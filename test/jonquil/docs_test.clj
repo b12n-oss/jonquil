@@ -2,7 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [jonquil.docs :as docs]))
 
-(def ^:once sandbox (create-ns 'jonquil.docs-test.sandbox))
+(def sandbox (create-ns 'jonquil.docs-test.sandbox))
 
 (defn setup-sandbox []
   (binding [*ns* sandbox]

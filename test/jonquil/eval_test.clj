@@ -137,7 +137,8 @@
     (sut/stop-eval! ctx)
     (let [r1 (deref c1 2000 :timeout)]
       (println "S1c result after Stop while reading:" (dissoc r1 :error))
-      (is (not= :timeout r1)))
+      (is (not= :timeout r1))
+      (is (= :interrupted (:status r1))))
     (let [[r2 _] (run-sync ctx "(+ 1 2)")]
       (is (= 3 (:value r2))))))
 
@@ -197,10 +198,13 @@
     (sut/eval-async ctx "(dotimes [i 100000] (println i))"
                     {:on-output (fn [_ s] (swap! chunks inc) (swap! chars + (count s)))
                      :on-complete (fn [r] (deliver done r))})
-    (let [r (deref done 60000 :timeout)]
+    (let [r (deref done 60000 :timeout)
+          ;; 100000 numbers 0..99999 as digit chars, plus one newline each.
+          expected-chars (+ (reduce + (map (comp count str) (range 100000))) 100000)]
       (println "S1f flood:" (:status r) "chunks" @chunks "chars" @chars
                "ms" (- (System/currentTimeMillis) t0))
-      (is (= :ok (:status r))))))
+      (is (= :ok (:status r)))
+      (is (= expected-chars @chars)))))
 
 (deftest s1g-out-err-ordering
   (let [ctx (sut/make-eval-context)
@@ -216,7 +220,13 @@
     (Thread/sleep 150)
     (sut/push-stdin! ctx "(+ 1 2)")
     (let [r (deref done 3000 :timeout)]
-      (println "S1i (read):" (:status r) (some-> (:error r) ex-message)))))
+      (println "S1i (read):" (:status r) (some-> (:error r) ex-message))
+      ;; DEVIATION: Jolt's `read` through a LineNumberingPushbackReader
+      ;; fails with `:-read-form` (see AGENTS.md's Jolt-facts section), so
+      ;; this asserts today's known failure rather than upstream's :ok
+      ;; behaviour. If a future Jolt fixes `read`, this assertion breaks
+      ;; and gets noticed instead of the test staying silently vacuous.
+      (is (= :error (:status r))))))
 
 (deftest s1j-namespace-reset
   (testing "error line in a later form"
@@ -245,7 +255,11 @@
           _ (remove-ns 'user)
           [r _] (run-sync (sut/make-eval-context) "(defn f [] 1) (f)")]
       (println "S1j user existed before:" had-user "run after remove-ns user:" (:status r) (:value r))
-      (is (= 1 (:value r))))))
+      (is (= 1 (:value r)))
+      ;; Clean up: eval-async's own create-ns recreated `user` and this run
+      ;; defined `f` in it, which would otherwise leak `f` into `user` for
+      ;; every later test that runs in the default namespace.
+      (when (find-ns 'user) (ns-unmap 'user 'f)))))
 
 ;; ---------------------------------------------------------------- fix round 1
 
@@ -328,3 +342,50 @@
         (is (some? running2-idx) (str "iteration " i ": run2 must have notified :running"))
         (is (< idle1-idx running2-idx)
             (str "iteration " i ": run2's :running notification must never precede run1's :idle notification, log=" entries))))))
+
+;; ---------------------------------------------------------------- phase-close fix wave
+
+(deftest phase-close-i1-stop-clears-interrupt-before-blocking-oncomplete
+  (let [ctx (sut/make-eval-context)
+        q (java.util.concurrent.LinkedBlockingQueue.)]
+    (sut/eval-async ctx "(loop [] (recur))" {:on-complete (fn [r] (.put q r))})
+    (Thread/sleep 100)
+    (sut/stop-eval! ctx)
+    (let [item (.poll q 3000 java.util.concurrent.TimeUnit/MILLISECONDS)]
+      (is (some? item) "on-complete's blocking .put must still deliver after Stop")
+      (is (= :interrupted (:status item))))))
+
+(deftest phase-close-i2-create-writer-char-array-branches
+  (testing "1-arg write with a char array"
+    (let [out (atom [])
+          w (sut/create-writer (fn [s] (swap! out conj s)))]
+      (.write w (char-array "hi"))
+      (is (= "hi" (apply str @out)))))
+  (testing "3-arg write with a char array slice"
+    (let [out (atom [])
+          w (sut/create-writer (fn [s] (swap! out conj s)))]
+      (.write w (char-array "hello") 1 3)
+      (is (= "ell" (apply str @out)))))
+  (testing "through eval-async, *out* is bound to the capture writer"
+    (let [[r out] (run-sync (sut/make-eval-context) "(.write *out* (char-array \"hi\\n\"))")]
+      (is (= :ok (:status r)))
+      (is (str/includes? (apply str (map second @out)) "hi")))))
+
+(deftest phase-close-i3-printed-realizes-under-binding-and-truncates
+  (testing "side effects of realizing :value arrive through on-output, :printed matches"
+    (let [[r out] (run-sync (sut/make-eval-context)
+                            "(map (fn [x] (println :side x) x) [1 2])")]
+      (is (= :ok (:status r)))
+      (is (= "(1 2)" (:printed r)))
+      (is (str/includes? (apply str (map second @out)) ":side 1"))
+      (is (str/includes? (apply str (map second @out)) ":side 2"))))
+  (testing "an infinite seq truncates via *print-length* instead of hanging"
+    (let [[r _] (run-sync (sut/make-eval-context) "(range)" {} 5000)]
+      (is (= :ok (:status r)))
+      (is (str/starts-with? (:printed r) "(0 1 2"))
+      (is (str/ends-with? (:printed r) "...)")))))
+
+(deftest phase-close-i4-doc-referred-and-honours-bound-out
+  (let [[r out] (run-sync (sut/make-eval-context) "(doc inc)")]
+    (is (= :ok (:status r)))
+    (is (str/includes? (apply str (map second @out)) "inc"))))
