@@ -86,42 +86,106 @@
   "Loads path into the editor: slurp, set-text!, remember the path. An
   error is appended as :error, never swallowed. Doesn't touch the title --
   callers hold the window, this doesn't, so update-title! is theirs to
-  call afterward (do-open!, and the ui map's :open-path! below)."
+  call afterward (do-open!, and the ui map's :open-path! below).
+
+  I6: Jolt's slurp maps bad bytes to U+FFFD without throwing, so a
+  non-UTF-8 file loads silently and Save would then write EF BF BD in
+  place of whatever the original bytes were. When the loaded text
+  contains U+FFFD, appends a :system warning naming the risk."
   [ed cv path-atom path]
   (try
-    (editor/set-text! ed (slurp path))
-    (reset! path-atom path)
+    (let [text (slurp path)]
+      (editor/set-text! ed text)
+      (reset! path-atom path)
+      (when (str/includes? text "�")
+        (cview/append! cv :system
+                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n")))
     (catch :default e
       (cview/append! cv :error (str "; open: " (ex-message e) "\n")))))
 
-(defn- save-to!
-  "Writes the editor text to path: spit, mark-saved!, remember the path. An
-  error is appended as :error, never swallowed -- losing the mark that a
-  save failed would risk the user believing unsaved work is safe when it
-  isn't. Doesn't touch the title; see open-path!'s docstring."
-  [ed cv path-atom path]
-  (try
-    (spit path (editor/editor-text ed))
-    (editor/mark-saved! ed)
-    (reset! path-atom path)
-    (catch :default e
-      (cview/append! cv :error (str "; save: " (ex-message e) "\n")))))
+(defn- temp-path-for
+  "A hidden temp file in the same directory as path (M12): the write-then-
+  rename below needs both on the same filesystem for the rename to be
+  possible at all, atomic or not."
+  [path]
+  (let [i (str/last-index-of path "/")
+        dir (if i (subs path 0 (inc i)) "")
+        name (if i (subs path (inc i)) path)]
+    (str dir "." name ".jonquil-tmp-" (System/nanoTime))))
 
-(defn- do-open! [ed cv win path-atom]
-  (file-dialog! :open win
-                (fn [{:keys [path error]}]
-                  (if path
-                    (do (open-path! ed cv path-atom path)
-                        (update-title! ed win path-atom))
-                    (cview/append! cv :error (str "; open: " error "\n"))))))
+(defn- save-to!
+  "Writes the editor text to path without ever truncating it in place
+  (M12): spits to a temp file beside it, then renames over the target with
+  java.nio.file.Files/move + ATOMIC_MOVE (probed against this Jolt: see
+  the fix-wave report) so a failure mid-write can't leave a half-written
+  target. mark-saved! and remembering the path only happen once the rename
+  has actually succeeded. An error is appended as :error, never swallowed
+  -- losing the mark that a save failed would risk the user believing
+  unsaved work is safe when it isn't -- and the temp file is cleaned up on
+  any failure. Doesn't touch the title; see open-path!'s docstring."
+  [ed cv path-atom path]
+  (let [tmp (temp-path-for path)]
+    (try
+      (spit tmp (editor/editor-text ed))
+      (java.nio.file.Files/move
+       (.toPath (java.io.File. ^String tmp))
+       (.toPath (java.io.File. ^String path))
+       (into-array java.nio.file.CopyOption
+                   [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                    java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+      (editor/mark-saved! ed)
+      (reset! path-atom path)
+      (catch :default e
+        (let [f (java.io.File. ^String tmp)]
+          (when (.exists f) (.delete f)))
+        (cview/append! cv :error (str "; save: " (ex-message e) "\n"))))))
+
+(defn- guarded-open!
+  "I4's dirty-discard gate, shared by do-open! (real button/chord, which
+  opens a file dialog) and the ui map's dialog-free :open-path! (so a
+  self-test row exercises the SAME gate the button does): when ed is dirty
+  and the previous attempt hasn't been warned about it yet, refuses and
+  appends a :system warning instead of calling proceed!. The next attempt
+  while STILL dirty (discard-warned? already true) calls proceed! and
+  clears the flag; a dirty->clean transition elsewhere (a successful Save)
+  also clears it, via the on-dirty-changed! registration in activate!, so
+  a later, unrelated dirty streak earns its own warning."
+  [ed cv discard-warned? proceed!]
+  (if (and (editor/dirty? ed) (not @discard-warned?))
+    (do (reset! discard-warned? true)
+        (cview/append! cv :system "Unsaved changes. Save first, or Open again to discard them.\n"))
+    (do (reset! discard-warned? false)
+        (proceed!))))
+
+(defn- handle-open-result!
+  "The file-dialog! :open callback's decision, factored out so a self-test
+  row can drive it with a synthetic result map shaped like g/finish-file's
+  (M2's dismissed-dialog case has no other way to reach it without a live
+  dialog)."
+  [ed cv win path-atom {:keys [path error code]}]
+  (cond
+    path (do (open-path! ed cv path-atom path)
+             (update-title! ed win path-atom))
+    ;; M2: a cancelled/dismissed dialog is not an error.
+    (= code g/GTK-DIALOG-ERROR-DISMISSED) nil
+    :else (cview/append! cv :error (str "; open: " error "\n"))))
+
+(defn- do-open! [ed cv win path-atom discard-warned?]
+  (guarded-open!
+   ed cv discard-warned?
+   (fn [] (file-dialog! :open win (fn [result] (handle-open-result! ed cv win path-atom result))))))
+
+(defn- handle-save-result!
+  "handle-open-result!'s counterpart for file-dialog! :save."
+  [ed cv win path-atom {:keys [path error code]}]
+  (cond
+    path (do (save-to! ed cv path-atom path)
+             (update-title! ed win path-atom))
+    (= code g/GTK-DIALOG-ERROR-DISMISSED) nil
+    :else (cview/append! cv :error (str "; save: " error "\n"))))
 
 (defn- do-save-as! [ed cv win path-atom]
-  (file-dialog! :save win
-                (fn [{:keys [path error]}]
-                  (if path
-                    (do (save-to! ed cv path-atom path)
-                        (update-title! ed win path-atom))
-                    (cview/append! cv :error (str "; save: " error "\n"))))))
+  (file-dialog! :save win (fn [result] (handle-save-result! ed cv win path-atom result))))
 
 (defn- do-save! [ed cv win path-atom]
   (if-let [path @path-atom]
@@ -264,6 +328,7 @@
 (defn- activate! [app {:keys [file on-ready]}]
   (let [session (session/make-session)
         path (atom file)
+        discard-warned? (atom false)
         ed (editor/make-editor)
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
@@ -278,7 +343,7 @@
         _ (reset! *cv cv)
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))
-        open-fn (fn [] (do-open! ed cv win path))
+        open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn
@@ -336,32 +401,51 @@
                                        [:pointer :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (editor/on-dirty-changed! ed (fn [_dirty] (update-title! ed win path)))
+    ;; I4: a dirty->clean transition (a successful Save) re-arms the
+    ;; discard warning, so an unrelated LATER dirty streak earns its own.
+    (editor/on-dirty-changed! ed (fn [dirty] (when-not dirty (reset! discard-warned? false))))
     (when file
       ;; A file argument that doesn't exist opens an empty editor with the
       ;; path remembered anyway, so Save creates it -- unlike the Open
       ;; button's dialog result, this is the documented normal case, not an
       ;; error to report.
-      (try (editor/set-text! ed (slurp file)) (catch :default _ nil)))
+      (try
+        (let [text (slurp file)]
+          (editor/set-text! ed text)
+          ;; I6: same non-UTF-8 warning as open-path!.
+          (when (str/includes? text "�")
+            (cview/append! cv :system
+                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n")))
+        (catch :default _ nil)))
     (update-title! ed win path)
     (g/gtk-window-present win)
     (editor/focus! ed)
     (when on-ready
       (on-ready {:editor ed :console cv :session session :status-label status-label :window win
                  :run!* run-fn :stop!* stop-fn
-                 :open-path! (fn [p] (open-path! ed cv path p) (update-title! ed win path))
+                 :open-path! (fn [p]
+                               (guarded-open! ed cv discard-warned?
+                                              (fn [] (open-path! ed cv path p) (update-title! ed win path))))
                  :save-to! (fn [p] (save-to! ed cv path p) (update-title! ed win path))
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
                  ;; a synthesized OS keystroke.
-                 :handle-window-key! window-key-fn}))))
+                 :handle-window-key! window-key-fn
+                 ;; M2 self-test hook: the exact dialog-result decisions,
+                 ;; driven with a synthetic result map shaped like
+                 ;; g/finish-file's -- file-dialog! itself can't be driven
+                 ;; without a live dialog.
+                 :simulate-open-result! (fn [result] (handle-open-result! ed cv win path result))
+                 :simulate-save-result! (fn [result] (handle-save-result! ed cv win path result))}))))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
   :status-label :window :run!* :stop!* :open-path! :save-to!
-  :handle-window-key!}; the self-test
-  rows call these functions directly, exactly as the buttons and keys do."
+  :handle-window-key! :simulate-open-result! :simulate-save-result!}; the
+  self-test rows call these functions directly, exactly as the buttons and
+  keys do."
   [opts]
   (let [app (g/gtk-application-new "net.b12n.jonquil" g/APPLICATION-DEFAULT-FLAGS)]
     (g/g-signal-connect-data app "activate"

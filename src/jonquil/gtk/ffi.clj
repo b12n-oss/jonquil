@@ -347,3 +347,10 @@
   [window]
   (let [p (gtk-window-get-title window)]
     (when-not (ffi/null? p) (ffi/ptr->string p))))
+
+;; --- P2 close ---
+;; GTK_DIALOG_ERROR_DISMISSED: /opt/homebrew/include/gtk-4.0/gtk/gtkdialogerror.h:54-56
+;; (enum GtkDialogError { GTK_DIALOG_ERROR_FAILED, GTK_DIALOG_ERROR_CANCELLED,
+;; GTK_DIALOG_ERROR_DISMISSED } -- DISMISSED is the third value, 2). M2: the
+;; file-dialog result handlers ignore this one code silently.
+(def GTK-DIALOG-ERROR-DISMISSED 2)

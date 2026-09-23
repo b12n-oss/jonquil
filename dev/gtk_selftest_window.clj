@@ -367,6 +367,115 @@
                                           :running-result running-result :stopped stopped?})
                                   (next))))))))
 
+(defn- row-open-refuses-dirty
+  "I4: Open silently discarded unsaved edits. Dirties the editor without
+  going through set-text! (which marks clean), then drives (:open-path!
+  ui) -- the SAME guarded-open! gate do-open! uses -- twice: the first
+  attempt must refuse and leave the text untouched, the second (still
+  dirty) must proceed. The refusal text arrives through cview/append!,
+  an on-gui!-scheduled drain (same I1 lesson: poll for it, don't read
+  the console immediately after the synchronous call that queued it)."
+  [ui next]
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)
+        tmp (str (System/getProperty "java.io.tmpdir")
+                 "/jonquil-selftest-dirty-" (System/currentTimeMillis) ".clj")]
+    (spit tmp "(+ 9 9)")
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (let [dirty-before (editor/dirty? ed)]
+      ((:open-path! ui) tmp)
+      (poll-until 1000 20
+                  (fn [] (str/includes? (since ui mark)
+                                        "Unsaved changes. Save first, or Open again to discard them."))
+                  (fn [refused?]
+                    (let [text-after-first (editor/editor-text ed)]
+                      ((:open-path! ui) tmp)
+                      (let [text-after-second (editor/editor-text ed)]
+                        (check :open-refuses-dirty
+                               (and dirty-before refused?
+                                    (= "(+ 1 1)z" text-after-first)
+                                    (= "(+ 9 9)" text-after-second))
+                               {:dirty-before dirty-before :refused refused?
+                                :text-after-first text-after-first
+                                :text-after-second text-after-second
+                                :console (since ui mark)})
+                        (.delete (java.io.File. ^String tmp))
+                        (next))))))))
+
+(defn- row-open-invalid-utf8
+  "I6: a file with a stray non-UTF-8 byte (0xE9, the brief's own example)
+  loads as U+FFFD without throwing; Open must append a :system warning
+  rather than silently accept the loss. Poll for the warning -- same
+  on-gui! drain lesson as row-open-refuses-dirty."
+  [ui next]
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)
+        tmp (str (System/getProperty "java.io.tmpdir")
+                 "/jonquil-selftest-badutf8-" (System/currentTimeMillis) ".clj")]
+    (with-open [os (java.io.FileOutputStream. ^String tmp)]
+      (.write os (byte-array [(byte 0x28) (unchecked-byte 0xE9) (byte 0x29)])))
+    ((:open-path! ui) tmp)
+    (poll-until 1000 20
+                (fn [] (str/includes? (since ui mark) "isn't valid UTF-8"))
+                (fn [warned?]
+                  (let [text (editor/editor-text ed)]
+                    (check :open-invalid-utf8
+                           (and (str/includes? text "�") warned?)
+                           {:text text :warned warned? :console (since ui mark)})
+                    (.delete (java.io.File. ^String tmp))
+                    (next))))))
+
+(defn- row-save-atomic
+  "M12: save-to! writes a temp file beside the target and renames over it,
+  never truncating the target in place. Saving into a missing directory
+  must still show :error (and never create the bad path); saving to a
+  real path round-trips. Poll for the :error line -- same on-gui! drain
+  lesson; the file writes themselves are synchronous, no poll needed for
+  those."
+  [ui next]
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)
+        good-tmp (str (System/getProperty "java.io.tmpdir")
+                      "/jonquil-selftest-atomic-" (System/currentTimeMillis) ".clj")
+        bad-path (str (System/getProperty "java.io.tmpdir")
+                      "/jonquil-selftest-missing-dir-" (System/currentTimeMillis) "/nested/file.clj")]
+    (editor/set-text! ed "(+ 3 3)")
+    ((:save-to! ui) bad-path)
+    (poll-until 1000 20
+                (fn [] (str/includes? (since ui mark) "; save:"))
+                (fn [error-shown?]
+                  (let [bad-path-exists? (.exists (java.io.File. ^String bad-path))]
+                    (editor/set-text! ed "(+ 4 4)")
+                    ((:save-to! ui) good-tmp)
+                    (let [round-tripped? (= "(+ 4 4)" (slurp good-tmp))]
+                      (check :save-atomic
+                             (and error-shown? (not bad-path-exists?) round-tripped?)
+                             {:error-shown error-shown? :bad-path-exists bad-path-exists?
+                              :round-tripped round-tripped? :console (since ui mark)})
+                      (.delete (java.io.File. ^String good-tmp))
+                      (next)))))))
+
+(defn- row-dialog-dismissed-silent
+  "M2: cancelling/dismissing a file dialog (GTK_DIALOG_ERROR_DISMISSED,
+  code 2) must not print an error line. file-dialog! itself can't be
+  driven without a live dialog, so this drives the exact result-handling
+  fns the dialog's own async callback calls, with a result map shaped
+  exactly like g/finish-file's for a dismissed dialog. Neither call
+  enqueues anything (the dismissed branch is a plain nil), so there's no
+  drain to poll for -- (since ui mark) always carries the live \"> \"
+  prompt tail regardless (its own docstring says so), hence the
+  substring checks rather than an equality-to-empty-string check."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    ((:simulate-open-result! ui) {:error "Dismissed by user" :code 2})
+    ((:simulate-save-result! ui) {:error "Dismissed by user" :code 2})
+    (let [text (since ui mark)]
+      (check :dialog-dismissed-silent
+             (and (not (str/includes? text "; open:")) (not (str/includes? text "; save:")))
+             {:console text})
+      (next))))
+
 (defn- row-save-and-open [ui next]
   (let [tmp (str (System/getProperty "java.io.tmpdir")
                  "/jonquil-selftest-" (System/currentTimeMillis) ".clj")]
@@ -396,6 +505,10 @@
    row-busy-hint-once
    row-console-history-down-empty
    row-escape-yields-when-idle
+   row-open-refuses-dirty
+   row-open-invalid-utf8
+   row-save-atomic
+   row-dialog-dismissed-silent
    row-save-and-open])
 
 ;; --- driver --------------------------------------------------------------
