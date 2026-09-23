@@ -314,3 +314,36 @@
 ;; input-start and inside output history are refused, same as insert.
 (ffi/defcfn gtk-text-buffer-delete-interactive "gtk_text_buffer_delete_interactive"
   [:pointer :pointer :pointer :int] :int)
+
+;; --- P2.T7: the Reset-on-Run toggle ---
+(ffi/defcfn gtk-check-button-new-with-label "gtk_check_button_new_with_label" [:string] :pointer)
+(ffi/defcfn gtk-check-button-get-active "gtk_check_button_get_active" [:pointer] :int)
+(ffi/defcfn gtk-check-button-set-active "gtk_check_button_set_active" [:pointer :int] :void)
+
+;; --- P2.T7: status/title read-back and a self-test-driven close.
+;; Signatures checked against /opt/homebrew/include/gtk-4.0/gtk/{gtklabel,
+;; gtkwindow}.h -- gtk_label_get_text (gtklabel.h:51), gtk_window_get_title
+;; (gtkwindow.h:99) and gtk_window_close (gtkwindow.h:209). None of the
+;; three is in the brief's prescribed check-button list; they're added here
+;; because the run-output row needs to read the status label back, the
+;; save-and-open row needs to read the title back, and the window self-test
+;; needs a way to end its own run cleanly (gtk_window_close triggers the
+;; SAME close-request path a real user's close-button click would, so
+;; ending the self-test this way is also a live check that closing the
+;; window quits the app).
+(ffi/defcfn gtk-label-get-text "gtk_label_get_text" [:pointer] :pointer)
+(ffi/defcfn gtk-window-get-title "gtk_window_get_title" [:pointer] :pointer)
+(ffi/defcfn gtk-window-close "gtk_window_close" [:pointer] :void)
+
+(defn label-text
+  "label's text. gtk_label_get_text returns a borrowed const char* (unlike
+  gtk_text_buffer_get_text's caller-owned copy) -- no g_free here."
+  [label]
+  (ffi/ptr->string (gtk-label-get-text label)))
+
+(defn window-title
+  "window's title, or nil if none was ever set. Also a borrowed const
+  char* -- no g_free."
+  [window]
+  (let [p (gtk-window-get-title window)]
+    (when-not (ffi/null? p) (ffi/ptr->string p))))

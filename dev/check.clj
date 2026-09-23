@@ -14,7 +14,9 @@
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.editor
-    jonquil.gtk.console-view])
+    jonquil.gtk.console-view
+    jonquil.gtk.window
+    jonquil.main])
 
 (defn -main [& _]
   (doseq [n namespaces]

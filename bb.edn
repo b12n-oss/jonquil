@@ -4,8 +4,20 @@
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
-  {:doc "Open a real GTK window and run the P2 front-end self-test rows"
-   :task (shell "jolt" "-M:selftest")}
+  {:doc "Open two real GTK windows in turn and run the P2 front-end self-test rows"
+   :task (let [r1 (shell {:continue true} "jolt" "-M:selftest")
+               r2 (shell {:continue true} "jolt" "-M:selftest-window")
+               ok1 (zero? (:exit r1))
+               ok2 (zero? (:exit r2))]
+           (when-not ok1 (println "gtk:selftest: editor/console rows FAILED"))
+           (when-not ok2 (println "gtk:selftest: window rows FAILED"))
+           (System/exit (if (and ok1 ok2) 0 1)))}
+  run
+  {:doc "Run Jonquil, optionally passing a file to open"
+   :task (apply shell "jolt" "-M" "-m" "jonquil.main" *command-line-args*)}
+  build
+  {:doc "Build the jonquil binary (gitignored; delete it after measuring)"
+   :task (shell "jolt" "build" "-m" "jonquil.main" "-o" "jonquil")}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
    :task (let [dir (or (System/getenv "DRCLOJURE_DIR")

@@ -24,4 +24,12 @@
           :main-opts ["-m" "check"]}
   ;; GTK self-test: opens a real window and runs the front-end rows.
   :selftest {:extra-paths ["dev"]
-             :main-opts ["-m" "gtk-selftest"]}}}
+             :main-opts ["-m" "gtk-selftest"]}
+  ;; P2.T7: the same self-test, but against the real jonquil.main/start!
+  ;; window instead of a bare editor+console -- needs its own alias because
+  ;; :main-opts picks the FIRST -m it sees, so appending "-m
+  ;; gtk-selftest-window" after :selftest's own "-m gtk-selftest" on the
+  ;; command line wouldn't select a different namespace, it would just hand
+  ;; those two tokens to gtk-selftest/-main as args.
+  :selftest-window {:extra-paths ["dev"]
+                    :main-opts ["-m" "gtk-selftest-window"]}}}
