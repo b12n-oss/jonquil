@@ -106,6 +106,32 @@
 
 ;; --- cgevent wrappers: every one of these requires a real pid ------------
 
+(def ^:private cgevent-timeout-ms
+  ;; Fix round 1, minor #4: p/shell has no deadline of its own, so one hung
+  ;; cgevent subcommand (ocr-inspect, windows, screenshot, key) used to be
+  ;; able to stall a step -- and everything after it -- forever. Every
+  ;; cgevent call in this file now goes through cgevent! below, which bounds
+  ;; it. 10s is generous, not measured precisely: every live cgevent call
+  ;; this session (probes and real runs alike) completed in well under 1s.
+  10000)
+
+(defn- cgevent!
+  "Runs `cgevent <args>` with its own deadline: p/process + a timeout
+  deref, destroying the subprocess tree on timeout so it can't linger past
+  it. Returns the same shape p/shell's :out/:err :string mode does
+  ({:exit :out :err}); a timeout reports :exit -1 (never a real cgevent
+  exit code, so every existing (zero? exit) check in this file still works
+  with no special case) and an :err message naming the command and the
+  deadline."
+  [& args]
+  (let [proc (p/process (into ["cgevent"] args) {:out :string :err :string})
+        result (deref proc cgevent-timeout-ms ::timeout)]
+    (if (= ::timeout result)
+      (do (try (p/destroy-tree proc) (catch Exception _ nil))
+          {:exit -1 :out ""
+           :err (str "cgevent " (str/join " " args) " timed out after " cgevent-timeout-ms "ms")})
+      {:exit (:exit result) :out (:out result) :err (:err result)})))
+
 (defn- cg-key!
   "Posts one chord to pid via CGEventPostToPid (never --global). Refuses
   outright when pid is nil -- this is the one function every key event in
@@ -114,8 +140,7 @@
   [pid chord]
   (when-not pid
     (throw (ex-info "binary_smoke: refusing to post a key event with no pid" {:chord chord})))
-  (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
-                                    "cgevent" "key" "--pid" (str pid) chord)]
+  (let [{:keys [exit err]} (cgevent! "key" "--pid" (str pid) chord)]
     (when-not (zero? exit)
       (throw (ex-info (str "cgevent key failed: " chord) {:pid pid :chord chord :err err})))))
 
@@ -160,8 +185,7 @@
   care about count (row-open-refuses-dirty's \"opens no panel\" check)
   read (count (windows-edn! pid)) directly rather than assuming 1."
   [pid]
-  (let [{:keys [out]} (p/shell {:out :string :err :string :continue true}
-                               "cgevent" "windows" "--pid" (str pid) "--edn")]
+  (let [{:keys [out]} (cgevent! "windows" "--pid" (str pid) "--edn")]
     (try (edn/read-string out) (catch Exception _ []))))
 
 (defn- window-for [pid]
@@ -176,8 +200,7 @@
   [pid]
   (try
     (let [tmp (str out-dir "/.ocr-" pid "-" (System/nanoTime) ".edn")
-          _ (p/shell {:out :string :err :string :continue true}
-                     "cgevent" "ocr-inspect" "--pid" (str pid) "-o" tmp)
+          _ (cgevent! "ocr-inspect" "--pid" (str pid) "-o" tmp)
           rows (edn/read-string (slurp tmp))]
       (io/delete-file tmp true)
       (str/join "\n" (keep :text rows)))
@@ -190,8 +213,7 @@
   [pid]
   (try
     (let [tmp (str out-dir "/.ocr-" pid "-" (System/nanoTime) ".edn")
-          _ (p/shell {:out :string :err :string :continue true}
-                     "cgevent" "ocr-inspect" "--pid" (str pid) "-o" tmp)
+          _ (cgevent! "ocr-inspect" "--pid" (str pid) "-o" tmp)
           rows (edn/read-string (slurp tmp))]
       (io/delete-file tmp true)
       rows)
@@ -202,8 +224,7 @@
   must never take down the rest of the run -- it only costs a diagnostic
   image)."
   [pid name]
-  (try (p/shell {:out :string :err :string :continue true}
-                "cgevent" "screenshot" (str out-dir "/" name ".png") "--pid" (str pid))
+  (try (cgevent! "screenshot" (str out-dir "/" name ".png") "--pid" (str pid))
        (catch Exception _ nil)))
 
 ;; --- generic poll: never a fixed sleep in place of a real wait -----------
@@ -250,14 +271,17 @@
   can't strand an unkillable process. Its own stdout/stderr go to a log
   file in out-dir rather than this script's own -- jonquil prints GLib/
   Gtk/macOS IME noise on stderr (smoke-results.md), harmless but not
-  worth interleaving with this script's own [binary-smoke] lines."
+  worth interleaving with this script's own [binary-smoke] lines. The log
+  path comes back as :log so a step that specifically cares what landed on
+  stderr (step-close-while-running!, checking for a GTK critical/crash)
+  can read it directly."
   [& [file]]
   (let [log (str out-dir "/.launch-" (System/nanoTime) ".log")
         args (cond-> [binary-path] file (conj file))
         proc (p/process args {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree})
         pid (.pid ^java.lang.Process (:proc proc))]
     (swap! launched conj {:proc proc :pid pid})
-    {:proc proc :pid pid}))
+    {:proc proc :pid pid :log log}))
 
 (defn- stop!
   "Kills one launched process (if still alive) and drops it from
@@ -278,6 +302,18 @@
   [pid deadline-ms]
   (wait-for! deadline-ms 200 (fn [] (seq (windows-edn! pid)))))
 
+(defn- ensure-window!
+  "Fix round 1, minor #3: wait-for-window!'s result used to be ignored at
+  every call site, so a binary that never opened a window (a crash on
+  launch, a missing library, a hung splash) fell through into the rest of
+  the step anyway -- every subsequent OCR read and key event just silently
+  went nowhere, and the step failed later with a confusing timeout that
+  named the wrong symptom. This throws instead, with the real reason,
+  which -main's own per-step catch turns into a FAIL naming it directly."
+  [pid deadline-ms]
+  (when-not (wait-for-window! pid deadline-ms)
+    (throw (ex-info "binary did not open a window" {:pid pid :deadline-ms deadline-ms}))))
+
 ;; --- steps ----------------------------------------------------------------
 ;; Each step launches its own fresh process (dev/demo_shots.clj's own
 ;; hard-won lesson: a shared process/window let one scene's leftover
@@ -292,7 +328,7 @@
   []
   (let [path (scratch-copy! "run.clj")
         {:keys [proc pid]} (launch! path)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok last]} (wait-for-ocr! pid 8000 "smoke-run")
           ok-nil (str/includes? last "=> nil")
@@ -362,7 +398,7 @@
   []
   (let [path (scratch-copy! "greet.clj")
         {:keys [proc pid]} (launch! path)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Waiting for input")]
       (when-not ok (check! :read-line-waiting false {:reason "status never showed Waiting for input"})))
@@ -377,7 +413,7 @@
   []
   (let [path (scratch-copy! "loop.clj")
         {:keys [proc pid]} (launch! path)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 3000 "Running")]
       (when-not ok (check! :loop-started false {:reason "status never showed Running"})))
@@ -404,7 +440,7 @@
   []
   (let [path (scratch-copy! "forever.clj")
         {:keys [proc pid]} (launch! path)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 4000 "tick")]
       (when-not ok (check! :forever-started false {:reason "no tick output seen"})))
@@ -428,7 +464,7 @@
   []
   (let [path (scratch-copy! "save.clj")
         {:keys [proc pid]} (launch! path)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (cg-key! pid "command + a")
     (cg-key! pid "delete")
     (type-text! pid "(+ 1 2)")
@@ -450,7 +486,7 @@
   buttons anyway even if one did open."
   []
   (let [{:keys [proc pid]} (launch! nil)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (type-text! pid "1")
     (cg-key! pid "command + o")
     (let [{:keys [ok last]} (wait-for-ocr! pid 4000 "Unsaved changes")
@@ -482,7 +518,7 @@
   (let [path (write-latin1-fixture!)
         before (fs/read-all-bytes path)
         {:keys [proc pid]} (launch! path)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "valid UTF-8")
           after (fs/read-all-bytes path)]
       (screenshot! pid "step10b-latin1-warning")
@@ -501,13 +537,59 @@
   exit 0."
   []
   (let [{:keys [proc pid]} (launch! nil)]
-    (wait-for-window! pid 8000)
+    (ensure-window! pid 8000)
     (cg-key! pid "command + w")
     (let [exit (deref proc 5000 ::timeout)]
       (if (= ::timeout exit)
         (do (check! :command-chord-close-exits false {:reason "process did not exit within 5000ms"})
             (stop! {:proc proc :pid pid}))
         (do (check! :command-chord-close-exits (zero? (:exit exit)) {:exit (:exit exit)})
+            (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
+
+(defn- step-close-while-running!
+  "Fix round 1, Important #1: closing while a program is running was
+  untested. window.clj's Cmd/Ctrl+W branch calls gtk_window_close with no
+  evaluating? guard, and the pre-existing close-request handler calls
+  g_application_quit unconditionally -- the eval worker may still call
+  on-gui! (g_idle_add) after the window and widgets are gone, and so may
+  the red close button, which predates this task. forever.clj floods
+  cview/append! (itself on-gui!-based) from the eval worker thread far
+  faster than a silent loop would, which is exactly the shape of race that
+  would matter if there were one.
+
+  Measured live against the built binary, outside this driver (bash +
+  cgevent directly, not this script), before writing this step: 10 runs
+  across two timing profiles (a normal ~1s gap between F5 and the close
+  chord, and a zero-gap back-to-back send) all exited 0 with no stderr at
+  all, except one run's single, already-documented-benign GLib warning
+  (\"Trying to snapshot GtkGizmo ... without a current allocation\", the
+  same pane-resize noise smoke-results.md's human walkthrough already
+  saw). Zero crashes, zero GTK criticals, in 10 for 10. This step encodes
+  that same probe as a permanent regression check: real exit code, real
+  stderr, read from the actual log launch! writes to, not inferred.
+
+  A GTK critical/warning about invalid objects would name the class it's
+  complaining about, and \"CRITICAL\" is the log-level token GLib itself
+  prints for exactly that -- distinct from the ordinary WARNING-level
+  pane-resize noise, so matching on it doesn't false-positive on already-
+  known-benign chatter."
+  []
+  (let [path (scratch-copy! "forever.clj")
+        {:keys [proc pid log]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "f5")
+    (let [{:keys [ok]} (wait-for-ocr! pid 4000 "tick")]
+      (when-not ok (check! :close-while-running-setup false {:reason "no tick output before closing"})))
+    (cg-key! pid "command + w")
+    (let [exit (deref proc 5000 ::timeout)
+          log-text (try (slurp log) (catch Exception _ ""))
+          critical? (str/includes? log-text "CRITICAL")]
+      (if (= ::timeout exit)
+        (do (check! :close-while-running false
+                    {:reason "process did not exit within 5000ms while running" :log log-text})
+            (stop! {:proc proc :pid pid}))
+        (do (check! :close-while-running (and (zero? (:exit exit)) (not critical?))
+                    {:exit (:exit exit) :critical critical? :log log-text})
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
 
 ;; --- driver ----------------------------------------------------------------
@@ -535,7 +617,8 @@
    ["save" step-save!]
    ["open-refuses-dirty" step-open-refuses-dirty!]
    ["latin1-warning" step-latin1-warning!]
-   ["command-chord-close" step-command-chord-close!]])
+   ["command-chord-close" step-command-chord-close!]
+   ["close-while-running" step-close-while-running!]])
 
 (defn -main [& args]
   (let [t0 (System/currentTimeMillis)

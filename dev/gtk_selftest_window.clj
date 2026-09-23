@@ -680,23 +680,35 @@
 (def ^:private KEY-W 0x77)
 
 (defn- row-command-chord-close
-  "P2.T10: a command chord (Control here) plus W closes the window, which
-  already quits the app -- gtk_window_close fires the SAME close-request
-  path a real close-button click or OS window-close would. Calls the exact
-  fn the key-pressed signal calls (window.clj's :handle-window-key!), never
-  a synthesized OS keystroke, same pattern as row-escape-yields-when-idle
+  "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
+  not idle -- the coordinator's own concern was exactly this combination
+  (the eval worker's on-gui!/cview/append! calls racing gtk_window_close's
+  widget teardown), so this row now starts (loop [] (recur)), waits for it
+  to actually be evaluating, and only then sends the chord. A command
+  chord (Control here) plus W closes the window, which already quits the
+  app -- gtk_window_close fires the SAME close-request path a real
+  close-button click or OS window-close would. Calls the exact fn the
+  key-pressed signal calls (window.clj's :handle-window-key!), never a
+  synthesized OS keystroke, same pattern as row-escape-yields-when-idle
   and row-command-chord-capslock above.
 
   This is deliberately the LAST row: gtk_window_close synchronously fires
   close-request, which calls g_application_quit, so the running
   g_application main loop stops once it returns to it and nothing after
-  this row runs. Ends the driver's own run the same way the old
-  unconditional close in run-rows! used to -- now exercised through the
-  product's own chord instead of a bare FFI call."
+  this row runs -- the CI-facing evidence that closing mid-run didn't hang
+  or crash is this whole process exiting cleanly afterward, which
+  run-rows!'s own destroy-signal fallback (below) now guarantees happens
+  either way, pass or fail."
   [ui next]
-  (let [handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
-    (check :command-chord-close (= 1 handled) {:handled handled})
-    (next)))
+  (editor/set-text! (:editor ui) "(loop [] (recur))")
+  ((:run!* ui))
+  (poll-until 2000 20
+              (fn [] (eval/evaluating? (:ctx (:session ui))))
+              (fn [started?]
+                (let [handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
+                  (check :command-chord-close (and started? (= 1 handled))
+                         {:started started? :handled handled})
+                  (next)))))
 
 (def ^:private row-fns
   [row-run-output
@@ -730,12 +742,53 @@
   (poll-until 2000 20 (fn [] (idle? ui))
               (fn [_idle?] (row-fn ui next))))
 
+;; P2.T10 fix round 1, Important #2: removing run-rows!'s old unconditional
+;; close made row-command-chord-close the only way out, so a REGRESSION in
+;; the close chord (on-window-key stops matching KEY-W, close-fn stops
+;; being wired, etc.) would leave the g_application main loop running
+;; forever with nothing to stop it -- hanging `bb gtk:selftest` instead of
+;; failing it. window-destroyed? is set by a "destroy" signal this file
+;; connects on the window itself (-main, below), independent of window.clj's
+;; own close-request->quit wiring: a plain Clojure atom flip, safe to poll
+;; from run-rows! without ever touching the (possibly already-destroyed)
+;; widget pointer directly.
+(defonce ^:private window-destroyed? (atom false))
+
+(def ^:private WINDOW-CLOSE-FALLBACK-DEADLINE-MS
+  ;; Generous: a working chord closes within one main-loop iteration
+  ;; (microseconds), so this only ever actually waits out its deadline
+  ;; when the chord is broken.
+  2000)
+
 (defn- run-rows! [ui fns]
   (if (empty? fns)
-    (let [passed (count (filter second @results)) total (count @results)]
-      (println (str "SUMMARY " passed " of " total " passed")))
+    ;; row-command-chord-close (the last row) already tried the product's
+    ;; own close chord. Poll window-destroyed? rather than assuming it
+    ;; worked: if the chord regressed (on-window-key stops matching,
+    ;; close-fn stops being wired, or gtk_window_close/close-request stops
+    ;; actually quitting the app), the window is still open here, and
+    ;; without this fallback nothing would ever end the run. Forcing
+    ;; gtk_window_close directly guarantees this process still exits
+    ;; (non-zero, via the FAIL below) instead of hanging -- the chord row
+    ;; itself stays a real check; this is only a backstop for when it
+    ;; fails.
+    (poll-until WINDOW-CLOSE-FALLBACK-DEADLINE-MS 50
+                (fn [] @window-destroyed?)
+                (fn [closed?]
+                  (when-not closed?
+                    (check :command-chord-close-forced false
+                           {:reason "window still open after the close chord; forced closed to avoid hanging the run"})
+                    (g/gtk-window-close (:window ui)))
+                  (let [passed (count (filter second @results)) total (count @results)]
+                    (println (str "SUMMARY " passed " of " total " passed")))))
     (run-row! ui (first fns) (fn [] (run-rows! ui (rest fns))))))
 
 (defn -main [& _]
-  (main/start! {:on-ready (fn [ui] (later 300 (fn [] (run-rows! ui row-fns))))})
+  (main/start!
+   {:on-ready (fn [ui]
+                (g/g-signal-connect-data (:window ui) "destroy"
+                                         (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
+                                                      [:pointer :pointer] :void)
+                                         ffi/null ffi/null g/CONNECT-DEFAULT)
+                (later 300 (fn [] (run-rows! ui row-fns))))})
   (System/exit (if (and (seq @results) (every? second @results)) 0 1)))
