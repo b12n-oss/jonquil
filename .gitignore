@@ -11,6 +11,7 @@
 .env
 .env.*
 /.remember/
+/.superpowers/
 # agent guides live in the planning store and are symlinked in
 /AGENTS.md
 /CLAUDE.md

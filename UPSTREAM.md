@@ -15,6 +15,13 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 | `src/jonquil/paint.clj` | `src/DrClojure/syntax.clj` | Re-expresses `highlight-doc!` |
 | `src/jonquil/edit.clj` | `src/DrClojure/ui.clj` | Re-expresses handlers |
 | `src/jonquil/eval.clj` | `src/DrClojure/eval.clj` | Reworks |
+| `test/jonquil/eval_test.clj` | `test/DrClojure/eval_test.clj` | Ports upstream tests, plus new rows |
+| `test/jonquil/paint_test.clj` | `test/DrClojure/syntax_test.clj` | Re-expresses 3 upstream deftests |
+| `test/jonquil/edit_test.clj` | `test/DrClojure/core_test.clj` | Cases derived from upstream |
+
+## Code deltas from upstream
+
+- `src/jonquil/syntax.clj`: `Character/toLowerCase` is not shimmed in Jolt. Two call sites (lines 602 and 810) replaced with `(first (str/lower-case (subs ... 0 1)))`. This change was verified in a trial lift on 2026-09-23; upstream's 13 pure deftests pass on Jolt after the change.
 
 ## Syncing with upstream
 
