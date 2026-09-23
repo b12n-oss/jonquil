@@ -6,7 +6,8 @@
   '[jonquil.core
     jonquil.syntax
     jonquil.paint
-    jonquil.docs])
+    jonquil.docs
+    jonquil.edit])
 
 (defn -main [& _]
   (doseq [n namespaces]
