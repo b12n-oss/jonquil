@@ -8,7 +8,8 @@
 
 (def test-namespaces
   ;; Add each new test namespace here as tasks land.
-  '[jonquil.smoke-test])
+  '[jonquil.smoke-test
+    jonquil.upstream.syntax-test])
 
 (defn -main [& args]
   (let [nss (if (seq args) (mapv symbol args) test-namespaces)]

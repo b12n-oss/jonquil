@@ -1,0 +1,629 @@
+(ns jonquil.upstream.syntax-test
+  "DrClojure's pure syntax tests at 41c56b8, ported unchanged apart from
+   the namespace names. See UPSTREAM.md."
+  (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
+            [jonquil.syntax :as syntax]))
+
+(deftest tokenize-test
+  (testing "Tokenizing comments"
+    (let [tokens (syntax/tokenize "; a simple comment\n(def x 1)")]
+      (is (= :comment (first (first tokens))))
+      (is (= [0 18] [(nth (first tokens) 1) (nth (first tokens) 2)]))))
+
+  (testing "Tokenizing strings and regexes"
+    (let [tokens (syntax/tokenize "\"hello \\\"world\\\"\" #\"\\d+\"")]
+      (is (= :string (first (first tokens))))
+      (is (= :regex (first (second tokens))))))
+
+  (testing "Tokenizing characters"
+    (let [tokens (syntax/tokenize "\\newline \\space \\a")]
+      (is (= [:char :char :char] (map first tokens)))))
+
+  (testing "Tokenizing keywords"
+    (let [tokens (syntax/tokenize ":simple ::auto-resolved :ns/qualified")]
+      (is (= [:keyword :keyword :keyword] (map first tokens)))))
+
+  (testing "Tokenizing numbers"
+    (let [tokens (syntax/tokenize "42 -10 3.14 1/2 0x1f 100N")]
+      (is (= [:number :number :number :number :number :number] (map first tokens)))))
+
+  (testing "Tokenizing special forms, builtins, constants, and symbols"
+    (let [tokens (syntax/tokenize "(defn square [n] (* n n))")]
+      (is (= [:bracket :special-form :symbol :bracket :symbol :bracket :bracket :builtin :symbol :symbol :bracket :bracket]
+             (map first tokens))))
+    (let [tokens (syntax/tokenize "(= true false nil)")]
+      (is (= [:bracket :builtin :constant :constant :constant :bracket]
+             (map first tokens))))))
+
+(deftest compute-brackets-test
+  (testing "Balanced nested brackets and depths"
+    (let [code "(defn f [x] {:a (+ x 1)})"
+          binfo (syntax/compute-brackets code)
+          matches (:matches binfo)
+          tokens (:bracket-tokens binfo)]
+      ;; Total brackets: 8 (4 pairs)
+      (is (= 8 (count tokens)))
+      (is (empty? (:unmatched binfo)))
+      ;; Matching indices:
+      ;; 0 '(' matches 24 ')'
+      (is (= 24 (get matches 0)))
+      (is (= 0 (get matches 24)))
+      ;; 8 '[' matches 10 ']'
+      (is (= 10 (get matches 8)))
+      (is (= 8 (get matches 10)))
+      ;; 12 '{' matches 23 '}'
+      (is (= 23 (get matches 12)))
+      (is (= 12 (get matches 23)))
+      ;; 16 '(' matches 22 ')'
+      (is (= 22 (get matches 16)))
+      (is (= 16 (get matches 22)))
+      ;; Check depths
+      ;; 0 is depth 0
+      (is (= [0 1 0 :open] (first tokens)))
+      ;; 8 is depth 1
+      (is (= [8 9 1 :open] (nth tokens 1)))))
+
+  (testing "Brackets inside comments, strings, regexes, and characters are ignored"
+    (let [code "(defn f [x] ;; (ignored in comment) [ ] {\n  (str \"(ignored in string) [ ] {\" #\"[0-9]+\" \\( \\)) x)"
+          binfo (syntax/compute-brackets code)
+          tokens (:bracket-tokens binfo)]
+      ;; Real code brackets:
+      ;; 0 '(', 8 '[', 10 ']', 44 '(', 92 ')', 95 ')'
+      (is (= 6 (count tokens)))
+      (is (empty? (:unmatched binfo)))
+      (is (= 95 (get (:matches binfo) 0)))
+      (is (= 10 (get (:matches binfo) 8)))
+      (is (= 92 (get (:matches binfo) 44)))))
+
+  (testing "Unmatched brackets detection"
+    (let [code "(let [x 1]))"
+          binfo (syntax/compute-brackets code)]
+      ;; Extra ')' at index 11
+      (is (contains? (:unmatched binfo) 11))
+      (let [extra-tok (last (:bracket-tokens binfo))]
+        (is (= :unmatched (nth extra-tok 3)))))
+
+    (let [code "(let [x 1)"
+          binfo (syntax/compute-brackets code)]
+      ;; Unclosed '[' at index 5 and unclosed '(' at index 0
+      (is (contains? (:unmatched binfo) 0))
+      (is (contains? (:unmatched binfo) 5))))
+
+  (testing "Empty and nil inputs"
+    (is (= {:bracket-tokens [] :matches {} :unmatched #{}}
+           (syntax/compute-brackets "")))
+    (is (= {:bracket-tokens [] :matches {} :unmatched #{}}
+           (syntax/compute-brackets nil)))))
+
+(deftest symbol-at-pos-test
+  (let [code "(defn greet [name]\n  ; a comment\n  \"a string\"\n  (println name))"]
+    (testing "Extracting symbol under or adjacent to cursor"
+      (is (= "defn" (:symbol (syntax/symbol-at-pos code 0))))  ;; cursor on '(' touching defn
+      (is (= "defn" (:symbol (syntax/symbol-at-pos code 1))))  ;; start of defn
+      (is (= "defn" (:symbol (syntax/symbol-at-pos code 2))))  ;; inside defn
+      (is (= "defn" (:symbol (syntax/symbol-at-pos code 5))))  ;; end of defn
+      (is (= "greet" (:symbol (syntax/symbol-at-pos code 6)))) ;; start of greet
+      (is (= "greet" (:symbol (syntax/symbol-at-pos code 7)))) ;; inside greet
+      (is (= "greet" (:symbol (syntax/symbol-at-pos code 11)))) ;; end of greet
+      (is (= "name" (:symbol (syntax/symbol-at-pos code 12)))) ;; on '[' touching name
+      (is (= "name" (:symbol (syntax/symbol-at-pos code 13)))) ;; start of name
+      (is (= "name" (:symbol (syntax/symbol-at-pos code 15)))) ;; inside name
+      (is (= "name" (:symbol (syntax/symbol-at-pos code 17)))) ;; on ']' touching name
+      (is (= "println" (:symbol (syntax/symbol-at-pos code 47)))) ;; on '(' touching println
+      (is (= "println" (:symbol (syntax/symbol-at-pos code 50))))) ;; inside println
+
+    (testing "Cursor on reader macros / prefixes"
+      (is (= "my-atom" (:symbol (syntax/symbol-at-pos "@my-atom" 0))))   ;; on @
+      (is (= "my-atom" (:symbol (syntax/symbol-at-pos "@my-atom" 1))))   ;; after @
+      (is (= "my-sym" (:symbol (syntax/symbol-at-pos "'my-sym" 0))))     ;; on '
+      (is (= "my-var" (:symbol (syntax/symbol-at-pos "#'my-var" 0))))    ;; on #
+      (is (= "my-var" (:symbol (syntax/symbol-at-pos "#'my-var" 1))))    ;; on '
+      (is (= "my-var" (:symbol (syntax/symbol-at-pos "#'my-var" 2))))    ;; on m
+      (is (= "my-splice" (:symbol (syntax/symbol-at-pos "~@my-splice" 0)))) ;; on ~
+      (is (= "my-splice" (:symbol (syntax/symbol-at-pos "~@my-splice" 1)))) ;; on @
+      (is (= "my-splice" (:symbol (syntax/symbol-at-pos "~@my-splice" 2))))) ;; on m
+
+    (testing "Closing delimiters touching symbol"
+      (is (= "foo" (:symbol (syntax/symbol-at-pos "(foo)" 0))))  ;; on (
+      (is (= "foo" (:symbol (syntax/symbol-at-pos "(foo)" 4))))  ;; on )
+      (is (= "foo" (:symbol (syntax/symbol-at-pos "(foo)" 5))))) ;; right after )
+
+    (testing "Unicode / Korean symbol extraction"
+      (let [k-code "(defn 넓이-계산 [가로 세로] (* 가로 세로))"]
+        (is (= "넓이-계산" (:symbol (syntax/symbol-at-pos k-code 6))))
+        (is (= "가로" (:symbol (syntax/symbol-at-pos k-code 13))))
+        (is (= "세로" (:symbol (syntax/symbol-at-pos k-code 16))))))
+
+    (testing "Cursor in comments or strings returns nil"
+      ;; Offset 23 is inside "; a comment"
+      (is (nil? (syntax/symbol-at-pos code 23)))
+      ;; Offset 37 is inside "\"a string\""
+      (is (nil? (syntax/symbol-at-pos code 37))))
+
+    (testing "Cursor at empty text, blank lines, or boundaries"
+      (is (nil? (syntax/symbol-at-pos "" 0)))
+      (is (nil? (syntax/symbol-at-pos nil 0)))
+      (is (nil? (syntax/symbol-at-pos "(foo)\n\n\n(bar)" 7))))))
+
+(deftest find-symbol-occurrences-test
+  (let [code (str "(defn count-items [items]\n"
+                  "  ; items in comment\n"
+                  "  (let [items (filter identity items)]\n"
+                  "    {:items items, :count (count items)}))\n")]
+    (testing "Finds only code symbol occurrences"
+      (let [occs (syntax/find-symbol-occurrences code "items")]
+        ;; Should find 4 occurrences in code:
+        ;; 1: [items] parameter
+        ;; 2: [items (filter ...)] binding
+        ;; 3: (filter identity items) argument
+        ;; 4: {:items items ...} value
+        ;; 5: (count items) argument
+        (is (= 5 (count occs)))
+        (doseq [[s e] occs]
+          (is (= "items" (.substring code s e))))))
+
+    (testing "Keyword with same name is not treated as symbol"
+      (let [occs (syntax/find-symbol-occurrences code ":items")]
+        (is (empty? occs))))
+
+    (testing "Non-existent symbol returns empty"
+      (is (empty? (syntax/find-symbol-occurrences code "non-existent"))))))
+
+(deftest find-definition-test
+  (let [code (str "(ns test.defs)\n"
+                  "(def ^:dynamic *timeout* 3000)\n"
+                  "(defn compute-area [width height]\n"
+                  "  (let [ratio 1.5]\n"
+                  "    (* width height ratio)))\n"
+                  "(defmacro with-timer [& body]\n"
+                  "  `(time ~@body))\n"
+                  "(compute-area 10 20)\n")]
+    (testing "Top-level defn definition"
+      (let [res (syntax/find-definition code "compute-area")]
+        (is (some? res))
+        (is (= "compute-area" (:symbol res)))
+        (is (= 3 (:line res)))
+        (is (= :def (:kind res)))))
+
+    (testing "Top-level def with metadata"
+      (let [res (syntax/find-definition code "*timeout*")]
+        (is (some? res))
+        (is (= "*timeout*" (:symbol res)))
+        (is (= 2 (:line res)))
+        (is (= :def (:kind res)))))
+
+    (testing "Top-level defmacro"
+      (let [res (syntax/find-definition code "with-timer")]
+        (is (some? res))
+        (is (= "with-timer" (:symbol res)))
+        (is (= 6 (:line res)))
+        (is (= :def (:kind res)))))
+
+    (testing "Local binding inside let"
+      (let [ratio-usage-pos (.indexOf code "ratio)))")
+            res (syntax/find-definition code "ratio" ratio-usage-pos)]
+        (is (some? res))
+        (is (= "ratio" (:symbol res)))
+        (is (= 4 (:line res)))
+        (is (= :local (:kind res)))))
+
+    (testing "Undefined symbol returns nil"
+      (is (nil? (syntax/find-definition code "unknown-symbol"))))))
+
+(deftest compute-smart-indent-test
+  (testing "Calculates indentation when unclosed brackets exist"
+    (let [code "(defn greet [name]\n"]
+      ;; Cursor right before newline (pos = 18)
+      (is (= "  " (syntax/compute-smart-indent code 18)))))
+
+  (testing "Carries forward base indentation and adds 2 spaces for nested forms"
+    (let [code "  (let [x 10\n"]
+      (is (= "    " (syntax/compute-smart-indent code 12)))))
+
+  (testing "Preserves existing indentation when all forms on line are balanced"
+    (let [code "  (println \"hello\")\n"]
+      (is (= "  " (syntax/compute-smart-indent code 19)))))
+
+  (testing "Auto-dedents when line closed forms"
+    ;; Line with 4 spaces closes 1 form -> dedents 2 spaces to 2 spaces
+    (let [code "    (println \"hello\"))\n"]
+      (is (= "  " (syntax/compute-smart-indent code 22))))
+    ;; Line with 4 spaces closes 2 forms -> dedents 4 spaces to 0 spaces
+    (let [code "    (println \"hello\")))\n"]
+      (is (= "" (syntax/compute-smart-indent code 23))))
+    ;; Line with 2 spaces closes 1 form -> dedents 2 spaces to 0 spaces
+    (let [code "  (println \"hello\"))\n"]
+      (is (= "" (syntax/compute-smart-indent code 20)))))
+
+  (testing "Auto-dedents when inserting newline immediately before closing brackets"
+    (let [code "    (+ a 1))"]
+      ;; Cursor right before outer ')' (pos = 11): 1 closing bracket in suffix -> dedents 2 spaces to 2 spaces
+      (is (= "  " (syntax/compute-smart-indent code 11))))
+    (let [code "    (+ a 1)))"]
+      ;; Cursor right before outer '))' (pos = 11): 2 closing brackets in suffix -> dedents 4 spaces to 0 spaces
+      (is (= "" (syntax/compute-smart-indent code 11))))
+    (let [code "    (+ a 1)"]
+      ;; Cursor right after '(+ a 1)' with balanced forms -> preserves base indent
+      (is (= "    " (syntax/compute-smart-indent code 11)))))
+
+  (testing "Handles blank or empty inputs"
+    (is (= "" (syntax/compute-smart-indent "" 0)))
+    (is (= "" (syntax/compute-smart-indent nil 0)))))
+
+(deftest find-text-matches-test
+  (let [code "apple Banana apple orange BANANA"]
+    (testing "Case-insensitive search"
+      (let [matches (syntax/find-text-matches code "banana")]
+        (is (= 2 (count matches)))
+        (is (= [[6 12] [26 32]] matches))))
+
+    (testing "Case-sensitive search"
+      (let [matches (syntax/find-text-matches code "Banana" {:case-sensitive? true})]
+        (is (= 1 (count matches)))
+        (is (= [[6 12]] matches))))
+
+    (testing "Empty or non-matching query"
+      (is (empty? (syntax/find-text-matches code "")))
+      (is (empty? (syntax/find-text-matches code "grape"))))))
+
+(deftest get-symbol-doc-test
+  (testing "Lookup core runtime function doc"
+    (let [doc-info (syntax/get-symbol-doc "map")]
+      (is (= :found (:status doc-info)))
+      (is (= "clojure.core" (:ns doc-info)))
+      (is (string? (:arglists doc-info)))
+      (is (.contains (:doc doc-info) "Returns a lazy sequence"))))
+
+  (testing "Lookup macro doc"
+    (let [doc-info (syntax/get-symbol-doc "defn")]
+      (is (= :found (:status doc-info)))
+      (is (true? (:macro? doc-info)))))
+
+  (testing "Lookup buffer defined symbol"
+    (let [code "(defn my-custom-func [a b] (+ a b))\n"
+          doc-info (syntax/get-symbol-doc "my-custom-func" code)]
+      (is (= :buffer-def (:status doc-info)))
+      (is (= 1 (:line doc-info)))
+      (is (= :def (:kind doc-info)))))
+
+  (testing "Lookup special form doc directly via get-symbol-doc"
+    (let [def-doc (syntax/get-symbol-doc "def")
+          if-doc (syntax/get-symbol-doc "if")]
+      (is (= :found (:status def-doc)))
+      (is (true? (:special-form def-doc)))
+      (is (string? (:doc def-doc)))
+      (is (.contains (:arglists def-doc) "def"))
+      (is (= :found (:status if-doc)))
+      (is (true? (:special-form if-doc)))
+      (is (string? (:doc if-doc)))))
+
+  (testing "Lookup buffer defined symbol with docstring and params"
+    (let [code "(defn calculate-total\n  \"Calculates the final total with tax.\"\n  [subtotal tax-rate]\n  (* subtotal (+ 1 tax-rate)))\n"
+          doc-info (syntax/get-symbol-doc "calculate-total" code)]
+      (is (= :buffer-def (:status doc-info)))
+      (is (= "calculate-total" (:name doc-info)))
+      (is (= 1 (:line doc-info)))
+      (is (= :def (:kind doc-info)))
+      (is (= "([subtotal tax-rate])" (:arglists doc-info)))
+      (is (= "Calculates the final total with tax." (:doc doc-info)))))
+
+  (testing "Lookup buffer defined symbol without docstring"
+    (let [code "(defn square [x] (* x x))\n"
+          doc-info (syntax/get-symbol-doc "square" code)]
+      (is (= :buffer-def (:status doc-info)))
+      (is (= "([x])" (:arglists doc-info)))
+      (is (nil? (:doc doc-info)))))
+
+  (testing "Lookup buffer defined multi-arity function"
+    (let [code "(defn greet\n  \"Greets a user.\"\n  ([name] (str \"Hello, \" name))\n  ([greeting name] (str greeting \", \" name)))\n"
+          doc-info (syntax/get-symbol-doc "greet" code)]
+      (is (= :buffer-def (:status doc-info)))
+      (is (= "([name] [greeting name])" (:arglists doc-info)))
+      (is (= "Greets a user." (:doc doc-info)))))
+
+  (testing "Lookup buffer def value (non-function)"
+    (let [code "(def default-timeout \"Default timeout in ms\" 5000)\n"
+          doc-info (syntax/get-symbol-doc "default-timeout" code)]
+      (is (= :buffer-def (:status doc-info)))
+      (is (nil? (:arglists doc-info)))
+      (is (= "Default timeout in ms" (:doc doc-info)))))
+
+  (testing "Lookup unknown symbol returns not-found"
+    (let [doc-info (syntax/get-symbol-doc "unknown-sym-xyz")]
+      (is (= :not-found (:status doc-info)))))
+
+  (testing "format-autocomplete-doc output formatting"
+    (let [map-doc (syntax/get-symbol-doc "map")
+          let-doc (syntax/get-symbol-doc "let")
+          buf-code "(defn my-helper \"Does helper work\" [a b] (+ a b))"
+          buf-doc (syntax/get-symbol-doc "my-helper" buf-code)
+          buf-no-doc (syntax/get-symbol-doc "no-doc-fn" "(defn no-doc-fn [x] x)")
+          unknown-doc (syntax/get-symbol-doc "unknown-sym")]
+      ;; map
+      (let [fmt (syntax/format-autocomplete-doc map-doc {:symbol "map" :category :builtin})]
+        (is (.contains fmt "clojure.core/map"))
+        (is (.contains fmt "([f]"))
+        (is (.contains fmt "Returns a lazy sequence")))
+      ;; let
+      (let [fmt (syntax/format-autocomplete-doc let-doc {:symbol "let" :category :special})]
+        (is (.contains fmt "let  [special form]"))
+        (is (.contains fmt "let"))
+        (is (.contains fmt "bindings")))
+      ;; buffer with doc
+      (let [fmt (syntax/format-autocomplete-doc buf-doc {:symbol "my-helper" :category :user})]
+        (is (.contains fmt "my-helper  [buffer def, line 1]"))
+        (is (.contains fmt "([a b])"))
+        (is (.contains fmt "Does helper work")))
+      ;; buffer without doc
+      (let [fmt (syntax/format-autocomplete-doc buf-no-doc {:symbol "no-doc-fn" :category :user})]
+        (is (.contains fmt "no-doc-fn  [buffer def, line 1]"))
+        (is (.contains fmt "([x])"))
+        (is (.contains fmt "(No documentation string)")))
+      ;; unknown
+      (let [fmt (syntax/format-autocomplete-doc unknown-doc {:symbol "unknown-sym" :category :user})]
+        (is (.contains fmt "unknown-sym"))
+        (is (.contains fmt "(No documentation found)"))))))
+
+(deftest format-code-test
+  (testing "Format unindented defn and let"
+    (let [unformatted (str "(defn calculate-sum [a b]\n"
+                           "(let [x (* a 2)\n"
+                           "y (* b 2)]\n"
+                           "(+ x y)))\n")
+          expected (str "(defn calculate-sum [a b]\n"
+                        "  (let [x (* a 2)\n"
+                        "        y (* b 2)]\n"
+                        "    (+ x y)))\n")]
+      (is (= expected (syntax/format-code unformatted)))))
+
+  (testing "Format cond expression"
+    (let [unformatted (str "(cond\n"
+                           "(= x 1) :one\n"
+                           "(= x 2) :two\n"
+                           ":else :other)\n")
+          expected (str "(cond\n"
+                        "  (= x 1) :one\n"
+                        "  (= x 2) :two\n"
+                        "  :else :other)\n")]
+      (is (= expected (syntax/format-code unformatted)))))
+
+  (testing "Format try-catch-finally expression"
+    (let [unformatted (str "(try\n"
+                           "(do-work)\n"
+                           "(catch Exception e\n"
+                           "(log-error e))\n"
+                           "(finally\n"
+                           "(cleanup)))\n")
+          expected (str "(try\n"
+                        "  (do-work)\n"
+                        "  (catch Exception e\n"
+                        "    (log-error e))\n"
+                        "  (finally\n"
+                        "    (cleanup)))\n")]
+      (is (= expected (syntax/format-code unformatted)))))
+
+  (testing "Format vector and map alignment"
+    (let [unformatted (str "{:first-name \"John\"\n"
+                           ":last-name \"Doe\"\n"
+                           ":scores [100\n"
+                           "200\n"
+                           "300]}\n")
+          expected (str "{:first-name \"John\"\n"
+                        " :last-name \"Doe\"\n"
+                        " :scores [100\n"
+                        "          200\n"
+                        "          300]}\n")]
+      (is (= expected (syntax/format-code unformatted)))))
+
+  (testing "Preserves multiline strings verbatim"
+    (let [code (str "(def docstring\n"
+                    "  \"This is a line\n"
+                    "   This is indented in string\n"
+                    "     More spaces in string\")\n")]
+      (is (= code (syntax/format-code code)))))
+
+  (testing "Comments are indented properly"
+    (let [unformatted (str "(defn greet []\n"
+                           ";; Print friendly greeting\n"
+                           "(println \"hello\"))\n")
+          expected (str "(defn greet []\n"
+                        "  ;; Print friendly greeting\n"
+                        "  (println \"hello\"))\n")]
+      (is (= expected (syntax/format-code unformatted)))))
+
+  (testing "Empty and blank lines are preserved without trailing spaces"
+    (let [unformatted "(defn a []\n\n  1)\n\n(defn b []\n  2)"
+          formatted (syntax/format-code unformatted)]
+      (is (= unformatted formatted)))))
+
+(deftest format-selection-text-test
+  (testing "Formats only selected lines and leaves others unchanged"
+    (let [unformatted (str "(defn a []\n"
+                           "1)\n"
+                           "(defn b []\n"
+                           "2)\n")
+          ;; Select only (defn b [] \n 2)
+          start-offset (.indexOf unformatted "(defn b")
+          end-offset (.length unformatted)
+          formatted (syntax/format-selection-text unformatted start-offset end-offset)
+          expected (str "(defn a []\n"
+                        "1)\n"
+                        "(defn b []\n"
+                        "  2)\n")]
+      ;; (defn a [] \n 1) should remain unindented (not touched)
+      (is (= expected formatted)))))
+
+;; --- Autocomplete Tests ---
+
+(deftest find-buffer-definitions-test
+  (testing "Extracts def, defn, defmacro, defonce, defrecord, etc."
+    (let [code (str "(ns my.app)\n"
+                    "(def global-config {:port 8080})\n"
+                    "(defn calculate-total [items]\n"
+                    "  (reduce + items))\n"
+                    "(defn- private-helper [x] (* x 2))\n"
+                    "(defmacro with-timer [& body] `(time (do ~@body)))\n"
+                    "(defonce server-state (atom nil))\n"
+                    "(defrecord Person [name age])\n"
+                    ";; (defn commented-out-fn [x] x)\n")]
+      (is (= #{"global-config" "calculate-total" "private-helper" "with-timer" "server-state" "Person"}
+             (syntax/find-buffer-definitions code)))))
+
+  (testing "Handles type hints and metadata tags on definitions"
+    (let [code "(defn ^String greet [^String name] (str \"Hello \" name))\n(def ^:dynamic *debug-mode* false)"]
+      (is (= #{"greet" "*debug-mode*"}
+             (syntax/find-buffer-definitions code)))))
+
+  (testing "Returns empty set on empty text or nil"
+    (is (= #{} (syntax/find-buffer-definitions "")))
+    (is (= #{} (syntax/find-buffer-definitions nil)))
+    (is (= #{} (syntax/find-buffer-definitions "   \n\t  ")))))
+
+(deftest get-symbol-prefix-at-pos-test
+  (testing "Extracts prefix right after delimiter"
+    (let [text "(pri"
+          info (syntax/get-symbol-prefix-at-pos text 4)]
+      (is (= "pri" (:prefix info)))
+      (is (= 1 (:start info)))
+      (is (= 4 (:end info)))
+      (is (= 4 (:word-end info)))))
+
+  (testing "Extracts prefix inside complex buffer"
+    (let [text "(defn foo [x]\n  (map"
+          pos (.length text)
+          info (syntax/get-symbol-prefix-at-pos text pos)]
+      (is (= "map" (:prefix info)))
+      (is (= (- pos 3) (:start info)))
+      (is (= pos (:end info)))))
+
+  (testing "Empty prefix when cursor is immediately after whitespace or delimiter"
+    (let [info1 (syntax/get-symbol-prefix-at-pos "( " 2)
+          info2 (syntax/get-symbol-prefix-at-pos "(" 1)
+          info3 (syntax/get-symbol-prefix-at-pos "" 0)]
+      (is (= "" (:prefix info1)))
+      (is (= 2 (:start info1)))
+      (is (= "" (:prefix info2)))
+      (is (= 1 (:start info2)))
+      (is (= "" (:prefix info3)))
+      (is (= 0 (:start info3)))))
+
+  (testing "Prefix with Clojure identifier symbols (+, -, ?, !, /, .)"
+    (let [info-plus (syntax/get-symbol-prefix-at-pos "(+" 2)
+          info-pred (syntax/get-symbol-prefix-at-pos "(empty?" 7)
+          info-bang (syntax/get-symbol-prefix-at-pos "(swap!" 6)
+          info-ns (syntax/get-symbol-prefix-at-pos "(str/blank?" 11)]
+      (is (= "+" (:prefix info-plus)))
+      (is (= "empty?" (:prefix info-pred)))
+      (is (= "swap!" (:prefix info-bang)))
+      (is (= "str/blank?" (:prefix info-ns)))))
+
+  (testing "Calculates word-end for caret in middle of word"
+    (let [text "(println-str \"hi\")"
+          ;; caret at 4: "(pri|ntln-str \"hi\")"
+          info (syntax/get-symbol-prefix-at-pos text 4)]
+      (is (= "pri" (:prefix info)))
+      (is (= 1 (:start info)))
+      (is (= 4 (:end info)))
+      (is (= 12 (:word-end info))))))
+
+(deftest get-autocomplete-candidates-test
+  (testing "Matches special forms starting with prefix"
+    (let [candidates (syntax/get-autocomplete-candidates "def")]
+      (is (seq candidates))
+      (let [symbols (set (map :symbol candidates))
+            categories (set (map :category candidates))]
+        (is (contains? symbols "defn"))
+        (is (contains? symbols "defmacro"))
+        (is (contains? symbols "def"))
+        (is (contains? categories :special)))))
+
+  (testing "Matches core built-ins starting with prefix"
+    (let [candidates (syntax/get-autocomplete-candidates "pri")]
+      (is (seq candidates))
+      (let [symbols (set (map :symbol candidates))]
+        (is (contains? symbols "println"))
+        (is (contains? symbols "printf"))
+        (is (contains? symbols "print"))
+        ;; Starts-with check: must match case-insensitively at start of symbol
+        (is (every? #(clojure.string/starts-with? (clojure.string/lower-case %) "pri") symbols)))))
+
+  (testing "Matches user-defined buffer symbols"
+    (let [buffer (str "(defn my-custom-calculator [x y]\n"
+                      "  (let [result (+ x y)]\n"
+                      "    result))\n")
+          candidates (syntax/get-autocomplete-candidates "my-custom" buffer)]
+      (is (seq candidates))
+      (let [top (first candidates)]
+        (is (= "my-custom-calculator" (:symbol top)))
+        (is (= :user (:category top))))))
+
+  (testing "Prioritizes user definitions and exact case matches"
+    (let [buffer "(defn PrintCustom [] nil)\n(defn printer-agent [] nil)"
+          candidates (syntax/get-autocomplete-candidates "print" buffer)
+          symbols (map :symbol candidates)]
+      ;; User symbols matching prefix appear first
+      (is (contains? (set (take 5 symbols)) "printer-agent"))))
+
+  (testing "Returns empty vector when no candidate matches prefix"
+    (let [candidates (syntax/get-autocomplete-candidates "zzzznonexistent123")]
+      (is (empty? candidates))))
+
+  (testing "Matches user definitions from extra-context (editor buffer for REPL)"
+    (let [editor-buffer "(defn compute-factorial [n] (if (<= n 1) 1 (* n (compute-factorial (dec n)))))\n"
+          repl-input "(comp"
+          ;; extra-context as string
+          candidates-str (syntax/get-autocomplete-candidates "comp" repl-input 5 editor-buffer)
+          top-str (first (filter #(= (:symbol %) "compute-factorial") candidates-str))]
+      (is (some? top-str))
+      (is (= :user (:category top-str)))
+      ;; extra-context as zero-arg fn
+      (let [candidates-fn (syntax/get-autocomplete-candidates "comp" repl-input 5 (constantly editor-buffer))
+            top-fn (first (filter #(= (:symbol %) "compute-factorial") candidates-fn))]
+        (is (some? top-fn))
+        (is (= :user (:category top-fn))))))
+
+  (testing "Matches dynamically defined runtime namespace vars"
+    (let [test-sym-name "my-dynamic-test-var-12345"
+          test-sym (symbol test-sym-name)]
+      (intern *ns* test-sym "test-value")
+      (try
+        (let [candidates (syntax/get-autocomplete-candidates "my-dynamic-test-var")]
+          (is (some #(= (:symbol %) test-sym-name) candidates))
+          (let [match (first (filter #(= (:symbol %) test-sym-name) candidates))]
+            (is (= :user (:category match)))))
+        (finally
+          (ns-unmap *ns* test-sym))))))
+
+  (testing "Returns all candidates with proper ordering when prefix is blank"
+    (binding [*ns* (find-ns 'user)]
+      (let [candidates (syntax/get-autocomplete-candidates "")]
+        (is (> (count candidates) 600))
+        ;; First candidates are special forms (e.g. def, fn, let, etc.)
+        (is (= :special (:category (first candidates))))
+        ;; Special forms come before builtins
+        (let [categories (map :category candidates)
+              first-builtin (first (keep-indexed (fn [idx cat] (when (= cat :builtin) idx)) categories))
+              last-special (last (keep-indexed (fn [idx cat] (when (= cat :special) idx)) categories))]
+          (is (some? first-builtin))
+          (is (some? last-special))
+          (is (< last-special first-builtin))))))
+
+  (testing "Prioritizes user definitions when prefix is blank"
+    (binding [*ns* (find-ns 'user)]
+      (let [buffer "(defn my-blank-test-fn [] nil)\n"
+            candidates (syntax/get-autocomplete-candidates "" buffer 0)]
+        (is (= "my-blank-test-fn" (:symbol (first candidates))))
+        (is (= :user (:category (first candidates)))))))
+
+  (testing "Blank prefix candidate resolution executes 100 queries in < 50ms"
+    (binding [*ns* (find-ns 'user)]
+      (let [buffer "(defn my-blank-test-fn [] nil)\n"]
+        (dotimes [_ 10]
+          (syntax/get-autocomplete-candidates "" buffer 0))
+        (let [start (System/nanoTime)]
+          (dotimes [_ 100]
+            (syntax/get-autocomplete-candidates "" buffer 0))
+          (let [elapsed-ms (/ (- (System/nanoTime) start) 1000000.0)]
+            (is (< elapsed-ms 50.0) (str "Elapsed time was " elapsed-ms " ms for 100 blank prefix calls")))))))
+
