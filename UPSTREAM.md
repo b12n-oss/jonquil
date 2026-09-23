@@ -1,0 +1,27 @@
+# Upstream: DrClojure-Neo
+
+**Repository:** https://github.com/kimtg/DrClojure-Neo  
+**Pinned commit:** `41c56b8` (2026-09-22)  
+**Local checkout:** `~/dev/b12n-oss/kimtg--DrClojure-Neo`
+
+## Lifted code
+
+Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and completion code.
+
+| Jonquil file | Upstream source | How |
+|---|---|---|
+| `src/jonquil/syntax.clj` | `src/DrClojure/syntax.clj` | Lifted |
+| `test/jonquil/upstream/syntax_test.clj` | `test/DrClojure/syntax_test.clj` | Ported |
+| `src/jonquil/paint.clj` | `src/DrClojure/syntax.clj` | Re-expresses `highlight-doc!` |
+| `src/jonquil/edit.clj` | `src/DrClojure/ui.clj` | Re-expresses handlers |
+| `src/jonquil/eval.clj` | `src/DrClojure/eval.clj` | Reworks |
+
+## Syncing with upstream
+
+To stay current with upstream developments:
+
+1. Run `bb upstream:diff` to list upstream commits that touch `src/` or `test/` since the pin.
+2. Review each commit; port what matters to Jonquil.
+3. Bump `UPSTREAM_PIN` to the new commit SHA in the same commit that lands the port.
+
+This keeps Jonquil's provenance transparent and drift visible.

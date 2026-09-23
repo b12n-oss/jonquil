@@ -2,4 +2,13 @@
  {test  {:doc "Run tests; pass namespace names to run a subset"
          :task (apply shell "jolt" "-M:test" *command-line-args*)}
   check {:doc "Headless compile-check of every project namespace"
-         :task (shell "jolt" "-M:check")}}}
+         :task (shell "jolt" "-M:check")}
+  upstream:diff
+  {:doc "List upstream DrClojure commits since the pin that touch src or test"
+   :task (let [dir (or (System/getenv "DRCLOJURE_DIR")
+                       (str (System/getProperty "user.home")
+                            "/dev/b12n-oss/kimtg--DrClojure-Neo"))
+               pin (clojure.string/trim (slurp "UPSTREAM_PIN"))]
+           (shell {:dir dir} "git" "fetch" "--quiet" "upstream")
+           (shell {:dir dir} "git" "log" "--oneline"
+                  (str pin "..upstream/main") "--" "src" "test"))}}}
