@@ -150,7 +150,7 @@
     (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
     ((:run!* ui))
     (poll-until 3000 20
-                (fn [] @(:waiting? (:console ui)))
+                (fn [] ((:waiting? (:console ui))))
                 (fn [waiting?]
                   (let [cv (:console ui)]
                     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "World" -1 1)
@@ -167,7 +167,7 @@
     (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
     ((:run!* ui))
     (poll-until 3000 20
-                (fn [] @(:waiting? (:console ui)))
+                (fn [] ((:waiting? (:console ui))))
                 (fn [waiting-before]
                   ((:stop!* ui))
                   (poll-until 3000 20
@@ -180,10 +180,10 @@
                                 ;; a slow pass instead of a silent-looking false failure.
                                 (let [t0 (System/currentTimeMillis)]
                                   (poll-until 2000 20
-                                              (fn [] (not @(:waiting? (:console ui))))
+                                              (fn [] (not ((:waiting? (:console ui)))))
                                               (fn [waiting-cleared?]
                                                 (let [cv (:console ui)
-                                                      waiting-after @(:waiting? cv)
+                                                      waiting-after ((:waiting? cv))
                                                       ms (- (System/currentTimeMillis) t0)
                                                       input-before (cview/input-text cv)
                                                       inserted (not (zero? (g/gtk-text-buffer-insert-interactive-at-cursor
@@ -262,6 +262,63 @@
                                           {:defined defined? :console (since ui mark)})
                                    (next)))))))
 
+(defn- row-fast-repl-twice
+  "I2: a fast REPL eval (nil, completing in microseconds) must not strand
+  the console in :busy. With the old console-mirrored evaluating? atom, a
+  fast on-complete could clear the mirror BEFORE do-repl-eval!'s own
+  `set-evaluating! true` ran, leaving it stuck true and every later Return
+  silently hitting :busy. Submits nil twice in a row and requires both
+  results to actually appear."
+  [ui next]
+  (let [cv (:console ui)
+        mark1 (out-end-offset ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "nil" -1 1)
+    (let [got1 (cview/handle-return! cv false)]
+      (poll-until 2000 20
+                  (fn [] (and (idle? ui) (str/includes? (since ui mark1) "=> nil")))
+                  (fn [ok1]
+                    (let [mark2 (out-end-offset ui)]
+                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "nil" -1 1)
+                      (let [got2 (cview/handle-return! cv false)]
+                        (poll-until 2000 20
+                                    (fn [] (and (idle? ui) (str/includes? (since ui mark2) "=> nil")))
+                                    (fn [ok2]
+                                      (check :fast-repl-twice
+                                             (and (= 1 got1) ok1 (= 1 got2) ok2)
+                                             {:got1 got1 :ok1 ok1 :got2 got2 :ok2 ok2
+                                              :console1 (since ui mark1) :console2 (since ui mark2)})
+                                      (next))))))))))
+
+(defn- row-busy-hint-once
+  "M3: Return while a program runs and isn't waiting on stdin does nothing
+  silently by default; the FIRST such Return during a run appends a hint,
+  later ones during the SAME run stay silent."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (let [cv (:console ui)
+                        got1 (cview/handle-return! cv false)
+                        got2 (cview/handle-return! cv false)]
+                    (poll-until 1000 20
+                                (fn [] (str/includes? (since ui mark) "A program is running"))
+                                (fn [hinted?]
+                                  (let [hint-count (count (re-seq #"A program is running" (since ui mark)))]
+                                    ((:stop!* ui))
+                                    (poll-until 3000 20
+                                                (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                                (fn [stopped?]
+                                                  (check :busy-hint-once
+                                                         (and started? (= 1 got1) (= 1 got2)
+                                                              hinted? (= 1 hint-count) stopped?)
+                                                         {:started started? :got1 got1 :got2 got2
+                                                          :hinted hinted? :hint-count hint-count :stopped stopped?
+                                                          :console (since ui mark)})
+                                                  (next)))))))))))
+
 (defn- row-save-and-open [ui next]
   (let [tmp (str (System/getProperty "java.io.tmpdir")
                  "/jonquil-selftest-" (System/currentTimeMillis) ".clj")]
@@ -287,6 +344,8 @@
    row-run-unbalanced
    row-reset-vs-accumulate
    row-repl-after-run
+   row-fast-repl-twice
+   row-busy-hint-once
    row-save-and-open])
 
 ;; --- driver --------------------------------------------------------------

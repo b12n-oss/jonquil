@@ -138,11 +138,21 @@
 
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (global.md: every one of
-  these runs on the eval worker thread and must only enqueue)."
+  these runs on the eval worker thread and must only enqueue).
+
+  I2: the console's :evaluating?/:waiting? are wired at construction to
+  read live from the engine (see activate!), not mirrored by callbacks
+  here -- there's nothing left for a fast eval's on-complete to race
+  against and strand, because there's no separate flag to strand.
+
+  :on-complete sets the status label FIRST, before result-line/
+  format-error run: a throwing result-line or format-error (both call
+  user-supplied formatting logic) can then never leave the status label
+  stuck on \"Running…\"; the same goes for reset-busy-hint! (M3), which
+  must re-arm for the next run whether or not the append below throws."
   [ed cv status-label]
   {:on-output (fn [kind s] (cview/append! cv kind s))
    :on-wait-input (fn [waiting?]
-                    (cview/set-waiting! cv waiting?)
                     (set-status! status-label (if waiting? "Waiting for input" "Running…")))
    :on-status-change (fn [status]
                        (set-status! status-label
@@ -151,6 +161,8 @@
                                       :waiting-input "Waiting for input"
                                       :idle "Ready")))
    :on-complete (fn [result]
+                  (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
+                  (cview/reset-busy-hint! cv)
                   (let [[kind text] (console/result-line result)]
                     (cview/append! cv kind text))
                   (when (and (= :error (:status result))
@@ -162,19 +174,15 @@
                     ;; on-gui! rather than called here directly.
                     (on-gui! (fn []
                                (when-let [msg (console/unclosed-bracket-message (editor/editor-text ed))]
-                                 (cview/append! cv :system (str msg "\n"))))))
-                  (cview/set-evaluating! cv false)
-                  (cview/set-waiting! cv false)
-                  (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready")))})
+                                 (cview/append! cv :system (str msg "\n")))))))})
 
 (defn- do-run!
   "1. the upstream banner. 2. run-definitions!, appending a warning if the
-  engine was already busy. 3. mark the console evaluating."
+  engine was already busy."
   [ed cv session status-label]
   (cview/append! cv :system "; --- Running Definitions ---\n")
   (let [warning (session/run-definitions! session (editor/editor-text ed) (make-eval-opts ed cv status-label))]
-    (when warning (cview/append! cv :system warning)))
-  (cview/set-evaluating! cv true))
+    (when warning (cview/append! cv :system warning))))
 
 (defn- do-stop! [session]
   (eval/stop-eval! (:ctx session))
@@ -184,12 +192,11 @@
 
 (defn- do-repl-eval!
   "submit-repl! with the same opts run uses, minus the banner -- and the
-  same warning-append/evaluating? bookkeeping, since submit-repl! can return
-  the same busy warning run-definitions! can."
+  same warning-append bookkeeping, since submit-repl! can return the same
+  busy warning run-definitions! can."
   [ed cv session status-label text]
   (let [warning (session/submit-repl! session text (make-eval-opts ed cv status-label))]
-    (when warning (cview/append! cv :system warning)))
-  (cview/set-evaluating! cv true))
+    (when warning (cview/append! cv :system warning))))
 
 (defn- make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
@@ -244,7 +251,11 @@
         *cv (atom nil)
         cv (cview/make-console-view {:on-submit (make-on-submit ed *cv session status-label)
                                      :history-prev (history-prev-fn session)
-                                     :history-next (history-next-fn session)})
+                                     :history-next (history-next-fn session)
+                                     ;; I2: the console reads busy/waiting state
+                                     ;; straight from the engine, never a mirror.
+                                     :evaluating? (fn [] (eval/evaluating? (:ctx session)))
+                                     :waiting? (fn [] (eval/waiting-for-input? (:ctx session)))})
         _ (reset! *cv cv)
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))

@@ -27,8 +27,14 @@
   same-kind chunks into one buffer mutation so a 100k-line flood does not
   starve GTK. Every other function here (handle-return!, handle-history!,
   clear-input!, the key controller) touches the buffer directly and must
-  only ever run on the GTK thread -- set-waiting!/set-evaluating! are the
-  exception, since they are plain atom resets with no GTK call in them."
+  only ever run on the GTK thread -- reset-busy-hint! is the exception,
+  since it is a plain atom reset with no GTK call in it.
+
+  :waiting?/:evaluating? are functions supplied at construction, read live
+  from the eval engine (I2) rather than mirrored into console-owned atoms:
+  a mirror set by the caller AFTER starting an eval can lose a race against
+  a fast eval's own completion clearing it first, stranding the console in
+  :busy forever."
   (:require [jonquil.console :as console]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
@@ -78,17 +84,12 @@
     (when (< start end)
       (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-delete buf a b))))))
 
-(defn set-waiting!
-  "Whether the console is waiting on stdin -- a plain atom reset, safe from
-  any thread."
-  [cv b]
-  (reset! (:waiting? cv) (boolean b)))
-
-(defn set-evaluating!
-  "Whether a program is running without waiting on stdin -- a plain atom
-  reset, safe from any thread."
-  [cv b]
-  (reset! (:evaluating? cv) (boolean b)))
+(defn reset-busy-hint!
+  "Clears the once-per-run :busy hint flag (M3), so the next run that stalls
+  on a busy Return earns its own hint instead of staying silent because an
+  earlier run already showed one. Safe from any thread: a plain atom reset."
+  [cv]
+  (reset! (:busy-hint-shown? cv) false))
 
 ;; --- draining output ---------------------------------------------------
 
@@ -196,16 +197,28 @@
   "console/input-action applied to cv's live state, with the real Shift bit
   from the key event. Both the key controller and self-test rows call this
   instead of synthesizing a keystroke. Returns 0 when GTK should insert a
-  plain newline itself, 1 when this function already handled the key."
+  plain newline itself, 1 when this function already handled the key.
+
+  :waiting?/:evaluating? are read by CALLING the fns supplied at
+  construction (I2), not derefing a console-owned mirror atom: the engine
+  is the source of truth, so there's nothing here for a fast eval's
+  on-complete to race against and strand.
+
+  :busy hints once per run (M3): the first busy Return after a run starts
+  appends a :system reminder; later ones stay silent until
+  reset-busy-hint! (called from on-complete) re-arms it for the next run."
   [cv shift?]
   (let [text (input-text cv)
         action (console/input-action {:input text
-                                      :waiting? @(:waiting? cv)
-                                      :evaluating? @(:evaluating? cv)
+                                      :waiting? ((:waiting? cv))
+                                      :evaluating? ((:evaluating? cv))
                                       :shift? shift?})]
     (case action
       :newline 0
-      (:noop :busy) 1
+      :noop 1
+      :busy (do (when (compare-and-set! (:busy-hint-shown? cv) false true)
+                  (append! cv :system "A program is running. Press Stop (Esc) to cancel it.\n"))
+                1)
       (:eval :send-stdin) (do (commit-input! cv)
                               ((:on-submit cv) {:action action :text text})
                               1))))
@@ -223,7 +236,7 @@
   (let [buf (:buf cv)
         caret (g/cursor-offset buf)
         start (mark-offset buf (:input-start cv))]
-    (if (and (>= caret start) (not @(:waiting? cv)))
+    (if (and (>= caret start) (not ((:waiting? cv))))
       (if-let [replacement (case dir
                              :prev ((:history-prev cv) (input-text cv))
                              :next ((:history-next cv)))]
@@ -255,7 +268,7 @@
       (contains? #{KEY-RETURN KEY-KP-ENTER} keyval)
       (handle-return! cv (not (zero? (bit-and state g/SHIFT-MASK))))
 
-      (and (= keyval KEY-D) (command-chord? state) @(:waiting? cv))
+      (and (= keyval KEY-D) (command-chord? state) ((:waiting? cv)))
       (do ((:on-submit cv) {:action :eof}) 1)
 
       (= keyval KEY-UP) (if (handle-history! cv :prev) 1 0)
@@ -297,11 +310,14 @@
   on-submit receives {:action :eval|:send-stdin|:eof :text s}. history-prev
   is (fn [current-input] -> string|nil); history-next is (fn [] ->
   string|nil) -- the caller (P2.T7) wires both to the session's history
-  atom.
+  atom. evaluating?/waiting? are (fn [] bool), read live from the eval
+  engine (I2) -- default (constantly false) for callers with no engine at
+  all (dev/gtk_selftest.clj's bare console rows).
 
   Returns {:view :buf :scroll} plus internal bookkeeping, mirroring
   jonquil.gtk.editor/make-editor's shape."
-  [{:keys [on-submit history-prev history-next]}]
+  [{:keys [on-submit history-prev history-next evaluating? waiting?]
+    :or {evaluating? (constantly false) waiting? (constantly false)}}]
   (let [view (g/gtk-text-view-new)
         buf (g/gtk-text-view-get-buffer view)
         scroll (g/gtk-scrolled-window-new)
@@ -331,8 +347,9 @@
               :end-mark (create-mark! buf "jonquil-console-scroll-end" 2 false)
               :queue (atom [])
               :drain-scheduled? (atom false)
-              :waiting? (atom false)
-              :evaluating? (atom false)
+              :waiting? waiting?
+              :evaluating? evaluating?
+              :busy-hint-shown? (atom false)
               :on-submit on-submit
               :history-prev history-prev
               :history-next history-next}]
