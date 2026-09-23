@@ -47,8 +47,16 @@
     (catch :default _ nil)))
 
 (defn- drain-pending [_data]
+  ;; Flip the flag BEFORE taking the queue. A thread's on-gui! landing
+  ;; between the two would otherwise conj onto a queue we've already
+  ;; emptied while compare-and-set! still sees the (stale) true flag, so
+  ;; its thunk schedules nothing and is stranded until some unrelated
+  ;; later on-gui! happens to drain it. Flipped first, that same race
+  ;; either lands the thunk in the reset-vals! below or wins its own
+  ;; compare-and-set! and schedules a second, harmless, possibly-empty
+  ;; drain.
+  (reset! drain-scheduled false)
   (let [thunks (first (reset-vals! pending []))]
-    (reset! drain-scheduled false)
     (doseq [f thunks]
       (try (f) (catch :default e (report-thunk-exception! e)))))
   0)

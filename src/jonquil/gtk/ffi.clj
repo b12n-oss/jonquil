@@ -270,3 +270,32 @@
 (ffi/defcfn gtk-text-buffer-create-mark "gtk_text_buffer_create_mark" [:pointer :string :pointer :int] :pointer)
 (ffi/defcfn gtk-text-buffer-move-mark "gtk_text_buffer_move_mark" [:pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-view-scroll-to-mark "gtk_text_view_scroll_to_mark" [:pointer :pointer :double :int :double :double] :void)
+
+;; --- P2.T5: reading a tag's style back ---
+;; Signatures checked against /opt/homebrew/include/glib-2.0/gobject
+;; (glib 2.0, gobject-2.0 installed via homebrew).
+;; g_value_get_enum: gobject/genums.h:248 -- gint g_value_get_enum (const GValue *value)
+(ffi/defcfn g-value-get-enum "g_value_get_enum" [:pointer] :int)
+;; g_object_get_property: gobject/gobject.h:493 -- void g_object_get_property
+;;   (GObject *object, const gchar *property_name, GValue *value)
+(ffi/defcfn g-object-get-property "g_object_get_property" [:pointer :string :pointer] :void)
+
+(defn- get-gvalue!
+  "Reads obj's prop through the fixed-arity GValue path (get-property's
+  counterpart to set-gvalue!'s set-property), returning (getter v)."
+  [obj prop gtype getter]
+  (let [v (ffi/alloc GVALUE-BYTES)]
+    (try
+      (doseq [i (range GVALUE-BYTES)] (ffi/write v :uint8 0 i))
+      (g-value-init v gtype)
+      (g-object-get-property obj prop v)
+      (let [result (getter v)]
+        (g-value-unset v)
+        result)
+      (finally (ffi/free v)))))
+
+(defn tag-italic?
+  "True when tag's `style` property reads back as PANGO_STYLE_ITALIC --
+  set-italic!'s read-back counterpart."
+  [tag]
+  (= PANGO-STYLE-ITALIC (get-gvalue! tag "style" (pango-style-get-type) g-value-get-enum)))

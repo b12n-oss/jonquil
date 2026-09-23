@@ -44,13 +44,15 @@
       (poll-until 1000 20
                   (fn [] (and (g/has-tag-at? buf 1 (get tags :special-form))
                               (g/has-tag-at? buf 0 (get tags [:rainbow 0]))
-                              (g/has-tag-at? buf 14 (get tags :comment))))
+                              (g/has-tag-at? buf 14 (get tags :comment))
+                              (g/tag-italic? (get tags :comment))))
                   (fn [ok]
                     (check :editor-colours ok
                            {:text (editor/editor-text ed)
                             :special-form-at-1 (g/has-tag-at? buf 1 (get tags :special-form))
                             :rainbow0-at-0 (g/has-tag-at? buf 0 (get tags [:rainbow 0]))
-                            :comment-at-14 (g/has-tag-at? buf 14 (get tags :comment))})
+                            :comment-at-14 (g/has-tag-at? buf 14 (get tags :comment))
+                            :comment-tag-italic (g/tag-italic? (get tags :comment))})
                     (next))))))
 
 (defn- row-editor-undo-text-only [ed]
@@ -111,12 +113,35 @@
                             :rainbow0-at-0 (g/has-tag-at? buf 0 (get tags [:rainbow 0]))})
                     (next))))))
 
+(defn- row-on-gui-concurrent
+  "P2.T6 will call on-gui! from worker threads at flood rates; this proves
+  no thunk enqueued concurrently from several threads is ever stranded."
+  [_ed]
+  (fn [next]
+    (let [n-threads 4
+          per-thread 2500
+          total (* n-threads per-thread)
+          counter (atom 0)
+          t0 (System/currentTimeMillis)]
+      (dotimes [_ n-threads]
+        (future
+          (dotimes [_ per-thread]
+            (cb/on-gui! (fn [] (swap! counter inc))))))
+      (poll-until 10000 20
+                  (fn [] (= total @counter))
+                  (fn [ok]
+                    (check :on-gui-concurrent ok
+                           {:count @counter :total total
+                            :ms (- (System/currentTimeMillis) t0)})
+                    (next))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
    row-editor-smart-enter
    row-editor-dirty
-   row-editor-emoji-offsets])
+   row-editor-emoji-offsets
+   row-on-gui-concurrent])
 
 ;; --- driver ------------------------------------------------------------
 
