@@ -8,7 +8,10 @@
            (clojure.lang LineNumberingPushbackReader)))
 
 (defn create-writer
-  "Creates a java.io.Writer that forwards character chunks to (on-chunk str)."
+  "Creates a java.io.Writer that forwards character chunks to (on-chunk str).
+   Matches upstream's char[] handling (41c56b8): a char array must go
+   through a String constructor, not (str ...), which stringifies the
+   array's identity instead of its contents."
   [on-chunk]
   (proxy [Writer] []
     (close [] nil)
@@ -17,10 +20,13 @@
       ([x]
        (cond
          (string? x) (on-chunk x)
+         (instance? (Class/forName "[C") x) (on-chunk (String. ^chars x))
          (integer? x) (on-chunk (str (char x)))
          :else (on-chunk (str x))))
       ([x off len]
-       (on-chunk (subs (str x) (int off) (+ (int off) (int len))))))))
+       (if (instance? (Class/forName "[C") x)
+         (on-chunk (String. ^chars x (int off) (int len)))
+         (on-chunk (subs (str x) (int off) (+ (int off) (int len)))))))))
 
 (defn create-stdin-reader
   "Upstream's queue-fed Reader, unchanged."
@@ -162,12 +168,30 @@
         (.offer queue ::eof)
         done))))
 
+(defn- report-callback-exception!
+  "Reports an exception a caller's callback threw, on the process's real
+   *err* (this runs outside the eval binding, so *err* is not the run's
+   capture writer here), then lets the caller continue. Used so a
+   throwing callback loses only itself, never the completion it would
+   otherwise have swallowed (fix I1)."
+  [who e]
+  (binding [*out* *err*]
+    (println (str "jonquil.eval: " who " threw: " (ex-message e)))))
+
 (defn eval-async
   "Evaluates code on a worker. Options:
      :on-output (fn [kind s])  kind is :out or :err
      :on-wait-input (fn [bool])
      :on-status-change (fn [status])  :running, :waiting-input, :idle
      :on-complete (fn [result])  {:status :ok|:error|:interrupted, :ns sym, ...}
+       :ok also carries :value (the raw result) and :printed -- (pr-str
+       value) with *print-length* bound to 1000, computed inside the same
+       interruptible thunk as the evaluation itself, so realizing a lazy
+       :value happens under the bound *out*/*ns* (its side effects go to
+       on-output, not the caller's console) and a Stop during that
+       realization yields :interrupted like any other Stop. :error also
+       carries :error. format-value is unchanged; the GUI should print
+       :printed rather than re-deriving it from :value.
      :ns-name symbol (default 'user)
    on-output must never print: it runs on the worker thread, where *out* is
    already bound to the capture writer, so a print inside it would feed back
@@ -178,9 +202,9 @@
    and :idle (worker exit); it runs WITHOUT the lock for the mid-run
    :waiting-input/:running toggle fired while the program blocks on stdin.
    on-output, on-wait-input and on-complete never run under the lock. The
-   lock is reentrant on the same thread, so it's safe for a locked
-   on-status-change call to itself call eval-async or stop-eval! on this
-   same context from the same thread (e.g. to chain a run). It is NOT
+   lock is reentrant on the same thread, so a locked on-status-change call
+   may itself call eval-async or stop-eval! on this same context from the
+   same thread and succeed immediately (e.g. to chain a run). It is NOT
    safe across threads: on-status-change must never synchronously block
    waiting on another thread that may itself call eval-async or
    stop-eval! on this context, or the two threads deadlock -- a GUI
@@ -240,10 +264,38 @@
                     (let [target (or (find-ns ns-sym) (create-ns ns-sym))]
                       (binding [*out* out-w *err* err-w *in* in-rdr *ns* target]
                         (let [r (try
-                                  (when-not (ns-resolve *ns* 'map) (refer-clojure))
-                                  {:status :ok
-                                   :value (jolt.host/run-interruptible
-                                           token (fn [] (load-string (str code "\n"))))}
+                                  ;; I4: unconditional -- the ns-resolve guard
+                                  ;; this replaced was always false on Jolt.
+                                  ;; Also refer the clojure.repl helpers that
+                                  ;; actually exist here (doc, find-doc,
+                                  ;; apropos, dir -- source and pst do not),
+                                  ;; so (doc ...) etc. work at the prompt like
+                                  ;; upstream's DrClojure.eval. NOT
+                                  ;; clojure.pprint: Jolt's pprint ignores the
+                                  ;; bound *out* and writes straight to the
+                                  ;; process's real stdout (known gap).
+                                  (refer-clojure)
+                                  (require 'clojure.repl)
+                                  (refer 'clojure.repl :only '[doc find-doc apropos dir])
+                                  (let [{:keys [value printed]}
+                                        (jolt.host/run-interruptible
+                                         token (fn []
+                                                 ;; I3: printed inside the same
+                                                 ;; interruptible thunk, under
+                                                 ;; the same binding, as the
+                                                 ;; evaluation itself -- so
+                                                 ;; realizing a lazy value's
+                                                 ;; side effects go to
+                                                 ;; on-output, not the
+                                                 ;; caller's console, and Stop
+                                                 ;; during that realization
+                                                 ;; yields :interrupted like
+                                                 ;; any other Stop.
+                                                 (let [v (load-string (str code "\n"))]
+                                                   {:value v
+                                                    :printed (binding [*print-length* 1000]
+                                                               (pr-str v))})))]
+                                    {:status :ok :value value :printed printed})
                                   (catch :default e
                                     (if (interrupted? e)
                                       {:status :interrupted}
@@ -253,9 +305,17 @@
                             ;; surfaced as (InterruptedException, EOF on stdin, a
                             ;; normal return), the user asked for a stop.
                             @stop-requested (-> (assoc :status :interrupted)
-                                                (dissoc :value :error))))))
+                                                (dissoc :value :error :printed))))))
                     (catch :default e
                       {:status :error :error e :ns ns-sym}))]
+              ;; I1: clear any pending Java interrupt before the tail. A
+              ;; busy loop stopped via the token can leave this thread's
+              ;; interrupt flag set (nothing inside it made a blocking call
+              ;; to consume it), and a blocking call inside
+              ;; on-status-change/on-complete -- a GUI's .put onto a queue,
+              ;; say -- would otherwise throw InterruptedException
+              ;; immediately, silently losing the completion.
+              (Thread/interrupted)
               ;; Fix #3: reset-to-idle and its notification are one locked
               ;; unit, so a new eval-async's own registration (locked, above)
               ;; can never squeeze its :running notification in before this
@@ -265,15 +325,16 @@
                 (reset! running-state idle-state)
                 ;; Fix #1: on-status-change is isolated in its own try so a
                 ;; throwing caller can never prevent the deliver/on-complete
-                ;; below from running.
+                ;; below from running. I1: the exception is reported, not
+                ;; silently dropped.
                 (try
                   (when on-status-change (on-status-change :idle))
-                  (catch :default _ nil)))
+                  (catch :default e (report-callback-exception! "on-status-change" e))))
               ;; Fix #1: every exit path reaches here exactly once, whatever
               ;; on-status-change did above.
               (deliver done result)
               (try
                 (when on-complete (on-complete result))
-                (catch :default _ nil))
+                (catch :default e (report-callback-exception! "on-complete" e)))
               result))
           nil)))))
