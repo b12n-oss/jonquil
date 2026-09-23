@@ -232,3 +232,85 @@
           [r _] (run-sync (sut/make-eval-context) "(defn f [] 1) (f)")]
       (println "S1j user existed before:" had-user "run after remove-ns user:" (:status r) (:value r))
       (is (= 1 (:value r))))))
+
+;; ---------------------------------------------------------------- fix round 1
+
+(deftest fix1-idle-notify-throw-does-not-block-completion
+  (let [ctx (sut/make-eval-context)
+        done (promise)
+        status-threw? (atom false)]
+    (sut/eval-async ctx "(+ 1 1)"
+                    {:on-status-change (fn [s]
+                                          (when (= :idle s)
+                                            (reset! status-threw? true)
+                                            (throw (ex-info "boom from on-status-change" {}))))
+                     :on-complete (fn [r] (deliver done r))})
+    (let [r (deref done 3000 :timeout)]
+      (is (true? @status-threw?))
+      (is (not= :timeout r))
+      (is (= :ok (:status r)))
+      (is (= 2 (:value r)))
+      (is (false? (sut/evaluating? ctx))))))
+
+(deftest fix2-stop-immediately-after-run-interrupts-promptly
+  (dotimes [i 5]
+    (let [ctx (sut/make-eval-context)
+          done (promise)
+          t0 (System/currentTimeMillis)]
+      (sut/eval-async ctx "(Thread/sleep 10000)" {:on-complete (fn [r] (deliver done r))})
+      (sut/stop-eval! ctx)
+      (let [r (deref done 5000 :timeout)
+            elapsed (- (System/currentTimeMillis) t0)]
+        (println "FIX2 iteration" i "stop-immediately-after-run took" elapsed "ms, result" (:status r))
+        (is (not= :timeout r) (str "iteration " i " timed out waiting for :interrupted"))
+        (is (= :interrupted (:status r)) (str "iteration " i))
+        (is (< elapsed 5000) (str "iteration " i " took " elapsed "ms, expected well under the 10000ms sleep"))))))
+
+(deftest fix3-no-stale-idle-after-next-run-starts
+  ;; A watch on running-state fires SYNCHRONOUSLY, on run1's own worker
+  ;; thread, as part of the very reset! that flips it to idle-state -- i.e.
+  ;; strictly before run1 goes on to call on-status-change :idle. From
+  ;; inside that watch we start run2 and then sleep briefly before letting
+  ;; the watch (and so the reset!) return, which gives run2's own worker a
+  ;; window to run if nothing serialises it against run1's still-pending
+  ;; :idle notification. This is exactly the gap S1's finding 3 describes
+  ;; (a new run starting between the old worker's state reset and its
+  ;; notification), widened deterministically instead of hoping a real
+  ;; scheduler race lands the wrong way often enough to catch in CI.
+  (dotimes [i 5]
+    (let [ctx (sut/make-eval-context)
+          log (atom [])
+          run2-started? (atom false)
+          run1-done (promise)
+          run2-done (promise)
+          watch-key (gensym "fix3-watch")]
+      (add-watch (:running-state ctx) watch-key
+                 (fn [_ _ old new]
+                   (when (and (= :idle (:status new))
+                              (not= :idle (:status old))
+                              (compare-and-set! run2-started? false true))
+                     (sut/eval-async ctx "(+ 2 2)"
+                                     {:on-status-change (fn [s2] (swap! log conj [:run2 s2]))
+                                      :on-complete (fn [r2] (deliver run2-done r2))})
+                     (Thread/sleep 200))))
+      (sut/eval-async ctx "(+ 1 1)"
+                      {:on-status-change (fn [s] (swap! log conj [:run1 s]))
+                       :on-complete (fn [r1] (deliver run1-done r1))})
+      ;; Wait for BOTH runs to fully finish (not just run2, which can race
+      ;; ahead of run1's own :idle notification here) before reading the
+      ;; log, or we'd race the test's own assertions against run1's worker.
+      (let [r1 (deref run1-done 3000 :timeout)
+            r2 (deref run2-done 3000 :timeout)
+            entries @log
+            idle1-idx (first (keep-indexed (fn [i [who s]] (when (and (= who :run1) (= s :idle)) i)) entries))
+            running2-idx (first (keep-indexed (fn [i [who s]] (when (and (= who :run2) (= s :running)) i)) entries))]
+        (remove-watch (:running-state ctx) watch-key)
+        (println "FIX3 iteration" i "notification log:" entries)
+        (is (not= :timeout r1) (str "iteration " i))
+        (is (not= :timeout r2) (str "iteration " i))
+        (is (= 2 (:value r1)) (str "iteration " i))
+        (is (= 4 (:value r2)) (str "iteration " i))
+        (is (some? idle1-idx) (str "iteration " i ": run1 must have notified :idle"))
+        (is (some? running2-idx) (str "iteration " i ": run2 must have notified :running"))
+        (is (< idle1-idx running2-idx)
+            (str "iteration " i ": run2's :running notification must never precede run1's :idle notification, log=" entries))))))
