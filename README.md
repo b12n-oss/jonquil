@@ -16,17 +16,17 @@ See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the win
 ## Running
 
 ```bash
-bb run           # opens an empty window
-bb run file.clj  # opens file.clj in the Definitions editor
+bb app:run           # opens an empty window
+bb app:run file.clj  # opens file.clj in the Definitions editor
 ```
 
 ## Building
 
 ```bash
-bb build   # writes ./jonquil (gitignored), a self-contained binary
+bb app:build   # writes ./jonquil (gitignored), a self-contained binary
 ```
 
-The binary is unsigned on macOS. `bb build` itself prints the fix if you need to hand it to someone else:
+The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
 
 ```
 jolt build: note — on macOS this binary is unsigned; to share it,
