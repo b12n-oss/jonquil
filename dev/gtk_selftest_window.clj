@@ -47,6 +47,38 @@
 (defn- console-text [ui] (g/buffer-text (:buf (:console ui))))
 (defn- idle? [ui] (not (eval/evaluating? (:ctx (:session ui)))))
 
+(defn- mark-offset
+  "mark's current character offset in buf -- console-view keeps its marks
+  (:out-end) in its returned map but doesn't expose an offset-of-mark
+  reader, mirroring dev/gtk_selftest.clj's own copy of this helper."
+  [buf mark]
+  (let [it (ffi/alloc g/ITER-BYTES)]
+    (try
+      (g/gtk-text-buffer-get-iter-at-mark buf it mark)
+      (g/gtk-text-iter-get-offset it)
+      (finally (ffi/free it)))))
+
+(defn- out-end-offset
+  "The console's out-end mark's current offset: the boundary between output
+  history so far and the live prompt/input tail. Capture this BEFORE a step
+  runs; `since` below reads the suffix from that offset once the step is
+  done, which is exactly the new output the step produced (plus the live
+  prompt/input tail, harmless for a substring check) -- never anything an
+  earlier row or step already appended."
+  [ui]
+  (let [cv (:console ui)]
+    (mark-offset (:buf cv) (:out-end cv))))
+
+(defn- since
+  "Console text from mark onward -- see out-end-offset. Every row below
+  scopes its own assertions to this instead of the whole accumulated
+  console-text, because run-row! only clears the editor and the console's
+  INPUT, never its output history, so a plain (console-text ui) search can
+  match a prior row's (or a prior step's) leftover line and pass for the
+  wrong reason."
+  [ui mark]
+  (subs (console-text ui) mark))
+
 (defn- run-and-wait!
   "editor/set-text! code, run!*, then wait (up to deadline-ms) until the
   engine has gone idle, before calling (done)."
@@ -60,87 +92,96 @@
 ;; check, then calls (next).
 
 (defn- row-run-output [ui next]
-  (editor/set-text! (:editor ui) "(println :hi) (+ 1 2)")
-  ((:run!* ui))
-  (poll-until 5000 20
-              (fn [] (let [t (console-text ui)]
-                       (and (str/includes? t ":hi") (str/includes? t "=> 3"))))
-              (fn [ok]
-                (let [text (console-text ui)
-                      status (g/label-text (:status-label ui))]
-                  (check :run-output (and ok (= "Ready" status)) {:console text :status status})
-                  (next)))))
-
-(defn- row-run-while-running [ui next]
-  (editor/set-text! (:editor ui) "(loop [] (recur))")
-  ((:run!* ui))
-  (poll-until 2000 20
-              (fn [] (eval/evaluating? (:ctx (:session ui))))
-              (fn [started?]
-                ((:run!* ui))
-                (poll-until 2000 20
-                            (fn [] (str/includes? (console-text ui) "already in progress"))
-                            (fn [warned?]
-                              ((:stop!* ui))
-                              (poll-until 3000 20
-                                          (fn [] (str/includes? (console-text ui) "; interrupted"))
-                                          (fn [stopped?]
-                                            (check :run-while-running
-                                                   (and started? warned? stopped?)
-                                                   {:started started? :warned warned? :stopped stopped?
-                                                    :console (console-text ui)})
-                                            (next))))))))
-
-(defn- row-stdin-roundtrip [ui next]
-  (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
-  ((:run!* ui))
-  (poll-until 3000 20
-              (fn [] @(:waiting? (:console ui)))
-              (fn [waiting?]
-                (let [cv (:console ui)]
-                  (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "World" -1 1)
-                  (cview/handle-return! cv false)
-                  (poll-until 3000 20
-                              (fn [] (str/includes? (console-text ui) "=> \"Hello, World\""))
-                              (fn [ok]
-                                (check :stdin-roundtrip (and waiting? ok)
-                                       {:waiting waiting? :console (console-text ui)})
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(println :hi) (+ 1 2)")
+    ((:run!* ui))
+    (poll-until 5000 20
+                (fn [] (let [t (since ui mark)]
+                         (and (str/includes? t ":hi") (str/includes? t "=> 3"))))
+                (fn [ok]
+                  ;; Poll the status label too, rather than a single read, for
+                  ;; the same reason: consistency with every other condition
+                  ;; here being a poll-with-deadline, never a one-shot check.
+                  (poll-until 2000 20
+                              (fn [] (= "Ready" (g/label-text (:status-label ui))))
+                              (fn [ready?]
+                                (check :run-output (and ok ready?)
+                                       {:console (since ui mark) :status (g/label-text (:status-label ui))})
                                 (next)))))))
 
+(defn- row-run-while-running [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  ((:run!* ui))
+                  (poll-until 2000 20
+                              (fn [] (str/includes? (since ui mark) "already in progress"))
+                              (fn [warned?]
+                                ((:stop!* ui))
+                                (poll-until 3000 20
+                                            (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                            (fn [stopped?]
+                                              (check :run-while-running
+                                                     (and started? warned? stopped?)
+                                                     {:started started? :warned warned? :stopped stopped?
+                                                      :console (since ui mark)})
+                                              (next)))))))))
+
+(defn- row-stdin-roundtrip [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
+    ((:run!* ui))
+    (poll-until 3000 20
+                (fn [] @(:waiting? (:console ui)))
+                (fn [waiting?]
+                  (let [cv (:console ui)]
+                    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "World" -1 1)
+                    (cview/handle-return! cv false)
+                    (poll-until 3000 20
+                                (fn [] (str/includes? (since ui mark) "=> \"Hello, World\""))
+                                (fn [ok]
+                                  (check :stdin-roundtrip (and waiting? ok)
+                                         {:waiting waiting? :console (since ui mark)})
+                                  (next))))))))
+
 (defn- row-stop-while-reading [ui next]
-  (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
-  ((:run!* ui))
-  (poll-until 3000 20
-              (fn [] @(:waiting? (:console ui)))
-              (fn [waiting-before]
-                ((:stop!* ui))
-                (poll-until 3000 20
-                            (fn [] (str/includes? (console-text ui) "; interrupted"))
-                            (fn [interrupted?]
-                              ;; waiting? is a plain worker-thread atom reset (no on-gui!
-                              ;; scheduling), so it should already be false once "; interrupted"
-                              ;; -- itself only visible after an on-gui! drain -- has landed.
-                              ;; Poll it too rather than reading once, so a real lag shows up as
-                              ;; a slow pass instead of a silent-looking false failure.
-                              (let [t0 (System/currentTimeMillis)]
-                                (poll-until 2000 20
-                                            (fn [] (not @(:waiting? (:console ui))))
-                                            (fn [waiting-cleared?]
-                                              (let [cv (:console ui)
-                                                    waiting-after @(:waiting? cv)
-                                                    ms (- (System/currentTimeMillis) t0)
-                                                    input-before (cview/input-text cv)
-                                                    inserted (not (zero? (g/gtk-text-buffer-insert-interactive-at-cursor
-                                                                          (:buf cv) "z" -1 1)))
-                                                    input-after (cview/input-text cv)]
-                                                (check :stop-while-reading
-                                                       (and waiting-before interrupted? waiting-cleared?
-                                                            (= "" input-before) inserted (= "z" input-after))
-                                                       {:waiting-before waiting-before :interrupted interrupted?
-                                                        :waiting-cleared waiting-cleared? :waiting-after waiting-after
-                                                        :ms-to-clear ms :input-before input-before
-                                                        :inserted inserted :input-after input-after})
-                                                (next))))))))))
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
+    ((:run!* ui))
+    (poll-until 3000 20
+                (fn [] @(:waiting? (:console ui)))
+                (fn [waiting-before]
+                  ((:stop!* ui))
+                  (poll-until 3000 20
+                              (fn [] (str/includes? (since ui mark) "; interrupted"))
+                              (fn [interrupted?]
+                                ;; waiting? is a plain worker-thread atom reset (no on-gui!
+                                ;; scheduling), so it should already be false once "; interrupted"
+                                ;; -- itself only visible after an on-gui! drain -- has landed.
+                                ;; Poll it too rather than reading once, so a real lag shows up as
+                                ;; a slow pass instead of a silent-looking false failure.
+                                (let [t0 (System/currentTimeMillis)]
+                                  (poll-until 2000 20
+                                              (fn [] (not @(:waiting? (:console ui))))
+                                              (fn [waiting-cleared?]
+                                                (let [cv (:console ui)
+                                                      waiting-after @(:waiting? cv)
+                                                      ms (- (System/currentTimeMillis) t0)
+                                                      input-before (cview/input-text cv)
+                                                      inserted (not (zero? (g/gtk-text-buffer-insert-interactive-at-cursor
+                                                                            (:buf cv) "z" -1 1)))
+                                                      input-after (cview/input-text cv)]
+                                                  (check :stop-while-reading
+                                                         (and waiting-before interrupted? waiting-cleared?
+                                                              (= "" input-before) inserted (= "z" input-after))
+                                                         {:waiting-before waiting-before :interrupted interrupted?
+                                                          :waiting-cleared waiting-cleared? :waiting-after waiting-after
+                                                          :ms-to-clear ms :input-before input-before
+                                                          :inserted inserted :input-after input-after})
+                                                  (next)))))))))))
 
 (defn- row-run-unbalanced [ui next]
   ;; The brief's literal fixture was "(ok)\n\n(defn f [x]" -- measured against
@@ -150,40 +191,53 @@
   ;; the unclosed-bracket message never fires. (+ 1 1) evaluates cleanly, so
   ;; the loop advances to read the still-unclosed third form and genuinely
   ;; hits EOF -- same line-3 shape, the intended code path.
-  (editor/set-text! (:editor ui) "(+ 1 1)\n\n(defn f [x]")
-  ((:run!* ui))
-  (poll-until 3000 20
-              (fn [] (str/includes? (console-text ui) "The ( on line 3 is never closed."))
-              (fn [ok]
-                (check :run-unbalanced ok {:console (console-text ui)})
-                (next))))
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(+ 1 1)\n\n(defn f [x]")
+    ((:run!* ui))
+    (poll-until 3000 20
+                (fn [] (str/includes? (since ui mark) "The ( on line 3 is never closed."))
+                (fn [ok]
+                  (check :run-unbalanced ok {:console (since ui mark)})
+                  (next)))))
 
-(defn- row-reset-vs-accumulate [ui next]
+(defn- row-reset-vs-accumulate
+  "Every step's own assertion is scoped (via out-end-offset/since) to the
+  output THAT step produced. Without this, run-row!'s reset (editor + input
+  only, never the console's output history) would let the first (greet)'s
+  own leftover error line -- or even a PRIOR row's -- satisfy first-error?
+  regardless of whether Reset actually removed anything; see the fix-round-1
+  can-fail proof in the P2.T7 report."
+  [ui next]
   (run-and-wait! ui "(defn greet [] :hi)" 3000
                  (fn [_]
-                   (run-and-wait! ui "(greet)" 3000
-                                  (fn [_]
-                                    (let [first-error? (str/includes? (console-text ui) "Error [")]
-                                      (session/set-mode! (:session ui) :accumulate)
-                                      (run-and-wait! ui "(defn greet [] :hi)" 3000
-                                                     (fn [_]
-                                                       (run-and-wait! ui "(greet)" 3000
-                                                                      (fn [_]
-                                                                        (check :reset-vs-accumulate
-                                                                               (and first-error? (str/includes? (console-text ui) "=> :hi"))
-                                                                               {:first-error first-error? :console (console-text ui)})
-                                                                        (next)))))))))))
+                   (let [mark1 (out-end-offset ui)]
+                     (run-and-wait! ui "(greet)" 3000
+                                    (fn [_]
+                                      (let [first-error? (str/includes? (since ui mark1) "Error [")]
+                                        (session/set-mode! (:session ui) :accumulate)
+                                        (run-and-wait! ui "(defn greet [] :hi)" 3000
+                                                       (fn [_]
+                                                         (let [mark2 (out-end-offset ui)]
+                                                           (run-and-wait! ui "(greet)" 3000
+                                                                          (fn [_]
+                                                                            (check :reset-vs-accumulate
+                                                                                   (and first-error? (str/includes? (since ui mark2) "=> :hi"))
+                                                                                   {:first-error first-error?
+                                                                                    :first-console (since ui mark1)
+                                                                                    :second-console (since ui mark2)})
+                                                                            (next)))))))))))))
 
 (defn- row-repl-after-run [ui next]
   (run-and-wait! ui "(def x 41)" 3000
                  (fn [_]
-                   (let [cv (:console ui)]
+                   (let [cv (:console ui)
+                         mark (out-end-offset ui)]
                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(inc x)" -1 1)
                      (cview/handle-return! cv false)
                      (poll-until 3000 20 (fn [] (idle? ui))
                                  (fn [_]
-                                   (check :repl-after-run (str/includes? (console-text ui) "=> 42")
-                                          {:console (console-text ui)})
+                                   (check :repl-after-run (str/includes? (since ui mark) "=> 42")
+                                          {:console (since ui mark)})
                                    (next)))))))
 
 (defn- row-save-and-open [ui next]

@@ -48,6 +48,16 @@
       (g/gtk-text-iter-get-offset it)
       (finally (ffi/free it)))))
 
+(defn- tail
+  "The last n characters of s, for a self-test detail map. row-console-flood
+  leaves ~200k chars of accumulated output in the buffer, and no row resets
+  output history (only input), so every row after it inherits that buffer
+  -- printing it in full on a PASS/FAIL line would dump ~200 KB per row.
+  Pass conditions elsewhere are computed against the real, untrimmed text;
+  this only trims what gets reported."
+  [s n]
+  (if (> (count s) n) (subs s (- (count s) n)) s))
+
 (defn- settle-fire-count!
   "Polls @true-fire-count until it has gone unchanged for two consecutive
   20ms ticks (>=40ms stable), or deadline-ms elapses, then calls (done
@@ -373,7 +383,7 @@
                                   (finally (ffi/free it)))]
                     (check :console-unicode
                            (and drained (= "한" input) refused)
-                           {:drained drained :input input :refused refused :text text})
+                           {:drained drained :input input :refused refused :text (tail text 200)})
                     (next))))))
 
 (defn- row-console-history [cv]
