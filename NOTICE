@@ -1,0 +1,7 @@
+Jonquil
+Copyright 2026 the Jonquil authors.
+
+Jonquil ports and adapts DrClojure by Kim Taegyoon
+(https://github.com/kimtg/DrClojure-Neo), distributed under the Eclipse
+Public License 1.0. Code lifted from DrClojure keeps its original copyright,
+and UPSTREAM.md lists which files it is in.

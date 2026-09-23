@@ -1,0 +1,5 @@
+{:tasks
+ {test  {:doc "Run tests; pass namespace names to run a subset"
+         :task (apply shell "jolt" "-M:test" *command-line-args*)}
+  check {:doc "Headless compile-check of every project namespace"
+         :task (shell "jolt" "-M:check")}}}

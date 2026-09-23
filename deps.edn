@@ -1,0 +1,9 @@
+{:paths ["src"]
+ :aliases
+ {;; Project tests. Pass namespace names to run a subset:
+  ;;   jolt -M:test jonquil.edit-test
+  :test {:extra-paths ["test" "dev"]
+         :main-opts ["-m" "test-runner"]}
+  ;; Headless compile-check: requires every project namespace and exits.
+  :check {:extra-paths ["dev"]
+          :main-opts ["-m" "check"]}}}

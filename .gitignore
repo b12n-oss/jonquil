@@ -1,0 +1,16 @@
+/target/
+/.jolt/
+/.cpcache/
+/.lsp/
+/.clj-kondo/.cache/
+.nrepl-port
+/jonquil
+/jonquil.build/
+/dist/
+.claude/
+.env
+.env.*
+/.remember/
+# agent guides live in the planning store and are symlinked in
+/AGENTS.md
+/CLAUDE.md
