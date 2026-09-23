@@ -299,3 +299,12 @@
   set-italic!'s read-back counterpart."
   [tag]
   (= PANGO-STYLE-ITALIC (get-gvalue! tag "style" (pango-style-get-type) g-value-get-enum)))
+
+;; --- P2.T6 ---
+;; gtk_text_buffer_insert_interactive: gtk/gtktextbuffer.h:221-225 (gtk4
+;; 4.22.4, /opt/homebrew/Cellar/gtk4/4.22.4/include/gtk-4.0/gtk/gtktextbuffer.h).
+;; Unlike gtk-text-buffer-insert-interactive-at-cursor above, this one takes
+;; an explicit iter, so a self-test row can target a specific offset instead
+;; of wherever the cursor happens to be.
+(ffi/defcfn gtk-text-buffer-insert-interactive "gtk_text_buffer_insert_interactive"
+  [:pointer :pointer :string :int :int] :int)

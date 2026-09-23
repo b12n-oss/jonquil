@@ -1,11 +1,14 @@
 (ns gtk-selftest
-  "P2.T5 self-test: opens a real GtkApplicationWindow around the editor
-  under test, runs the rows on a timer chain (never a fixed sleep -- each
-  wait polls a condition against a deadline), prints PASS/FAIL per row and
-  a SUMMARY line, quits, and exits 0 or 1. Rows call the same functions the
-  key handlers call; no keystroke is ever synthesized."
-  (:require [jolt.ffi :as ffi]
+  "P2.T5/P2.T6 self-test: opens a real GtkApplicationWindow around the
+  editor and the console under test, runs the rows on a timer chain (never
+  a fixed sleep -- each wait polls a condition against a deadline), prints
+  PASS/FAIL per row and a SUMMARY line, quits, and exits 0 or 1. Rows call
+  the same functions the key handlers call; no keystroke is ever
+  synthesized."
+  (:require [clojure.string :as str]
+            [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :as cb]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]))
 
@@ -143,6 +146,152 @@
    row-editor-emoji-offsets
    row-on-gui-concurrent])
 
+;; --- P2.T6: console rows -------------------------------------------------
+;; on-submit/history-prev/history-next are stubs recording their calls in
+;; atoms; the rows call the same functions the key handlers call
+;; (handle-return!/handle-history!), never a synthesized keystroke.
+
+(defonce console-submits (atom []))
+(defonce history-prev-calls (atom []))
+(defonce history-next-calls (atom []))
+
+(defn- stub-on-submit! [action] (swap! console-submits conj action))
+(defn- stub-history-prev [current] (swap! history-prev-calls conj current) "(inc 1)")
+(defn- stub-history-next [] (swap! history-next-calls conj :called) nil)
+
+(defn- row-console-readonly [cv]
+  (fn [next]
+    (cview/append! cv :out "hello\n")
+    (poll-until 1000 20
+                (fn [] (str/includes? (g/buffer-text (:buf cv)) "hello\n"))
+                (fn [drained]
+                  (let [buf (:buf cv)
+                        before (g/buffer-text buf)
+                        it (ffi/alloc g/ITER-BYTES)
+                        refused (try
+                                  (g/gtk-text-buffer-get-iter-at-offset buf it 2)
+                                  (zero? (g/gtk-text-buffer-insert-interactive buf it "X" -1 1))
+                                  (finally (ffi/free it)))
+                        after (g/buffer-text buf)]
+                    (check :console-readonly (and drained refused (= before after))
+                           {:drained drained :refused refused :before before :after after})
+                    (next))))))
+
+(defn- row-console-output-above-input [cv]
+  (fn [next]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "abc" -1 1)
+    (future (cview/append! cv :out "late\n"))
+    (poll-until 1000 20
+                (fn [] (str/includes? (g/buffer-text (:buf cv)) "late\n"))
+                (fn [ok]
+                  (let [text (g/buffer-text (:buf cv))
+                        input (cview/input-text cv)
+                        late-at (str/index-of text "late\n")
+                        prompt-at (str/index-of text "> abc")]
+                    (check :console-output-above-input
+                           (and ok (str/ends-with? text "> abc")
+                                (some? late-at) (some? prompt-at) (< late-at prompt-at)
+                                (= "abc" input))
+                           {:text text :input input :late-at late-at :prompt-at prompt-at})
+                    (next))))))
+
+(defn- row-console-submit [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
+    (let [got (cview/handle-return! cv false)
+          input-after (cview/input-text cv)
+          text (g/buffer-text (:buf cv))]
+      (check :console-submit
+             (and (= 1 got)
+                  (= {:action :eval :text "(+ 1 2)"} (last @console-submits))
+                  (= "" input-after)
+                  (str/ends-with? text "> "))
+             {:return got :last-submit (last @console-submits)
+              :input-after input-after :text text})
+      (next))))
+
+(defn- row-console-unbalanced-newline [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(defn f [x]" -1 1)
+    (let [before-count (count @console-submits)
+          got (cview/handle-return! cv false)
+          after-count (count @console-submits)]
+      (check :console-unbalanced-newline
+             (and (= 0 got) (= before-count after-count))
+             {:return got :before-count before-count :after-count after-count})
+      (next))))
+
+(defn- row-console-flood [cv]
+  (fn [next]
+    ;; row-console-unbalanced-newline deliberately leaves "(defn f [x]" in
+    ;; the input (its :newline branch never touches the buffer); clear it
+    ;; so output-chars below measures the output region, not output plus
+    ;; that leftover input.
+    (cview/clear-input! cv)
+    (let [samples (atom [(System/currentTimeMillis)])
+          active? (atom true)
+          tick (fn tick []
+                 (when @active?
+                   (swap! samples conj (System/currentTimeMillis))
+                   (later 20 tick)))]
+      (later 20 tick)
+      (future (dotimes [i 100000] (cview/append! cv :out (str i "\n"))))
+      (poll-until 60000 50
+                  (fn [] (str/includes? (g/buffer-text (:buf cv)) "99999\n"))
+                  (fn [ok]
+                    (reset! active? false)
+                    (let [gaps (map - (rest @samples) @samples)
+                          max-gap (if (seq gaps) (apply max gaps) 0)
+                          out-chars (- (count (g/buffer-text (:buf cv))) 2)]
+                      (check :console-flood (and ok (<= out-chars cview/MAX-OUTPUT-CHARS))
+                             {:last-line-visible ok
+                              :output-chars out-chars
+                              :max-output-chars cview/MAX-OUTPUT-CHARS
+                              :longest-tick-gap-ms max-gap})
+                      (next)))))))
+
+(defn- row-console-unicode [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (cview/append! cv :out "😀한글\n")
+    (poll-until 1000 20
+                (fn [] (str/includes? (g/buffer-text (:buf cv)) "한글\n"))
+                (fn [drained]
+                  (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "한" -1 1)
+                  (let [input (cview/input-text cv)
+                        buf (:buf cv)
+                        text (g/buffer-text buf)
+                        prompt-at (str/index-of text "> ")
+                        it (ffi/alloc g/ITER-BYTES)
+                        refused (try
+                                  (g/gtk-text-buffer-get-iter-at-offset buf it prompt-at)
+                                  (zero? (g/gtk-text-buffer-insert-interactive buf it "X" -1 1))
+                                  (finally (ffi/free it)))]
+                    (check :console-unicode
+                           (and drained (= "한" input) refused)
+                           {:drained drained :input input :refused refused :text text})
+                    (next))))))
+
+(defn- row-console-history [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (let [handled (cview/handle-history! cv :prev)
+          input (cview/input-text cv)]
+      (check :console-history (and handled (= "(inc 1)" input))
+             {:handled handled :input input})
+      (next))))
+
+(def ^:private console-row-fns
+  [row-console-readonly
+   row-console-output-above-input
+   row-console-submit
+   row-console-unbalanced-newline
+   row-console-flood
+   row-console-unicode
+   row-console-history])
+
 ;; --- driver ------------------------------------------------------------
 
 (defn- run-rows! [app fns]
@@ -154,14 +303,22 @@
 
 (defn- activate [app _data]
   (let [win (g/gtk-application-window-new app)
-        ed (editor/make-editor)]
-    (g/gtk-window-set-title win "Jonquil P2.T5 self-test")
-    (g/gtk-window-set-default-size win 700 500)
-    (g/gtk-window-set-child win (:scroll ed))
+        ed (editor/make-editor)
+        cv (cview/make-console-view {:on-submit stub-on-submit!
+                                     :history-prev stub-history-prev
+                                     :history-next stub-history-next})
+        paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)]
+    (g/gtk-paned-set-start-child paned (:scroll ed))
+    (g/gtk-paned-set-end-child paned (:scroll cv))
+    (g/gtk-paned-set-position paned 300)
+    (g/gtk-window-set-title win "Jonquil P2.T5+T6 self-test")
+    (g/gtk-window-set-default-size win 700 700)
+    (g/gtk-window-set-child win paned)
     (editor/on-dirty-changed! ed (fn [dirty] (when dirty (swap! true-fire-count inc))))
     (g/gtk-window-present win)
     (editor/focus! ed)
-    (later 300 (fn [] (run-rows! app (mapv (fn [f] (f ed)) row-fns))))))
+    (later 300 (fn [] (run-rows! app (into (mapv (fn [f] (f ed)) row-fns)
+                                           (mapv (fn [f] (f cv)) console-row-fns)))))))
 
 (defn -main [& _]
   (let [app (g/gtk-application-new "net.b12n.jonquil.selftest" g/APPLICATION-DEFAULT-FLAGS)]
