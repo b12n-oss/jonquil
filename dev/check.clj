@@ -4,7 +4,8 @@
 (def namespaces
   ;; Project namespaces in dependency order. Add each one as it lands.
   '[jonquil.core
-    jonquil.syntax])
+    jonquil.syntax
+    jonquil.paint])
 
 (defn -main [& _]
   (doseq [n namespaces]
