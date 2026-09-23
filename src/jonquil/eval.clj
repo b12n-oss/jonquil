@@ -141,7 +141,17 @@
    worker's own registration of :thread (fix #2): whichever of the two runs
    first is guaranteed visible to whichever runs second, so at least one of
    them always delivers a real thread interrupt. The same lock also keeps
-   this EOF offer from landing in a different run's freshly cleared queue."
+   this EOF offer from landing in a different run's freshly cleared queue.
+
+   Caller rule for the lock: this whole body runs while the context's lock
+   is held. The lock is reentrant on the same thread, so calling stop-eval!
+   from inside an eval-async callback on the same thread (for instance from
+   on-status-change) is safe -- it re-enters immediately. It is NOT safe
+   across threads: Jolt's locking blocks a different thread trying to
+   acquire the same lock, so if a locked callback synchronously waits on
+   another thread that then calls stop-eval! (or eval-async) on this same
+   context, both sides deadlock. See eval-async's docstring for which of
+   its callbacks run under the lock."
   [{:keys [queue running-state lock]}]
   (locking lock
     (let [{:keys [status token thread done stop-requested]} @running-state]
@@ -161,7 +171,20 @@
      :ns-name symbol (default 'user)
    on-output must never print: it runs on the worker thread, where *out* is
    already bound to the capture writer, so a print inside it would feed back
-   into itself."
+   into itself.
+
+   Caller rule for the context's lock: on-status-change runs WHILE the
+   context's lock is held when it reports :running (worker registration)
+   and :idle (worker exit); it runs WITHOUT the lock for the mid-run
+   :waiting-input/:running toggle fired while the program blocks on stdin.
+   on-output, on-wait-input and on-complete never run under the lock. The
+   lock is reentrant on the same thread, so it's safe for a locked
+   on-status-change call to itself call eval-async or stop-eval! on this
+   same context from the same thread (e.g. to chain a run). It is NOT
+   safe across threads: on-status-change must never synchronously block
+   waiting on another thread that may itself call eval-async or
+   stop-eval! on this context, or the two threads deadlock -- a GUI
+   should enqueue that work for later and return, not invoke-and-wait."
   [{:keys [queue current-rdr closed? waiting-input? running-state lock] :as ctx}
    code
    {:keys [on-output on-wait-input on-status-change on-complete] :as opts}]

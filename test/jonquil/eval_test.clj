@@ -152,6 +152,17 @@
 
 (def live (atom #{}))
 
+;; CHANGED in P1.T7 fix round 2: this test used to assume "Run pressed
+;; immediately after Stop, before the worker has exited" always gets the
+;; "already in progress" warning, then always started run 2 explicitly
+;; afterward. Round 1's tighter Stop handshake means that immediate call
+;; can now sometimes race ahead of run1's worker and actually START run 2
+;; (returning nil) instead of warning -- both outcomes are legitimate
+;; results of a real race, and the test's actual invariant (at most one
+;; program is ever live, and a second run does get going once the first
+;; has stopped) holds under either one. So: if the immediate call started
+;; run 2, use it as run 2; otherwise wait for run1 to fully finish and
+;; start run 2 afresh, as before.
 (deftest s1e-run-stop-run
   (reset! live #{})
   (let [ctx (sut/make-eval-context)
@@ -164,11 +175,14 @@
     (swap! max-live max (count @live))
     (sut/stop-eval! ctx)
     ;; a Run pressed immediately after Stop, before the worker has exited
-    (let [warn (sut/eval-async ctx (prog 2) {:on-complete (fn [r] (deliver d2 r))})]
-      (println "S1e immediate re-run returned:" (pr-str warn)))
-    (deref d1 2000 :timeout)
-    (let [started (nil? (sut/eval-async ctx (prog 2) {:on-complete (fn [r] (deliver d2 r))}))]
-      (is started))
+    (let [immediate (sut/eval-async ctx (prog 2) {:on-complete (fn [r] (deliver d2 r))})]
+      (println "S1e immediate re-run returned:" (pr-str immediate))
+      (deref d1 2000 :timeout)
+      (when (some? immediate)
+        ;; immediate got the warning (the pre-round-1 outcome): run1 has
+        ;; since finished, so this call should start run 2 for real.
+        (let [started (nil? (sut/eval-async ctx (prog 2) {:on-complete (fn [r] (deliver d2 r))}))]
+          (is started))))
     (Thread/sleep 100)
     (swap! max-live max (count @live))
     (println "S1e live set while second run is going:" @live)
