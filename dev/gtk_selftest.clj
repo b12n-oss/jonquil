@@ -373,6 +373,46 @@
               :input-after input-after :text text})
       (next))))
 
+(defn- row-console-style-after-submit
+  "P2.T9 round-1 fix: once a REPL entry is committed, out-end sits exactly
+  on the boundary between the just-committed prompt+input span and the
+  fresh \"> \" prompt right after it -- both tagged :prompt, no untagged
+  character between them. GtkTextBuffer treats inserting text at such a
+  boundary as inside one continuous :prompt span and extends it onto the
+  new text; insert-chunk! used to only ADD its kind's own tag on top via
+  gtk_text_buffer_apply_tag, never stripping a tag that leaked in from
+  the insertion boundary. Submits an entry (so out-end lands on that
+  boundary), appends plain :out text, and asserts the appended text
+  carries :out but NOT :prompt -- and, the reverse direction, that the
+  just-submitted input still carries its own :prompt and stays
+  read-only."
+  [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 3 3)" -1 1)
+    (let [submitted-at (mark-offset (:buf cv) (:input-start cv))
+          got (cview/handle-return! cv false)]
+      (future (cview/append! cv :out "plain\n"))
+      (poll-until 1000 20
+                  (fn [] (str/includes? (g/buffer-text (:buf cv)) "plain\n"))
+                  (fn [ok]
+                    (let [buf (:buf cv)
+                          text (g/buffer-text buf)
+                          plain-at (str/index-of text "plain\n")
+                          out-tag (get (:tags cv) :out)
+                          prompt-tag (get (:tags cv) :prompt)
+                          plain-out? (g/has-tag-at? buf plain-at out-tag)
+                          plain-prompt? (g/has-tag-at? buf plain-at prompt-tag)
+                          submitted-prompt? (g/has-tag-at? buf submitted-at prompt-tag)
+                          submitted-readonly? (g/has-tag-at? buf submitted-at (:readonly-tag cv))]
+                      (check :console-style-after-submit
+                             (and (= 1 got) ok plain-out? (not plain-prompt?)
+                                  submitted-prompt? submitted-readonly?)
+                             {:return got :plain-at plain-at :plain-out plain-out? :plain-prompt plain-prompt?
+                              :submitted-at submitted-at :submitted-prompt submitted-prompt?
+                              :submitted-readonly submitted-readonly? :text (tail text 200)})
+                      (next)))))))
+
 (defn- row-console-unbalanced-newline [cv]
   (fn [next]
     (cview/clear-input! cv)
@@ -492,6 +532,7 @@
    row-console-readonly-delete
    row-console-output-above-input
    row-console-submit
+   row-console-style-after-submit
    row-console-unbalanced-newline
    row-console-flood
    row-console-unicode

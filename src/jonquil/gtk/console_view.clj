@@ -112,13 +112,31 @@
 (defn- insert-chunk!
   "Inserts text at out-end and tags it read-only plus its kind's style. Right
   gravity does the rest: the inserted text lands to out-end's left (before
-  the prompt) and the mark ends up past it, ready for the next chunk."
+  the prompt) and the mark ends up past it, ready for the next chunk.
+
+  Once a REPL entry has been committed, out-end sits exactly on the
+  boundary between the just-committed prompt+input span and the fresh
+  \"> \" prompt right after it -- both tagged :prompt, with no untagged
+  character between them. GtkTextBuffer treats inserting text at such a
+  boundary as inserting into the INTERIOR of one continuous :prompt span
+  (there is no gap for it to land in), so the new text automatically
+  inherits :prompt, and gtk_text_buffer_apply_tag below only ADDS the
+  kind's own tag on top rather than replacing it. Overlapping tags are
+  resolved by table priority (later gtk_text_tag_table_add wins), and
+  console/styles' declaration order (out, err, prompt, result, error,
+  system) puts :out ahead of :prompt in the table, so leaked :prompt
+  silently wins over :out's own tag -- while :result/:error/:system,
+  added after :prompt, happen to win and look unaffected. Removing every
+  tag from exactly the inserted range before retagging it strips any such
+  inherited tag first, so the kind's own tag is the only one left."
   [cv kind text]
   (let [{:keys [buf tags readonly-tag out-end]} cv
-        start (mark-offset buf out-end)]
+        start (mark-offset buf out-end)
+        end (+ start (count text))]
     (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a text -1)))
-    (g/with-iters* buf start (+ start (count text))
+    (g/with-iters* buf start end
       (fn [a b]
+        (g/gtk-text-buffer-remove-all-tags buf a b)
         (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
         (when-let [tag (get tags kind)] (g/gtk-text-buffer-apply-tag buf tag a b))))))
 
