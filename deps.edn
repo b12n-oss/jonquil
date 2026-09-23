@@ -32,4 +32,9 @@
   ;; command line wouldn't select a different namespace, it would just hand
   ;; those two tokens to gtk-selftest/-main as args.
   :selftest-window {:extra-paths ["dev"]
-                    :main-opts ["-m" "gtk-selftest-window"]}}}
+                    :main-opts ["-m" "gtk-selftest-window"]}
+  ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
+  ;; one GIF) for the guide, driving jonquil.main/start! the same way
+  ;; :selftest-window does.
+  :shots {:extra-paths ["dev"]
+          :main-opts ["-m" "demo-shots"]}}}

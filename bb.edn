@@ -12,6 +12,11 @@
            (when-not ok1 (println "gtk:selftest: editor/console rows FAILED"))
            (when-not ok2 (println "gtk:selftest: window rows FAILED"))
            (System/exit (if (and ok1 ok2) 0 1)))}
+  docs:shots
+  {:doc "Self-capture docs/images/*.png (+ one GIF) by driving the real window"
+   :task (let [r (shell {:continue true} "jolt" "-M:shots")]
+           (when-not (zero? (:exit r)) (println "docs:shots: one or more scenes FAILED"))
+           (System/exit (:exit r)))}
   run
   {:doc "Run Jonquil, optionally passing a file to open"
    :task (apply shell "jolt" "-M" "-m" "jonquil.main" *command-line-args*)}
