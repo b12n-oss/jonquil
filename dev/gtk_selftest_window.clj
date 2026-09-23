@@ -80,12 +80,27 @@
   (subs (console-text ui) mark))
 
 (defn- run-and-wait!
-  "editor/set-text! code, run!*, then wait (up to deadline-ms) until the
-  engine has gone idle, before calling (done)."
-  [ui code deadline-ms done]
-  (editor/set-text! (:editor ui) code)
-  ((:run!* ui))
-  (poll-until deadline-ms 20 (fn [] (idle? ui)) done))
+  "editor/set-text! code, run!*, then waits (up to deadline-ms) until BOTH
+  the engine has gone idle AND (expect-fn text-since-start) is true, where
+  text-since-start is the console text from a mark captured right before
+  run!* -- exactly this run's own output, never a prior run's. (done ok
+  mark) is called with the poll's final result and that same mark, so a
+  caller can scope its own further assertions to exactly this run's output.
+
+  I1: engine-idle alone is not enough. The engine flips to idle BEFORE
+  on-complete's own on-gui!-scheduled append lands the result line (the
+  worker resets running-state to idle-state, then only afterward calls
+  on-complete, which enqueues the console append for a later GTK-thread
+  drain) -- so a poll on idle? alone can resolve before the result is
+  actually visible, exactly what reset-vs-accumulate's flaky first-error?
+  false demonstrated."
+  [ui code deadline-ms expect-fn done]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) code)
+    ((:run!* ui))
+    (poll-until deadline-ms 20
+                (fn [] (and (idle? ui) (expect-fn (since ui mark))))
+                (fn [ok] (done ok mark)))))
 
 ;; --- rows --------------------------------------------------------------
 ;; Each row is (fn [ui next] ...): it acts on ui, records exactly one
@@ -201,43 +216,50 @@
                   (next)))))
 
 (defn- row-reset-vs-accumulate
-  "Every step's own assertion is scoped (via out-end-offset/since) to the
+  "Every step's own assertion is scoped (via run-and-wait!'s mark) to the
   output THAT step produced. Without this, run-row!'s reset (editor + input
   only, never the console's output history) would let the first (greet)'s
   own leftover error line -- or even a PRIOR row's -- satisfy first-error?
   regardless of whether Reset actually removed anything; see the fix-round-1
-  can-fail proof in the P2.T7 report."
+  can-fail proof in the P2.T7 report. Each run-and-wait! also gates on its
+  OWN expected text (I1), not just engine-idle, so mark1/mark2 are captured
+  only once the previous step's result is actually visible."
   [ui next]
   (run-and-wait! ui "(defn greet [] :hi)" 3000
-                 (fn [_]
-                   (let [mark1 (out-end-offset ui)]
-                     (run-and-wait! ui "(greet)" 3000
-                                    (fn [_]
-                                      (let [first-error? (str/includes? (since ui mark1) "Error [")]
-                                        (session/set-mode! (:session ui) :accumulate)
-                                        (run-and-wait! ui "(defn greet [] :hi)" 3000
-                                                       (fn [_]
-                                                         (let [mark2 (out-end-offset ui)]
-                                                           (run-and-wait! ui "(greet)" 3000
-                                                                          (fn [_]
-                                                                            (check :reset-vs-accumulate
-                                                                                   (and first-error? (str/includes? (since ui mark2) "=> :hi"))
-                                                                                   {:first-error first-error?
-                                                                                    :first-console (since ui mark1)
-                                                                                    :second-console (since ui mark2)})
-                                                                            (next)))))))))))))
+                 (fn [t] (str/includes? t "=> #'user/greet"))
+                 (fn [defined1? _]
+                   (run-and-wait! ui "(greet)" 3000
+                                  (fn [t] (str/includes? t "Error ["))
+                                  (fn [first-error? mark1]
+                                    (session/set-mode! (:session ui) :accumulate)
+                                    (run-and-wait! ui "(defn greet [] :hi)" 3000
+                                                   (fn [t] (str/includes? t "=> #'user/greet"))
+                                                   (fn [defined2? _]
+                                                     (run-and-wait! ui "(greet)" 3000
+                                                                    (fn [t] (str/includes? t "=> :hi"))
+                                                                    (fn [second-ok? mark3]
+                                                                      (check :reset-vs-accumulate
+                                                                             (and defined1? first-error? defined2? second-ok?)
+                                                                             {:defined1 defined1? :first-error first-error?
+                                                                              :defined2 defined2? :second-ok second-ok?
+                                                                              :first-console (since ui mark1)
+                                                                              :second-console (since ui mark3)})
+                                                                      (next))))))))))
 
 (defn- row-repl-after-run [ui next]
   (run-and-wait! ui "(def x 41)" 3000
-                 (fn [_]
+                 (fn [t] (str/includes? t "=> #'user/x"))
+                 (fn [defined? _]
                    (let [cv (:console ui)
                          mark (out-end-offset ui)]
                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(inc x)" -1 1)
                      (cview/handle-return! cv false)
-                     (poll-until 3000 20 (fn [] (idle? ui))
-                                 (fn [_]
-                                   (check :repl-after-run (str/includes? (since ui mark) "=> 42")
-                                          {:console (since ui mark)})
+                     ;; I1 again: gate on the text itself, not idle? alone.
+                     (poll-until 3000 20
+                                 (fn [] (and (idle? ui) (str/includes? (since ui mark) "=> 42")))
+                                 (fn [ok]
+                                   (check :repl-after-run (and defined? ok)
+                                          {:defined defined? :console (since ui mark)})
                                    (next)))))))
 
 (defn- row-save-and-open [ui next]
