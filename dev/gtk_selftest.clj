@@ -395,6 +395,23 @@
              {:handled handled :input input})
       (next))))
 
+(defn- row-console-history-multiline-caret [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "line1\nline2" -1 1)
+    ;; the insert leaves the caret at the end of "line2" -- the input's
+    ;; second (last) line -- so Up must be gated off entirely (I3): a
+    ;; multi-line entry's own caret movement must not be hijacked into
+    ;; browsing history. history-prev must never even be CALLED.
+    (let [before-calls (count @history-prev-calls)
+          got (cview/handle-history! cv :prev)
+          input (cview/input-text cv)]
+      (check :console-history-multiline-caret
+             (and (not got) (= "line1\nline2" input) (= before-calls (count @history-prev-calls)))
+             {:got got :input input
+              :calls-before before-calls :calls-after (count @history-prev-calls)})
+      (next))))
+
 (def ^:private console-row-fns
   [row-console-readonly
    row-console-readonly-delete
@@ -403,6 +420,7 @@
    row-console-unbalanced-newline
    row-console-flood
    row-console-unicode
+   row-console-history-multiline-caret
    row-console-history])
 
 ;; --- driver ------------------------------------------------------------

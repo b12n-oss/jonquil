@@ -35,7 +35,8 @@
   a mirror set by the caller AFTER starting an eval can lose a race against
   a fast eval's own completion clearing it first, stranding the console in
   :busy forever."
-  (:require [jonquil.console :as console]
+  (:require [clojure.string :as str]
+            [jonquil.console :as console]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]))
@@ -225,18 +226,42 @@
 
 ;; --- Up/Down -----------------------------------------------------------
 
+(defn- on-first-line-of-input?
+  "True when there's no newline between input-start and caret -- Up only
+  browses history from the input's first line (I3); on any other line GTK
+  moves the caret up within a multi-line entry instead."
+  [cv caret]
+  (let [buf (:buf cv)
+        start (mark-offset buf (:input-start cv))]
+    (not (str/includes? (text-range buf start caret) "\n"))))
+
+(defn- on-last-line-of-input?
+  "True when there's no newline between caret and the buffer's end -- Down's
+  half of the same I3 gate."
+  [cv caret]
+  (let [buf (:buf cv)
+        end (g/gtk-text-buffer-get-char-count buf)]
+    (not (str/includes? (text-range buf caret end) "\n"))))
+
 (defn handle-history!
-  "Up/Down in the console input. dir is :prev or :next. While the caret is
-  at or after input-start and the console isn't waiting on stdin, replaces
-  the input with history-prev/history-next's result; a nil result leaves
-  the input unchanged. Returns true when it replaced the input (the key
-  controller returns 1), false otherwise (the key controller returns 0, so
-  GTK's normal Up/Down caret movement applies)."
+  "Up/Down in the console input. dir is :prev or :next. Replaces the input
+  with history-prev/history-next's result when ALL of: the caret is at or
+  after input-start, the console isn't waiting on stdin, and the caret sits
+  on the input's first line (Up) or last line (Down) -- otherwise a
+  multi-line entry's own Up/Down caret movement would be hijacked into
+  browsing history instead (I3). A nil replacement (no history to move to,
+  or not currently browsing) leaves the input unchanged. Returns true when
+  it replaced the input (the key controller returns 1), false otherwise
+  (the key controller returns 0, so GTK's normal Up/Down caret movement
+  applies)."
   [cv dir]
   (let [buf (:buf cv)
         caret (g/cursor-offset buf)
-        start (mark-offset buf (:input-start cv))]
-    (if (and (>= caret start) (not ((:waiting? cv))))
+        start (mark-offset buf (:input-start cv))
+        on-edge-line? (case dir
+                        :prev (on-first-line-of-input? cv caret)
+                        :next (on-last-line-of-input? cv caret))]
+    (if (and (>= caret start) (not ((:waiting? cv))) on-edge-line?)
       (if-let [replacement (case dir
                              :prev ((:history-prev cv) (input-text cv))
                              :next ((:history-next cv)))]

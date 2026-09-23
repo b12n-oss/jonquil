@@ -218,12 +218,25 @@
       (reset! (:history ctx) new-hist)
       text)))
 
-(defn- history-next-fn [session]
+(defn- history-next-fn
+  "I3: eval/history-next returns \"\" both when there's no history at all
+  and when the browsing index is already at the draft (not currently
+  browsing) -- console/handle-history! treats any non-nil result as a real
+  replacement, so passing that \"\" straight through erased whatever the
+  user had typed. Only call through to eval/history-next (and only reset!
+  the history atom) when the index is actually behind the item count, i.e.
+  there is somewhere for Down to move to; otherwise nil leaves the input
+  untouched. jonquil.eval's own contract is unchanged -- this is purely the
+  adapter's job of telling \"nothing to move to\" apart from \"moved to an
+  empty draft\"."
+  [session]
   (fn []
     (let [ctx (:ctx session)
-          [new-hist text] (eval/history-next @(:history ctx))]
-      (reset! (:history ctx) new-hist)
-      text)))
+          hist @(:history ctx)]
+      (when (< (:index hist) (count (:items hist)))
+        (let [[new-hist text] (eval/history-next hist)]
+          (reset! (:history ctx) new-hist)
+          text)))))
 
 ;; --- window-level keys: F5, Escape, a command chord plus R/O/S -------------
 

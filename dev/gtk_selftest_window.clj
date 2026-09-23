@@ -319,6 +319,26 @@
                                                           :console (since ui mark)})
                                                   (next)))))))))))
 
+(defn- row-console-history-down-empty
+  "I3: eval/history-next returns \"\" for both an empty history and a
+  not-currently-browsing index; the window.clj adapter must tell those
+  apart from a real replacement, or Down erases whatever the user typed.
+  Forces a fresh, empty history on THIS window's real session (not a stub)
+  so the real adapter -- not console_view.clj's own nil handling, already
+  covered by the multiline-caret row -- is what's under test."
+  [ui next]
+  (let [cv (:console ui)
+        ctx (:ctx (:session ui))]
+    (reset! (:history ctx) (eval/create-history))
+    (cview/clear-input! cv)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "typed" -1 1)
+    (let [got (cview/handle-history! cv :next)
+          input (cview/input-text cv)]
+      (check :console-history-down-empty
+             (and (not got) (= "typed" input))
+             {:got got :input input})
+      (next))))
+
 (defn- row-save-and-open [ui next]
   (let [tmp (str (System/getProperty "java.io.tmpdir")
                  "/jonquil-selftest-" (System/currentTimeMillis) ".clj")]
@@ -346,6 +366,7 @@
    row-repl-after-run
    row-fast-repl-twice
    row-busy-hint-once
+   row-console-history-down-empty
    row-save-and-open])
 
 ;; --- driver --------------------------------------------------------------
