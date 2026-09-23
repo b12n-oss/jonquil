@@ -15,7 +15,8 @@
     jonquil.edit-test
     jonquil.eval-test
     jonquil.registry-test
-    jonquil.console-test])
+    jonquil.console-test
+    jonquil.session-test])
 
 (defn -main [& args]
   (let [nss (if (seq args) (mapv symbol args) test-namespaces)]

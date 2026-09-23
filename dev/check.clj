@@ -9,7 +9,8 @@
     jonquil.docs
     jonquil.edit
     jonquil.eval
-    jonquil.console])
+    jonquil.console
+    jonquil.session])
 
 (defn -main [& _]
   (doseq [n namespaces]
