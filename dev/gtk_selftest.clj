@@ -35,6 +35,37 @@
                 :else (later interval-ms step)))]
       (step))))
 
+(defn- mark-offset
+  "mark's current character offset in buf -- console-view keeps its marks
+  (:out-end, :input-start) in its returned map, but doesn't expose an
+  offset-of-mark reader, so rows that need one (to compute an offset
+  relative to a mark rather than a hard-coded number) do it here the same
+  way jonquil.gtk.ffi/cursor-offset does for the built-in insert mark."
+  [buf mark]
+  (let [it (ffi/alloc g/ITER-BYTES)]
+    (try
+      (g/gtk-text-buffer-get-iter-at-mark buf it mark)
+      (g/gtk-text-iter-get-offset it)
+      (finally (ffi/free it)))))
+
+(defn- settle-fire-count!
+  "Polls @true-fire-count until it has gone unchanged for two consecutive
+  20ms ticks (>=40ms stable), or deadline-ms elapses, then calls (done
+  settled?). A condition-based replacement for a fixed sleep: it waits for
+  any dirty-flip left pending from an EARLIER row's edit to actually fire
+  and be counted, so the caller's own baseline isn't captured mid-flip."
+  [deadline-ms done]
+  (let [t0 (System/currentTimeMillis)]
+    (letfn [(step [last-seen stable-since]
+              (let [now @true-fire-count
+                    t (System/currentTimeMillis)]
+                (cond
+                  (not= now last-seen) (later 20 (fn [] (step now t)))
+                  (>= (- t stable-since) 40) (done true)
+                  (>= (- t t0) deadline-ms) (done false)
+                  :else (later 20 (fn [] (step now stable-since))))))]
+      (step @true-fire-count (System/currentTimeMillis)))))
+
 ;; --- rows ------------------------------------------------------------------
 ;; Each row is (fn [ed] (fn [next] ...)) -- it runs its actions against ed,
 ;; records exactly one check, then calls (next) to advance the chain.
@@ -60,11 +91,19 @@
 
 (defn- row-editor-undo-text-only [ed]
   (fn [next]
-    (let [buf (:buf ed)]
+    (let [buf (:buf ed)
+          text-before (editor/editor-text ed)
+          can-undo-before (not (zero? (g/gtk-text-buffer-get-can-undo buf)))
+          dirty-before (editor/dirty? ed)]
       (g/gtk-text-buffer-undo buf)
-      (check :editor-undo-text-only (= "" (editor/editor-text ed))
-             {:text (editor/editor-text ed)})
-      (next))))
+      (let [text-after (editor/editor-text ed)]
+        (check :editor-undo-text-only (= "" text-after)
+               {:text text-after
+                :text-before text-before
+                :can-undo-before can-undo-before
+                :dirty-before dirty-before
+                :can-undo-after (not (zero? (g/gtk-text-buffer-get-can-undo buf)))})
+        (next)))))
 
 (defn- row-editor-smart-enter [ed]
   (fn [next]
@@ -81,26 +120,38 @@
   (fn [next]
     (editor/set-text! ed "a")
     (let [dirty-right-after (editor/dirty? ed)]
-      ;; give any pending flip left over from an earlier row's state (tick
-      ;; runs every 20ms) time to settle before this row's own baseline.
-      (later 150
-             (fn []
-               (let [baseline @true-fire-count
-                     buf (:buf ed)]
-                 (g/with-iters* buf 1 1 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
-                 (g/gtk-text-buffer-insert-interactive-at-cursor buf "b" -1 1)
-                 (poll-until 1000 20
-                             (fn [] (and (editor/dirty? ed)
-                                         (>= (- @true-fire-count baseline) 1)))
-                             (fn [became-dirty]
-                               (check :editor-dirty
-                                      (and (not dirty-right-after)
-                                           became-dirty
-                                           (= 1 (- @true-fire-count baseline)))
-                                      {:dirty-right-after-set-text dirty-right-after
-                                       :became-dirty-within-deadline became-dirty
-                                       :true-fires (- @true-fire-count baseline)})
-                               (next)))))))))
+      ;; Condition-based replacement for a fixed sleep: wait for any
+      ;; dirty-flip left pending from an earlier row's edit (tick runs
+      ;; every 20ms) to actually fire and be counted, before this row's
+      ;; own baseline is captured -- not a disguised fixed wait, since it
+      ;; polls @true-fire-count for real stability rather than assuming
+      ;; any fixed duration is enough.
+      (settle-fire-count!
+       1000
+       (fn [settled?]
+         (let [baseline @true-fire-count
+               buf (:buf ed)
+               t0 (System/currentTimeMillis)]
+           (g/with-iters* buf 1 1 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+           (g/gtk-text-buffer-insert-interactive-at-cursor buf "b" -1 1)
+           (poll-until 1000 20
+                       (fn [] (and (editor/dirty? ed)
+                                   (>= (- @true-fire-count baseline) 1)))
+                       (fn [became-dirty]
+                         (check :editor-dirty
+                                (and (not dirty-right-after)
+                                     became-dirty
+                                     (= 1 (- @true-fire-count baseline)))
+                                {:dirty-right-after-set-text dirty-right-after
+                                 :settled-before-baseline settled?
+                                 :became-dirty-within-deadline became-dirty
+                                 :true-fires (- @true-fire-count baseline)
+                                 :baseline-fire-count baseline
+                                 :final-fire-count @true-fire-count
+                                 :text-after-insert (editor/editor-text ed)
+                                 :dirty-at-check (editor/dirty? ed)
+                                 :elapsed-ms (- (System/currentTimeMillis) t0)})
+                         (next)))))))))
 
 (defn- row-editor-emoji-offsets [ed]
   (fn [next]
@@ -177,6 +228,50 @@
                            {:drained drained :refused refused :before before :after after})
                     (next))))))
 
+(defn- row-console-readonly-delete [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (cview/append! cv :out "guard\n")
+    (poll-until 1000 20
+                (fn [] (str/includes? (g/buffer-text (:buf cv)) "guard\n"))
+                (fn [drained]
+                  (let [buf (:buf cv)
+                        before (g/buffer-text buf)
+                        input-start-at (mark-offset buf (:input-start cv))
+                        ;; the space just before input-start is the second
+                        ;; char of the prompt's "> " -- still read-only.
+                        prompt-space-at (dec input-start-at)
+                        delete-at (fn [pos]
+                                    (let [i1 (ffi/alloc g/ITER-BYTES)
+                                          i2 (ffi/alloc g/ITER-BYTES)]
+                                      (try
+                                        (g/gtk-text-buffer-get-iter-at-offset buf i1 pos)
+                                        (g/gtk-text-buffer-get-iter-at-offset buf i2 (inc pos))
+                                        (not (zero? (g/gtk-text-buffer-delete-interactive buf i1 i2 1)))
+                                        (finally (ffi/free i1) (ffi/free i2)))))
+                        prompt-delete-succeeded (delete-at prompt-space-at)
+                        after-prompt-delete (g/buffer-text buf)
+                        history-delete-succeeded (delete-at 0)
+                        after-history-delete (g/buffer-text buf)
+                        _ (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1)
+                        input-delete-at (mark-offset buf (:input-start cv))
+                        input-delete-succeeded (delete-at input-delete-at)
+                        input-after (cview/input-text cv)]
+                    (check :console-readonly-delete
+                           (and drained
+                                (not prompt-delete-succeeded) (= before after-prompt-delete)
+                                (not history-delete-succeeded) (= before after-history-delete)
+                                input-delete-succeeded (= "" input-after))
+                           {:drained drained
+                            :prompt-delete-succeeded prompt-delete-succeeded
+                            :history-delete-succeeded history-delete-succeeded
+                            :input-delete-succeeded input-delete-succeeded
+                            :before before
+                            :after-prompt-delete after-prompt-delete
+                            :after-history-delete after-history-delete
+                            :input-after input-after})
+                    (next))))))
+
 (defn- row-console-output-above-input [cv]
   (fn [next]
     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "abc" -1 1)
@@ -199,15 +294,22 @@
   (fn [next]
     (cview/clear-input! cv)
     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
-    (let [got (cview/handle-return! cv false)
+    ;; the offset of the submitted text's first char, captured from
+    ;; input-start BEFORE handle-return! moves the mark to the fresh
+    ;; prompt -- never a hard-coded number.
+    (let [submitted-at (mark-offset (:buf cv) (:input-start cv))
+          got (cview/handle-return! cv false)
           input-after (cview/input-text cv)
-          text (g/buffer-text (:buf cv))]
+          text (g/buffer-text (:buf cv))
+          history-readonly (g/has-tag-at? (:buf cv) submitted-at (:readonly-tag cv))]
       (check :console-submit
              (and (= 1 got)
                   (= {:action :eval :text "(+ 1 2)"} (last @console-submits))
+                  history-readonly
                   (= "" input-after)
                   (str/ends-with? text "> "))
              {:return got :last-submit (last @console-submits)
+              :history-readonly history-readonly :submitted-at submitted-at
               :input-after input-after :text text})
       (next))))
 
@@ -285,6 +387,7 @@
 
 (def ^:private console-row-fns
   [row-console-readonly
+   row-console-readonly-delete
    row-console-output-above-input
    row-console-submit
    row-console-unbalanced-newline

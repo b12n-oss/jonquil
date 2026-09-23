@@ -308,3 +308,9 @@
 ;; of wherever the cursor happens to be.
 (ffi/defcfn gtk-text-buffer-insert-interactive "gtk_text_buffer_insert_interactive"
   [:pointer :pointer :string :int :int] :int)
+
+;; gtk_text_buffer_delete_interactive: gtk/gtktextbuffer.h:272-275 (same
+;; header/version as above). Used to probe that Backspace/Delete at
+;; input-start and inside output history are refused, same as insert.
+(ffi/defcfn gtk-text-buffer-delete-interactive "gtk_text_buffer_delete_interactive"
+  [:pointer :pointer :pointer :int] :int)
