@@ -207,22 +207,29 @@
 
   :busy hints once per run (M3): the first busy Return after a run starts
   appends a :system reminder; later ones stay silent until
-  reset-busy-hint! (called from on-complete) re-arms it for the next run."
+  reset-busy-hint! (called from on-complete) re-arms it for the next run.
+
+  Returns 0 unconditionally while an IME preedit composition is active
+  (I5), before even reading input-action: the capture-phase key controller
+  runs before the IM context filters the key, so consuming Return here
+  would split or lose a pending Hangul/CJK composition."
   [cv shift?]
-  (let [text (input-text cv)
-        action (console/input-action {:input text
-                                      :waiting? ((:waiting? cv))
-                                      :evaluating? ((:evaluating? cv))
-                                      :shift? shift?})]
-    (case action
-      :newline 0
-      :noop 1
-      :busy (do (when (compare-and-set! (:busy-hint-shown? cv) false true)
-                  (append! cv :system "A program is running. Press Stop (Esc) to cancel it.\n"))
-                1)
-      (:eval :send-stdin) (do (commit-input! cv)
-                              ((:on-submit cv) {:action action :text text})
-                              1))))
+  (if @(:preedit-active? cv)
+    0
+    (let [text (input-text cv)
+          action (console/input-action {:input text
+                                        :waiting? ((:waiting? cv))
+                                        :evaluating? ((:evaluating? cv))
+                                        :shift? shift?})]
+      (case action
+        :newline 0
+        :noop 1
+        :busy (do (when (compare-and-set! (:busy-hint-shown? cv) false true)
+                    (append! cv :system "A program is running. Press Stop (Esc) to cancel it.\n"))
+                  1)
+        (:eval :send-stdin) (do (commit-input! cv)
+                                ((:on-submit cv) {:action action :text text})
+                                1)))))
 
 ;; --- Up/Down -----------------------------------------------------------
 
@@ -253,25 +260,28 @@
   or not currently browsing) leaves the input unchanged. Returns true when
   it replaced the input (the key controller returns 1), false otherwise
   (the key controller returns 0, so GTK's normal Up/Down caret movement
-  applies)."
+  applies). Also false while an IME preedit composition is active (I5),
+  same reasoning as handle-return!."
   [cv dir]
-  (let [buf (:buf cv)
-        caret (g/cursor-offset buf)
-        start (mark-offset buf (:input-start cv))
-        on-edge-line? (case dir
-                        :prev (on-first-line-of-input? cv caret)
-                        :next (on-last-line-of-input? cv caret))]
-    (if (and (>= caret start) (not ((:waiting? cv))) on-edge-line?)
-      (if-let [replacement (case dir
-                             :prev ((:history-prev cv) (input-text cv))
-                             :next ((:history-next cv)))]
-        (do (clear-input! cv)
-            (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a replacement -1)))
-            (let [end (+ start (count replacement))]
-              (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
-            true)
-        false)
-      false)))
+  (if @(:preedit-active? cv)
+    false
+    (let [buf (:buf cv)
+          caret (g/cursor-offset buf)
+          start (mark-offset buf (:input-start cv))
+          on-edge-line? (case dir
+                          :prev (on-first-line-of-input? cv caret)
+                          :next (on-last-line-of-input? cv caret))]
+      (if (and (>= caret start) (not ((:waiting? cv))) on-edge-line?)
+        (if-let [replacement (case dir
+                               :prev ((:history-prev cv) (input-text cv))
+                               :next ((:history-next cv)))]
+          (do (clear-input! cv)
+              (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a replacement -1)))
+              (let [end (+ start (count replacement))]
+                (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+              true)
+          false)
+        false))))
 
 ;; --- keys: Return/KP-Enter, a command-chord D, Up/Down ---------------------
 
@@ -375,6 +385,7 @@
               :waiting? waiting?
               :evaluating? evaluating?
               :busy-hint-shown? (atom false)
+              :preedit-active? (atom false)
               :on-submit on-submit
               :history-prev history-prev
               :history-next history-next}]
@@ -383,4 +394,12 @@
                                (callable (on-key cv) [:pointer :uint :uint :uint :pointer] :int)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (g/gtk-widget-add-controller view keyctl)
+      ;; I5: same GtkTextView::preedit-changed signal as editor.clj (see
+      ;; that namespace's citation for the exact gir/header sourcing).
+      (g/g-signal-connect-data view "preedit-changed"
+                               (callable (fn [_view preedit _data]
+                                           (reset! (:preedit-active? cv) (not (empty? preedit)))
+                                           nil)
+                                         [:pointer :string :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
       cv)))

@@ -125,9 +125,14 @@
 
 (defn handle-return!
   "Applies jonquil.edit/smart-enter to the current snapshot as one user
-  action."
+  action. Returns nil, applying nothing, while an IME preedit composition
+  is active (I5): the capture-phase key controller runs before the IM
+  context gets to filter the key, so consuming Return here would split or
+  lose a pending Hangul/CJK composition. on-key (below) treats this the
+  same as any other unhandled key: 0, so GTK/the IM context gets it."
   [ed]
-  (apply-op! ed (edit/smart-enter (snapshot ed))))
+  (when-not @(:preedit-active? ed)
+    (apply-op! ed (edit/smart-enter (snapshot ed)))))
 
 ;; --- repaint + the debounce/dirty tick -------------------------------------
 
@@ -167,8 +172,8 @@
 
 (defn- on-key [ed]
   (fn [_ctl keyval _keycode state _data]
-    (if (plain-return? keyval state)
-      (do (handle-return! ed) 1)
+    (if (and (plain-return? keyval state) (handle-return! ed))
+      1
       0)))
 
 ;; --- construction ----------------------------------------------------------
@@ -190,7 +195,8 @@
             :saved-text (atom "")
             :last-dirty? (atom false)
             :on-dirty-fns (atom [])
-            :dirty-at (atom nil)}]
+            :dirty-at (atom nil)
+            :preedit-active? (atom false)}]
     (g/gtk-text-view-set-editable view 1)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
@@ -202,6 +208,18 @@
                                          (reset! (:dirty-at ed) (System/currentTimeMillis))
                                          nil)
                                        [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; I5: GtkTextView's OWN "preedit-changed" signal (distinct from
+    ;; GtkIMContext's identically-named one) -- gtk/gtktextview.c:1529 per
+    ;; Gtk-4.0.gir (not declared in the public gtktextview.h header; GTK
+    ;; signals are registered at runtime and documented via GIR/gtk-doc,
+    ;; not exposed as C symbols to grep for). Callback signature (instance,
+    ;; gchar* preedit, user_data): [:pointer :string :pointer] :void.
+    (g/g-signal-connect-data view "preedit-changed"
+                             (callable (fn [_view preedit _data]
+                                         (reset! (:preedit-active? ed) (not (empty? preedit)))
+                                         nil)
+                                       [:pointer :string :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/g-signal-connect-data keyctl "key-pressed"

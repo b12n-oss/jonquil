@@ -240,11 +240,17 @@
 
 ;; --- window-level keys: F5, Escape, a command chord plus R/O/S -------------
 
-(defn- on-window-key [run-fn stop-fn open-fn save-fn save-as-fn]
+(defn- on-window-key
+  "evaluating? is (fn [] bool), read live from the engine. M5: the window
+  consumes Escape (to Stop) only while something is actually evaluating;
+  otherwise it returns 0 so Escape can reach an IME composition (or GTK's
+  own default handling) instead of being swallowed here every time."
+  [run-fn stop-fn open-fn save-fn save-as-fn evaluating?]
   (fn [_ctl keyval _keycode state _data]
     (cond
       (= keyval KEY-F5) (do (run-fn) 1)
-      (= keyval KEY-ESCAPE) (do (stop-fn) 1)
+      (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
+      (= keyval KEY-ESCAPE) 0
       (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
       (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
       (and (command-chord? state) (shift-held? state)
@@ -275,6 +281,8 @@
         open-fn (fn [] (do-open! ed cv win path))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))
+        window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn
+                                     (fn [] (eval/evaluating? (:ctx session))))
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -320,8 +328,7 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (on-window-key run-fn stop-fn open-fn save-fn save-as-fn)
-                                       [:pointer :uint :uint :uint :pointer] :int)
+                             (callable window-key-fn [:pointer :uint :uint :uint :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)
     (g/g-signal-connect-data win "close-request"
@@ -342,12 +349,18 @@
       (on-ready {:editor ed :console cv :session session :status-label status-label :window win
                  :run!* run-fn :stop!* stop-fn
                  :open-path! (fn [p] (open-path! ed cv path p) (update-title! ed win path))
-                 :save-to! (fn [p] (save-to! ed cv path p) (update-title! ed win path))}))))
+                 :save-to! (fn [p] (save-to! ed cv path p) (update-title! ed win path))
+                 ;; M5/M4 self-test hook: the exact fn the "key-pressed"
+                 ;; signal calls, so a row can invoke it directly with a
+                 ;; synthetic keyval/state -- an ordinary function call, not
+                 ;; a synthesized OS keystroke.
+                 :handle-window-key! window-key-fn}))))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
-  :status-label :window :run!* :stop!* :open-path! :save-to!}; the self-test
+  :status-label :window :run!* :stop!* :open-path! :save-to!
+  :handle-window-key!}; the self-test
   rows call these functions directly, exactly as the buttons and keys do."
   [opts]
   (let [app (g/gtk-application-new "net.b12n.jonquil" g/APPLICATION-DEFAULT-FLAGS)]

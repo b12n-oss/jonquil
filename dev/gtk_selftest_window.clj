@@ -339,6 +339,34 @@
              {:got got :input input})
       (next))))
 
+;; gtk-keys.md's shared table -- window.clj's own copy is private.
+(def ^:private KEY-ESCAPE 0xff1b)
+
+(defn- row-escape-yields-when-idle
+  "M5: the window-level capture controller used to consume Escape even
+  when nothing was evaluating, so Escape could never reach an IME
+  composition. Calls the exact fn the \"key-pressed\" signal calls (an
+  ordinary function call with a synthetic keyval/state, not a synthesized
+  OS keystroke) -- once while idle (must yield: 0) and once while a
+  program runs (must Stop it: 1, and the program must actually stop)."
+  [ui next]
+  (let [idle-result ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)]
+    (editor/set-text! (:editor ui) "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (let [mark (out-end-offset ui)
+                        running-result ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)]
+                    (poll-until 3000 20
+                                (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                (fn [stopped?]
+                                  (check :escape-yields-when-idle
+                                         (and (= 0 idle-result) started? (= 1 running-result) stopped?)
+                                         {:idle-result idle-result :started started?
+                                          :running-result running-result :stopped stopped?})
+                                  (next))))))))
+
 (defn- row-save-and-open [ui next]
   (let [tmp (str (System/getProperty "java.io.tmpdir")
                  "/jonquil-selftest-" (System/currentTimeMillis) ".clj")]
@@ -367,6 +395,7 @@
    row-fast-repl-twice
    row-busy-hint-once
    row-console-history-down-empty
+   row-escape-yields-when-idle
    row-save-and-open])
 
 ;; --- driver --------------------------------------------------------------

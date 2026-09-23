@@ -199,12 +199,30 @@
                             :ms (- (System/currentTimeMillis) t0)})
                     (next))))))
 
+(defn- row-editor-preedit-guard
+  "I5: while an IME preedit composition is active, Return must not apply
+  smart-enter -- setting the atom directly proves the handlers yield
+  without needing a real IME (the real preedit-changed wiring is a human
+  smoke step)."
+  [ed]
+  (fn [next]
+    (editor/set-text! ed "(defn f [x]")
+    (g/with-iters* (:buf ed) 11 11 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+    (reset! (:preedit-active? ed) true)
+    (let [result (editor/handle-return! ed)
+          text (editor/editor-text ed)]
+      (reset! (:preedit-active? ed) false)
+      (check :editor-preedit-guard (and (nil? result) (= "(defn f [x]" text))
+             {:result result :text text})
+      (next))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
    row-editor-smart-enter
    row-editor-dirty
    row-editor-emoji-offsets
+   row-editor-preedit-guard
    row-on-gui-concurrent])
 
 ;; --- P2.T6: console rows -------------------------------------------------
@@ -412,6 +430,24 @@
               :calls-before before-calls :calls-after (count @history-prev-calls)})
       (next))))
 
+(defn- row-console-preedit-guard
+  "I5: an active IME preedit composition makes Return and Up/Down no-ops
+  (setting the atom directly proves the yield; the real preedit-changed
+  wiring is a human smoke step)."
+  [cv]
+  (fn [next]
+    (cview/clear-input! cv)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
+    (reset! (:preedit-active? cv) true)
+    (let [return-got (cview/handle-return! cv false)
+          history-got (cview/handle-history! cv :prev)
+          input (cview/input-text cv)]
+      (reset! (:preedit-active? cv) false)
+      (check :console-preedit-guard
+             (and (= 0 return-got) (false? history-got) (= "(+ 1 2)" input))
+             {:return-got return-got :history-got history-got :input input})
+      (next))))
+
 (def ^:private console-row-fns
   [row-console-readonly
    row-console-readonly-delete
@@ -421,6 +457,7 @@
    row-console-flood
    row-console-unicode
    row-console-history-multiline-caret
+   row-console-preedit-guard
    row-console-history])
 
 ;; --- driver ------------------------------------------------------------
