@@ -12,7 +12,8 @@
     jonquil.upstream.syntax-test
     jonquil.paint-test
     jonquil.docs-test
-    jonquil.edit-test])
+    jonquil.edit-test
+    jonquil.eval-test])
 
 (defn -main [& args]
   (let [nss (if (seq args) (mapv symbol args) test-namespaces)]
