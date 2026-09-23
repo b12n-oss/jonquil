@@ -110,23 +110,73 @@
         name (if i (subs path (inc i)) path)]
     (str dir "." name ".jonquil-tmp-" (System/nanoTime))))
 
+(defn- resolve-target
+  "path's real underlying file (M12 follow-up (a)). .getCanonicalPath
+  follows a symlink to what it points at, and works even when path (or
+  its parent directories) doesn't exist yet -- probed against this Jolt.
+  java.nio.file.Files/move onto a symlink's OWN path replaces the link
+  itself with a regular file and leaves whatever it pointed at untouched
+  (probed: after such a move the link path is no longer a symlink at all,
+  and the file it used to point at is unchanged); moving onto the
+  resolved target instead updates the real file and leaves the link a
+  link, still pointing at the same place, with the new content visible
+  through it."
+  [path]
+  (.getCanonicalPath (java.io.File. ^String path)))
+
+(defn- copy-permissions!
+  "Copies target's POSIX permissions onto tmp when target already exists
+  (M12 follow-up (b)): a freshly spit temp file gets the process umask's
+  default mode (probed: rw-r--r--, i.e. 644), so saving over an
+  executable (755) file silently dropped its +x. Files/setPosixFile-
+  Permissions exists and works on this Jolt; java.io.File's
+  setExecutable/setReadable/setWritable do NOT -- probed, and both the
+  1-arg and 2-arg forms raise 'No matching method ... found' -- so there
+  is no fallback to reach for here."
+  [target tmp]
+  (when (.exists (java.io.File. ^String target))
+    (java.nio.file.Files/setPosixFilePermissions
+     (.toPath (java.io.File. ^String tmp))
+     (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String target))))))
+
+(defn- name-user-path
+  "Rewrites any occurrence of tmp (the hidden temp filename) or target
+  (path resolved through symlinks, which can differ from what the user
+  typed) inside an exception message back to path -- an exact literal
+  replacement, not a guessed pattern, since both strings are ones this
+  namespace itself built or resolved a moment earlier. Used so a save
+  error never names a file the user never typed (M12 follow-up)."
+  [msg tmp target path]
+  (-> msg (str/replace tmp path) (str/replace target path)))
+
 (defn- save-to!
   "Writes the editor text to path without ever truncating it in place
-  (M12): spits to a temp file beside it, then renames over the target with
-  java.nio.file.Files/move + ATOMIC_MOVE (probed against this Jolt: see
-  the fix-wave report) so a failure mid-write can't leave a half-written
-  target. mark-saved! and remembering the path only happen once the rename
-  has actually succeeded. An error is appended as :error, never swallowed
-  -- losing the mark that a save failed would risk the user believing
-  unsaved work is safe when it isn't -- and the temp file is cleaned up on
-  any failure. Doesn't touch the title; see open-path!'s docstring."
+  (M12), and without breaking a symlink or dropping the target's
+  permissions (M12 follow-up): resolves path to its real underlying file
+  (resolve-target), spits to a temp file in THAT file's directory, copies
+  its POSIX permissions onto the temp file when it already exists
+  (copy-permissions!), then renames the temp file over the RESOLVED
+  target with java.nio.file.Files/move + ATOMIC_MOVE (probed against this
+  Jolt: see the fix-wave report) so a failure mid-write can't leave a
+  half-written target -- and so a symlink target gets updated in place
+  rather than replaced by the rename. mark-saved! and remembering path
+  (the user's own path, not the resolved target) only happen once the
+  rename has actually succeeded. An error is appended as :error, naming
+  path rather than the hidden temp file or a resolved target that
+  differs from it, and never swallowed -- losing the mark that a save
+  failed would risk the user believing unsaved work is safe when it
+  isn't -- and the temp file is cleaned up on any failure; the rename
+  never runs at all when the write itself fails, so the target is never
+  touched. Doesn't touch the title; see open-path!'s docstring."
   [ed cv path-atom path]
-  (let [tmp (temp-path-for path)]
+  (let [target (resolve-target path)
+        tmp (temp-path-for target)]
     (try
       (spit tmp (editor/editor-text ed))
+      (copy-permissions! target tmp)
       (java.nio.file.Files/move
        (.toPath (java.io.File. ^String tmp))
-       (.toPath (java.io.File. ^String path))
+       (.toPath (java.io.File. ^String target))
        (into-array java.nio.file.CopyOption
                    [java.nio.file.StandardCopyOption/REPLACE_EXISTING
                     java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
@@ -135,7 +185,8 @@
       (catch :default e
         (let [f (java.io.File. ^String tmp)]
           (when (.exists f) (.delete f)))
-        (cview/append! cv :error (str "; save: " (ex-message e) "\n"))))))
+        (cview/append! cv :error
+                       (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))
 
 (defn- guarded-open!
   "I4's dirty-discard gate, shared by do-open! (real button/chord, which
@@ -154,17 +205,26 @@
     (do (reset! discard-warned? false)
         (proceed!))))
 
+(defn- dialog-dismissed?
+  "True only for GTK's own GTK_DIALOG_ERROR_DISMISSED (M2), checking BOTH
+  the numeric code AND the GError domain quark: code 2 is also
+  G_IO_ERROR_EXISTS in a different domain, and code alone can't tell them
+  apart -- see ffi.clj's gtk-dialog-error-quark citation."
+  [{:keys [code domain]}]
+  (and (= code g/GTK-DIALOG-ERROR-DISMISSED)
+       (= domain (g/gtk-dialog-error-quark))))
+
 (defn- handle-open-result!
   "The file-dialog! :open callback's decision, factored out so a self-test
   row can drive it with a synthetic result map shaped like g/finish-file's
   (M2's dismissed-dialog case has no other way to reach it without a live
   dialog)."
-  [ed cv win path-atom {:keys [path error code]}]
+  [ed cv win path-atom {:keys [path error] :as result}]
   (cond
     path (do (open-path! ed cv path-atom path)
              (update-title! ed win path-atom))
     ;; M2: a cancelled/dismissed dialog is not an error.
-    (= code g/GTK-DIALOG-ERROR-DISMISSED) nil
+    (dialog-dismissed? result) nil
     :else (cview/append! cv :error (str "; open: " error "\n"))))
 
 (defn- do-open! [ed cv win path-atom discard-warned?]
@@ -174,11 +234,11 @@
 
 (defn- handle-save-result!
   "handle-open-result!'s counterpart for file-dialog! :save."
-  [ed cv win path-atom {:keys [path error code]}]
+  [ed cv win path-atom {:keys [path error] :as result}]
   (cond
     path (do (save-to! ed cv path-atom path)
              (update-title! ed win path-atom))
-    (= code g/GTK-DIALOG-ERROR-DISMISSED) nil
+    (dialog-dismissed? result) nil
     :else (cview/append! cv :error (str "; save: " error "\n"))))
 
 (defn- do-save-as! [ed cv win path-atom]

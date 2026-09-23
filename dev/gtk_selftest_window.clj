@@ -515,25 +515,149 @@
                       (.delete (java.io.File. ^String good-tmp))
                       (next)))))))
 
-(defn- row-dialog-dismissed-silent
-  "M2: cancelling/dismissing a file dialog (GTK_DIALOG_ERROR_DISMISSED,
-  code 2) must not print an error line. file-dialog! itself can't be
-  driven without a live dialog, so this drives the exact result-handling
-  fns the dialog's own async callback calls, with a result map shaped
-  exactly like g/finish-file's for a dismissed dialog. Neither call
-  enqueues anything (the dismissed branch is a plain nil), so there's no
-  drain to poll for -- (since ui mark) always carries the live \"> \"
-  prompt tail regardless (its own docstring says so), hence the
-  substring checks rather than an equality-to-empty-string check."
+(defn- row-save-follows-symlink
+  "M12 follow-up (a): the atomic rename used to target the SAVE PATH
+  directly, so if that path is a symlink, java.nio.file.Files/move
+  replaces the link itself with a regular file -- the link stops being a
+  link, and whatever it used to point at is never touched (probed:
+  reproduced exactly this against the old, unfixed code before writing
+  this row -- see the fix-wave report's Follow-up section). save-to! now
+  resolves the path first (.getCanonicalPath) and renames onto THAT, so
+  saving through a symlink updates the real file and the link stays a
+  link pointing at the same place."
   [ui next]
-  (let [mark (out-end-offset ui)]
-    ((:simulate-open-result! ui) {:error "Dismissed by user" :code 2})
-    ((:simulate-save-result! ui) {:error "Dismissed by user" :code 2})
-    (let [text (since ui mark)]
-      (check :dialog-dismissed-silent
-             (and (not (str/includes? text "; open:")) (not (str/includes? text "; save:")))
-             {:console text})
+  (let [ed (:editor ui)
+        dir (System/getProperty "java.io.tmpdir")
+        real (str dir "/jonquil-selftest-symlink-real-" (System/currentTimeMillis) ".clj")
+        link (str dir "/jonquil-selftest-symlink-link-" (System/currentTimeMillis) ".clj")]
+    (spit real "(+ 0 0)")
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath (java.io.File. ^String link))
+     (.toPath (java.io.File. ^String real)))
+    (editor/set-text! ed "(+ 9 9)")
+    ((:save-to! ui) link)
+    (let [still-symlink? (java.nio.file.Files/isSymbolicLink (.toPath (java.io.File. ^String link)))
+          real-content (slurp real)
+          via-link-content (slurp link)]
+      (check :save-follows-symlink
+             (and still-symlink? (= "(+ 9 9)" real-content) (= "(+ 9 9)" via-link-content))
+             {:still-symlink still-symlink? :real-content real-content :via-link-content via-link-content})
+      (.delete (java.io.File. ^String link))
+      (.delete (java.io.File. ^String real))
       (next))))
+
+(defn- row-save-executable-keeps-mode
+  "M12 follow-up (b): a freshly spit temp file gets the process umask's
+  default mode (probed: 644), so the old save-to! silently turned a 755
+  file into 644 on every save. copy-permissions! now copies the target's
+  real POSIX permissions onto the temp file before the rename."
+  [ui next]
+  (let [ed (:editor ui)
+        path (str (System/getProperty "java.io.tmpdir")
+                  "/jonquil-selftest-exec-" (System/currentTimeMillis) ".clj")]
+    (spit path "(+ 0 0)")
+    (java.nio.file.Files/setPosixFilePermissions
+     (.toPath (java.io.File. ^String path))
+     (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x"))
+    (editor/set-text! ed "(+ 1 1)")
+    ((:save-to! ui) path)
+    (let [mode (java.nio.file.attribute.PosixFilePermissions/toString
+                (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String path))))
+          content (slurp path)]
+      (check :save-executable-keeps-mode
+             (and (= "rwxr-xr-x" mode) (= "(+ 1 1)" content))
+             {:mode mode :content content})
+      (.delete (java.io.File. ^String path))
+      (next))))
+
+(defn- row-save-failure-leaves-original-intact
+  "M12 follow-up: a target directory made read-only AFTER the file
+  already exists there -- spit can't create the temp file inside it, so
+  the rename never runs at all. Must leave the original content intact,
+  leave no stray .jonquil-tmp-* file in the directory, and show :error
+  naming path (dir/file.clj, what the user typed) rather than the hidden
+  temp filename or path's resolved-through-symlinks form (here the
+  process tmpdir itself, /var/folders/... on macOS, which name-user-path
+  must also rewrite since it resolves to /private/var/folders/...)."
+  [ui next]
+  (let [ed (:editor ui)
+        dir (str (System/getProperty "java.io.tmpdir")
+                 "/jonquil-selftest-readonly-" (System/currentTimeMillis))
+        path (str dir "/file.clj")
+        mark (out-end-offset ui)]
+    (.mkdir (java.io.File. ^String dir))
+    (spit path "(+ 0 0)")
+    (java.nio.file.Files/setPosixFilePermissions
+     (.toPath (java.io.File. ^String dir))
+     (java.nio.file.attribute.PosixFilePermissions/fromString "r-xr-xr-x"))
+    (editor/set-text! ed "(+ 1 1)")
+    ((:save-to! ui) path)
+    (poll-until 1000 20
+                (fn [] (str/includes? (since ui mark) "; save:"))
+                (fn [error-shown?]
+                  (let [error-text (since ui mark)
+                        content-intact? (= "(+ 0 0)" (slurp path))
+                        stray-tmp? (boolean (some (fn [n] (str/includes? n ".jonquil-tmp-"))
+                                                  (seq (.list (java.io.File. ^String dir)))))
+                        names-user-path? (str/includes? error-text path)
+                        names-tmp? (str/includes? error-text ".jonquil-tmp-")]
+                    ;; restore write access before deleting, or .delete may
+                    ;; itself fail against the still-read-only directory.
+                    (java.nio.file.Files/setPosixFilePermissions
+                     (.toPath (java.io.File. ^String dir))
+                     (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x"))
+                    (check :save-failure-leaves-original-intact
+                           (and error-shown? content-intact? (not stray-tmp?)
+                                names-user-path? (not names-tmp?))
+                           {:error-shown error-shown? :content-intact content-intact?
+                            :stray-tmp stray-tmp? :names-user-path names-user-path?
+                            :names-tmp names-tmp? :error-text error-text})
+                    (.delete (java.io.File. ^String path))
+                    (.delete (java.io.File. ^String dir))
+                    (next))))))
+
+(defn- row-dialog-dismissed-silent
+  "M2 follow-up: cancelling/dismissing a file dialog
+  (GTK_DIALOG_ERROR_DISMISSED, code 2, IN GTK's OWN error domain) must not
+  print an error line -- but code 2 is ALSO G_IO_ERROR_EXISTS in a
+  different domain, so dialog-dismissed? must check the domain too, not
+  just the code. file-dialog! itself can't be driven without a live
+  dialog, so this drives the exact result-handling fns with result maps
+  shaped like g/finish-file's.
+
+  Every append! (real or, if the dismissed guard were ever broken, errant)
+  goes through on-gui!'s async drain. The FIRST version of this row read
+  (since ui mark) synchronously right after the simulate calls, with
+  nothing real ever enqueued -- so it could never fail no matter what
+  dialog-dismissed? actually did. Fixed by adding a wrong-domain code-2
+  case and a genuine different-code error, both real appends the row can
+  poll for; once the last one lands, the SAME drain call has already
+  flushed everything queued before it (drain! processes the whole queue
+  in one pass), including any errant dismissed-case append, so the scoped
+  text at that point is a real assertion, not a foregone conclusion."
+  [ui next]
+  (let [mark (out-end-offset ui)
+        real-domain (g/gtk-dialog-error-quark)
+        wrong-domain (inc real-domain)] ; any value != real-domain
+    ;; the real dismissed case: code 2, the real GTK-dialog-error domain.
+    ((:simulate-open-result! ui) {:error "Dismissed by user" :code 2 :domain real-domain})
+    ((:simulate-save-result! ui) {:error "Dismissed by user" :code 2 :domain real-domain})
+    ;; code 2, wrong domain -- stands in for G_IO_ERROR_EXISTS -- must NOT
+    ;; be swallowed by a code-only check.
+    ((:simulate-open-result! ui) {:error "exists" :code 2 :domain wrong-domain})
+    ;; a genuine, different-code error: something real to poll for.
+    ((:simulate-open-result! ui) {:error "boom" :code 1 :domain real-domain})
+    (poll-until 1000 20
+                (fn [] (str/includes? (since ui mark) "; open: boom"))
+                (fn [boom-shown?]
+                  (let [text (since ui mark)]
+                    (check :dialog-dismissed-silent
+                           (and boom-shown?
+                                (str/includes? text "; open: exists")
+                                (not (str/includes? text "; open: Dismissed by user"))
+                                (not (str/includes? text "; save: Dismissed by user")))
+                           {:console text})
+                    (next))))))
 
 (defn- row-save-and-open [ui next]
   (let [tmp (str (System/getProperty "java.io.tmpdir")
@@ -569,6 +693,9 @@
    row-open-refuses-dirty
    row-open-invalid-utf8
    row-save-atomic
+   row-save-follows-symlink
+   row-save-executable-keeps-mode
+   row-save-failure-leaves-original-intact
    row-dialog-dismissed-silent
    row-save-and-open])
 

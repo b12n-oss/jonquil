@@ -220,9 +220,12 @@
 (ffi/defcfn g-cancellable-cancel "g_cancellable_cancel" [:pointer] :void)
 
 (defn finish-file
-  "Completes an open/save. Returns {:path s} or {:error msg :code n}.
-  GError is {GQuark domain; gint code; gchar *message}: code at byte 4,
-  message pointer at byte 8."
+  "Completes an open/save. Returns {:path s} or {:error msg :code n :domain q}.
+  GError is {GQuark domain; gint code; gchar *message}
+  (/opt/homebrew/include/glib-2.0/glib/gerror.h:45-50): domain at byte 0,
+  code at byte 4, message pointer at byte 8. :domain lets a caller tell
+  apart error codes that collide across domains (M2 follow-up:
+  GTK_DIALOG_ERROR_DISMISSED and G_IO_ERROR_EXISTS are both 2)."
   [finish-fn dialog result]
   (let [slot (ffi/alloc 8)]
     (try
@@ -233,7 +236,8 @@
             (if (ffi/null? err)
               {:error "no file and no GError"}
               (try {:error (ffi/ptr->string (ffi/read err :pointer 8))
-                    :code (ffi/read err :int 4)}
+                    :code (ffi/read err :int 4)
+                    :domain (ffi/read err :uint 0)}
                    (finally (g-error-free err)))))
           (try (let [p (g-file-get-path* file)]
                  (try {:path (ffi/ptr->string p)} (finally (g-free p))))
@@ -372,3 +376,13 @@
 ;; Round-trip readback for G-APPLICATION-NON-UNIQUE's own unit test -- doesn't
 ;; need a display, only a constructed GApplication object.
 (ffi/defcfn g-application-get-flags "g_application_get_flags" [:pointer] :uint)
+
+;; --- P2 close follow-up ---
+;; gtk_dialog_error_quark: /opt/homebrew/include/gtk-4.0/gtk/gtkdialogerror.h:60
+;; (GQuark gtk_dialog_error_quark (void)). GQuark is guint32
+;; (/opt/homebrew/include/glib-2.0/glib/gquark.h:38). M2 follow-up: code alone
+;; isn't enough to identify GTK_DIALOG_ERROR_DISMISSED, since G_IO_ERROR_EXISTS
+;; is ALSO 2 (/opt/homebrew/include/glib-2.0/gio/gioenums.h:543-544, third
+;; enumerator after G_IO_ERROR_FAILED/NOT_FOUND) -- a GError's domain quark
+;; (finish-file's :domain) must match too.
+(ffi/defcfn gtk-dialog-error-quark "gtk_dialog_error_quark" [] :uint)

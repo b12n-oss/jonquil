@@ -124,21 +124,29 @@
 
 (defn- trim!
   "When the output region (0..out-end) is over MAX-OUTPUT-CHARS, deletes
-  characters from its front so it fits -- cutting after a newline where one
-  exists in the part that must go, console/trim-length's exact rule, but
-  computed from out-end's own offset (gtk_text_iter_get_offset, via
-  mark-offset) instead of copying the whole output region just to measure
-  it (I7). Only the small tail near the cut point (at most
-  MAX-OUTPUT-CHARS + 1 characters, never the full region) is ever read."
+  characters from its front so it fits, reusing console/trim-length's
+  reviewed rule directly instead of duplicating its cut-after-newline math
+  (P2-close follow-up item 3 -- the duplication was itself a defect: two
+  copies of the same rule that could silently drift apart).
+
+  Measures the region's length from out-end's own offset
+  (gtk_text_iter_get_offset, via mark-offset) instead of copying the whole
+  region just to measure it (I7), then reads only the small tail near the
+  cut point: exactly MAX-OUTPUT-CHARS + 1 characters, from-to-n below. That
+  exact size is what makes reuse work without passing trim-length the real
+  total length n: trim-length's own internal `must` (its length minus
+  max-chars) then always works out to exactly 1 in the no-newline case,
+  which is exactly what a 1-character offset from `from` needs to equal
+  the true cut point -- verified against the original duplicated math
+  across 6 cases including the real ~589k-char flood size (see the
+  fix-wave report's Follow-up section)."
   [cv]
   (let [buf (:buf cv)
         n (mark-offset buf (:out-end cv))]
     (when (> n MAX-OUTPUT-CHARS)
-      (let [must (- n MAX-OUTPUT-CHARS)
-            from (dec must)
+      (let [from (dec (- n MAX-OUTPUT-CHARS))
             tail (text-range buf from n)
-            nl (str/index-of tail "\n")
-            cut (if nl (+ from nl 1) must)]
+            cut (+ from (console/trim-length tail MAX-OUTPUT-CHARS))]
         (g/with-iters* buf 0 cut (fn [a b] (g/gtk-text-buffer-delete buf a b)))))))
 
 (defn- scroll-to-end!
@@ -278,17 +286,26 @@
   it replaced the input (the key controller returns 1), false otherwise
   (the key controller returns 0, so GTK's normal Up/Down caret movement
   applies). Also false while an IME preedit composition is active (I5),
-  same reasoning as handle-return!."
+  same reasoning as handle-return!.
+
+  Checks caret >= start BEFORE computing on-edge-line? (Minor #4 of the
+  P2-close follow-up): on-first/last-line-of-input? each read a text-range
+  from the caret out to input-start or the buffer's end. With the caret
+  somewhere in the (potentially ~200k-char) output history and input-start
+  far away, gtk_text_buffer_get_text silently reorders a start > end pair,
+  so that read would span the WHOLE output region -- for a key the caret
+  gate was always going to refuse anyway. Gating first means that read
+  never happens for a click into the output area."
   [cv dir]
   (if @(:preedit-active? cv)
     false
     (let [buf (:buf cv)
           caret (g/cursor-offset buf)
-          start (mark-offset buf (:input-start cv))
-          on-edge-line? (case dir
-                          :prev (on-first-line-of-input? cv caret)
-                          :next (on-last-line-of-input? cv caret))]
-      (if (and (>= caret start) (not ((:waiting? cv))) on-edge-line?)
+          start (mark-offset buf (:input-start cv))]
+      (if (and (>= caret start) (not ((:waiting? cv)))
+               (case dir
+                 :prev (on-first-line-of-input? cv caret)
+                 :next (on-last-line-of-input? cv caret)))
         (if-let [replacement (case dir
                                :prev ((:history-prev cv) (input-text cv))
                                :next ((:history-next cv)))]
