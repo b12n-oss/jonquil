@@ -8,7 +8,8 @@
     jonquil.paint
     jonquil.docs
     jonquil.edit
-    jonquil.eval])
+    jonquil.eval
+    jonquil.console])
 
 (defn -main [& _]
   (doseq [n namespaces]
