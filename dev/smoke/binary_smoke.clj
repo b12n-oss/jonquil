@@ -1,0 +1,567 @@
+;; P2.T10: automated smoke of the BUILT Jonquil binary, driven by cgevent
+;; against a real macOS process -- everything dev/gtk_selftest_window.clj
+;; and dev/demo_shots.clj can't cover, because both of those run IN the
+;; GTK process under test and call its own handler functions directly.
+;; This script is external: it launches ./jonquil as a real subprocess,
+;; drives it with real key events routed by pid, and reads back real file
+;; bytes, real window titles and real screen pixels.
+;;
+;; Run via `bb smoke:binary` (see bb.edn); this file is a plain babashka
+;; script, not a jolt namespace -- it never touches the jolt/GTK process
+;; from the inside, only from outside via cgevent and the filesystem.
+;;
+;; Hard safety rules (p2t10-brief.md, this task's own instructions):
+;;   - every input event carries --pid; cg-key! below takes pid as a
+;;     required (not optional) argument and throws if it's nil, so there
+;;     is no code path in this file that can post without one.
+;;   - never --global, never click/drag/move, never `cgevent type` (probed
+;;     mangled against GTK -- p2t10-probe.md: "(+ 1 2)" arrived as "((" +
+;;     5 spaces, because GTK's macOS backend reads the key code, not the
+;;     Unicode string cgevent attaches).
+;;   - the binary under test always launches from target/smoke/ (gitignored
+;;     via the existing top-level /target/ rule -- confirmed with
+;;     `git check-ignore -v target/smoke/probe.txt` before relying on it,
+;;     so .gitignore itself needed no edit), with its own scratch copies of
+;;     the checked-in dev/smoke/fixtures/*.clj files, never the fixtures
+;;     themselves as the live file argument.
+;;   - every jonquil process this script starts is killed on every exit
+;;     path, including a thrown exception (an outer try/finally) or Ctrl-C
+;;     (each launch! passes :shutdown p/destroy-tree, babashka.process's
+;;     own per-process JVM shutdown hook); `pgrep -fl jonquil` after a run
+;;     should show nothing of this script's own.
+;;
+;; cgevent's coordinate systems, measured live against this build
+;; (2026-09-23, session probe, not carried over from p2t10-probe.md):
+;;   `cgevent ocr-inspect` reports boxes in SCREEN points (matches
+;;   `cgevent windows --edn`'s :x/:y, not window-relative) -- confirmed by
+;;   comparing a window at x=900 against an OCR row's x=909 (inside it) for
+;;   a line far down the window, whose y (548) is nowhere near the
+;;   window's own y (31). `cgevent screenshot` writes NATIVE PIXELS, so
+;;   mapping an OCR box onto a screenshot needs the window's own :scale
+;;   (`cgevent windows --pid N --edn`) applied to (ocr-x - window-x) and
+;;   (ocr-y - window-y), not to the raw ocr coordinates.
+;;
+;; The colour spot check (window.clj's `:out`/`:prompt` colours,
+;; jonquil.console/styles) needs one more measured correction: a PLAIN
+;; average of every pixel in an OCR'd line's box came back 202,202,202 --
+;; close to white -- because most of a text line's bounding box is
+;; background, not ink; the box's DARKEST pixel came back 40,40,40, an
+;; exact match for :out's "#282828". See dev/smoke/PixelAt.java's own
+;; docstring for the full measurement and the darkest-cluster fix.
+;; babashka itself can't do this sampling -- `bb -e '(import (javax.imageio
+;; ImageIO)) ...)'` fails with "Unable to resolve classname", because
+;; babashka is a GraalVM native image with a curated class list that
+;; doesn't include AWT/ImageIO -- so this shells out to a full JDK's
+;; `java` instead (JEP 330 single-file source-code programs, JDK 11+; a
+;; JDK is on PATH here, confirmed via `java -version`). sips, this task's
+;; other suggested option, has no per-pixel query, only whole-image
+;; property/profile queries, so it can't do this job at all.
+(ns binary-smoke
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
+
+(def ^:private out-dir "target/smoke")
+(def ^:private fixtures-dir "dev/smoke/fixtures")
+(def ^:private binary-path (str out-dir "/jonquil"))
+(def ^:private pixel-at-jar "dev/smoke/PixelAt.java")
+
+;; --- process bookkeeping: every jonquil pid this run launches, killed on
+;; every exit path (a set of {:proc :pid}, never just a bare pid, since
+;; killing needs the babashka.process handle) ---------------------------
+
+(defonce ^:private launched (atom []))
+
+(defn- kill-all-launched!
+  "Destroys every process this run started (destroy-tree, since babashka.
+  process falls back to plain destroy pre-JDK9 but this project's own JDK
+  is 25 -- verified via `java -version` earlier this session). Safe to
+  call more than once -- destroying an already-dead process is a no-op in
+  babashka.process (measured: alive? false after destroy, no exception on
+  a second destroy). Backed up per-process by :shutdown p/destroy-tree at
+  launch! (below), which babashka.process registers as its own JVM
+  shutdown hook -- so a Ctrl-C is covered even if this fn never runs."
+  []
+  (doseq [{:keys [proc pid]} @launched]
+    (try
+      (when (p/alive? proc) (p/destroy-tree proc))
+      (catch Exception e
+        (binding [*out* *err*]
+          (println "[binary-smoke] warning: couldn't kill pid" pid (ex-message e))))))
+  (reset! launched []))
+
+;; --- results -------------------------------------------------------------
+
+(defonce ^:private results (atom []))
+
+(defn- check! [step ok detail]
+  (swap! results conj {:step step :ok (boolean ok) :detail detail})
+  (println (str "[binary-smoke] " (name step) " " (if ok "PASS" "FAIL") " " (pr-str detail))))
+
+(defn- skip! [step reason]
+  (swap! results conj {:step step :ok :skip :detail {:reason reason}})
+  (println (str "[binary-smoke] " (name step) " SKIP " reason)))
+
+;; --- cgevent wrappers: every one of these requires a real pid ------------
+
+(defn- cg-key!
+  "Posts one chord to pid via CGEventPostToPid (never --global). Refuses
+  outright when pid is nil -- this is the one function every key event in
+  this file goes through, so that refusal is the hard safety rule, not a
+  convention someone could forget at a call site."
+  [pid chord]
+  (when-not pid
+    (throw (ex-info "binary_smoke: refusing to post a key event with no pid" {:chord chord})))
+  (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
+                                    "cgevent" "key" "--pid" (str pid) chord)]
+    (when-not (zero? exit)
+      (throw (ex-info (str "cgevent key failed: " chord) {:pid pid :chord chord :err err})))))
+
+;; letters, digits, space and the punctuation this smoke run's fixtures
+;; and typed REPL/stdin answers need. cgevent names keys by their literal
+;; character (p2t10-probe.md); an unmapped character is a driver bug, not
+;; something to skip silently -- type-text! throws rather than dropping
+;; it. "(" / ")" were measured in p2t10-probe.md; shift+= for "+", shift+'
+;; for '"', "-" and "." were measured live against this build in this
+;; task's own session (probe: select-all, delete, then those four chords
+;; in a row read back via OCR as exactly `+"-.`, with no stray spaces).
+(def ^:private char->chord
+  (merge
+   (into {} (map (fn [c] [c (str c)])) "abcdefghijklmnopqrstuvwxyz")
+   (into {} (map (fn [c] [c (str c)])) "0123456789")
+   (into {} (map (fn [c] [c (str "shift + " (Character/toLowerCase ^char c))]))
+         "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+   {\space "space"
+    \( "shift + 9"
+    \) "shift + 0"
+    \" "shift + '"
+    \+ "shift + ="
+    \- "-"
+    \. "."}))
+
+(defn- type-text!
+  "Types s one character at a time via char->chord -- never `cgevent
+  type`, which p2t10-probe.md measured mangled against GTK (the buffer
+  got \"((\" plus 5 spaces for the literal text \"(+ 1 2)\", because GTK's
+  macOS backend reads the key code, not the Unicode string cgevent
+  attaches)."
+  [pid s]
+  (doseq [c s]
+    (if-let [chord (get char->chord c)]
+      (cg-key! pid chord)
+      (throw (ex-info (str "binary_smoke: no chord mapped for character " (pr-str c))
+                      {:char c :s s})))))
+
+(defn- windows-edn!
+  "This pid's on-screen windows, parsed. Normally exactly one for jonquil
+  (M6: G_APPLICATION_NON_UNIQUE, one window per process) -- callers that
+  care about count (row-open-refuses-dirty's \"opens no panel\" check)
+  read (count (windows-edn! pid)) directly rather than assuming 1."
+  [pid]
+  (let [{:keys [out]} (p/shell {:out :string :err :string :continue true}
+                               "cgevent" "windows" "--pid" (str pid) "--edn")]
+    (try (edn/read-string out) (catch Exception _ []))))
+
+(defn- window-for [pid]
+  (first (windows-edn! pid)))
+
+(defn- ocr-text!
+  "This pid's visible window text, OCR'd and joined into one string for
+  loose substring matching (p2t10-probe.md: OCR drops the space after
+  \"(\" and mangles \"---\", so callers match distinctive words, never
+  punctuation runs). Never throws -- a transient OCR/subprocess hiccup
+  reads as \"no match yet\" to a poller, not a crash of the whole run."
+  [pid]
+  (try
+    (let [tmp (str out-dir "/.ocr-" pid "-" (System/nanoTime) ".edn")
+          _ (p/shell {:out :string :err :string :continue true}
+                     "cgevent" "ocr-inspect" "--pid" (str pid) "-o" tmp)
+          rows (edn/read-string (slurp tmp))]
+      (io/delete-file tmp true)
+      (str/join "\n" (keep :text rows)))
+    (catch Exception _ "")))
+
+(defn- ocr-rows!
+  "Like ocr-text!, but returns the parsed rows (with :x/:y/:w/:h in SCREEN
+  points -- measured live this session, see this file's own header) for
+  callers that need a specific line's bounds, not just its text."
+  [pid]
+  (try
+    (let [tmp (str out-dir "/.ocr-" pid "-" (System/nanoTime) ".edn")
+          _ (p/shell {:out :string :err :string :continue true}
+                     "cgevent" "ocr-inspect" "--pid" (str pid) "-o" tmp)
+          rows (edn/read-string (slurp tmp))]
+      (io/delete-file tmp true)
+      rows)
+    (catch Exception _ [])))
+
+(defn- screenshot!
+  "Saves a screenshot to out-dir/<name>.png, best-effort (a failed capture
+  must never take down the rest of the run -- it only costs a diagnostic
+  image)."
+  [pid name]
+  (try (p/shell {:out :string :err :string :continue true}
+                "cgevent" "screenshot" (str out-dir "/" name ".png") "--pid" (str pid))
+       (catch Exception _ nil)))
+
+;; --- generic poll: never a fixed sleep in place of a real wait -----------
+
+(defn- wait-for!
+  "Polls (pred?) every interval-ms, up to a total of deadline-ms, sleeping
+  between checks -- global.md/AGENTS.md's own rule for GTK self-tests,
+  applied here to an external process instead of an in-process poll."
+  [deadline-ms interval-ms pred?]
+  (let [t0 (System/currentTimeMillis)]
+    (loop []
+      (cond
+        (pred?) true
+        (>= (- (System/currentTimeMillis) t0) deadline-ms) false
+        :else (do (Thread/sleep (long interval-ms)) (recur))))))
+
+(defn- wait-for-ocr!
+  "Polls OCR until it contains needle or deadline-ms elapses. Returns
+  {:ok bool :last last-ocr-text} -- \"prints what OCR saw\" on a failed
+  wait, per this task's own design."
+  [pid deadline-ms needle]
+  (let [last (atom "")]
+    (let [ok (wait-for! deadline-ms 300
+                        (fn [] (let [t (ocr-text! pid)] (reset! last t) (str/includes? t needle))))]
+      {:ok ok :last @last})))
+
+;; --- launching and stopping the binary under test ------------------------
+
+(defn- scratch-copy!
+  "Copies a checked-in fixture into out-dir under a fresh name, so the
+  live file argument handed to jonquil is always a scratch file this run
+  owns -- the checked-in dev/smoke/fixtures/*.clj sources are never
+  touched, even by a step (Save) that writes to its file argument."
+  [fixture-name]
+  (let [src (io/file fixtures-dir fixture-name)
+        dst (io/file out-dir (str (System/nanoTime) "-" fixture-name))]
+    (fs/copy src dst)
+    (.getPath dst)))
+
+(defn- launch!
+  "Starts ./jonquil (built into out-dir) as a real subprocess, optionally
+  opening file. Registers it in `launched` immediately (before returning)
+  so a thrown exception between here and the caller's own bookkeeping
+  can't strand an unkillable process. Its own stdout/stderr go to a log
+  file in out-dir rather than this script's own -- jonquil prints GLib/
+  Gtk/macOS IME noise on stderr (smoke-results.md), harmless but not
+  worth interleaving with this script's own [binary-smoke] lines."
+  [& [file]]
+  (let [log (str out-dir "/.launch-" (System/nanoTime) ".log")
+        args (cond-> [binary-path] file (conj file))
+        proc (p/process args {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree})
+        pid (.pid ^java.lang.Process (:proc proc))]
+    (swap! launched conj {:proc proc :pid pid})
+    {:proc proc :pid pid}))
+
+(defn- stop!
+  "Kills one launched process (if still alive) and drops it from
+  `launched` -- used by steps that end their own process mid-run (rather
+  than via the product's own Cmd+W path, which is step-command-chord-close's
+  own job) so a FAILED step's process doesn't linger until the whole run's
+  final cleanup."
+  [{:keys [proc pid]}]
+  (try
+    (when (p/alive? proc) (p/destroy-tree proc))
+    (catch Exception _ nil))
+  (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
+
+(defn- wait-for-window!
+  "Polls cgevent windows --pid until it reports at least one window (the
+  toolbar's own OCR text is a slower, heavier check than this, so ready-
+  to-receive-keys and ready-to-OCR are checked separately)."
+  [pid deadline-ms]
+  (wait-for! deadline-ms 200 (fn [] (seq (windows-edn! pid)))))
+
+;; --- steps ----------------------------------------------------------------
+;; Each step launches its own fresh process (dev/demo_shots.clj's own
+;; hard-won lesson: a shared process/window let one scene's leftover
+;; console history bleed into the next one's screenshot; a fresh process
+;; per step means a fresh window and an empty console every time, so an
+;; OCR/pixel assertion never depends on what an earlier step left behind).
+
+(defn- step-run-and-colour!
+  "Brief step 2 (Run shows output and => nil, status Ready) plus the
+  colour spot check (:out, not :prompt blue) on the same output line,
+  since the check needs exactly the line step 2 already produces."
+  []
+  (let [path (scratch-copy! "run.clj")
+        {:keys [proc pid]} (launch! path)]
+    (wait-for-window! pid 8000)
+    (cg-key! pid "f5")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 8000 "smoke-run")
+          ok-nil (str/includes? last "=> nil")
+          ok-ready (wait-for-ocr! pid 3000 "Ready")
+          win (window-for pid)
+          scale (or (:scale win) 2.0)
+          wx (:x win) wy (:y win)
+          out-row (some (fn [r] (when (= "smoke-run" (:text r)) r)) (ocr-rows! pid))]
+      (screenshot! pid "step2-run-output")
+      (check! :run-shows-output (and ok ok-nil (:ok ok-ready))
+              {:console last :ready (:ok ok-ready)})
+      (if (and out-row wx wy)
+        (let [px (int (* scale (- (:x out-row) wx)))
+              py (int (* scale (- (:y out-row) wy)))
+              pw (max 10 (int (* scale (:w out-row))))
+              ph (max 6 (int (* scale (:h out-row))))
+              shot (str out-dir "/step2-run-output.png")
+              {:keys [out exit err]} (p/shell {:out :string :err :string :continue true}
+                                              "java" pixel-at-jar shot
+                                              (str px) (str py) (str pw) (str ph))]
+          (if (zero? exit)
+            (let [[r g b] (map #(Long/parseLong %) (str/split (str/trim out) #","))
+                  dist-out (+ (Math/abs (- r 0x28)) (Math/abs (- g 0x28)) (Math/abs (- b 0x28)))
+                  dist-prompt (+ (Math/abs (- r 0x00)) (Math/abs (- g 0x64)) (Math/abs (- b 0xc8)))]
+              (check! :colour-spot-check (< dist-out dist-prompt)
+                      {:sampled-rgb [r g b] :dist-out dist-out :dist-prompt dist-prompt
+                       :rect [px py pw ph]}))
+            (check! :colour-spot-check false {:pixel-at-exit exit :pixel-at-err err :rect [px py pw ph]})))
+        (check! :colour-spot-check false {:reason "no OCR row for smoke-run" :window win})))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-repl-history!
+  "Brief step 3 (one REPL entry, then Up recalls it, then Down leaves the
+  input alone) turned out to be unreachable under this driver's hard
+  safety rules, discovered live this session, not assumed from the brief:
+  jonquil.gtk.window/activate! calls editor/focus! exactly once, at window
+  construction, and grep across the whole src tree (`grab.focus`) turns up
+  no other call anywhere -- the console pane NEVER receives keyboard focus
+  without a mouse click. Typing \"5\" into a freshly launched window with
+  no file (this step's own first attempt) landed in the DEFINITIONS editor
+  instead (its title gained \"* \", confirming it, not the console, went
+  dirty), and Tab / Shift+Tab (tried live against the built binary as a
+  click-free alternative) both stayed in the editor too -- accepts-tab
+  swallows plain Tab as an indent, and Shift+Tab isn't wired to move focus
+  either. cgevent's own docs independently confirm --pid clicks wouldn't
+  help even if this task allowed them: CGEventPostToPid button events
+  never reach window content, in any app, always (window-targeting.md).
+  So there is no safety-compliant way to type at the console prompt at
+  all right now -- human-only until Jonquil ships a keyboard path to it."
+  []
+  (skip! :repl-history
+         "console pane has no keyboard-reachable focus path (measured live: only editor/focus! ever grabs focus; Tab/Shift+Tab both stay in the editor) and cgevent clicks can't substitute (--pid buttons never reach window content); needs a mouse, which this driver's safety rules forbid"))
+
+(defn- step-read-line!
+  "Brief step 4 (read-line, answered by chords) hits the same console-
+  focus wall as step-repl-history! for the \"answered\" half: F5 always
+  reaches the window (the capture-phase key controller sees it regardless
+  of focus), so Run-triggers-Waiting-for-input is genuinely automatable,
+  but typing the answer needs the console focused, which nothing in this
+  codebase ever grants without a click. What this step actually checks
+  instead: read-line puts the engine into :waiting-input (a real, distinct
+  status from :running), and Escape -- also window-level, also focus-
+  independent -- interrupts it cleanly from THAT state, the same way
+  dev/gtk_selftest_window.clj's own row-stop-while-reading proves in-
+  process. That's real automated coverage of a real code path, just not
+  the literal \"answered by chords\" one the brief described."
+  []
+  (let [path (scratch-copy! "greet.clj")
+        {:keys [proc pid]} (launch! path)]
+    (wait-for-window! pid 8000)
+    (cg-key! pid "f5")
+    (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Waiting for input")]
+      (when-not ok (check! :read-line-waiting false {:reason "status never showed Waiting for input"})))
+    (cg-key! pid "escape")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "Stopped")]
+      (screenshot! pid "step4-read-line-interrupted")
+      (check! :read-line-waiting-then-interrupted ok {:console last}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-stop-infinite-loop!
+  "Brief step 5: an infinite (silent) loop, stopped by Escape."
+  []
+  (let [path (scratch-copy! "loop.clj")
+        {:keys [proc pid]} (launch! path)]
+    (wait-for-window! pid 8000)
+    (cg-key! pid "f5")
+    (let [{:keys [ok]} (wait-for-ocr! pid 3000 "Running")]
+      (when-not ok (check! :loop-started false {:reason "status never showed Running"})))
+    (cg-key! pid "escape")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "interrupted")
+          stopped (wait-for-ocr! pid 3000 "Stopped")]
+      (screenshot! pid "step5-stop-infinite-loop")
+      (check! :stop-infinite-loop (and ok (:ok stopped)) {:console last}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-stop-print-forever!
+  "Brief step 9: a print-forever loop, stopped by Escape, window still
+  responsive. Measured live: this fixture prints fast enough that by the
+  time OCR runs, \"; interrupted\" itself can already have scrolled out of
+  the console's visible viewport, pushed up by more \"tick\" lines that
+  were already queued (AGENTS.md's own GTK fact: \"the result line is
+  queued after the status flips\", so a burst of already-buffered output
+  can still land after it) -- a first version of this step asserted on
+  seeing \"interrupted\" in the OCR text and failed on exactly that,
+  correctly-behaving run. The status label (a separate widget, never part
+  of the scrolling console, always fully visible) doesn't have this
+  problem, so this asserts on it reaching \"Stopped\" instead -- the same
+  durable signal step-stop-infinite-loop! also checks."
+  []
+  (let [path (scratch-copy! "forever.clj")
+        {:keys [proc pid]} (launch! path)]
+    (wait-for-window! pid 8000)
+    (cg-key! pid "f5")
+    (let [{:keys [ok]} (wait-for-ocr! pid 4000 "tick")]
+      (when-not ok (check! :forever-started false {:reason "no tick output seen"})))
+    (cg-key! pid "escape")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "Stopped")
+          responsive (seq (windows-edn! pid))]
+      (screenshot! pid "step9-stop-print-forever")
+      (check! :stop-print-forever (and ok responsive) {:console last :responsive (boolean responsive)}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-save!
+  "Brief step 7: Cmd+S; the file bytes on disk equal what the editor held,
+  and the title loses \"* \". The exact edit is select-all + delete + a
+  freshly typed replacement (\"(+ 1 2)\") rather than a literal append at
+  the fixture's end -- probed live this session that select-all+delete+
+  retype lands byte-for-byte as typed (four chords typed back to back read
+  back via OCR as exactly `+\"-.`, no stray characters), which this step
+  reuses directly for a robust, fully-verified path; positioning the caret
+  at end-of-buffer to append instead was never itself measured against
+  this build, so it isn't the one this step depends on."
+  []
+  (let [path (scratch-copy! "save.clj")
+        {:keys [proc pid]} (launch! path)]
+    (wait-for-window! pid 8000)
+    (cg-key! pid "command + a")
+    (cg-key! pid "delete")
+    (type-text! pid "(+ 1 2)")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))]
+      (screenshot! pid "step7-save")
+      (check! :save (and title-ok (= "(+ 1 2)" on-disk))
+              {:title-lost-star title-ok :on-disk on-disk :window-name (:name (window-for pid))}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-open-refuses-dirty!
+  "Brief step 10 (first half): with a dirty buffer, command+o prints the
+  refusal line and opens no panel -- checked here as \"still exactly one
+  window for this pid\" (a real GtkFileDialog would add a second
+  top-level surface), since pid-routed keys can't drive a native panel's
+  buttons anyway even if one did open."
+  []
+  (let [{:keys [proc pid]} (launch! nil)]
+    (wait-for-window! pid 8000)
+    (type-text! pid "1")
+    (cg-key! pid "command + o")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 4000 "Unsaved changes")
+          window-count (count (windows-edn! pid))]
+      (screenshot! pid "step10a-open-refuses-dirty")
+      (check! :open-refuses-dirty (and ok (= 1 window-count)) {:console last :window-count window-count}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- write-latin1-fixture!
+  "A file with one stray non-UTF-8 byte (0xE9, the same byte
+  gtk_selftest_window.clj's own row-open-invalid-utf8 uses), generated at
+  runtime into out-dir rather than checked in -- an intentionally-broken-
+  encoding file has no business living beside the real fixtures, the same
+  reason that self-test row builds its own instead of a static file."
+  []
+  (let [path (str out-dir "/" (System/nanoTime) "-latin1.clj")]
+    (with-open [os (java.io.FileOutputStream. ^String path)]
+      (.write os (byte-array [(byte 0x28) (unchecked-byte 0xE9) (byte 0x29)])))
+    path))
+
+(defn- step-latin1-warning!
+  "Brief step 10 (second half): the Latin-1 warning, checked by launching
+  a SECOND instance with the Latin-1 fixture as its file argument (opening
+  through the native panel would need clicks, which pid-routing can't
+  deliver -- p2t10-brief.md is explicit about this). Also checks the
+  file's bytes are unchanged on disk, since Jonquil must never rewrite a
+  file it only opened."
+  []
+  (let [path (write-latin1-fixture!)
+        before (fs/read-all-bytes path)
+        {:keys [proc pid]} (launch! path)]
+    (wait-for-window! pid 8000)
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "valid UTF-8")
+          after (fs/read-all-bytes path)]
+      (screenshot! pid "step10b-latin1-warning")
+      (check! :latin1-warning (and ok (= (seq before) (seq after)))
+              {:console last :bytes-before (seq before) :bytes-after (seq after)}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-command-chord-close!
+  "Brief step 11: the command chord plus W; the process exits 0. This
+  step's own launch! process is deref'd for its REAL exit code (not just
+  \"pid no longer in pgrep\"), which is the one thing this smoke test can
+  check that the in-process self-test (P2.T10's other commit) cannot --
+  that self-test calls the key handler directly inside the same process
+  it's testing, so it can prove the handler returns 1 but never that the
+  OS process this handler's caller lives in actually terminates with
+  exit 0."
+  []
+  (let [{:keys [proc pid]} (launch! nil)]
+    (wait-for-window! pid 8000)
+    (cg-key! pid "command + w")
+    (let [exit (deref proc 5000 ::timeout)]
+      (if (= ::timeout exit)
+        (do (check! :command-chord-close-exits false {:reason "process did not exit within 5000ms"})
+            (stop! {:proc proc :pid pid}))
+        (do (check! :command-chord-close-exits (zero? (:exit exit)) {:exit (:exit exit)})
+            (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
+
+;; --- driver ----------------------------------------------------------------
+
+(defn- build!
+  "Builds ./jonquil into out-dir (never the repo root -- app:build's own
+  `jolt build -m jonquil.main -o jonquil` task writes there, so this
+  shells the same underlying jolt command with a different -o instead of
+  reusing that task verbatim)."
+  []
+  (fs/create-dirs out-dir)
+  (println "[binary-smoke] building" binary-path "...")
+  (let [{:keys [exit err]} (p/shell {:out :string :err :string :continue true}
+                                    "jolt" "build" "-m" "jonquil.main" "-o" binary-path)]
+    (when-not (zero? exit)
+      (binding [*out* *err*] (println "[binary-smoke] build FAILED:" err))
+      (System/exit 1))))
+
+(def ^:private steps
+  [["run-and-colour" step-run-and-colour!]
+   ["repl-history" step-repl-history!]
+   ["read-line" step-read-line!]
+   ["stop-infinite-loop" step-stop-infinite-loop!]
+   ["stop-print-forever" step-stop-print-forever!]
+   ["save" step-save!]
+   ["open-refuses-dirty" step-open-refuses-dirty!]
+   ["latin1-warning" step-latin1-warning!]
+   ["command-chord-close" step-command-chord-close!]])
+
+(defn -main [& args]
+  (let [t0 (System/currentTimeMillis)
+        no-build (some #{"--no-build"} args)]
+    (fs/create-dirs out-dir)
+    (if no-build
+      (when-not (fs/exists? binary-path)
+        (binding [*out* *err*]
+          (println "[binary-smoke] --no-build given but" binary-path "doesn't exist"))
+        (System/exit 1))
+      (build!))
+    (try
+      (doseq [[name step-fn] steps]
+        (try
+          (step-fn)
+          (catch Exception e
+            (check! (keyword name) false {:exception (ex-message e) :data (ex-data e)}))))
+      (skip! :ime-editor-return "IME composition (Hangul/Thai) needs a real input method; human-only")
+      (skip! :ime-console-return "same as above, console pane; human-only")
+      (finally
+        (kill-all-launched!)))
+    (let [scored (remove #(= :skip (:ok %)) @results)
+          passed (count (filter :ok scored))
+          total (count scored)
+          wall-ms (- (System/currentTimeMillis) t0)]
+      (println (str "SUMMARY " passed " of " total " passed (" wall-ms "ms)"))
+      (System/exit (if (= passed total) 0 1)))))
+
+(apply -main *command-line-args*)

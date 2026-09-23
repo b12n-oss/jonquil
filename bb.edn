@@ -38,6 +38,9 @@
   app:build
   {:doc "Build the ./jonquil binary (unsigned on macOS)"
    :task (shell "jolt" "build" "-m" "jonquil.main" "-o" "jonquil")}
+  smoke:binary
+  {:doc "P2.T10: automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
+   :task (apply shell "bb" "dev/smoke/binary_smoke.clj" *command-line-args*)}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
    :task (let [dir (or (System/getenv "DRCLOJURE_DIR")
