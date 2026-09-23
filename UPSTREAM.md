@@ -14,6 +14,7 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 | `test/jonquil/upstream/syntax_test.clj` | `test/DrClojure/syntax_test.clj` | Ported |
 | `src/jonquil/paint.clj` | `src/DrClojure/syntax.clj` | Re-expresses `highlight-doc!` |
 | `src/jonquil/edit.clj` | `src/DrClojure/ui.clj` | Re-expresses handlers |
+| `src/jonquil/console.clj` | `src/DrClojure/ui.clj` | Re-expresses `attr-normal`, `attr-prompt`, `attr-result`, `attr-error`, `attr-system` as hex colours |
 | `src/jonquil/eval.clj` | `src/DrClojure/eval.clj` | Reworks |
 | `test/jonquil/eval_test.clj` | `test/DrClojure/eval_test.clj` | Ports upstream tests, plus new rows |
 | `test/jonquil/paint_test.clj` | `test/DrClojure/syntax_test.clj` | Re-expresses 3 upstream deftests |
