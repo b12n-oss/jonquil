@@ -216,6 +216,37 @@
              {:result result :text text})
       (next))))
 
+(defn- row-editor-tick-skips-unchanged
+  "M7: tick! used to copy and compare the whole buffer every 20ms even when
+  nothing changed. dirty-check-count only bumps on an actual recompute, so
+  it must stay flat across ~200ms (10 ticks) of idle after a settled edit,
+  then bump again once a real edit happens. dirty-check-count is a
+  monotonic counter for the whole selftest run (earlier rows' own edits
+  already pushed it well above 0), so the first poll compares against a
+  pre-edit snapshot taken JUST before this row's own set-text! -- not
+  pos?, which would already be true from those earlier rows and so
+  wouldn't actually wait for anything."
+  [ed]
+  (fn [next]
+    (let [pre-edit @(:dirty-check-count ed)]
+      (editor/set-text! ed "abc")
+      (poll-until 500 20
+                  (fn [] (> @(:dirty-check-count ed) pre-edit))
+                  (fn [recomputed-once?]
+                    (let [baseline @(:dirty-check-count ed)]
+                      (later 200
+                             (fn []
+                               (let [after-idle @(:dirty-check-count ed)]
+                                 (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "d" -1 1)
+                                 (poll-until 500 20
+                                             (fn [] (> @(:dirty-check-count ed) after-idle))
+                                             (fn [recomputed-after-edit?]
+                                               (check :editor-tick-skips-unchanged
+                                                      (and recomputed-once? (= baseline after-idle) recomputed-after-edit?)
+                                                      {:pre-edit pre-edit :recomputed-once recomputed-once? :baseline baseline
+                                                       :after-idle after-idle :after-edit @(:dirty-check-count ed)})
+                                               (next))))))))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -223,6 +254,7 @@
    row-editor-dirty
    row-editor-emoji-offsets
    row-editor-preedit-guard
+   row-editor-tick-skips-unchanged
    row-on-gui-concurrent])
 
 ;; --- P2.T6: console rows -------------------------------------------------

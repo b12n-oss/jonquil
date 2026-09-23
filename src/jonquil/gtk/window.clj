@@ -27,17 +27,14 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.session :as session]))
 
-;; --- keys (gtk-keys.md; KEY-R and KEY-S-SHIFT are P2.T7 additions the
-;; table doesn't carry) ------------------------------------------------------
+;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
+;; ----------------------------------------------------------------------
 
 (def ^:private KEY-F5 0xffc2)
 (def ^:private KEY-ESCAPE 0xff1b)
 (def ^:private KEY-R 0x72)
 (def ^:private KEY-O 0x6f)
 (def ^:private KEY-S 0x73)
-;; GDK reports a capital S when Shift is held (controller ruling); Save As
-;; accepts either keyval as long as Shift is down.
-(def ^:private KEY-S-SHIFT 0x53)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -213,8 +210,16 @@
   format-error run: a throwing result-line or format-error (both call
   user-supplied formatting logic) can then never leave the status label
   stuck on \"Running…\"; the same goes for reset-busy-hint! (M3), which
-  must re-arm for the next run whether or not the append below throws."
-  [ed cv status-label]
+  must re-arm for the next run whether or not the append below throws.
+
+  is-run? is true for run-definitions! and false for submit-repl! (M11):
+  the EOF-unclosed-bracket hint reads the DEFINITIONS editor's own text,
+  which is only relevant to a Run's own EOF -- a REPL entry's EOF (e.g. an
+  unbalanced string argument to a nested load-string, since a genuinely
+  unbalanced top-level REPL entry never reaches :eval at all per
+  console/input-action) has nothing to do with whatever the Definitions
+  pane currently holds, and must not name it as the culprit."
+  [ed cv status-label is-run?]
   {:on-output (fn [kind s] (cview/append! cv kind s))
    :on-wait-input (fn [waiting?]
                     (set-status! status-label (if waiting? "Waiting for input" "Running…")))
@@ -229,7 +234,8 @@
                   (cview/reset-busy-hint! cv)
                   (let [[kind text] (console/result-line result)]
                     (cview/append! cv kind text))
-                  (when (and (= :error (:status result))
+                  (when (and is-run?
+                             (= :error (:status result))
                              (str/includes? (eval/format-error (:error result)) "EOF while reading"))
                     ;; editor/editor-text calls GTK text-buffer functions, which
                     ;; is a real GTK-thread requirement, not just this project's
@@ -241,11 +247,18 @@
                                  (cview/append! cv :system (str msg "\n")))))))})
 
 (defn- do-run!
-  "1. the upstream banner. 2. run-definitions!, appending a warning if the
-  engine was already busy."
+  "The upstream banner, printed ONLY when the Run actually starts (M1).
+  eval/evaluating? is checked BEFORE run-definitions! and the banner (when
+  printed) goes first, in that order, so it's never possible for the
+  program's own output to land ahead of a banner that hasn't been
+  enqueued yet. When the engine is already busy, run-definitions! returns
+  its warning string instead of starting anything, and only that line is
+  appended -- no banner."
   [ed cv session status-label]
-  (cview/append! cv :system "; --- Running Definitions ---\n")
-  (let [warning (session/run-definitions! session (editor/editor-text ed) (make-eval-opts ed cv status-label))]
+  (when-not (eval/evaluating? (:ctx session))
+    (cview/append! cv :system "; --- Running Definitions ---\n"))
+  (let [warning (session/run-definitions! session (editor/editor-text ed)
+                                          (make-eval-opts ed cv status-label true))]
     (when warning (cview/append! cv :system warning))))
 
 (defn- do-stop! [session]
@@ -259,7 +272,7 @@
   same warning-append bookkeeping, since submit-repl! can return the same
   busy warning run-definitions! can."
   [ed cv session status-label text]
-  (let [warning (session/submit-repl! session text (make-eval-opts ed cv status-label))]
+  (let [warning (session/submit-repl! session text (make-eval-opts ed cv status-label false))]
     (when warning (cview/append! cv :system warning))))
 
 (defn- make-on-submit
@@ -308,20 +321,26 @@
   "evaluating? is (fn [] bool), read live from the engine. M5: the window
   consumes Escape (to Stop) only while something is actually evaluating;
   otherwise it returns 0 so Escape can reach an IME composition (or GTK's
-  own default handling) instead of being swallowed here every time."
+  own default handling) instead of being swallowed here every time.
+
+  M4: keyval is normalised with gdk_keyval_to_lower before every
+  comparison below. Caps Lock reports the UPPERCASE keyval with no Shift
+  bit set, so comparing the raw keyval against lowercase KEY-R/O/S broke
+  those chords under Caps Lock; lower-casing first makes Ctrl+R/O/S fire
+  regardless of Caps Lock, while Save As's own Shift requirement is still
+  checked separately via the modifier mask, not the keyval's case."
   [run-fn stop-fn open-fn save-fn save-as-fn evaluating?]
-  (fn [_ctl keyval _keycode state _data]
-    (cond
-      (= keyval KEY-F5) (do (run-fn) 1)
-      (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
-      (= keyval KEY-ESCAPE) 0
-      (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
-      (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
-      (and (command-chord? state) (shift-held? state)
-           (contains? #{KEY-S KEY-S-SHIFT} keyval))
-      (do (save-as-fn) 1)
-      (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
-      :else 0)))
+  (fn [_ctl keyval0 _keycode state _data]
+    (let [keyval (g/gdk-keyval-to-lower keyval0)]
+      (cond
+        (= keyval KEY-F5) (do (run-fn) 1)
+        (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
+        (= keyval KEY-ESCAPE) 0
+        (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
+        (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
+        (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
+        (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
+        :else 0))))
 
 ;; --- construction ------------------------------------------------------
 
@@ -447,7 +466,11 @@
   self-test rows call these functions directly, exactly as the buttons and
   keys do."
   [opts]
-  (let [app (g/gtk-application-new "net.b12n.jonquil" g/APPLICATION-DEFAULT-FLAGS)]
+  ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
+  ;; process instead of forwarding "activate" into an already-running one
+  ;; over D-Bus (the default GApplication behaviour for a shared app id).
+  (let [app (g/gtk-application-new "net.b12n.jonquil"
+                                   (bit-or g/APPLICATION-DEFAULT-FLAGS g/G-APPLICATION-NON-UNIQUE))]
     (g/g-signal-connect-data app "activate"
                              (callable (fn [app _data] (activate! app opts)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

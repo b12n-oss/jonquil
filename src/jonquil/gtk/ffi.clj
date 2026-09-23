@@ -354,3 +354,21 @@
 ;; GTK_DIALOG_ERROR_DISMISSED } -- DISMISSED is the third value, 2). M2: the
 ;; file-dialog result handlers ignore this one code silently.
 (def GTK-DIALOG-ERROR-DISMISSED 2)
+
+;; gdk_keyval_to_lower: /opt/homebrew/include/gtk-4.0/gdk/gdkkeys.h:47
+;; (guint gdk_keyval_to_lower (guint keyval)). M4: normalises a keyval before
+;; comparing it to a shortcut's letter, so Caps Lock (which reports the
+;; uppercase keyval with no Shift bit set) doesn't break Ctrl+R/O/S.
+(ffi/defcfn gdk-keyval-to-lower "gdk_keyval_to_lower" [:uint] :uint)
+
+;; G_APPLICATION_NON_UNIQUE: /opt/homebrew/include/glib-2.0/gio/gioenums.h:1572
+;; (GApplicationFlags enum, G_APPLICATION_NON_UNIQUE = 1 << 5 = 32). M6: passed
+;; to gtk_application_new so a second launch doesn't just forward its
+;; "activate" into an already-running instance over D-Bus.
+(def G-APPLICATION-NON-UNIQUE (bit-shift-left 1 5))
+
+;; g_application_get_flags: /opt/homebrew/include/glib-2.0/gio/gapplication.h:159-160
+;; (GApplicationFlags g_application_get_flags (GApplication *application)).
+;; Round-trip readback for G-APPLICATION-NON-UNIQUE's own unit test -- doesn't
+;; need a display, only a constructed GApplication object.
+(ffi/defcfn g-application-get-flags "g_application_get_flags" [:pointer] :uint)

@@ -139,11 +139,16 @@
                                 (poll-until 3000 20
                                             (fn [] (str/includes? (since ui mark) "; interrupted"))
                                             (fn [stopped?]
-                                              (check :run-while-running
-                                                     (and started? warned? stopped?)
-                                                     {:started started? :warned warned? :stopped stopped?
-                                                      :console (since ui mark)})
-                                              (next)))))))))
+                                              ;; M1: the refused second Run must not print a
+                                              ;; second banner -- exactly one for the whole row.
+                                              (let [banner-count (count (re-seq #"; --- Running Definitions ---"
+                                                                                (since ui mark)))]
+                                                (check :run-while-running
+                                                       (and started? warned? stopped? (= 1 banner-count))
+                                                       {:started started? :warned warned? :stopped stopped?
+                                                        :banner-count banner-count
+                                                        :console (since ui mark)})
+                                                (next))))))))))
 
 (defn- row-stdin-roundtrip [ui next]
   (let [mark (out-end-offset ui)]
@@ -341,6 +346,9 @@
 
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-ESCAPE 0xff1b)
+;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
+;; Shift bit set in state -- window.clj's own copy is private.
+(def ^:private KEY-S-CAPS 0x53)
 
 (defn- row-escape-yields-when-idle
   "M5: the window-level capture controller used to consume Escape even
@@ -366,6 +374,57 @@
                                          {:idle-result idle-result :started started?
                                           :running-result running-result :stopped stopped?})
                                   (next))))))))
+
+(defn- row-command-chord-capslock
+  "M4: shortcuts compared the raw keyval, so Caps Lock -- which makes GDK
+  report the UPPERCASE keyval with no Shift bit set -- broke Ctrl+S (and
+  Ctrl+R/O, not separately exercised here since they share the same
+  gdk_keyval_to_lower normalisation). Establishes a path via the
+  dialog-free :save-to! (no live dialog needed), dirties the editor, then
+  drives the exact key-controller fn with the Caps-Lock-shaped keyval:
+  it must Save (not Save As, since Shift isn't set), and the file's
+  content must actually update."
+  [ui next]
+  (let [ed (:editor ui)
+        tmp (str (System/getProperty "java.io.tmpdir")
+                 "/jonquil-selftest-capslock-" (System/currentTimeMillis) ".clj")]
+    (editor/set-text! ed "(+ 1 1)")
+    ((:save-to! ui) tmp)
+    (editor/set-text! ed "(+ 2 2)")
+    (let [handled ((:handle-window-key! ui) nil KEY-S-CAPS 0 g/CONTROL-MASK nil)
+          saved-content (slurp tmp)]
+      (check :command-chord-capslock
+             (and (= 1 handled) (= "(+ 2 2)" saved-content))
+             {:handled handled :saved-content saved-content})
+      (.delete (java.io.File. ^String tmp))
+      (next))))
+
+(defn- row-repl-eof-no-editor-hint
+  "M11: the EOF-unclosed-bracket hint reads the DEFINITIONS editor's text,
+  so it must fire only for Runs, never for a REPL error. Sets the
+  Definitions text to something WITH an unclosed bracket -- if the guard
+  were missing, on-complete would misapply this Run-only hint and name
+  THIS opener even though it's the REPL entry's own nested load-string
+  that actually failed. (load-string \"(+ 1\") is balanced at the REPL's
+  own top level (console/input-action lets it through to :eval), so the
+  reader only hits EOF one level down, inside the nested load-string
+  call -- verified against this Jolt to throw exactly \"EOF while
+  reading\" at the top of the exception, same message text as a Run's own
+  unbalanced Definitions."
+  [ui next]
+  (let [ed (:editor ui)
+        cv (:console ui)
+        mark (out-end-offset ui)]
+    (editor/set-text! ed "(defn f [x]")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(load-string \"(+ 1\")" -1 1)
+    (cview/handle-return! cv false)
+    (poll-until 3000 20
+                (fn [] (and (idle? ui) (str/includes? (since ui mark) "EOF while reading")))
+                (fn [ok]
+                  (check :repl-eof-no-editor-hint
+                         (and ok (not (str/includes? (since ui mark) "is never closed.")))
+                         {:console (since ui mark)})
+                  (next)))))
 
 (defn- row-open-refuses-dirty
   "I4: Open silently discarded unsaved edits. Dirties the editor without
@@ -505,6 +564,8 @@
    row-busy-hint-once
    row-console-history-down-empty
    row-escape-yields-when-idle
+   row-command-chord-capslock
+   row-repl-eof-no-editor-hint
    row-open-refuses-dirty
    row-open-invalid-utf8
    row-save-atomic

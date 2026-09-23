@@ -59,22 +59,28 @@
 
 (defn mark-saved!
   "Records the current text as saved, so dirty? reads false until the next
-  change."
+  change. Marks a dirty recompute needed (M7): this changes what dirty?
+  will return without any buffer mutation, so no `changed` signal fires on
+  its own to trigger tick!'s usual recompute trigger."
   [ed]
   (reset! (:saved-text ed) (editor-text ed))
+  (reset! (:dirty-check-needed? ed) true)
   nil)
 
 (defn set-text!
   "Replaces the whole buffer inside begin/end_irreversible_action, so it
   leaves no undo step, and records s as the saved text in the same call --
   before the next tick can run -- so set-text! never itself marks dirty or
-  fires on-dirty-changed!."
+  fires on-dirty-changed!. Also marks a dirty recompute needed (M7),
+  belt-and-braces alongside the `changed` signal set-text buffer itself
+  emits."
   [ed s]
   (let [buf (:buf ed)]
     (g/gtk-text-buffer-begin-irreversible-action buf)
     (g/gtk-text-buffer-set-text buf s -1)
     (g/gtk-text-buffer-end-irreversible-action buf)
     (reset! (:saved-text ed) s))
+  (reset! (:dirty-check-needed? ed) true)
   nil)
 
 (defn dirty?
@@ -146,11 +152,22 @@
         (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-apply-tag buf tag a b)))))))
 
 (defn- tick! [ed]
-  (let [cur (dirty? ed)
-        last-dirty? (:last-dirty? ed)]
-    (when (not= cur @last-dirty?)
-      (reset! last-dirty? cur)
-      (doseq [f @(:on-dirty-fns ed)] (f cur))))
+  ;; M7: dirty? copies and compares the whole buffer, which used to run
+  ;; every 20ms regardless of whether anything changed. Only recompute when
+  ;; a `changed` happened since the last check (or set-text!/mark-saved!
+  ;; ran) -- both set dirty-check-needed?; this consumes it. dirty-check-
+  ;; count is bumped on every ACTUAL recompute, purely so a self-test row
+  ;; can observe that idle ticks skip it (there's no other externally
+  ;; visible difference: dirty? itself is still correct on every call, and
+  ;; on-dirty-fns still only fires on a real flip either way).
+  (when @(:dirty-check-needed? ed)
+    (reset! (:dirty-check-needed? ed) false)
+    (swap! (:dirty-check-count ed) inc)
+    (let [cur (dirty? ed)
+          last-dirty? (:last-dirty? ed)]
+      (when (not= cur @last-dirty?)
+        (reset! last-dirty? cur)
+        (doseq [f @(:on-dirty-fns ed)] (f cur)))))
   (when-let [t @(:dirty-at ed)]
     (when (>= (- (System/currentTimeMillis) t) 60)
       (reset! (:dirty-at ed) nil)
@@ -196,7 +213,12 @@
             :last-dirty? (atom false)
             :on-dirty-fns (atom [])
             :dirty-at (atom nil)
-            :preedit-active? (atom false)}]
+            :preedit-active? (atom false)
+            ;; M7: starts true so the first tick always checks, establishing
+            ;; a baseline; `changed` (below), set-text! and mark-saved! are
+            ;; the only writers after that.
+            :dirty-check-needed? (atom true)
+            :dirty-check-count (atom 0)}]
     (g/gtk-text-view-set-editable view 1)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
@@ -206,6 +228,7 @@
     (g/g-signal-connect-data buf "changed"
                              (callable (fn [_buf _data]
                                          (reset! (:dirty-at ed) (System/currentTimeMillis))
+                                         (reset! (:dirty-check-needed? ed) true)
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
