@@ -676,6 +676,28 @@
         (.delete (java.io.File. ^String tmp))
         (next)))))
 
+;; gtk-keys.md's shared table -- window.clj's own copy is private.
+(def ^:private KEY-W 0x77)
+
+(defn- row-command-chord-close
+  "P2.T10: a command chord (Control here) plus W closes the window, which
+  already quits the app -- gtk_window_close fires the SAME close-request
+  path a real close-button click or OS window-close would. Calls the exact
+  fn the key-pressed signal calls (window.clj's :handle-window-key!), never
+  a synthesized OS keystroke, same pattern as row-escape-yields-when-idle
+  and row-command-chord-capslock above.
+
+  This is deliberately the LAST row: gtk_window_close synchronously fires
+  close-request, which calls g_application_quit, so the running
+  g_application main loop stops once it returns to it and nothing after
+  this row runs. Ends the driver's own run the same way the old
+  unconditional close in run-rows! used to -- now exercised through the
+  product's own chord instead of a bare FFI call."
+  [ui next]
+  (let [handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
+    (check :command-chord-close (= 1 handled) {:handled handled})
+    (next)))
+
 (def ^:private row-fns
   [row-run-output
    row-run-while-running
@@ -697,7 +719,8 @@
    row-save-executable-keeps-mode
    row-save-failure-leaves-original-intact
    row-dialog-dismissed-silent
-   row-save-and-open])
+   row-save-and-open
+   row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
 
@@ -710,11 +733,7 @@
 (defn- run-rows! [ui fns]
   (if (empty? fns)
     (let [passed (count (filter second @results)) total (count @results)]
-      (println (str "SUMMARY " passed " of " total " passed"))
-      ;; gtk_window_close triggers the SAME close-request path a real
-      ;; user's close-button click would -- ending the run this way is
-      ;; also a live check that closing the window quits the app.
-      (later 50 (fn [] (g/gtk-window-close (:window ui)))))
+      (println (str "SUMMARY " passed " of " total " passed")))
     (run-row! ui (first fns) (fn [] (run-rows! ui (rest fns))))))
 
 (defn -main [& _]

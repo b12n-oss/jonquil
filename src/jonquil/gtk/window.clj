@@ -35,6 +35,7 @@
 (def ^:private KEY-R 0x72)
 (def ^:private KEY-O 0x6f)
 (def ^:private KEY-S 0x73)
+(def ^:private KEY-W 0x77)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -375,7 +376,7 @@
           (reset! (:history ctx) new-hist)
           text)))))
 
-;; --- window-level keys: F5, Escape, a command chord plus R/O/S -------------
+;; --- window-level keys: F5, Escape, a command chord plus R/O/S/W ----------
 
 (defn- on-window-key
   "evaluating? is (fn [] bool), read live from the engine. M5: the window
@@ -385,11 +386,18 @@
 
   M4: keyval is normalised with gdk_keyval_to_lower before every
   comparison below. Caps Lock reports the UPPERCASE keyval with no Shift
-  bit set, so comparing the raw keyval against lowercase KEY-R/O/S broke
-  those chords under Caps Lock; lower-casing first makes Ctrl+R/O/S fire
+  bit set, so comparing the raw keyval against lowercase KEY-R/O/S/W broke
+  those chords under Caps Lock; lower-casing first makes Ctrl+R/O/S/W fire
   regardless of Caps Lock, while Save As's own Shift requirement is still
-  checked separately via the modifier mask, not the keyval's case."
-  [run-fn stop-fn open-fn save-fn save-as-fn evaluating?]
+  checked separately via the modifier mask, not the keyval's case.
+
+  P2.T10: a command chord plus W closes the window, normalised and checked
+  the same way as R/O/S. gtk_window_close fires the same close-request
+  handler a real close-button click or OS window-close would, which already
+  calls g_application_quit -- so this needs no extra quit call of its own,
+  and (per the task) no dirty-buffer prompt, same as the close-button/OS
+  path today."
+  [run-fn stop-fn open-fn save-fn save-as-fn close-fn evaluating?]
   (fn [_ctl keyval0 _keycode state _data]
     (let [keyval (g/gdk-keyval-to-lower keyval0)]
       (cond
@@ -400,6 +408,7 @@
         (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
         (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
         (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
+        (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
         :else 0))))
 
 ;; --- construction ------------------------------------------------------
@@ -425,7 +434,8 @@
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))
-        window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn
+        close-fn (fn [] (g/gtk-window-close win))
+        window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
                                      (fn [] (eval/evaluating? (:ctx session))))
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")

@@ -179,6 +179,7 @@ plain file at that name.
 | Cmd/Ctrl+O | anywhere in the window | Open |
 | Cmd/Ctrl+S | anywhere in the window | Save |
 | Cmd/Ctrl+Shift+S | anywhere in the window | Save As |
+| Cmd/Ctrl+W | anywhere in the window | Close the window, which quits the app |
 | Return | console prompt | Evaluate, send the line as stdin, or insert a newline for an unfinished multi-line entry |
 | Shift+Return | console prompt | Always insert a newline |
 | Up | console prompt, first line of input | Recall the previous history entry |
