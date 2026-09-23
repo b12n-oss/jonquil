@@ -23,7 +23,7 @@ bb app:run file.clj  # opens file.clj in the Definitions editor
 ## Building
 
 ```bash
-bb app:build   # writes ./jonquil (gitignored), a self-contained binary
+bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
 ```
 
 The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
@@ -35,7 +35,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-All of Phase 1 (core utilities) runs without GTK. Run `bb test` to verify. As of 2026-09-23, 54 tests pass (454 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-23, 71 tests pass (506 assertions).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
@@ -49,4 +49,6 @@ All of Phase 1 (core utilities) runs without GTK. Run `bb test` to verify. As of
 bb check                  # require every namespace, exit 0
 bb test                   # all test namespaces; exits 1 on any failure or error
 bb test jonquil.edit-test # one namespace (the TDD loop)
+bb gtk:selftest           # real-window self-tests (opens windows; don't type while it runs)
+bb docs:shots             # re-capture docs/images/*.png, one process per scene
 ```

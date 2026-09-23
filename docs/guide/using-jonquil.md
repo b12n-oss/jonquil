@@ -137,21 +137,21 @@ syllable is still underlined and uncommitted, Jonquil lets GTK handle the
 key itself: the syllable commits, and a plain newline is inserted, with no
 smart indent in the editor and no evaluation in the console. Press Return
 again once the syllable has landed, and it does what you'd expect: the
-editor indents, or the console evaluates. This showed up clearly during
-testing with Hangul: typing `(def 안녕 "...")` and completing it normally
-returns `#'user/안녕`, and typing `"한글"` at the prompt with the closing
-character still composing takes two Returns, the first to commit the
-character and the second to evaluate, giving `=> "한글"` with nothing left
-behind at the next prompt.
+editor indents, or the console evaluates. In testing with 2-Set Korean, a
+syllable still underlined in the editor committed first and was followed by
+a plain newline at column 0, and Hangul names worked end to end: typing
+`(def 안녕 "...")` at the prompt returned `#'user/안녕`. Typing a closing
+character such as `"` or `)` after a Hangul syllable commits the syllable
+by itself, so an entry that ends that way needs only one Return.
 
 ## Open and Save
 
 Cmd/Ctrl+O opens a file into the Definitions pane. If the pane has unsaved
 changes, the first Open attempt refuses and prints a warning instead of
 discarding your edits: "Unsaved changes. Save first, or Open again to
-discard them." Pressing Open again while still dirty goes ahead and
-discards them. Saving first, or doing nothing and Opening a third time,
-starts that same one-warning cycle over.
+discard them." Pressing Open again goes ahead and discards them. Each new
+round of unsaved edits gets its own warning, so a Save in between starts
+the count over.
 
 Opening a file that isn't valid UTF-8 doesn't fail either. Bytes that
 can't be decoded turn into the replacement character, and the console
