@@ -58,11 +58,10 @@
   string when a program is already running (and then resets nothing)."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
-  (if (eval/evaluating? ctx)
-    (eval/eval-async ctx code opts)
-    (do (when (= :reset (:mode @state)) (reset-namespaces! session))
-        (create-ns 'user)
-        (evaluate! session code 'user opts)))))
+   (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
+     (reset-namespaces! session))
+   (create-ns 'user)
+   (evaluate! session code 'user opts)))
 
 (defn submit-repl!
   "Evaluates one REPL entry in the namespace the last evaluation left, and
