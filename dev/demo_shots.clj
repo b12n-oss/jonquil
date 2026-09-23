@@ -1,10 +1,25 @@
 (ns demo-shots
   "P2.T9: opens the REAL Jonquil window via jonquil.main/start! and drives it
-  through a fixed list of scenes, screenshotting each one with cgevent once
-  its expected text is visible and the frame has settled, then closes the
-  window. One window for the whole run (never rebuilt between scenes), which
-  is what keeps every screenshot the same size -- window.clj already opens
-  at a fixed 900x700 default size on every construction.
+  through exactly ONE scene per process, screenshotting it with cgevent
+  once its expected text is visible and the frame has settled, then closes
+  the window and exits. `-main` takes the scene id as its one argument
+  (`jolt -M:shots window`, etc.); bb's docs:shots task loops over every
+  scene id and launches a fresh `jolt -M:shots <scene-id>` process for
+  each one (see bb.edn's docs:shots task and this file's own `scenes`
+  list, hand-kept in sync the same way dev/check.clj and
+  dev/test_runner.clj's namespace lists are).
+
+  Round 1 (P2.T9 controller review) replaced an earlier version that ran
+  all 7 scenes against ONE shared window/process: every scene after the
+  first inherited every earlier scene's console history, so stdin.png
+  showed hello.clj's output twice plus a REPL entry, and
+  run-while-running.png was mostly other scenes' leftover text. A fresh
+  process per scene means a fresh session, a fresh window and an empty
+  console every time -- each image shows only its own scene. Window size
+  stays identical across scenes for the same reason it always did:
+  window.clj opens at a fixed 900x700 default size on every construction,
+  and every scene here still only ever builds one window for its one
+  scene, never rebuilding.
 
   Timing follows dev/gtk_selftest_window.clj's own pattern verbatim (later,
   poll-until, since, idle?, out-end-offset are small copies of that file's
@@ -296,30 +311,40 @@
                                                                                 {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
                                                                         (next)))))))))))))
 
-(def ^:private scene-fns
-  [scene-window
-   scene-repl
-   scene-stdin
-   scene-stop
-   scene-unbalanced
-   scene-unicode
-   scene-run-while-running])
+;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
+;; Kept in sync by hand with that task's own scene-id list, the same way
+;; dev/check.clj and dev/test_runner.clj's namespace lists are.
+(def ^:private scenes
+  [[:window scene-window]
+   [:repl scene-repl]
+   [:stdin scene-stdin]
+   [:stop scene-stop]
+   [:unbalanced scene-unbalanced]
+   [:unicode scene-unicode]
+   [:run-while-running scene-run-while-running]])
 
-;; --- driver ------------------------------------------------------------
+;; --- driver: exactly one scene per process --------------------------------
 
-(defn- run-scene! [ui scene-fn next]
+(defn- run-scene! [ui scene-fn done]
   (editor/set-text! (:editor ui) "")
   (cview/clear-input! (:console ui))
   (poll-until 2000 20 (fn [] (idle? ui))
-              (fn [_idle?] (scene-fn ui next))))
+              (fn [_idle?] (scene-fn ui done))))
 
-(defn- run-scenes! [ui fns]
-  (if (empty? fns)
-    (let [passed (count (filter :ok @results)) total (count @results)]
-      (log "SUMMARY" passed "of" total "scenes passed")
-      (later 50 (fn [] (g/gtk-window-close (:window ui)))))
-    (run-scene! ui (first fns) (fn [] (run-scenes! ui (rest fns))))))
-
-(defn -main [& _]
-  (main/start! {:on-ready (fn [ui] (later 300 (fn [] (run-scenes! ui scene-fns))))})
-  (System/exit (if (and (seq @results) (every? :ok @results)) 0 1)))
+(defn -main [& args]
+  (let [scene-id (some-> (first args) keyword)
+        scene-fn (some (fn [[id f]] (when (= id scene-id) f)) scenes)]
+    (if-not scene-fn
+      (do (log "usage: jolt -M:shots <scene-id>, one of:"
+               (str/join ", " (map (fn [[id _]] (name id)) scenes)))
+          (log "got:" (pr-str (first args)))
+          (System/exit 1))
+      (do
+        (main/start!
+         {:on-ready (fn [ui]
+                      (later 300
+                             (fn []
+                               (run-scene! ui scene-fn
+                                           (fn []
+                                             (later 50 (fn [] (g/gtk-window-close (:window ui)))))))))})
+        (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))

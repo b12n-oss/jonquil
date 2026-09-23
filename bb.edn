@@ -13,10 +13,25 @@
            (when-not ok2 (println "gtk:selftest: window rows FAILED"))
            (System/exit (if (and ok1 ok2) 0 1)))}
   docs:shots
-  {:doc "Self-capture docs/images/*.png (+ one GIF) by driving the real window"
-   :task (let [r (shell {:continue true} "jolt" "-M:shots")]
-           (when-not (zero? (:exit r)) (println "docs:shots: one or more scenes FAILED"))
-           (System/exit (:exit r)))}
+  {:doc "Self-capture docs/images/*.png (+ one GIF): one fresh process per scene"
+   ;; P2.T9 round 1: one shared process/window for all 7 scenes let every
+   ;; scene inherit every earlier scene's console history, so a scene's
+   ;; screenshot showed more than its own output. A fresh `jolt -M:shots
+   ;; <scene-id>` process per scene means a fresh session and an empty
+   ;; console every time. This scene-id list is kept in sync by hand with
+   ;; dev/demo_shots.clj's own `scenes` list, the same way dev/check.clj
+   ;; and dev/test_runner.clj's namespace lists are.
+   :task (let [scene-ids ["window" "repl" "stdin" "stop" "unbalanced" "unicode" "run-while-running"]
+               results (mapv (fn [id]
+                               (let [r (shell {:continue true} "jolt" "-M:shots" id)]
+                                 {:id id :ok (zero? (:exit r))}))
+                             scene-ids)
+               failed (filterv (fn [r] (not (:ok r))) results)]
+           (doseq [r results]
+             (println (str "docs:shots: " (:id r) " " (if (:ok r) "PASS" "FAIL"))))
+           (when (seq failed)
+             (println (str "docs:shots: " (count failed) " of " (count results) " scenes FAILED")))
+           (System/exit (if (seq failed) 1 0)))}
   run
   {:doc "Run Jonquil, optionally passing a file to open"
    :task (apply shell "jolt" "-M" "-m" "jonquil.main" *command-line-args*)}
