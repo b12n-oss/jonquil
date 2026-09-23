@@ -199,8 +199,9 @@ than being surprises you'd otherwise have to rediscover:
   See the Unicode section above.
 - Closing the window with unsaved changes doesn't ask first. Save before
   you close if you're not sure.
-- Closing the window, or Cmd/Ctrl+W, while a program runs stops it and
-  quits.
+- Closing the window, or Cmd/Ctrl+W, while a program runs quits Jonquil
+  at once, which ends the program too. It isn't a Stop: nothing is printed,
+  and the program gets no chance to finish what it was doing.
 - Text left at the prompt after a program stops waiting on it is read as
   a Clojure entry on your next Return, not as leftover stdin.
 - Saving through a symlink that points at nothing replaces the link with
