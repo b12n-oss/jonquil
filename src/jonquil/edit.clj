@@ -249,7 +249,8 @@
   -- each of those is upstream's own no-op or error-dialog path, and none of
   them has anything to apply."
   [{:keys [text caret sel-start sel-end]} new-name]
-  (let [selected (when (< sel-start sel-end) (str/trim (subs text sel-start sel-end)))
+  (let [new-name (str/trim (str new-name))
+        selected (when (< sel-start sel-end) (str/trim (subs text sel-start sel-end)))
         old-sym (if (and selected (re-matches code-symbol-re selected))
                   selected
                   (:symbol (syntax/symbol-at-pos text caret)))]

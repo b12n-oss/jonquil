@@ -277,4 +277,16 @@
   a word that only ever appears inside a comment finds nothing to rename"
     (let [text "; foo bar\n(baz 1)"
           s (str/index-of text "bar")]
-      (is (nil? (edit/rename (snap-sel text s (+ s 3)) "quux"))))))
+      (is (nil? (edit/rename (snap-sel text s (+ s 3)) "quux")))))
+
+  (testing "a whitespace-padded new name is trimmed first, like upstream's
+  own (str/trim (str input)) -- renames exactly like the untrimmed name"
+    (let [text "(defn foo [x] (+ foo x))\n\"a string with foo inside\"\n; a comment about foo\n"
+          caret (str/index-of text "foo")
+          untrimmed (edit/rename (snap text caret) "bar")
+          padded (edit/rename (snap text caret) " bar ")]
+      (is (= (edit/apply-edits text (:edits untrimmed))
+             (edit/apply-edits text (:edits padded))))
+      (is (= (:caret untrimmed) (:caret padded)))
+      (is (= "(defn bar [x] (+ bar x))\n\"a string with foo inside\"\n; a comment about foo\n"
+             (edit/apply-edits text (:edits padded)))))))
