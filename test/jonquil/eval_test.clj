@@ -389,3 +389,12 @@
   (let [[r out] (run-sync (sut/make-eval-context) "(doc inc)")]
     (is (= :ok (:status r)))
     (is (str/includes? (apply str (map second @out)) "inc"))))
+
+(deftest p2-stop-leaves-a-finishing-worker-alone
+  (let [ctx (sut/make-eval-context)
+        flag (atom false)]
+    (reset! (:running-state ctx) {:status :running :finishing true
+                                  :token (jolt.host/make-interrupt)
+                                  :done (promise) :stop-requested flag})
+    (is (nil? (sut/stop-eval! ctx)))
+    (is (false? @flag) "a finishing run is not re-classified as interrupted")))

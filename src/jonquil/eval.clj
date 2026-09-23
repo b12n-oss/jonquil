@@ -160,8 +160,11 @@
    its callbacks run under the lock."
   [{:keys [queue running-state lock]}]
   (locking lock
-    (let [{:keys [status token thread done stop-requested]} @running-state]
-      (when (= :running status)
+    (let [{:keys [status token thread done stop-requested finishing]} @running-state]
+      ;; A worker that has marked itself :finishing has its result and is
+      ;; about to clear its interrupt flag; interrupting it now would re-arm
+      ;; the flag for its callbacks (P2 hardening), so Stop leaves it alone.
+      (when (and (= :running status) (not finishing))
         (reset! stop-requested true)
         (jolt.host/interrupt! token)
         (when thread (try (.interrupt ^Thread thread) (catch :default _ nil)))
@@ -175,8 +178,12 @@
    throwing callback loses only itself, never the completion it would
    otherwise have swallowed (fix I1)."
   [who e]
-  (binding [*out* *err*]
-    (println (str "jonquil.eval: " who " threw: " (ex-message e)))))
+  ;; Last resort: if even reporting fails (stderr closed), drop the report
+  ;; rather than skip the deliver/on-complete the callers rely on.
+  (try
+    (binding [*out* *err*]
+      (println (str "jonquil.eval: " who " threw: " (ex-message e))))
+    (catch :default _ nil)))
 
 (defn eval-async
   "Evaluates code on a worker. Options:
@@ -315,6 +322,11 @@
               ;; on-status-change/on-complete -- a GUI's .put onto a queue,
               ;; say -- would otherwise throw InterruptedException
               ;; immediately, silently losing the completion.
+              (locking lock
+                (swap! running-state
+                       (fn [s] (if (identical? (:token s) token)
+                                 (assoc s :finishing true)
+                                 s))))
               (Thread/interrupted)
               ;; Fix #3: reset-to-idle and its notification are one locked
               ;; unit, so a new eval-async's own registration (locked, above)
