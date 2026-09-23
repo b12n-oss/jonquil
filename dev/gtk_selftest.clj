@@ -375,7 +375,14 @@
                     (let [gaps (map - (rest @samples) @samples)
                           max-gap (if (seq gaps) (apply max gaps) 0)
                           out-chars (- (count (g/buffer-text (:buf cv))) 2)]
-                      (check :console-flood (and ok (<= out-chars cview/MAX-OUTPUT-CHARS))
+                      ;; I7: drain! no longer inserts a whole oversized batch
+                      ;; before trimming, and trim! measures out-end's own
+                      ;; offset instead of copying the output region just to
+                      ;; count it -- both bounded costs, so the GTK main
+                      ;; loop's tick cadence should stay well under 1s even
+                      ;; under this flood (measured 90-144ms pre-fix, 99-111ms
+                      ;; post-fix across this fix wave's own runs).
+                      (check :console-flood (and ok (<= out-chars cview/MAX-OUTPUT-CHARS) (< max-gap 1000))
                              {:last-line-visible ok
                               :output-chars out-chars
                               :max-output-chars cview/MAX-OUTPUT-CHARS

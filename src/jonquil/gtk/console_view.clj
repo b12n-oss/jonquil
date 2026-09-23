@@ -94,16 +94,20 @@
 
 ;; --- draining output ---------------------------------------------------
 
-(defn- output-text
-  "The output region's text: offset 0 to out-end."
-  [cv]
-  (text-range (:buf cv) 0 (mark-offset (:buf cv) (:out-end cv))))
-
 (defn- coalesce
   "Consecutive same-kind [kind s] chunks merged into one, preserving order."
   [chunks]
   (mapv (fn [group] [(ffirst group) (apply str (map second group))])
         (partition-by first chunks)))
+
+(defn- clip-to-cap
+  "text's last max characters, or text unchanged when it already fits (I7).
+  Applied per coalesced run before it's ever inserted: a print-forever
+  program can queue a single batch far bigger than the cap before a drain
+  gets a chance to run, and there's no point inserting (and read-only/
+  style-tagging) the part trim! would delete a moment later anyway."
+  [text max]
+  (if (> (count text) max) (subs text (- (count text) max)) text))
 
 (defn- insert-chunk!
   "Inserts text at out-end and tags it read-only plus its kind's style. Right
@@ -119,13 +123,23 @@
         (when-let [tag (get tags kind)] (g/gtk-text-buffer-apply-tag buf tag a b))))))
 
 (defn- trim!
-  "When the output region exceeds MAX-OUTPUT-CHARS, deletes
-  console/trim-length characters from offset 0 -- always inside the output
-  region, never touching the prompt or the input."
+  "When the output region (0..out-end) is over MAX-OUTPUT-CHARS, deletes
+  characters from its front so it fits -- cutting after a newline where one
+  exists in the part that must go, console/trim-length's exact rule, but
+  computed from out-end's own offset (gtk_text_iter_get_offset, via
+  mark-offset) instead of copying the whole output region just to measure
+  it (I7). Only the small tail near the cut point (at most
+  MAX-OUTPUT-CHARS + 1 characters, never the full region) is ever read."
   [cv]
-  (let [n (console/trim-length (output-text cv) MAX-OUTPUT-CHARS)]
-    (when (pos? n)
-      (g/with-iters* (:buf cv) 0 n (fn [a b] (g/gtk-text-buffer-delete (:buf cv) a b))))))
+  (let [buf (:buf cv)
+        n (mark-offset buf (:out-end cv))]
+    (when (> n MAX-OUTPUT-CHARS)
+      (let [must (- n MAX-OUTPUT-CHARS)
+            from (dec must)
+            tail (text-range buf from n)
+            nl (str/index-of tail "\n")
+            cut (if nl (+ from nl 1) must)]
+        (g/with-iters* buf 0 cut (fn [a b] (g/gtk-text-buffer-delete buf a b)))))))
 
 (defn- scroll-to-end!
   "Scrolls the view to the buffer's end via a dedicated mark, since
@@ -142,13 +156,16 @@
   applies -- so a chunk that lands in the gap between the flip and the take
   is never stranded: it either lands in the vector this reset-vals! takes,
   or its own append! wins the next compare-and-set! and schedules a second,
-  harmless drain. One drain handles everything queued: it coalesces,
-  inserts, trims once, then scrolls once."
+  harmless drain. One drain handles everything queued: it coalesces, clips
+  each run to MAX-OUTPUT-CHARS before inserting it (I7 -- a print-forever
+  program can queue a batch far bigger than the cap between drains), then
+  trims once and scrolls once."
   [cv]
   (reset! (:drain-scheduled? cv) false)
   (let [chunks (first (reset-vals! (:queue cv) []))]
     (when (seq chunks)
-      (doseq [[kind text] (coalesce chunks)] (insert-chunk! cv kind text))
+      (doseq [[kind text] (coalesce chunks)]
+        (insert-chunk! cv kind (clip-to-cap text MAX-OUTPUT-CHARS)))
       (trim! cv)
       (scroll-to-end! cv))))
 
