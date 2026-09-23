@@ -11,7 +11,9 @@
     jonquil.eval
     jonquil.console
     jonquil.session
-    jonquil.gtk.ffi])
+    jonquil.gtk.ffi
+    jonquil.gtk.callbacks
+    jonquil.gtk.editor])
 
 (defn -main [& _]
   (doseq [n namespaces]

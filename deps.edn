@@ -21,4 +21,7 @@
          :main-opts ["-m" "test-runner"]}
   ;; Headless compile-check: requires every project namespace and exits.
   :check {:extra-paths ["dev"]
-          :main-opts ["-m" "check"]}}}
+          :main-opts ["-m" "check"]}
+  ;; GTK self-test: opens a real window and runs the front-end rows.
+  :selftest {:extra-paths ["dev"]
+             :main-opts ["-m" "gtk-selftest"]}}}

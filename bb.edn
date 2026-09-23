@@ -3,6 +3,9 @@
          :task (apply shell "jolt" "-M:test" *command-line-args*)}
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
+  gtk:selftest
+  {:doc "Open a real GTK window and run the P2 front-end self-test rows"
+   :task (shell "jolt" "-M:selftest")}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
    :task (let [dir (or (System/getenv "DRCLOJURE_DIR")
