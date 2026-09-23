@@ -1,4 +1,19 @@
 {:paths ["src"]
+ :jolt/native [{:name "glib-2.0" :optional true
+                :darwin ["/opt/homebrew/lib/libglib-2.0.0.dylib" "/usr/local/lib/libglib-2.0.0.dylib" "libglib-2.0.0.dylib"]
+                :linux ["libglib-2.0.so.0" "libglib-2.0.so"]}
+               {:name "gobject-2.0" :optional true
+                :darwin ["/opt/homebrew/lib/libgobject-2.0.0.dylib" "/usr/local/lib/libgobject-2.0.0.dylib" "libgobject-2.0.0.dylib"]
+                :linux ["libgobject-2.0.so.0" "libgobject-2.0.so"]}
+               {:name "gio-2.0" :optional true
+                :darwin ["/opt/homebrew/lib/libgio-2.0.0.dylib" "/usr/local/lib/libgio-2.0.0.dylib" "libgio-2.0.0.dylib"]
+                :linux ["libgio-2.0.so.0" "libgio-2.0.so"]}
+               {:name "pango-1.0" :optional true
+                :darwin ["/opt/homebrew/lib/libpango-1.0.0.dylib" "/usr/local/lib/libpango-1.0.0.dylib" "libpango-1.0.0.dylib"]
+                :linux ["libpango-1.0.so.0" "libpango-1.0.so"]}
+               {:name "gtk-4" :optional true
+                :darwin ["/opt/homebrew/lib/libgtk-4.1.dylib" "/usr/local/lib/libgtk-4.1.dylib" "libgtk-4.1.dylib"]
+                :linux ["libgtk-4.so.1" "libgtk-4.so"]}]
  :aliases
  {;; Project tests. Pass namespace names to run a subset:
   ;;   jolt -M:test jonquil.edit-test
