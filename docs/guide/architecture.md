@@ -26,6 +26,17 @@ Jonquil is a port of DrClojure's idea to Jolt: a Clojure IDE with a Definitions 
             pure         pure        threads       pure + runtime
 ```
 
+Phase 3 and the Themes phase added three more pure namespaces alongside
+these:
+
+- `jonquil.commands`: the run-selection text, the pre-Run bracket check,
+  next/prev match, replace-current and replace-all, the format
+  operations, and the zoom sizes.
+- `jonquil.theme`: the four palettes as data, plus `theme`, `next-theme`
+  and `code-css`.
+- `jonquil.settings`: `settings-path`, `load-settings` (never throws) and
+  `save-settings!` (atomic, never throws).
+
 The front-end and the core use plain data to communicate. When the user edits, the GTK TextBuffer sends a snapshot to the core:
 
 ```clojure
@@ -54,7 +65,8 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 
 - `jonquil.gtk.ffi`: the raw GTK4/GLib/GObject/pango bindings, plus the low-level GtkTextIter/mark helpers everything else builds on.
 - `jonquil.gtk.callbacks`: the `callable` macro that turns a Clojure function into a retained, `:collect-safe` foreign-callable (GTK invokes callbacks from inside its own blocking main loop, so a collected one would crash it), and `on-gui!`, the one function safe to call from any thread to hand a thunk to the GTK main thread.
-- `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter.
+- `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
+- `jonquil.gtk.find-bar`: the find and replace bar, with its own `handle-key!` and match highlighting through a `search-match` tag.
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
 - `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, Esc, Cmd/Ctrl+R/O/S), the file dialogs, and the wiring between `jonquil.session` and the two views.
 
@@ -89,6 +101,12 @@ Two `bb` tasks drive the real GTK front end headlessly, without a human at the k
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
 Both poll a condition against a deadline rather than sleeping, and both hand any blocking subprocess call (screenshots, GIF recording) to a `future` so the GTK thread itself never blocks.
+
+### Themes
+
+Applying a theme doesn't rebuild anything: each component's `apply-theme!` retints its existing tags in place, so text, undo history and highlights all survive the switch. The window then reloads its one CSS provider, the same one zoom uses, from `theme/code-css`, and sets `gtk-interface-color-scheme` on GtkSettings to `DARK` or `LIGHT` so GTK's own chrome follows along.
+
+Isolation matters here too: self-tests and `bb docs:shots` pass a temp `:settings-path`, and `bb smoke:binary` sets `XDG_CONFIG_HOME` to a temp directory, so none of the harnesses ever touches the user's real settings file.
 
 ## The eval engine
 

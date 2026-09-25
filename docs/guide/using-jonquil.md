@@ -2,8 +2,8 @@
 
 Jonquil is a DrRacket-style IDE for Clojure: a Definitions editor above an
 Interactions console, with a Run button that runs the top pane and a Stop
-that actually stops it. This page walks through the window as it stands at
-the end of Phase 2.
+that actually stops it. This page walks through the window as it stands
+after Phase 3 and the Themes phase.
 
 ## The window
 
@@ -24,15 +24,27 @@ and gains a leading `* ` the moment the editor has unsaved changes.
 ## Running a program
 
 Press **Run**, **F5**, or **Cmd/Ctrl+R** to evaluate everything in the
-Definitions pane, top to bottom. The console prints a `; --- Running
-Definitions ---` banner (only when nothing else is already running), then
-streams the program's own output as it prints, and finishes with the
-result on its own line: `=> 3`, say, for whatever the last form
-evaluates to. The status label tracks the run and settles back on `Ready`
-when it's done.
+Definitions pane, top to bottom. Before anything runs, Jonquil checks the
+pane's brackets and refuses to run a broken one; see "The friendly
+unclosed-bracket message" below for what that looks like. If a program is
+already running, Run doesn't queue a second one; it just warns that one is
+running already. Once the brackets check out, the console prints a `;
+--- Running Definitions ---` banner (only when nothing else is already
+running), then streams the program's own output as it prints, and
+finishes with the result on its own line: `=> 3`, say, for whatever the
+last form evaluates to. The status label tracks the run and settles back
+on `Ready` when it's done.
 
 `docs/demos/hello.clj` is the simplest case: it prints a line, leaves a
 value behind, and shows exactly that shape.
+
+You can also run just part of the Definitions pane: select some text (or
+put the caret on a line with no selection) and press **Cmd/Ctrl+E** to
+evaluate the selection, or the current line, at the console prompt. It
+shows up there like anything else you typed, with its result, and joins
+the REPL history.
+
+![A selection run at the console with Cmd/Ctrl+E, shown with its result](../images/run-selection.png)
 
 ## The REPL prompt, and how it differs from Run
 
@@ -112,13 +124,54 @@ got cleared.
 ![unbalanced.clj's Run result: a plain-language sentence naming the unclosed bracket and its line](../images/unbalanced.png)
 
 Forget a closing paren, and Jonquil doesn't hand you a raw reader
-exception. It names the opening bracket and the line it's on: something
-like "The ( on line 6 is never closed." `docs/demos/unbalanced.clj` is
-deliberately broken this way. This only fires for a Run, and only when the
-reader actually runs out of file to read; if your program throws a normal
-runtime error earlier and only then has an unclosed bracket at the very
-end, you'll see the earlier error instead. It's a known gap, not a bug in
-the detection.
+exception. Run checks the pane's brackets before it evaluates anything, so
+an unclosed opener names itself and its line, something like "The ( on
+line 6 is never closed.", and a stray closer with no opener to match does
+the same, "The ) on line 1 has no matching opener." Either way, nothing
+runs. `docs/demos/unbalanced.clj` is deliberately broken this way.
+
+## Editing
+
+Typing `(`, `[`, `{` or `"` inserts the matching closer right along with
+it, or wraps a selection in the pair instead of replacing it. Type the
+closing character yourself over one Jonquil already inserted and it steps
+past the existing one rather than adding a second, and Backspace removes
+an empty pair in a single press instead of leaving a stray opener behind.
+
+Tab indents the current line, or every line in a selection, one level;
+Shift+Tab unindents the same way. Cmd/Ctrl+/ or Cmd/Ctrl+; toggles line
+comments on the line or selection. Cmd/Ctrl+Shift+F formats the whole
+file, and Cmd/Ctrl+Option+F (Alt+F on Linux and Windows keyboards) or the
++L equivalent formats just the selection or the current line. A format is
+one undo step, so a single Cmd/Ctrl+Z puts the file back the way it was.
+Cmd/Ctrl+Z undoes more generally; Cmd/Ctrl+Shift+Z, GTK's own binding,
+and Cmd/Ctrl+Y both redo.
+
+F6 moves focus between the Definitions editor and the Interactions
+console, so a keyboard-only user can reach the prompt without touching
+the mouse. Cmd/Ctrl+L clears the console's output history while leaving
+whatever's typed at the prompt alone. Cmd/Ctrl+= (or Cmd/Ctrl++) zooms
+in, Cmd/Ctrl+- zooms out, and Cmd/Ctrl+0 resets the zoom, and all three
+resize both panes together. The status bar tracks the editor caret as
+`Ln L, Col C`, following clicks, the arrow keys and ordinary typing.
+
+## Find and replace
+
+![The find bar open over a query, with matches highlighted and a count](../images/find.png)
+
+Cmd/Ctrl+F opens the find bar. Cmd/Ctrl+H opens the same bar with its
+replace field showing too. Select a single line of text first and the
+bar opens prefilled with it. Every match in the pane highlights as you
+type, and a count beside the field says where you stand, "2 of 5", or
+"No matches" when there's nothing to find.
+
+Return, F3 or Cmd/Ctrl+G moves to the next match; Shift+Return, Shift+F3
+or Cmd/Ctrl+Shift+G moves to the previous one. F3 and Cmd/Ctrl+G also
+work with focus back in the editor, not just while the find bar has it.
+Replace swaps the current match and Replace All swaps every one, and
+each of those is a single undo step. Escape closes the bar, but only
+while the bar itself has focus; with focus somewhere else, Escape keeps
+its usual job of stopping a running program.
 
 ## Unicode and IME
 
@@ -169,6 +222,49 @@ updates the file it points to, leaving the link itself in place; saving
 through a symlink that points at nothing yet replaces the link with a
 plain file at that name.
 
+![The close prompt: Save, Don't Save and Cancel over unsaved changes](../images/close-prompt.png)
+
+Closing with unsaved changes asks first, however you close: Cmd/Ctrl+W,
+the window's own close button, Cmd+Q, Dock → Quit, or logging out all
+raise the same prompt, offering Save, Don't Save and Cancel. Cancel, or
+dismissing the prompt any other way, leaves everything open and
+untouched. If a save fails or you cancel partway through it, the window
+stays open too, so a bad save can't quietly close your work out from
+under you. `docs/demos/close-prompt.clj` is there to try it on: make an
+edit, then close the window.
+
+## Themes
+
+Cmd/Ctrl+Shift+M cycles through four themes, in order: light (the
+default), dark, solarized, navy. The status bar names the current one,
+`Theme: dark`, say, except while a program is running, when it's busy
+showing that instead.
+
+![Jonquil's window in the light theme](../images/theme-light.png)
+![Jonquil's window in the dark theme](../images/theme-dark.png)
+![Jonquil's window in the solarized theme](../images/theme-solarized.png)
+![Jonquil's window in the navy theme](../images/theme-navy.png)
+
+A theme recolours both panes: background, text, syntax highlighting,
+rainbow brackets, the unmatched-bracket colour, the caret, selections,
+the find highlight, and the different kinds of console output. GTK's own
+chrome switches to its dark or light variant to match, and dark and navy
+both count as dark for that purpose. Inside a find match, the text keeps
+the theme's plain text colour instead of its syntax colour, so it stays
+readable against the highlight.
+
+Solarized keeps the lower contrast of the a-sibling-cljd-app palette it's
+drawn from. Dark and navy are built for night use.
+
+The choice sticks: it's saved to
+`$XDG_CONFIG_HOME/jonquil/settings.edn` (or `~/.config/jonquil/settings.edn`
+when that variable isn't set) as `{:theme :navy}`, or whichever theme you
+picked. A missing settings file starts Jonquil in light, with nothing
+said about it; a file that can't be read, or that names a theme Jonquil
+doesn't know, also starts it in light, but says so once in the console.
+A settings file that's a symlink stays a symlink after Jonquil saves
+through it. To go back to light, delete the file.
+
 ## Keys
 
 | Key | Where | Does |
@@ -179,7 +275,30 @@ plain file at that name.
 | Cmd/Ctrl+O | anywhere in the window | Open |
 | Cmd/Ctrl+S | anywhere in the window | Save |
 | Cmd/Ctrl+Shift+S | anywhere in the window | Save As |
-| Cmd/Ctrl+W | anywhere in the window | Close the window, which quits the app |
+| Cmd/Ctrl+W | anywhere in the window | Close the window (asks first over unsaved changes), which quits the app |
+| ( [ { " | Definitions editor | Auto-pair the closer, or wrap the selection |
+| Tab | Definitions editor | Indent the line or selection |
+| Shift+Tab | Definitions editor | Unindent the line or selection |
+| Cmd/Ctrl+/ | Definitions editor | Toggle line comments |
+| Cmd/Ctrl+; | Definitions editor | Toggle line comments |
+| Cmd/Ctrl+Shift+F | Definitions editor | Format the whole file |
+| Cmd/Ctrl+Option(Alt)+F | Definitions editor | Format the selection or current line |
+| Cmd/Ctrl+Option(Alt)+L | Definitions editor | Format the selection or current line |
+| Cmd/Ctrl+Z | anywhere in the window | Undo |
+| Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
+| Cmd/Ctrl+Y | anywhere in the window | Redo |
+| Cmd/Ctrl+E | Definitions editor | Run the selection, or the current line, at the console prompt |
+| F6 | anywhere in the window | Move focus between the editor and the console |
+| Cmd/Ctrl+L | Interactions console | Clear the console's output history |
+| Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
+| Cmd/Ctrl+- | anywhere in the window | Zoom out |
+| Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
+| Cmd/Ctrl+F | anywhere in the window | Open the find bar |
+| Cmd/Ctrl+H | anywhere in the window | Open the find bar with replace showing |
+| Return, F3 or Cmd/Ctrl+G | find bar (F3/Cmd+G also from the editor) | Next match |
+| Shift+Return, Shift+F3 or Cmd/Ctrl+Shift+G | find bar | Previous match |
+| Escape | find bar | Close the find bar |
+| Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme |
 | Return | console prompt | Evaluate, send the line as stdin, or insert a newline for an unfinished multi-line entry |
 | Shift+Return | console prompt | Always insert a newline |
 | Up | console prompt, first line of input | Recall the previous history entry |
@@ -191,14 +310,9 @@ plain file at that name.
 A few rough edges are already known and parked for a later phase, rather
 than being surprises you'd otherwise have to rediscover:
 
-- The unclosed-bracket message only appears when the reader reaches the
-  end of the file still missing a closer. An earlier runtime error hides
-  it.
 - Return during an IME composition commits the syllable and inserts a
   plain newline rather than acting on it; a second Return does the rest.
   See the Unicode section above.
-- Closing the window with unsaved changes doesn't ask first. Save before
-  you close if you're not sure.
 - Closing the window, or Cmd/Ctrl+W, while a program runs quits Jonquil
   at once, which ends the program too. It isn't a Stop: nothing is printed,
   and the program gets no chance to finish what it was doing.
@@ -209,6 +323,3 @@ than being surprises you'd otherwise have to rediscover:
 - Typing in a very large Definitions pane can lag: repainting the whole
   buffer measured about 29ms at 200 lines, 144ms at 1,000 lines, and 3.4
   seconds at 20,000 lines. Most programs never get close to that size.
-- Each time an Open or Save dialog is used, a small amount of memory
-  isn't freed afterward. It only adds up over a great many dialogs in one
-  session.
