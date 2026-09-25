@@ -26,6 +26,7 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.session :as session]))
 
 ;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
@@ -45,6 +46,9 @@
 (def ^:private KEY-PLUS 0x02b)
 (def ^:private KEY-MINUS 0x02d)
 (def ^:private KEY-0 0x030)
+;; P3.T4 additions.
+(def ^:private KEY-F 0x066)
+(def ^:private KEY-H 0x068)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -383,6 +387,21 @@
 (defn- do-clear-console! [cv]
   (cview/clear-output! cv))
 
+;; --- find/replace bar (P3.T4) -----------------------------------------
+
+(defn- find-bar-focused?
+  "True when the find bar's query or replacement entry currently holds
+  gtk_root_get_focus's focus widget (P3.T3's own has_focus caveat applies
+  here too, so this reads the ROOT's focus-widget pointer, not
+  gtk_widget_has_focus). Used only to route Escape: the window's own
+  capture-phase key controller runs BEFORE the bar's own (win is a more
+  outer ancestor than the bar's box), so without this check Escape would
+  always reach the window's evaluating?-gated Stop handling first,
+  regardless of where focus actually is."
+  [win fb]
+  (let [f (g/gtk-root-get-focus win)]
+    (or (= f (:query fb)) (= f (:replacement fb)))))
+
 (defn- reload-zoom-css! [provider px]
   (g/gtk-css-provider-load-from-string provider (str ".jonquil-code { font-size: " px "px; }")))
 
@@ -455,13 +474,25 @@
   handler a real close-button click or OS window-close would, which already
   calls g_application_quit -- so this needs no extra quit call of its own,
   and (per the task) no dirty-buffer prompt, same as the close-button/OS
-  path today."
+  path today.
+
+  P3.T4: the find bar's own handle-key! is checked FIRST for Escape, before
+  evaluating? even runs -- see find-bar-focused?'s docstring for why this
+  can't just rely on the bar's own (separately wired) capture-phase
+  controller. Cmd+F/Cmd+H open the bar; Alt and Shift are excluded from
+  Cmd+F so it doesn't shadow editor.clj's Cmd+Alt+F (format selection) or
+  Cmd+Shift+F (format all), the same guard style KEY-L already uses
+  against Cmd+Alt+L."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
-   run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?]
+   run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
+   win fb open-find-fn open-replace-fn]
   (fn [_ctl keyval0 _keycode state _data]
     (let [keyval (g/gdk-keyval-to-lower keyval0)]
       (cond
         (= keyval KEY-F5) (do (run-fn) 1)
+        (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb)
+             (not (zero? (find-bar/handle-key! fb keyval0 state))))
+        1
         (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
         (= keyval KEY-ESCAPE) 0
         (= keyval KEY-F6) (do (toggle-focus-fn) 1)
@@ -472,6 +503,9 @@
         (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
         (and (command-chord? state) (= keyval KEY-E)) (do (run-selection-fn) 1)
         (and (command-chord? state) (not (alt-held? state)) (= keyval KEY-L)) (do (clear-console-fn) 1)
+        (and (command-chord? state) (not (alt-held? state)) (not (shift-held? state)) (= keyval KEY-F))
+        (do (open-find-fn) 1)
+        (and (command-chord? state) (= keyval KEY-H)) (do (open-replace-fn) 1)
         (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
         (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
         (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
@@ -484,6 +518,7 @@
         path (atom file)
         discard-warned? (atom false)
         ed (editor/make-editor)
+        fb (find-bar/make-find-bar ed)
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         *cv (atom nil)
@@ -507,9 +542,12 @@
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px direction))
+        open-find-fn (fn [] (find-bar/open! fb :find))
+        open-replace-fn (fn [] (find-bar/open! fb :replace))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
                                      run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
-                                     (fn [] (eval/evaluating? (:ctx session))))
+                                     (fn [] (eval/evaluating? (:ctx session)))
+                                     win fb open-find-fn open-replace-fn)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -518,6 +556,12 @@
         reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        ;; P3.T4: the find bar's box sits above the editor's own scroll
+        ;; view, inside a dedicated vertical box that becomes the paned's
+        ;; start child (in place of (:scroll ed) directly) -- the scroll
+        ;; view keeps vexpand so it, not the bar, absorbs the pane's
+        ;; height.
+        editor-pane (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
     (g/gtk-box-append toolbar run-btn)
     (g/gtk-box-append toolbar stop-btn)
@@ -526,7 +570,10 @@
     (g/gtk-box-append toolbar reset-chk)
     (g/gtk-check-button-set-active reset-chk 1)
     (g/gtk-widget-set-vexpand paned 1)
-    (g/gtk-paned-set-start-child paned (:scroll ed))
+    (g/gtk-box-append editor-pane (:box fb))
+    (g/gtk-widget-set-vexpand (:scroll ed) 1)
+    (g/gtk-box-append editor-pane (:scroll ed))
+    (g/gtk-paned-set-start-child paned editor-pane)
     (g/gtk-paned-set-end-child paned (:scroll cv))
     (g/gtk-paned-set-position paned 430)
     (g/gtk-box-append vbox toolbar)
@@ -592,6 +639,7 @@
     (editor/focus! ed)
     (when on-ready
       (on-ready {:editor ed :console cv :session session :status-label status-label :window win
+                 :find-bar fb
                  :run!* run-fn :stop!* stop-fn
                  :open-path! (fn [p]
                                (guarded-open! ed cv discard-warned?
@@ -618,11 +666,12 @@
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
-  :status-label :window :run!* :stop!* :open-path! :save-to!
+  :status-label :window :find-bar :run!* :stop!* :open-path! :save-to!
   :run-selection!* :toggle-focus!* :clear-console!* :zoom!*
   :handle-window-key! :simulate-open-result! :simulate-save-result!}; the
   self-test rows call these functions directly, exactly as the buttons and
-  keys do."
+  keys do. :find-bar is the jonquil.gtk.find-bar map (P3.T4); rows call
+  jonquil.gtk.find-bar's own functions on it."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one

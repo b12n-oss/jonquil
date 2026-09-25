@@ -19,6 +19,7 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.main :as main]
             [jonquil.session :as session]))
 
@@ -823,6 +824,152 @@
              (check :zoom-in-out (and (> h1 h0) (= h2 h0)) {:h0 h0 :h1 h1 :h2 h2})
              (next)))))))))
 
+;; --- P3.T4: find and replace bar ------------------------------------------
+;; Each row is self-contained (its own editor/set-text!, open! and query)
+;; rather than chaining off a prior row's leftover selection, since
+;; run-row! resets the editor text before every row anyway.
+
+(defn- row-find-highlights
+  "\"foo bar foo baz foo\" has three occurrences of \"foo\", at character
+  offsets [0 3], [8 11] and [16 19] (measured). Opening find and setting
+  the query to \"foo\" must tag all three, show \"1 of 3\", and select the
+  first."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (let [tag0 (g/has-tag-at? buf 0 (:tag fb))
+          tag8 (g/has-tag-at? buf 8 (:tag fb))
+          tag16 (g/has-tag-at? buf 16 (:tag fb))
+          label (g/label-text (:count-label fb))
+          sel (g/selection-offsets buf)]
+      (check :find-highlights
+             (and tag0 tag8 tag16 (= "1 of 3" label) (= [0 3] sel))
+             {:tag0 tag0 :tag8 tag8 :tag16 tag16 :label label :sel sel})
+      (next))))
+
+(defn- row-find-next-wraps
+  "From the initial [0 3] (find-highlights' own finding), three find-next!
+  calls step to [8 11], [16 19], then wrap back to [0 3]."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (find-bar/find-next! fb)
+    (let [sel1 (g/selection-offsets buf)]
+      (find-bar/find-next! fb)
+      (let [sel2 (g/selection-offsets buf)]
+        (find-bar/find-next! fb)
+        (let [sel3 (g/selection-offsets buf)]
+          (check :find-next-wraps
+                 (and (= [8 11] sel1) (= [16 19] sel2) (= [0 3] sel3))
+                 {:sel1 sel1 :sel2 sel2 :sel3 sel3})
+          (next))))))
+
+(defn- row-find-prev
+  "From the initial [0 3], find-prev! wraps back to the last match, [16 19]."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (let [initial (g/selection-offsets buf)]
+      (find-bar/find-prev! fb)
+      (let [sel (g/selection-offsets buf)]
+        (check :find-prev (and (= [0 3] initial) (= [16 19] sel))
+               {:initial initial :sel sel})
+        (next)))))
+
+(defn- row-find-no-match
+  "A query with no occurrences shows \"No matches\" and leaves no
+  search-match tag anywhere the earlier \"foo\" matches were."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "zzz")
+    (let [label (g/label-text (:count-label fb))
+          any-tag? (or (g/has-tag-at? buf 0 (:tag fb))
+                       (g/has-tag-at? buf 8 (:tag fb))
+                       (g/has-tag-at? buf 16 (:tag fb)))]
+      (check :find-no-match (and (= "No matches" label) (not any-tag?))
+             {:label label :any-tag any-tag?})
+      (next))))
+
+(defn- row-replace-one
+  "replace-one! from the initial [0 3] match replaces only that occurrence
+  (commands/replace-current), landing the selection on the shifted next
+  match."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :replace)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (g/gtk-editable-set-text (:replacement fb) "X")
+    (find-bar/replace-one! fb)
+    (let [text (editor/editor-text ed)
+          sel (g/selection-offsets buf)]
+      (check :replace-one (and (= "X bar foo baz foo" text) (= [6 9] sel))
+             {:text text :sel sel})
+      (next))))
+
+(defn- row-replace-all
+  "replace-all! replaces every match in one edit (commands/replace-all,
+  applied through one apply-op! call, so one undo restores every original
+  occurrence)."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :replace)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (g/gtk-editable-set-text (:replacement fb) "X")
+    (find-bar/replace-all! fb)
+    (let [text (editor/editor-text ed)
+          label (g/label-text (:count-label fb))]
+      (g/gtk-text-buffer-undo buf)
+      (let [restored (editor/editor-text ed)]
+        (check :replace-all
+               (and (= "X bar X baz X" text) (= "Replaced 3" label)
+                    (= "foo bar foo baz foo" restored))
+               {:text text :label label :restored restored})
+        (next)))))
+
+(defn- row-find-escape
+  "Escape, driven through the bar's own handle-key! (never a synthesized
+  keystroke), closes the bar, strips every search-match tag, and returns
+  focus to the editor view."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed) win (:window ui)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (let [handled (find-bar/handle-key! fb KEY-ESCAPE 0)
+          visible (g/gtk-widget-get-visible (:box fb))
+          any-tag? (or (g/has-tag-at? buf 0 (:tag fb))
+                       (g/has-tag-at? buf 8 (:tag fb))
+                       (g/has-tag-at? buf 16 (:tag fb)))
+          focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))]
+      (check :find-escape
+             (and (= 1 handled) (zero? visible) (not any-tag?) focus-is-editor?)
+             {:handled handled :visible visible :any-tag any-tag?
+              :focus-is-editor focus-is-editor?})
+      (next))))
+
+(defn- row-find-hangul
+  "Hangul syllables are single characters on this Jolt/JVM string
+  representation (not surrogate pairs), so \"안녕 hello 안녕\" matches
+  \"안녕\" at character offsets [0 2] and [9 11] (measured)."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui)]
+    (editor/set-text! ed "안녕 hello 안녕")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "안녕")
+    (let [matches @(:matches fb)]
+      (check :find-hangul (= [[0 2] [9 11]] matches) {:matches matches})
+      (next))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -885,6 +1032,14 @@
    row-toggle-focus
    row-clear-console
    row-zoom-in-out
+   row-find-highlights
+   row-find-next-wraps
+   row-find-prev
+   row-find-no-match
+   row-replace-one
+   row-replace-all
+   row-find-escape
+   row-find-hangul
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

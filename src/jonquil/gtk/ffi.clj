@@ -441,3 +441,54 @@
       (gtk-widget-measure widget 1 -1 out (+ out 4) (+ out 8) (+ out 12))
       (ffi/read out :int 4)
       (finally (ffi/free out)))))
+
+;; --- P3.T4 ---
+;; gtk_search_entry_new / gtk_entry_new: gtksearchentry.h:48, gtkentry.h:102
+;; (gtk4 4.22.4). Copied from the store's spike.p3-ffi (probe 1): the query
+;; entry is a GtkSearchEntry, the replacement entry a plain GtkEntry.
+(ffi/defcfn gtk-search-entry-new "gtk_search_entry_new" [] :pointer)
+(ffi/defcfn gtk-entry-new "gtk_entry_new" [] :pointer)
+;; gtk_editable_get_text / gtk_editable_set_text: gtkeditable.h:82, 84-85.
+;; get_text returns a borrowed const char* (no transfer-full annotation) --
+;; no g_free, unlike gtk_text_buffer_get_text's caller-owned copy
+;; buffer-text already frees (probe 1). Both GtkSearchEntry and GtkEntry
+;; implement GtkEditable directly.
+(ffi/defcfn gtk-editable-get-text "gtk_editable_get_text" [:pointer] :pointer)
+(ffi/defcfn gtk-editable-set-text "gtk_editable_set_text" [:pointer :string] :void)
+;; gtk_widget_set_visible / gtk_widget_get_visible: gtkwidget.h:442-443, 445.
+;; The find bar's whole box is hidden until opened; the replacement entry
+;; and its two buttons are hidden outside :replace mode.
+(ffi/defcfn gtk-widget-set-visible "gtk_widget_set_visible" [:pointer :int] :void)
+(ffi/defcfn gtk-widget-get-visible "gtk_widget_get_visible" [:pointer] :int)
+;; gtk_text_view_scroll_to_iter: gtktextview.h:197-202. Copied from the
+;; store's spike.p3-ffi (probe 2): scrolls the current match into view.
+(ffi/defcfn gtk-text-view-scroll-to-iter "gtk_text_view_scroll_to_iter"
+  [:pointer :pointer :double :int :double :double] :int)
+
+(defn editable-text
+  "editable's text (a GtkSearchEntry or GtkEntry). nil-safe borrowed-string
+  read, editable-get-text's counterpart to buffer-text/label-text/
+  window-title above -- no g_free (probe 1)."
+  [editable]
+  (let [p (gtk-editable-get-text editable)]
+    (when-not (ffi/null? p) (ffi/ptr->string p))))
+
+;; gtk_text_buffer_remove_tag: gtktextbuffer.h:363-366 (same signature shape
+;; as the already-bound gtk_text_buffer_apply_tag above). Not in the
+;; brief's enumerated P3.T4 list or in spike.p3-ffi -- added here (per
+;; AGENTS.md: "cite the header line for any you write yourself") because
+;; gtk_text_buffer_remove_all_tags would strip the editor's own syntax tags
+;; too wherever a match happens to overlap them; this removes only the
+;; search-match tag, so recomputing/closing never touches paint/syntax
+;; highlighting.
+(ffi/defcfn gtk-text-buffer-remove-tag "gtk_text_buffer_remove_tag"
+  [:pointer :pointer :pointer :pointer] :void)
+
+;; gtk_widget_get_root: gtkwidget.h:463. Also not in the brief's enumerated
+;; list; added so the find bar's own handle-key! can read gtk_root_get_focus
+;; (already bound, P3.T3) from a widget it owns, without needing the
+;; window handle make-find-bar's single-arg interface doesn't take -- the
+;; only way to tell "Return in the query" apart from "Return in the
+;; replacement entry" (probe 1: neither entry's own \"activate\" signal is
+;; relied on).
+(ffi/defcfn gtk-widget-get-root "gtk_widget_get_root" [:pointer] :pointer)
