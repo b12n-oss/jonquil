@@ -591,3 +591,17 @@
                    (finally (g-error-free err)))))
           {:index idx}))
       (finally (ffi/free slot)))))
+
+;; --- P3.T4 fix round 3 ---
+;; gtk_widget_is_ancestor: gtkwidget.h:609-610 (gtk4 4.22.4, GDK_AVAILABLE_IN_ALL,
+;; not deprecated -- gtk_widget_translate_coordinates right after it is the
+;; deprecated one). True when widget is somewhere inside ancestor, through
+;; any number of intermediate containers. Used to test whether the current
+;; focus widget is anywhere inside the find bar's own box, WITHOUT needing
+;; to know that gtk_root_get_focus actually returns an entry's internal
+;; GtkText delegate rather than the entry itself (fix round 2's own
+;; finding) -- measured with a throwaway probe (not committed):
+;; gtk_widget_is_ancestor(gtk_root_get_focus(win), box) read true with
+;; focus grabbed on the query entry and on the replacement entry, false
+;; with focus grabbed on the editor and on the console.
+(ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)

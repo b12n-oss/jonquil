@@ -537,17 +537,26 @@
 ;; --- find/replace bar (P3.T4) -----------------------------------------
 
 (defn- find-bar-focused?
-  "True when the find bar's query or replacement entry currently holds
-  gtk_root_get_focus's focus widget (P3.T3's own has_focus caveat applies
-  here too, so this reads the ROOT's focus-widget pointer, not
-  gtk_widget_has_focus). Used only to route Escape: the window's own
-  capture-phase key controller runs BEFORE the bar's own (win is a more
-  outer ancestor than the bar's box), so without this check Escape would
-  always reach the window's evaluating?-gated Stop handling first,
-  regardless of where focus actually is."
+  "True when keyboard focus is anywhere inside the find bar (P3.T3's own
+  has_focus caveat applies here too, so this reads the ROOT's focus-widget
+  pointer via gtk_root_get_focus, not gtk_widget_has_focus). Used only to
+  route Escape: the window's own capture-phase key controller runs BEFORE
+  the bar's own (win is a more outer ancestor than the bar's box), so
+  without this check Escape would always reach the window's
+  evaluating?-gated Stop handling first, regardless of where focus
+  actually is.
+
+  Fix round 3: this used to compare the focus widget against (:query fb)/
+  (:replacement fb) directly, which is always false -- fix round 2's own
+  diagnosis measured that gtk_root_get_focus actually returns an entry's
+  internal GtkText DELEGATE, never the outer GtkSearchEntry/GtkEntry
+  itself. gtk_widget_is_ancestor(focus, box) sidesteps needing to know
+  about the delegate at all: true for anything inside the bar's box,
+  including the delegate, measured true with focus in the query and the
+  replacement entry, false with focus in the editor and the console."
   [win fb]
   (let [f (g/gtk-root-get-focus win)]
-    (or (= f (:query fb)) (= f (:replacement fb)))))
+    (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb)))))))
 
 (defn- reload-zoom-css! [provider px]
   (g/gtk-css-provider-load-from-string provider (str ".jonquil-code { font-size: " px "px; }")))

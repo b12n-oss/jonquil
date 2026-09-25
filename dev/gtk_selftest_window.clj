@@ -1207,6 +1207,102 @@
                   (check :pre-run-stray-closer ok {:console (since ui mark)})
                   (next)))))
 
+;; --- P3.T4 fix round 3: Escape via the WINDOW's own dispatch -------------
+;; (:handle-window-key! ui), never find-bar/handle-key! directly -- these
+;; rows exercise find-bar-focused?'s own routing, not the bar's internal
+;; key handling (already covered by find-escape/find-preedit-yields).
+
+(defn- row-window-escape-closes-bar-while-running
+  "Fix round 3, Important: window.clj's find-bar-focused? used to compare
+  gtk_root_get_focus against the outer (:query fb)/(:replacement fb)
+  widgets directly, which is always false (fix round 2's own diagnosis:
+  the real focus widget is an entry's internal GtkText delegate, never the
+  entry itself) -- so with a program running and the find bar's query
+  focused, the window's own Escape clause never matched and fell through
+  to Stop, stopping the program instead of closing the bar. Starts a real
+  (loop [] (recur)), waits for it to actually be running, opens the find
+  bar (which focuses the query), then drives the WINDOW's own key
+  dispatch with Escape: the bar must close, focus must return to the
+  editor, and the program must STILL be running (stopped in this row's
+  own cleanup, not by the Escape press)."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) win (:window ui)]
+    (editor/set-text! ed "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (find-bar/open! fb :find)
+                  (let [handled ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)
+                        bar-visible (g/gtk-widget-get-visible (:box fb))
+                        focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
+                        still-running? (eval/evaluating? (:ctx (:session ui)))]
+                    (check :window-escape-closes-bar-while-running
+                           (and started? (= 1 handled) (zero? bar-visible)
+                                focus-is-editor? still-running?)
+                           {:started started? :handled handled :bar-visible bar-visible
+                            :focus-is-editor focus-is-editor? :still-running still-running?})
+                    ((:stop!* ui))
+                    (poll-until 3000 20
+                                (fn [] (not (eval/evaluating? (:ctx (:session ui)))))
+                                (fn [_] (next))))))))
+
+(defn- row-window-escape-yields-preedit-while-running
+  "Fix round 3: with the find bar's own preedit flag set (fix round 1),
+  window.clj's Escape clause must yield (0) too, not just find-bar/
+  handle-key! in isolation -- the clause now returns handle-key!'s OWN
+  result directly (fix round 1's own change), so this exercises that
+  through the WINDOW dispatch specifically, with a program running.
+  Starts a real running program, opens the bar, sets preedit-active?
+  true, sends window Escape: must return 0, the bar must stay open, and
+  the program must still be running."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui)]
+    (editor/set-text! ed "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (find-bar/open! fb :find)
+                  (reset! (:preedit-active? fb) true)
+                  (let [handled ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)
+                        bar-visible (g/gtk-widget-get-visible (:box fb))
+                        still-running? (eval/evaluating? (:ctx (:session ui)))]
+                    (reset! (:preedit-active? fb) false)
+                    (check :window-escape-yields-preedit-while-running
+                           (and started? (= 0 handled) (= 1 bar-visible) still-running?)
+                           {:started started? :handled handled :bar-visible bar-visible
+                            :still-running still-running?})
+                    (find-bar/close! fb)
+                    ((:stop!* ui))
+                    (poll-until 3000 20
+                                (fn [] (not (eval/evaluating? (:ctx (:session ui)))))
+                                (fn [_] (next))))))))
+
+(defn- row-window-escape-stops-when-editor-focused
+  "Fix round 3: Escape must keep its P2 meaning (Stop) when focus is
+  OUTSIDE the find bar -- find-bar-focused? must read false here.
+  Explicitly grabs editor focus (not just relying on whatever an earlier
+  row left focused), starts a real running program, sends window Escape:
+  the program must stop."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/focus! ed)
+    (editor/set-text! ed "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (let [mark (out-end-offset ui)
+                        handled ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)]
+                    (poll-until 3000 20
+                                (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                (fn [stopped?]
+                                  (check :window-escape-stops-when-editor-focused
+                                         (and started? (= 1 handled) stopped?)
+                                         {:started started? :handled handled :stopped stopped?})
+                                  (next))))))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -1287,6 +1383,9 @@
    row-close-dirty-save
    row-pre-run-hidden-by-error
    row-pre-run-stray-closer
+   row-window-escape-closes-bar-while-running
+   row-window-escape-yields-preedit-while-running
+   row-window-escape-stops-when-editor-focused
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
