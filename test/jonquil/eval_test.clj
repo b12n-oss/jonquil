@@ -221,12 +221,9 @@
     (sut/push-stdin! ctx "(+ 1 2)")
     (let [r (deref done 3000 :timeout)]
       (println "S1i (read):" (:status r) (some-> (:error r) ex-message))
-      ;; DEVIATION: Jolt's `read` through a LineNumberingPushbackReader
-      ;; fails with `:-read-form` (see AGENTS.md's Jolt-facts section), so
-      ;; this asserts today's known failure rather than upstream's :ok
-      ;; behaviour. If a future Jolt fixes `read`, this assertion breaks
-      ;; and gets noticed instead of the test staying silently vacuous.
-      (is (= :error (:status r))))))
+      ;; `read` returns once the form is complete, without waiting for EOF on
+      ;; the console's stdin (jolt-lang/jolt#1133 and #1137).
+      (is (= [:ok '(+ 1 2)] ((juxt :status :value) r))))))
 
 (deftest s1j-namespace-reset
   (testing "error line in a later form"
