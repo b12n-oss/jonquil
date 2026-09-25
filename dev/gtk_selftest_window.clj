@@ -1758,6 +1758,13 @@
 ;; widget pointer directly.
 (defonce ^:private window-destroyed? (atom false))
 
+;; P3 fix wave I3: set only where SUMMARY prints, i.e. when run-rows! reached
+;; the end of row-fns. An early g_application_quit (a row that really closes
+;; or quits) ends g_application_run with the remaining rows never run and no
+;; SUMMARY, and every result recorded so far can still be a PASS -- -main
+;; used to exit 0 then, and `bb gtk:selftest` reads only exit codes.
+(defonce ^:private finished? (atom false))
+
 (def ^:private WINDOW-CLOSE-FALLBACK-DEADLINE-MS
   ;; Generous: a working chord closes within one main-loop iteration
   ;; (microseconds), so this only ever actually waits out its deadline
@@ -1784,6 +1791,7 @@
                            {:reason "window still open after the close chord; forced closed to avoid hanging the run"})
                     (g/gtk-window-close (:window ui)))
                   (let [passed (count (filter second @results)) total (count @results)]
+                    (reset! finished? true)
                     (println (str "SUMMARY " passed " of " total " passed")))))
     (run-row! ui (first fns) (fn [] (run-rows! ui (rest fns))))))
 
@@ -1795,4 +1803,7 @@
                                                       [:pointer :pointer] :void)
                                          ffi/null ffi/null g/CONNECT-DEFAULT)
                 (later 300 (fn [] (run-rows! ui row-fns))))})
-  (System/exit (if (and (seq @results) (every? second @results)) 0 1)))
+  (when-not @finished?
+    (binding [*out* *err*]
+      (println "[gtk-selftest-window] run ended before the last row; no SUMMARY, exiting 1")))
+  (System/exit (if (and @finished? (seq @results) (every? second @results)) 0 1)))
