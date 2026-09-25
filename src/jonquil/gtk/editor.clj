@@ -20,6 +20,7 @@
   nothing in this namespace needs jonquil.gtk.callbacks/on-gui! to get
   there."
   (:require [jolt.ffi :as ffi]
+            [jonquil.commands :as commands]
             [jonquil.edit :as edit]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
@@ -114,19 +115,30 @@
 
 (defn apply-op!
   "Applies an edit-op result inside one user action, back to front, then
-  places the caret. Returns true when the op applied, nil when result was
-  nil."
+  places the caret -- or, when result has :sel [a b] with a < b (P3.T2:
+  indent/unindent/toggle-comment on a selection), selects that range
+  instead, so a chained op (a second Tab) sees the same selection through
+  snapshot. gtk_text_buffer_select_range's first iter argument becomes the
+  insert mark (probe 6: reading the insert mark back after select_range(a,
+  b) shows it lands on a, the FIRST argument), and :caret is always the
+  selection's own end (b), so b is passed first to land the insert mark
+  where the op put the caret. Returns true when the op applied, nil when
+  result was nil."
   [ed result]
   (when result
-    (let [buf (:buf ed)]
+    (let [buf (:buf ed)
+          [sel-a sel-b] (:sel result)]
       (g/gtk-text-buffer-begin-user-action buf)
       (try
         (doseq [[s e r] (rseq (vec (:edits result)))]
           (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
           (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a r -1))))
         (finally (g/gtk-text-buffer-end-user-action buf)))
-      (g/with-iters* buf (:caret result) (:caret result)
-        (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+      (if (and sel-a sel-b (< sel-a sel-b))
+        (g/with-iters* buf sel-b sel-a
+          (fn [ins bound] (g/gtk-text-buffer-select-range buf ins bound)))
+        (g/with-iters* buf (:caret result) (:caret result)
+          (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
     true))
 
 (defn handle-return!
@@ -134,8 +146,8 @@
   action. Returns nil, applying nothing, while an IME preedit composition
   is active (I5): the capture-phase key controller runs before the IM
   context gets to filter the key, so consuming Return here would split or
-  lose a pending Hangul/CJK composition. on-key (below) treats this the
-  same as any other unhandled key: 0, so GTK/the IM context gets it."
+  lose a pending Hangul/CJK composition. handle-key! (below) treats this
+  the same as any other unhandled key: 0, so GTK/the IM context gets it."
   [ed]
   (when-not @(:preedit-active? ed)
     (apply-op! ed (edit/smart-enter (snapshot ed)))))
@@ -187,11 +199,106 @@
   (and (contains? #{KEY-RETURN KEY-KP-ENTER} keyval)
        (zero? (bit-and state (bit-or g/SHIFT-MASK g/CONTROL-MASK g/META-MASK)))))
 
+;; --- keys: the rest of the dispatch (P3.T2, gtk-keys.md) --------------------
+
+(def ^:private KEY-PARENLEFT 0x028)
+(def ^:private KEY-PARENRIGHT 0x029)
+(def ^:private KEY-BRACKETLEFT 0x05b)
+(def ^:private KEY-BRACKETRIGHT 0x05d)
+(def ^:private KEY-BRACELEFT 0x07b)
+(def ^:private KEY-BRACERIGHT 0x07d)
+(def ^:private KEY-QUOTEDBL 0x022)
+(def ^:private KEY-BACKSPACE 0xff08)
+(def ^:private KEY-TAB 0xff09)
+(def ^:private KEY-ISO-LEFT-TAB 0xfe20)
+(def ^:private KEY-SLASH 0x02f)
+(def ^:private KEY-SEMICOLON 0x03b)
+(def ^:private KEY-F 0x066)
+(def ^:private KEY-L 0x06c)
+(def ^:private KEY-Y 0x079)
+
+(def ^:private open-chars
+  {KEY-PARENLEFT \( KEY-BRACKETLEFT \[ KEY-BRACELEFT \{ KEY-QUOTEDBL \"})
+
+(def ^:private close-chars
+  {KEY-PARENRIGHT \) KEY-BRACKETRIGHT \] KEY-BRACERIGHT \}})
+
+(defn- command-chord?
+  "A command chord is Control or Meta (gtk-keys.md), as in Phase 2
+  (jonquil.gtk.window/command-chord?, duplicated here since it's private
+  there too)."
+  [state]
+  (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
+
+(defn- shift-held? [state]
+  (not (zero? (bit-and state g/SHIFT-MASK))))
+
+(defn- alt-held? [state]
+  (not (zero? (bit-and state g/ALT-MASK))))
+
+(defn- no-command-modifiers?
+  "True when none of Control, Meta or Alt is held -- the guard on row 7's
+  bracket/quote/BackSpace/Tab keys, so they never shadow a command chord
+  that happens to share a keyval."
+  [state]
+  (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK))))
+
+(defn- apply-edit! [ed result]
+  (if (apply-op! ed result) 1 0))
+
+(defn handle-key!
+  "The editor's key dispatch (P3.T2 gtk-keys.md), first match wins. Returns
+  1 when it handled the key, 0 otherwise -- the key controller (on-key,
+  below) only calls this, so self-test rows can call the exact same
+  function with a synthetic keyval/state, never a synthesized OS
+  keystroke. Yields (0) on every key while a preedit is active (I5), not
+  just Return, since GTK/the IM context need every key while composing.
+  keyval0 is normalised with gdk_keyval_to_lower before every comparison
+  (M4, gtk-keys.md: same reason window.clj's on-window-key does it -- Caps
+  Lock reports the uppercase keyval with no Shift bit set)."
+  [ed keyval0 state]
+  (let [keyval (g/gdk-keyval-to-lower keyval0)]
+    (cond
+      @(:preedit-active? ed) 0
+
+      (plain-return? keyval state)
+      (if (handle-return! ed) 1 0)
+
+      (and (command-chord? state) (contains? #{KEY-SLASH KEY-SEMICOLON} keyval))
+      (apply-edit! ed (edit/toggle-comment (snapshot ed)))
+
+      (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
+      (apply-edit! ed (commands/format-all-op (snapshot ed)))
+
+      (and (command-chord? state) (alt-held? state) (contains? #{KEY-F KEY-L} keyval))
+      (apply-edit! ed (commands/format-selection-op (snapshot ed)))
+
+      (and (command-chord? state) (= keyval KEY-Y))
+      (if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
+        (do (g/gtk-text-buffer-redo (:buf ed)) 1)
+        0)
+
+      (and (no-command-modifiers? state) (contains? open-chars keyval))
+      (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
+
+      (and (no-command-modifiers? state) (contains? close-chars keyval))
+      (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
+
+      (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
+      (apply-edit! ed (edit/backspace-pair (snapshot ed)))
+
+      (and (no-command-modifiers? state)
+           (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
+      (apply-edit! ed (edit/unindent (snapshot ed)))
+
+      (and (no-command-modifiers? state) (= keyval KEY-TAB))
+      (apply-edit! ed (edit/indent (snapshot ed)))
+
+      :else 0)))
+
 (defn- on-key [ed]
   (fn [_ctl keyval _keycode state _data]
-    (if (and (plain-return? keyval state) (handle-return! ed))
-      1
-      0)))
+    (handle-key! ed keyval state)))
 
 ;; --- construction ----------------------------------------------------------
 

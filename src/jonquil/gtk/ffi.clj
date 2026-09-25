@@ -386,3 +386,13 @@
 ;; enumerator after G_IO_ERROR_FAILED/NOT_FOUND) -- a GError's domain quark
 ;; (finish-file's :domain) must match too.
 (ffi/defcfn gtk-dialog-error-quark "gtk_dialog_error_quark" [] :uint)
+
+;; --- P3.T2 ---
+;; gtk_text_buffer_redo / gtk_text_buffer_get_can_redo: probe 5 (P3 probe
+;; findings #5), copied from the store's spike.p3-ffi. redo is undo's
+;; counterpart (jonquil.gtk.ffi already binds gtk-text-buffer-undo and
+;; gtk-text-buffer-get-can-undo); get-can-redo gates handle-key!'s
+;; command-chord+y dispatch so redo is only invoked when there is
+;; something to redo.
+(ffi/defcfn gtk-text-buffer-redo "gtk_text_buffer_redo" [:pointer] :void)
+(ffi/defcfn gtk-text-buffer-get-can-redo "gtk_text_buffer_get_can_redo" [:pointer] :int)

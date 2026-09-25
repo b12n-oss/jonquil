@@ -247,6 +247,185 @@
                                                        :after-idle after-idle :after-edit @(:dirty-check-count ed)})
                                                (next))))))))))))
 
+;; --- P3.T2: handle-key! dispatch rows --------------------------------------
+;; gtk-keys.md's key table -- editor.clj's own copy is private, same pattern
+;; gtk_selftest_window.clj already uses for its own KEY-ESCAPE/KEY-S-CAPS/
+;; KEY-W. Every row calls editor/handle-key! directly with a synthetic
+;; keyval/state, never a synthesized OS keystroke.
+(def ^:private KEY-PARENLEFT 0x028)
+(def ^:private KEY-PARENRIGHT 0x029)
+(def ^:private KEY-BRACKETLEFT 0x05b)
+(def ^:private KEY-BACKSPACE 0xff08)
+(def ^:private KEY-TAB 0xff09)
+(def ^:private KEY-ISO-LEFT-TAB 0xfe20)
+(def ^:private KEY-SLASH 0x02f)
+(def ^:private KEY-F 0x066)
+(def ^:private KEY-Y 0x079)
+
+(defn- line-of
+  "The 0-based line `pos` sits on within `text` -- the number of newlines
+  strictly before it. Used by row-edit-tab-selection to assert the
+  selection apply-op! sets still spans both lines, without hard-coding the
+  exact post-indent offsets."
+  [text pos]
+  (count (filter #(= % \newline) (subs text 0 pos))))
+
+(defn- row-edit-auto-pair [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "")
+      (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed KEY-PARENLEFT 0)
+            text (editor/editor-text ed)
+            caret (g/cursor-offset buf)]
+        (check :edit-auto-pair (and (= 1 handled) (= "()" text) (= 1 caret))
+               {:handled handled :text text :caret caret})
+        (next)))))
+
+(defn- row-edit-wrap-selection [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "abc")
+      (g/with-iters* buf 0 3 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (let [handled (editor/handle-key! ed KEY-BRACKETLEFT 0)
+            text (editor/editor-text ed)]
+        (check :edit-wrap-selection (and (= 1 handled) (= "[abc]" text))
+               {:handled handled :text text})
+        (next)))))
+
+(defn- row-edit-type-over [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "()")
+      (g/with-iters* buf 1 1 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed KEY-PARENRIGHT 0)
+            text (editor/editor-text ed)
+            caret (g/cursor-offset buf)]
+        (check :edit-type-over (and (= 1 handled) (= "()" text) (= 2 caret))
+               {:handled handled :text text :caret caret})
+        (next)))))
+
+(defn- row-edit-backspace-pair [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "()")
+      (g/with-iters* buf 1 1 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed KEY-BACKSPACE 0)
+            text (editor/editor-text ed)]
+        (check :edit-backspace-pair (and (= 1 handled) (= "" text))
+               {:handled handled :text text})
+        (next)))))
+
+(defn- row-edit-backspace-plain [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "ab")
+      (g/with-iters* buf 2 2 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed KEY-BACKSPACE 0)
+            text (editor/editor-text ed)]
+        (check :edit-backspace-plain (and (= 0 handled) (= "ab" text))
+               {:handled handled :text text})
+        (next)))))
+
+(defn- row-edit-tab-selection [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "ab\ncd")
+      (g/with-iters* buf 0 5 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (let [h1 (editor/handle-key! ed KEY-TAB 0)
+            text1 (editor/editor-text ed)
+            sel1 (g/selection-offsets buf)
+            h2 (editor/handle-key! ed KEY-TAB 0)
+            text2 (editor/editor-text ed)
+            [sel-a sel-b] (g/selection-offsets buf)]
+        (check :edit-tab-selection
+               (and (= 1 h1) (= 1 h2) (= "    ab\n    cd" text2)
+                    (= 0 (line-of text2 sel-a)) (= 1 (line-of text2 sel-b)))
+               {:h1 h1 :text1 text1 :sel1 sel1 :h2 h2 :text2 text2 :sel2 [sel-a sel-b]})
+        (next)))))
+
+(defn- row-edit-shift-tab [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "  ab\n  cd")
+      (g/with-iters* buf 0 9 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (let [handled (editor/handle-key! ed KEY-ISO-LEFT-TAB 0)
+            text (editor/editor-text ed)]
+        (check :edit-shift-tab (and (= 1 handled) (= "ab\ncd" text))
+               {:handled handled :text text})
+        (next)))))
+
+(defn- row-edit-toggle-comment [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "(+ 1 2)")
+      (g/with-iters* buf 0 7 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (let [h1 (editor/handle-key! ed KEY-SLASH g/CONTROL-MASK)
+            text1 (editor/editor-text ed)
+            h2 (editor/handle-key! ed KEY-SLASH g/CONTROL-MASK)
+            text2 (editor/editor-text ed)]
+        (check :edit-toggle-comment
+               (and (= 1 h1) (= "; (+ 1 2)" text1) (= 1 h2) (= "(+ 1 2)" text2))
+               {:h1 h1 :text1 text1 :h2 h2 :text2 text2})
+        (next)))))
+
+(defn- row-edit-format-all [ed]
+  (fn [next]
+    (let [buf (:buf ed)
+          original "(defn f [x]\n(inc x))"]
+      (editor/set-text! ed original)
+      (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed KEY-F (bit-or g/CONTROL-MASK g/SHIFT-MASK))
+            text (editor/editor-text ed)]
+        (g/gtk-text-buffer-undo buf)
+        (let [undone (editor/editor-text ed)]
+          (check :edit-format-all
+                 (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                 {:handled handled :text text :undone undone})
+          (next))))))
+
+(defn- row-edit-format-selection [ed]
+  (fn [next]
+    (let [buf (:buf ed)
+          original "(defn f [x]\n(inc x))"]
+      (editor/set-text! ed original)
+      ;; offset 15 is inside "(inc x))", line 2 -- format-selection-op
+      ;; operates on the caret's whole line with no selection present.
+      (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed KEY-F (bit-or g/CONTROL-MASK g/ALT-MASK))
+            text (editor/editor-text ed)]
+        (g/gtk-text-buffer-undo buf)
+        (let [undone (editor/editor-text ed)]
+          (check :edit-format-selection
+                 (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                 {:handled handled :text text :undone undone})
+          (next))))))
+
+(defn- row-edit-redo-y [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "")
+      (g/gtk-text-buffer-insert-interactive-at-cursor buf "x" -1 1)
+      (let [typed (editor/editor-text ed)]
+        (g/gtk-text-buffer-undo buf)
+        (let [undone (editor/editor-text ed)
+              handled (editor/handle-key! ed KEY-Y g/CONTROL-MASK)
+              redone (editor/editor-text ed)]
+          (check :edit-redo-y (and (= "x" typed) (= "" undone) (= 1 handled) (= "x" redone))
+                 {:typed typed :undone undone :handled handled :redone redone})
+          (next))))))
+
+(defn- row-edit-preedit-yields [ed]
+  (fn [next]
+    (editor/set-text! ed "abc")
+    (reset! (:preedit-active? ed) true)
+    (let [handled (editor/handle-key! ed KEY-PARENLEFT 0)
+          text (editor/editor-text ed)]
+      (reset! (:preedit-active? ed) false)
+      (check :edit-preedit-yields (and (= 0 handled) (= "abc" text))
+             {:handled handled :text text})
+      (next))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -255,7 +434,19 @@
    row-editor-emoji-offsets
    row-editor-preedit-guard
    row-editor-tick-skips-unchanged
-   row-on-gui-concurrent])
+   row-on-gui-concurrent
+   row-edit-auto-pair
+   row-edit-wrap-selection
+   row-edit-type-over
+   row-edit-backspace-pair
+   row-edit-backspace-plain
+   row-edit-tab-selection
+   row-edit-shift-tab
+   row-edit-toggle-comment
+   row-edit-format-all
+   row-edit-format-selection
+   row-edit-redo-y
+   row-edit-preedit-yields])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
