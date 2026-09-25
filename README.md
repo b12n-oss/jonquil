@@ -10,7 +10,7 @@ See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the win
 
 ## Requirements
 
-- [Jolt](https://github.com/jolt-lang/jolt) v0.8.11
+- [Jolt](https://github.com/jolt-lang/jolt) v0.8.12
 - GTK4 and pango, installed via Homebrew
 
 ## Running
