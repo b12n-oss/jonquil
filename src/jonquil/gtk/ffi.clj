@@ -97,6 +97,16 @@
 (ffi/defcfn gtk-event-controller-key-new "gtk_event_controller_key_new" [] :pointer)
 (ffi/defcfn gtk-event-controller-set-propagation-phase "gtk_event_controller_set_propagation_phase" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-add-controller "gtk_widget_add_controller" [:pointer :pointer] :void)
+
+;; P4.T4: GtkEventControllerFocus -- gtkeventcontrollerfocus.h:46. Its own
+;; "leave" signal (Gtk-4.0.gir: class EventControllerFocus, glib:signal
+;; leave -- no signal args beyond instance/user_data, confirmed against
+;; the installed gir) closes the quick-doc popover when focus moves off
+;; the editor's view. Tracks focus-within at the GtkRoot level (like
+;; gtk_root_get_focus, window.clj's do-toggle-focus!), not
+;; gtk_widget_has_focus's OS-window-active dependency (P4.T3's own probe 1
+;; finding).
+(ffi/defcfn gtk-event-controller-focus-new "gtk_event_controller_focus_new" [] :pointer)
 (ffi/defcfn gtk-widget-get-width "gtk_widget_get_width" [:pointer] :int)
 (ffi/defcfn gtk-widget-get-height "gtk_widget_get_height" [:pointer] :int)
 (ffi/defcfn gdk-keyval-to-unicode "gdk_keyval_to_unicode" [:uint] :uint)

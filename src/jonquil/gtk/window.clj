@@ -21,13 +21,16 @@
             [jolt.ffi :as ffi]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
+            [jonquil.docs :as docs]
             [jonquil.eval :as eval]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
+            [jonquil.help :as help]
             [jonquil.session :as session]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
@@ -513,6 +516,17 @@
                                       :waiting-input "Waiting for input"
                                       :idle "Ready")))
    :on-complete (fn [result]
+                  ;; P4.T2 review's Important, widened by P4.T4: docs/
+                  ;; symbol-doc memoises on [ns sym text], so a name looked
+                  ;; up before this evaluation defined (or removed) it
+                  ;; would otherwise keep serving that stale answer for the
+                  ;; SAME [ns sym text] forever after. Clearing here covers
+                  ;; every completed evaluation, Run and REPL entry alike
+                  ;; -- make-eval-opts is shared by both (is-run? only
+                  ;; gates the EOF hint below) -- not only after Run. A
+                  ;; plain atom reset, safe to call from this worker
+                  ;; thread with no on-gui! (unlike everything else here).
+                  (docs/clear-doc-cache!)
                   (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
                   (let [[kind text] (console/result-line result)]
@@ -637,6 +651,71 @@
   (let [open (filter popover/open? @popovers)]
     (doseq [p open] (popover/hide! p))
     (boolean (seq open))))
+
+;; --- quick doc and jump (P4.T4) -----------------------------------------
+
+(defn- place-caret-and-scroll!
+  "Places ed's cursor at offset and scrolls it into view -- the same
+  gtk_text_view_scroll_to_iter pattern jonquil.gtk.find-bar's select-
+  match! uses (P4 probe 2), in two with-iters* calls since scroll-to-iter
+  needs its own fresh iter."
+  [ed offset]
+  (let [buf (:buf ed)]
+    (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+    (g/with-iters* buf offset offset
+      (fn [a _] (g/gtk-text-view-scroll-to-iter (:view ed) a 0.0 0 0.0 0.0)))))
+
+(defn- do-quick-doc!
+  "Ctrl+Q/Shift+F1 (P4.T4), the ui's own :quick-doc!*: help/target on ed's
+  current snapshot; none sets status \"No symbol at the caret.\"
+  Otherwise looks up docs/symbol-doc in the session's own prompt
+  namespace and shows help/doc-text in the quick-doc popover at the
+  caret. Wrapped in try/catch (the reviewer clause: no lookup may throw
+  out of a key handler) even though docs/symbol-doc already catches its
+  own exceptions -- help/doc-text and syntax/format-autocomplete-doc run
+  outside that catch, and this is the editor's own key dispatch calling
+  straight through, with nothing else between it and a throw."
+  [ed session status-label help-pop]
+  (try
+    (let [snap (editor/snapshot ed)]
+      (if-let [{:keys [symbol start]} (help/target snap)]
+        (let [doc (docs/symbol-doc (:prompt-ns @(:state session)) symbol (:text snap) start)]
+          (help-popover/show-doc! help-pop (help/doc-text symbol doc)))
+        (set-status! status-label "No symbol at the caret.")))
+    (catch :default e
+      (set-status! status-label (str "; quick doc: " (ex-message e))))))
+
+(defn- do-jump!
+  "F12/Ctrl+B (P4.T4), the ui's own :jump!*: help/jump-target on ed's
+  current snapshot, using docs/symbol-doc as the doc-info external
+  fallback. :buffer places the cursor at :offset and scrolls it into
+  view, status \"Jumped to <sym>.\"; :external shows its own doc in the
+  quick-doc popover; jump-target's own nil case (no definition anywhere)
+  reads as \"No definition found for <sym>.\" -- the brief's three cases.
+  No symbol at the caret at all (help/target nil, so there is no sym to
+  name) falls back to quick doc's own \"No symbol at the caret.\" message
+  instead of naming a nil symbol; no row exercises this edge, it's just
+  the sane completion of the two named cases. Same try/catch reasoning
+  as do-quick-doc!."
+  [ed session status-label help-pop]
+  (try
+    (let [snap (editor/snapshot ed)]
+      (if-let [{:keys [symbol start]} (help/target snap)]
+        (let [doc (docs/symbol-doc (:prompt-ns @(:state session)) symbol (:text snap) start)
+              target (help/jump-target snap doc)]
+          (cond
+            (= :buffer (:kind target))
+            (do (place-caret-and-scroll! ed (:offset target))
+                (set-status! status-label (str "Jumped to " symbol ".")))
+
+            (= :external (:kind target))
+            (help-popover/show-doc! help-pop (help/doc-text symbol (:doc target)))
+
+            :else
+            (set-status! status-label (str "No definition found for " symbol "."))))
+        (set-status! status-label "No symbol at the caret.")))
+    (catch :default e
+      (set-status! status-label (str "; jump: " (ex-message e))))))
 
 ;; --- find/replace bar (P3.T4) -----------------------------------------
 
@@ -924,6 +1003,15 @@
         popovers (atom [])
         close-popovers-fn (fn [] (close-popovers! popovers))
         register-popover-fn (fn [p] (register-popover! popovers p))
+        ;; P4.T4: the quick-doc popover, built once on ed's view and
+        ;; joined to the SAME registry above (Escape closes it, like every
+        ;; other P4 popover); quick-doc-fn/jump-fn are the ui's own
+        ;; :quick-doc!*/:jump!* and are also what editor.clj's own key
+        ;; dispatch calls (set-quick-doc-fn!/set-jump-fn! below), since ed
+        ;; itself is built before session/status-label/help-pop exist.
+        help-pop (help-popover/make-help-popover (:view ed))
+        quick-doc-fn (fn [] (do-quick-doc! ed session status-label help-pop))
+        jump-fn (fn [] (do-jump! ed session status-label help-pop))
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
@@ -1045,6 +1133,16 @@
     ;; P3.T5: the status bar's Ln/Col label, editor position only (probe 6).
     (editor/on-cursor-moved!
      ed (fn [[line col]] (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col)))))
+    ;; P4.T4: joins the SAME popover registry P4.T3 built (Escape closes
+    ;; it), wires the editor's own Ctrl+Q/Shift+F1/F12/Ctrl+B key clauses
+    ;; to quick-doc-fn/jump-fn, and closes the popover on any caret move
+    ;; or focus leaving the editor (the brief's own close conditions,
+    ;; beyond Escape, which the registry above already covers).
+    (register-popover-fn help-pop)
+    (editor/set-quick-doc-fn! ed quick-doc-fn)
+    (editor/set-jump-fn! ed jump-fn)
+    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (when file
       ;; A file argument that doesn't exist opens an empty editor with the
       ;; path remembered anyway, so Save creates it -- unlike the Open
@@ -1104,6 +1202,14 @@
                  ;; P4.T4-T7 on) joins that registry.
                  :close-popovers!* close-popovers-fn
                  :register-popover!* register-popover-fn
+                 ;; P4.T4: the ui's own quick-doc/jump actions -- the exact
+                 ;; fns editor.clj's own Ctrl+Q/Shift+F1/F12/Ctrl+B clauses
+                 ;; call (set-quick-doc-fn!/set-jump-fn!, above) -- and the
+                 ;; quick-doc popover itself, for rows to read back via
+                 ;; jonquil.gtk.popover/open? and help-popover/quick-doc-text.
+                 :quick-doc!* quick-doc-fn
+                 :jump!* jump-fn
+                 :help-popover help-pop
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -1147,7 +1253,7 @@
   :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
-  :close-popovers!* :register-popover!*
+  :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :handle-window-key! :simulate-open-result! :simulate-save-result!
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
@@ -1163,7 +1269,10 @@
   joins a jonquil.gtk.popover map to this window's registry so
   :close-popovers!* knows about it -- P4.T4-T7's completion/quick-doc/
   rename popovers register theirs the same way a self-test row's own test
-  popover does."
+  popover does. :quick-doc!*/:jump!* (P4.T4) are exactly what the editor's
+  own Ctrl+Q/Shift+F1/F12/Ctrl+B key clauses call; :help-popover is the
+  jonquil.gtk.help-popover map those two actions show doc text in --
+  jonquil.gtk.popover/open? and help-popover/quick-doc-text read it back."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one

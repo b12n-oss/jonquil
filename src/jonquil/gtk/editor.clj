@@ -126,6 +126,37 @@
   (swap! (:on-cursor-fns ed) conj f)
   nil)
 
+(defn on-focus-lost!
+  "Registers f (fn [] -> nil) to be called, on the GTK thread, whenever
+  the editor's view (or a descendant) stops being the root's focus widget
+  -- GtkEventControllerFocus's own \"leave\" signal (P4.T4, ffi.clj's own
+  citation), which tracks focus-within independent of OS window-
+  activation, unlike gtk_widget_has_focus (window.clj's do-toggle-focus!
+  docstring). Multiple registrations fire in registration order, mirroring
+  on-dirty-changed!/on-cursor-moved!."
+  [ed f]
+  (swap! (:on-focus-fns ed) conj f)
+  nil)
+
+(defn set-quick-doc-fn!
+  "Registers f (fn [] -> nil), the ui's own :quick-doc!* action, to run
+  for the editor's quick-doc chords (Ctrl+Q, Shift+F1). A single slot, not
+  a list like on-dirty-changed!/on-cursor-moved!/on-focus-lost! above --
+  there is exactly one owner (jonquil.gtk.window's activate!), set once
+  after the quick-doc popover and its status wiring exist; ed itself is
+  built before those, so this is a late registration, same shape either
+  way."
+  [ed f]
+  (reset! (:quick-doc-fn ed) f)
+  nil)
+
+(defn set-jump-fn!
+  "Registers f (fn [] -> nil), the ui's own :jump!* action, to run for the
+  editor's jump chords (F12, Ctrl+B). See set-quick-doc-fn!."
+  [ed f]
+  (reset! (:jump-fn ed) f)
+  nil)
+
 (defn focus! [ed]
   (g/gtk-widget-grab-focus (:view ed))
   nil)
@@ -269,6 +300,14 @@
 (def ^:private KEY-L 0x06c)
 (def ^:private KEY-Y 0x079)
 
+;; P4.T4 additions (gdkkeysyms.h, measured 2026-09-26 -- see the brief's key
+;; table): Ctrl+Q quick doc, F12/Ctrl+B jump to definition, Shift+F1 quick
+;; doc's second chord.
+(def ^:private KEY-Q 0x071)
+(def ^:private KEY-B 0x062)
+(def ^:private KEY-F1 0xffbe)
+(def ^:private KEY-F12 0xffc9)
+
 ;; macOS hardware keycodes for the physical F and L keys (measured live
 ;; this session, pid-driven cgevent cmd+option+f/l against this build:
 ;; keycode 3 and 37 respectively, state carrying both ALT-MASK and
@@ -305,6 +344,22 @@
   that happens to share a keyval."
   [state]
   (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK))))
+
+(defn- control-only?
+  "P4 keys (quick doc, jump): Control held and Meta NOT held -- the P4
+  rule (00-overview.md's global constraints) that these chords check
+  CONTROL-MASK only and reject META-MASK, unlike command-chord? above
+  which treats either as the same chord."
+  [state]
+  (and (not (zero? (bit-and state g/CONTROL-MASK)))
+       (zero? (bit-and state g/META-MASK))))
+
+(defn- no-modifiers?
+  "True when none of Shift, Control, Meta or Alt is held -- F12's own P4
+  requirement (\"no modifiers\"), stricter than no-command-modifiers?
+  above, which doesn't check Shift."
+  [state]
+  (zero? (bit-and state (bit-or g/SHIFT-MASK g/CONTROL-MASK g/META-MASK g/ALT-MASK))))
 
 (defn- apply-edit! [ed result]
   (if (apply-op! ed result) 1 0))
@@ -376,6 +431,27 @@
          (do (g/gtk-text-buffer-redo (:buf ed)) 1)
          0)
 
+       ;; P4.T4: quick doc and jump. control-only? (not command-chord?)
+       ;; because the P4 global constraint is CONTROL-MASK only, rejecting
+       ;; META-MASK -- unlike every chord above, which treats Control and
+       ;; Meta as the same command chord. F12 additionally requires NO
+       ;; modifiers at all (no-modifiers?, stricter than no-command-
+       ;; modifiers? above, which doesn't check Shift). Each runs the fn
+       ;; jonquil.gtk.window registered (set-quick-doc-fn!/set-jump-fn!,
+       ;; below) and returns 1 regardless of what that fn finds -- "acted"
+       ;; means the chord matched, not that a symbol/definition turned up.
+       (and (control-only? state) (= keyval KEY-Q))
+       (do (when-let [f @(:quick-doc-fn ed)] (f)) 1)
+
+       (and (shift-held? state) (= keyval KEY-F1))
+       (do (when-let [f @(:quick-doc-fn ed)] (f)) 1)
+
+       (and (no-modifiers? state) (= keyval KEY-F12))
+       (do (when-let [f @(:jump-fn ed)] (f)) 1)
+
+       (and (control-only? state) (= keyval KEY-B))
+       (do (when-let [f @(:jump-fn ed)] (f)) 1)
+
        (and (no-command-modifiers? state) (contains? open-chars keyval))
        (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
 
@@ -416,6 +492,7 @@
         buf (g/gtk-text-view-get-buffer view)
         scroll (g/gtk-scrolled-window-new)
         keyctl (g/gtk-event-controller-key-new)
+        focusctl (g/gtk-event-controller-focus-new)
         ed {:view view
             :buf buf
             :scroll scroll
@@ -424,13 +501,18 @@
             :last-dirty? (atom false)
             :on-dirty-fns (atom [])
             :on-cursor-fns (atom [])
+            :on-focus-fns (atom [])
             :dirty-at (atom nil)
             :preedit-active? (atom false)
             ;; M7: starts true so the first tick always checks, establishing
             ;; a baseline; `changed` (below), set-text! and mark-saved! are
             ;; the only writers after that.
             :dirty-check-needed? (atom true)
-            :dirty-check-count (atom 0)}]
+            :dirty-check-count (atom 0)
+            ;; P4.T4: single-slot registrations for the quick-doc/jump
+            ;; chords -- see set-quick-doc-fn!/set-jump-fn!.
+            :quick-doc-fn (atom nil)
+            :jump-fn (atom nil)}]
     (g/gtk-text-view-set-editable view 1)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
@@ -472,6 +554,16 @@
                                          nil)
                                        [:pointer :string :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; P4.T4: GtkEventControllerFocus's own "leave" signal (ffi.clj's
+    ;; citation) -- fires whenever view (or a descendant) stops being the
+    ;; root's focus widget. No signal args beyond instance/user_data.
+    (g/g-signal-connect-data focusctl "leave"
+                             (callable (fn [_ctl _data]
+                                         (doseq [f @(:on-focus-fns ed)] (f))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller view focusctl)
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/g-signal-connect-data keyctl "key-pressed"
                              (callable (on-key ed) [:pointer :uint :uint :uint :pointer] :int)

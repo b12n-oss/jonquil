@@ -20,6 +20,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
             [jonquil.main :as main]
             [jonquil.session :as session]
@@ -2215,6 +2216,224 @@
       ((:set-theme!* ui) :light)
       (next))))
 
+;; --- P4.T4: quick doc and jump to definition -------------------------------
+
+;; gtk-keys.md's shared table, this file's own private copies (measured
+;; against gdkkeysyms.h, same values editor.clj's own KEY-Q/KEY-B/KEY-F1/
+;; KEY-F12 use).
+(def ^:private KEY-Q 0x071)
+(def ^:private KEY-B 0x062)
+(def ^:private KEY-F1 0xffbe)
+(def ^:private KEY-F12 0xffc9)
+
+(defn- row-quick-doc-core
+  "editor/handle-key! directly with Ctrl+Q (control-only?, no synthesized
+  keystroke): the popover opens at the caret and its label -- read back
+  via help-popover/quick-doc-text -- carries clojure.core/map's own
+  arglists."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-Q g/CONTROL-MASK)
+          text (help-popover/quick-doc-text hp)]
+      (check :quick-doc-core
+             (and (= 1 handled) (popover/open? hp)
+                  (str/includes? text "clojure.core/map")
+                  (str/includes? text "([f] [f coll]"))
+             {:handled handled :open (popover/open? hp) :text text})
+      (popover/hide! hp)
+      (next))))
+
+(defn- row-quick-doc-run-defined
+  "Runs a real Run defining greet with a docstring, waits for it to
+  actually land (run-and-wait!'s own I1 gating), then Shift+F1 on a fresh
+  (greet 1) shows that docstring."
+  [ui next]
+  (run-and-wait! ui "(defn greet \"Says hi.\" [name] name)" 3000
+                 (fn [t] (str/includes? t "=> #'user/greet"))
+                 (fn [defined? _]
+                   (let [ed (:editor ui) hp (:help-popover ui)]
+                     (editor/set-text! ed "(greet 1)")
+                     (place-cursor! (:buf ed) 2)
+                     (let [handled (editor/handle-key! ed KEY-F1 g/SHIFT-MASK)
+                           text (help-popover/quick-doc-text hp)]
+                       (check :quick-doc-run-defined
+                              (and defined? (= 1 handled) (str/includes? text "Says hi."))
+                              {:defined defined? :handled handled :text text})
+                       (popover/hide! hp)
+                       (next))))))
+
+(defn- row-quick-doc-after-reset
+  "Continues from the same defined greet, then forces Reset-on-Run mode
+  (session/set-mode!, since an earlier row in this file's own sequence
+  left the session in :accumulate -- see row-reset-vs-accumulate) and
+  Runs a program that does NOT define greet: reset-namespaces! removes
+  the whole `user` ns, including greet, before evaluating it. A quick doc
+  on the SAME (greet 1) text afterward must not throw (docs/symbol-doc's
+  own `user`-missing fallback, P4.T2) and must read as not found -- and,
+  since docs/symbol-doc memoises on [ns sym text] and this reuses the
+  EXACT SAME key row-quick-doc-run-defined just cached with a real doc,
+  this also depends on window.clj's clear-doc-cache! running after the
+  second Run (P4.T2 review's Important)."
+  [ui next]
+  (run-and-wait! ui "(defn greet \"Says hi.\" [name] name)" 3000
+                 (fn [t] (str/includes? t "=> #'user/greet"))
+                 (fn [defined1? _]
+                   (session/set-mode! (:session ui) :reset)
+                   (run-and-wait! ui "(+ 1 1)" 3000
+                                  (fn [t] (str/includes? t "=> 2"))
+                                  (fn [reran? _]
+                                    (let [ed (:editor ui) hp (:help-popover ui)]
+                                      (editor/set-text! ed "(greet 1)")
+                                      (place-cursor! (:buf ed) 2)
+                                      (let [{:keys [handled threw]}
+                                            (try {:handled (editor/handle-key! ed KEY-Q g/CONTROL-MASK)}
+                                                 (catch Throwable e {:threw (ex-message e)}))
+                                            text (help-popover/quick-doc-text hp)]
+                                        (check :quick-doc-after-reset
+                                               (and defined1? reran? (nil? threw) (= 1 handled)
+                                                    (str/includes? text "No documentation found"))
+                                               {:defined1 defined1? :reran reran?
+                                                :handled handled :threw threw :text text})
+                                        (popover/hide! hp)
+                                        (next))))))))
+
+(defn- row-quick-doc-closes
+  "gtk_text_buffer_place_cursor's own cursor-position notify (synchronous,
+  no on-gui! drain, per row-line-col) closes the popover the moment the
+  caret moves -- no poll needed."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (editor/handle-key! ed KEY-Q g/CONTROL-MASK)
+    (let [opened? (popover/open? hp)]
+      (place-cursor! (:buf ed) 3)
+      (check :quick-doc-closes
+             (and opened? (not (popover/open? hp)))
+             {:opened opened? :still-open (popover/open? hp)})
+      (next))))
+
+(defn- row-quick-doc-cmd-does-nothing
+  "0x71 with META-MASK only: control-only? rejects it (the P4 rule --
+  CONTROL-MASK checked, META-MASK rejected), so the chord falls through
+  unhandled and no popover opens."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-Q g/META-MASK)]
+      (check :quick-doc-cmd-does-nothing
+             (and (= 0 handled) (not (popover/open? hp)))
+             {:handled handled :open (popover/open? hp)})
+      (next))))
+
+(defn- row-quick-doc-after-define
+  "T2 review's Important, widened (context clue #3): a lookup before
+  anything defines the name must not keep serving :not-found once a REPL
+  entry defines it. Looks up quickdocdefme -- a name unique to this row --
+  before anything defines it (help/doc-text's own \"No documentation
+  found\"), defines it through the SAME path the console's Return uses
+  (an interactive insert + handle-return!, never a synthesized key), then
+  looks it up again with the IDENTICAL buffer text: the memo key
+  ([ns sym text]) is the same both times, so this fails if window.clj's
+  clear-doc-cache! call after a completed REPL eval is removed -- verified
+  live (see the report) by removing that call, confirming this row (and
+  quick-doc-after-reset above, which depends on the SAME call site for its
+  own Run) both fail, then restoring it."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui) cv (:console ui)
+        code "(quickdocdefme 1)"]
+    (editor/set-text! ed code)
+    (place-cursor! (:buf ed) 2)
+    (let [h1 (editor/handle-key! ed KEY-Q g/CONTROL-MASK)
+          before (help-popover/quick-doc-text hp)]
+      (popover/hide! hp)
+      (let [mark (out-end-offset ui)]
+        (g/gtk-text-buffer-insert-interactive-at-cursor
+         (:buf cv) "(defn quickdocdefme \"Freshly defined.\" [n] n)" -1 1)
+        (cview/handle-return! cv false)
+        (poll-until 3000 20
+                    (fn [] (and (idle? ui) (str/includes? (since ui mark) "=> #'user/quickdocdefme")))
+                    (fn [defined?]
+                      (editor/set-text! ed code)
+                      (place-cursor! (:buf ed) 2)
+                      (let [h2 (editor/handle-key! ed KEY-Q g/CONTROL-MASK)
+                            after (help-popover/quick-doc-text hp)]
+                        (check :quick-doc-after-define
+                               (and (= 1 h1) (str/includes? before "No documentation found")
+                                    defined? (= 1 h2) (str/includes? after "Freshly defined."))
+                               {:h1 h1 :before before :defined defined? :h2 h2 :after after})
+                        (popover/hide! hp)
+                        (next))))))))
+
+(defn- row-jump-top-level
+  "\"(defn greet [n] n)\\n(greet 1)\", caret 22 (inside the SECOND greet,
+  the usage) -- help/jump-target takes the symbol's START (P4.T1's
+  jump-target docstring), F12 (no-modifiers?) lands the caret on the
+  DEFN's own greet, offset 6."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(defn greet [n] n)\n(greet 1)")
+    (place-cursor! (:buf ed) 22)
+    (let [handled (editor/handle-key! ed KEY-F12 0)
+          caret (g/cursor-offset (:buf ed))]
+      (check :jump-top-level
+             (and (= 1 handled) (= 6 caret))
+             {:handled handled :caret caret})
+      (next))))
+
+(defn- row-jump-local-binding
+  "\"(defn f [x] (let [y x] y))\", caret 23 (the LAST y, the usage inside
+  the body) -- Ctrl+B (control-only?) lands on the BINDING y inside
+  [y x], offset 18 (measured with the pure spike's help/jump-target, per
+  the brief)."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(defn f [x] (let [y x] y))")
+    (place-cursor! (:buf ed) 23)
+    (let [handled (editor/handle-key! ed KEY-B g/CONTROL-MASK)
+          caret (g/cursor-offset (:buf ed))]
+      (check :jump-local-binding
+             (and (= 1 handled) (= 18 caret))
+             {:handled handled :caret caret})
+      (next))))
+
+(defn- row-jump-external
+  "\"(map inc [1])\", caret 2, F12: find-definition finds nothing in the
+  buffer, so jump-target falls to the :external case and the SAME quick-
+  doc popover shows clojure.core/map's own doc."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-F12 0)
+          text (help-popover/quick-doc-text hp)]
+      (check :jump-external
+             (and (= 1 handled) (popover/open? hp) (str/includes? text "clojure.core/map"))
+             {:handled handled :open (popover/open? hp) :text text})
+      (popover/hide! hp)
+      (next))))
+
+(defn- row-jump-none
+  "\"(nope 1)\", caret 2, F12: a real symbol with no definition anywhere
+  -- jump-target's own nil case -- reads as the status message, polled
+  (P4.T4: do-jump! goes through set-status!, which enqueues via on-gui!
+  same as every other status update in this file, never synchronous)."
+  [ui next]
+  (let [ed (:editor ui) status (:status-label ui)]
+    (editor/set-text! ed "(nope 1)")
+    (place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-F12 0)]
+      (poll-until 1000 20
+                  (fn [] (= "No definition found for nope." (g/label-text status)))
+                  (fn [status-ok?]
+                    (check :jump-none
+                           (and (= 1 handled) status-ok?)
+                           {:handled handled :status (g/label-text status)})
+                    (next))))))
+
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
   not idle -- the coordinator's own concern was exactly this combination
@@ -2326,6 +2545,16 @@
    row-window-f6-still-toggles
    row-window-escape-closes-popover
    row-popover-dark-colours
+   row-quick-doc-core
+   row-quick-doc-run-defined
+   row-quick-doc-after-reset
+   row-quick-doc-closes
+   row-quick-doc-cmd-does-nothing
+   row-quick-doc-after-define
+   row-jump-top-level
+   row-jump-local-binding
+   row-jump-external
+   row-jump-none
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
