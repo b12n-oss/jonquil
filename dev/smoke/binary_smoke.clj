@@ -251,6 +251,37 @@
                         (fn [] (let [t (ocr-text! pid)] (reset! last t) (str/includes? t needle))))]
       {:ok ok :last @last})))
 
+(defn- ocr-rows->loose-text
+  "rows' own :text values joined by a single SPACE (P3.T6), not ocr-text!'s
+  \"\\n\": measured live this session, cgevent sometimes renders a short
+  result like \"=> 2\" as one OCR row and sometimes splits it into \"=>\"
+  and \"2\" as two adjacent rows -- same console content, different OCR
+  passes, not something a caller can rely on being stable run to run. A
+  newline join can leave a caller's literal \"=> 2\" substring search
+  spanning exactly that split unmatched; a single space reconstitutes the
+  same text whichever way cgevent happened to segment it this time,
+  without assuming any row order beyond what cgevent already returns."
+  [rows]
+  (str/join " " (keep :text rows)))
+
+(defn- wait-for-ocr-count!
+  "Polls until re matches at least n times (non-overlapping, via re-seq)
+  against ocr-rows->loose-text's own join of ocr-rows!, or deadline-ms
+  elapses. Returns {:ok bool :count n :last last-loose-text}, the same
+  \"prints what OCR saw\" shape wait-for-ocr! uses. Used where a step needs
+  to count repeated occurrences (P3.T6 step 1's two \"=> 2\" round trips),
+  where a plain wait-for-ocr! could only ever prove \"at least once\"."
+  [pid deadline-ms re n]
+  (let [last-count (atom 0) last-text (atom "")]
+    (let [ok (wait-for! deadline-ms 300
+                        (fn []
+                          (let [t (ocr-rows->loose-text (ocr-rows! pid))
+                                c (count (re-seq re t))]
+                            (reset! last-count c)
+                            (reset! last-text t)
+                            (>= c n))))]
+      {:ok ok :count @last-count :last @last-text})))
+
 ;; --- launching and stopping the binary under test ------------------------
 
 (defn- scratch-copy!
@@ -314,6 +345,24 @@
   (when-not (wait-for-window! pid deadline-ms)
     (throw (ex-info "binary did not open a window" {:pid pid :deadline-ms deadline-ms}))))
 
+(defn- format-code-via-jolt!
+  "The text jonquil.syntax/format-code produces for whatever is on disk at
+  path right now, computed by shelling a real `jolt -M -e` (AGENTS.md:
+  `jolt -e` ignores deps.edn; `-M` loads the project classpath) -- never
+  hand-written, per this task's own instructions, so a future change to
+  the formatter's own rules can't silently desync this step from the code
+  it claims to check. Throws on a non-zero exit, naming jolt's own stderr:
+  a step that silently compared against a blank/garbage expected string
+  would be worse than no check at all."
+  [path]
+  (let [code (str "(require (quote [jonquil.syntax :as syntax])) "
+                  "(print (syntax/format-code (slurp " (pr-str path) ")))")
+        {:keys [exit out err]} (p/shell {:out :string :err :string :continue true}
+                                        "jolt" "-M" "-e" code)]
+    (when-not (zero? exit)
+      (throw (ex-info "jolt -M -e (format-code) failed" {:exit exit :err err})))
+    out))
+
 ;; --- steps ----------------------------------------------------------------
 ;; Each step launches its own fresh process (dev/demo_shots.clj's own
 ;; hard-won lesson: a shared process/window let one scene's leftover
@@ -361,40 +410,48 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-repl-history!
-  "Brief step 3 (one REPL entry, then Up recalls it, then Down leaves the
-  input alone) turned out to be unreachable under this driver's hard
-  safety rules, discovered live this session, not assumed from the brief:
-  jonquil.gtk.window/activate! calls editor/focus! exactly once, at window
-  construction, and grep across the whole src tree (`grab.focus`) turns up
-  no other call anywhere -- the console pane NEVER receives keyboard focus
-  without a mouse click. Typing \"5\" into a freshly launched window with
-  no file (this step's own first attempt) landed in the DEFINITIONS editor
-  instead (its title gained \"* \", confirming it, not the console, went
-  dirty), and Tab / Shift+Tab (tried live against the built binary as a
-  click-free alternative) both stayed in the editor too -- accepts-tab
-  swallows plain Tab as an indent, and Shift+Tab isn't wired to move focus
-  either. cgevent's own docs independently confirm --pid clicks wouldn't
-  help even if this task allowed them: CGEventPostToPid button events
-  never reach window content, in any app, always (window-targeting.md).
-  So there is no safety-compliant way to type at the console prompt at
-  all right now -- human-only until Jonquil ships a keyboard path to it."
+  "Brief step 1 (P3.T6): un-skips P2's own step 3. F6 (P3.T3,
+  do-toggle-focus!) now gives the console a keyboard-reachable focus path
+  that didn't exist when this step's earlier SKIP (P2.T10, see git
+  history) was written -- F6, type \"(inc 1)\" by chords, Return, then Up
+  recalls it from history (console-view/handle-history!) and a second
+  Return resubmits the SAME text, so the result line has to appear twice.
+
+  Counted with wait-for-ocr-count! against #\"=>\\s*2\", not a plain
+  wait-for-ocr! substring check: measured live this session, the SAME
+  console content read back split (\"=>\" then \"2\" as two OCR rows) on
+  one OCR pass and unified (\"=> 2\", one row) on the next, so a literal
+  substring search on ocr-text!'s newline join can miss an occurrence
+  that's really there -- see ocr-rows->loose-text's own docstring."
   []
-  (skip! :repl-history
-         "console pane has no keyboard-reachable focus path (measured live: only editor/focus! ever grabs focus; Tab/Shift+Tab both stay in the editor) and cgevent clicks can't substitute (--pid buttons never reach window content); needs a mouse, which this driver's safety rules forbid"))
+  (let [{:keys [proc pid]} (launch! nil)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "f6")
+    (type-text! pid "(inc 1)")
+    (cg-key! pid "return")
+    (let [{:keys [ok count]} (wait-for-ocr-count! pid 5000 #"=>\s*2" 1)]
+      (when-not ok
+        (check! :repl-history-first-eval false {:reason "no => 2 after the first Return" :count count})))
+    (cg-key! pid "up")
+    (cg-key! pid "return")
+    (let [{:keys [ok count last]} (wait-for-ocr-count! pid 5000 #"=>\s*2" 2)]
+      (screenshot! pid "step1-repl-history")
+      (check! :repl-history (and ok (>= count 2)) {:count count :console last}))
+    (stop! {:proc proc :pid pid})))
 
 (defn- step-read-line!
-  "Brief step 4 (read-line, answered by chords) hits the same console-
-  focus wall as step-repl-history! for the \"answered\" half: F5 always
-  reaches the window (the capture-phase key controller sees it regardless
-  of focus), so Run-triggers-Waiting-for-input is genuinely automatable,
-  but typing the answer needs the console focused, which nothing in this
-  codebase ever grants without a click. What this step actually checks
-  instead: read-line puts the engine into :waiting-input (a real, distinct
-  status from :running), and Escape -- also window-level, also focus-
-  independent -- interrupts it cleanly from THAT state, the same way
-  dev/gtk_selftest_window.clj's own row-stop-while-reading proves in-
-  process. That's real automated coverage of a real code path, just not
-  the literal \"answered by chords\" one the brief described."
+  "Brief step 2 (P3.T6): completes P2's own step 4. F6 (P3.T3) closes the
+  console-focus gap that used to make read-line's own answer unreachable
+  (this fn's earlier docstring, and step-repl-history!'s, cover why) -- so
+  this now answers read-line for real instead of only interrupting it:
+  once the status shows Waiting for input, F6 focuses the console, \"kim\"
+  is typed by chords, and Return submits it as :send-stdin
+  (console/input-action, waiting? true), which greet.clj's own
+  `(read-line)` picks up and prints \"Hi kim\". This replaces the earlier
+  Escape-interrupt-while-waiting check (that path is still exercised by
+  step-stop-infinite-loop!/step-stop-print-forever!'s own Escape-from-
+  :running case; only the read-line-specific interrupt regression drops
+  out here, per the brief's own step 2 wording)."
   []
   (let [path (scratch-copy! "greet.clj")
         {:keys [proc pid]} (launch! path)]
@@ -402,11 +459,269 @@
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Waiting for input")]
       (when-not ok (check! :read-line-waiting false {:reason "status never showed Waiting for input"})))
-    (cg-key! pid "escape")
-    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "Stopped")]
-      (screenshot! pid "step4-read-line-interrupted")
-      (check! :read-line-waiting-then-interrupted ok {:console last}))
+    (cg-key! pid "f6")
+    (type-text! pid "kim")
+    (cg-key! pid "return")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "Hi kim")]
+      (screenshot! pid "step2-read-line-answered")
+      (check! :read-line-answered ok {:console last}))
     (stop! {:proc proc :pid pid})))
+
+(defn- step-run-selection!
+  "Brief step 3: runsel.clj is two lines, each a self-contained expression
+  (no line depends on the other, unlike run.clj/greet.clj which run
+  through session/run-definitions! first) -- Run Selection (Cmd+E) sends
+  straight to the REPL, so a fixture that needed a prior Run would read
+  as broken here for the wrong reason. The caret sits at the end of the
+  buffer right after launch: measured live this session against this
+  exact fixture shape (Ln 2, Col 9 after launch, exactly the last line's
+  own length, no trailing newline in the fixture) -- the brief's own
+  expectation, confirmed rather than assumed. With no selection,
+  commands/run-selection-text (P3.T1) sends the caret's own line, so
+  Cmd+E must show the LAST line's value, 42, not the first line's (3)."
+  []
+  (let [path (scratch-copy! "runsel.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "command + e")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "=> 42")]
+      (screenshot! pid "step3-run-selection")
+      (check! :run-selection ok {:console last}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-toggle-comment!
+  "Brief step 4: select all (Cmd+A), toggle comment (Cmd+/,
+  edit/toggle-comment, P3.T2), Save (Cmd+S). Every non-blank line's own
+  bytes on disk must start with \"; \" (edit/toggle-comment's own leading
+  comment marker)."
+  []
+  (let [path (scratch-copy! "comment.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "command + a")
+    (cg-key! pid "command + /")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))
+          lines (when (seq on-disk) (str/split-lines on-disk))
+          all-commented? (and (seq lines) (every? #(str/starts-with? % "; ") lines))]
+      (screenshot! pid "step4-toggle-comment")
+      (check! :toggle-comment (and title-ok all-commented?) {:title-lost-star title-ok :on-disk on-disk}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-format-all!
+  "Brief step 5: a mis-indented fixture, Cmd+Shift+F
+  (commands/format-all-op, P3.T2), Cmd+S. The file's own bytes on disk
+  must equal jonquil.syntax/format-code's real output for the ORIGINAL
+  fixture text (format-code-via-jolt!, a live `jolt -M -e` call, per this
+  task's own instructions -- never hand-written). The extra (not=
+  original expected) assertion is this step's own falsifiability check
+  (subagent-prompt-conventions.md: \"each PASS would fail if the feature
+  broke\") -- without it, a fixture that happened to already be correctly
+  formatted would let a completely broken format-all-op pass this step by
+  doing nothing at all."
+  []
+  (let [path (scratch-copy! "format.clj")
+        original (slurp path)
+        expected (format-code-via-jolt! path)
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "command + shift + f")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))]
+      (screenshot! pid "step5-format-all")
+      (check! :format-all (and title-ok (not= original expected) (= expected on-disk))
+              {:title-lost-star title-ok :expected expected :on-disk on-disk}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-find!
+  "Brief step 6: Cmd+F opens the bar already focused on the query entry
+  (find-bar/open!, P3.T4), types \"findme\" by chords, Return. The title
+  must stay unchanged (the find bar never dirties the buffer), and at
+  least one match's own highlighted pixels must sample close to the
+  search-match tag's colour, #fff2a8 (jonquil.gtk.find-bar/SEARCH-MATCH-BG).
+
+  \"At least one\" rather than \"whichever Return leaves selected\":
+  measured live this session against this exact two-line fixture, Return's
+  own find-next! (P3.T4) leaves ONE match as the buffer's text selection,
+  and GTK renders a SELECTED match's highlight visibly dimmer (198,191,155
+  measured) than an unselected one's (255,242,168 measured -- an exact
+  match) -- the tag and the selection paint blend. Sampling every OCR row
+  that contains the query text, not only the current match, is what makes
+  this assertion true regardless of which of the two ends up selected.
+
+  Pixel sampling reuses PixelAt.java's darkest/lightest-cluster idea
+  (step-run-and-colour!) but adds a \"near\" mode (this task): a plain
+  lightest-cluster read plain WHITE background ahead of the yellow
+  highlight, because #fff2a8's own mean channel value (221) is lower than
+  white's (255) -- measured live, see PixelAt.java's own comment. \"near\"
+  sorts by distance to the target colour instead, so it finds the fill
+  regardless of which cluster has the higher luminance. Window position
+  is re-read fresh right before ocr-rows!/screenshot! (not from an earlier
+  call): measured live this session that this window's reported x/y drifts
+  between separate cgevent calls after key events land, the same reason
+  step-run-and-colour! already reads window-for immediately before using
+  it."
+  []
+  (let [path (scratch-copy! "find.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "command + f")
+    (type-text! pid "findme")
+    (cg-key! pid "return")
+    (let [{:keys [ok]} (wait-for-ocr! pid 5000 "findme")]
+      (when-not ok (check! :find-setup false {:reason "\"findme\" never showed in OCR after Return"})))
+    (let [win (window-for pid)
+          scale (or (:scale win) 2.0)
+          wx (:x win) wy (:y win)
+          rows (filter (fn [r] (str/includes? (or (:text r) "") "findme")) (ocr-rows! pid))
+          shot (str out-dir "/step6-find.png")
+          _ (screenshot! pid "step6-find")
+          title-ok (not (str/starts-with? (or (:name win) "") "*"))
+          samples (when (and wx wy (seq rows))
+                    (keep (fn [row]
+                            (let [px (int (* scale (- (:x row) wx)))
+                                  py (int (* scale (- (:y row) wy)))
+                                  pw (max 10 (int (* scale (:w row))))
+                                  ph (max 6 (int (* scale (:h row))))
+                                  {:keys [out exit]}
+                                  (p/shell {:out :string :err :string :continue true}
+                                           "java" pixel-at-jar shot
+                                           (str px) (str py) (str pw) (str ph)
+                                           "near" "255" "242" "168")]
+                              (when (zero? exit)
+                                (let [[r g b] (map #(Long/parseLong %) (str/split (str/trim out) #","))]
+                                  {:rgb [r g b]
+                                   :dist (+ (Math/abs (- r 0xff)) (Math/abs (- g 0xf2)) (Math/abs (- b 0xa8)))}))))
+                          rows))
+          close-enough? (boolean (some #(< (:dist %) 40) samples))]
+      (check! :find (and title-ok close-enough?)
+              {:title-ok title-ok :row-count (count rows) :samples samples}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-pre-run-check!
+  "Brief step 7: the (undefined-fn)\\n(defn g [y] fixture (unclosed.clj),
+  F5. commands/pre-run-problem (P3.T1) must catch the unclosed \"(\" on
+  line 2 BEFORE anything evaluates, so OCR shows \"never closed\" and
+  never \"resolve\" (the unresolved-symbol error the first form would
+  otherwise throw, if the bracket check didn't run first) -- the same
+  regression dev/gtk_selftest_window.clj's own row-pre-run-hidden-by-error
+  guards in-process; this drives the same behaviour from outside it."
+  []
+  (let [path (scratch-copy! "unclosed.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "f5")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "never closed")]
+      (screenshot! pid "step7-pre-run-check")
+      (check! :pre-run-check (and ok (not (str/includes? last "resolve"))) {:console last}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- dirty-title?
+  "True once this pid's window title carries the \"* \" dirty marker
+  (update-title!, P2/P3.T5), polled rather than read once -- typed chords
+  land asynchronously and the dirty tick (editor.clj's own 20ms debounce)
+  needs a moment to catch up. Shared by step-close-with-unsaved! and
+  step-quit-with-unsaved!, both of which need a genuinely dirty buffer
+  before sending their own chord."
+  [pid]
+  (wait-for! 3000 200 (fn [] (let [w (window-for pid)] (and w (str/starts-with? (or (:name w) "") "*"))))))
+
+(defn- step-close-with-unsaved!
+  "Brief step 8: typing makes the editor dirty (title gains \"* \"), then
+  Cmd+W opens the close-confirmation alert (close-request-fn, P3.T5) as a
+  SECOND top-level window for this pid -- checked via `cgevent windows
+  --pid`, since a real GtkAlertDialog renders as its own window, never a
+  native macOS sheet (P3 probe finding #3). The process must still be
+  alive throughout: the alert only SUSPENDS the close (close-request-fn
+  returns 1), it never quits on its own. Escape by pid is then the
+  alert's own Cancel (index 2, close-choice!): measured live this session
+  (not assumed from the brief) that a pid-routed Escape DOES reach the
+  alert -- it closes the SECOND window, back down to one, with the
+  process still alive and the title still carrying \"* \" (close-choice!'s
+  own index-2 branch touches nothing). If the alert ever stops taking
+  pid-routed keys in some future GTK/macOS version, this step reports it
+  and SKIPs rather than reaching for a click, which this driver's hard
+  safety rules forbid outright."
+  []
+  (let [{:keys [proc pid]} (launch! nil)]
+    (ensure-window! pid 8000)
+    (type-text! pid "1")
+    (when-not (dirty-title? pid)
+      (check! :close-with-unsaved-setup false {:reason "title never gained * after typing"}))
+    (cg-key! pid "command + w")
+    (let [alert-appeared? (wait-for! 4000 200 (fn [] (= 2 (count (windows-edn! pid)))))
+          alive-after-w? (p/alive? proc)]
+      (screenshot! pid "step8-close-alert")
+      (if-not alert-appeared?
+        (skip! :close-with-unsaved
+               "pid-routed command+w never opened a second (alert) window for this pid -- can't drive the alert without a click, which this driver never does")
+        (do
+          (cg-key! pid "escape")
+          (let [cancel-ok? (wait-for! 4000 200 (fn [] (= 1 (count (windows-edn! pid)))))
+                still-alive? (p/alive? proc)
+                title (:name (window-for pid))]
+            (screenshot! pid "step8-close-cancelled")
+            (check! :close-with-unsaved
+                    (and alive-after-w? cancel-ok? still-alive? (str/starts-with? (or title "") "*"))
+                    {:alert-appeared alert-appeared? :alive-after-w alive-after-w?
+                     :cancel-ok cancel-ok? :still-alive still-alive? :title title})))))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-quit-with-unsaved!
+  "Controller-added step 9 (task-6-brief.md, not in the store plan): a
+  plain, unbound Cmd/Ctrl+Q sent while the editor is dirty.
+  jonquil.gtk.window's on-window-key has no KEY-Q case at all (grepped:
+  no KEY-Q, no \"Quit\" anywhere in src/) and this app builds no GMenu, so
+  there is nothing in this codebase for the OS to route a Quit
+  accelerator through. Measured live against the built binary before
+  writing this step (not assumed): three separate launches, each typed
+  one character then sent \"command + q\" by pid -- every time the
+  process stayed alive, no second window ever appeared, and the title
+  kept its \"* \" exactly as before the chord, i.e. the key reached the
+  window's own capture-phase controller like any other key, fell through
+  every cond clause to :else 0, and GTK's default handling did nothing
+  with it.
+
+  Encoded as a real PASS/FAIL per the controller's own ruling (not a
+  SKIP): PASS needs the process alive AND either a second window (the
+  alert, same shape as step-close-with-unsaved!) or the ORIGINAL window
+  untouched with the title still carrying \"* \". FAIL is a process that
+  exits (unsaved text silently discarded) -- reported with the exit map
+  as evidence; this task does not change product code to fix that if it
+  happens. A SKIP is left available in principle (\"Cmd+Q doesn't reach
+  the app at all\"), but nothing this driver can observe from outside the
+  process distinguishes that from \"reached it and nothing handled it\" --
+  both look like the untouched-window PASS case above, which is what was
+  actually measured, three times, live."
+  []
+  (let [{:keys [proc pid]} (launch! nil)]
+    (ensure-window! pid 8000)
+    (type-text! pid "1")
+    (when-not (dirty-title? pid)
+      (check! :quit-with-unsaved-setup false {:reason "title never gained * after typing"}))
+    (cg-key! pid "command + q")
+    (let [exit (deref proc 3000 ::timeout)]
+      (if (not= ::timeout exit)
+        (do (check! :quit-with-unsaved false
+                    {:reason "process exited on an unbound Cmd/Ctrl+Q -- unsaved text was discarded"
+                     :exit exit})
+            (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
+        (let [windows (windows-edn! pid)
+              title (:name (first windows))
+              alive? (p/alive? proc)]
+          (screenshot! pid "step9-quit-unsaved")
+          (check! :quit-with-unsaved
+                  (and alive?
+                       (or (= 2 (count windows))
+                           (and (= 1 (count windows)) (str/starts-with? (or title "") "*"))))
+                  {:window-count (count windows) :title title :alive alive?})
+          (stop! {:proc proc :pid pid}))))))
 
 (defn- step-stop-infinite-loop!
   "Brief step 5: an infinite (silent) loop, stopped by Escape."
@@ -612,6 +927,13 @@
   [["run-and-colour" step-run-and-colour!]
    ["repl-history" step-repl-history!]
    ["read-line" step-read-line!]
+   ["run-selection" step-run-selection!]
+   ["toggle-comment" step-toggle-comment!]
+   ["format-all" step-format-all!]
+   ["find" step-find!]
+   ["pre-run-check" step-pre-run-check!]
+   ["close-with-unsaved" step-close-with-unsaved!]
+   ["quit-with-unsaved" step-quit-with-unsaved!]
    ["stop-infinite-loop" step-stop-infinite-loop!]
    ["stop-print-forever" step-stop-print-forever!]
    ["save" step-save!]
