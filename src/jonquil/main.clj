@@ -5,8 +5,9 @@
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
-  {:file path-or-nil :on-ready (fn [ui])}; see jonquil.gtk.window/start!
-  for ui's shape."
+  {:file path-or-nil :on-ready (fn [ui]) :settings-path path-or-nil}
+  (:settings-path defaults to (jonquil.settings/settings-path), TH.T5); see
+  jonquil.gtk.window/start! for ui's shape."
   [opts]
   (window/start! opts))
 

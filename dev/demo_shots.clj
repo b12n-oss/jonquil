@@ -52,6 +52,17 @@
 (def ^:private images-dir "docs/images")
 (def ^:private demos-dir "docs/demos")
 
+(defn- fresh-settings-path
+  "TH.T5 isolation: a settings.edn under a fresh temp directory (one per
+  process -- bb docs:shots launches a fresh `jolt -M:shots <scene-id>`
+  process per scene, so this is also one per scene), never the user's real
+  $XDG_CONFIG_HOME/jonquil. No file exists there yet, so activate!'s
+  startup load defaults to :light -- every scene starts in :light."
+  []
+  (str (System/getProperty "java.io.tmpdir")
+       "/jonquil-demoshots-settings-" (System/currentTimeMillis) "-" (System/nanoTime)
+       "/settings.edn"))
+
 (defonce results (atom []))
 
 (defn- log [& args]
@@ -500,7 +511,8 @@
           (System/exit 1))
       (do
         (main/start!
-         {:on-ready (fn [ui]
+         {:settings-path (fresh-settings-path)
+          :on-ready (fn [ui]
                       (later 300
                              (fn []
                                (run-scene! ui scene-fn

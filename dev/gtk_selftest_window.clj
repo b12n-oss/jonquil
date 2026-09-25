@@ -21,7 +21,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.main :as main]
-            [jonquil.session :as session]))
+            [jonquil.session :as session]
+            [jonquil.settings :as settings]))
 
 (defonce results (atom []))
 
@@ -29,6 +30,15 @@
   (swap! results conj [row (boolean ok) detail])
   (binding [*out* *err*]
     (println "[gtk-selftest-window]" (name row) (if ok "PASS" "FAIL") (pr-str detail))))
+
+(defn- fresh-settings-path
+  "TH.T5 isolation: a settings.edn under a fresh temp directory (one per
+  run of this file, never the user's real $XDG_CONFIG_HOME/jonquil), so
+  this self-test can never read or write the real settings file."
+  []
+  (str (System/getProperty "java.io.tmpdir")
+       "/jonquil-selftest-window-settings-" (System/currentTimeMillis) "-" (System/nanoTime)
+       "/settings.edn"))
 
 (defn- later [ms f]
   (g/g-timeout-add ms (cb/callable (fn [_data] (f) 0) [:pointer] :int) ffi/null))
@@ -1808,6 +1818,210 @@
                     ((:zoom!* ui) :reset)
                     (next))))))
 
+;; --- TH.T5: the chord, startup loading, saving, isolation -----------------
+
+(defn- row-theme-cycle
+  "Four :cycle-theme!* calls with no program running walk theme/theme-names
+  in order, starting from :light (this harness's own isolated settings
+  path has no file yet, so activate!'s startup load defaults to :light).
+  After the FIRST call the status label reads \"Theme: dark\" and the
+  settings file at (:settings-path* ui) reads back {:theme :dark} through
+  jonquil.settings/load-settings itself, not a raw slurp.
+
+  set-status! (window.clj) is on-gui!-scheduled, the same async-drain
+  lesson (I1) every console-text assertion in this file already respects
+  -- a synchronous read right after :cycle-theme!* can race the queued
+  update and see a PRIOR row's leftover status text, so status1 is polled
+  for, not read once."
+  [ui next]
+  ((:cycle-theme!* ui))
+  (poll-until 500 20
+              (fn [] (= "Theme: dark" (g/label-text (:status-label ui))))
+              (fn [status1-ok?]
+                (let [name1 ((:theme-name* ui))
+                      status1 (g/label-text (:status-label ui))
+                      settings1 (settings/load-settings ((:settings-path* ui)))]
+                  ((:cycle-theme!* ui))
+                  (let [name2 ((:theme-name* ui))]
+                    ((:cycle-theme!* ui))
+                    (let [name3 ((:theme-name* ui))]
+                      ((:cycle-theme!* ui))
+                      (let [name4 ((:theme-name* ui))]
+                        (check :theme-cycle
+                               (and (= :dark name1) (= :solarized name2) (= :navy name3) (= :light name4)
+                                    status1-ok? (= :dark (:theme settings1)))
+                               {:name1 name1 :name2 name2 :name3 name3 :name4 name4
+                                :status1 status1 :settings1 settings1})
+                        ((:set-theme!* ui) :light)
+                        ((:zoom!* ui) :reset)
+                        (next))))))))
+
+(defn- row-theme-chord
+  "The window's own key dispatch, driven directly (never a synthesized
+  keystroke): 0x04d (uppercase M, as Shift+m arrives) + CONTROL-MASK +
+  SHIFT-MASK, then 0x06d (lowercase m) + META-MASK + SHIFT-MASK -- both
+  Control and Meta count as the command chord (gtk-keys.md), so this
+  covers Linux and macOS. Each call must return 1 and advance the theme
+  one step from wherever the previous call (or an earlier row) left it."
+  [ui next]
+  (let [before ((:theme-name* ui))
+        h1 ((:handle-window-key! ui) nil 0x04d 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil)
+        after1 ((:theme-name* ui))
+        h2 ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/META-MASK g/SHIFT-MASK) nil)
+        after2 ((:theme-name* ui))]
+    (check :theme-chord
+           (and (= 1 h1) (not= before after1) (= 1 h2) (not= after1 after2))
+           {:before before :h1 h1 :after1 after1 :h2 h2 :after2 after2})
+    ((:set-theme!* ui) :light)
+    ((:zoom!* ui) :reset)
+    (next)))
+
+(defn- row-theme-chord-needs-shift
+  "The same lower-cased 0x06d with CONTROL-MASK alone (no Shift) must not
+  cycle the theme: the window handler returns 0 and the theme is
+  unchanged."
+  [ui next]
+  (let [before ((:theme-name* ui))
+        handled ((:handle-window-key! ui) nil 0x06d 0 g/CONTROL-MASK nil)
+        after ((:theme-name* ui))]
+    (check :theme-chord-needs-shift (and (= 0 handled) (= before after))
+           {:handled handled :before before :after after})
+    ((:set-theme!* ui) :light)
+    ((:zoom!* ui) :reset)
+    (next)))
+
+(defn- row-settings-isolated
+  "This window's own settings path (:settings-path* ui) lives under
+  java.io.tmpdir and differs from the real one (jonquil.settings/
+  settings-path, no env/home override -- the actual production path);
+  cycling the theme, which writes to the WINDOW's path, must never touch
+  the real file's existence or its content, checked both before and after
+  the write."
+  [ui next]
+  (let [window-path ((:settings-path* ui))
+        real-path (settings/settings-path)
+        real-file (java.io.File. ^String real-path)
+        existed-before (.exists real-file)
+        content-before (when existed-before (slurp real-file))]
+    ((:cycle-theme!* ui))
+    (let [existed-after (.exists real-file)
+          content-after (when existed-after (slurp real-file))]
+      ((:set-theme!* ui) :light)
+      ((:zoom!* ui) :reset)
+      (check :settings-isolated
+             (and (str/starts-with? window-path (System/getProperty "java.io.tmpdir"))
+                  (not= window-path real-path)
+                  (= existed-before existed-after)
+                  (= content-before content-after))
+             {:window-path window-path :real-path real-path
+              :existed-before existed-before :existed-after existed-after
+              :content-before content-before :content-after content-after})
+      (next))))
+
+(defn- row-settings-unreadable-warns
+  "A settings file whose contents aren't readable EDN: (:load-settings!* ui)
+  (activate!'s own startup-load fn, exposed so this row drives the exact
+  same path) against it must still leave the theme at :light and append a
+  warning to the console -- jonquil.settings/load-settings' own message,
+  'couldn't read <path>, using light', prefixed with '; settings: '."
+  [ui next]
+  (let [mark (out-end-offset ui)
+        tmp (str (System/getProperty "java.io.tmpdir")
+                 "/jonquil-selftest-bad-settings-" (System/currentTimeMillis) ".edn")]
+    (spit tmp "{:theme")
+    ((:load-settings!* ui) tmp)
+    (poll-until 1000 20
+                (fn [] (str/includes? (since ui mark) "; settings: couldn't read"))
+                (fn [warned?]
+                  (let [theme-name ((:theme-name* ui))]
+                    (check :settings-unreadable-warns
+                           (and (= :light theme-name) warned?)
+                           {:theme-name theme-name :console (since ui mark)})
+                    (.delete (java.io.File. ^String tmp))
+                    ((:set-theme!* ui) :light)
+                    ((:zoom!* ui) :reset)
+                    (next))))))
+
+(defn- row-theme-save-failure-reported
+  "Test hook: :settings-path!* (TH.T5's own self-test-only addition,
+  window.clj) repoints the window's own settings-path atom -- here at an
+  IMPOSSIBLE path (a regular file used as the would-be parent directory,
+  so io/make-parents can't create it and the temp-file spit inside it
+  throws). :cycle-theme!* must still advance the theme and report the
+  save failure on the console (jonquil.settings/save-settings!'s own
+  'couldn't save <path>: ...' message, prefixed with '; settings: ')."
+  [ui next]
+  (let [mark (out-end-offset ui)
+        original-path ((:settings-path* ui))
+        blocking-file (str (System/getProperty "java.io.tmpdir")
+                           "/jonquil-selftest-impossible-parent-" (System/currentTimeMillis))
+        impossible-path (str blocking-file "/settings.edn")]
+    (spit blocking-file "not a directory")
+    (let [before ((:theme-name* ui))]
+      ((:settings-path!* ui) impossible-path)
+      ((:cycle-theme!* ui))
+      (let [after ((:theme-name* ui))]
+        (poll-until 1000 20
+                    (fn [] (str/includes? (since ui mark) "; settings: couldn't save"))
+                    (fn [reported?]
+                      ((:settings-path!* ui) original-path)
+                      (check :theme-save-failure-reported
+                             (and (not= before after) reported?)
+                             {:before before :after after :reported reported? :console (since ui mark)})
+                      (.delete (java.io.File. ^String blocking-file))
+                      ((:set-theme!* ui) :light)
+                      ((:zoom!* ui) :reset)
+                      (next)))))))
+
+(defn- row-theme-switch-while-running
+  "The locked status-bar decision (the brief): cycling the theme while a
+  program is running must not overwrite a live Running…/Waiting for input
+  with 'Theme: <name>'. Runs (loop [] (recur)), waits for the status to
+  actually read Running…, cycles the theme, and requires the status to
+  STILL read Running… right after, the theme to have advanced, and Escape
+  (via :handle-window-key!, still the same real Stop path) to still stop
+  the program.
+
+  The brief's own row text says 'wait for Ready' at the end; measured
+  against make-eval-opts' :on-complete (window.clj), an INTERRUPTED run's
+  terminal status is 'Stopped', never 'Ready' -- :on-status-change sets
+  'Ready' first (the :idle notification), then :on-complete immediately
+  overwrites it with 'Stopped' since (:status result) is :interrupted here.
+  'Ready' is only ever the terminal text for a run that finishes on its
+  own (row-run-output's own case). This row waits for the settled terminal
+  status instead, 'Stopped', which is what a poll for 'Ready' would never
+  see after an Escape-stop -- confirmed live: with the literal brief text
+  this row FAILed with :ready false every run."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (= "Running…" (g/label-text (:status-label ui))))
+                (fn [running?]
+                  (let [before ((:theme-name* ui))]
+                    ((:cycle-theme!* ui))
+                    (let [after ((:theme-name* ui))
+                          status-right-after (g/label-text (:status-label ui))
+                          handled ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)]
+                      (poll-until 3000 20
+                                  (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                  (fn [stopped?]
+                                    (poll-until 2000 20
+                                                (fn [] (= "Stopped" (g/label-text (:status-label ui))))
+                                                (fn [settled?]
+                                                  (check :theme-switch-while-running
+                                                         (and running? (not= before after)
+                                                              (= "Running…" status-right-after)
+                                                              (= 1 handled) stopped? settled?)
+                                                         {:running running? :before before :after after
+                                                          :status status-right-after :handled handled
+                                                          :stopped stopped? :settled settled?
+                                                          :console (since ui mark)})
+                                                  ((:set-theme!* ui) :light)
+                                                  ((:zoom!* ui) :reset)
+                                                  (next)))))))))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -1909,6 +2123,13 @@
    row-theme-keeps-find-highlight
    row-theme-and-zoom-share-css
    row-theme-applies-to-new-text
+   row-theme-cycle
+   row-theme-chord
+   row-theme-chord-needs-shift
+   row-settings-isolated
+   row-settings-unreadable-warns
+   row-theme-save-failure-reported
+   row-theme-switch-while-running
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
@@ -1970,7 +2191,8 @@
 
 (defn -main [& _]
   (main/start!
-   {:on-ready (fn [ui]
+   {:settings-path (fresh-settings-path)
+    :on-ready (fn [ui]
                 (g/g-signal-connect-data (:window ui) "destroy"
                                          (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                       [:pointer :pointer] :void)

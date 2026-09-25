@@ -28,6 +28,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.session :as session]
+            [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
 
 ;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
@@ -50,6 +51,8 @@
 ;; P3.T4 additions.
 (def ^:private KEY-F 0x066)
 (def ^:private KEY-H 0x068)
+;; TH.T5 addition (gdkkeysyms.h:459, GDK_KEY_m).
+(def ^:private KEY-M 0x06d)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -669,6 +672,37 @@
     (reset! theme-name k))
   nil)
 
+(defn- load-and-apply-theme!
+  "TH.T5: jonquil.settings/load-settings against path, applied with
+  apply-window-theme! -- a missing file is silently :light (load-settings'
+  own contract), a present-but-broken one still resolves to a real theme,
+  with a :warning appended to the console as :system once. Used both by
+  activate! at startup and as the :load-settings!* self-test hook, so a row
+  can drive the exact same startup path against a synthetic path."
+  [ed cv fb provider zoom-px theme-name code-css path]
+  (let [{:keys [theme warning]} (settings/load-settings path)]
+    (apply-window-theme! ed cv fb provider zoom-px theme-name code-css theme)
+    (when warning
+      (cview/append! cv :system (str "; settings: " warning "\n")))))
+
+(defn- do-cycle-theme!
+  "TH.T5: the chord/:cycle-theme!* action. Advances to the next theme
+  (theme/next-theme, wrapping) and applies it, then saves {:theme k} to
+  settings-path -- read at CALL time (not captured once), so a self-test
+  row can repoint it via :settings-path!* right before calling this. A
+  save error is reported on the console as :system, but the theme switch
+  itself already happened and is kept regardless. Locked decision (the
+  brief): while a program is running, the status label is left alone --
+  overwriting a live Running…/Waiting for input would make the status
+  lie, so only the idle case gets 'Theme: <name>'."
+  [ed cv fb provider zoom-px theme-name code-css settings-path status-label evaluating?]
+  (let [k (theme/next-theme @theme-name)]
+    (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k)
+    (when-let [err (settings/save-settings! @settings-path {:theme k})]
+      (cview/append! cv :system (str "; settings: " err "\n")))
+    (when-not (evaluating?)
+      (set-status! status-label (str "Theme: " (name k))))))
+
 (defn- make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
   view it will act on exists, so it takes an atom and derefs it lazily, at
@@ -749,10 +783,15 @@
 
   P3 fix wave I4: F3/Cmd+G (next match) and Shift+F3/Cmd+Shift+G
   (previous) go to find-bar/handle-nav-key! whenever the bar is open, so
-  they also work with focus in the editor or the console."
+  they also work with focus in the editor or the console.
+
+  TH.T5: Cmd/Ctrl+Shift+M cycles the theme. keyval is already lower-cased
+  above, so Shift+M's 0x04d becomes 0x06d the same way every other letter
+  chord here is normalised; this clause doesn't consult the editor's IME
+  state, same as every other window-level chord."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
    run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
-   win fb open-find-fn open-replace-fn]
+   win fb open-find-fn open-replace-fn theme-cycle-fn]
   (fn [_ctl keyval0 _keycode state _data]
     (let [keyval (g/gdk-keyval-to-lower keyval0)]
       (cond
@@ -778,12 +817,21 @@
         (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
         (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
         (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
+        (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
         :else 0))))
 
 ;; --- construction ------------------------------------------------------
 
-(defn- activate! [app {:keys [file on-ready]}]
+(defn- activate! [app {:keys [file on-ready settings-path]}]
   (let [session (session/make-session)
+        ;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
+        ;; hook only, row-theme-save-failure-reported) repoints it at an
+        ;; impossible path so a save can be forced to fail without ever
+        ;; touching a real filesystem race. Defaults to the real settings
+        ;; file; every harness (dev/gtk_selftest_window.clj, dev/demo_shots.clj,
+        ;; dev/smoke/binary_smoke.clj's XDG_CONFIG_HOME) is responsible for
+        ;; passing its own isolated :settings-path instead.
+        settings-path (atom (or settings-path (settings/settings-path)))
         path (atom file)
         discard-warned? (atom false)
         ed (editor/make-editor)
@@ -823,12 +871,16 @@
         clear-console-fn (fn [] (do-clear-console! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
         set-theme-fn (fn [k] (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k))
+        ;; TH.T5: the chord's/:cycle-theme!*'s action.
+        cycle-theme-fn (fn [] (do-cycle-theme! ed cv fb provider zoom-px theme-name code-css
+                                               settings-path status-label
+                                               (fn [] (eval/evaluating? (:ctx session)))))
         open-find-fn (fn [] (find-bar/open! fb :find))
         open-replace-fn (fn [] (find-bar/open! fb :replace))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
                                      run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
                                      (fn [] (eval/evaluating? (:ctx session)))
-                                     win fb open-find-fn open-replace-fn)
+                                     win fb open-find-fn open-replace-fn cycle-theme-fn)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -876,7 +928,8 @@
     (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
     (g/gtk-style-context-add-provider-for-display
      (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
-    (apply-window-theme! ed cv fb provider zoom-px theme-name code-css theme/default-theme)
+    ;; TH.T5: the saved theme, in place of TH.T4's fixed theme/default-theme.
+    (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css @settings-path)
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (fn [_ _] (run-fn)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -964,6 +1017,18 @@
                  :set-theme!* set-theme-fn
                  :theme-name* (fn [] @theme-name)
                  :code-css* (fn [] @code-css)
+                 ;; TH.T5: the chord's own action, the settings path this
+                 ;; window reads/writes, and the exact startup-load fn
+                 ;; activate! itself just ran (so a row can drive the same
+                 ;; path against a synthetic settings file).
+                 :cycle-theme!* cycle-theme-fn
+                 :settings-path* (fn [] @settings-path)
+                 :load-settings!* (fn [p] (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css p))
+                 ;; TH.T5 self-test hook only (row-theme-save-failure-
+                 ;; reported): repoints the window's own settings path so a
+                 ;; save can be forced to fail without touching the real
+                 ;; settings file or racing the filesystem.
+                 :settings-path!* (fn [p] (reset! settings-path p))
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -999,17 +1064,25 @@
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
-  {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
-  :status-label :line-col-label :window :find-bar :run!* :stop!*
-  :open-path! :save-to! :run-selection!* :toggle-focus!* :clear-console!*
-  :zoom!* :set-theme!* :theme-name* :code-css* :handle-window-key!
-  :simulate-open-result! :simulate-save-result!
+  {:file path-or-nil :on-ready (fn [ui]) :settings-path path-or-nil}, where
+  :settings-path defaults to (jonquil.settings/settings-path) -- every
+  self-test/docs-shots/smoke harness must pass its own isolated path so it
+  never touches the user's real settings file (TH.T5). ui is {:editor
+  :console :session :status-label :line-col-label :window :find-bar :run!*
+  :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
+  :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
+  :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
+  :handle-window-key! :simulate-open-result! :simulate-save-result!
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
   :register-alert-choice-for-test! :complete-alert-for-test!}; the
   self-test rows call these functions directly, exactly as the buttons and
   keys do. :find-bar is the jonquil.gtk.find-bar map (P3.T4); rows call
-  jonquil.gtk.find-bar's own functions on it."
+  jonquil.gtk.find-bar's own functions on it. :cycle-theme!* is what
+  Cmd/Ctrl+Shift+M runs; :settings-path* reads back the window's own
+  settings path; :load-settings!* re-runs the startup load against any
+  path; :settings-path!* is self-test-only (row-theme-save-failure-
+  reported), repointing the window's own settings path."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one

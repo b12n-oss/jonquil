@@ -68,6 +68,17 @@
 (def ^:private binary-path (str out-dir "/jonquil"))
 (def ^:private pixel-at-jar "dev/smoke/PixelAt.java")
 
+;; TH.T5 isolation: one XDG_CONFIG_HOME temp dir for this ENTIRE smoke run
+;; (a top-level def, evaluated once when this script loads), handed to
+;; every launch! below via :extra-env -- so no jonquil process this script
+;; starts can ever read or write the user's real $XDG_CONFIG_HOME/jonquil
+;; (or ~/.config/jonquil). The dir need not exist up front: jonquil.settings
+;; itself creates its parents on save and treats a missing file as the
+;; default theme on load.
+(def ^:private smoke-xdg-config-home
+  (str (System/getProperty "java.io.tmpdir")
+       "/jonquil-smoke-xdg-" (System/currentTimeMillis) "-" (System/nanoTime)))
+
 ;; --- process bookkeeping: every jonquil pid this run launches, killed on
 ;; every exit path (a set of {:proc :pid}, never just a bare pid, since
 ;; killing needs the babashka.process handle) ---------------------------
@@ -305,11 +316,18 @@
   worth interleaving with this script's own [binary-smoke] lines. The log
   path comes back as :log so a step that specifically cares what landed on
   stderr (step-close-while-running!, checking for a GTK critical/crash)
-  can read it directly."
+  can read it directly.
+
+  TH.T5: :extra-env sets XDG_CONFIG_HOME to smoke-xdg-config-home (merged
+  onto the inherited environment, never replacing it -- babashka.process's
+  own :env/:extra-env distinction), so every jonquil process this script
+  starts reads and writes settings.edn under this run's own temp dir, never
+  the user's real one."
   [& [file]]
   (let [log (str out-dir "/.launch-" (System/nanoTime) ".log")
         args (cond-> [binary-path] file (conj file))
-        proc (p/process args {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree})
+        proc (p/process args {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree
+                              :extra-env {"XDG_CONFIG_HOME" smoke-xdg-config-home}})
         pid (.pid ^java.lang.Process (:proc proc))]
     (swap! launched conj {:proc proc :pid pid})
     {:proc proc :pid pid :log log}))
