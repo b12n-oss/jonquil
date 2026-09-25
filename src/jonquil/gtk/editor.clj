@@ -6,14 +6,22 @@
   gtk_text_buffer_begin/end_user_action).
 
   One GtkTextTag per paint/style key. Typing debounces through a 20ms
-  g_timeout_add tick: it repaints (remove all tags, reapply the paint plan)
-  once 60ms have passed since the buffer's last `changed` signal, and on
-  every tick it also recomputes dirty? against the last-saved text and
-  fires on-dirty-changed! exactly on a flip. dirty? itself is computed live
-  from the buffer text vs the saved text, so it reads correctly the instant
-  set-text!/mark-saved! runs, without waiting on the tick -- and because
-  repaint! only ever touches tags, never buffer text, a repaint can never
-  itself flip dirty?.
+  g_timeout_add tick: it repaints once 60ms have passed since the buffer's
+  last `changed` signal, and on every tick it also recomputes dirty?
+  against the last-saved text and fires on-dirty-changed! exactly on a
+  flip. dirty? itself is computed live from the buffer text vs the saved
+  text, so it reads correctly the instant set-text!/mark-saved! runs,
+  without waiting on the tick -- and because repaint! only ever touches
+  tags, never buffer text, a repaint can never itself flip dirty?.
+
+  P3.T4 fix round 1: repaint! removes and reapplies only the tags it owns
+  (this namespace's own paint/rainbow/unmatched set, keyed in :tags), never
+  gtk_text_buffer_remove_all_tags over the whole buffer -- that used to
+  strip ANY other tag applied over the same range too, including
+  jonquil.gtk.find-bar's search-match tag, and since a repaint's own
+  tag-only mutation never itself fires `changed`, nothing re-applied it
+  afterward; the search-match highlight silently vanished up to 60-80ms
+  after every keystroke while the find bar stayed open.
 
   Every GTK call here already runs on the GTK thread: signal emission and
   g_timeout_add callbacks are both delivered by GTK's own main loop, so
@@ -167,8 +175,13 @@
 (defn- repaint! [ed]
   (let [{:keys [buf tags]} ed
         text (g/buffer-text buf)
-        plan (paint/paint-plan text)]
-    (g/with-iters* buf 0 (count text) (fn [a b] (g/gtk-text-buffer-remove-all-tags buf a b)))
+        plan (paint/paint-plan text)
+        len (count text)]
+    ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
+    ;; remove_all_tags -- a tag another namespace applies over the same
+    ;; range (jonquil.gtk.find-bar's search-match) must survive a repaint.
+    (doseq [tag (vals tags)]
+      (g/with-iters* buf 0 len (fn [a b] (g/gtk-text-buffer-remove-tag buf tag a b))))
     (doseq [[k s e] plan]
       (when-let [tag (get tags k)]
         (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-apply-tag buf tag a b)))))))

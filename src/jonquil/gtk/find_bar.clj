@@ -16,7 +16,15 @@
   command+shift+g to the previous one; probe 1 found gtk_widget_activate
   does not fire GtkSearchEntry's \"activate\", so all of this goes through
   handle-key!, wired to the bar's own capture-phase key controller (never
-  the GTK signal) -- rows call handle-key! directly."
+  the GTK signal) -- rows call handle-key! directly.
+
+  P3.T4 fix round 1: handle-key! yields (0) while either entry has an IME
+  preedit composition active, the same global constraint editor.clj and
+  console_view.clj already follow. Both the query and replacement entries
+  delegate their GtkEditable implementation to an internal GtkText
+  (gtk_editable_get_delegate), which is where GTK's own \"preedit-changed\"
+  signal actually lives -- neither GtkSearchEntry nor GtkEntry re-exposes
+  it directly."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.commands :as commands]
@@ -114,14 +122,18 @@
 (defn open!
   "Opens the bar in :find or :replace mode: shows the replacement entry and
   its two buttons only in :replace mode, prefills the query with the
-  editor's selection when it's exactly one line, focuses the query entry,
-  and recomputes matches (which also selects/scrolls to the nearest one)."
+  editor's selection when it's exactly one line, selects the WHOLE query
+  text (fix round 1, per the brief -- so typing immediately overtypes it,
+  whether it was just prefilled or is leftover from a previous open!),
+  focuses the query entry, and recomputes matches (which also
+  selects/scrolls to the nearest one)."
   [fb mode]
   (g/gtk-widget-set-visible (:box fb) 1)
   (let [replace? (= mode :replace)]
     (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w (if replace? 1 0))))
   (when-let [sel (single-line-selection (editor/snapshot (:ed fb)))]
     (g/gtk-editable-set-text (:query fb) sel))
+  (g/gtk-editable-select-region (:query fb) 0 (count (or (g/editable-text (:query fb)) "")))
   (g/gtk-widget-grab-focus (:query fb))
   (recompute-matches! fb)
   nil)
@@ -207,15 +219,20 @@
 
 (defn handle-key!
   "Keys inside the bar, wired to its own capture-phase key controller: 1
-  when handled, 0 otherwise (and always 0 while the bar is closed). Escape
-  closes the bar. Return in the replacement entry replaces the current
-  match; Return elsewhere in the bar, F3 and command+g go to the next
-  match; Shift+Return, Shift+F3 and command+shift+g go to the previous
-  one."
+  when handled, 0 otherwise -- always 0 while the bar is closed, and
+  always 0 while either entry has an IME preedit composition active (fix
+  round 1), so a composing Hangul/CJK syllable's own Return/Escape reaches
+  the entry's IM context instead of being reinterpreted as find-next!/
+  close!. Escape closes the bar. Return in the replacement entry replaces
+  the current match; Return elsewhere in the bar, F3 and command+g go to
+  the next match; Shift+Return, Shift+F3 and command+shift+g go to the
+  previous one."
   [fb keyval0 state]
   (let [keyval (g/gdk-keyval-to-lower keyval0)]
-    (if-not (open? fb)
-      0
+    (cond
+      @(:preedit-active? fb) 0
+      (not (open? fb)) 0
+      :else
       (cond
         (= keyval KEY-ESCAPE) (do (close! fb) 1)
 
@@ -238,7 +255,8 @@
 (defn make-find-bar
   "Builds the find-and-replace bar over ed (a jonquil.gtk.editor map).
   Returns {:box :query :replacement :replace-btn :replace-all-btn
-  :count-label :ed :tag :matches}; :box is hidden until open! is called."
+  :count-label :ed :tag :matches :preedit-active?}; :box is hidden until
+  open! is called."
   [ed]
   (let [box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         query (g/gtk-search-entry-new)
@@ -253,7 +271,8 @@
             :replace-btn replace-btn :replace-all-btn replace-all-btn
             :replace-widgets [replacement replace-btn replace-all-btn]
             :count-label count-label
-            :ed ed :tag tag :matches (atom [])}]
+            :ed ed :tag tag :matches (atom [])
+            :preedit-active? (atom false)}]
     (g/set-string-property! tag "background" SEARCH-MATCH-BG)
     (g/gtk-text-tag-table-add table tag)
     (g/gtk-box-append box query)
@@ -275,6 +294,17 @@
     (g/g-signal-connect-data replace-all-btn "clicked"
                              (callable (fn [_ _] (replace-all! fb)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; P3.T4 fix round 1: both entries delegate their GtkEditable
+    ;; implementation to an internal GtkText (gtk_editable_get_delegate),
+    ;; and it's THAT delegate, not the entry itself, that carries the real
+    ;; "preedit-changed" signal -- verified empirically, see the binding's
+    ;; own citation in ffi.clj.
+    (doseq [entry [query replacement]]
+      (g/g-signal-connect-data
+       (g/gtk-editable-get-delegate entry) "preedit-changed"
+       (callable (fn [_ preedit _] (reset! (:preedit-active? fb) (not (empty? preedit))))
+                 [:pointer :string :pointer] :void)
+       ffi/null ffi/null g/CONNECT-DEFAULT))
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/g-signal-connect-data keyctl "key-pressed"
                              (callable (fn [_ctl keyval _keycode state _data] (handle-key! fb keyval state))

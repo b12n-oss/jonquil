@@ -359,6 +359,8 @@
 
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-ESCAPE 0xff1b)
+;; gtk-keys.md's shared table -- find_bar.clj's own copy is private.
+(def ^:private KEY-RETURN 0xff0d)
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
 ;; Shift bit set in state -- window.clj's own copy is private.
 (def ^:private KEY-S-CAPS 0x53)
@@ -970,6 +972,84 @@
       (check :find-hangul (= [[0 2] [9 11]] matches) {:matches matches})
       (next))))
 
+;; --- P3.T4 fix round 1 ---
+
+(defn- row-find-survives-repaint
+  "Fix round 1, Important #1: editor.clj's repaint! (60ms debounce after
+  the buffer's own \"changed\" signal) used to strip EVERY tag over the
+  whole buffer via gtk_text_buffer_remove_all_tags, including
+  search-match -- and since a repaint's own tag-only mutation never fires
+  \"changed\" itself, nothing re-applied it afterward. Opens find, sets
+  the query, types one character past the last match (so no match's own
+  offsets move), then waits a FIXED delay well past the repaint debounce
+  (there's no positive condition to poll for -- the tags either survive or
+  they don't -- so this is the same one-shot-wait-then-check pattern
+  row-run-selection-blank already uses) before checking the tags are still
+  there."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (place-cursor! buf (count (editor/editor-text ed)))
+    (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1)
+    (later 300
+           (fn []
+             (let [tags-survived? (and (g/has-tag-at? buf 0 (:tag fb))
+                                       (g/has-tag-at? buf 8 (:tag fb))
+                                       (g/has-tag-at? buf 16 (:tag fb)))]
+               (check :find-survives-repaint tags-survived?
+                      {:tags-survived tags-survived? :text (editor/editor-text ed)})
+               (next))))))
+
+(defn- row-find-preedit-yields
+  "Fix round 1, Important #2: find_bar.clj's handle-key! is a capture-phase
+  controller on the bar's own :box, so it used to consume Escape/Return
+  before either entry's IM context ever saw it -- setting the atom
+  directly proves the yield without needing a real IME, same pattern as
+  editor.clj's row-edit-preedit-yields/row-editor-preedit-guard (the real
+  preedit-changed wiring on each entry's GtkText delegate was verified
+  separately with a throwaway probe, see ffi.clj's gtk-editable-get-
+  delegate citation)."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (let [sel-before (g/selection-offsets buf)
+          visible-before (g/gtk-widget-get-visible (:box fb))]
+      (reset! (:preedit-active? fb) true)
+      (let [return-result (find-bar/handle-key! fb KEY-RETURN 0)
+            escape-result (find-bar/handle-key! fb KEY-ESCAPE 0)
+            sel-after (g/selection-offsets buf)
+            visible-after (g/gtk-widget-get-visible (:box fb))]
+        (reset! (:preedit-active? fb) false)
+        (check :find-preedit-yields
+               (and (= 0 return-result) (= 0 escape-result)
+                    (= sel-before sel-after) (= visible-before visible-after))
+               {:return-result return-result :escape-result escape-result
+                :sel-before sel-before :sel-after sel-after
+                :visible-before visible-before :visible-after visible-after})
+        (next)))))
+
+(defn- row-find-prefill-selects
+  "Fix round 1, Missing requirement: open! must select the whole prefilled
+  query text (per the brief), not just prefill and focus it. Selects
+  \"bar\" in the editor first, so open!'s own prefill (single-line
+  selection) puts exactly that text in the query."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (select-range! buf 4 7) ; "bar"
+    (find-bar/open! fb :find)
+    (let [query-text (g/editable-text (:query fb))
+          sel (g/editable-selection-bounds (:query fb))]
+      (check :find-prefill-selects
+             (and (= "bar" query-text) (= [0 3] sel))
+             {:query-text query-text :sel sel})
+      (find-bar/close! fb)
+      (next))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -1040,6 +1120,9 @@
    row-replace-all
    row-find-escape
    row-find-hangul
+   row-find-survives-repaint
+   row-find-preedit-yields
+   row-find-prefill-selects
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

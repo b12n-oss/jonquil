@@ -482,7 +482,15 @@
   controller. Cmd+F/Cmd+H open the bar; Alt and Shift are excluded from
   Cmd+F so it doesn't shadow editor.clj's Cmd+Alt+F (format selection) or
   Cmd+Shift+F (format all), the same guard style KEY-L already uses
-  against Cmd+Alt+L."
+  against Cmd+Alt+L.
+
+  P3.T4 fix round 1: when the bar has focus, handle-key!'s OWN return
+  value is this clause's final answer -- 1 (closed) or 0 (an IME preedit
+  composition is active, per handle-key!'s own docstring). It must NOT be
+  coerced into always-1-or-fall-through: a 0 has to fall all the way
+  through to GTK's default handling (the composing entry's own IM
+  context), never into evaluating?'s Stop below, or Escape would cancel
+  the running program instead of the IME composition."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
    run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
    win fb open-find-fn open-replace-fn]
@@ -490,9 +498,8 @@
     (let [keyval (g/gdk-keyval-to-lower keyval0)]
       (cond
         (= keyval KEY-F5) (do (run-fn) 1)
-        (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb)
-             (not (zero? (find-bar/handle-key! fb keyval0 state))))
-        1
+        (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
+        (find-bar/handle-key! fb keyval0 state)
         (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
         (= keyval KEY-ESCAPE) 0
         (= keyval KEY-F6) (do (toggle-focus-fn) 1)

@@ -492,3 +492,37 @@
 ;; replacement entry" (probe 1: neither entry's own \"activate\" signal is
 ;; relied on).
 (ffi/defcfn gtk-widget-get-root "gtk_widget_get_root" [:pointer] :pointer)
+
+;; --- P3.T4 fix round 1 ---
+;; gtk_editable_get_selection_bounds: gtkeditable.h:101-103. The ENTRY's own
+;; selection (distinct from gtk_text_buffer_get_selection_bounds above,
+;; which reads the EDITOR's buffer selection) -- both out-params come back
+;; identical when there's no selection, per its own doc comment, the same
+;; convention selection-offsets already relies on for a GtkTextBuffer.
+(ffi/defcfn gtk-editable-get-selection-bounds "gtk_editable_get_selection_bounds"
+  [:pointer :pointer :pointer] :int)
+
+(defn editable-selection-bounds
+  "[start end] in characters -- editable's own selection, mirroring
+  selection-offsets above."
+  [editable]
+  (let [s (ffi/alloc 4) e (ffi/alloc 4)]
+    (try
+      (gtk-editable-get-selection-bounds editable s e)
+      [(ffi/read s :int 0) (ffi/read e :int 0)]
+      (finally (ffi/free s) (ffi/free e)))))
+
+;; gtk_editable_select_region: gtkeditable.h:107-109.
+(ffi/defcfn gtk-editable-select-region "gtk_editable_select_region" [:pointer :int :int] :void)
+
+;; gtk_editable_get_delegate: gtkeditable.h:181. GtkSearchEntry and GtkEntry
+;; both delegate their GtkEditable implementation to an internal GtkText --
+;; confirmed empirically against this gtk4 build with a throwaway probe (not
+;; committed): gtk_editable_get_delegate returned a non-null pointer for
+;; both a fresh GtkSearchEntry and a fresh GtkEntry, and connecting
+;; "preedit-changed" on each returned delegate (GtkText's own signal --
+;; Gtk-4.0.gir, gtk/gtktext.c:1257, same (instance, gchar* preedit,
+;; user_data) shape GtkTextView's "preedit-changed" already uses in
+;; editor.clj) returned a real non-zero handler id on both, with no GLib
+;; critical warning.
+(ffi/defcfn gtk-editable-get-delegate "gtk_editable_get_delegate" [:pointer] :pointer)
