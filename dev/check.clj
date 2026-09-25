@@ -5,6 +5,7 @@
   ;; Project namespaces in dependency order. Add each one as it lands.
   '[jonquil.core
     jonquil.syntax
+    jonquil.theme
     jonquil.paint
     jonquil.docs
     jonquil.edit

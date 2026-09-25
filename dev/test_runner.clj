@@ -10,6 +10,7 @@
   ;; Add each new test namespace here as tasks land.
   '[jonquil.smoke-test
     jonquil.upstream.syntax-test
+    jonquil.theme-test
     jonquil.paint-test
     jonquil.docs-test
     jonquil.edit-test
