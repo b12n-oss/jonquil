@@ -355,18 +355,56 @@
                {:handled handled :text text})
         (next)))))
 
-(defn- row-edit-toggle-comment [ed]
+(defn- row-edit-toggle-comment
+  "Fix round 1: the selection is built BACKWARD -- with-iters* buf 0 7
+  passes offset 0 first to gtk_text_buffer_select_range, so the insert
+  mark (probe 6: the FIRST iter argument) lands at 0, the LOW end, same as
+  the reviewer's verified (edit/toggle-comment {:text \"(+ 1 2)\" :caret 0
+  :sel-start 0 :sel-end 7}) => {:edits [[0 0 \"; \"]], :caret 2, :sel [2
+  9]}. apply-op! must put the insert mark at 2 (where toggle-comment's own
+  :caret says), not always at the selection's high end -- so this row
+  reads back g/cursor-offset, not just the text, after each toggle."
+  [ed]
   (fn [next]
     (let [buf (:buf ed)]
       (editor/set-text! ed "(+ 1 2)")
       (g/with-iters* buf 0 7 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
       (let [h1 (editor/handle-key! ed KEY-SLASH g/CONTROL-MASK)
             text1 (editor/editor-text ed)
+            caret1 (g/cursor-offset buf)
+            sel1 (g/selection-offsets buf)
             h2 (editor/handle-key! ed KEY-SLASH g/CONTROL-MASK)
-            text2 (editor/editor-text ed)]
+            text2 (editor/editor-text ed)
+            caret2 (g/cursor-offset buf)
+            sel2 (g/selection-offsets buf)]
         (check :edit-toggle-comment
-               (and (= 1 h1) (= "; (+ 1 2)" text1) (= 1 h2) (= "(+ 1 2)" text2))
-               {:h1 h1 :text1 text1 :h2 h2 :text2 text2})
+               (and (= 1 h1) (= "; (+ 1 2)" text1) (= 2 caret1) (= [2 9] sel1)
+                    (= 1 h2) (= "(+ 1 2)" text2) (= 0 caret2) (= [0 7] sel2))
+               {:h1 h1 :text1 text1 :caret1 caret1 :sel1 sel1
+                :h2 h2 :text2 text2 :caret2 caret2 :sel2 sel2})
+        (next)))))
+
+(defn- row-edit-toggle-comment-forward
+  "Fix round 1's forward-direction counterpart: the selection is built
+  FORWARD this time (with-iters* buf 7 0 -- offset 7 passed first, so the
+  insert mark lands at 7, the HIGH end, matching a normal left-to-right
+  drag). toggle-comment's own :caret then equals the selection's high end
+  (sel-b), which is what the pre-fix apply-op! always assumed -- so this
+  case passed even with the bug. Kept as the regression check that the fix
+  (picking the iter that matches :caret, not always sel-b) didn't break
+  the common case."
+  [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "(+ 1 2)")
+      (g/with-iters* buf 7 0 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (let [handled (editor/handle-key! ed KEY-SLASH g/CONTROL-MASK)
+            text (editor/editor-text ed)
+            caret (g/cursor-offset buf)
+            sel (g/selection-offsets buf)]
+        (check :edit-toggle-comment-forward
+               (and (= 1 handled) (= "; (+ 1 2)" text) (= 9 caret) (= [2 9] sel))
+               {:handled handled :text text :caret caret :sel sel})
         (next)))))
 
 (defn- row-edit-format-all [ed]
@@ -443,6 +481,7 @@
    row-edit-tab-selection
    row-edit-shift-tab
    row-edit-toggle-comment
+   row-edit-toggle-comment-forward
    row-edit-format-all
    row-edit-format-selection
    row-edit-redo-y

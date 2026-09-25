@@ -120,14 +120,21 @@
   instead, so a chained op (a second Tab) sees the same selection through
   snapshot. gtk_text_buffer_select_range's first iter argument becomes the
   insert mark (probe 6: reading the insert mark back after select_range(a,
-  b) shows it lands on a, the FIRST argument), and :caret is always the
-  selection's own end (b), so b is passed first to land the insert mark
-  where the op put the caret. Returns true when the op applied, nil when
-  result was nil."
+  b) shows it lands on a, the FIRST argument). Fix round 1: :caret is NOT
+  always the selection's high end (b) -- indent/unindent/insert-open do
+  put it there, but toggle-comment's :caret comes from shift-offset on the
+  raw pre-edit caret, which can land on EITHER end depending on which way
+  the user dragged the selection (a Cmd+/ on a backward-drag selection has
+  :caret = a, not b; verified against (edit/toggle-comment {:text \"(+ 1
+  2)\" :caret 0 :sel-start 0 :sel-end 7}) => {:caret 2 :sel [2 9]}, where
+  2 = a). So the iter that matches :caret goes first, whichever end that
+  is, not always b. Returns true when the op applied, nil when result was
+  nil."
   [ed result]
   (when result
     (let [buf (:buf ed)
-          [sel-a sel-b] (:sel result)]
+          [sel-a sel-b] (:sel result)
+          caret (:caret result)]
       (g/gtk-text-buffer-begin-user-action buf)
       (try
         (doseq [[s e r] (rseq (vec (:edits result)))]
@@ -135,9 +142,12 @@
           (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a r -1))))
         (finally (g/gtk-text-buffer-end-user-action buf)))
       (if (and sel-a sel-b (< sel-a sel-b))
-        (g/with-iters* buf sel-b sel-a
-          (fn [ins bound] (g/gtk-text-buffer-select-range buf ins bound)))
-        (g/with-iters* buf (:caret result) (:caret result)
+        (let [caret-at-a? (= caret sel-a)
+              ins (if caret-at-a? sel-a sel-b)
+              bound (if caret-at-a? sel-b sel-a)]
+          (g/with-iters* buf ins bound
+            (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2))))
+        (g/with-iters* buf caret caret
           (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
     true))
 
