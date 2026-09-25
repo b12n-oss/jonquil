@@ -90,39 +90,40 @@
 ;; P3.T5 (parked P2 item M9): file-dialog! used to build a FRESH foreign-
 ;; callable on every Open/Save, retained forever (jonquil.gtk.callbacks's
 ;; own contract), so a long session leaked one native trampoline per
-;; dialog. One callable per MODE, reused for every call, fixes it: the
-;; callable reads the CURRENT dialog object and on-result fn from these
-;; atoms, which file-dialog! resets just before starting each async call.
-;; It also unrefs the GtkFileDialog once its result has arrived, the
-;; leak's other half.
-(defonce ^:private open-dialog-atom (atom nil))
-(defonce ^:private open-on-result-atom (atom nil))
-(defonce ^:private save-dialog-atom (atom nil))
-(defonce ^:private save-on-result-atom (atom nil))
+;; dialog. One callable per MODE, reused for every call, fixes that half.
+;;
+;; Fix round 1 (Important #1, the same fix as the alert dialog below): on-
+;; result is tracked per DIALOG OBJECT, keyed by the completion callback's
+;; own source_object (GAsyncReadyCallback's first argument), never by a
+;; single "current" atom -- two dialogs of the same mode pending at once
+;; used to let the second's completion finish/unref the WRONG object and
+;; silently drop the first's result (the same bug the close-alert row
+;; demonstrates; unlikely in normal use since Open/Save is effectively
+;; modal, but the fix is the same either way).
+(defonce ^:private open-on-result-by-dialog (atom {}))
+(defonce ^:private save-on-result-by-dialog (atom {}))
 
-(defn- make-file-dialog-cb [finish dialog-atom on-result-atom]
-  (callable (fn [_src res _data]
-              (let [d @dialog-atom on-result @on-result-atom]
-                (try (on-result (g/finish-file finish d res))
-                     (finally (g/g-object-unref d))))
+(defn- make-file-dialog-cb [finish on-result-by-dialog]
+  (callable (fn [src res _data]
+              (when-let [on-result (get @on-result-by-dialog src)]
+                (swap! on-result-by-dialog dissoc src)
+                (try (on-result (g/finish-file finish src res))
+                     (finally (g/g-object-unref src))))
               nil)
             [:pointer :pointer :pointer] :void))
 
-(defonce ^:private open-cb
-  (make-file-dialog-cb g/gtk-file-dialog-open-finish open-dialog-atom open-on-result-atom))
-(defonce ^:private save-cb
-  (make-file-dialog-cb g/gtk-file-dialog-save-finish save-dialog-atom save-on-result-atom))
+(defonce ^:private open-cb (make-file-dialog-cb g/gtk-file-dialog-open-finish open-on-result-by-dialog))
+(defonce ^:private save-cb (make-file-dialog-cb g/gtk-file-dialog-save-finish save-on-result-by-dialog))
 
 (defn- file-dialog!
   "mode is :open or :save. on-result gets {:path s} or {:error msg :code n}."
   [mode window on-result]
   (let [d (g/gtk-file-dialog-new)
-        [dialog-atom on-result-atom cb start]
+        [on-result-by-dialog cb start]
         (if (= mode :open)
-          [open-dialog-atom open-on-result-atom open-cb g/gtk-file-dialog-open]
-          [save-dialog-atom save-on-result-atom save-cb g/gtk-file-dialog-save])]
-    (reset! dialog-atom d)
-    (reset! on-result-atom on-result)
+          [open-on-result-by-dialog open-cb g/gtk-file-dialog-open]
+          [save-on-result-by-dialog save-cb g/gtk-file-dialog-save])]
+    (swap! on-result-by-dialog assoc d on-result)
     (start d window ffi/null cb ffi/null)))
 
 ;; --- open / save: the no-dialog forms the rows (and the dialog callbacks
@@ -301,18 +302,62 @@
 
 ;; --- ask before closing (P3.T5, probe 3) ------------------------------------
 
-;; The alert dialog's own retained callable (M9, same reasoning as
-;; open-cb/save-cb above): built once and reused for every close attempt.
-;; alert-dialog-atom/alert-on-choice-atom hold the CURRENT attempt's dialog
-;; object and decision fn, reset just before gtk_alert_dialog_choose starts.
-(defonce ^:private alert-dialog-atom (atom nil))
-(defonce ^:private alert-on-choice-atom (atom nil))
+;; Fix round 1 (Important #1): each pending alert dialog tracks its OWN
+;; on-choice fn, keyed by the completion callback's own source_object
+;; (GAsyncReadyCallback's first argument -- for gtk_alert_dialog_choose
+;; this is the GtkAlertDialog itself), never a single "current dialog"
+;; atom. With two alerts pending, the old shared-atom design let the
+;; second overwrite which dialog/callback the FIRST's own real completion
+;; would use: gtk_alert_dialog_choose_finish(wrong-dialog, first-result)
+;; fails GTK's own source-object check, returns -1 with NO GError, decodes
+;; as {:error "no index and no GError"}, and close-choice!'s error branch
+;; treats that as a dismissal -- silently dropping the user's real Save/
+;; Don't Save choice -- while the WRONG dialog gets released, and the
+;; RIGHT one (still its own pending operation's real source object) never
+;; does, a leak that becomes a double release once it later completes for
+;; real too.
+(defonce ^:private alert-on-choice-by-dialog (atom {}))
+
+;; Swappable only for the self-test (row-close-alert-routing): lets
+;; complete-alert! be driven with synthetic, non-GTK "dialog" identities
+;; without ever calling the real g_object_unref on something that isn't a
+;; live GObject. Defaults to the real release.
+(defonce ^:private alert-release! (atom g/g-object-unref))
+
+;; Self-test observability only: counts real GtkAlertDialogs actually
+;; built, so row-close-alert-pending-guard can assert the guard below
+;; really did prevent a second one.
+(defonce ^:private alert-dialog-count (atom 0))
+
+;; Guards close-request-fn (below) against opening a SECOND alert while
+;; one is already pending: set true right before gtk_alert_dialog_choose
+;; starts, cleared once THIS dialog's own on-choice actually runs
+;; (success, Cancel, or dismissal all clear it, via complete-alert!).
+(defonce ^:private alert-pending? (atom false))
+
+(defn- register-alert-choice!
+  "Tracks on-choice under dialog's own identity: a raw pointer for a real
+  GtkAlertDialog (show-close-dialog!, below), or any comparable value in
+  a self-test row driving complete-alert! directly."
+  [dialog on-choice]
+  (swap! alert-on-choice-by-dialog assoc dialog on-choice))
+
+(defn- complete-alert!
+  "Routes ONE alert's async completion by its own identity (src). Looks
+  up and removes src's own on-choice, calls it with the already-decoded
+  result, and releases src exactly once, then clears alert-pending? so a
+  later close-request can open a fresh alert. A src with no registration
+  (already completed, or never registered) is a no-op -- idempotent
+  against a stray re-invocation, so calling this twice with the SAME src
+  never double-releases."
+  [src result]
+  (when-let [on-choice (get @alert-on-choice-by-dialog src)]
+    (swap! alert-on-choice-by-dialog dissoc src)
+    (try (on-choice result)
+         (finally (@alert-release! src) (reset! alert-pending? false)))))
+
 (defonce ^:private alert-choose-cb
-  (callable (fn [_src res _data]
-              (let [d @alert-dialog-atom on-choice @alert-on-choice-atom]
-                (try (on-choice (g/finish-choice d res))
-                     (finally (g/g-object-unref d))))
-              nil)
+  (callable (fn [src res _data] (complete-alert! src (g/finish-choice src res)) nil)
             [:pointer :pointer :pointer] :void))
 
 (defn- show-close-dialog!
@@ -324,8 +369,8 @@
   per the brief."
   [win name on-choice]
   (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)]
-    (reset! alert-dialog-atom d)
-    (reset! alert-on-choice-atom on-choice)
+    (swap! alert-dialog-count inc)
+    (register-alert-choice! d on-choice)
     (g/gtk-alert-dialog-set-message d (str "Save changes to " name " before closing?"))
     (ffi/with-c-string-array [labels 4] ["Save" "Don't Save" "Cancel" nil]
       (g/gtk-alert-dialog-set-buttons d labels))
@@ -393,13 +438,21 @@
   actual close. While suppressed, confirmed-close? is also reset to false
   right here, so the attempt leaves no residue for the next row's own
   close-request to see -- rows only need to reset suppress-close?/closing?
-  themselves afterward. See the report."
+  themselves afterward. See the report.
+
+  Fix round 1 (Important #1): a second close-request while an alert is
+  already pending (alert-pending?) no longer opens a second one -- it
+  still suppresses the close (returns 1), same as any other dirty-and-
+  unconfirmed attempt, so the user just sees the same already-open alert
+  again instead of a confusing second window."
   [ed cv win app path-atom confirmed-close? suppress-close? closing?]
   (fn [_win _data]
     (if (and (editor/dirty? ed) (not @confirmed-close?))
-      (do (show-close-dialog!
-           win (if-let [p @path-atom] (file-name p) "Untitled")
-           (fn [result] (close-choice! ed cv win path-atom confirmed-close? result)))
+      (do (when-not @alert-pending?
+            (reset! alert-pending? true)
+            (show-close-dialog!
+             win (if-let [p @path-atom] (file-name p) "Untitled")
+             (fn [result] (close-choice! ed cv win path-atom confirmed-close? result))))
           1)
       (do (reset! closing? true)
           (if @suppress-close?
@@ -471,24 +524,36 @@
   its warning string instead of starting anything, and only that line is
   appended -- no banner.
 
-  P3.T5: commands/pre-run-problem runs FIRST, against the editor's own
-  text. When it names a bracket problem, Run never reaches session/run-
-  definitions! at all -- nothing is evaluated, even a form before the
-  broken one, so an earlier form's own unresolved-symbol error can never
-  hide the bracket message (row pre-run-hidden-by-error). The P2 banner
-  still prints (same not-already-evaluating guard as the normal path)
-  before the problem is appended as :error, and the status is set to
-  Ready."
+  P3.T5: commands/pre-run-problem runs against the editor's own text, but
+  ONLY when the engine is idle. When it names a bracket problem, Run
+  never reaches session/run-definitions! at all -- nothing is evaluated,
+  even a form before the broken one, so an earlier form's own unresolved-
+  symbol error can never hide the bracket message (row pre-run-hidden-by-
+  error). The banner still prints before the problem is appended as
+  :error, and the status is set to Ready.
+
+  Fix round 1 (Important #2): a Run while one is ALREADY running must
+  stay exactly the P2 path -- eval/evaluating? is checked FIRST, before
+  the bracket check ever runs, so a second Run never sets the status to
+  Ready (the first program is still running) and never appends a bracket
+  :error into the middle of its output; only session/run-definitions!'s
+  own busy-refusal warning is appended, same as P2, with no banner (the
+  busy path never printed one) and no status change (eval/eval-async's
+  own busy branch returns its warning string without ever calling
+  on-status-change)."
   [ed cv session status-label]
-  (let [text (editor/editor-text ed)
-        problem (commands/pre-run-problem text)]
-    (when-not (eval/evaluating? (:ctx session))
-      (cview/append! cv :system "; --- Running Definitions ---\n"))
-    (if problem
-      (do (cview/append! cv :error (str problem "\n"))
-          (set-status! status-label "Ready"))
-      (let [warning (session/run-definitions! session text (make-eval-opts ed cv status-label true))]
-        (when warning (cview/append! cv :system warning))))))
+  (if (eval/evaluating? (:ctx session))
+    (let [warning (session/run-definitions! session (editor/editor-text ed)
+                                            (make-eval-opts ed cv status-label true))]
+      (when warning (cview/append! cv :system warning)))
+    (let [text (editor/editor-text ed)
+          problem (commands/pre-run-problem text)]
+      (cview/append! cv :system "; --- Running Definitions ---\n")
+      (if problem
+        (do (cview/append! cv :error (str problem "\n"))
+            (set-status! status-label "Ready"))
+        (let [warning (session/run-definitions! session text (make-eval-opts ed cv status-label true))]
+          (when warning (cview/append! cv :system warning)))))))
 
 (defn- do-stop! [session]
   (eval/stop-eval! (:ctx session))
@@ -850,7 +915,15 @@
                  :close-choice! (fn [result] (close-choice! ed cv win path confirmed-close? result))
                  :request-close!* (fn [] (g/gtk-window-close win))
                  :closing? closing?
-                 :suppress-close? suppress-close?}))))
+                 :suppress-close? suppress-close?
+                 ;; Fix round 1 self-test hooks only (Important #1): drive
+                 ;; complete-alert!'s per-dialog routing directly, with
+                 ;; synthetic, non-GTK "dialog" identities -- see the report.
+                 :alert-dialog-count alert-dialog-count
+                 :alert-pending? alert-pending?
+                 :alert-release! alert-release!
+                 :register-alert-choice-for-test! register-alert-choice!
+                 :complete-alert-for-test! complete-alert!}))))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
@@ -858,7 +931,9 @@
   :status-label :line-col-label :window :find-bar :run!* :stop!*
   :open-path! :save-to! :run-selection!* :toggle-focus!* :clear-console!*
   :zoom!* :handle-window-key! :simulate-open-result! :simulate-save-result!
-  :close-choice! :request-close!* :closing? :suppress-close?}; the
+  :close-choice! :request-close!* :closing? :suppress-close?
+  :alert-dialog-count :alert-pending? :alert-release!
+  :register-alert-choice-for-test! :complete-alert-for-test!}; the
   self-test rows call these functions directly, exactly as the buttons and
   keys do. :find-bar is the jonquil.gtk.find-bar map (P3.T4); rows call
   jonquil.gtk.find-bar's own functions on it."

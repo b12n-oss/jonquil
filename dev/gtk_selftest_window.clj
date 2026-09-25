@@ -1107,7 +1107,14 @@
   close-request-fn's dirty branch doesn't consult it at all. close-choice!
   is then driven with a synthetic {:index 2} (probe 3's own pattern) to
   verify the decision logic without a human: index 2 (Cancel) must do
-  nothing, leaving the window open, the text unchanged, and still dirty."
+  nothing, leaving the window open, the text unchanged, and still dirty.
+
+  Fix round 1: request-close!* leaves a real, abandoned alert pending
+  (close-choice! is driven synthetically here, never through the real
+  dialog's own completion), so alert-pending? is reset by hand afterward
+  -- otherwise the next dirty close-request row would find one still
+  \"pending\" and never open its own alert at all (row-close-alert-
+  pending-guard's own guard, applied to a row that isn't testing it)."
   [ui next]
   (let [ed (:editor ui)]
     (editor/set-text! ed "(+ 1 1)")
@@ -1118,6 +1125,7 @@
       ((:close-choice! ui) {:index 2})
       (let [dirty-after (editor/dirty? ed)
             text-after (editor/editor-text ed)]
+        (reset! (:alert-pending? ui) false)
         (check :close-dirty-cancel
                (and dirty-before (= text-before text-after) dirty-after)
                {:dirty-before dirty-before :dirty-after dirty-after
@@ -1130,7 +1138,10 @@
   request-fn). suppress-close? intercepts the real close there (see
   window.clj's close-request-fn docstring) -- closing? becoming true,
   asserted through this test hook rather than an actual close, is the
-  row's evidence that the confirm-and-close decision fired."
+  row's evidence that the confirm-and-close decision fired.
+
+  Fix round 1: also resets alert-pending? -- see close-dirty-cancel's own
+  note on why."
   [ui next]
   (let [ed (:editor ui)]
     (editor/set-text! ed "(+ 1 1)")
@@ -1142,6 +1153,7 @@
       (let [closing @(:closing? ui)]
         (reset! (:suppress-close? ui) false)
         (reset! (:closing? ui) false)
+        (reset! (:alert-pending? ui) false)
         (check :close-dirty-discard (and dirty-before closing)
                {:dirty-before dirty-before :closing closing})
         (next)))))
@@ -1151,7 +1163,10 @@
   index-0 branch takes the has-a-path arm, not the file-dialog one) then
   dirtied again. {:index 0} must save the CURRENT (dirtied) text to that
   path and, since the save clears dirty?, confirm and close (suppressed,
-  same as close-dirty-discard)."
+  same as close-dirty-discard).
+
+  Fix round 1: also resets alert-pending? -- see close-dirty-cancel's own
+  note on why."
   [ui next]
   (let [ed (:editor ui)
         tmp (str (System/getProperty "java.io.tmpdir")
@@ -1169,6 +1184,7 @@
             dirty-after (editor/dirty? ed)]
         (reset! (:suppress-close? ui) false)
         (reset! (:closing? ui) false)
+        (reset! (:alert-pending? ui) false)
         (check :close-dirty-save
                (and dirty-before closing (not dirty-after) (= "(+ 5 5)z" saved-content))
                {:dirty-before dirty-before :closing closing :dirty-after dirty-after
@@ -1206,6 +1222,106 @@
                 (fn [ok]
                   (check :pre-run-stray-closer ok {:console (since ui mark)})
                   (next)))))
+
+;; --- P3.T5 fix round 1 ----------------------------------------------------
+
+(defn- row-close-alert-pending-guard
+  "Fix round 1, Important #1 (the guard half): a second close request
+  while the first alert is still pending used to build a SECOND real
+  GtkAlertDialog and silently hand it the shared 'current dialog' state,
+  orphaning the first (row-close-alert-routing, below, covers the other
+  half -- per-dialog completion routing). close-request-fn now refuses to
+  open a second alert while one is pending. Two dirty :request-close!*
+  calls in a row must build only ONE real dialog (alert-dialog-count);
+  answering that one pending alert with a synthetic Don't Save must still
+  confirm the close via :closing?."
+  [ui next]
+  (let [ed (:editor ui)
+        count-before @(:alert-dialog-count ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    ((:request-close!* ui))
+    ((:request-close!* ui))
+    (let [dialogs-created (- @(:alert-dialog-count ui) count-before)]
+      (reset! (:suppress-close? ui) true)
+      ((:close-choice! ui) {:index 1})
+      (let [closing @(:closing? ui)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
+        (reset! (:alert-pending? ui) false)
+        (check :close-alert-pending-guard
+               (and (= 1 dialogs-created) closing)
+               {:dialogs-created dialogs-created :closing closing})
+        (next)))))
+
+(defn- row-close-alert-routing
+  "Fix round 1, Important #1 (the routing half): the completion callback
+  must route by its OWN dialog identity (src -- GAsyncReadyCallback's own
+  source_object argument for a real dialog), never a shared 'current
+  dialog' atom. Drives complete-alert! directly with two distinct
+  SYNTHETIC \"dialogs\" (plain keywords, never passed to any real GTK
+  call) and a counting release stub swapped in via :alert-release! (so
+  nothing GTK-side is ever touched, per the review's own crash-safety
+  note), completing them in REVERSE registration order -- the shared-atom
+  bug's exact failure shape: with :dialog-b registered after :dialog-a,
+  completing :dialog-b first coincidentally looks right (it IS the
+  'current' one), but completing :dialog-a next still uses the STALE
+  'current' state (:dialog-b's, since nothing ever cleared it), so
+  :dialog-a's own on-choice never fires and :dialog-b gets released a
+  second time. A third, stray re-invocation of :dialog-a (already
+  completed) must be a no-op, not another on-choice call or release."
+  [ui next]
+  (let [calls (atom [])
+        released (atom [])
+        prior-release @(:alert-release! ui)]
+    (reset! (:alert-release! ui) (fn [d] (swap! released conj d)))
+    ((:register-alert-choice-for-test! ui) :dialog-a (fn [r] (swap! calls conj [:a r])))
+    ((:register-alert-choice-for-test! ui) :dialog-b (fn [r] (swap! calls conj [:b r])))
+    ((:complete-alert-for-test! ui) :dialog-b {:index 0})
+    ((:complete-alert-for-test! ui) :dialog-a {:index 1})
+    ((:complete-alert-for-test! ui) :dialog-a {:index 1}) ; stray re-invocation
+    (reset! (:alert-release! ui) prior-release)
+    (check :close-alert-routing
+           (and (= [[:b {:index 0}] [:a {:index 1}]] @calls)
+                (= [:dialog-b :dialog-a] @released))
+           {:calls @calls :released @released})
+    (next)))
+
+(defn- row-run-while-running-keeps-warning
+  "Fix round 1, Important #2: a Run while one is already running used to
+  run commands/pre-run-problem on the SECOND buffer regardless, so an
+  unbalanced buffer set status to Ready (the FIRST program is still
+  running) and appended a bracket :error into the middle of its output
+  instead of P2's own 'already in progress' warning. Starts (loop []
+  (recur)), waits for it to really be evaluating, THEN sets an unbalanced
+  buffer and calls run!* again: the console must show the P2 warning and
+  no bracket sentence, and the status must still read the running status,
+  not Ready."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (editor/set-text! (:editor ui) "(+ 1 2))")
+                  ((:run!* ui))
+                  (poll-until 1000 20
+                              (fn [] (str/includes? (since ui mark) "already in progress"))
+                              (fn [warned?]
+                                (let [t (since ui mark)
+                                      status (g/label-text (:status-label ui))]
+                                  ((:stop!* ui))
+                                  (poll-until 3000 20
+                                              (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                              (fn [stopped?]
+                                                (check :run-while-running-keeps-warning
+                                                       (and started? warned? stopped?
+                                                            (= "Running…" status)
+                                                            (not (str/includes? t "no matching opener")))
+                                                       {:started started? :warned warned? :stopped stopped?
+                                                        :status status :console t})
+                                                (next))))))))))
 
 ;; --- P3.T4 fix round 3: Escape via the WINDOW's own dispatch -------------
 ;; (:handle-window-key! ui), never find-bar/handle-key! directly -- these
@@ -1383,6 +1499,9 @@
    row-close-dirty-save
    row-pre-run-hidden-by-error
    row-pre-run-stray-closer
+   row-close-alert-pending-guard
+   row-close-alert-routing
+   row-run-while-running-keeps-warning
    row-window-escape-closes-bar-while-running
    row-window-escape-yields-preedit-while-running
    row-window-escape-stops-when-editor-focused
