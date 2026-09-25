@@ -66,18 +66,19 @@
   file sits beside the target and the rename lands on the target), so the
   link itself survives the save."
   [path {:keys [theme]}]
-  (let [target (resolved-target path)
-        tmp (str target ".tmp-" (System/nanoTime))]
+  (let [tmp (atom nil)]
     (try
-      (io/make-parents target)
-      (spit tmp (pr-str {:theme theme}))
-      (java.nio.file.Files/move
-       (.toPath (java.io.File. ^String tmp))
-       (.toPath (java.io.File. ^String target))
-       (into-array java.nio.file.CopyOption
-                   [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                    java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-      nil
+      (let [target (resolved-target path)]
+        (reset! tmp (str target ".tmp-" (System/nanoTime)))
+        (io/make-parents target)
+        (spit @tmp (pr-str {:theme theme}))
+        (java.nio.file.Files/move
+         (.toPath (java.io.File. ^String @tmp))
+         (.toPath (java.io.File. ^String target))
+         (into-array java.nio.file.CopyOption
+                     [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                      java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+        nil)
       (catch Exception e
-        (try (io/delete-file tmp true) (catch Exception _ nil))
+        (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
         (str "couldn't save " path ": " (.getMessage e))))))

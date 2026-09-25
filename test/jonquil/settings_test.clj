@@ -68,3 +68,28 @@
     (let [msg (settings/save-settings! (str blocker "/jonquil/settings.edn") {:theme :navy})]
       (is (string? msg))
       (is (str/includes? msg "couldn't save")))))
+
+(deftest save-through-bad-symlink-test
+  (testing "dangling symlink"
+    (let [dir (temp-dir)
+          link (str dir "/settings.edn")
+          target (str dir "/missing.edn")]
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file link)) (.toPath (io/file target))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (let [msg (settings/save-settings! link {:theme :dark})]
+        (is (string? msg) "should return a string, not throw")
+        (is (str/includes? msg "couldn't save") "error message should mention save failure"))))
+  (testing "symlink loop"
+    (let [dir (temp-dir)
+          a (str dir "/a.edn")
+          b (str dir "/b.edn")]
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file a)) (.toPath (io/file b))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file b)) (.toPath (io/file a))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (let [msg (settings/save-settings! a {:theme :dark})]
+        (is (string? msg) "should return a string, not throw")
+        (is (str/includes? msg "couldn't save") "error message should mention save failure")))))
