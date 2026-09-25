@@ -526,3 +526,68 @@
 ;; editor.clj) returned a real non-zero handler id on both, with no GLib
 ;; critical warning.
 (ffi/defcfn gtk-editable-get-delegate "gtk_editable_get_delegate" [:pointer] :pointer)
+
+;; --- P3.T5 ---
+;; gtk_text_iter_get_line / gtk_text_iter_get_line_offset: gtktextiter.h:119,
+;; 121 (gtk4 4.22.4). Both 0-based; the status bar adds 1 for display
+;; (probe 6, spike.p3-ffi's own line-col).
+(ffi/defcfn gtk-text-iter-get-line "gtk_text_iter_get_line" [:pointer] :int)
+(ffi/defcfn gtk-text-iter-get-line-offset "gtk_text_iter_get_line_offset" [:pointer] :int)
+
+(defn cursor-line-col
+  "[line col], both 0-based, at buf's insert mark -- cursor-offset's
+  sibling, for the status bar's Ln/Col label."
+  [buf]
+  (let [it (ffi/alloc ITER-BYTES)]
+    (try
+      (gtk-text-buffer-get-iter-at-mark buf it (gtk-text-buffer-get-insert buf))
+      [(gtk-text-iter-get-line it) (gtk-text-iter-get-line-offset it)]
+      (finally (ffi/free it)))))
+
+;; gtk_widget_set_hexpand: gtkwidget.h:556. Not in the brief's enumerated
+;; binding list; added so the status bar's P2 label can claim the box's
+;; extra horizontal space, pushing the new Ln/Col label to the right edge
+;; -- GTK4's GtkBox has no per-child "expand" packing option of its own, a
+;; child's own hexpand is what it honours.
+(ffi/defcfn gtk-widget-set-hexpand "gtk_widget_set_hexpand" [:pointer :int] :void)
+
+;; g_object_new_with_properties: gobject/gobject.h:436-439 (probe 3;
+;; jonquil.gtk.ffi didn't have this yet, spike.p3-ffi did). The fixed-arity
+;; GtkAlertDialog constructor -- gtk_alert_dialog_new is variadic (printf-
+;; style) and is never bound (AGENTS.md).
+(ffi/defcfn g-object-new-with-properties "g_object_new_with_properties"
+  [:size_t :uint :pointer :pointer] :pointer)
+;; gtkalertdialog.h (gtk4 4.22.4, GDK_AVAILABLE_IN_4_10): gtk_alert_dialog_get_type
+;; via the GTK_TYPE_ALERT_DIALOG macro (line 30, calls gtk_alert_dialog_get_type());
+;; set_message:50-51, set_buttons:65-66, set_cancel_button:72-73,
+;; set_default_button:78-79, choose:82-86, choose_finish:89-91.
+(ffi/defcfn gtk-alert-dialog-get-type "gtk_alert_dialog_get_type" [] :size_t)
+(ffi/defcfn gtk-alert-dialog-set-message "gtk_alert_dialog_set_message" [:pointer :string] :void)
+(ffi/defcfn gtk-alert-dialog-set-buttons "gtk_alert_dialog_set_buttons" [:pointer :pointer] :void)
+(ffi/defcfn gtk-alert-dialog-set-cancel-button "gtk_alert_dialog_set_cancel_button" [:pointer :int] :void)
+(ffi/defcfn gtk-alert-dialog-set-default-button "gtk_alert_dialog_set_default_button" [:pointer :int] :void)
+(ffi/defcfn gtk-alert-dialog-choose "gtk_alert_dialog_choose"
+  [:pointer :pointer :pointer :pointer :pointer] :void)
+(ffi/defcfn gtk-alert-dialog-choose-finish "gtk_alert_dialog_choose_finish"
+  [:pointer :pointer :pointer] :int)
+
+(defn finish-choice
+  "Completes gtk_alert_dialog_choose. Returns {:index n} or {:error msg
+  :code n :domain q} -- the same GError layout finish-file already
+  documents (domain@0, code@4, message-ptr@8), reused here since
+  gtk_alert_dialog_choose_finish takes the same GError** out-param shape."
+  [dialog result]
+  (let [slot (ffi/alloc 8)]
+    (try
+      (ffi/write slot :pointer ffi/null 0)
+      (let [idx (gtk-alert-dialog-choose-finish dialog result slot)]
+        (if (neg? idx)
+          (let [err (ffi/read slot :pointer)]
+            (if (ffi/null? err)
+              {:error "no index and no GError"}
+              (try {:error (ffi/ptr->string (ffi/read err :pointer 8))
+                    :code (ffi/read err :int 4)
+                    :domain (ffi/read err :uint 0)}
+                   (finally (g-error-free err)))))
+          {:index idx}))
+      (finally (ffi/free slot)))))

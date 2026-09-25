@@ -1050,6 +1050,150 @@
       (find-bar/close! fb)
       (next))))
 
+;; --- P3.T5: Line/Col, ask before closing, bracket check before Run --------
+
+(defn- row-line-col
+  "place_cursor is one of probe 6's own two measured triggers for mark-set;
+  the label update itself is synchronous (the buffer's \"mark-set\" signal
+  fires inline from place-cursor!'s own call, not via an on-gui! drain), so
+  this reads the label right back, no poll needed. \"ab\\ncd\" offset 4 is
+  the 'd', 0-based [line 1, col 1] -> 1-based \"Ln 2, Col 2\"."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "ab\ncd")
+    (place-cursor! (:buf ed) 4)
+    (let [label (g/label-text (:line-col-label ui))]
+      (check :line-col (= "Ln 2, Col 2" label) {:label label})
+      (next))))
+
+(defn- row-close-clean
+  "Clean editor: close-request-fn's own else branch (would quit) fires
+  immediately, no dialog. Driven with suppress-close? set (window.clj's
+  close-request-fn docstring): the window is never really destroyed here,
+  so later rows keep a live window -- row-command-chord-close (still the
+  suite's sole deliberately-last row) is what actually exercises a real
+  close ending the process. closing? becoming true is this row's stand-in
+  for \"the window closes\"."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (reset! (:suppress-close? ui) true)
+    ((:request-close!* ui))
+    (let [closing @(:closing? ui)
+          dirty-after (editor/dirty? ed)]
+      (reset! (:suppress-close? ui) false)
+      (reset! (:closing? ui) false)
+      (check :close-clean (and (not dirty-after) closing)
+             {:dirty-after dirty-after :closing closing})
+      (next))))
+
+(defn- row-close-dirty-cancel
+  "Dirty editor: request-close!* shows the real GtkAlertDialog (probe 3 --
+  there is no programmatic way to pick a labelled button on it) and
+  suppresses the close (returns 1) regardless of suppress-close?, since
+  close-request-fn's dirty branch doesn't consult it at all. close-choice!
+  is then driven with a synthetic {:index 2} (probe 3's own pattern) to
+  verify the decision logic without a human: index 2 (Cancel) must do
+  nothing, leaving the window open, the text unchanged, and still dirty."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (let [dirty-before (editor/dirty? ed)
+          text-before (editor/editor-text ed)]
+      ((:request-close!* ui))
+      ((:close-choice! ui) {:index 2})
+      (let [dirty-after (editor/dirty? ed)
+            text-after (editor/editor-text ed)]
+        (check :close-dirty-cancel
+               (and dirty-before (= text-before text-after) dirty-after)
+               {:dirty-before dirty-before :dirty-after dirty-after
+                :text-before text-before :text-after text-after})
+        (next)))))
+
+(defn- row-close-dirty-discard
+  "As close-dirty-cancel, but {:index 1} (Don't Save): close-choice! must
+  confirm and finish-close! (gtk_window_close again, re-entering close-
+  request-fn). suppress-close? intercepts the real close there (see
+  window.clj's close-request-fn docstring) -- closing? becoming true,
+  asserted through this test hook rather than an actual close, is the
+  row's evidence that the confirm-and-close decision fired."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (let [dirty-before (editor/dirty? ed)]
+      ((:request-close!* ui))
+      (reset! (:suppress-close? ui) true)
+      ((:close-choice! ui) {:index 1})
+      (let [closing @(:closing? ui)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
+        (check :close-dirty-discard (and dirty-before closing)
+               {:dirty-before dirty-before :closing closing})
+        (next)))))
+
+(defn- row-close-dirty-save
+  "A remembered path (via the real :save-to! path, so close-choice!'s
+  index-0 branch takes the has-a-path arm, not the file-dialog one) then
+  dirtied again. {:index 0} must save the CURRENT (dirtied) text to that
+  path and, since the save clears dirty?, confirm and close (suppressed,
+  same as close-dirty-discard)."
+  [ui next]
+  (let [ed (:editor ui)
+        tmp (str (System/getProperty "java.io.tmpdir")
+                 "/jonquil-selftest-close-save-" (System/currentTimeMillis) ".clj")]
+    (spit tmp "(+ 0 0)")
+    (editor/set-text! ed "(+ 5 5)")
+    ((:save-to! ui) tmp)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (let [dirty-before (editor/dirty? ed)]
+      ((:request-close!* ui))
+      (reset! (:suppress-close? ui) true)
+      ((:close-choice! ui) {:index 0})
+      (let [closing @(:closing? ui)
+            saved-content (slurp tmp)
+            dirty-after (editor/dirty? ed)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
+        (check :close-dirty-save
+               (and dirty-before closing (not dirty-after) (= "(+ 5 5)z" saved-content))
+               {:dirty-before dirty-before :closing closing :dirty-after dirty-after
+                :saved-content saved-content})
+        (.delete (java.io.File. ^String tmp))
+        (next)))))
+
+(defn- row-pre-run-hidden-by-error
+  "(undefined-fn) would throw an unresolved-symbol error at EVAL time if
+  Run ever reached it -- the bracket check must run FIRST and skip
+  evaluation entirely, so only the line-2 unclosed-opener message shows,
+  never the eval error the first form would otherwise produce."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(undefined-fn)\n(defn g [y]")
+    ((:run!* ui))
+    (poll-until 3000 20
+                (fn [] (str/includes? (since ui mark) "The ( on line 2 is never closed."))
+                (fn [ok]
+                  (let [t (since ui mark)]
+                    (check :pre-run-hidden-by-error
+                           (and ok (not (str/includes? t "Unable to resolve symbol")))
+                           {:console t})
+                    (next))))))
+
+(defn- row-pre-run-stray-closer
+  "An extra closer with no opener at all (as opposed to an unclosed
+  opener, row-run-unbalanced's own case)."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(+ 1 2))")
+    ((:run!* ui))
+    (poll-until 3000 20
+                (fn [] (str/includes? (since ui mark) "The ) on line 1 has no matching opener."))
+                (fn [ok]
+                  (check :pre-run-stray-closer ok {:console (since ui mark)})
+                  (next)))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -1123,6 +1267,13 @@
    row-find-survives-repaint
    row-find-preedit-yields
    row-find-prefill-selects
+   row-line-col
+   row-close-clean
+   row-close-dirty-cancel
+   row-close-dirty-discard
+   row-close-dirty-save
+   row-pre-run-hidden-by-error
+   row-pre-run-stray-closer
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

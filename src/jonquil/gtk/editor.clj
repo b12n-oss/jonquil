@@ -90,6 +90,9 @@
     (g/gtk-text-buffer-end-irreversible-action buf)
     (reset! (:saved-text ed) s))
   (reset! (:dirty-check-needed? ed) true)
+  ;; P3.T5: belt-and-braces alongside the buffer's own "mark-set" (below),
+  ;; same reasoning as the dirty-check-needed? line above it.
+  (doseq [f @(:on-cursor-fns ed)] (f (g/cursor-line-col (:buf ed))))
   nil)
 
 (defn dirty?
@@ -106,6 +109,19 @@
   registration order."
   [ed f]
   (swap! (:on-dirty-fns ed) conj f)
+  nil)
+
+(defn on-cursor-moved!
+  "Registers f (fn [[line col]], both 0-based) to be called, on the GTK
+  thread, whenever the insert mark's position changes: on the buffer's
+  own \"mark-set\" signal, filtered to the insert mark (probe 6 measured
+  mark-set firing on place_cursor and select_range; arrow keys/clicks are
+  inferred, not measured -- see the report), and on set-text! (which
+  resets the cursor without necessarily firing mark-set itself, same
+  belt-and-braces reasoning as dirty-check-needed?). Multiple
+  registrations fire in registration order, mirroring on-dirty-changed!."
+  [ed f]
+  (swap! (:on-cursor-fns ed) conj f)
   nil)
 
 (defn focus! [ed]
@@ -342,6 +358,7 @@
             :saved-text (atom "")
             :last-dirty? (atom false)
             :on-dirty-fns (atom [])
+            :on-cursor-fns (atom [])
             :dirty-at (atom nil)
             :preedit-active? (atom false)
             ;; M7: starts true so the first tick always checks, establishing
@@ -361,6 +378,17 @@
                                          (reset! (:dirty-check-needed? ed) true)
                                          nil)
                                        [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; P3.T5 (probe 6): "mark-set" fires on every mark move, so filter to
+    ;; the insert mark -- otherwise a selection's bound-mark move (or the
+    ;; find bar's own marks) would also fire the status bar's own update.
+    (g/g-signal-connect-data buf "mark-set"
+                             (callable (fn [_buf _iter mark _data]
+                                         (when (= mark (g/gtk-text-buffer-get-insert buf))
+                                           (doseq [f @(:on-cursor-fns ed)]
+                                             (f (g/cursor-line-col buf))))
+                                         nil)
+                                       [:pointer :pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; I5: GtkTextView's OWN "preedit-changed" signal (distinct from
     ;; GtkIMContext's identically-named one) -- gtk/gtktextview.c:1529 per

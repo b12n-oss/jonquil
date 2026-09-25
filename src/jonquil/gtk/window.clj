@@ -87,15 +87,42 @@
 
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
+;; P3.T5 (parked P2 item M9): file-dialog! used to build a FRESH foreign-
+;; callable on every Open/Save, retained forever (jonquil.gtk.callbacks's
+;; own contract), so a long session leaked one native trampoline per
+;; dialog. One callable per MODE, reused for every call, fixes it: the
+;; callable reads the CURRENT dialog object and on-result fn from these
+;; atoms, which file-dialog! resets just before starting each async call.
+;; It also unrefs the GtkFileDialog once its result has arrived, the
+;; leak's other half.
+(defonce ^:private open-dialog-atom (atom nil))
+(defonce ^:private open-on-result-atom (atom nil))
+(defonce ^:private save-dialog-atom (atom nil))
+(defonce ^:private save-on-result-atom (atom nil))
+
+(defn- make-file-dialog-cb [finish dialog-atom on-result-atom]
+  (callable (fn [_src res _data]
+              (let [d @dialog-atom on-result @on-result-atom]
+                (try (on-result (g/finish-file finish d res))
+                     (finally (g/g-object-unref d))))
+              nil)
+            [:pointer :pointer :pointer] :void))
+
+(defonce ^:private open-cb
+  (make-file-dialog-cb g/gtk-file-dialog-open-finish open-dialog-atom open-on-result-atom))
+(defonce ^:private save-cb
+  (make-file-dialog-cb g/gtk-file-dialog-save-finish save-dialog-atom save-on-result-atom))
+
 (defn- file-dialog!
   "mode is :open or :save. on-result gets {:path s} or {:error msg :code n}."
   [mode window on-result]
   (let [d (g/gtk-file-dialog-new)
-        [start finish] (if (= mode :open)
-                         [g/gtk-file-dialog-open g/gtk-file-dialog-open-finish]
-                         [g/gtk-file-dialog-save g/gtk-file-dialog-save-finish])
-        cb (callable (fn [_src res _data] (on-result (g/finish-file finish d res)))
-                     [:pointer :pointer :pointer] :void)]
+        [dialog-atom on-result-atom cb start]
+        (if (= mode :open)
+          [open-dialog-atom open-on-result-atom open-cb g/gtk-file-dialog-open]
+          [save-dialog-atom save-on-result-atom save-cb g/gtk-file-dialog-save])]
+    (reset! dialog-atom d)
+    (reset! on-result-atom on-result)
     (start d window ffi/null cb ffi/null)))
 
 ;; --- open / save: the no-dialog forms the rows (and the dialog callbacks
@@ -272,6 +299,113 @@
         (update-title! ed win path-atom))
     (do-save-as! ed cv win path-atom)))
 
+;; --- ask before closing (P3.T5, probe 3) ------------------------------------
+
+;; The alert dialog's own retained callable (M9, same reasoning as
+;; open-cb/save-cb above): built once and reused for every close attempt.
+;; alert-dialog-atom/alert-on-choice-atom hold the CURRENT attempt's dialog
+;; object and decision fn, reset just before gtk_alert_dialog_choose starts.
+(defonce ^:private alert-dialog-atom (atom nil))
+(defonce ^:private alert-on-choice-atom (atom nil))
+(defonce ^:private alert-choose-cb
+  (callable (fn [_src res _data]
+              (let [d @alert-dialog-atom on-choice @alert-on-choice-atom]
+                (try (on-choice (g/finish-choice d res))
+                     (finally (g/g-object-unref d))))
+              nil)
+            [:pointer :pointer :pointer] :void))
+
+(defn- show-close-dialog!
+  "Builds a fresh GtkAlertDialog (probe 3: g_object_new_with_properties,
+  0 properties -- gtk_alert_dialog_new is variadic and is never bound) for
+  THIS close attempt (the message needs the current file name, which can
+  differ between attempts after a Save As), but reuses the ONE retained
+  alert-choose-cb across every attempt. Cancel button 2, default button 0,
+  per the brief."
+  [win name on-choice]
+  (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)]
+    (reset! alert-dialog-atom d)
+    (reset! alert-on-choice-atom on-choice)
+    (g/gtk-alert-dialog-set-message d (str "Save changes to " name " before closing?"))
+    (ffi/with-c-string-array [labels 4] ["Save" "Don't Save" "Cancel" nil]
+      (g/gtk-alert-dialog-set-buttons d labels))
+    (g/gtk-alert-dialog-set-cancel-button d 2)
+    (g/gtk-alert-dialog-set-default-button d 0)
+    (g/gtk-alert-dialog-choose d win ffi/null alert-choose-cb ffi/null)))
+
+(defn- finish-close!
+  "Confirms and re-triggers the window's own close-request (probe 3):
+  gtk_window_close synchronously re-enters close-request-fn (below), which
+  this time (confirmed-close? true) either quits for real or, when
+  suppress-close? is set, only records that it WOULD have -- see
+  close-request-fn's docstring for why."
+  [win confirmed-close?]
+  (reset! confirmed-close? true)
+  (g/gtk-window-close win))
+
+(defn- close-choice!
+  "The GtkAlertDialog decision (probe 3; the brief's :close-choice!):
+  index 0 Save, 1 Don't Save, 2 Cancel; an :error means the dialog was
+  dismissed. Index 2 and an error both do nothing -- the window stays open
+  and the text untouched. Index 0 with no remembered path opens the Save
+  dialog; a successful save (editor no longer dirty afterward -- save-to!
+  cleared it) confirms and closes, a cancelled or failed save leaves the
+  window open. Rows call this directly with a synthetic {:index n}
+  (probe 3), exactly as the real dialog's own completion callback does."
+  [ed cv win path-atom confirmed-close? {:keys [index error]}]
+  (cond
+    error nil
+    (= index 2) nil
+    (= index 1) (finish-close! win confirmed-close?)
+    (= index 0)
+    (if-let [path @path-atom]
+      (do (save-to! ed cv path-atom path)
+          (update-title! ed win path-atom)
+          (when-not (editor/dirty? ed) (finish-close! win confirmed-close?)))
+      (file-dialog!
+       :save win
+       (fn [{:keys [path error] :as save-result}]
+         (cond
+           path (do (save-to! ed cv path-atom path)
+                    (update-title! ed win path-atom)
+                    (when-not (editor/dirty? ed) (finish-close! win confirmed-close?)))
+           (dialog-dismissed? save-result) nil
+           :else (cview/append! cv :error (str "; save: " error "\n"))))))
+    :else nil))
+
+(defn- close-request-fn
+  "The window's close-request handler (P3.T5). Dirty and unconfirmed shows
+  the alert and suppresses the close (returns 1, GTK does not proceed);
+  otherwise it proceeds to quit -- unless suppress-close? is set, in which
+  case it only flips closing? and still returns 1.
+
+  suppress-close?/closing? exist ONLY for the self-test (dev/gtk_selftest_
+  window.clj's close-dirty-discard/close-dirty-save/close-clean rows): a
+  REAL gtk_window_close/g_application_quit synchronously re-enters this
+  same handler and, once it returns 0, GTK proceeds to actually tear the
+  window down and the pending quit fires as soon as control next reaches
+  the main loop (the very next deferred g_timeout_add wait, which most
+  later rows need) -- ending the shared self-test process before the rest
+  of row-fns runs, silently dropping them from the summary. Only
+  row-command-chord-close (P2.T10, already the deliberately-last row) is
+  allowed to trigger the real thing; every other close-confirmation row
+  sets suppress-close? true first and asserts @closing? instead of an
+  actual close. While suppressed, confirmed-close? is also reset to false
+  right here, so the attempt leaves no residue for the next row's own
+  close-request to see -- rows only need to reset suppress-close?/closing?
+  themselves afterward. See the report."
+  [ed cv win app path-atom confirmed-close? suppress-close? closing?]
+  (fn [_win _data]
+    (if (and (editor/dirty? ed) (not @confirmed-close?))
+      (do (show-close-dialog!
+           win (if-let [p @path-atom] (file-name p) "Untitled")
+           (fn [result] (close-choice! ed cv win path-atom confirmed-close? result)))
+          1)
+      (do (reset! closing? true)
+          (if @suppress-close?
+            (do (reset! confirmed-close? false) 1)
+            (do (g/g-application-quit app) 0))))))
+
 ;; --- Run / Stop ------------------------------------------------------------
 
 (defn- set-status!
@@ -335,13 +469,26 @@
   program's own output to land ahead of a banner that hasn't been
   enqueued yet. When the engine is already busy, run-definitions! returns
   its warning string instead of starting anything, and only that line is
-  appended -- no banner."
+  appended -- no banner.
+
+  P3.T5: commands/pre-run-problem runs FIRST, against the editor's own
+  text. When it names a bracket problem, Run never reaches session/run-
+  definitions! at all -- nothing is evaluated, even a form before the
+  broken one, so an earlier form's own unresolved-symbol error can never
+  hide the bracket message (row pre-run-hidden-by-error). The P2 banner
+  still prints (same not-already-evaluating guard as the normal path)
+  before the problem is appended as :error, and the status is set to
+  Ready."
   [ed cv session status-label]
-  (when-not (eval/evaluating? (:ctx session))
-    (cview/append! cv :system "; --- Running Definitions ---\n"))
-  (let [warning (session/run-definitions! session (editor/editor-text ed)
-                                          (make-eval-opts ed cv status-label true))]
-    (when warning (cview/append! cv :system warning))))
+  (let [text (editor/editor-text ed)
+        problem (commands/pre-run-problem text)]
+    (when-not (eval/evaluating? (:ctx session))
+      (cview/append! cv :system "; --- Running Definitions ---\n"))
+    (if problem
+      (do (cview/append! cv :error (str problem "\n"))
+          (set-status! status-label "Ready"))
+      (let [warning (session/run-definitions! session text (make-eval-opts ed cv status-label true))]
+        (when warning (cview/append! cv :system warning))))))
 
 (defn- do-stop! [session]
   (eval/stop-eval! (:ctx session))
@@ -528,6 +675,11 @@
         fb (find-bar/make-find-bar ed)
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
+        line-col-label (g/gtk-label-new "Ln 1, Col 1")
+        confirmed-close? (atom false)
+        ;; P3.T5 self-test hooks only -- see close-request-fn's docstring.
+        suppress-close? (atom false)
+        closing? (atom false)
         *cv (atom nil)
         cv (cview/make-console-view {:on-submit (make-on-submit ed *cv session status-label)
                                      :history-prev (history-prev-fn session)
@@ -561,6 +713,10 @@
         open-btn (g/gtk-button-new-with-label "Open…")
         save-btn (g/gtk-button-new-with-label "Save…")
         reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
+        ;; P3.T5: the status bar becomes a horizontal box -- the P2 label
+        ;; on the left (hexpand, so it claims the box's spare width) and
+        ;; the new Ln/Col label on the right.
+        status-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         ;; P3.T4: the find bar's box sits above the editor's own scroll
@@ -585,7 +741,10 @@
     (g/gtk-paned-set-position paned 430)
     (g/gtk-box-append vbox toolbar)
     (g/gtk-box-append vbox paned)
-    (g/gtk-box-append vbox status-label)
+    (g/gtk-widget-set-hexpand status-label 1)
+    (g/gtk-box-append status-box status-label)
+    (g/gtk-box-append status-box line-col-label)
+    (g/gtk-box-append vbox status-box)
     (g/gtk-window-set-child win vbox)
     (g/gtk-window-set-default-size win 900 700)
     ;; P3.T3: one shared GtkCssProvider for the display, added once; both
@@ -621,13 +780,17 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)
     (g/g-signal-connect-data win "close-request"
-                             (callable (fn [_win _data] (g/g-application-quit app) 0)
+                             (callable (close-request-fn ed cv win app path confirmed-close?
+                                                         suppress-close? closing?)
                                        [:pointer :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (editor/on-dirty-changed! ed (fn [_dirty] (update-title! ed win path)))
     ;; I4: a dirty->clean transition (a successful Save) re-arms the
     ;; discard warning, so an unrelated LATER dirty streak earns its own.
     (editor/on-dirty-changed! ed (fn [dirty] (when-not dirty (reset! discard-warned? false))))
+    ;; P3.T5: the status bar's Ln/Col label, editor position only (probe 6).
+    (editor/on-cursor-moved!
+     ed (fn [[line col]] (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col)))))
     (when file
       ;; A file argument that doesn't exist opens an empty editor with the
       ;; path remembered anyway, so Save creates it -- unlike the Open
@@ -646,6 +809,7 @@
     (editor/focus! ed)
     (when on-ready
       (on-ready {:editor ed :console cv :session session :status-label status-label :window win
+                 :line-col-label line-col-label
                  :find-bar fb
                  :run!* run-fn :stop!* stop-fn
                  :open-path! (fn [p]
@@ -668,14 +832,24 @@
                  ;; g/finish-file's -- file-dialog! itself can't be driven
                  ;; without a live dialog.
                  :simulate-open-result! (fn [result] (handle-open-result! ed cv win path result))
-                 :simulate-save-result! (fn [result] (handle-save-result! ed cv win path result))}))))
+                 :simulate-save-result! (fn [result] (handle-save-result! ed cv win path result))
+                 ;; P3.T5: close-choice! is the exact fn the real alert
+                 ;; dialog's own completion callback calls; request-close!*
+                 ;; runs gtk_window_close, the same path the window's close
+                 ;; button/OS chrome uses. closing?/suppress-close? are
+                 ;; self-test-only hooks (close-request-fn's docstring).
+                 :close-choice! (fn [result] (close-choice! ed cv win path confirmed-close? result))
+                 :request-close!* (fn [] (g/gtk-window-close win))
+                 :closing? closing?
+                 :suppress-close? suppress-close?}))))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
-  :status-label :window :find-bar :run!* :stop!* :open-path! :save-to!
-  :run-selection!* :toggle-focus!* :clear-console!* :zoom!*
-  :handle-window-key! :simulate-open-result! :simulate-save-result!}; the
+  :status-label :line-col-label :window :find-bar :run!* :stop!*
+  :open-path! :save-to! :run-selection!* :toggle-focus!* :clear-console!*
+  :zoom!* :handle-window-key! :simulate-open-result! :simulate-save-result!
+  :close-choice! :request-close!* :closing? :suppress-close?}; the
   self-test rows call these functions directly, exactly as the buttons and
   keys do. :find-bar is the jonquil.gtk.find-bar map (P3.T4); rows call
   jonquil.gtk.find-bar's own functions on it."
