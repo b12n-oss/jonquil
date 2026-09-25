@@ -20,6 +20,7 @@
     jonquil.console-test
     jonquil.session-test
     jonquil.commands-test
+    jonquil.help-test
     jonquil.gtk.ffi-test])
 
 (defn -main [& args]
