@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.svg" alt="Jonquil logo: a yellow jonquil between a pair of parentheses" width="128"></p>
+
 # Jonquil
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
@@ -53,3 +55,11 @@ bb gtk:selftest           # real-window self-tests (opens windows; don't type wh
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
 ```
+
+## The name
+
+A jonquil (*Narcissus jonquilla*) is a small, scented narcissus with several yellow flowers to a stem.
+
+<p align="center"><img src="docs/images/jonquil-1787.jpg" alt="Botanical plate of Narcissus jonquilla: a bulb with roots, long narrow leaves and a stem of small yellow flowers" width="240"></p>
+
+*Narcissus jonquilla* by Sydenham Edwards, from William Curtis's *Botanical Magazine* (1787). Public domain, via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Narcissus_jonquilla_1787.jpg). The logo in `docs/images/logo.svg` was drawn for this project.
