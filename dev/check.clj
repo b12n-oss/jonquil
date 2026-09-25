@@ -11,6 +11,7 @@
     jonquil.eval
     jonquil.console
     jonquil.session
+    jonquil.commands
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.editor
