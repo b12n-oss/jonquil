@@ -269,6 +269,17 @@
 (def ^:private KEY-L 0x06c)
 (def ^:private KEY-Y 0x079)
 
+;; macOS hardware keycodes for the physical F and L keys (measured live
+;; this session, pid-driven cgevent cmd+option+f/l against this build:
+;; keycode 3 and 37 respectively, state carrying both ALT-MASK and
+;; META-MASK correctly). These match Carbon/HIToolbox's own kVK_ANSI_F =
+;; 0x03 and kVK_ANSI_L = 0x25 (37) -- Events.h:200 and :232 in the macOS
+;; SDK's HIToolbox headers -- so they're the stable, well-known scan
+;; positions for those two physical keys, not something guessed. See
+;; handle-key!'s docstring for why keyval alone can't be used here.
+(def ^:private MAC-KEYCODE-F 3)
+(def ^:private MAC-KEYCODE-L 37)
+
 (def ^:private open-chars
   {KEY-PARENLEFT \( KEY-BRACKETLEFT \[ KEY-BRACELEFT \{ KEY-QUOTEDBL \"})
 
@@ -298,65 +309,100 @@
 (defn- apply-edit! [ed result]
   (if (apply-op! ed result) 1 0))
 
+(defn- alt-chord-f-or-l?
+  "True for Cmd/Ctrl+Alt+F or Cmd/Ctrl+Alt+L, on either platform.
+
+  On Linux GDK, Option/Alt doesn't remap the keyval, so keyval alone
+  (already normalised to lowercase by the caller) matches KEY-F/KEY-L
+  directly -- the historical check.
+
+  On macOS, GDK reports the OPTION-TRANSLATED character as keyval, not
+  the plain letter (measured live this session, pid-driven cgevent:
+  Cmd+Option+F arrives as keyval 0x8f6 = GDK_KEY_function, the florin
+  sign; Cmd+Option+L arrives as keyval 0xac = GDK_KEY_notsign -- both
+  confirmed against gdkkeysyms.h:1143 and :490). gdk_keyval_to_lower
+  doesn't help: neither is an uppercase variant of f/l. The hardware
+  keycode is unaffected by Option's translation and stays MAC-KEYCODE-F/
+  MAC-KEYCODE-L (also measured live, matching kVK_ANSI_F/kVK_ANSI_L), so
+  it's the fallback match.
+
+  The `(< keyval 0x1000)` guard keeps that fallback from ever firing on a
+  modifier key's own key-press event (Control_L's keyval is 0xffe3, way
+  above this range) -- on standard XKB/evdev Linux keycodes, hardware
+  keycode 37 belongs to Control_L and keycode 3 is unassigned, so without
+  this guard a Ctrl+Alt press sequence could in principle mis-fire on the
+  Control_L keystroke itself; the guard makes that impossible regardless
+  of keyval-lower's actual value that day."
+  [keyval keycode]
+  (or (contains? #{KEY-F KEY-L} keyval)
+      (and (< keyval 0x1000) (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L} keycode))))
+
 (defn handle-key!
   "The editor's key dispatch (P3.T2 gtk-keys.md), first match wins. Returns
   1 when it handled the key, 0 otherwise -- the key controller (on-key,
   below) only calls this, so self-test rows can call the exact same
-  function with a synthetic keyval/state, never a synthesized OS
+  function with a synthetic keyval/keycode/state, never a synthesized OS
   keystroke. Yields (0) on every key while a preedit is active (I5), not
   just Return, since GTK/the IM context need every key while composing.
   keyval0 is normalised with gdk_keyval_to_lower before every comparison
   (M4, gtk-keys.md: same reason window.clj's on-window-key does it -- Caps
-  Lock reports the uppercase keyval with no Shift bit set)."
-  [ed keyval0 state]
-  (let [keyval (g/gdk-keyval-to-lower keyval0)]
-    (cond
-      @(:preedit-active? ed) 0
+  Lock reports the uppercase keyval with no Shift bit set).
 
-      (plain-return? keyval state)
-      (if (handle-return! ed) 1 0)
+  Two arities: the 3-arg form (no keycode) is every pre-existing caller,
+  defaulting keycode to 0 -- harmless, since 0 never matches
+  MAC-KEYCODE-F/MAC-KEYCODE-L. on-key (below), the real GTK callback,
+  always uses the 4-arg form so alt-chord-f-or-l?'s macOS fallback has a
+  real hardware keycode to check."
+  ([ed keyval0 state] (handle-key! ed keyval0 0 state))
+  ([ed keyval0 keycode state]
+   (let [keyval (g/gdk-keyval-to-lower keyval0)]
+     (cond
+       @(:preedit-active? ed) 0
 
-      (and (command-chord? state) (contains? #{KEY-SLASH KEY-SEMICOLON} keyval))
-      (apply-edit! ed (edit/toggle-comment (snapshot ed)))
+       (plain-return? keyval state)
+       (if (handle-return! ed) 1 0)
 
-      (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
-      (apply-edit! ed (commands/format-all-op (snapshot ed)))
+       (and (command-chord? state) (contains? #{KEY-SLASH KEY-SEMICOLON} keyval))
+       (apply-edit! ed (edit/toggle-comment (snapshot ed)))
 
-      (and (command-chord? state) (alt-held? state) (contains? #{KEY-F KEY-L} keyval))
-      (apply-edit! ed (commands/format-selection-op (snapshot ed)))
+       (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
+       (apply-edit! ed (commands/format-all-op (snapshot ed)))
 
-      (and (command-chord? state) (= keyval KEY-Y))
-      (if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
-        (do (g/gtk-text-buffer-redo (:buf ed)) 1)
-        0)
+       (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode))
+       (apply-edit! ed (commands/format-selection-op (snapshot ed)))
 
-      (and (no-command-modifiers? state) (contains? open-chars keyval))
-      (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
+       (and (command-chord? state) (= keyval KEY-Y))
+       (if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
+         (do (g/gtk-text-buffer-redo (:buf ed)) 1)
+         0)
 
-      (and (no-command-modifiers? state) (contains? close-chars keyval))
-      (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
+       (and (no-command-modifiers? state) (contains? open-chars keyval))
+       (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
 
-      (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
-      (apply-edit! ed (edit/backspace-pair (snapshot ed)))
+       (and (no-command-modifiers? state) (contains? close-chars keyval))
+       (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
 
-      ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
-      ;; spanned line has leading whitespace), the way Tab always is.
-      ;; Returning 0 handed the key to GtkTextView's own handler, which
-      ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
-      ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
-      ;; lines 5744-5764).
-      (and (no-command-modifiers? state)
-           (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
-      (do (apply-op! ed (edit/unindent (snapshot ed))) 1)
+       (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
+       (apply-edit! ed (edit/backspace-pair (snapshot ed)))
 
-      (and (no-command-modifiers? state) (= keyval KEY-TAB))
-      (apply-edit! ed (edit/indent (snapshot ed)))
+       ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
+       ;; spanned line has leading whitespace), the way Tab always is.
+       ;; Returning 0 handed the key to GtkTextView's own handler, which
+       ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
+       ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
+       ;; lines 5744-5764).
+       (and (no-command-modifiers? state)
+            (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
+       (do (apply-op! ed (edit/unindent (snapshot ed))) 1)
 
-      :else 0)))
+       (and (no-command-modifiers? state) (= keyval KEY-TAB))
+       (apply-edit! ed (edit/indent (snapshot ed)))
+
+       :else 0))))
 
 (defn- on-key [ed]
-  (fn [_ctl keyval _keycode state _data]
-    (handle-key! ed keyval state)))
+  (fn [_ctl keyval keycode state _data]
+    (handle-key! ed keyval keycode state)))
 
 ;; --- construction ----------------------------------------------------------
 

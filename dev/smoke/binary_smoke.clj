@@ -381,6 +381,35 @@
       (throw (ex-info "jolt -M -e (format-code) failed" {:exit exit :err err})))
     out))
 
+(defn- format-selection-via-jolt!
+  "The text jonquil.syntax/format-selection-text produces for the LAST
+  line of whatever is on disk at path right now -- this step's fixture
+  puts the caret at end-of-buffer by default right after launch
+  (step-run-selection!'s own measured behaviour), landing on the
+  fixture's last line with no selection, so commands/format-selection-op
+  formats exactly that line. start/end are computed with the exact
+  formula jonquil.commands/line-bounds uses (the last \\n before the
+  caret, or 0; the next \\n at/after the caret, or the text's own
+  length) -- not itself the formatter under test, just locating where
+  that one line starts and ends; the real formatting comes from a live
+  `jolt -M -e` call into jonquil.syntax/format-selection-text (AGENTS.md:
+  `jolt -e` ignores deps.edn; `-M` loads the project classpath), never
+  hand-written, same reasoning as format-code-via-jolt!. Throws on a
+  non-zero exit, naming jolt's own stderr."
+  [path]
+  (let [code (str "(require (quote [jonquil.syntax :as syntax])) "
+                  "(let [text (slurp " (pr-str path) ") "
+                  "      caret (count text) "
+                  "      nl (when (pos? caret) (clojure.string/last-index-of text \"\\n\" (dec caret))) "
+                  "      s (if nl (inc nl) 0) "
+                  "      e (or (clojure.string/index-of text \"\\n\" caret) (count text))] "
+                  "(print (syntax/format-selection-text text s e)))")
+        {:keys [exit out err]} (p/shell {:out :string :err :string :continue true}
+                                        "jolt" "-M" "-e" code)]
+    (when-not (zero? exit)
+      (throw (ex-info "jolt -M -e (format-selection-text) failed" {:exit exit :err err})))
+    out))
+
 ;; --- steps ----------------------------------------------------------------
 ;; Each step launches its own fresh process (dev/demo_shots.clj's own
 ;; hard-won lesson: a shared process/window let one scene's leftover
@@ -554,6 +583,46 @@
           on-disk (try (slurp path) (catch Exception _ nil))]
       (screenshot! pid "step5-format-all")
       (check! :format-all (and title-ok (not= original expected) (= expected on-disk))
+              {:title-lost-star title-ok :expected expected :on-disk on-disk}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-format-selection!
+  "Cmd+Option+F bug fix's own smoke step (the bug this whole dispatch was
+  for: Cmd+Option+F/L did nothing in the built macOS app). A mis-indented
+  fixture whose last line is out of indent, Cmd+Option+F, Cmd+S. On
+  macOS, GDK reports the Option-translated character as keyval (0x8f6,
+  GDK_KEY_function, for Option+F) instead of the plain letter, so
+  editor.clj's alt-chord-f-or-l? falls back to the physical key's
+  hardware keycode (3, matching kVK_ANSI_F) when the keyval doesn't
+  match -- see that function's own docstring for the measured values.
+  The file's own bytes on disk must equal
+  jonquil.syntax/format-selection-text's real output for the ORIGINAL
+  fixture text over the last line's bounds
+  (format-selection-via-jolt!, a live `jolt -M -e` call -- never
+  hand-written). The extra (not= original expected) assertion is this
+  step's own falsifiability check, same reasoning as step-format-all!'s
+  own comment: without it, a fixture that happened to already be
+  correctly formatted would let a completely broken Cmd+Option+F pass
+  this step by doing nothing at all. This step FAILS on the pre-fix
+  code (measured this task's own session, both via
+  dev/gtk_selftest.clj's new macOS rows and a live pid-driven probe
+  against the built binary): the old dispatch only ever compared keyval
+  against #{KEY-F KEY-L}, and Option's translated keyval never matches
+  either member of that set."
+  []
+  (let [path (scratch-copy! "format_selection.clj")
+        original (slurp path)
+        expected (format-selection-via-jolt! path)
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "command + option + f")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))]
+      (screenshot! pid "step-format-selection")
+      (check! :format-selection (and title-ok (not= original expected) (= expected on-disk))
               {:title-lost-star title-ok :expected expected :on-disk on-disk}))
     (stop! {:proc proc :pid pid})))
 
@@ -974,6 +1043,7 @@
    ["run-selection" step-run-selection!]
    ["toggle-comment" step-toggle-comment!]
    ["format-all" step-format-all!]
+   ["format-selection" step-format-selection!]
    ["find" step-find!]
    ["pre-run-check" step-pre-run-check!]
    ["close-with-unsaved" step-close-with-unsaved!]

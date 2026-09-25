@@ -457,6 +457,53 @@
                  {:handled handled :text text :undone undone})
           (next))))))
 
+(defn- row-edit-format-selection-macos-cmd-option-f
+  "Bug fix (Cmd+Option+F did nothing in the built macOS app): the MEASURED
+  macOS triple for Cmd+Option+F, from a pid-driven cgevent probe against
+  this build (not assumed) -- keyval 0x8f6 (GDK_KEY_function, the florin
+  sign Option+F types on a US keyboard, gdkkeysyms.h:1143), hardware
+  keycode 3 (kVK_ANSI_F, macOS SDK Events.h:200), state META-MASK|ALT-MASK
+  (Cmd reports as META on GDK's macOS backend -- command-chord?'s own
+  check; the probe showed no CONTROL bit). Calls handle-key!'s 4-arg
+  arity so alt-chord-f-or-l?'s hardware-keycode fallback has a real
+  keycode to match -- this row FAILS on the pre-fix code, where the
+  dispatch only ever compared keyval against #{KEY-F KEY-L}."
+  [ed]
+  (fn [next]
+    (let [buf (:buf ed)
+          original "(defn f [x]\n(inc x))"]
+      (editor/set-text! ed original)
+      ;; offset 15 is inside "(inc x))", line 2, same as row-edit-format-selection.
+      (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed 0x8f6 3 (bit-or g/META-MASK g/ALT-MASK))
+            text (editor/editor-text ed)]
+        (g/gtk-text-buffer-undo buf)
+        (let [undone (editor/editor-text ed)]
+          (check :edit-format-selection-macos-cmd-option-f
+                 (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                 {:handled handled :text text :undone undone})
+          (next))))))
+
+(defn- row-edit-format-selection-macos-cmd-option-l
+  "Same bug, the L chord: MEASURED macOS triple for Cmd+Option+L -- keyval
+  0xac (GDK_KEY_notsign, the ¬ Option+L types, gdkkeysyms.h:490), hardware
+  keycode 37 (kVK_ANSI_L, macOS SDK Events.h:232), state
+  META-MASK|ALT-MASK, same as the F row above."
+  [ed]
+  (fn [next]
+    (let [buf (:buf ed)
+          original "(defn f [x]\n(inc x))"]
+      (editor/set-text! ed original)
+      (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+      (let [handled (editor/handle-key! ed 0xac 37 (bit-or g/META-MASK g/ALT-MASK))
+            text (editor/editor-text ed)]
+        (g/gtk-text-buffer-undo buf)
+        (let [undone (editor/editor-text ed)]
+          (check :edit-format-selection-macos-cmd-option-l
+                 (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                 {:handled handled :text text :undone undone})
+          (next))))))
+
 (defn- row-edit-redo-y [ed]
   (fn [next]
     (let [buf (:buf ed)]
@@ -503,6 +550,8 @@
    row-edit-toggle-comment-forward
    row-edit-format-all
    row-edit-format-selection
+   row-edit-format-selection-macos-cmd-option-f
+   row-edit-format-selection-macos-cmd-option-l
    row-edit-redo-y
    row-edit-preedit-yields])
 
