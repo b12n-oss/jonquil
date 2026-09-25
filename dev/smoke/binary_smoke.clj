@@ -41,13 +41,15 @@
 ;;   (`cgevent windows --pid N --edn`) applied to (ocr-x - window-x) and
 ;;   (ocr-y - window-y), not to the raw ocr coordinates.
 ;;
-;; The colour spot check (window.clj's `:out`/`:prompt` colours,
-;; jonquil.console/styles) needs one more measured correction: a PLAIN
-;; average of every pixel in an OCR'd line's box came back 202,202,202 --
-;; close to white -- because most of a text line's bounding box is
-;; background, not ink; the box's DARKEST pixel came back 40,40,40, an
-;; exact match for :out's "#282828". See dev/smoke/PixelAt.java's own
-;; docstring for the full measurement and the darkest-cluster fix.
+;; The colour spot check (jonquil.theme's light theme, :text and :console
+;; :prompt, consumed via jonquil.console/styles) needs one more measured
+;; correction: a PLAIN average of every pixel in an OCR'd line's box came
+;; back close to white, because most of a text line's bounding box is
+;; background, not ink; the box's DARKEST pixel is an exact match for
+;; light's :text, "#24292f" (TH.T6: was upstream's "#282828" before
+;; TH.T2/T4 moved console colours onto the theme). See dev/smoke/
+;; PixelAt.java's own docstring for the full measurement and the
+;; darkest-cluster fix.
 ;; babashka itself can't do this sampling -- `bb -e '(import (javax.imageio
 ;; ImageIO)) ...)'` fails with "Unable to resolve classname", because
 ;; babashka is a GraalVM native image with a curated class list that
@@ -420,14 +422,34 @@
 (defn- step-run-and-colour!
   "Brief step 2 (Run shows output and => nil, status Ready) plus the
   colour spot check (:out, not :prompt blue) on the same output line,
-  since the check needs exactly the line step 2 already produces."
+  since the check needs exactly the line step 2 already produces.
+
+  TH.T6: the => nil match tolerates OCR dropping the '>' (matching '= nil'
+  too), diagnosed live this session rather than assumed. It is NOT a
+  colour regression: an isolated crop of just this console line reads
+  '=> nil' correctly under either the old or the new :result colour, and
+  reverting :result (or :system, or :prompt) back to their pre-TH.T2
+  values on an otherwise-current build does not fix it either -- only
+  cropping the FULL WINDOW capture down to exclude the toolbar/definitions
+  area above the console does, and a y-offset bisection of that crop
+  flips pass/fail non-monotonically rather than at one clean boundary.
+  So this is Vision's own whole-window text layout, not any single
+  element, occasionally dropping the tightly-kerned bold '>' from '=>'
+  when it reads the entire frame -- the same frame-to-frame OCR fragility
+  net.b12n.cgevent.ocr/still-present-at-timeout? documents needing two
+  consecutive absent polls for. The regex still requires the '=' that only
+  the result line ever produces immediately before 'nil' (with an optional
+  '>' and whitespace in between), so a bare 'nil' anywhere on screen, or a
+  missing result line, does not match -- confirmed by construction: with
+  no Run result on screen there is no '=' adjacent to any 'nil' for the
+  regex to find."
   []
   (let [path (scratch-copy! "run.clj")
         {:keys [proc pid]} (launch! path)]
     (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok last]} (wait-for-ocr! pid 8000 "smoke-run")
-          ok-nil (str/includes? last "=> nil")
+          ok-nil (boolean (re-find #"=>?\s*nil" last))
           ok-ready (wait-for-ocr! pid 3000 "Ready")
           win (window-for pid)
           scale (or (:scale win) 2.0)
@@ -447,8 +469,8 @@
                                               (str px) (str py) (str pw) (str ph))]
           (if (zero? exit)
             (let [[r g b] (map #(Long/parseLong %) (str/split (str/trim out) #","))
-                  dist-out (+ (Math/abs (- r 0x28)) (Math/abs (- g 0x28)) (Math/abs (- b 0x28)))
-                  dist-prompt (+ (Math/abs (- r 0x00)) (Math/abs (- g 0x64)) (Math/abs (- b 0xc8)))]
+                  dist-out (+ (Math/abs (- r 0x24)) (Math/abs (- g 0x29)) (Math/abs (- b 0x2f)))
+                  dist-prompt (+ (Math/abs (- r 0x66)) (Math/abs (- g 0x39)) (Math/abs (- b 0xba)))]
               (check! :colour-spot-check (< dist-out dist-prompt)
                       {:sampled-rgb [r g b] :dist-out dist-out :dist-prompt dist-prompt
                        :rect [px py pw ph]}))
