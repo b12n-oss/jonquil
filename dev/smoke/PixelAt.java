@@ -44,10 +44,6 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.Arrays;
 import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.File;
-import java.util.Arrays;
-import javax.imageio.ImageIO;
 
 public class PixelAt {
     public static void main(String[] args) throws Exception {
