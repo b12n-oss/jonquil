@@ -478,6 +478,43 @@
                       (editor/mark-saved! ed)
                       (next))))))))))))))
 
+(defn- scene-theme
+  "TH.T6: theme-sample.clj (a comment, a string, a keyword, a number, a
+  defn and three levels of nested brackets) Run to completion so the
+  console shows both output and a result, then (:set-theme!* ui) k --
+  the same fn Cmd/Ctrl+Shift+M's cycle calls, applied directly rather
+  than cycled to, so each of the four scenes lands on its own theme
+  regardless of cycle order. settle! (2 more ticks) gives the retint's
+  own queued repaint a moment to land before the screenshot reads the
+  frame -- the same 'wait a later main-loop tick' every other capture
+  here already does, since apply-window-theme! only sets GObject tag/CSS
+  properties synchronously; GTK's own repaint is still queued, not
+  immediate. id is the scene id (also docs/images/<id>.png's stem via
+  image-path); k is the theme keyword passed to set-theme!*."
+  [id k ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) (slurp (demo-path "theme-sample.clj")))
+    ((:run!* ui))
+    (poll-until 5000 20
+                (fn [] (and (idle? ui)
+                            (str/includes? (since ui mark) "Hi, Jonquil")
+                            (str/includes? (since ui mark) ":greeting")))
+                (fn [ok]
+                  ((:set-theme!* ui) k)
+                  (settle! 2
+                           (fn []
+                             (screenshot! (image-path id "png") (own-pid)
+                                          (fn [{:keys [exit err]}]
+                                            (check! id (and ok (zero? exit))
+                                                    {:console (since ui mark) :theme k
+                                                     :screenshot-exit exit :screenshot-err err})
+                                            (next)))))))))
+
+(defn- scene-theme-light [ui next] (scene-theme :theme-light :light ui next))
+(defn- scene-theme-dark [ui next] (scene-theme :theme-dark :dark ui next))
+(defn- scene-theme-solarized [ui next] (scene-theme :theme-solarized :solarized ui next))
+(defn- scene-theme-navy [ui next] (scene-theme :theme-navy :navy ui next))
+
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
@@ -491,7 +528,11 @@
    [:run-while-running scene-run-while-running]
    [:find scene-find]
    [:run-selection scene-run-selection]
-   [:close-prompt scene-close-prompt]])
+   [:close-prompt scene-close-prompt]
+   [:theme-light scene-theme-light]
+   [:theme-dark scene-theme-dark]
+   [:theme-solarized scene-theme-solarized]
+   [:theme-navy scene-theme-navy]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
