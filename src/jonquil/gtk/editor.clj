@@ -43,7 +43,9 @@
 (defn- make-tags!
   "One GtkTextTag per paint/style key: every paint/token-styles key,
   [:rainbow 0..6], and :unmatched. :bold sets weight 700; :italic goes
-  through set-italic! (the S2 italic gap the p2c probe closed)."
+  through set-italic! (the S2 italic gap the p2c probe closed). Tags start
+  with theme/default-theme's colours; apply-theme! (TH.T4) retints them in
+  place, never recreating them."
   [buf]
   (let [table (g/gtk-text-buffer-get-tag-table buf)
         ks (concat (keys paint/token-styles)
@@ -126,6 +128,17 @@
 
 (defn focus! [ed]
   (g/gtk-widget-grab-focus (:view ed))
+  nil)
+
+(defn apply-theme!
+  "Retints every tag in (:tags ed) to theme t's colours (TH.T4): sets each
+  tag's foreground to (:fg (paint/style t k)). Only ever touches tag
+  properties -- never buffer text, the selection or undo history -- so
+  repaint! keeps working unchanged against the same tag objects, which
+  already carry the new colours by the time any later repaint runs."
+  [ed t]
+  (doseq [[k tag] (:tags ed)]
+    (g/set-string-property! tag "foreground" (:fg (paint/style t k))))
   nil)
 
 ;; --- snapshot / apply-op!, from the S2 spike ------------------------------

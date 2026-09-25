@@ -1642,6 +1642,172 @@
                 :text-after text-after :closing-clean closing-clean})
         (next)))))
 
+;; --- TH.T4: apply-theme! (retint tags, reload the CSS, flip prefer-dark) --
+;; Every row here ends by restoring :light and zoom :reset, per the shared
+;; rule (02-gtk.md) that later rows see the colours/size they expect.
+
+(defn- row-theme-retints-tags
+  "Reads each tag's colour back via rgba-property-hex/get-bool-property
+  (probe rgba.clj), before and after switching theme, against the exact
+  hex values measured from jonquil.theme/themes: navy's :keyword
+  (#c792ea), [:rainbow 0] (#f78c6c), :unmatched (:red, #f07178), the
+  console's :result (#c3e88d) and the find bar's :find-highlight
+  (#4d4520); then light's same five (#cf222e, #953800, #cf222e, #0a3069,
+  #fff2a8)."
+  [ui next]
+  (let [ed (:editor ui) cv (:console ui) fb (:find-bar ui)
+        kw-tag (get (:tags ed) :keyword)
+        rb0-tag (get (:tags ed) [:rainbow 0])
+        um-tag (get (:tags ed) :unmatched)
+        result-tag (get (:tags cv) :result)
+        fb-tag (:tag fb)]
+    ((:set-theme!* ui) :navy)
+    (let [kw-navy (g/rgba-property-hex kw-tag "foreground-rgba")
+          rb0-navy (g/rgba-property-hex rb0-tag "foreground-rgba")
+          um-navy (g/rgba-property-hex um-tag "foreground-rgba")
+          result-navy (g/rgba-property-hex result-tag "foreground-rgba")
+          fb-navy (g/rgba-property-hex fb-tag "background-rgba")]
+      ((:set-theme!* ui) :light)
+      (let [kw-light (g/rgba-property-hex kw-tag "foreground-rgba")
+            rb0-light (g/rgba-property-hex rb0-tag "foreground-rgba")
+            um-light (g/rgba-property-hex um-tag "foreground-rgba")
+            result-light (g/rgba-property-hex result-tag "foreground-rgba")
+            fb-light (g/rgba-property-hex fb-tag "background-rgba")]
+        (check :theme-retints-tags
+               (and (= "#c792ea" kw-navy) (= "#f78c6c" rb0-navy) (= "#f07178" um-navy)
+                    (= "#c3e88d" result-navy) (= "#4d4520" fb-navy)
+                    (= "#cf222e" kw-light) (= "#953800" rb0-light) (= "#cf222e" um-light)
+                    (= "#0a3069" result-light) (= "#fff2a8" fb-light))
+               {:kw-navy kw-navy :rb0-navy rb0-navy :um-navy um-navy
+                :result-navy result-navy :fb-navy fb-navy
+                :kw-light kw-light :rb0-light rb0-light :um-light um-light
+                :result-light result-light :fb-light fb-light})
+        ((:zoom!* ui) :reset)
+        (next)))))
+
+(defn- row-theme-css
+  "dark's code-css (jonquil.theme/code-css) at the default font size:
+  background-color #000000, color #e0e0e0, font-size 13px."
+  [ui next]
+  ((:zoom!* ui) :reset)
+  ((:set-theme!* ui) :dark)
+  (let [css ((:code-css* ui))]
+    (check :theme-css
+           (and (str/includes? css "background-color: #000000;")
+                (str/includes? css "color: #e0e0e0;")
+                (str/includes? css "font-size: 13px;"))
+           {:css css})
+    ((:set-theme!* ui) :light)
+    ((:zoom!* ui) :reset)
+    (next)))
+
+(defn- row-theme-prefer-dark
+  "GtkSettings' gtk-application-prefer-dark-theme (probe probe.clj), read
+  back via get-bool-property: true for dark's :dark? true, false for
+  solarized's :dark? false."
+  [ui next]
+  ((:set-theme!* ui) :dark)
+  (let [dark? (g/get-bool-property (g/gtk-settings-get-default) "gtk-application-prefer-dark-theme")]
+    ((:set-theme!* ui) :solarized)
+    (let [solarized-dark? (g/get-bool-property (g/gtk-settings-get-default)
+                                               "gtk-application-prefer-dark-theme")]
+      (check :theme-prefer-dark (and dark? (not solarized-dark?))
+             {:dark dark? :solarized-dark solarized-dark?})
+      ((:set-theme!* ui) :light)
+      ((:zoom!* ui) :reset)
+      (next))))
+
+(defn- row-theme-keeps-text-and-undo
+  "A theme switch never touches buffer text, the selection or undo
+  history: inserts \"x\" interactively (an undoable step) after set-text!'s
+  own irreversible \"(def a 1)\", selects [0 4], switches theme, then
+  checks the text, the selection, get-can-undo and one undo's result are
+  all exactly what they'd be without the switch."
+  [ui next]
+  (let [ed (:editor ui) buf (:buf ed)]
+    (editor/set-text! ed "(def a 1)")
+    (place-cursor! buf (count "(def a 1)"))
+    (g/gtk-text-buffer-insert-interactive-at-cursor buf "x" -1 1)
+    (select-range! buf 0 4)
+    ((:set-theme!* ui) :navy)
+    (let [text (editor/editor-text ed)
+          sel (g/selection-offsets buf)
+          can-undo (not (zero? (g/gtk-text-buffer-get-can-undo buf)))]
+      (g/gtk-text-buffer-undo buf)
+      (let [undone (editor/editor-text ed)]
+        (check :theme-keeps-text-and-undo
+               (and (= "(def a 1)x" text) (= [0 4] sel) can-undo (= "(def a 1)" undone))
+               {:text text :sel sel :can-undo can-undo :undone undone})
+        ((:set-theme!* ui) :light)
+        ((:zoom!* ui) :reset)
+        (next)))))
+
+(defn- row-theme-keeps-find-highlight
+  "A theme switch never touches the find bar's :matches: with the bar open
+  on \"foo bar foo\" (matches at [0 3] and [8 11]), switching theme must
+  leave both tagged, the count label unchanged, and only the tag's
+  background retinted (dark's #5c4b00)."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (let [label-before (g/label-text (:count-label fb))]
+      ((:set-theme!* ui) :dark)
+      (let [tag0 (g/has-tag-at? buf 0 (:tag fb))
+            tag8 (g/has-tag-at? buf 8 (:tag fb))
+            label-after (g/label-text (:count-label fb))
+            bg (g/rgba-property-hex (:tag fb) "background-rgba")]
+        (find-bar/close! fb)
+        (check :theme-keeps-find-highlight
+               (and tag0 tag8 (= label-before label-after) (= "#5c4b00" bg))
+               {:tag0 tag0 :tag8 tag8 :label-before label-before :label-after label-after :bg bg})
+        ((:set-theme!* ui) :light)
+        ((:zoom!* ui) :reset)
+        (next)))))
+
+(defn- row-theme-and-zoom-share-css
+  "Zoom and theme reload the SAME shared provider and must not overwrite
+  each other's part of the CSS: zoom :in (13->14px), switch to navy (css1:
+  14px + navy's #1a1b2e background), zoom :in again (14->16px; css2: 16px
+  and STILL navy's #1a1b2e, not the default theme's)."
+  [ui next]
+  ((:zoom!* ui) :reset)
+  ((:zoom!* ui) :in)
+  ((:set-theme!* ui) :navy)
+  (let [css1 ((:code-css* ui))]
+    ((:zoom!* ui) :in)
+    (let [css2 ((:code-css* ui))]
+      (check :theme-and-zoom-share-css
+             (and (str/includes? css1 "font-size: 14px;") (str/includes? css1 "#1a1b2e")
+                  (str/includes? css2 "font-size: 16px;") (str/includes? css2 "#1a1b2e"))
+             {:css1 css1 :css2 css2})
+      ((:set-theme!* ui) :light)
+      ((:zoom!* ui) :reset)
+      (next))))
+
+(defn- row-theme-applies-to-new-text
+  "Tags that repaint! applies later are the same tag objects apply-theme!
+  already retinted, so new/pasted text needs no repaint of its own: sets
+  navy, THEN types new text, waits for the debounce repaint (a tag over
+  offset 1, \"defn\"), and checks that tag is :special-form at navy's
+  #c792ea."
+  [ui next]
+  (let [ed (:editor ui) buf (:buf ed)
+        tag (get (:tags ed) :special-form)]
+    ((:set-theme!* ui) :navy)
+    (editor/set-text! ed "(defn f [x] :k)")
+    (poll-until 500 20
+                (fn [] (g/has-tag-at? buf 1 tag))
+                (fn [tagged?]
+                  (let [fg (g/rgba-property-hex tag "foreground-rgba")]
+                    (check :theme-applies-to-new-text
+                           (and tagged? (= "#c792ea" fg))
+                           {:tagged tagged? :fg fg})
+                    ((:set-theme!* ui) :light)
+                    ((:zoom!* ui) :reset)
+                    (next))))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -1736,6 +1902,13 @@
    row-close-save-failed
    row-close-alert-build-throws
    row-quit-action-prompts
+   row-theme-retints-tags
+   row-theme-css
+   row-theme-prefer-dark
+   row-theme-keeps-text-and-undo
+   row-theme-keeps-find-highlight
+   row-theme-and-zoom-share-css
+   row-theme-applies-to-new-text
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

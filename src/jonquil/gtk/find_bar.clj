@@ -4,8 +4,10 @@
   GtkEntry plus \"Replace\"/\"Replace All\" buttons visible only in :replace
   mode, and a match-count label.
 
-  Every match gets a \"search-match\" GtkTextTag (background #fff2a8, probe
-  2). Matches are recomputed over the editor text on every query change and
+  Every match gets a \"search-match\" GtkTextTag (background from the
+  active theme's :find-highlight, probe 2; starts with theme/default-
+  theme's colour and apply-theme! retints it in place, TH.T4). Matches are
+  recomputed over the editor text on every query change and
   on every editor buffer change while the bar is open (both wired as GTK
   \"changed\" signals here), but only a query change, open!, next/prev and
   a replace move the editor's selection (P3 fix wave C1); the tag is stripped on every recompute and on
@@ -32,7 +34,8 @@
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.syntax :as syntax]))
+            [jonquil.syntax :as syntax]
+            [jonquil.theme :as theme]))
 
 ;; --- keys (gtk-keys.md, values from gdkkeysyms.h 2026-09-24) --------------
 
@@ -40,8 +43,6 @@
 (def ^:private KEY-RETURN 0xff0d)
 (def ^:private KEY-F3 0xffc0)
 (def ^:private KEY-G 0x067)
-
-(def ^:private SEARCH-MATCH-BG "#fff2a8")
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), duplicated here since
@@ -203,6 +204,14 @@
   (editor/focus! (:ed fb))
   nil)
 
+(defn apply-theme!
+  "Sets the search-match tag's background to theme t's :find-highlight
+  (TH.T4). Only ever touches the tag's colour -- never the editor's
+  matches, its buffer text or its selection."
+  [fb t]
+  (g/set-string-property! (:tag fb) "background" (:find-highlight t))
+  nil)
+
 ;; --- moving between matches -----------------------------------------------
 
 (defn find-next!
@@ -352,7 +361,7 @@
             :ed ed :tag tag :matches (atom [])
             :preedit-active? (atom false)
             :replacing? (atom false)}]
-    (g/set-string-property! tag "background" SEARCH-MATCH-BG)
+    (g/set-string-property! tag "background" (:find-highlight (theme/theme theme/default-theme)))
     (g/gtk-text-tag-table-add table tag)
     (g/gtk-box-append box query)
     (g/gtk-box-append box replacement)

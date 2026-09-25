@@ -616,6 +616,45 @@
 (ffi/defcfn gtk-text-buffer-delete-selection "gtk_text_buffer_delete_selection"
   [:pointer :int :int] :int)
 
+;; --- TH.T4 ---
+;; gtk_settings_get_default: gtksettings.h:39 (gtk4 4.22.4). Probe: store
+;; 808973e:b12n-oss/jonquil/spikes/themes/probes/probe.clj (prefer-dark
+;; read/write).
+(ffi/defcfn gtk-settings-get-default "gtk_settings_get_default" [] :pointer)
+
+;; gdk_rgba_get_type: gdkrgba.h:46. Probe: rgba.clj (reading a tag's
+;; colour back).
+(ffi/defcfn gdk-rgba-get-type "gdk_rgba_get_type" [] :size_t)
+
+;; g_value_get_boxed: gboxed.h:90.
+(ffi/defcfn g-value-get-boxed "g_value_get_boxed" [:pointer] :pointer)
+
+;; g_value_get_boolean: gvaluetypes.h:212.
+(ffi/defcfn g-value-get-boolean "g_value_get_boolean" [:pointer] :int)
+
+(defn rgba-property-hex
+  "obj's prop (a *-rgba GdkRGBA property, e.g. \"foreground-rgba\") read
+  back as \"#rrggbb\", or nil when the property comes back unset (probe
+  rgba.clj): a GdkRGBA of four floats at byte offsets 0, 4, 8 (and 12 for
+  alpha), each channel (Math/round (* 255.0 f)). Reuses get-gvalue! (P2.T5)
+  and the already-bound g-object-get-property -- the getter itself reads
+  the boxed pointer's floats and formats the hex string before
+  get-gvalue!'s own g-value-unset runs, since unset can free the boxed
+  value."
+  [obj prop]
+  (get-gvalue! obj prop (gdk-rgba-get-type)
+               (fn [v]
+                 (let [p (g-value-get-boxed v)]
+                   (when-not (ffi/null? p)
+                     (let [ch (fn [off] (Math/round (* 255.0 (ffi/read p :float off))))]
+                       (format "#%02x%02x%02x" (ch 0) (ch 4) (ch 8))))))))
+
+(defn get-bool-property
+  "obj's boolean prop read back as a Clojure boolean (probe probe.clj's
+  read-bool), reusing get-gvalue! the same way rgba-property-hex does."
+  [obj prop]
+  (not (zero? (get-gvalue! obj prop G-TYPE-BOOLEAN g-value-get-boolean))))
+
 ;; C3: an application "quit" action. GTK's macOS delegate
 ;; (gtk/gtkapplication-quartz.c:80-95 at the 4.22.4 tag) answers
 ;; applicationShouldTerminate: -- Dock Quit, logout, shutdown, the Quit

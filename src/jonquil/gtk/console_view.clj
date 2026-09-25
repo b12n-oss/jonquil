@@ -109,6 +109,15 @@
     (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
   nil)
 
+(defn apply-theme!
+  "Retints every tag in (:tags cv) to theme t's colours (TH.T4): sets each
+  tag's foreground to (:fg (console/style t k)). Only ever touches tag
+  properties -- never buffer text, marks or undo history."
+  [cv t]
+  (doseq [[k tag] (:tags cv)]
+    (g/set-string-property! tag "foreground" (:fg (console/style t k))))
+  nil)
+
 (defn reset-busy-hint!
   "Clears the once-per-run :busy hint flag (M3), so the next run that stalls
   on a busy Return earns its own hint instead of staying silent because an
@@ -404,7 +413,8 @@
   "One GtkTextTag per jonquil.console/styles key, the same tag-building
   idiom jonquil.gtk.editor/make-tags! uses for jonquil.paint's styles: fg
   via set-string-property!, bold via set-int-property! weight 700, italic
-  via set-italic!."
+  via set-italic!. Tags start with theme/default-theme's colours;
+  apply-theme! (TH.T4) retints them in place, never recreating them."
   [buf]
   (let [table (g/gtk-text-buffer-get-tag-table buf)]
     (into {}

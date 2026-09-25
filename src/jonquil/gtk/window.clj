@@ -27,7 +27,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
-            [jonquil.session :as session]))
+            [jonquil.session :as session]
+            [jonquil.theme :as theme]))
 
 ;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
 ;; ----------------------------------------------------------------------
@@ -632,17 +633,41 @@
   (let [f (g/gtk-root-get-focus win)]
     (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb)))))))
 
-(defn- reload-zoom-css! [provider px]
-  (g/gtk-css-provider-load-from-string provider (str ".jonquil-code { font-size: " px "px; }")))
+(defn- reload-code-css!
+  "Loads theme t's CSS (jonquil.theme/code-css) at font size px into the
+  one shared GtkCssProvider, and remembers the CSS string in code-css
+  (TH.T4, an atom read back only by :code-css* for self-test rows)."
+  [provider t px code-css]
+  (let [css (theme/code-css t px)]
+    (reset! code-css css)
+    (g/gtk-css-provider-load-from-string provider css)))
 
 (defn- do-zoom!
   "Cmd/Ctrl+=/-/0: the next font size from commands/zoom (P3.T1), reloaded
   into the one shared GtkCssProvider (added to the display once, in
-  activate!) so both views resize live -- probe 4's measured behaviour."
-  [provider zoom-px direction]
+  activate!) so both views resize live -- probe 4's measured behaviour.
+  TH.T4: reloads under the CURRENT theme (theme-name), not a fixed one, so
+  a zoom never drops back to the default theme's colours."
+  [provider zoom-px theme-name code-css direction]
   (let [px (commands/zoom @zoom-px direction)]
     (reset! zoom-px px)
-    (reload-zoom-css! provider px)))
+    (reload-code-css! provider (theme/theme @theme-name) px code-css)))
+
+(defn- apply-window-theme!
+  "TH.T4: applies theme k to the editor, console, find bar, the shared CSS
+  provider (at the current @zoom-px) and GtkSettings' prefer-dark flag, and
+  resets theme-name to k. Only ever writes tag properties, the CSS
+  provider and the GtkSettings flag -- never buffer text, marks, the
+  selection or undo history."
+  [ed cv fb provider zoom-px theme-name code-css k]
+  (let [t (theme/theme k)]
+    (editor/apply-theme! ed t)
+    (cview/apply-theme! cv t)
+    (find-bar/apply-theme! fb t)
+    (reload-code-css! provider t @zoom-px code-css)
+    (g/set-bool-property! (g/gtk-settings-get-default) "gtk-application-prefer-dark-theme" (:dark? t))
+    (reset! theme-name k))
+  nil)
 
 (defn- make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
@@ -781,6 +806,12 @@
         _ (reset! *cv cv)
         provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
+        ;; TH.T4: the active theme's name and the last CSS string loaded,
+        ;; kept next to zoom-px -- TH.T5 loads theme-name's initial value
+        ;; from settings; code-css exists only for :code-css*'s self-test
+        ;; hook.
+        theme-name (atom theme/default-theme)
+        code-css (atom nil)
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
@@ -790,7 +821,8 @@
         run-selection-fn (fn [] (do-run-selection! ed cv session status-label))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
-        zoom-fn (fn [direction] (do-zoom! provider zoom-px direction))
+        zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
+        set-theme-fn (fn [k] (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k))
         open-find-fn (fn [] (find-bar/open! fb :find))
         open-replace-fn (fn [] (find-bar/open! fb :replace))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
@@ -844,7 +876,7 @@
     (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
     (g/gtk-style-context-add-provider-for-display
      (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
-    (reload-zoom-css! provider @zoom-px)
+    (apply-window-theme! ed cv fb provider zoom-px theme-name code-css theme/default-theme)
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (fn [_ _] (run-fn)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -926,6 +958,12 @@
                  :toggle-focus!* toggle-focus-fn
                  :clear-console!* clear-console-fn
                  :zoom!* zoom-fn
+                 ;; TH.T4 self-test hooks: applies a theme (never saves --
+                 ;; TH.T5's job), reads back the active theme name, and
+                 ;; reads back the last CSS string reload-code-css! loaded.
+                 :set-theme!* set-theme-fn
+                 :theme-name* (fn [] @theme-name)
+                 :code-css* (fn [] @code-css)
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -964,7 +1002,8 @@
   {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
   :status-label :line-col-label :window :find-bar :run!* :stop!*
   :open-path! :save-to! :run-selection!* :toggle-focus!* :clear-console!*
-  :zoom!* :handle-window-key! :simulate-open-result! :simulate-save-result!
+  :zoom!* :set-theme!* :theme-name* :code-css* :handle-window-key!
+  :simulate-open-result! :simulate-save-result!
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
   :register-alert-choice-for-test! :complete-alert-for-test!}; the
