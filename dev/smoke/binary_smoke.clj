@@ -693,31 +693,32 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-quit-with-unsaved!
-  "Controller-added step 9 (task-6-brief.md, not in the store plan): a
-  plain, unbound Cmd/Ctrl+Q sent while the editor is dirty.
-  jonquil.gtk.window's on-window-key has no KEY-Q case at all (grepped:
-  no KEY-Q, no \"Quit\" anywhere in src/) and this app builds no GMenu, so
-  there is nothing in this codebase for the OS to route a Quit
-  accelerator through. Measured live against the built binary before
-  writing this step (not assumed): three separate launches, each typed
-  one character then sent \"command + q\" by pid -- every time the
-  process stayed alive, no second window ever appeared, and the title
-  kept its \"* \" exactly as before the chord, i.e. the key reached the
-  window's own capture-phase controller like any other key, fell through
-  every cond clause to :else 0, and GTK's default handling did nothing
-  with it.
+  "Controller-added step 9 (task-6-brief.md, not in the store plan);
+  corrected by task-7a's own controller ruling after the P3 phase-close
+  fix wave. This step's earlier docstring (git history) said Cmd/Ctrl+Q
+  was unbound and reached nothing in this codebase -- that was true when
+  it was written, but P3 fix wave C3 (window.clj, `quit-action`) gave the
+  GtkApplication a \"quit\" action wired to `(gtk-window-close win)`, which
+  is exactly the accelerator GTK's macOS delegate takes for Cmd+Q. A
+  dirty, unconfirmed close re-enters close-request-fn the same way Cmd+W
+  does (step-close-with-unsaved!'s own path), so Cmd+Q on a dirty buffer
+  now shows the same real GtkAlertDialog instead of doing nothing.
 
-  Encoded as a real PASS/FAIL per the controller's own ruling (not a
-  SKIP): PASS needs the process alive AND either a second window (the
-  alert, same shape as step-close-with-unsaved!) or the ORIGINAL window
-  untouched with the title still carrying \"* \". FAIL is a process that
-  exits (unsaved text silently discarded) -- reported with the exit map
-  as evidence; this task does not change product code to fix that if it
-  happens. A SKIP is left available in principle (\"Cmd+Q doesn't reach
-  the app at all\"), but nothing this driver can observe from outside the
-  process distinguishes that from \"reached it and nothing handled it\" --
-  both look like the untouched-window PASS case above, which is what was
-  actually measured, three times, live."
+  PASS needs the alert to appear as a SECOND top-level window for this
+  pid (the same `cgevent windows --pid` check step-close-with-unsaved!
+  uses -- a real GtkAlertDialog is its own window, never a native macOS
+  sheet, P3 probe finding #3) AND the process to stay alive throughout.
+  ANY process exit here is a FAIL outright (unsaved text silently
+  discarded), checked immediately after the alert-appeared wait rather
+  than assumed -- a process that died mid-wait reads as alert-appeared?
+  false / alive-after-q? false, the same FAIL shape as no alert at all.
+  Once the alert is confirmed, a pid-routed Escape cancels it -- measured
+  live in step-close-with-unsaved! that Escape reaches the alert's own
+  Cancel (index 2, close-choice!) -- and the title must still carry the
+  \"* \" dirty marker afterward, with exactly one window left and the
+  process still alive: Cancel touches nothing, so losing any of those
+  three would mean Escape hit the wrong window or something else closed
+  behind it."
   []
   (let [{:keys [proc pid]} (launch! nil)]
     (ensure-window! pid 8000)
@@ -725,22 +726,28 @@
     (when-not (dirty-title? pid)
       (check! :quit-with-unsaved-setup false {:reason "title never gained * after typing"}))
     (cg-key! pid "command + q")
-    (let [exit (deref proc 3000 ::timeout)]
-      (if (not= ::timeout exit)
-        (do (check! :quit-with-unsaved false
-                    {:reason "process exited on an unbound Cmd/Ctrl+Q -- unsaved text was discarded"
-                     :exit exit})
-            (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
-        (let [windows (windows-edn! pid)
-              title (:name (first windows))
-              alive? (p/alive? proc)]
-          (screenshot! pid "step9-quit-unsaved")
-          (check! :quit-with-unsaved
-                  (and alive?
-                       (or (= 2 (count windows))
-                           (and (= 1 (count windows)) (str/starts-with? (or title "") "*"))))
-                  {:window-count (count windows) :title title :alive alive?})
-          (stop! {:proc proc :pid pid}))))))
+    (let [alert-appeared? (wait-for! 4000 200 (fn [] (= 2 (count (windows-edn! pid)))))
+          alive-after-q? (p/alive? proc)]
+      (screenshot! pid "step9-quit-alert")
+      (check! :quit-with-unsaved-alert-appears
+              (and alert-appeared? alive-after-q?)
+              {:alert-appeared alert-appeared? :alive-after-q alive-after-q?})
+      (if-not (and alert-appeared? alive-after-q?)
+        (check! :quit-with-unsaved false
+                {:reason "no alert (or the process exited) after command+q -- unsaved text may have been discarded"
+                 :alert-appeared alert-appeared? :alive-after-q alive-after-q?})
+        (do
+          (cg-key! pid "escape")
+          (wait-for! 4000 200 (fn [] (not= 2 (count (windows-edn! pid)))))
+          (let [windows-after (windows-edn! pid)
+                window-count (count windows-after)
+                still-alive? (p/alive? proc)
+                title (:name (first windows-after))]
+            (screenshot! pid "step9-quit-cancelled")
+            (check! :quit-with-unsaved
+                    (and still-alive? (= 1 window-count) (str/starts-with? (or title "") "*"))
+                    {:window-count window-count :still-alive still-alive? :title title}))))
+      (stop! {:proc proc :pid pid}))))
 
 (defn- step-stop-infinite-loop!
   "Brief step 5: an infinite (silent) loop, stopped by Escape."
