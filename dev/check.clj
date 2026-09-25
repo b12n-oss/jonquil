@@ -6,6 +6,7 @@
   '[jonquil.core
     jonquil.syntax
     jonquil.theme
+    jonquil.settings
     jonquil.paint
     jonquil.docs
     jonquil.edit

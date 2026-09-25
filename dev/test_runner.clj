@@ -11,6 +11,7 @@
   '[jonquil.smoke-test
     jonquil.upstream.syntax-test
     jonquil.theme-test
+    jonquil.settings-test
     jonquil.paint-test
     jonquil.docs-test
     jonquil.edit-test
