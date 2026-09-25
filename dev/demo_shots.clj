@@ -37,7 +37,8 @@
   input is inserted the same way dev/gtk_selftest_window.clj's stdin/REPL
   rows do it, via gtk_text_buffer_insert_interactive_at_cursor +
   handle-return!."
-  (:require [clojure.java.shell :as sh]
+  (:require [clojure.edn :as edn]
+            [clojure.java.shell :as sh]
             [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
@@ -45,6 +46,7 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.main :as main]))
 
 (def ^:private images-dir "docs/images")
@@ -120,6 +122,45 @@
   (future
     (let [r (sh/sh "cgevent" "screenshot" path "--pid" (str pid))]
       (cb/on-gui! (fn [] (done r))))))
+
+(defn- screenshot-by-id!
+  "Like screenshot!, but by --window-id instead of --pid -- for a window
+  that isn't this process's main one (the close-prompt scene's alert)."
+  [path window-id done]
+  (future
+    (let [r (sh/sh "cgevent" "screenshot" path "--window-id" (str window-id))]
+      (cb/on-gui! (fn [] (done r))))))
+
+(defn- cgevent-windows!
+  "Runs `cgevent windows --pid <pid> --edn` in a future and hands the
+  parsed vector back to the GTK thread via on-gui! -- the same blocking-
+  subprocess-never-on-the-GTK-thread discipline as screenshot!/
+  record-gif-async!. An unparseable or failed call reads as no windows,
+  never an exception, so a poller sees it as \"not there yet\"."
+  [pid done]
+  (future
+    (let [{:keys [out exit]} (sh/sh "cgevent" "windows" "--pid" (str pid) "--edn")]
+      (cb/on-gui! (fn [] (done (if (zero? exit)
+                                 (try (edn/read-string out) (catch Exception _ []))
+                                 [])))))))
+
+(defn- poll-windows!
+  "Like poll-until, but the predicate is checked against cgevent-windows!'s
+  own result instead of an in-process condition: polls every interval-ms,
+  up to deadline-ms, calling (done final-windows) once (pred? windows) is
+  truthy or the deadline elapses. Never blocks the GTK thread -- each
+  check is its own cgevent-windows! future."
+  [pid deadline-ms interval-ms pred? done]
+  (let [t0 (System/currentTimeMillis)]
+    (letfn [(step []
+              (cgevent-windows!
+               pid
+               (fn [windows]
+                 (cond
+                   (pred? windows) (done windows)
+                   (>= (- (System/currentTimeMillis) t0) deadline-ms) (done windows)
+                   :else (later interval-ms step)))))]
+      (step))))
 
 (defonce ^:private gif-done? (atom false))
 (defonce ^:private gif-result (atom nil))
@@ -311,6 +352,121 @@
                                                                                 {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
                                                                         (next)))))))))))))
 
+(defn- scene-find
+  "P3.T7: find.clj open, find-bar/open! (the same fn Cmd+F calls), then a
+  query set the same way dev/gtk_selftest_window.clj's own find-bar rows
+  do it -- g/gtk-editable-set-text on the query entry, which fires the
+  entry's real \"changed\" signal and so runs recompute-matches! exactly
+  as a typed keystroke would. \"jonquil\" (case-insensitive,
+  find-text-matches) matches three places in find.clj: every match gets
+  the search-match tag (#fff2a8) applied before this screenshot."
+  [ui next]
+  (let [fb (:find-bar ui)]
+    (editor/set-text! (:editor ui) (slurp (demo-path "find.clj")))
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "jonquil")
+    (poll-until 3000 20
+                (fn [] (>= (count @(:matches fb)) 2))
+                (fn [ok]
+                  (settle! 2
+                           (fn []
+                             (screenshot! (image-path :find "png") (own-pid)
+                                          (fn [{:keys [exit err]}]
+                                            (check! :find (and ok (zero? exit))
+                                                    {:match-count (count @(:matches fb))
+                                                     :screenshot-exit exit :screenshot-err err})
+                                            (next)))))))))
+
+(defn- scene-run-selection
+  "P3.T7: run-selection.clj's last line, with the caret already there
+  (editor/set-text! leaves the caret at the end, the same fact
+  binary_smoke.clj's own step-run-selection! measured live and depends
+  on), run via :run-selection!* -- the exact fn Cmd+E calls
+  (do-run-selection!). It echoes \"> (* 6 7)\" to the console, then
+  evaluates it through the same REPL path a typed entry uses, showing
+  \"=> 42\" underneath."
+  [ui next]
+  (let [mark (out-end-offset ui)]
+    (editor/set-text! (:editor ui) (slurp (demo-path "run-selection.clj")))
+    ((:run-selection!* ui))
+    (poll-until 3000 20
+                (fn [] (and (idle? ui)
+                            (str/includes? (since ui mark) "(* 6 7)")
+                            (str/includes? (since ui mark) "=> 42")))
+                (fn [ok]
+                  (settle! 2
+                           (fn []
+                             (screenshot! (image-path :run-selection "png") (own-pid)
+                                          (fn [{:keys [exit err]}]
+                                            (check! :run-selection (and ok (zero? exit))
+                                                    {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
+                                            (next)))))))))
+
+(defn- scene-close-prompt
+  "P3.T7: close-prompt.clj, dirtied by one inserted character (the same
+  editor/set-text! + insert-interactive-at-cursor shape dev/gtk_selftest_
+  window.clj's row-close-dirty-cancel uses), then :request-close!* -- the
+  real gtk_window_close path Cmd+W/Cmd+Q both take (P3 fix wave C3) --
+  which shows the REAL GtkAlertDialog (Save / Don't Save / Cancel)
+  because the buffer is dirty and unconfirmed (close-request-fn). The
+  alert is its own top-level window, never a native macOS sheet (measured
+  live, a cgevent windows --pid --edn probe this session): found here by
+  diffing that call's result against the ONE window id present just
+  before the close request, then screenshotted by --window-id (the
+  brief's own instruction; measured live this session that on this build
+  it captures the alert together with the main window's own dirty '*'
+  title behind it, not just the alert's own small bounds).
+
+  The real alert is then abandoned rather than resolved through its own
+  GTK completion, exactly as row-close-dirty-cancel does and explains: a
+  synthetic {:index 2} (Cancel) via the :close-choice! hook leaves the
+  window open and the text untouched, then :alert-pending? is reset by
+  hand so a LATER close-request isn't silently suppressed by a stale
+  \"already pending\" flag -- same cleanup that row performs. editor/
+  mark-saved! then clears dirty? without writing anything to disk, purely
+  so the driver's own end-of-scene gtk_window_close (run-scene!'s `next`,
+  in -main) takes the plain not-dirty path and quits for real instead of
+  popping a second, never-to-be-resolved alert that would hang this
+  process forever.
+
+  If cgevent never lists a second window, this scene records a PASS with
+  :skipped true and says why in its detail map (the brief: \"otherwise
+  skip that scene and say so\") rather than guessing which window to
+  shoot -- no docs/images/close-prompt.png is written in that case."
+  [ui next]
+  (let [pid (own-pid)
+        ed (:editor ui)]
+    (editor/set-text! ed (slurp (demo-path "close-prompt.clj")))
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1)
+    (poll-windows!
+     pid 3000 100 seq
+     (fn [before]
+       (let [before-ids (set (map :window-id before))]
+         ((:request-close!* ui))
+         (poll-windows!
+          pid 5000 100
+          (fn [ws] (some (fn [w] (not (before-ids (:window-id w)))) ws))
+          (fn [after]
+            (let [alert (some (fn [w] (when-not (before-ids (:window-id w)) w)) after)]
+              (if-not alert
+                (do (check! :close-prompt true
+                            {:skipped true
+                             :reason "cgevent windows never listed a second (alert) window for this pid"
+                             :before before :after after})
+                    (next))
+                (settle!
+                 2
+                 (fn []
+                   (screenshot-by-id!
+                    (image-path :close-prompt "png") (:window-id alert)
+                    (fn [{:keys [exit err]}]
+                      (check! :close-prompt (zero? exit)
+                              {:alert-window alert :screenshot-exit exit :screenshot-err err})
+                      ((:close-choice! ui) {:index 2})
+                      (reset! (:alert-pending? ui) false)
+                      (editor/mark-saved! ed)
+                      (next))))))))))))))
+
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
@@ -321,7 +477,10 @@
    [:stop scene-stop]
    [:unbalanced scene-unbalanced]
    [:unicode scene-unicode]
-   [:run-while-running scene-run-while-running]])
+   [:run-while-running scene-run-while-running]
+   [:find scene-find]
+   [:run-selection scene-run-selection]
+   [:close-prompt scene-close-prompt]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
