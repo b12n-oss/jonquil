@@ -30,5 +30,26 @@
   (let [results (docs/candidates 'jonquil.docs-test.sandbox "hel" "" 0)]
     (is (= "hello" (:symbol (first results))))))
 
-(deftest missing-namespace-throws-test
-  (is (thrown? Exception (docs/symbol-doc 'no.such.ns "map" nil nil))))
+(deftest removed-namespace-falls-back-to-user-test
+  (docs/clear-doc-cache!)
+  (is (= :found (:status (docs/symbol-doc 'no.such.ns "map" "" 0))))
+  (is (some #(= "map" (:symbol %)) (docs/candidates 'no.such.ns "ma" "" 0))))
+
+(deftest program-namespace-test
+  (docs/clear-doc-cache!)
+  (create-ns 'p4.docs.demo)
+  (binding [*ns* (the-ns 'p4.docs.demo)]
+    (eval '(clojure.core/refer-clojure))
+    (eval '(defn greet "Says hi." [name] (str "hi " name))))
+  (let [d (docs/symbol-doc 'p4.docs.demo "greet" "" 0)]
+    (is (= :found (:status d)))
+    (is (re-find #"Says hi" (str (:doc d)))))
+  (is (some #(= "greet" (:symbol %)) (docs/candidates 'p4.docs.demo "gr" "" 0)))
+  (remove-ns 'p4.docs.demo))
+
+(deftest memo-is-keyed-by-namespace-and-text-test
+  (docs/clear-doc-cache!)
+  (let [t1 "(defn zork \"one\" [a] a)"
+        t2 "(defn zork \"two\" [a] a)"]
+    (is (not= (docs/symbol-doc 'user "zork" t1 0) (docs/symbol-doc 'user "zork" t2 0))
+        "a changed buffer isn't served the old doc")))
