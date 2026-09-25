@@ -122,20 +122,33 @@
 (defn open!
   "Opens the bar in :find or :replace mode: shows the replacement entry and
   its two buttons only in :replace mode, prefills the query with the
-  editor's selection when it's exactly one line, selects the WHOLE query
-  text (fix round 1, per the brief -- so typing immediately overtypes it,
-  whether it was just prefilled or is leftover from a previous open!),
-  focuses the query entry, and recomputes matches (which also
-  selects/scrolls to the nearest one)."
+  editor's selection when it's exactly one line, recomputes matches (which
+  selects/scrolls to the nearest one IN THE EDITOR), then selects the WHOLE
+  query text (fix round 1, per the brief -- so typing immediately overtypes
+  it, whether it was just prefilled or is leftover from a previous open!)
+  and focuses the query entry.
+
+  Fix round 2: recompute-matches! must run BEFORE the query's own
+  select_region/grab_focus, not after. Measured (throwaway probe, not
+  committed): once this find bar has been through one earlier open! cycle,
+  recompute-matches!'s own select-match! -- which calls
+  gtk_text_buffer_select_range on the EDITOR's buffer to highlight the
+  nearest match -- silently clears whatever selection the QUERY entry was
+  just given a moment earlier (GTK's shared primary-selection ownership:
+  selecting text on one widget revokes the visible/logical selection on
+  whichever other widget held it). The reorder makes the query's own
+  select_region the LAST thing to touch selection at all, so nothing after
+  it can revoke it -- independent of grab_focus order or window/OS focus
+  timing, which a probe confirmed is not itself the deciding factor here."
   [fb mode]
   (g/gtk-widget-set-visible (:box fb) 1)
   (let [replace? (= mode :replace)]
     (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w (if replace? 1 0))))
   (when-let [sel (single-line-selection (editor/snapshot (:ed fb)))]
     (g/gtk-editable-set-text (:query fb) sel))
+  (recompute-matches! fb)
   (g/gtk-editable-select-region (:query fb) 0 (count (or (g/editable-text (:query fb)) "")))
   (g/gtk-widget-grab-focus (:query fb))
-  (recompute-matches! fb)
   nil)
 
 (defn close!

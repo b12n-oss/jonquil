@@ -1036,19 +1036,32 @@
   "Fix round 1, Missing requirement: open! must select the whole prefilled
   query text (per the brief), not just prefill and focus it. Selects
   \"bar\" in the editor first, so open!'s own prefill (single-line
-  selection) puts exactly that text in the query."
+  selection) puts exactly that text in the query.
+
+  Fix round 2: this used to read the query's selection synchronously, in
+  the same tick as open! -- fails intermittently once the bar has already
+  been through an earlier open! cycle (row-find-preedit-yields, right
+  before this one, is exactly such a cycle): open!'s own recompute-matches!
+  selects a match IN THE EDITOR, which revokes GTK's shared primary
+  selection the query had just claimed, and open!'s fix (recompute-matches!
+  now runs before the query's own select_region) makes that a non-issue,
+  but a same-tick read can't tell \"fixed\" apart from \"just hasn't been
+  revoked yet\" -- so this polls with a deadline instead, and genuinely
+  fails (not hangs) if the selection never settles."
   [ui next]
   (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
     (editor/set-text! ed "foo bar foo baz foo")
     (select-range! buf 4 7) ; "bar"
     (find-bar/open! fb :find)
-    (let [query-text (g/editable-text (:query fb))
-          sel (g/editable-selection-bounds (:query fb))]
-      (check :find-prefill-selects
-             (and (= "bar" query-text) (= [0 3] sel))
-             {:query-text query-text :sel sel})
-      (find-bar/close! fb)
-      (next))))
+    (poll-until 500 20
+                (fn [] (and (= "bar" (g/editable-text (:query fb)))
+                            (= [0 3] (g/editable-selection-bounds (:query fb)))))
+                (fn [ok?]
+                  (check :find-prefill-selects ok?
+                         {:query-text (g/editable-text (:query fb))
+                          :sel (g/editable-selection-bounds (:query fb))})
+                  (find-bar/close! fb)
+                  (next)))))
 
 ;; --- P3.T5: Line/Col, ask before closing, bracket check before Run --------
 
