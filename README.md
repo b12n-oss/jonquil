@@ -14,7 +14,7 @@ See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the win
 
 ## Requirements
 
-- [Jolt](https://github.com/jolt-lang/jolt) v0.8.12
+- [Jolt](https://github.com/jolt-lang/jolt) built from `main` at `c9808c39` or later: v0.8.12 plus the reader fixes from jolt-lang/jolt#1134 and #1138, which `(read)` from the console needs
 - GTK4 and pango, installed via Homebrew
 
 ## Running
@@ -39,7 +39,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-23, 71 tests pass (506 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-26, 94 tests pass (682 assertions).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
