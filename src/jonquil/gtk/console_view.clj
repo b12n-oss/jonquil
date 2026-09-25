@@ -85,6 +85,29 @@
     (when (< start end)
       (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-delete buf a b))))))
 
+(defn clear-output!
+  "Deletes the output history [0, out-end), keeping the prompt and any
+  typed input untouched. GTK-thread only, like clear-input!. Allowed while
+  a program runs (Cmd/Ctrl+L, upstream): new output keeps arriving above
+  the prompt at out-end, which this never touches."
+  [cv]
+  (let [buf (:buf cv)
+        end (mark-offset buf (:out-end cv))]
+    (when (pos? end)
+      (g/with-iters* buf 0 end (fn [a b] (g/gtk-text-buffer-delete buf a b))))))
+
+(defn focus!
+  "Grabs focus for the console view and places the cursor at the end of the
+  input, mirroring jonquil.gtk.editor/focus!. Used by F6 (P3.T3) so typing
+  continues at the end of whatever's already there, rather than wherever an
+  earlier click left the caret."
+  [cv]
+  (g/gtk-widget-grab-focus (:view cv))
+  (let [buf (:buf cv)
+        end (g/gtk-text-buffer-get-char-count buf)]
+    (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+  nil)
+
 (defn reset-busy-hint!
   "Clears the once-per-run :busy hint flag (M3), so the next run that stalls
   on a busy Return earns its own hint instead of staying silent because an
@@ -202,6 +225,17 @@
   (swap! (:queue cv) conj [kind s])
   (when (compare-and-set! (:drain-scheduled? cv) false true)
     (on-gui! (fn [] (drain! cv)))))
+
+(defn echo-entry!
+  "Adds \"> text\" to the read-only output history above the prompt, in the
+  :prompt style, exactly as if it had been typed and submitted -- but
+  leaves the current input untouched. Goes through append! (the same
+  queue+drain path an eval's own output uses), so Run Selection's echo and
+  whatever the eval later prints land in the console in the order they
+  were called, even though the eval's own output arrives asynchronously
+  from the eval worker thread. Safe from any thread, like append!."
+  [cv text]
+  (append! cv :prompt (str "> " text "\n")))
 
 ;; --- Return ----------------------------------------------------------------
 

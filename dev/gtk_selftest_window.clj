@@ -79,6 +79,18 @@
   [ui mark]
   (subs (console-text ui) mark))
 
+(defn- place-cursor!
+  "Places buf's cursor at offset -- an ordinary GtkTextBuffer call, not a
+  synthesized keystroke, same category as the existing
+  gtk-text-buffer-insert-interactive-at-cursor/select-range calls other
+  rows already make directly on the buffer."
+  [buf offset]
+  (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+
+(defn- select-range!
+  [buf a b]
+  (g/with-iters* buf a b (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2))))
+
 (defn- run-and-wait!
   "editor/set-text! code, run!*, then waits (up to deadline-ms) until BOTH
   the engine has gone idle AND (expect-fn text-since-start) is true, where
@@ -676,6 +688,141 @@
         (.delete (java.io.File. ^String tmp))
         (next)))))
 
+(defn- row-run-selection-line
+  "Caret on line 2, no selection: commands/run-selection-text (P3.T1) sends
+  the whole line. Asserts BOTH the echoed \"> (inc 41)\" (console-view/
+  echo-entry!) and the real result \"=> 42\", so a path that evaluates
+  without echoing (or echoes without evaluating) still fails."
+  [ui next]
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)
+        text "(def a 1)\n(inc 41)"]
+    (editor/set-text! ed text)
+    (place-cursor! (:buf ed) (count text))
+    ((:run-selection!* ui))
+    (poll-until 3000 20
+                (fn [] (let [t (since ui mark)]
+                         (and (str/includes? t "> (inc 41)") (str/includes? t "=> 42"))))
+                (fn [ok]
+                  (check :run-selection-line ok {:console (since ui mark)})
+                  (next)))))
+
+(defn- row-run-selection-sel
+  "A selection inside a longer line sends only the selection, not the whole
+  line."
+  [ui next]
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)
+        text "foo (+ 1 2) bar"]
+    (editor/set-text! ed text)
+    (select-range! (:buf ed) 4 11) ; "(+ 1 2)"
+    ((:run-selection!* ui))
+    (poll-until 3000 20
+                (fn [] (str/includes? (since ui mark) "=> 3"))
+                (fn [ok]
+                  (check :run-selection-sel ok {:console (since ui mark)})
+                  (next)))))
+
+(defn- row-run-selection-blank [ui next]
+  ;; since is always non-empty (it includes the live "> " prompt and any
+  ;; typed input), so "nothing appended" is asserted against a BASELINE
+  ;; captured right before the action, not literal "".
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)
+        text "(def a 1)\n\n(inc 41)"]
+    (editor/set-text! ed text)
+    (place-cursor! (:buf ed) (count "(def a 1)\n")) ; the blank line 2
+    (let [baseline (since ui mark)]
+      ((:run-selection!* ui))
+      ;; The brief's one allowed fixed wait: absence has no positive
+      ;; condition to poll for, so this waits out the full window rather
+      ;; than polling for something that should never appear.
+      (later 500
+             (fn []
+               (let [t (since ui mark)]
+                 (check :run-selection-blank (= baseline t) {:console t :baseline baseline})
+                 (next)))))))
+
+(defn- row-toggle-focus
+  "Grabs editor focus first (a real function call, not a keystroke) so the
+  row starts from a known state regardless of what an earlier row left
+  focused, then toggles twice: console, then back to the editor."
+  [ui next]
+  (let [ed (:editor ui) cv (:console ui) win (:window ui)]
+    (editor/focus! ed)
+    ((:toggle-focus!* ui))
+    (let [after-first (g/gtk-root-get-focus win)]
+      ((:toggle-focus!* ui))
+      (let [after-second (g/gtk-root-get-focus win)]
+        (check :toggle-focus
+               (and (= after-first (:view cv)) (= after-second (:view ed)))
+               {:after-first after-first :after-second after-second
+                :editor-view (:view ed) :console-view (:view cv)})
+        (next)))))
+
+(defn- row-clear-console
+  "Produces real output, types \"abc\" at the (uncommitted) prompt, then
+  clears. clear-output! only deletes [0, out-end) -- the whole buffer
+  should read exactly the fresh prompt plus the still-typed input, and the
+  input itself must be untouched."
+  [ui next]
+  (let [cv (:console ui)
+        mark (out-end-offset ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 1)" -1 1)
+    (cview/handle-return! cv false)
+    (poll-until 3000 20
+                (fn [] (and (idle? ui) (str/includes? (since ui mark) "=> 2")))
+                (fn [produced?]
+                  (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "abc" -1 1)
+                  ((:clear-console!* ui))
+                  (let [text (console-text ui)
+                        input (cview/input-text cv)]
+                    (check :clear-console
+                           (and produced? (= "> abc" text) (= "abc" input))
+                           {:produced produced? :text text :input input})
+                    (next))))))
+
+(defn- wait-stable-height
+  "Polls widget's natural-height (probe 4's numeric proxy for \"did the CSS
+  font-size actually apply\") until two consecutive reads 20ms apart agree,
+  up to deadline-ms, then calls (done height). Probe 4 measured
+  gtk_widget_measure answering a value from BEFORE the most recent
+  change (a CSS reload, or here also a big buffer deletion just before
+  this row from row-clear-console) until GTK runs at least one more
+  main-loop layout pass; polling for the reading to settle -- rather than
+  trusting a single synchronous read -- waits that out without a fixed
+  sleep."
+  [widget deadline-ms done]
+  (let [prev (atom ::none)]
+    (poll-until deadline-ms 20
+                (fn []
+                  (let [cur (g/natural-height widget)
+                        stable? (= cur @prev)]
+                    (reset! prev cur)
+                    stable?))
+                (fn [_] (done @prev)))))
+
+(defn- row-zoom-in-out
+  "Zooms in, waits for the editor view's natural height to settle and grow
+  past the baseline, then resets and waits for it to settle back to
+  exactly the original -- each measurement via wait-stable-height, never
+  a synchronous read on the same tick as the change."
+  [ui next]
+  (let [view (:view (:editor ui))]
+    (wait-stable-height
+     view 2000
+     (fn [h0]
+       ((:zoom!* ui) :in)
+       (wait-stable-height
+        view 2000
+        (fn [h1]
+          ((:zoom!* ui) :reset)
+          (wait-stable-height
+           view 2000
+           (fn [h2]
+             (check :zoom-in-out (and (> h1 h0) (= h2 h0)) {:h0 h0 :h1 h1 :h2 h2})
+             (next)))))))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -732,6 +879,12 @@
    row-save-failure-leaves-original-intact
    row-dialog-dismissed-silent
    row-save-and-open
+   row-run-selection-line
+   row-run-selection-sel
+   row-run-selection-blank
+   row-toggle-focus
+   row-clear-console
+   row-zoom-in-out
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

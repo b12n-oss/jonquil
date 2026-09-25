@@ -396,3 +396,48 @@
 ;; something to redo.
 (ffi/defcfn gtk-text-buffer-redo "gtk_text_buffer_redo" [:pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-can-redo "gtk_text_buffer_get_can_redo" [:pointer] :int)
+
+;; --- P3.T3 ---
+;; gtk_root_get_focus: gtk/gtkroot.h:43 (gtk4 4.22.4, checked against both
+;; /opt/homebrew/include/gtk-4.0 and /opt/homebrew/Cellar/gtk4/4.22.4's own
+;; copy). Returns the widget that currently holds keyboard focus within the
+;; root, or NULL. F6 (jonquil.gtk.window/do-toggle-focus!) compares against
+;; THIS pointer rather than gtk_widget_has_focus -- the P3 probe (findings
+;; #1) measured has_focus reading false on a window that never became the
+;; OS key window, which a self-test window usually isn't; grab_focus still
+;; moves the root's own focus-widget bookkeeping regardless.
+(ffi/defcfn gtk-root-get-focus "gtk_root_get_focus" [:pointer] :pointer)
+
+;; gtk_css_provider_load_from_string / gtk_widget_add_css_class: copied
+;; from the P3 probe 4 spike (store 5ff5b70:b12n-oss/jonquil/spikes/p3/src/
+;; spike/p3_ffi.clj) -- gtkcssprovider.h:53 (GDK_AVAILABLE_IN_4_12,
+;; satisfied by gtk4 4.22.4; the non-deprecated alternative to the
+;; already-bound gtk-css-provider-load-from-data) and gtkwidget.h:922. The
+;; display getter (gdk-display-get-default) and
+;; gtk-style-context-add-provider-for-display this needs are both already
+;; bound above (the "CSS styling" section near the top of this file).
+(ffi/defcfn gtk-css-provider-load-from-string "gtk_css_provider_load_from_string" [:pointer :string] :void)
+(ffi/defcfn gtk-widget-add-css-class "gtk_widget_add_css_class" [:pointer :string] :void)
+
+;; gtk_widget_measure: gtkwidget.h:310-316, copied from the same probe file
+;; (p3_ffi.clj's natural-height helper below, GTK_ORIENTATION_VERTICAL = 1,
+;; for_size -1). The zoom-in-out self-test row needs a numeric proxy for
+;; "did the CSS font-size actually change the layout";
+;; gtk_widget_get_height reads the widget's last ALLOCATED size instead of
+;; its natural size and isn't guaranteed to track a CSS-only reload the
+;; same way.
+(ffi/defcfn gtk-widget-measure "gtk_widget_measure" [:pointer :int :int :pointer :pointer :pointer :pointer] :void)
+
+(defn natural-height
+  "widget's natural height via gtk_widget_measure (GTK_ORIENTATION_VERTICAL
+  = 1, for_size -1: no cross-axis constraint) -- probe 4's numeric proxy for
+  \"did the CSS font-size actually apply\". Probe 4 measured 0 for a widget
+  that hadn't been through a real main-loop layout pass since the CSS
+  reload; callers must re-measure on a LATER tick (a poll-until, not a
+  fixed sleep), never the same tick as the reload."
+  [widget]
+  (let [out (ffi/alloc 16)]
+    (try
+      (gtk-widget-measure widget 1 -1 out (+ out 4) (+ out 8) (+ out 12))
+      (ffi/read out :int 4)
+      (finally (ffi/free out)))))

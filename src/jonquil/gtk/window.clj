@@ -19,6 +19,7 @@
   ported unchanged in shape."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.eval :as eval]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
@@ -36,6 +37,14 @@
 (def ^:private KEY-O 0x6f)
 (def ^:private KEY-S 0x73)
 (def ^:private KEY-W 0x77)
+;; P3.T3 additions (gtk-keys.md, values read from gdkkeysyms.h 2026-09-24).
+(def ^:private KEY-F6 0xffc3)
+(def ^:private KEY-E 0x065)
+(def ^:private KEY-L 0x06c)
+(def ^:private KEY-EQUAL 0x03d)
+(def ^:private KEY-PLUS 0x02b)
+(def ^:private KEY-MINUS 0x02d)
+(def ^:private KEY-0 0x030)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -45,6 +54,14 @@
 
 (defn- shift-held? [state]
   (not (zero? (bit-and state g/SHIFT-MASK))))
+
+(defn- alt-held?
+  "Guards Cmd/Ctrl+L (clear console) from also matching editor.clj's
+  Cmd/Ctrl+Alt+L (format current line): the window-level key controller
+  runs in the capture phase, before the editor's own, so without this
+  guard Cmd+Alt+L would be swallowed here and never reach it."
+  [state]
+  (not (zero? (bit-and state g/ALT-MASK))))
 
 ;; --- title -------------------------------------------------------------
 
@@ -336,6 +353,48 @@
   (let [warning (session/submit-repl! session text (make-eval-opts ed cv status-label false))]
     (when warning (cview/append! cv :system warning))))
 
+(defn- do-run-selection!
+  "Cmd/Ctrl+E: commands/run-selection-text (P3.T1) on the editor's snapshot
+  is nil for a blank line, else the selection or the caret's whole line.
+  When non-nil, echoes \"> text\" to the console as if typed, then goes
+  through do-repl-eval! -- the SAME session path a typed REPL entry uses
+  (history via session/submit-repl!, the busy-refusal warning, the same
+  make-eval-opts)."
+  [ed cv session status-label]
+  (when-let [text (commands/run-selection-text (editor/snapshot ed))]
+    (cview/echo-entry! cv text)
+    (do-repl-eval! ed cv session status-label text)))
+
+;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
+
+(defn- do-toggle-focus!
+  "F6 (gtk-keys.md, Jonquil's own key): moves focus between the editor and
+  console panes. Compares gtk_root_get_focus's FOCUS WIDGET pointer, not
+  gtk_widget_has_focus -- the P3 probe (findings #1) measured has_focus
+  reading false on a window that isn't the OS key window, which a
+  self-test window (and bb gtk:selftest's own window) usually isn't. When
+  the console gets focus, cview/focus! also places its cursor at the end
+  of the input."
+  [win ed cv]
+  (if (= (g/gtk-root-get-focus win) (:view ed))
+    (cview/focus! cv)
+    (editor/focus! ed)))
+
+(defn- do-clear-console! [cv]
+  (cview/clear-output! cv))
+
+(defn- reload-zoom-css! [provider px]
+  (g/gtk-css-provider-load-from-string provider (str ".jonquil-code { font-size: " px "px; }")))
+
+(defn- do-zoom!
+  "Cmd/Ctrl+=/-/0: the next font size from commands/zoom (P3.T1), reloaded
+  into the one shared GtkCssProvider (added to the display once, in
+  activate!) so both views resize live -- probe 4's measured behaviour."
+  [provider zoom-px direction]
+  (let [px (commands/zoom @zoom-px direction)]
+    (reset! zoom-px px)
+    (reload-zoom-css! provider px)))
+
 (defn- make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
   view it will act on exists, so it takes an atom and derefs it lazily, at
@@ -397,18 +456,25 @@
   calls g_application_quit -- so this needs no extra quit call of its own,
   and (per the task) no dirty-buffer prompt, same as the close-button/OS
   path today."
-  [run-fn stop-fn open-fn save-fn save-as-fn close-fn evaluating?]
+  [run-fn stop-fn open-fn save-fn save-as-fn close-fn
+   run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?]
   (fn [_ctl keyval0 _keycode state _data]
     (let [keyval (g/gdk-keyval-to-lower keyval0)]
       (cond
         (= keyval KEY-F5) (do (run-fn) 1)
         (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
         (= keyval KEY-ESCAPE) 0
+        (= keyval KEY-F6) (do (toggle-focus-fn) 1)
         (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
         (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
         (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
         (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
         (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
+        (and (command-chord? state) (= keyval KEY-E)) (do (run-selection-fn) 1)
+        (and (command-chord? state) (not (alt-held? state)) (= keyval KEY-L)) (do (clear-console-fn) 1)
+        (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
+        (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
+        (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
         :else 0))))
 
 ;; --- construction ------------------------------------------------------
@@ -429,13 +495,20 @@
                                      :evaluating? (fn [] (eval/evaluating? (:ctx session)))
                                      :waiting? (fn [] (eval/waiting-for-input? (:ctx session)))})
         _ (reset! *cv cv)
+        provider (g/gtk-css-provider-new)
+        zoom-px (atom commands/DEFAULT-FONT-PX)
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))
         close-fn (fn [] (g/gtk-window-close win))
+        run-selection-fn (fn [] (do-run-selection! ed cv session status-label))
+        toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
+        clear-console-fn (fn [] (do-clear-console! cv))
+        zoom-fn (fn [direction] (do-zoom! provider zoom-px direction))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
+                                     run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
                                      (fn [] (eval/evaluating? (:ctx session))))
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
@@ -461,6 +534,14 @@
     (g/gtk-box-append vbox status-label)
     (g/gtk-window-set-child win vbox)
     (g/gtk-window-set-default-size win 900 700)
+    ;; P3.T3: one shared GtkCssProvider for the display, added once; both
+    ;; views get the jonquil-code CSS class so a single reload resizes both
+    ;; live (probe 4).
+    (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
+    (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
+    (g/gtk-style-context-add-provider-for-display
+     (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
+    (reload-zoom-css! provider @zoom-px)
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (fn [_ _] (run-fn)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -516,6 +597,12 @@
                                (guarded-open! ed cv discard-warned?
                                               (fn [] (open-path! ed cv path p) (update-title! ed win path))))
                  :save-to! (fn [p] (save-to! ed cv path p) (update-title! ed win path))
+                 ;; P3.T3 self-test hooks: the exact fns the F6/Cmd+E/Cmd+L/
+                 ;; zoom key chords call, so rows can drive them directly.
+                 :run-selection!* run-selection-fn
+                 :toggle-focus!* toggle-focus-fn
+                 :clear-console!* clear-console-fn
+                 :zoom!* zoom-fn
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -532,6 +619,7 @@
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :on-ready (fn [ui])}. ui is {:editor :console :session
   :status-label :window :run!* :stop!* :open-path! :save-to!
+  :run-selection!* :toggle-focus!* :clear-console!* :zoom!*
   :handle-window-key! :simulate-open-result! :simulate-save-result!}; the
   self-test rows call these functions directly, exactly as the buttons and
   keys do."
