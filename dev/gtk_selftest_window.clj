@@ -20,6 +20,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.popover :as popover]
             [jonquil.main :as main]
             [jonquil.session :as session]
             [jonquil.settings :as settings]))
@@ -374,6 +375,12 @@
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
 ;; Shift bit set in state -- window.clj's own copy is private.
 (def ^:private KEY-S-CAPS 0x53)
+;; gtk-keys.md's shared table (0xffc3, GDK_KEY_F6) -- window.clj's own copy
+;; is private.
+(def ^:private KEY-F6 0xffc3)
+;; GDK_KEY_a (gdkkeysyms.h) -- an ordinary letter, for popover-keys-stay-
+;; with-editor's synthetic handle-key! call.
+(def ^:private KEY-A 0x061)
 
 (defn- row-escape-yields-when-idle
   "M5: the window-level capture controller used to consume Escape even
@@ -2058,6 +2065,156 @@
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
+;; --- P4.T3: the caret-anchored popover base, its theme colours, and the
+;; window's key order -------------------------------------------------------
+
+(defn- row-popover-at-caret
+  "Probe 2: a test popover (autohide off, a plain label child), shown at
+  caret offset 5 in \"(defn f [x] x)\". jonquil.gtk.popover's own fix
+  (report: GtkTextView's dispose hangs on a directly-parented popover, see
+  popover.clj's ns docstring) makes the popover's real GtkWidget parent
+  the view's scrolled window, not the view -- so the expected x is
+  g/caret-window-rect's x translated (g/compute-point) into THAT parent's
+  coordinate space, the same computation show-at-caret! itself makes, read
+  back independently against the popover's own pointing-to rectangle
+  (g/popover-pointing-to, gtk_popover_get_pointing_to)."
+  [ui next]
+  (let [ed (:editor ui) view (:view ed)
+        pp (popover/make-popover view {:autohide? false :position :bottom})]
+    (editor/set-text! ed "(defn f [x] x)")
+    (place-cursor! (:buf ed) 5)
+    (popover/set-child! pp (g/gtk-label-new "candidate"))
+    (popover/show-at-caret! pp)
+    (let [[cx cy] (g/caret-window-rect view)
+          [expected-x] (g/compute-point view (g/gtk-widget-get-parent (:popover pp)) cx cy)
+          [actual-x] (g/popover-pointing-to (:popover pp))
+          visible (g/gtk-widget-get-visible (:popover pp))]
+      (check :popover-at-caret
+             (and (popover/open? pp) (= 1 visible) (= (Math/round (double expected-x)) actual-x))
+             {:open (popover/open? pp) :visible visible
+              :expected-x expected-x :actual-x actual-x})
+      (popover/hide! pp)
+      (g/gtk-widget-unparent (:popover pp))
+      (next))))
+
+(defn- row-popover-keys-stay-with-editor
+  "Probe 1: with autohide FALSE, the view's own capture-phase key
+  controller keeps every key regardless of whether a popover is showing --
+  nothing in jonquil.gtk.popover filters keys, so editor/handle-key! with
+  an ordinary letter behaves exactly as it would with no popover open (0,
+  unhandled -- GTK's own default handling inserts it), and the popover the
+  row opened stays open, since nothing here closes it."
+  [ui next]
+  (let [ed (:editor ui) view (:view ed)
+        pp (popover/make-popover view {:autohide? false :position :bottom})]
+    (popover/set-child! pp (g/gtk-label-new "candidate"))
+    (popover/show-at-caret! pp)
+    (let [handled (editor/handle-key! ed KEY-A 0)]
+      (check :popover-keys-stay-with-editor
+             (and (= 0 handled) (popover/open? pp))
+             {:handled handled :open (popover/open? pp)})
+      (popover/hide! pp)
+      (g/gtk-widget-unparent (:popover pp))
+      (next))))
+
+(defn- row-window-shift-f6-reaches-editor
+  "P4.T3 key-order change #1 (probe 4): the window's F6 clause now also
+  requires (not shift-held?), so Shift+F6 no longer matches it and falls
+  through unconsumed -- returns 0, and focus (read via gtk_root_get_focus,
+  the same pointer-identity check do-toggle-focus! itself uses) is
+  unchanged. Grabs editor focus first so the row starts from a known
+  state regardless of what an earlier row left focused."
+  [ui next]
+  (let [win (:window ui) ed (:editor ui)]
+    (editor/focus! ed)
+    (let [before (g/gtk-root-get-focus win)
+          handled ((:handle-window-key! ui) nil KEY-F6 0 g/SHIFT-MASK nil)
+          after (g/gtk-root-get-focus win)]
+      (check :window-shift-f6-reaches-editor
+             (and (= 0 handled) (= before after))
+             {:handled handled :before before :after after})
+      (next))))
+
+(defn- row-window-f6-still-toggles
+  "Plain F6 (no modifier) must still toggle focus after the Shift guard was
+  added -- console.clj's view first, editor's back, same pattern
+  row-toggle-focus already uses for the :toggle-focus!* hook, but driven
+  through the WINDOW's own key dispatch (:handle-window-key!) instead,
+  since that's the exact path a real F6 keystroke takes."
+  [ui next]
+  (let [win (:window ui) ed (:editor ui) cv (:console ui)]
+    (editor/focus! ed)
+    (let [h1 ((:handle-window-key! ui) nil KEY-F6 0 0 nil)
+          after-first (g/gtk-root-get-focus win)
+          h2 ((:handle-window-key! ui) nil KEY-F6 0 0 nil)
+          after-second (g/gtk-root-get-focus win)]
+      (check :window-f6-still-toggles
+             (and (= 1 h1) (= after-first (:view cv)) (= 1 h2) (= after-second (:view ed)))
+             {:h1 h1 :h2 h2 :after-first after-first :after-second after-second})
+      (next))))
+
+(defn- row-window-escape-closes-popover
+  "P4.T3 key-order change #2 (probe 4): a new clause ahead of the
+  evaluating? Stop clause closes any open P4 popover on Escape and returns
+  1 without touching the program. Starts a real (loop [] (recur)), opens a
+  test popover registered on the window's own registry
+  (:register-popover!*, the same join completion/quick-doc/rename will use
+  from P4.T4 on), sends window Escape: the popover must close and the
+  program must still be running. A second Escape (nothing left open) must
+  then fall through to the evaluating? clause and Stop it."
+  [ui next]
+  (let [ed (:editor ui) view (:view ed)
+        pp (popover/make-popover view {:autohide? false :position :bottom})]
+    (editor/set-text! ed "(loop [] (recur))")
+    ((:run!* ui))
+    (poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (popover/set-child! pp (g/gtk-label-new "candidate"))
+                  (popover/show-at-caret! pp)
+                  ((:register-popover!* ui) pp)
+                  (let [mark (out-end-offset ui)
+                        h1 ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)
+                        closed-open? (not (popover/open? pp))
+                        still-running-1? (eval/evaluating? (:ctx (:session ui)))
+                        h2 ((:handle-window-key! ui) nil KEY-ESCAPE 0 0 nil)]
+                    (poll-until 3000 20
+                                (fn [] (str/includes? (since ui mark) "; interrupted"))
+                                (fn [stopped?]
+                                  (check :window-escape-closes-popover
+                                         (and started? (= 1 h1) closed-open? still-running-1?
+                                              (= 1 h2) stopped?)
+                                         {:started started? :h1 h1 :closed-open closed-open?
+                                          :still-running-1 still-running-1? :h2 h2 :stopped stopped?})
+                                  ;; Belt-and-braces: hide! is idempotent, so
+                                  ;; this leaves clean state for later rows
+                                  ;; even if close-popovers-fn didn't fire.
+                                  (popover/hide! pp)
+                                  (g/gtk-widget-unparent (:popover pp))
+                                  (next))))))))
+
+(defn- row-popover-dark-colours
+  "Probe 7's measured selector, read back from the shared provider's OWN
+  serialisation (:code-css*, gtk_css_provider_to_string) -- like row-
+  theme-css, GTK normalises the theme's hex colours to rgb(r,g,b): dark's
+  :background #000000 -> rgb(0,0,0), :selection #3e4451 -> rgb(62,68,81)."
+  [ui next]
+  (let [ed (:editor ui) view (:view ed)
+        pp (popover/make-popover view {:autohide? false :position :bottom})]
+    ((:set-theme!* ui) :dark)
+    (popover/set-child! pp (g/gtk-label-new "candidate"))
+    (popover/show-at-caret! pp)
+    (let [css ((:code-css* ui))]
+      (check :popover-dark-colours
+             (and (str/includes? css "popover.jonquil-popover")
+                  (str/includes? css "rgb(0,0,0)")
+                  (str/includes? css "rgb(62,68,81)"))
+             {:css css})
+      (popover/hide! pp)
+      (g/gtk-widget-unparent (:popover pp))
+      ((:set-theme!* ui) :light)
+      (next))))
+
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
   not idle -- the coordinator's own concern was exactly this combination
@@ -2163,6 +2320,12 @@
    row-settings-unreadable-warns
    row-theme-save-failure-reported
    row-theme-switch-while-running
+   row-popover-at-caret
+   row-popover-keys-stay-with-editor
+   row-window-shift-f6-reaches-editor
+   row-window-f6-still-toggles
+   row-window-escape-closes-popover
+   row-popover-dark-colours
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

@@ -73,3 +73,7 @@
     (is (str/includes? css "color: #e0e0e0;"))
     (is (str/includes? css "caret-color: #6cb4ff;"))
     (is (str/includes? css ".jonquil-code text selection { background-color: #3e4451;"))))
+
+(deftest code-css-popover-test
+  (let [css (theme/code-css (theme/theme :navy) 14)]
+    (is (str/includes? css "popover.jonquil-popover row:selected { background-color: #2e3250;"))))

@@ -17,6 +17,7 @@
     jonquil.help
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
+    jonquil.gtk.popover
     jonquil.gtk.editor
     jonquil.gtk.find-bar
     jonquil.gtk.console-view

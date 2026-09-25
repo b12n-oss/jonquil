@@ -27,6 +27,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.popover :as popover]
             [jonquil.session :as session]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
@@ -612,6 +613,31 @@
 (defn- do-clear-console! [cv]
   (cview/clear-output! cv))
 
+;; --- popovers (P4.T3): a registry so Escape can close whichever P4
+;; popover happens to be open -------------------------------------------
+
+(defn- register-popover!
+  "Adds p (a jonquil.gtk.popover map) to popovers, this window's own
+  registry of every P4 popover it has created. Completion, quick doc and
+  rename (P4.T4-T7) each register their own popover once, at construction
+  -- created once, shown/hidden repeatedly, the same lifecycle
+  :close-popovers!* below assumes."
+  [popovers p]
+  (swap! popovers conj p)
+  nil)
+
+(defn- close-popovers!
+  "Closes every OPEN popover in popovers (jonquil.gtk.popover/hide!) and
+  returns whether any was open -- the window's own :close-popovers!*, which
+  on-window-key's new Escape clause calls ahead of the evaluating? Stop
+  clause (probe 4 finding #2: the window's capture-phase controller runs
+  before a popover ever sees the key, so closing a popover during a run
+  must happen here, before Escape can also Stop the program)."
+  [popovers]
+  (let [open (filter popover/open? @popovers)]
+    (doseq [p open] (popover/hide! p))
+    (boolean (seq open))))
+
 ;; --- find/replace bar (P3.T4) -----------------------------------------
 
 (defn- find-bar-focused?
@@ -799,22 +825,34 @@
   TH.T5: Cmd/Ctrl+Shift+M cycles the theme. keyval is already lower-cased
   above, so Shift+M's 0x04d becomes 0x06d the same way every other letter
   chord here is normalised; this clause doesn't consult the editor's IME
-  state, same as every other window-level chord."
+  state, same as every other window-level chord.
+
+  P4.T3, two measured key-order changes (probe 4):
+  - The F6 clause now also requires (not (shift-held? state)): plain F6
+    (findings #4) toggles focus as before, but Shift+F6 no longer matches
+    it, so Shift+F6 (rename, P4.T7) falls all the way through to :else and
+    reaches the editor -- before this it never got there, since this
+    clause had no modifier check and ran first.
+  - A new clause, ahead of the evaluating? Stop clause: when
+    close-popovers-fn finds any P4 popover open, Escape closes it and
+    returns 1 without touching evaluating? at all, so closing a popover
+    during a run never also Stops the program."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
    run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
-   win fb open-find-fn open-replace-fn theme-cycle-fn]
+   win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn]
   (fn [_ctl keyval0 _keycode state _data]
     (let [keyval (g/gdk-keyval-to-lower keyval0)]
       (cond
         (= keyval KEY-F5) (do (run-fn) 1)
         (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
         (find-bar/handle-key! fb keyval0 state)
+        (and (= keyval KEY-ESCAPE) (close-popovers-fn)) 1
         (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
         (= keyval KEY-ESCAPE) 0
         ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
         ;; is open, wherever focus is (1 only when the bar acted).
         (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
-        (= keyval KEY-F6) (do (toggle-focus-fn) 1)
+        (and (= keyval KEY-F6) (not (shift-held? state))) (do (toggle-focus-fn) 1)
         (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
         (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
         (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
@@ -879,6 +917,13 @@
         ;; reload-code-css!'s docstring.
         theme-name (atom theme/default-theme)
         code-css (atom nil)
+        ;; P4.T3: this window's own registry of P4 popovers (completion,
+        ;; quick doc, rename -- P4.T4-T7 register theirs via
+        ;; register-popover-fn as they're created); close-popovers-fn is
+        ;; what the window's own Escape clause and :close-popovers!* call.
+        popovers (atom [])
+        close-popovers-fn (fn [] (close-popovers! popovers))
+        register-popover-fn (fn [p] (register-popover! popovers p))
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
@@ -899,7 +944,8 @@
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
                                      run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
                                      (fn [] (eval/evaluating? (:ctx session)))
-                                     win fb open-find-fn open-replace-fn cycle-theme-fn)
+                                     win fb open-find-fn open-replace-fn cycle-theme-fn
+                                     close-popovers-fn)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -1051,6 +1097,13 @@
                  ;; save can be forced to fail without touching the real
                  ;; settings file or racing the filesystem.
                  :settings-path!* (fn [p] (reset! settings-path* p))
+                 ;; P4.T3: the window's own popover registry -- close-
+                 ;; popovers-fn is exactly what the new Escape clause calls;
+                 ;; register-popover-fn is how a popover (a self-test row's
+                 ;; own test popover today, completion/quick-doc/rename from
+                 ;; P4.T4-T7 on) joins that registry.
+                 :close-popovers!* close-popovers-fn
+                 :register-popover!* register-popover-fn
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -1094,6 +1147,7 @@
   :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
+  :close-popovers!* :register-popover!*
   :handle-window-key! :simulate-open-result! :simulate-save-result!
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
@@ -1104,7 +1158,12 @@
   Cmd/Ctrl+Shift+M runs; :settings-path* reads back the window's own
   settings path; :load-settings!* re-runs the startup load against any
   path; :settings-path!* is self-test-only (row-theme-save-failure-
-  reported), repointing the window's own settings path."
+  reported), repointing the window's own settings path. :close-popovers!*
+  is what the window's own Escape clause calls (P4.T3); :register-popover!*
+  joins a jonquil.gtk.popover map to this window's registry so
+  :close-popovers!* knows about it -- P4.T4-T7's completion/quick-doc/
+  rename popovers register theirs the same way a self-test row's own test
+  popover does."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one

@@ -85,10 +85,18 @@
     (get (:console t) kind (:text t))))
 
 (defn code-css
-  "The CSS for both code views at font size px. Measured on GTK 4.22.4
-  (2026-09-25): background-color, color and caret-color apply on the
-  view's own node (.jonquil-code); color on the text subnode does not
-  recolour the text; the selection rule applies on 'text selection'."
+  "The CSS for both code views, and for every P4 caret-anchored popover, at
+  font size px. Measured on GTK 4.22.4 (2026-09-25): background-color,
+  color and caret-color apply on the view's own node (.jonquil-code); color
+  on the text subnode does not recolour the text; the selection rule
+  applies on 'text selection'.
+
+  The popover.jonquil-popover rules are P4 probe 7's measured selector: a
+  popover follows the GtkSettings colour scheme but not the theme palette
+  or the code font without them. font-size on the list/row and
+  label.jonquil-doc rules is this task's own addition (probe 7 didn't set
+  it), so a zoom reaches the completion/doc popovers the same way it
+  already reaches the code views."
   [t px]
   (str ".jonquil-code { font-size: " px "px; "
        "background-color: " (:background t) "; "
@@ -96,4 +104,17 @@
        "caret-color: " (:caret t) "; } "
        ".jonquil-code text selection { "
        "background-color: " (:selection t) "; "
-       "color: " (:text t) "; }"))
+       "color: " (:text t) "; } "
+       "popover.jonquil-popover > contents, popover.jonquil-popover > arrow { "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; } "
+       "popover.jonquil-popover list, popover.jonquil-popover row { "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; "
+       "font-size: " px "px; } "
+       "popover.jonquil-popover row:selected { "
+       "background-color: " (:selection t) "; "
+       "color: " (:text t) "; } "
+       "popover.jonquil-popover label.jonquil-doc { "
+       "font-family: monospace; "
+       "font-size: " px "px; }"))

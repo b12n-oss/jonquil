@@ -744,3 +744,105 @@
 ;; (see find_bar.clj and the theme-keeps-find-highlight self-test row).
 (ffi/defcfn gtk-text-tag-get-priority "gtk_text_tag_get_priority" [:pointer] :int)
 (ffi/defcfn gtk-text-tag-set-priority "gtk_text_tag_set_priority" [:pointer :int] :void)
+
+;; --- P4.T3 ---
+;; Header lines checked against /opt/homebrew/include/gtk-4.0/gtk (gtk4
+;; 4.22.4), same copy the P4 probes cite (spikes/p4/p4_ffi.clj) -- re-verified
+;; directly against the header files on this machine, not just copied.
+;; gtk_widget_set_parent: gtkwidget.h:457 -- void gtk_widget_set_parent
+;; (GtkWidget*, GtkWidget *parent). Fixed arity.
+(ffi/defcfn gtk-widget-set-parent "gtk_widget_set_parent" [:pointer :pointer] :void)
+;; gtk_widget_get_parent: gtkwidget.h:460 -- GtkWidget* (GtkWidget*).
+;; gtk_widget_unparent: gtkwidget.h:272 -- void (GtkWidget*). Both fixed
+;; arity. Live measurement (2026-09-26, this task, not in any P4 probe):
+;; parenting a popover DIRECTLY to a GtkTextView (the probes' own pattern,
+;; never exercised past a hard System/exit) hangs the whole process the
+;; first time the window is actually destroyed -- sample'd main-thread
+;; stack sits at 100% CPU in gtk_text_view_dispose -> gtk_text_view_remove
+;; -> g_log_structured_standard, an infinite loop: GtkTextView's own
+;; dispose walks its structural children to detach them, doesn't recognise
+;; a foreign (non-anchor) child, warns "GtkPopover is not a child of
+;; GtkTextView" every iteration and never actually detaches it, so the
+;; loop never terminates. Parenting to the view's own immediate container
+;; instead (measured: a plain GtkScrolledWindow, no special dispose
+;; override) destroys cleanly. jonquil.gtk.popover/make-popover uses this
+;; to resolve that container from the view it's handed.
+(ffi/defcfn gtk-widget-get-parent "gtk_widget_get_parent" [:pointer] :pointer)
+(ffi/defcfn gtk-widget-unparent "gtk_widget_unparent" [:pointer] :void)
+;; gtk_widget_compute_point: gtkwidget.h:493-496 -- gboolean (...)
+;; (GtkWidget*, GtkWidget *target, const graphene_point_t*, graphene_point_t*).
+;; graphene_point_t is two floats. Fixed arity.
+(ffi/defcfn gtk-widget-compute-point "gtk_widget_compute_point" [:pointer :pointer :pointer :pointer] :int)
+
+(defn compute-point
+  "[x y] in widget's own coordinates, translated into target's -- nil when
+  GTK can't compute a transform (gtk_widget_compute_point's own documented
+  failure case). Needed because gtk_popover_set_pointing_to's rectangle is
+  in the coordinate space of the popover's actual GtkWidget parent (GIR
+  doc), which jonquil.gtk.popover now resolves to the view's own container,
+  not the view itself -- see gtk-widget-get-parent's citation above."
+  [widget target x y]
+  (let [in (ffi/alloc 8) out (ffi/alloc 8)]
+    (try
+      (ffi/write in :float (float x) 0)
+      (ffi/write in :float (float y) 4)
+      (when (pos? (gtk-widget-compute-point widget target in out))
+        [(ffi/read out :float 0) (ffi/read out :float 4)])
+      (finally (ffi/free in) (ffi/free out)))))
+;; gtkpopover.h: gtk_popover_new:62, set_child:65, set_pointing_to:71,
+;; get_pointing_to:74, set_position:77, set_autohide:83, popup:101,
+;; popdown:103. All fixed arity.
+(ffi/defcfn gtk-popover-new "gtk_popover_new" [] :pointer)
+(ffi/defcfn gtk-popover-set-child "gtk_popover_set_child" [:pointer :pointer] :void)
+(ffi/defcfn gtk-popover-set-pointing-to "gtk_popover_set_pointing_to" [:pointer :pointer] :void)
+(ffi/defcfn gtk-popover-get-pointing-to "gtk_popover_get_pointing_to" [:pointer :pointer] :int)
+(ffi/defcfn gtk-popover-set-position "gtk_popover_set_position" [:pointer :int] :void)
+(ffi/defcfn gtk-popover-set-autohide "gtk_popover_set_autohide" [:pointer :int] :void)
+(ffi/defcfn gtk-popover-popup "gtk_popover_popup" [:pointer] :void)
+(ffi/defcfn gtk-popover-popdown "gtk_popover_popdown" [:pointer] :void)
+;; GtkPositionType: gtkenums.h:489-495 (enum starts GTK_POS_LEFT=0,
+;; RIGHT=1, TOP=2, BOTTOM=3).
+(def POPOVER-POS-TOP 2)
+(def POPOVER-POS-BOTTOM 3)
+;; gtk_text_view_get_iter_location: gtktextview.h:241-243 -- void (...)
+;; (GtkTextView*, const GtkTextIter*, GdkRectangle*). Fixed arity.
+(ffi/defcfn gtk-text-view-get-iter-location "gtk_text_view_get_iter_location"
+  [:pointer :pointer :pointer] :void)
+;; gtk_text_view_buffer_to_window_coords: gtktextview.h:267-272 -- void (...)
+;; (GtkTextView*, GtkTextWindowType, int buffer_x, int buffer_y, int*
+;; window_x, int* window_y). Fixed arity.
+(ffi/defcfn gtk-text-view-buffer-to-window-coords "gtk_text_view_buffer_to_window_coords"
+  [:pointer :int :int :int :pointer :pointer] :void)
+;; GtkTextWindowType: gtktextview.h:57-58 (WIDGET=1, TEXT=2, per the enum's
+;; leading comment block at line 45).
+(def TEXT-WINDOW-TEXT 2)
+
+(defn caret-window-rect
+  "The insert mark's rectangle in view's TEXT-window coordinates (P4 probe
+  2): gtk_text_view_get_iter_location on the buffer's insert-mark iter
+  (buffer coords), then gtk_text_view_buffer_to_window_coords with
+  GTK_TEXT_WINDOW_TEXT. Returns [x y w h]. GdkRectangle is four ints (x y w
+  h) -- the same 16-byte layout the P4 probe's rect-alloc/rect-read use."
+  [view]
+  (let [buf (gtk-text-view-get-buffer view)
+        it (ffi/alloc ITER-BYTES)
+        loc (ffi/alloc 16)
+        out (ffi/alloc 8)]
+    (try
+      (gtk-text-buffer-get-iter-at-mark buf it (gtk-text-buffer-get-insert buf))
+      (gtk-text-view-get-iter-location view it loc)
+      (let [bx (ffi/read loc :int 0) by (ffi/read loc :int 4)
+            w (ffi/read loc :int 8) h (ffi/read loc :int 12)]
+        (gtk-text-view-buffer-to-window-coords view TEXT-WINDOW-TEXT bx by out (+ out 4))
+        [(ffi/read out :int 0) (ffi/read out :int 4) w h])
+      (finally (ffi/free it) (ffi/free loc) (ffi/free out)))))
+
+(defn popover-pointing-to
+  "Reads back popover's own pointing-to rectangle (P4 probe 2:
+  gtk_popover_get_pointing_to) as [x y w h]."
+  [popover]
+  (let [r (ffi/alloc 16)]
+    (try
+      (gtk-popover-get-pointing-to popover r)
+      [(ffi/read r :int 0) (ffi/read r :int 4) (ffi/read r :int 8) (ffi/read r :int 12)]
+      (finally (ffi/free r)))))
