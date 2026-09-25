@@ -5,16 +5,27 @@
   decide."
   (:require [clojure.string :as str]
             [jonquil.eval :as eval]
-            [jonquil.syntax :as syntax]))
+            [jonquil.syntax :as syntax]
+            [jonquil.theme :as theme]))
 
 (def styles
-  ;; Upstream ui.clj console attrs at 41c56b8, as hex.
-  {:out    {:fg "#282828"}
-   :err    {:fg "#b41414"}
-   :prompt {:fg "#0064c8" :bold true}
-   :result {:fg "#147828" :bold true}
-   :error  {:fg "#b41414"}
-   :system {:fg "#6e6e6e" :italic true}})
+  ;; Each console kind's bold/italic flags (upstream ui.clj console attrs at
+  ;; 41c56b8). Colours come from the active theme (jonquil.theme). The
+  ;; declaration order matters: jonquil.gtk.console-view adds one tag per
+  ;; key in this order, and GTK's tag priority follows it.
+  {:out    {}
+   :err    {}
+   :prompt {:bold true}
+   :result {:bold true}
+   :error  {}
+   :system {:italic true}})
+
+(defn style
+  "The style map for console kind k under theme t (a jonquil.theme map):
+  :fg from the theme, :bold/:italic from the kind. nil for an unknown k."
+  [t k]
+  (when-let [flags (get styles k)]
+    (assoc flags :fg (theme/console-color t k))))
 
 (defn input-action
   "What Return in the console input does. Shift+Return always inserts a

@@ -3,36 +3,45 @@
   tags. Pure. Mirrors upstream DrClojure.syntax/highlight-doc! (41c56b8) with
   the Swing document replaced by data: token styles first, then rainbow and
   unmatched brackets on top, so a later span wins where two overlap."
-  (:require [jonquil.syntax :as syntax]))
+  (:require [jonquil.syntax :as syntax]
+            [jonquil.theme :as theme]))
 
 (def token-styles
-  ;; Upstream default-palette, as hex. :symbol and :bracket are absent on
-  ;; purpose: highlight-doc! leaves plain symbols at the default style and
-  ;; paints brackets only through the rainbow pass.
-  {:comment      {:fg "#6a737d" :italic true}
-   :string       {:fg "#22863a"}
-   :regex        {:fg "#b31d28"}
-   :char         {:fg "#22863a"}
-   :keyword      {:fg "#6f42c1" :bold true}
-   :number       {:fg "#005cc5"}
-   :special-form {:fg "#0000cd" :bold true}
-   :builtin      {:fg "#005a9e"}
-   :constant     {:fg "#0000cd" :bold true}
-   :metatag      {:fg "#586069" :italic true}})
+  ;; Each token kind's bold/italic flags (upstream default-palette's, at
+  ;; 41c56b8). Colours come from the active theme (jonquil.theme). :symbol
+  ;; and :bracket are absent on purpose: highlight-doc! leaves plain symbols
+  ;; at the default style and paints brackets only through the rainbow pass.
+  {:comment      {:italic true}
+   :string       {}
+   :regex        {}
+   :char         {}
+   :keyword      {:bold true}
+   :number       {}
+   :special-form {:bold true}
+   :builtin      {}
+   :constant     {:bold true}
+   :metatag      {:italic true}})
 
-(def rainbow
-  ;; Upstream rainbow-colors, all bold, cycled by depth mod 7.
-  ["#c06800" "#007acc" "#7b1fa2" "#2e7d32" "#c62828" "#00838f" "#ad1457"])
-
-(def unmatched-style {:fg "#dc0000" :bold true})
+(def rainbow-count
+  ;; Upstream cycles rainbow brackets by depth mod 7.
+  7)
 
 (defn style
-  "The style map for a paint-plan key."
-  [k]
+  "The style map for a paint-plan key under theme t (a jonquil.theme map):
+  :fg from the theme, :bold/:italic from the kind."
+  [t k]
   (cond
-    (= k :unmatched) unmatched-style
-    (and (vector? k) (= :rainbow (first k))) {:fg (nth rainbow (second k)) :bold true}
-    :else (get token-styles k)))
+    (= k :unmatched) {:fg (:red t) :bold true}
+    (and (vector? k) (= :rainbow (first k))) {:fg (nth (:rainbow t) (second k)) :bold true}
+    :else (when-let [flags (get token-styles k)]
+            (assoc flags :fg (theme/token-color t k)))))
+
+(defn style-at
+  "The effective style map at offset pos under theme t, or nil for the
+  default style."
+  [t plan pos]
+  (some (fn [[k s e]] (when (and (<= s pos) (< pos e)) (style t k)))
+        (rseq plan)))
 
 (defn paint-plan
   "Returns a vector of [style-key start end]. Style keys are token types,
@@ -43,14 +52,8 @@
     (let [tokens (into []
                        (keep (fn [[t s e]] (when (contains? token-styles t) [t s e])))
                        (syntax/tokenize text))
-          n (count rainbow)
+          n rainbow-count
           brackets (mapv (fn [[s e depth kind]]
                            [(if (= kind :unmatched) :unmatched [:rainbow (mod depth n)]) s e])
                          (:bracket-tokens (syntax/compute-brackets text)))]
       (into tokens brackets))))
-
-(defn style-at
-  "The effective style map at offset pos, or nil for the default style."
-  [plan pos]
-  (some (fn [[k s e]] (when (and (<= s pos) (< pos e)) (style k)))
-        (rseq plan)))

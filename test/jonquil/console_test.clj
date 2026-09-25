@@ -1,6 +1,7 @@
 (ns jonquil.console-test
   (:require [clojure.test :refer [deftest is testing]]
-            [jonquil.console :as console]))
+            [jonquil.console :as console]
+            [jonquil.theme :as theme]))
 
 (deftest input-action-test
   (testing "shift always inserts a newline"
@@ -49,4 +50,14 @@
     (is (nil? (console/unclosed-bracket-message "(+ 1 2))")))))
 
 (deftest styles-cover-every-kind-test
-  (is (= #{:out :err :prompt :result :error :system} (set (keys console/styles)))))
+  (is (= #{:out :err :prompt :result :error :system} (set (keys console/styles))))
+  (is (= [:out :err :prompt :result :error :system] (vec (keys console/styles)))
+      "declaration order is the GTK tag priority order"))
+
+(deftest style-takes-colours-from-the-theme-test
+  (let [light (theme/theme :light) navy (theme/theme :navy)]
+    (is (= {:fg "#24292f"} (console/style light :out)))
+    (is (= {:fg "#6639ba" :bold true} (console/style light :prompt)))
+    (is (= {:fg "#f07178"} (console/style navy :err)))
+    (is (= {:fg "#6f7390" :italic true} (console/style navy :system)))
+    (is (nil? (console/style light :bogus)))))

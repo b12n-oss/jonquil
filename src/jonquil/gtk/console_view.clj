@@ -39,7 +39,8 @@
             [jonquil.console :as console]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
-            [jonquil.gtk.ffi :as g]))
+            [jonquil.gtk.ffi :as g]
+            [jonquil.theme :as theme]))
 
 (def MAX-OUTPUT-CHARS
   "A chosen bound on the output region, not a measurement (estimate: at 5 to
@@ -407,14 +408,15 @@
   [buf]
   (let [table (g/gtk-text-buffer-get-tag-table buf)]
     (into {}
-          (map (fn [[k {:keys [fg bold italic]}]]
-                 (let [tag (g/gtk-text-tag-new (name k))]
+          (map (fn [k]
+                 (let [{:keys [fg bold italic]} (console/style (theme/theme theme/default-theme) k)
+                       tag (g/gtk-text-tag-new (name k))]
                    (g/set-string-property! tag "foreground" fg)
                    (when bold (g/set-int-property! tag "weight" g/PANGO-WEIGHT-BOLD))
                    (when italic (g/set-italic! tag))
                    (g/gtk-text-tag-table-add table tag)
                    [k tag])))
-          console/styles)))
+          (keys console/styles))))
 
 (defn- create-mark! [buf mark-name offset left-gravity?]
   (let [it (ffi/alloc g/ITER-BYTES)]

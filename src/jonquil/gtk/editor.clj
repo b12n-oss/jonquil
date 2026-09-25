@@ -32,7 +32,8 @@
             [jonquil.edit :as edit]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
-            [jonquil.paint :as paint]))
+            [jonquil.paint :as paint]
+            [jonquil.theme :as theme]))
 
 ;; --- tags ----------------------------------------------------------------
 
@@ -46,11 +47,11 @@
   [buf]
   (let [table (g/gtk-text-buffer-get-tag-table buf)
         ks (concat (keys paint/token-styles)
-                   (map (fn [i] [:rainbow i]) (range (count paint/rainbow)))
+                   (map (fn [i] [:rainbow i]) (range paint/rainbow-count))
                    [:unmatched])]
     (into {}
           (map (fn [k]
-                 (let [{:keys [fg bold italic]} (paint/style k)
+                 (let [{:keys [fg bold italic]} (paint/style (theme/theme theme/default-theme) k)
                        tag (g/gtk-text-tag-new (tag-key-name k))]
                    (g/set-string-property! tag "foreground" fg)
                    (when bold (g/set-int-property! tag "weight" g/PANGO-WEIGHT-BOLD))
