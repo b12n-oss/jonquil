@@ -634,20 +634,31 @@
 
 (defn- step-close-with-unsaved!
   "Brief step 8: typing makes the editor dirty (title gains \"* \"), then
-  Cmd+W opens the close-confirmation alert (close-request-fn, P3.T5) as a
-  SECOND top-level window for this pid -- checked via `cgevent windows
+  Cmd+W must open the close-confirmation alert (close-request-fn, P3.T5) as
+  a SECOND top-level window for this pid -- checked via `cgevent windows
   --pid`, since a real GtkAlertDialog renders as its own window, never a
-  native macOS sheet (P3 probe finding #3). The process must still be
-  alive throughout: the alert only SUSPENDS the close (close-request-fn
-  returns 1), it never quits on its own. Escape by pid is then the
-  alert's own Cancel (index 2, close-choice!): measured live this session
-  (not assumed from the brief) that a pid-routed Escape DOES reach the
-  alert -- it closes the SECOND window, back down to one, with the
-  process still alive and the title still carrying \"* \" (close-choice!'s
-  own index-2 branch touches nothing). If the alert ever stops taking
-  pid-routed keys in some future GTK/macOS version, this step reports it
-  and SKIPs rather than reaching for a click, which this driver's hard
-  safety rules forbid outright."
+  native macOS sheet (P3 probe finding #3) -- with the process still alive
+  (the alert only SUSPENDS the close, close-request-fn returns 1; it never
+  quits on its own). This is a real check! (:close-with-unsaved-alert-
+  appears): fix round 1 (task review) found the earlier version SKIPped
+  here instead, so a total regression of the close-confirmation feature
+  (Cmd+W just closes/quits with no prompt at all) read as SKIP and dropped
+  out of -main's scored denominator -- SUMMARY still said \"N of N passed\"
+  while unsaved text was being silently discarded. No alert, or the
+  process already gone, is now :close-with-unsaved FAIL, not a skip.
+
+  Escape by pid is then tried as the alert's own Cancel (index 2,
+  close-choice!): measured live this session (not assumed from the brief)
+  that it DOES reach the alert -- closes the SECOND window, back down to
+  one, process still alive, title still carrying \"* \" (close-choice!'s
+  own index-2 branch touches nothing). The SKIP is now narrow and only
+  fires here: the alert appeared, Escape was sent, and NOTHING changed --
+  still 2 windows, process still alive -- which is what \"the alert
+  doesn't take pid-routed keys\" (the brief's own SKIP wording) actually
+  means. If Escape instead closes the main window too, or the process
+  dies, that is not \"didn't take the key\" -- it took it and did the
+  wrong (data-losing) thing, so it FAILs :close-with-unsaved rather than
+  skipping."
   []
   (let [{:keys [proc pid]} (launch! nil)]
     (ensure-window! pid 8000)
@@ -658,19 +669,27 @@
     (let [alert-appeared? (wait-for! 4000 200 (fn [] (= 2 (count (windows-edn! pid)))))
           alive-after-w? (p/alive? proc)]
       (screenshot! pid "step8-close-alert")
-      (if-not alert-appeared?
-        (skip! :close-with-unsaved
-               "pid-routed command+w never opened a second (alert) window for this pid -- can't drive the alert without a click, which this driver never does")
+      (check! :close-with-unsaved-alert-appears
+              (and alert-appeared? alive-after-w?)
+              {:alert-appeared alert-appeared? :alive-after-w alive-after-w?})
+      (if-not (and alert-appeared? alive-after-w?)
+        (check! :close-with-unsaved false
+                {:reason "no alert (or the process died) after command+w -- see close-with-unsaved-alert-appears"
+                 :alert-appeared alert-appeared? :alive-after-w alive-after-w?})
         (do
           (cg-key! pid "escape")
-          (let [cancel-ok? (wait-for! 4000 200 (fn [] (= 1 (count (windows-edn! pid)))))
+          (wait-for! 4000 200 (fn [] (not= 2 (count (windows-edn! pid)))))
+          (let [windows-after (windows-edn! pid)
+                window-count (count windows-after)
                 still-alive? (p/alive? proc)
-                title (:name (window-for pid))]
+                title (:name (first windows-after))]
             (screenshot! pid "step8-close-cancelled")
-            (check! :close-with-unsaved
-                    (and alive-after-w? cancel-ok? still-alive? (str/starts-with? (or title "") "*"))
-                    {:alert-appeared alert-appeared? :alive-after-w alive-after-w?
-                     :cancel-ok cancel-ok? :still-alive still-alive? :title title})))))
+            (if (and (= 2 window-count) still-alive?)
+              (skip! :close-with-unsaved
+                     "the alert stayed open after a pid-routed Escape (still 2 windows, process alive) -- it doesn't take pid-routed keys, can't verify Cancel without a click")
+              (check! :close-with-unsaved
+                      (and still-alive? (= 1 window-count) (str/starts-with? (or title "") "*"))
+                      {:window-count window-count :still-alive still-alive? :title title}))))))
     (stop! {:proc proc :pid pid})))
 
 (defn- step-quit-with-unsaved!
