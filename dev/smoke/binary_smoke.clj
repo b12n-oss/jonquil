@@ -1042,6 +1042,75 @@
                     {:exit (:exit exit) :critical critical? :log log-text})
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
 
+(defn- step-theme-persists!
+  "TH.T6 item 4: the theme Cmd/Ctrl+Shift+M saves survives a relaunch.
+  Launches into a blank buffer under THIS run's own temp config dir
+  (smoke-xdg-config-home -- a single top-level def shared by every
+  launch! in this file, so a second launch! below reads back exactly
+  what the first one wrote, never the user's real settings), cycles once
+  (theme/theme-names: :light -> :dark), waits for the status text
+  'Theme: dark' by OCR, then reads the saved settings.edn straight off
+  disk and requires it to be exactly {:theme :dark} -- the save
+  (window.clj's do-cycle-theme!, settings/save-settings!) and the status
+  label are two different code paths, so this checks the save directly
+  rather than trusting the status text alone. Command+W then closes with
+  no dirty buffer to prompt about (measured live this session: a blank,
+  untouched buffer exits 0 with no alert), checked via the process's own
+  real exit code -- the same falsifiability step-command-chord-close!
+  already relies on, not just 'pid no longer in pgrep'.
+
+  A second launch! against the SAME temp config dir must then start in
+  :dark. Sampled from a rectangle well inside the empty definitions pane
+  (window-local point coordinates, so unlike an OCR row's rect this
+  needs no window x/y subtraction -- point (0,0) in a --pid screenshot
+  IS the window's own top-left), clear of both the blinking caret at
+  (0,0) and the console divider below (measured live this session: a
+  blank buffer's editor pane samples 0,0,0 in :dark, 252,252,251 in
+  :light, at this exact rect). PixelAt.java's own 'near' mode
+  (step-find!'s pattern) against black, then PASS needs the sampled
+  colour nearer dark's #000000 than light's #ffffff -- not equality,
+  since anti-aliasing at the pane's own edges could shift a strictly-
+  uniform rect by a pixel or two."
+  []
+  (let [{:keys [proc pid]} (launch! nil)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "command + shift + m")
+    (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Theme: dark")]
+      (when-not ok (check! :theme-persists-cycle false {:reason "status never showed Theme: dark"})))
+    (let [settings-path (str smoke-xdg-config-home "/jonquil/settings.edn")
+          saved (try (edn/read-string (slurp settings-path)) (catch Exception _ ::unreadable))]
+      (check! :theme-persists-saved (= {:theme :dark} saved)
+              {:settings-path settings-path :saved saved}))
+    (cg-key! pid "command + w")
+    (let [exit (deref proc 5000 ::timeout)]
+      (if (= ::timeout exit)
+        (do (check! :theme-persists-close false {:reason "process did not exit within 5000ms after command+w"})
+            (stop! {:proc proc :pid pid}))
+        (do
+          (check! :theme-persists-close (zero? (:exit exit)) {:exit (:exit exit)})
+          (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v))))
+          (let [{:keys [proc pid]} (launch! nil)]
+            (ensure-window! pid 8000)
+            (let [win (window-for pid)
+                  scale (or (:scale win) 2.0)
+                  shot (str out-dir "/theme-persists-relaunch.png")
+                  _ (screenshot! pid "theme-persists-relaunch")
+                  px (int (* scale 100)) py (int (* scale 250))
+                  pw (int (* scale 400)) ph (int (* scale 400))
+                  {:keys [out exit err]} (p/shell {:out :string :err :string :continue true}
+                                                  "java" pixel-at-jar shot
+                                                  (str px) (str py) (str pw) (str ph)
+                                                  "near" "0" "0" "0")]
+              (if (zero? exit)
+                (let [[r g b] (map #(Long/parseLong %) (str/split (str/trim out) #","))
+                      dist-dark (+ (Math/abs r) (Math/abs g) (Math/abs b))
+                      dist-light (+ (Math/abs (- r 255)) (Math/abs (- g 255)) (Math/abs (- b 255)))]
+                  (check! :theme-persists (< dist-dark dist-light)
+                          {:sampled-rgb [r g b] :dist-dark dist-dark :dist-light dist-light
+                           :rect [px py pw ph]}))
+                (check! :theme-persists false {:pixel-at-exit exit :pixel-at-err err :rect [px py pw ph]})))
+            (stop! {:proc proc :pid pid})))))))
+
 ;; --- driver ----------------------------------------------------------------
 
 (defn- build!
@@ -1076,7 +1145,8 @@
    ["open-refuses-dirty" step-open-refuses-dirty!]
    ["latin1-warning" step-latin1-warning!]
    ["command-chord-close" step-command-chord-close!]
-   ["close-while-running" step-close-while-running!]])
+   ["close-while-running" step-close-while-running!]
+   ["theme-persists" step-theme-persists!]])
 
 (defn -main [& args]
   (let [t0 (System/currentTimeMillis)
