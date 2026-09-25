@@ -14,11 +14,15 @@
 
 (defn settings-path
   "The settings file's path. env is (fn [name] value), System/getenv in
-  production and a map in tests; home is the user's home directory."
+  production and a map in tests; home is the user's home directory. A
+  relative XDG_CONFIG_HOME (anything not starting with \"/\") is invalid
+  per the XDG spec (fix wave item 4) and is treated like a blank one."
   ([] (settings-path (fn [n] (System/getenv n)) (System/getProperty "user.home")))
   ([env home]
    (let [xdg (env "XDG_CONFIG_HOME")
-         base (if (str/blank? xdg) (str home "/.config") xdg)]
+         base (if (or (str/blank? xdg) (not (str/starts-with? xdg "/")))
+                (str home "/.config")
+                xdg)]
      (str base "/jonquil/settings.edn"))))
 
 (defn load-settings
@@ -41,16 +45,35 @@
           {:theme theme/default-theme
            :warning (str path " has no known :theme, using " (name theme/default-theme))})))))
 
+(defn- resolved-target
+  "path itself, unless it exists and is a symlink, in which case the real
+  file it points at (fix wave item 3: a save used to replace the symlink
+  with a plain file, so a dotfiles-managed settings.edn lost its link and
+  the linked target never saw the new value). Measured on this Jolt pin
+  (2026-09-26, throwaway probe): java.nio.file.Files/isSymbolicLink,
+  Files/createSymbolicLink and Path/.toRealPath all work. isSymbolicLink
+  answers false for a path that doesn't exist, so no separate .exists
+  check is needed."
+  [path]
+  (let [p (.toPath (java.io.File. ^String path))]
+    (if (java.nio.file.Files/isSymbolicLink p)
+      (str (.toRealPath p (make-array java.nio.file.LinkOption 0)))
+      path)))
+
 (defn save-settings!
-  "Writes {:theme k} to path atomically. nil on success, else a message."
+  "Writes {:theme k} to path atomically. nil on success, else a message.
+  When path is a symlink, the real target is rewritten in place (the temp
+  file sits beside the target and the rename lands on the target), so the
+  link itself survives the save."
   [path {:keys [theme]}]
-  (let [tmp (str path ".tmp-" (System/nanoTime))]
+  (let [target (resolved-target path)
+        tmp (str target ".tmp-" (System/nanoTime))]
     (try
-      (io/make-parents path)
+      (io/make-parents target)
       (spit tmp (pr-str {:theme theme}))
       (java.nio.file.Files/move
        (.toPath (java.io.File. ^String tmp))
-       (.toPath (java.io.File. ^String path))
+       (.toPath (java.io.File. ^String target))
        (into-array java.nio.file.CopyOption
                    [java.nio.file.StandardCopyOption/REPLACE_EXISTING
                     java.nio.file.StandardCopyOption/ATOMIC_MOVE]))

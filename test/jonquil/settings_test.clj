@@ -13,7 +13,10 @@
 (deftest settings-path-test
   (is (= "/x/cfg/jonquil/settings.edn" (settings/settings-path {"XDG_CONFIG_HOME" "/x/cfg"} "/home/u")))
   (is (= "/home/u/.config/jonquil/settings.edn" (settings/settings-path {} "/home/u")))
-  (is (= "/home/u/.config/jonquil/settings.edn" (settings/settings-path {"XDG_CONFIG_HOME" ""} "/home/u"))))
+  (is (= "/home/u/.config/jonquil/settings.edn" (settings/settings-path {"XDG_CONFIG_HOME" ""} "/home/u")))
+  ;; fix wave item 4: a relative XDG_CONFIG_HOME is invalid per the XDG spec.
+  (is (= "/home/u/.config/jonquil/settings.edn"
+         (settings/settings-path {"XDG_CONFIG_HOME" "relative/cfg"} "/home/u"))))
 
 (deftest round-trip-test
   (let [path (str (temp-dir) "/nested/jonquil/settings.edn")]
@@ -41,6 +44,22 @@
       (let [r (settings/load-settings path)]
         (is (= :light (:theme r)) content)
         (is (str/includes? (:warning r) "no known :theme") content)))))
+
+(deftest save-preserves-symlink-test
+  ;; fix wave item 3: saving through a symlinked settings.edn must rewrite
+  ;; the real target in place, not replace the link with a plain file.
+  (let [dir (temp-dir)
+        real (str dir "/real-target.edn")
+        link (str dir "/settings.edn")]
+    (spit real (pr-str {:theme :light}))
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath (io/file link)) (.toPath (io/file real))
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (nil? (settings/save-settings! link {:theme :dark})))
+    (is (java.nio.file.Files/isSymbolicLink (.toPath (io/file link)))
+        "the link itself must survive the save")
+    (is (= {:theme :dark} (settings/load-settings real))
+        "the real target must read back the new value")))
 
 (deftest save-failure-test
   (let [blocker (str (temp-dir) "/file")]
