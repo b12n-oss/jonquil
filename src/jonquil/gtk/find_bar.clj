@@ -7,7 +7,8 @@
   Every match gets a \"search-match\" GtkTextTag (background #fff2a8, probe
   2). Matches are recomputed over the editor text on every query change and
   on every editor buffer change while the bar is open (both wired as GTK
-  \"changed\" signals here); the tag is stripped on every recompute and on
+  \"changed\" signals here), but only a query change, open!, next/prev and
+  a replace move the editor's selection (P3 fix wave C1); the tag is stripped on every recompute and on
   close, using gtk_text_buffer_remove_tag (not remove_all_tags, which would
   also strip the editor's own syntax-highlighting tags wherever they
   overlap a match).
@@ -88,26 +89,67 @@
     (g/with-iters* buf s s
       (fn [a _] (g/gtk-text-view-scroll-to-iter (:view ed) a 0.0 0 0.0 0.0)))))
 
-(defn- recompute-matches!
-  "Recomputes matches for the current query over the editor text, reapplies
-  the search-match tag, selects and scrolls to the nearest match from the
-  editor's current caret (wrapping to the first), and updates the count
-  label. A no-op while the bar is closed."
+(defn- refresh-matches!
+  "Recomputes matches for the current query over the editor text,
+  reapplies the search-match tag and updates the :matches atom and the
+  count label, never touching the editor's selection or scroll position.
+  The label counts the current selection as the current match only when
+  it is exactly one. Returns the new matches, or nil while the bar is
+  closed (a no-op then).
+
+  P3 fix wave C1: this is all the editor buffer's own \"changed\" signal
+  runs. It used to run recompute-matches!, which selected the next match
+  after the caret on every keystroke, so the NEXT keystroke's commit
+  deleted that selection and replaced a match the user never chose."
   [fb]
   (when (open? fb)
     (let [ed (:ed fb)
           text (editor/editor-text ed)
           query (or (g/editable-text (:query fb)) "")
           matches (syntax/find-text-matches text query {:case-sensitive? false})
-          caret (:caret (editor/snapshot ed))]
+          {:keys [sel-start sel-end]} (editor/snapshot ed)
+          current (first (filter (fn [m] (= m [sel-start sel-end])) matches))]
       (clear-tags! fb)
       (apply-tags! fb matches)
       (reset! (:matches fb) matches)
-      (if (seq matches)
-        (let [m (commands/next-match matches caret)]
-          (select-match! fb m)
-          (update-count-label! fb matches m))
-        (update-count-label! fb matches nil)))))
+      (update-count-label! fb matches current)
+      matches)))
+
+(defn- recompute-matches!
+  "refresh-matches!, then selects and scrolls to the nearest match from
+  the editor's current caret (wrapping to the first) and labels it as the
+  current one. Runs only on a query change and open!, never on a plain
+  edit (C1). A no-op while the bar is closed."
+  [fb]
+  (when-let [matches (seq (refresh-matches! fb))]
+    (let [m (commands/next-match (vec matches) (:caret (editor/snapshot (:ed fb))))]
+      (select-match! fb m)
+      (update-count-label! fb matches m))))
+
+(defn- on-buffer-changed
+  "The editor buffer's \"changed\" handler: refresh only (C1), and nothing
+  at all while a replace is applying its edits, since replace-one!/
+  replace-all! recompute once themselves when the whole edit has landed
+  (a replace-all used to recompute once per delete and once per insert)."
+  [fb]
+  (when-not @(:replacing? fb)
+    (refresh-matches! fb)))
+
+(defn- apply-replace!
+  "Applies a replace result through editor/apply-op! with the buffer's
+  \"changed\" handler held off (see on-buffer-changed), then refreshes
+  once. The result's own :sel already selects the next match
+  (commands/replace-current), so this only scrolls to it when the new
+  selection is exactly a match."
+  [fb result]
+  (reset! (:replacing? fb) true)
+  (try
+    (editor/apply-op! (:ed fb) result)
+    (finally (reset! (:replacing? fb) false)))
+  (let [matches (refresh-matches! fb)
+        {:keys [sel-start sel-end]} (editor/snapshot (:ed fb))]
+    (when (some #{[sel-start sel-end]} matches)
+      (select-match! fb [sel-start sel-end]))))
 
 ;; --- open / close --------------------------------------------------------
 
@@ -194,30 +236,30 @@
 (defn replace-one!
   "Replaces the current selection when it is exactly one of the current
   matches (commands/replace-current), applied through editor/apply-op! as
-  one undo step -- the editor buffer's own \"changed\" signal then
-  recomputes matches over the new text. When the selection isn't a match,
-  finds the next match instead, per the brief."
+  one undo step, which also selects the next match; matches are then
+  recomputed over the new text once (apply-replace!). When the selection
+  isn't a match, finds the next match instead, per the brief."
   [fb]
   (let [ed (:ed fb)
         matches @(:matches fb)
         replacement (or (g/editable-text (:replacement fb)) "")
         result (commands/replace-current (editor/snapshot ed) matches replacement)]
     (if result
-      (editor/apply-op! ed result)
+      (apply-replace! fb result)
       (find-next! fb))
     nil))
 
 (defn replace-all!
   "Replaces every current match (commands/replace-all), applied through
-  editor/apply-op! as one undo step, then shows \"Replaced n\" (overwriting
-  whatever the post-edit recompute -- via the same \"changed\" signal --
-  already set the label to)."
+  editor/apply-op! as one undo step with one refresh at the end
+  (apply-replace!), then shows \"Replaced n\" (overwriting whatever that
+  recompute set the label to)."
   [fb]
   (let [matches @(:matches fb)
         replacement (or (g/editable-text (:replacement fb)) "")
         result (commands/replace-all matches replacement)]
     (when result
-      (editor/apply-op! (:ed fb) result)
+      (apply-replace! fb result)
       (g/gtk-label-set-text (:count-label fb) (str "Replaced " (:count result))))
     nil))
 
@@ -229,6 +271,35 @@
   single-arg interface never receives the window handle."
   [fb]
   (g/gtk-root-get-focus (g/gtk-widget-get-root (:box fb))))
+
+(defn- replacement-focused?
+  "True when keyboard focus is in the replacement entry. P3 fix wave I1:
+  gtk_root_get_focus returns the entry's internal GtkText delegate, never
+  the GtkEntry itself (measured in P3.T4 fix round 2), so this asks
+  gtk_widget_is_ancestor(focus, replacement), the same test window.clj's
+  find-bar-focused? uses against the whole bar."
+  [fb]
+  (let [f (focused-widget fb)]
+    (and (not (ffi/null? f))
+         (or (= f (:replacement fb))
+             (not (zero? (g/gtk-widget-is-ancestor f (:replacement fb))))))))
+
+(defn handle-nav-key!
+  "F3/command+g (next match) and Shift+F3/command+shift+g (previous) while
+  the bar is open: 1 when handled, 0 otherwise, and always 0 while either
+  entry has an IME preedit active. P3 fix wave I4: window.clj's
+  on-window-key calls this too, so these keys work with focus in the
+  editor, not only inside the bar; handle-key! (below) delegates to it."
+  [fb keyval0 state]
+  (let [keyval (g/gdk-keyval-to-lower keyval0)]
+    (cond
+      @(:preedit-active? fb) 0
+      (not (open? fb)) 0
+      (and (= keyval KEY-F3) (shift-held? state)) (do (find-prev! fb) 1)
+      (= keyval KEY-F3) (do (find-next! fb) 1)
+      (and (command-chord? state) (shift-held? state) (= keyval KEY-G)) (do (find-prev! fb) 1)
+      (and (command-chord? state) (= keyval KEY-G)) (do (find-next! fb) 1)
+      :else 0)))
 
 (defn handle-key!
   "Keys inside the bar, wired to its own capture-phase key controller: 1
@@ -249,19 +320,13 @@
       (cond
         (= keyval KEY-ESCAPE) (do (close! fb) 1)
 
-        (and (= keyval KEY-RETURN) (= (focused-widget fb) (:replacement fb)))
+        (and (= keyval KEY-RETURN) (replacement-focused? fb))
         (do (replace-one! fb) 1)
 
         (and (= keyval KEY-RETURN) (shift-held? state)) (do (find-prev! fb) 1)
         (= keyval KEY-RETURN) (do (find-next! fb) 1)
 
-        (and (= keyval KEY-F3) (shift-held? state)) (do (find-prev! fb) 1)
-        (= keyval KEY-F3) (do (find-next! fb) 1)
-
-        (and (command-chord? state) (shift-held? state) (= keyval KEY-G)) (do (find-prev! fb) 1)
-        (and (command-chord? state) (= keyval KEY-G)) (do (find-next! fb) 1)
-
-        :else 0))))
+        :else (handle-nav-key! fb keyval0 state)))))
 
 ;; --- construction ----------------------------------------------------------
 
@@ -285,7 +350,8 @@
             :replace-widgets [replacement replace-btn replace-all-btn]
             :count-label count-label
             :ed ed :tag tag :matches (atom [])
-            :preedit-active? (atom false)}]
+            :preedit-active? (atom false)
+            :replacing? (atom false)}]
     (g/set-string-property! tag "background" SEARCH-MATCH-BG)
     (g/gtk-text-tag-table-add table tag)
     (g/gtk-box-append box query)
@@ -299,7 +365,7 @@
                              (callable (fn [_ _] (recompute-matches! fb)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data (:buf ed) "changed"
-                             (callable (fn [_ _] (recompute-matches! fb)) [:pointer :pointer] :void)
+                             (callable (fn [_ _] (on-buffer-changed fb)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data replace-btn "clicked"
                              (callable (fn [_ _] (replace-one! fb)) [:pointer :pointer] :void)

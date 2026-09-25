@@ -355,6 +355,24 @@
                {:handled handled :text text})
         (next)))))
 
+(defn- row-edit-shift-tab-unindented
+  "P3 fix wave C2: edit/unindent returns nil when no spanned line has
+  leading whitespace. handle-key! used to return 0 then, handing
+  ISO_Left_Tab to GtkTextView's own key handler, which commits a literal
+  \"\\t\" over the selection (gtk/gtktextview.c at the 4.22.4 tag, the
+  Tab/KP_Tab/ISO_Left_Tab branch). Shift+Tab must be consumed (1) and
+  leave the text alone."
+  [ed]
+  (fn [next]
+    (let [buf (:buf ed)]
+      (editor/set-text! ed "(a)\n(b)")
+      (g/with-iters* buf 0 7 (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+      (let [handled (editor/handle-key! ed KEY-ISO-LEFT-TAB 0)
+            text (editor/editor-text ed)]
+        (check :edit-shift-tab-unindented (and (= 1 handled) (= "(a)\n(b)" text))
+               {:handled handled :text text})
+        (next)))))
+
 (defn- row-edit-toggle-comment
   "Fix round 1: the selection is built BACKWARD -- with-iters* buf 0 7
   passes offset 0 first to gtk_text_buffer_select_range, so the insert
@@ -480,6 +498,7 @@
    row-edit-backspace-plain
    row-edit-tab-selection
    row-edit-shift-tab
+   row-edit-shift-tab-unindented
    row-edit-toggle-comment
    row-edit-toggle-comment-forward
    row-edit-format-all

@@ -1122,14 +1122,21 @@
     (let [dirty-before (editor/dirty? ed)
           text-before (editor/editor-text ed)]
       ((:request-close!* ui))
+      ;; P3 fix wave (#7): suppress-close? so a Cancel that wrongly
+      ;; confirmed the close shows up as closing? here instead of ending
+      ;; the run.
+      (reset! (:suppress-close? ui) true)
       ((:close-choice! ui) {:index 2})
       (let [dirty-after (editor/dirty? ed)
-            text-after (editor/editor-text ed)]
+            text-after (editor/editor-text ed)
+            closing @(:closing? ui)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
         (reset! (:alert-pending? ui) false)
         (check :close-dirty-cancel
-               (and dirty-before (= text-before text-after) dirty-after)
+               (and dirty-before (= text-before text-after) dirty-after (not closing))
                {:dirty-before dirty-before :dirty-after dirty-after
-                :text-before text-before :text-after text-after})
+                :text-before text-before :text-after text-after :closing closing})
         (next)))))
 
 (defn- row-close-dirty-discard
@@ -1419,6 +1426,222 @@
                                          {:started started? :handled handled :stopped stopped?})
                                   (next))))))))
 
+;; --- P3 fix wave -----------------------------------------------------------
+
+;; gtk-keys.md's shared table (gdkkeysyms.h) -- the product's copies are private.
+(def ^:private KEY-F3 0xffc0)
+(def ^:private KEY-G 0x067)
+
+(defn- row-find-typing-keeps-caret
+  "C1: typing in the editor while the bar is open must not move the
+  selection. The buffer's \"changed\" signal used to run the full
+  recompute, which selected (and scrolled to) the next match after the
+  caret, so the NEXT keystroke's commit deleted that selection and
+  replaced a match. Types \"z\" inside \"bar\" (away from every match)
+  with insert_interactive_at_cursor, then asserts an empty selection with
+  the caret right after the z. The second keystroke is reproduced the way
+  GtkTextView's own commit_text does it (delete_selection, then insert at
+  the cursor), and every \"foo\" must survive it."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (place-cursor! buf 5)
+    (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1)
+    (let [sel1 (g/selection-offsets buf)
+          caret1 (g/cursor-offset buf)]
+      (g/gtk-text-buffer-delete-selection buf 1 1)
+      (g/gtk-text-buffer-insert-interactive-at-cursor buf "q" -1 1)
+      (let [text (editor/editor-text ed)
+            matches @(:matches fb)]
+        (find-bar/close! fb)
+        (check :find-typing-keeps-caret
+               (and (= [6 6] sel1) (= 6 caret1)
+                    (= "foo bzqar foo baz foo" text) (= 3 (count matches)))
+               {:sel1 sel1 :caret1 caret1 :text text :matches matches})
+        (next)))))
+
+(defn- row-find-return-in-replacement
+  "I1: Return with focus in the replacement entry replaces the current
+  match. gtk_root_get_focus returns the entry's internal GtkText delegate,
+  so comparing it with the entry itself was always false and Return ran
+  find-next! instead."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :replace)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (g/gtk-editable-set-text (:replacement fb) "X")
+    (g/gtk-widget-grab-focus (:replacement fb))
+    (let [handled (find-bar/handle-key! fb KEY-RETURN 0)
+          text (editor/editor-text ed)
+          sel (g/selection-offsets buf)]
+      (find-bar/close! fb)
+      (check :find-return-in-replacement
+             (and (= 1 handled) (= "X bar foo baz foo" text) (= [6 9] sel))
+             {:handled handled :text text :sel sel})
+      (next))))
+
+(defn- row-window-find-keys-editor-focused
+  "I4: with the bar open and focus back in the editor, F3, Cmd+G and
+  Shift+F3 still move between matches, through the WINDOW's own key
+  dispatch (:handle-window-key!), not the bar's controller."
+  [ui next]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed) win (:window ui)]
+    (editor/set-text! ed "foo bar foo baz foo")
+    (find-bar/open! fb :find)
+    (g/gtk-editable-set-text (:query fb) "foo")
+    (editor/focus! ed)
+    (let [focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
+          initial (g/selection-offsets buf)
+          h1 ((:handle-window-key! ui) nil KEY-F3 0 0 nil)
+          sel1 (g/selection-offsets buf)
+          h2 ((:handle-window-key! ui) nil KEY-G 0 g/CONTROL-MASK nil)
+          sel2 (g/selection-offsets buf)
+          h3 ((:handle-window-key! ui) nil KEY-F3 0 g/SHIFT-MASK nil)
+          sel3 (g/selection-offsets buf)]
+      (find-bar/close! fb)
+      (check :window-find-keys-editor-focused
+             (and focus-is-editor? (= [0 3] initial)
+                  (= 1 h1) (= [8 11] sel1)
+                  (= 1 h2) (= [16 19] sel2)
+                  (= 1 h3) (= [8 11] sel3))
+             {:focus-is-editor focus-is-editor? :initial initial
+              :h1 h1 :sel1 sel1 :h2 h2 :sel2 sel2 :h3 h3 :sel3 sel3})
+      (next))))
+
+(defn- row-line-col-typing
+  "I2: an insert moves the insert mark by gravity without emitting
+  mark-set, so Ln/Col must follow the buffer's notify::cursor-position
+  instead. \"ab\\ncd\" with the caret at 4 reads \"Ln 2, Col 2\"; typing
+  \"x\" there must advance it to \"Ln 2, Col 3\"."
+  [ui next]
+  (let [ed (:editor ui) buf (:buf ed)]
+    (editor/set-text! ed "ab\ncd")
+    (place-cursor! buf 4)
+    (let [before (g/label-text (:line-col-label ui))]
+      (g/gtk-text-buffer-insert-interactive-at-cursor buf "x" -1 1)
+      (let [after (g/label-text (:line-col-label ui))]
+        (check :line-col-typing (and (= "Ln 2, Col 2" before) (= "Ln 2, Col 3" after))
+               {:before before :after after})
+        (next)))))
+
+(defn- row-close-dismissed
+  "#7: a dismissed alert ({:error ..}, close-choice!'s error branch) leaves
+  the window open, the buffer dirty and the text unchanged."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (reset! (:suppress-close? ui) true)
+    (let [text-before (editor/editor-text ed)]
+      ((:close-choice! ui) {:error "dismissed"})
+      (let [closing @(:closing? ui)
+            dirty-after (editor/dirty? ed)
+            text-after (editor/editor-text ed)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
+        (check :close-dismissed
+               (and (not closing) dirty-after (= text-before text-after))
+               {:closing closing :dirty-after dirty-after
+                :text-before text-before :text-after text-after})
+        (next)))))
+
+(defn- row-close-save-failed
+  "#7: Save chosen ({:index 0}) with a remembered path whose save fails
+  (its directory was removed after the first save) must not close: the
+  window stays open, the buffer stays dirty, the text is unchanged, and
+  the failure reaches the console."
+  [ui next]
+  (let [ed (:editor ui)
+        dir (java.io.File. (str (System/getProperty "java.io.tmpdir")
+                                "/jonquil-selftest-close-fail-" (System/currentTimeMillis)))
+        path (str (.getPath dir) "/f.clj")
+        mark (out-end-offset ui)]
+    (.mkdirs dir)
+    (editor/set-text! ed "(+ 5 5)")
+    ((:save-to! ui) path)
+    (.delete (java.io.File. ^String path))
+    (.delete dir)
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (reset! (:suppress-close? ui) true)
+    (let [text-before (editor/editor-text ed)]
+      ((:close-choice! ui) {:index 0})
+      (let [closing @(:closing? ui)
+            dirty-after (editor/dirty? ed)
+            text-after (editor/editor-text ed)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
+        (poll-until 1000 20
+                    (fn [] (str/includes? (since ui mark) "; save:"))
+                    (fn [reported?]
+                      (check :close-save-failed
+                             (and (not closing) dirty-after (= text-before text-after) reported?
+                                  (not (.exists dir)))
+                             {:closing closing :dirty-after dirty-after :text-before text-before
+                              :text-after text-after :reported reported? :console (since ui mark)})
+                      (next)))))))
+
+(defn- row-close-alert-build-throws
+  "#10: if building the alert throws after alert-pending? is set, the flag
+  must reset (or every later close silently does nothing) and the error
+  must reach the console. Forces the throw by redefining the alert's
+  constructor for this one close request."
+  [ui next]
+  (let [ed (:editor ui)
+        mark (out-end-offset ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (reset! (:suppress-close? ui) true)
+    (with-redefs [g/g-object-new-with-properties
+                  (fn [& _] (throw (ex-info "forced alert build failure" {})))]
+      ((:request-close!* ui)))
+    (let [pending @(:alert-pending? ui)
+          closing @(:closing? ui)
+          dirty-after (editor/dirty? ed)]
+      (reset! (:suppress-close? ui) false)
+      (reset! (:closing? ui) false)
+      (reset! (:alert-pending? ui) false)
+      (poll-until 1000 20
+                  (fn [] (str/includes? (since ui mark) "forced alert build failure"))
+                  (fn [reported?]
+                    (check :close-alert-build-throws
+                           (and (not pending) (not closing) dirty-after reported?)
+                           {:pending pending :closing closing :dirty-after dirty-after
+                            :reported reported? :console (since ui mark)})
+                    (next))))))
+
+(defn- row-quit-action-prompts
+  "C3: the application's \"quit\" action, activated the way GTK's macOS
+  delegate activates it on a Quit AppleEvent (Dock -> Quit, logout),
+  must go through the close prompt: dirty opens the alert and does not
+  close; clean closes (suppress-close? stands in for the real quit, as in
+  close-clean)."
+  [ui next]
+  (let [ed (:editor ui)
+        count-before @(:alert-dialog-count ui)]
+    (editor/set-text! ed "(+ 1 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+    (reset! (:suppress-close? ui) true)
+    ((:activate-quit-action!* ui))
+    (let [dialogs (- @(:alert-dialog-count ui) count-before)
+          pending @(:alert-pending? ui)
+          closing-dirty @(:closing? ui)
+          text-after (editor/editor-text ed)]
+      (reset! (:alert-pending? ui) false)
+      (editor/set-text! ed "(+ 1 1)")
+      ((:activate-quit-action!* ui))
+      (let [closing-clean @(:closing? ui)]
+        (reset! (:suppress-close? ui) false)
+        (reset! (:closing? ui) false)
+        (check :quit-action-prompts
+               (and (= 1 dialogs) pending (not closing-dirty) (= "(+ 1 1)z" text-after)
+                    closing-clean)
+               {:dialogs dialogs :pending pending :closing-dirty closing-dirty
+                :text-after text-after :closing-clean closing-clean})
+        (next)))))
+
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 
@@ -1505,6 +1728,14 @@
    row-window-escape-closes-bar-while-running
    row-window-escape-yields-preedit-while-running
    row-window-escape-stops-when-editor-focused
+   row-find-typing-keeps-caret
+   row-find-return-in-replacement
+   row-window-find-keys-editor-focused
+   row-line-col-typing
+   row-close-dismissed
+   row-close-save-failed
+   row-close-alert-build-throws
+   row-quit-action-prompts
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

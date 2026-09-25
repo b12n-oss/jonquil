@@ -450,9 +450,18 @@
     (if (and (editor/dirty? ed) (not @confirmed-close?))
       (do (when-not @alert-pending?
             (reset! alert-pending? true)
-            (show-close-dialog!
-             win (if-let [p @path-atom] (file-name p) "Untitled")
-             (fn [result] (close-choice! ed cv win path-atom confirmed-close? result))))
+            ;; P3 fix wave #10: a throw while building the alert used to
+            ;; leave alert-pending? true for the rest of the session (every
+            ;; later close silently did nothing) and escape into GTK's
+            ;; signal emission. Reset the flag and report it instead; the
+            ;; window stays open, since the text is still unsaved.
+            (try
+              (show-close-dialog!
+               win (if-let [p @path-atom] (file-name p) "Untitled")
+               (fn [result] (close-choice! ed cv win path-atom confirmed-close? result)))
+              (catch :default e
+                (reset! alert-pending? false)
+                (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
           1)
       (do (reset! closing? true)
           (if @suppress-close?
@@ -692,10 +701,10 @@
 
   P2.T10: a command chord plus W closes the window, normalised and checked
   the same way as R/O/S. gtk_window_close fires the same close-request
-  handler a real close-button click or OS window-close would, which already
-  calls g_application_quit -- so this needs no extra quit call of its own,
-  and (per the task) no dirty-buffer prompt, same as the close-button/OS
-  path today.
+  handler a real close-button click or OS window-close would
+  (close-request-fn): since P3.T5 that asks before closing a dirty buffer,
+  and otherwise calls g_application_quit -- so this needs no prompt or quit
+  call of its own.
 
   P3.T4: the find bar's own handle-key! is checked FIRST for Escape, before
   evaluating? even runs -- see find-bar-focused?'s docstring for why this
@@ -711,7 +720,11 @@
   coerced into always-1-or-fall-through: a 0 has to fall all the way
   through to GTK's default handling (the composing entry's own IM
   context), never into evaluating?'s Stop below, or Escape would cancel
-  the running program instead of the IME composition."
+  the running program instead of the IME composition.
+
+  P3 fix wave I4: F3/Cmd+G (next match) and Shift+F3/Cmd+Shift+G
+  (previous) go to find-bar/handle-nav-key! whenever the bar is open, so
+  they also work with focus in the editor or the console."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
    run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
    win fb open-find-fn open-replace-fn]
@@ -723,6 +736,9 @@
         (find-bar/handle-key! fb keyval0 state)
         (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
         (= keyval KEY-ESCAPE) 0
+        ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
+        ;; is open, wherever focus is (1 only when the bar acted).
+        (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
         (= keyval KEY-F6) (do (toggle-focus-fn) 1)
         (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
         (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
@@ -858,6 +874,20 @@
                                                          suppress-close? closing?)
                                        [:pointer :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
+    ;; delegate lets a Quit AppleEvent (Dock -> Quit, logout, shutdown)
+    ;; terminate the process at once -- measured: a dirty ./jonquil sent
+    ;; one by pid exited 0 in ~250ms with no prompt. With it, the delegate
+    ;; activates this action and cancels the terminate; the action closes
+    ;; the window, so a dirty buffer gets the same prompt as the close
+    ;; button (close-request-fn) and a clean one quits. It also takes GTK's
+    ;; default Cmd+Q accelerator for app.quit on macOS.
+    (let [quit-action (g/g-simple-action-new "quit" ffi/null)]
+      (g/g-signal-connect-data quit-action "activate"
+                               (callable (fn [_action _param _data] (g/gtk-window-close win) nil)
+                                         [:pointer :pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
+      (g/g-action-map-add-action app quit-action))
     (editor/on-dirty-changed! ed (fn [_dirty] (update-title! ed win path)))
     ;; I4: a dirty->clean transition (a successful Save) re-arms the
     ;; discard warning, so an unrelated LATER dirty streak earns its own.
@@ -913,6 +943,10 @@
                  ;; button/OS chrome uses. closing?/suppress-close? are
                  ;; self-test-only hooks (close-request-fn's docstring).
                  :close-choice! (fn [result] (close-choice! ed cv win path confirmed-close? result))
+                 ;; P3 fix wave C3: activates the application's "quit"
+                 ;; action exactly as GTK's macOS delegate does on a Quit
+                 ;; AppleEvent.
+                 :activate-quit-action!* (fn [] (g/g-action-group-activate-action app "quit" ffi/null))
                  :request-close!* (fn [] (g/gtk-window-close win))
                  :closing? closing?
                  :suppress-close? suppress-close?
@@ -931,7 +965,7 @@
   :status-label :line-col-label :window :find-bar :run!* :stop!*
   :open-path! :save-to! :run-selection!* :toggle-focus!* :clear-console!*
   :zoom!* :handle-window-key! :simulate-open-result! :simulate-save-result!
-  :close-choice! :request-close!* :closing? :suppress-close?
+  :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
   :register-alert-choice-for-test! :complete-alert-for-test!}; the
   self-test rows call these functions directly, exactly as the buttons and

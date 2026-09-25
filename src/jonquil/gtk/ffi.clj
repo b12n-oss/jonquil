@@ -605,3 +605,30 @@
 ;; focus grabbed on the query entry and on the replacement entry, false
 ;; with focus grabbed on the editor and on the console.
 (ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)
+
+;; --- P3 fix wave ---
+;; gtk_text_buffer_delete_selection: gtktextbuffer.h:476-479 (gtk4 4.22.4,
+;; GDK_AVAILABLE_IN_ALL). Fixed arity: (buffer, interactive, default_editable)
+;; -> gboolean. GtkTextView's own gtk_text_view_commit_text calls exactly this
+;; before inserting a typed character (gtk/gtktextview.c, 4.22.4 tag), so a
+;; self-test row pairs it with insert_interactive_at_cursor to reproduce what
+;; one keystroke does to a live selection, without synthesizing the key.
+(ffi/defcfn gtk-text-buffer-delete-selection "gtk_text_buffer_delete_selection"
+  [:pointer :int :int] :int)
+
+;; C3: an application "quit" action. GTK's macOS delegate
+;; (gtk/gtkapplication-quartz.c:80-95 at the 4.22.4 tag) answers
+;; applicationShouldTerminate: -- Dock Quit, logout, shutdown, the Quit
+;; AppleEvent -- with NSTerminateNow unless the app has a "quit" action, in
+;; which case it activates that action and returns NSTerminateCancel.
+;; glib 2.90.0 headers: g_simple_action_new gio/gsimpleaction.h:43-44
+;; (name, const GVariantType* parameter_type, NULL for none);
+;; g_action_map_add_action gio/gactionmap.h:84-85 (GtkApplication implements
+;; GActionMap); g_action_group_activate_action gio/gactiongroup.h:131-133 (the
+;; call the quartz delegate itself makes; used by a self-test row). All
+;; fixed-arity. GSimpleAction's "activate" signal callback is (GSimpleAction*,
+;; GVariant* parameter, gpointer user_data) -> void.
+(ffi/defcfn g-simple-action-new "g_simple_action_new" [:string :pointer] :pointer)
+(ffi/defcfn g-action-map-add-action "g_action_map_add_action" [:pointer :pointer] :void)
+(ffi/defcfn g-action-group-activate-action "g_action_group_activate_action"
+  [:pointer :string :pointer] :void)

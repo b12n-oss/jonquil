@@ -90,7 +90,7 @@
     (g/gtk-text-buffer-end-irreversible-action buf)
     (reset! (:saved-text ed) s))
   (reset! (:dirty-check-needed? ed) true)
-  ;; P3.T5: belt-and-braces alongside the buffer's own "mark-set" (below),
+  ;; P3.T5: belt-and-braces alongside the buffer's own cursor notify (below),
   ;; same reasoning as the dirty-check-needed? line above it.
   (doseq [f @(:on-cursor-fns ed)] (f (g/cursor-line-col (:buf ed))))
   nil)
@@ -114,9 +114,8 @@
 (defn on-cursor-moved!
   "Registers f (fn [[line col]], both 0-based) to be called, on the GTK
   thread, whenever the insert mark's position changes: on the buffer's
-  own \"mark-set\" signal, filtered to the insert mark (probe 6 measured
-  mark-set firing on place_cursor and select_range; arrow keys/clicks are
-  inferred, not measured -- see the report), and on set-text! (which
+  own \"notify::cursor-position\" (P3 fix wave I2, replacing P3.T5's
+  mark-set, which an insert or delete never emits), and on set-text! (which
   resets the cursor without necessarily firing mark-set itself, same
   belt-and-braces reasoning as dirty-check-needed?). Multiple
   registrations fire in registration order, mirroring on-dirty-changed!."
@@ -326,9 +325,15 @@
       (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
       (apply-edit! ed (edit/backspace-pair (snapshot ed)))
 
+      ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
+      ;; spanned line has leading whitespace), the way Tab always is.
+      ;; Returning 0 handed the key to GtkTextView's own handler, which
+      ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
+      ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
+      ;; lines 5744-5764).
       (and (no-command-modifiers? state)
            (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
-      (apply-edit! ed (edit/unindent (snapshot ed)))
+      (do (apply-op! ed (edit/unindent (snapshot ed))) 1)
 
       (and (no-command-modifiers? state) (= keyval KEY-TAB))
       (apply-edit! ed (edit/indent (snapshot ed)))
@@ -379,16 +384,21 @@
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; P3.T5 (probe 6): "mark-set" fires on every mark move, so filter to
-    ;; the insert mark -- otherwise a selection's bound-mark move (or the
-    ;; find bar's own marks) would also fire the status bar's own update.
-    (g/g-signal-connect-data buf "mark-set"
-                             (callable (fn [_buf _iter mark _data]
-                                         (when (= mark (g/gtk-text-buffer-get-insert buf))
-                                           (doseq [f @(:on-cursor-fns ed)]
-                                             (f (g/cursor-line-col buf))))
+    ;; P3 fix wave I2: the buffer's "cursor-position" property notify, in
+    ;; place of P3.T5's "mark-set" filtered to the insert mark. An insert or
+    ;; delete moves the insert mark by gravity without emitting mark-set,
+    ;; so Ln/Col went stale while typing. GtkTextBuffer notifies
+    ;; cursor-position from real_insert_text, real_delete_range and
+    ;; real_mark_set when the mark is the insert mark
+    ;; (gtk/gtktextbuffer.c:1293, 2090 and 3067 at the 4.22.4 tag), so this
+    ;; one signal covers typing, deletion and every mark-set case.
+    ;; GObject::notify's callback is (instance, GParamSpec*, user_data).
+    (g/g-signal-connect-data buf "notify::cursor-position"
+                             (callable (fn [_buf _pspec _data]
+                                         (doseq [f @(:on-cursor-fns ed)]
+                                           (f (g/cursor-line-col buf)))
                                          nil)
-                                       [:pointer :pointer :pointer :pointer] :void)
+                                       [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; I5: GtkTextView's OWN "preedit-changed" signal (distinct from
     ;; GtkIMContext's identically-named one) -- gtk/gtktextview.c:1529 per
