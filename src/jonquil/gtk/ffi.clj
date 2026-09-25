@@ -671,3 +671,76 @@
 (ffi/defcfn g-action-map-add-action "g_action_map_add_action" [:pointer :pointer] :void)
 (ffi/defcfn g-action-group-activate-action "g_action_group_activate_action"
   [:pointer :string :pointer] :void)
+
+;; --- fix wave item 2: gtk-interface-color-scheme replaces the deprecated
+;; gtk-application-prefer-dark-theme boolean. Deprecated since GTK 4.20;
+;; from 4.23.1 each set logs a g_warning ("Use GtkSettings:gtk-interface-
+;; color-scheme instead"). gtk_interface_color_scheme_get_type:
+;; gtktypebuiltins.h:247 (gtk4 4.22.4, GDK_AVAILABLE_IN_ALL, and exported --
+;; `nm -gU libgtk-4.dylib` lists _gtk_interface_color_scheme_get_type).
+;; GtkInterfaceColorScheme (gtkenums.h:1998-2020, "Since: 4.20"):
+;; UNSUPPORTED=0, DEFAULT=1, DARK=2, LIGHT=3.
+;;
+;; Probe (2026-09-26, throwaway, not committed): gtk_init then GValue
+;; set/get through this GType round-tripped DARK(2) and LIGHT(3) exactly.
+;; A real window's toolbar (unthemed Adwaita default CSS, per the spec's
+;; "no per-theme CSS for buttons/toolbar") sampled identically under both
+;; mechanisms: rgb(53,53,53) under gtk-application-prefer-dark-theme=true
+;; AND under gtk-interface-color-scheme=DARK(2); rgb(246,245,244) under
+;; prefer-dark-theme=false/DEFAULT-baseline AND under explicit LIGHT(3).
+;; All three checks the brief asked for came back yes, so apply-window-
+;; theme! switches to the new property.
+(ffi/defcfn gtk-interface-color-scheme-get-type "gtk_interface_color_scheme_get_type" [] :size_t)
+(def GTK-INTERFACE-COLOR-SCHEME-DARK 2)
+(def GTK-INTERFACE-COLOR-SCHEME-LIGHT 3)
+
+(defn set-color-scheme!
+  "Sets GtkSettings' gtk-interface-color-scheme to DARK when dark? is
+  truthy, else explicit LIGHT (never DEFAULT, which would track the OS
+  appearance instead of Jonquil's own per-theme choice -- the same
+  explicit-either-way behaviour the old boolean had)."
+  [settings dark?]
+  (set-gvalue! settings "gtk-interface-color-scheme" (gtk-interface-color-scheme-get-type)
+               (fn [v] (g-value-set-enum v (if dark?
+                                             GTK-INTERFACE-COLOR-SCHEME-DARK
+                                             GTK-INTERFACE-COLOR-SCHEME-LIGHT)))))
+
+(defn color-scheme-dark?
+  "True when gtk-interface-color-scheme reads back DARK -- the self-test
+  row's replacement for get-bool-property on the deprecated boolean."
+  [settings]
+  (= GTK-INTERFACE-COLOR-SCHEME-DARK
+     (get-gvalue! settings "gtk-interface-color-scheme" (gtk-interface-color-scheme-get-type)
+                  g-value-get-enum)))
+
+;; --- fix wave item 7: the CSS rows read the provider's own serialisation,
+;; not the code-css atom mirror. gtk_css_provider_to_string:
+;; gtkcssprovider.h:46 (gtk4 4.22.4, GDK_AVAILABLE_IN_ALL), fixed arity
+;; (provider) -> a newly allocated char* the caller frees -- buffer-text's
+;; own pattern (:pointer, then ptr->string, then g_free).
+(ffi/defcfn gtk-css-provider-to-string "gtk_css_provider_to_string" [:pointer] :pointer)
+
+(defn css-provider-string
+  "provider's current stylesheet as a Clojure string. Probe (2026-09-26):
+  GTK's own serialisation normalises colours (#000000 -> rgb(0,0,0)) and
+  re-orders/re-indents the declarations, but keeps \"font-size: <n>px;\"
+  verbatim."
+  [provider]
+  (let [p (gtk-css-provider-to-string provider)]
+    (try (ffi/ptr->string p) (finally (g-free p)))))
+
+;; --- fix wave item 1: verify (never assume) that the find bar's
+;; search-match tag wins tag-table priority over a syntax tag on the same
+;; range. gtk_text_tag_set_priority: gtktexttag.h:100-101 (gtk4 4.22.4,
+;; GDK_AVAILABLE_IN_ALL), fixed arity (tag, priority) -> void. Its getter
+;; counterpart, gtk_text_tag_get_priority: gtktexttag.h:97-98, fixed arity
+;; (tag) -> int -- a tag's priority IS its 0-based tag-table add order
+;; (GTK docs: "text tags added later have higher priority", and a
+;; conflicting property, e.g. two tags both setting foreground, is decided
+;; by whichever overlapping tag has the higher priority), so comparing the
+;; two tags' priorities is a direct, non-visual way to confirm which one's
+;; foreground actually renders. Bound so the fix has a fallback ready;
+;; whether set-priority is actually called is decided by the measurement
+;; (see find_bar.clj and the theme-keeps-find-highlight self-test row).
+(ffi/defcfn gtk-text-tag-get-priority "gtk_text_tag_get_priority" [:pointer] :int)
+(ffi/defcfn gtk-text-tag-set-priority "gtk_text_tag_set_priority" [:pointer :int] :void)

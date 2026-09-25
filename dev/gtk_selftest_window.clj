@@ -1663,7 +1663,9 @@
   (#c792ea), [:rainbow 0] (#f78c6c), :unmatched (:red, #f07178), the
   console's :result (#c3e88d) and the find bar's :find-highlight
   (#4d4520); then light's same five (#cf222e, #953800, #cf222e, #0a3069,
-  #fff2a8)."
+  #fff2a8). Fix wave item 1: also the find bar tag's own foreground-rgba,
+  which must equal the theme's :text (navy #c8cad8, light #24292f) so
+  matched text stays readable on top of the highlight."
   [ui next]
   (let [ed (:editor ui) cv (:console ui) fb (:find-bar ui)
         kw-tag (get (:tags ed) :keyword)
@@ -1676,35 +1678,42 @@
           rb0-navy (g/rgba-property-hex rb0-tag "foreground-rgba")
           um-navy (g/rgba-property-hex um-tag "foreground-rgba")
           result-navy (g/rgba-property-hex result-tag "foreground-rgba")
-          fb-navy (g/rgba-property-hex fb-tag "background-rgba")]
+          fb-navy (g/rgba-property-hex fb-tag "background-rgba")
+          fbfg-navy (g/rgba-property-hex fb-tag "foreground-rgba")]
       ((:set-theme!* ui) :light)
       (let [kw-light (g/rgba-property-hex kw-tag "foreground-rgba")
             rb0-light (g/rgba-property-hex rb0-tag "foreground-rgba")
             um-light (g/rgba-property-hex um-tag "foreground-rgba")
             result-light (g/rgba-property-hex result-tag "foreground-rgba")
-            fb-light (g/rgba-property-hex fb-tag "background-rgba")]
+            fb-light (g/rgba-property-hex fb-tag "background-rgba")
+            fbfg-light (g/rgba-property-hex fb-tag "foreground-rgba")]
         (check :theme-retints-tags
                (and (= "#c792ea" kw-navy) (= "#f78c6c" rb0-navy) (= "#f07178" um-navy)
-                    (= "#c3e88d" result-navy) (= "#4d4520" fb-navy)
+                    (= "#c3e88d" result-navy) (= "#4d4520" fb-navy) (= "#c8cad8" fbfg-navy)
                     (= "#cf222e" kw-light) (= "#953800" rb0-light) (= "#cf222e" um-light)
-                    (= "#0a3069" result-light) (= "#fff2a8" fb-light))
+                    (= "#0a3069" result-light) (= "#fff2a8" fb-light) (= "#24292f" fbfg-light))
                {:kw-navy kw-navy :rb0-navy rb0-navy :um-navy um-navy
-                :result-navy result-navy :fb-navy fb-navy
+                :result-navy result-navy :fb-navy fb-navy :fbfg-navy fbfg-navy
                 :kw-light kw-light :rb0-light rb0-light :um-light um-light
-                :result-light result-light :fb-light fb-light})
+                :result-light result-light :fb-light fb-light :fbfg-light fbfg-light})
         ((:zoom!* ui) :reset)
         (next)))))
 
 (defn- row-theme-css
-  "dark's code-css (jonquil.theme/code-css) at the default font size:
-  background-color #000000, color #e0e0e0, font-size 13px."
+  "dark's code-css (jonquil.theme/code-css) at the default font size, read
+  back from the shared GtkCssProvider's OWN serialisation (fix wave item
+  7: :code-css* now calls gtk_css_provider_to_string instead of reading
+  the code-css atom mirror). Measured (2026-09-26): GTK normalises hex
+  colours to rgb(r,g,b) and re-orders/re-indents the declarations, but
+  keeps \"font-size: <n>px;\" verbatim -- background-color rgb(0,0,0),
+  color rgb(224,224,224), font-size 13px."
   [ui next]
   ((:zoom!* ui) :reset)
   ((:set-theme!* ui) :dark)
   (let [css ((:code-css* ui))]
     (check :theme-css
-           (and (str/includes? css "background-color: #000000;")
-                (str/includes? css "color: #e0e0e0;")
+           (and (str/includes? css "background-color: rgb(0,0,0);")
+                (str/includes? css "color: rgb(224,224,224);")
                 (str/includes? css "font-size: 13px;"))
            {:css css})
     ((:set-theme!* ui) :light)
@@ -1712,15 +1721,18 @@
     (next)))
 
 (defn- row-theme-prefer-dark
-  "GtkSettings' gtk-application-prefer-dark-theme (probe probe.clj), read
-  back via get-bool-property: true for dark's :dark? true, false for
-  solarized's :dark? false."
+  "GtkSettings' colour scheme, read back via color-scheme-dark?: true for
+  dark's :dark? true, false for solarized's :dark? false. Fix wave item 2:
+  gtk-application-prefer-dark-theme is deprecated (GTK 4.20+, a
+  g_warning from 4.23.1); apply-window-theme! now sets the replacement,
+  gtk-interface-color-scheme, so this row reads that property instead
+  (measured live to darken the chrome exactly as the old boolean did --
+  see ffi.clj's own citation)."
   [ui next]
   ((:set-theme!* ui) :dark)
-  (let [dark? (g/get-bool-property (g/gtk-settings-get-default) "gtk-application-prefer-dark-theme")]
+  (let [dark? (g/color-scheme-dark? (g/gtk-settings-get-default))]
     ((:set-theme!* ui) :solarized)
-    (let [solarized-dark? (g/get-bool-property (g/gtk-settings-get-default)
-                                               "gtk-application-prefer-dark-theme")]
+    (let [solarized-dark? (g/color-scheme-dark? (g/gtk-settings-get-default))]
       (check :theme-prefer-dark (and dark? (not solarized-dark?))
              {:dark dark? :solarized-dark solarized-dark?})
       ((:set-theme!* ui) :light)
@@ -1755,10 +1767,18 @@
 (defn- row-theme-keeps-find-highlight
   "A theme switch never touches the find bar's :matches: with the bar open
   on \"foo bar foo\" (matches at [0 3] and [8 11]), switching theme must
-  leave both tagged, the count label unchanged, and only the tag's
-  background retinted (dark's #5c4b00)."
+  leave both tagged, the count label unchanged, the tag's background
+  retinted (dark's #5c4b00) and, fix wave item 1, its foreground equal to
+  the theme's :text (dark #e0e0e0) so matched text stays readable. Also
+  checks the search-match tag's tag-table priority against a syntax tag's
+  (:special-form, present in the buffer as \"foo\" isn't a token but the
+  tag object exists once the editor's paint plan has run) -- GTK's
+  priority is add order and a higher priority wins a conflicting property
+  on an overlapping range, so search-match (added after every editor tag
+  in make-find-bar) must read a strictly higher priority."
   [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)
+        special-form-tag (get (:tags ed) :special-form)]
     (editor/set-text! ed "foo bar foo")
     (find-bar/open! fb :find)
     (g/gtk-editable-set-text (:query fb) "foo")
@@ -1767,11 +1787,16 @@
       (let [tag0 (g/has-tag-at? buf 0 (:tag fb))
             tag8 (g/has-tag-at? buf 8 (:tag fb))
             label-after (g/label-text (:count-label fb))
-            bg (g/rgba-property-hex (:tag fb) "background-rgba")]
+            bg (g/rgba-property-hex (:tag fb) "background-rgba")
+            fg (g/rgba-property-hex (:tag fb) "foreground-rgba")
+            fb-priority (g/gtk-text-tag-get-priority (:tag fb))
+            syntax-priority (g/gtk-text-tag-get-priority special-form-tag)]
         (find-bar/close! fb)
         (check :theme-keeps-find-highlight
-               (and tag0 tag8 (= label-before label-after) (= "#5c4b00" bg))
-               {:tag0 tag0 :tag8 tag8 :label-before label-before :label-after label-after :bg bg})
+               (and tag0 tag8 (= label-before label-after) (= "#5c4b00" bg) (= "#e0e0e0" fg)
+                    (> fb-priority syntax-priority))
+               {:tag0 tag0 :tag8 tag8 :label-before label-before :label-after label-after
+                :bg bg :fg fg :fb-priority fb-priority :syntax-priority syntax-priority})
         ((:set-theme!* ui) :light)
         ((:zoom!* ui) :reset)
         (next)))))
@@ -1780,7 +1805,9 @@
   "Zoom and theme reload the SAME shared provider and must not overwrite
   each other's part of the CSS: zoom :in (13->14px), switch to navy (css1:
   14px + navy's #1a1b2e background), zoom :in again (14->16px; css2: 16px
-  and STILL navy's #1a1b2e, not the default theme's)."
+  and STILL navy's #1a1b2e, not the default theme's). Fix wave item 7:
+  read from the provider's own serialisation (:code-css*), where navy's
+  #1a1b2e prints as rgb(26,27,46) (measured 2026-09-26)."
   [ui next]
   ((:zoom!* ui) :reset)
   ((:zoom!* ui) :in)
@@ -1789,8 +1816,8 @@
     ((:zoom!* ui) :in)
     (let [css2 ((:code-css* ui))]
       (check :theme-and-zoom-share-css
-             (and (str/includes? css1 "font-size: 14px;") (str/includes? css1 "#1a1b2e")
-                  (str/includes? css2 "font-size: 16px;") (str/includes? css2 "#1a1b2e"))
+             (and (str/includes? css1 "font-size: 14px;") (str/includes? css1 "rgb(26,27,46)")
+                  (str/includes? css2 "font-size: 16px;") (str/includes? css2 "rgb(26,27,46)"))
              {:css1 css1 :css2 css2})
       ((:set-theme!* ui) :light)
       ((:zoom!* ui) :reset)
@@ -1895,27 +1922,33 @@
   java.io.tmpdir and differs from the real one (jonquil.settings/
   settings-path, no env/home override -- the actual production path);
   cycling the theme, which writes to the WINDOW's path, must never touch
-  the real file's existence or its content, checked both before and after
-  the write."
+  the real file. Fix wave item 5: checked via .exists/.lastModified/
+  .length only -- never a slurp of the real file's content, which used to
+  read (and, on every check, print) whatever theme the user's own real
+  settings.edn happens to hold."
   [ui next]
   (let [window-path ((:settings-path* ui))
         real-path (settings/settings-path)
         real-file (java.io.File. ^String real-path)
         existed-before (.exists real-file)
-        content-before (when existed-before (slurp real-file))]
+        mtime-before (.lastModified real-file)
+        length-before (.length real-file)]
     ((:cycle-theme!* ui))
     (let [existed-after (.exists real-file)
-          content-after (when existed-after (slurp real-file))]
+          mtime-after (.lastModified real-file)
+          length-after (.length real-file)]
       ((:set-theme!* ui) :light)
       ((:zoom!* ui) :reset)
       (check :settings-isolated
              (and (str/starts-with? window-path (System/getProperty "java.io.tmpdir"))
                   (not= window-path real-path)
                   (= existed-before existed-after)
-                  (= content-before content-after))
+                  (= mtime-before mtime-after)
+                  (= length-before length-after))
              {:window-path window-path :real-path real-path
               :existed-before existed-before :existed-after existed-after
-              :content-before content-before :content-after content-after})
+              :mtime-before mtime-before :mtime-after mtime-after
+              :length-before length-before :length-after length-after})
       (next))))
 
 (defn- row-settings-unreadable-warns

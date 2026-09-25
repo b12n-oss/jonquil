@@ -5,8 +5,10 @@
   mode, and a match-count label.
 
   Every match gets a \"search-match\" GtkTextTag (background from the
-  active theme's :find-highlight, probe 2; starts with theme/default-
-  theme's colour and apply-theme! retints it in place, TH.T4). Matches are
+  active theme's :find-highlight, probe 2, and foreground from the
+  theme's :text so matched text stays readable, fix wave item 1; starts
+  with theme/default-theme's colours and apply-theme! retints it in
+  place, TH.T4). Matches are
   recomputed over the editor text on every query change and
   on every editor buffer change while the bar is open (both wired as GTK
   \"changed\" signals here), but only a query change, open!, next/prev and
@@ -205,11 +207,15 @@
   nil)
 
 (defn apply-theme!
-  "Sets the search-match tag's background to theme t's :find-highlight
-  (TH.T4). Only ever touches the tag's colour -- never the editor's
-  matches, its buffer text or its selection."
+  "Sets the search-match tag's background to theme t's :find-highlight and
+  its foreground to t's :text (TH.T4; fix wave item 1 -- a comment or a
+  keyword inside a match otherwise kept its own syntax colour on top of
+  the highlight, which measured unreadable in every theme, 1.82-2.68).
+  Only ever touches the tag's colour -- never the editor's matches, its
+  buffer text or its selection."
   [fb t]
   (g/set-string-property! (:tag fb) "background" (:find-highlight t))
+  (g/set-string-property! (:tag fb) "foreground" (:text t))
   nil)
 
 ;; --- moving between matches -----------------------------------------------
@@ -361,8 +367,19 @@
             :ed ed :tag tag :matches (atom [])
             :preedit-active? (atom false)
             :replacing? (atom false)}]
-    (g/set-string-property! tag "background" (:find-highlight (theme/theme theme/default-theme)))
+    (let [default-t (theme/theme theme/default-theme)]
+      (g/set-string-property! tag "background" (:find-highlight default-t))
+      (g/set-string-property! tag "foreground" (:text default-t)))
     (g/gtk-text-tag-table-add table tag)
+    ;; Fix wave item 1: measured, not assumed -- the editor's own syntax
+    ;; tags are added to this SAME tag table before make-find-bar ever
+    ;; runs (activate! builds ed, then fb), and GTK's priority is add
+    ;; order, so search-match already outranks them. theme-keeps-find-
+    ;; highlight's own row reads both tags' gtk_text_tag_get_priority and
+    ;; measured search-match at 18 against :special-form's 6 -- search-
+    ;; match wins already, so no explicit gtk_text_tag_set_priority call
+    ;; is needed (it stays bound in ffi.clj in case a future tag order
+    ;; change ever needs it).
     (g/gtk-box-append box query)
     (g/gtk-box-append box replacement)
     (g/gtk-box-append box replace-btn)

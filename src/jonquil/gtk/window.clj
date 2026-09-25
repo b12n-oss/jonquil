@@ -639,7 +639,12 @@
 (defn- reload-code-css!
   "Loads theme t's CSS (jonquil.theme/code-css) at font size px into the
   one shared GtkCssProvider, and remembers the CSS string in code-css
-  (TH.T4, an atom read back only by :code-css* for self-test rows)."
+  (TH.T4, an atom kept for now; fix wave item 7 moved :code-css*'s own
+  self-test read to the provider's own gtk_css_provider_to_string
+  serialisation instead, via g/css-provider-string, so this mirror is no
+  longer read anywhere -- left in place since removing it threads a
+  parameter change through five functions for no behavioural gain, out of
+  scope for this item)."
   [provider t px code-css]
   (let [css (theme/code-css t px)]
     (reset! code-css css)
@@ -658,17 +663,23 @@
 
 (defn- apply-window-theme!
   "TH.T4: applies theme k to the editor, console, find bar, the shared CSS
-  provider (at the current @zoom-px) and GtkSettings' prefer-dark flag, and
+  provider (at the current @zoom-px) and GtkSettings' colour-scheme, and
   resets theme-name to k. Only ever writes tag properties, the CSS
-  provider and the GtkSettings flag -- never buffer text, marks, the
-  selection or undo history."
+  provider and the GtkSettings property -- never buffer text, marks, the
+  selection or undo history.
+
+  Fix wave item 2: gtk-application-prefer-dark-theme is deprecated (GTK
+  4.20+, a g_warning from 4.23.1); this sets GtkSettings' replacement,
+  gtk-interface-color-scheme, instead (g/set-color-scheme!, measured
+  live to darken the chrome exactly as the old boolean did -- see
+  ffi.clj's own citation)."
   [ed cv fb provider zoom-px theme-name code-css k]
   (let [t (theme/theme k)]
     (editor/apply-theme! ed t)
     (cview/apply-theme! cv t)
     (find-bar/apply-theme! fb t)
     (reload-code-css! provider t @zoom-px code-css)
-    (g/set-bool-property! (g/gtk-settings-get-default) "gtk-application-prefer-dark-theme" (:dark? t))
+    (g/set-color-scheme! (g/gtk-settings-get-default) (:dark? t))
     (reset! theme-name k))
   nil)
 
@@ -831,7 +842,14 @@
         ;; file; every harness (dev/gtk_selftest_window.clj, dev/demo_shots.clj,
         ;; dev/smoke/binary_smoke.clj's XDG_CONFIG_HOME) is responsible for
         ;; passing its own isolated :settings-path instead.
-        settings-path (atom (or settings-path (settings/settings-path)))
+        ;;
+        ;; Fix wave item 8: named settings-path* (not settings-path) so it
+        ;; no longer shadows the destructured :settings-path option above
+        ;; -- this let's own (or settings-path ...) init form still reads
+        ;; that option correctly either way (a let binding's own init
+        ;; expression sees the OUTER scope, never itself), but the shadow
+        ;; made that non-obvious to a reader.
+        settings-path* (atom (or settings-path (settings/settings-path)))
         path (atom file)
         discard-warned? (atom false)
         ed (editor/make-editor)
@@ -856,8 +874,9 @@
         zoom-px (atom commands/DEFAULT-FONT-PX)
         ;; TH.T4: the active theme's name and the last CSS string loaded,
         ;; kept next to zoom-px -- TH.T5 loads theme-name's initial value
-        ;; from settings; code-css exists only for :code-css*'s self-test
-        ;; hook.
+        ;; from settings. code-css is now write-only (fix wave item 7:
+        ;; :code-css* reads the CSS provider itself instead) -- see
+        ;; reload-code-css!'s docstring.
         theme-name (atom theme/default-theme)
         code-css (atom nil)
         run-fn (fn [] (do-run! ed cv session status-label))
@@ -873,7 +892,7 @@
         set-theme-fn (fn [k] (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
         cycle-theme-fn (fn [] (do-cycle-theme! ed cv fb provider zoom-px theme-name code-css
-                                               settings-path status-label
+                                               settings-path* status-label
                                                (fn [] (eval/evaluating? (:ctx session)))))
         open-find-fn (fn [] (find-bar/open! fb :find))
         open-replace-fn (fn [] (find-bar/open! fb :replace))
@@ -929,7 +948,7 @@
     (g/gtk-style-context-add-provider-for-display
      (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
     ;; TH.T5: the saved theme, in place of TH.T4's fixed theme/default-theme.
-    (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css @settings-path)
+    (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css @settings-path*)
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (fn [_ _] (run-fn)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -1013,22 +1032,25 @@
                  :zoom!* zoom-fn
                  ;; TH.T4 self-test hooks: applies a theme (never saves --
                  ;; TH.T5's job), reads back the active theme name, and
-                 ;; reads back the last CSS string reload-code-css! loaded.
+                 ;; reads back the shared CSS provider's OWN serialisation
+                 ;; (fix wave item 7 -- the code-css atom was a mirror the
+                 ;; rows could drift from; g/css-provider-string asks the
+                 ;; provider itself instead).
                  :set-theme!* set-theme-fn
                  :theme-name* (fn [] @theme-name)
-                 :code-css* (fn [] @code-css)
+                 :code-css* (fn [] (g/css-provider-string provider))
                  ;; TH.T5: the chord's own action, the settings path this
                  ;; window reads/writes, and the exact startup-load fn
                  ;; activate! itself just ran (so a row can drive the same
                  ;; path against a synthetic settings file).
                  :cycle-theme!* cycle-theme-fn
-                 :settings-path* (fn [] @settings-path)
+                 :settings-path* (fn [] @settings-path*)
                  :load-settings!* (fn [p] (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css p))
                  ;; TH.T5 self-test hook only (row-theme-save-failure-
                  ;; reported): repoints the window's own settings path so a
                  ;; save can be forced to fail without touching the real
                  ;; settings file or racing the filesystem.
-                 :settings-path!* (fn [p] (reset! settings-path p))
+                 :settings-path!* (fn [p] (reset! settings-path* p))
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
