@@ -4,13 +4,17 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing and themes work**
+**Status: alpha, the window, editing, themes and help work**
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
-See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, themes, and the keys.
+See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, themes, help, and the keys.
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
+
+Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot; F12 or Ctrl+B jumps to where it's defined; Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
+
+![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
 ## Requirements
 
@@ -33,19 +37,20 @@ bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Hom
 The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
 
 ```
-jolt build: note — on macOS this binary is unsigned; to share it,
+jolt build: note: on macOS this binary is unsigned; to share it,
   `xattr -d com.apple.quarantine ./jonquil` on the target, or sign it.
 ```
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-26, 94 tests pass (682 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-26, 106 tests pass (744 assertions).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
-- `jonquil.docs`: Doc strings and completion candidates for an eval namespace.
+- `jonquil.docs`: Doc strings and completion candidates for an eval namespace, falling back to `user` when that namespace is gone.
 - `jonquil.edit`: Pure edit operations (smart enter, auto-pair, indent, rename, etc.).
 - `jonquil.eval`: The eval engine with `run-interruptible` Stop, output streaming and REPL history.
+- `jonquil.help`: The decisions behind completion, quick doc, jump to definition and rename.
 
 ## Commands
 

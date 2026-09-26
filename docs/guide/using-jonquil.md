@@ -3,7 +3,7 @@
 Jonquil is a DrRacket-style IDE for Clojure: a Definitions editor above an
 Interactions console, with a Run button that runs the top pane and a Stop
 that actually stops it. This page walks through the window as it stands
-after Phase 3 and the Themes phase.
+after Phase 3, the Themes phase, and P4's help features.
 
 ## The window
 
@@ -265,6 +265,104 @@ doesn't know, also starts it in light, but says so once in the console.
 A settings file that's a symlink stays a symlink after Jonquil saves
 through it. To go back to light, delete the file.
 
+## Help
+
+P4 adds four features on top of everything above: completion with a doc
+preview, quick documentation, jump to definition, and rename, plus a
+right-click menu that reaches all of them. Each one resolves in the
+namespace your program actually runs in, so a function Run just defined
+shows up the same way a core one does.
+
+Every key below checks the Control key specifically, not Command: Cmd+Q
+still means Quit, and Cmd+Space still does whatever Spotlight or your
+input source switcher already has it bound to. Cmd+B, Cmd+F1, and
+Command's usual companions to these keys do nothing here, on purpose.
+F-keys need the Fn key held down too, on most Mac keyboards.
+
+### Completion
+
+Ctrl+Space, in either the Definitions editor or the console's input line.
+With no prefix at the caret it does nothing; with exactly one match it
+inserts that match right away; otherwise a popup opens below the caret
+(above the input line in the console) with the candidate list on one side
+and a documentation preview for whichever one is selected on the other.
+
+![The completion popup open over a partial word, with a candidate list and its doc preview](../images/completion.png)
+
+While the popup is open, Up and Down move the selection one row, PageUp
+and PageDown move it eight rows, Enter or Tab commits the selected
+candidate, and Escape closes the popup without touching the buffer.
+Typing keeps narrowing the list, and moving the caret out of the word
+(an arrow key past its start, say) closes the popup the same way Escape
+does. In the console's input line, the popup's own keys take over from
+history and from evaluation while it's open: Up and Down move the list
+instead of paging through history, and Enter commits the candidate
+instead of running the line. Close the popup first, by committing
+something or by Escape, to get history and evaluation back.
+
+Candidates come from Clojure's special forms and core built-ins, whatever
+the Definitions pane itself defines, and whatever your program has
+defined by running or by typing at the prompt.
+
+### Quick documentation
+
+Ctrl+Q or Shift+F1 opens a popup with the namespace, arglists, and
+docstring for the symbol at the caret, or in the selection when the
+selection is exactly one symbol. With no symbol there, the status bar
+says so instead of opening anything. Escape, or moving the caret, closes
+the popup.
+
+![The quick documentation popup over a call to a core function](../images/quick-doc.png)
+
+### Jump to definition
+
+F12 or Ctrl+B moves the caret to the symbol's own definition and scrolls
+it into view, when Jonquil can find one in the buffer. It checks the
+nearest enclosing local binding first (a function parameter, a `let`, or
+anything else that can shadow a name), then a top-level `def`, `defn`, or
+similar form anywhere in the file. When neither turns up but the symbol
+still resolves to something outside the buffer, jump shows that var's
+documentation in the quick-doc popup instead of moving the caret. When
+nothing matches at all, the status bar says so.
+
+### Rename
+
+Shift+F6 or F2 opens a small popup prefilled with the symbol at the
+caret. Type a new name and press Enter to apply it, or press Escape to
+cancel. A rename touches only code: every place the exact symbol appears
+as its own token, never inside a comment, a string, a regex literal, or a
+keyword, and never a longer name that merely contains it, so renaming
+`greet` leaves `greeting` alone. If the new name is blank, isn't a valid
+Clojure symbol, matches the old name, or there's nothing to rename, the
+popup explains why instead of doing anything. Applying a rename is one
+undo step, so Cmd/Ctrl+Z reverts it in a single press, and the status bar
+reports how many occurrences changed.
+
+![The rename popup, prefilled with the symbol at the caret](../images/rename.png)
+
+### Right-click menus
+
+Shift+F10, or a right click over the Definitions editor, opens a menu
+with Jump to Definition, Rename Symbol, Quick Documentation, and
+Complete, alongside Jonquil's other editing commands (Toggle Comment,
+Format All, Format Selection, Indent, Unindent, Find, Replace) and GTK's
+own Cut, Copy, and Paste. The same menu over the console's input line
+carries Complete next to GTK's own entries. Every item runs the exact
+function its key would.
+
+### Freeing Ctrl+Space on macOS
+
+macOS reserves Ctrl+Space by default, under System Settings > Keyboard >
+Keyboard Shortcuts > Input Sources > "Select the previous input source."
+While that shortcut stays on, a real Ctrl+Space keypress goes to the
+system first and never reaches Jonquil at all. Turn it off there (or
+rebind it to something else) to free Ctrl+Space for completion. This
+isn't something Jonquil can work around from inside the app: in testing,
+a Ctrl+Space routed straight to Jonquil's own process by its pid reached
+the completion handler without trouble, but an actual key press on the
+keyboard still went to the system's input-source switch as long as that
+shortcut was turned on.
+
 ## Keys
 
 | Key | Where | Does |
@@ -304,6 +402,11 @@ through it. To go back to light, delete the file.
 | Up | console prompt, first line of input | Recall the previous history entry |
 | Down | console prompt, last line of input | Recall the next history entry |
 | Cmd/Ctrl+D | console prompt, while waiting on input | Send end-of-input |
+| Ctrl+Space | Definitions editor, console input | Open or commit completion |
+| Ctrl+Q or Shift+F1 | Definitions editor | Quick documentation |
+| F12 or Ctrl+B | Definitions editor | Jump to definition |
+| Shift+F6 or F2 | Definitions editor | Rename |
+| Shift+F10 or right click | Definitions editor, console input | Open the context menu |
 
 ## Known limits
 
