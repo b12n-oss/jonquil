@@ -22,6 +22,7 @@
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.docs :as docs]
+            [jonquil.edit :as edit]
             [jonquil.eval :as eval]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
@@ -777,6 +778,66 @@
     (catch :default e
       (set-status! status-label (str "; jump: " (ex-message e))))))
 
+;; --- rename (P4.T7) ------------------------------------------------------
+
+(defn- do-rename!
+  "Shift+F6/F2, the ui's own :rename!*: help/target on ed's current
+  snapshot; none sets status \"Put the caret on a symbol first.\" (the
+  brief's own wording -- rename-problem's OWN sentence for this case
+  reads the same, but this path never opens the popover at all, so there
+  is no problem label to show it in). Otherwise closes every other open
+  P4 popover first (close-popovers-fn, same reasoning as do-quick-doc!/
+  do-jump! above) and shows the rename popover prefilled with the target
+  symbol. Same try/catch reasoning as do-quick-doc!/do-jump!: help/target
+  and help-popover/show-rename! run with nothing else between this and a
+  throw."
+  [ed rename-pop status-label close-popovers-fn]
+  (try
+    (if-let [{:keys [symbol]} (help/target (editor/snapshot ed))]
+      (do (close-popovers-fn)
+          (help-popover/show-rename! rename-pop symbol))
+      (set-status! status-label "Put the caret on a symbol first."))
+    (catch :default e
+      (set-status! status-label (str "; rename: " (ex-message e))))))
+
+(defn- occurrence-count-phrase
+  "\"n occurrence\" or \"n occurrences\" -- the brief's own plural rule
+  for the rename status line."
+  [n]
+  (str n " occurrence" (when (not= 1 n) "s")))
+
+(defn- do-rename-to!
+  "The rename popover's Enter, and the ui's own :rename-to!*: new-name is
+  the entry's current text. help/rename-problem on ed's current snapshot
+  -- non-nil shows that sentence in the popover's own problem label and
+  returns it, applying nothing; nil applies edit/rename's result through
+  editor/apply-op! (one user action, one undo step per apply-op!'s own
+  contract), closes the popover, sets the brief's own status wording and
+  returns nil. old is read once (help/target) and reused for both the
+  status line and (inside rename-problem) the problem sentence, mirroring
+  do-quick-doc!/do-jump!'s own snapshot-once shape. Wrapped in try/catch,
+  same reviewer-clause reasoning as every other P4 action here -- this is
+  the entry's own \"activate\" signal handler, so nothing else stands
+  between a throw here and GTK's own signal emission."
+  [ed rename-pop new-name status-label]
+  (try
+    (let [snap (editor/snapshot ed)
+          old (:symbol (help/target snap))
+          problem (help/rename-problem snap new-name)]
+      (if problem
+        (do (help-popover/show-rename-problem! rename-pop problem) problem)
+        (let [result (edit/rename snap new-name)]
+          (editor/apply-op! ed result)
+          (popover/hide! rename-pop)
+          (set-status! status-label
+                       (str "Renamed " (occurrence-count-phrase (count (:edits result)))
+                            " of '" old "' to '" new-name "'."))
+          nil)))
+    (catch :default e
+      (let [msg (str "; rename: " (ex-message e))]
+        (set-status! status-label msg)
+        msg))))
+
 ;; --- completion (P4.T5) -------------------------------------------------
 
 (defn- do-complete!
@@ -1047,6 +1108,40 @@
         (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
         :else 0))))
 
+;; --- context menus (P4.T7) -----------------------------------------------
+
+(defn- install-context-menu!
+  "Builds view's P4 context menu (probe 3's own shape): a GMenu with one
+  entry per item, each a detailed action name \"p4.<action-name>\"
+  (g_menu_append), set as view's extra-menu (gtk_text_view_set_extra_menu
+  -- GTK's own Cut/Copy/Paste/... stay, this only APPENDS); a matching
+  GSimpleActionGroup holding one no-parameter GSimpleAction per item,
+  each wired to call f (its \"activate\" signal), inserted on view under
+  prefix \"p4\" (gtk_widget_insert_action_group). items is [[label
+  action-name f] ...] -- f is the SAME fn its own key chord calls, per
+  the brief's reviewer clause; every editor item below names one.
+
+  Returns the GSimpleActionGroup pointer so a caller can fire an item by
+  its own unprefixed action-name through g_action_group_activate_action
+  directly on the group -- probe 3 measured that equivalent to
+  gtk_widget_activate_action_variant(view, \"p4.<name>\", NULL) on the
+  prefixed name, since \"p4\" here is only this group's own insertion
+  prefix, not a second name the action itself carries."
+  [view items]
+  (let [menu (g/g-menu-new)
+        group (g/g-simple-action-group-new)]
+    (doseq [[label action-name f] items]
+      (g/g-menu-append menu label (str "p4." action-name))
+      (let [action (g/g-simple-action-new action-name ffi/null)]
+        (g/g-signal-connect-data action "activate"
+                                 (callable (fn [_action _param _data] (f) nil)
+                                           [:pointer :pointer :pointer] :void)
+                                 ffi/null ffi/null g/CONNECT-DEFAULT)
+        (g/g-action-map-add-action group action)))
+    (g/gtk-widget-insert-action-group view "p4" group)
+    (g/gtk-text-view-set-extra-menu view menu)
+    group))
+
 ;; --- construction ------------------------------------------------------
 
 (defn- activate! [app {:keys [file on-ready settings-path]}]
@@ -1111,6 +1206,17 @@
         help-pop (help-popover/make-help-popover (:view ed))
         quick-doc-fn (fn [] (do-quick-doc! ed session status-label help-pop close-popovers-fn))
         jump-fn (fn [] (do-jump! ed session status-label help-pop close-popovers-fn))
+        ;; P4.T7: the rename popover, built once on ed's view and joined
+        ;; to the SAME registry (Escape/teardown, same reasoning as
+        ;; help-pop above -- though autohide ON means GTK's own modal
+        ;; grab, not the registry's Escape clause, is what actually closes
+        ;; it in practice, per popover.clj's own ns docstring). rename-fn
+        ;; is editor.clj's own Shift+F6/F2 action (set-rename-fn! below);
+        ;; rename-to-fn is the popover entry's own \"activate\" action,
+        ;; wired below once rename-pop exists.
+        rename-pop (help-popover/make-rename-popover (:view ed))
+        rename-fn (fn [] (do-rename! ed rename-pop status-label close-popovers-fn))
+        rename-to-fn (fn [name] (do-rename-to! ed rename-pop name status-label))
         ;; P4.T5: the completion popover, built once on ed's view and
         ;; joined to the SAME registry (Escape closes it, teardown
         ;; unparents it); close-others! is close-popovers-fn itself, so
@@ -1170,6 +1276,29 @@
                                                (fn [] (eval/evaluating? (:ctx session)))))
         open-find-fn (fn [] (find-bar/open! fb :find))
         open-replace-fn (fn [] (find-bar/open! fb :replace))
+        ;; P4.T7: the editor's and the console's own context menus (probe
+        ;; 3) -- each item calls the EXACT SAME fn its key does. install-
+        ;; context-menu! returns the GSimpleActionGroup, so :activate-
+        ;; menu-action!*/:repl-activate-menu-action!* (below) can fire an
+        ;; item directly, by name, for rows and the smoke.
+        editor-menu-group
+        (install-context-menu!
+         (:view ed)
+         [["Jump to Definition" "jump" jump-fn]
+          ["Rename Symbol" "rename" rename-fn]
+          ["Quick Documentation" "quick-doc" quick-doc-fn]
+          ["Complete" "complete" complete-fn]
+          ["Toggle Comment" "toggle-comment" (fn [] (editor/do-toggle-comment! ed))]
+          ["Format All" "format-all" (fn [] (editor/do-format-all! ed))]
+          ["Format Selection" "format-selection" (fn [] (editor/do-format-selection! ed))]
+          ["Indent" "indent" (fn [] (editor/do-indent! ed))]
+          ["Unindent" "unindent" (fn [] (editor/do-unindent! ed))]
+          ["Find" "find" open-find-fn]
+          ["Replace" "replace" open-replace-fn]])
+        console-menu-group (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]])
+        activate-menu-action-fn (fn [name] (g/g-action-group-activate-action editor-menu-group name ffi/null))
+        repl-activate-menu-action-fn
+        (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
                                      run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
                                      (fn [] (eval/evaluating? (:ctx session)))
@@ -1284,6 +1413,24 @@
     (editor/set-jump-fn! ed jump-fn)
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    ;; P4.T7: joins the SAME popover registry, wires the editor's own
+    ;; Shift+F6/F2 chords to rename-fn, and wires the popover's own entry
+    ;; "activate" signal (a real Enter keypress in a focused GtkEntry,
+    ;; never gtk_widget_activate -- find-bar's own ns docstring measured
+    ;; that entry point unreliable for GtkSearchEntry, so this project
+    ;; never relies on it) to rename-to-fn. No on-cursor-moved!/on-focus-
+    ;; lost! close hook, unlike help-pop/completion above: rename is
+    ;; autohide ON, so GTK's own modal grab -- not a caret move or a focus
+    ;; change the editor could observe -- is what closes it (popover.clj's
+    ;; own ns docstring).
+    (register-popover-fn rename-pop)
+    (editor/set-rename-fn! ed rename-fn)
+    (g/g-signal-connect-data (:entry rename-pop) "activate"
+                             (callable (fn [_entry _data]
+                                         (rename-to-fn (help-popover/rename-entry-text rename-pop))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P4.T5: joins the SAME popover registry, wires the editor's own
     ;; Ctrl+Space chord and its nav/commit/escape keys to completion/
     ;; open!/handle-key!, and refines/closes it on the SAME on-cursor-
@@ -1398,6 +1545,25 @@
                  :quick-doc!* quick-doc-fn
                  :jump!* jump-fn
                  :help-popover help-pop
+                 ;; P4.T7: the ui's own rename actions -- rename!* is the
+                 ;; exact fn editor.clj's own Shift+F6/F2 clauses call
+                 ;; (set-rename-fn!, above); rename-to!* is the exact fn
+                 ;; the popover entry's own "activate" signal calls, for
+                 ;; rows to drive without a synthesized keystroke; and the
+                 ;; rename popover itself, for rows to read back via
+                 ;; jonquil.gtk.popover/open? and help-popover/rename-
+                 ;; entry-text/rename-problem-text.
+                 :rename!* rename-fn
+                 :rename-to!* rename-to-fn
+                 :rename-popover rename-pop
+                 ;; P4.T7: fires a context-menu item by its own unprefixed
+                 ;; action name (\"jump\", \"rename\", \"toggle-comment\",
+                 ;; ...) through g_action_group_activate_action on the
+                 ;; editor's/the console's own GSimpleActionGroup --
+                 ;; install-context-menu!'s own docstring on why that's
+                 ;; equivalent to activating the prefixed \"p4.<name>\".
+                 :activate-menu-action!* activate-menu-action-fn
+                 :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
                  ;; completion popover itself, for rows to read back via
@@ -1455,6 +1621,8 @@
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
+  :rename!* :rename-to!* :rename-popover
+  :activate-menu-action!* :repl-activate-menu-action!*
   :complete!* :completion
   :handle-window-key! :simulate-open-result! :simulate-save-result!
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
@@ -1475,10 +1643,17 @@
   own Ctrl+Q/Shift+F1/F12/Ctrl+B key clauses call; :help-popover is the
   jonquil.gtk.help-popover map those two actions show doc text in --
   jonquil.gtk.popover/open? and help-popover/quick-doc-text read it back.
-  :complete!* (P4.T5) is exactly what the editor's own Ctrl+Space clause
-  calls; :completion is the jonquil.gtk.completion map it acts on --
-  jonquil.gtk.popover/open? and jonquil.gtk.completion/state read it
-  back."
+  :rename!*/:rename-to!* (P4.T7) are exactly what the editor's own
+  Shift+F6/F2 clauses and the rename popover's own entry \"activate\"
+  signal call; :rename-popover is the jonquil.gtk.help-popover map those
+  two act on -- jonquil.gtk.popover/open? and help-popover/rename-entry-
+  text/rename-problem-text read it back. :activate-menu-action!*/:repl-
+  activate-menu-action!* fire one of the editor's/the console's own P4
+  context-menu items by its unprefixed action name, exactly as
+  install-context-menu!'s own docstring describes. :complete!* (P4.T5) is
+  exactly what the editor's own Ctrl+Space clause calls; :completion is
+  the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
+  and jonquil.gtk.completion/state read it back."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one

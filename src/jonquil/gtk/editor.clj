@@ -157,6 +157,13 @@
   (reset! (:jump-fn ed) f)
   nil)
 
+(defn set-rename-fn!
+  "Registers f (fn [] -> nil), the ui's own :rename!* action, to run for
+  the editor's rename chords (Shift+F6, F2). See set-quick-doc-fn!."
+  [ed f]
+  (reset! (:rename-fn ed) f)
+  nil)
+
 (defn set-completion-fns!
   "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
   state] -> 0/1)}), the ui's own completion actions (P4.T5): :complete! is
@@ -331,6 +338,12 @@
 ;; header): Ctrl+Space opens/commits completion.
 (def ^:private KEY-SPACE 0x020)
 
+;; P4.T7 additions (gdkkeysyms.h, re-verified against the installed
+;; header, matching the brief's own measured values): Shift+F6/F2 open
+;; the rename popover.
+(def ^:private KEY-F6 0xffc3)
+(def ^:private KEY-F2 0xffbf)
+
 ;; macOS hardware keycodes for the physical F and L keys (measured live
 ;; this session, pid-driven cgevent cmd+option+f/l against this build:
 ;; keycode 3 and 37 respectively, state carrying both ALT-MASK and
@@ -386,6 +399,27 @@
 
 (defn- apply-edit! [ed result]
   (if (apply-op! ed result) 1 0))
+
+;; P4.T7: named so the context menu's own items (window.clj) call the
+;; EXACT same function as their key, per the brief's own reviewer clause
+;; -- these five used to be inline lambdas inside handle-key!'s cond
+;; below, which a menu item could only have duplicated, never reused.
+;; Each does exactly what its own inline body used to.
+
+(defn do-toggle-comment! [ed]
+  (apply-edit! ed (edit/toggle-comment (snapshot ed))))
+
+(defn do-format-all! [ed]
+  (apply-edit! ed (commands/format-all-op (snapshot ed))))
+
+(defn do-format-selection! [ed]
+  (apply-edit! ed (commands/format-selection-op (snapshot ed))))
+
+(defn do-indent! [ed]
+  (apply-edit! ed (edit/indent (snapshot ed))))
+
+(defn do-unindent! [ed]
+  (apply-op! ed (edit/unindent (snapshot ed))))
 
 (defn- alt-chord-f-or-l?
   "True for Cmd/Ctrl+Alt+F or Cmd/Ctrl+Alt+L, on either platform.
@@ -460,13 +494,13 @@
        (do (when-let [f (:complete! cfns)] (f)) 1)
 
        (and (command-chord? state) (contains? #{KEY-SLASH KEY-SEMICOLON} keyval))
-       (apply-edit! ed (edit/toggle-comment (snapshot ed)))
+       (do-toggle-comment! ed)
 
        (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
-       (apply-edit! ed (commands/format-all-op (snapshot ed)))
+       (do-format-all! ed)
 
        (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode))
-       (apply-edit! ed (commands/format-selection-op (snapshot ed)))
+       (do-format-selection! ed)
 
        (and (command-chord? state) (= keyval KEY-Y))
        (if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
@@ -494,6 +528,18 @@
        (and (control-only? state) (= keyval KEY-B))
        (do (when-let [f @(:jump-fn ed)] (f)) 1)
 
+       ;; P4.T7: rename. Shift+F6/F2, neither gated by control-only? --
+       ;; matching Shift+F1/F12's own precedent just above (P4.T4), which
+       ;; checks shift-held?/no-modifiers? alone with no Meta exclusion.
+       ;; window.clj's own F6 clause already lets Shift+F6 fall through to
+       ;; here (P4.T3's own key-order change); F2 has no other clause to
+       ;; collide with.
+       (and (shift-held? state) (= keyval KEY-F6))
+       (do (when-let [f @(:rename-fn ed)] (f)) 1)
+
+       (and (no-modifiers? state) (= keyval KEY-F2))
+       (do (when-let [f @(:rename-fn ed)] (f)) 1)
+
        (and (no-command-modifiers? state) (contains? open-chars keyval))
        (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
 
@@ -511,10 +557,10 @@
        ;; lines 5744-5764).
        (and (no-command-modifiers? state)
             (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
-       (do (apply-op! ed (edit/unindent (snapshot ed))) 1)
+       (do (do-unindent! ed) 1)
 
        (and (no-command-modifiers? state) (= keyval KEY-TAB))
-       (apply-edit! ed (edit/indent (snapshot ed)))
+       (do-indent! ed)
 
        :else 0))))
 
@@ -555,6 +601,9 @@
             ;; chords -- see set-quick-doc-fn!/set-jump-fn!.
             :quick-doc-fn (atom nil)
             :jump-fn (atom nil)
+            ;; P4.T7: single-slot registration for the rename chords --
+            ;; see set-rename-fn!.
+            :rename-fn (atom nil)
             ;; P4.T5: single-slot registration for completion -- see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
             :completion-fns (atom nil)}]

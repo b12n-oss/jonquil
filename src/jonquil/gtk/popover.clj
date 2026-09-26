@@ -51,8 +51,23 @@
   translated point equalled the untranslated one exactly (no border
   between the view and its scrolled window in this theme), but the
   translation is applied unconditionally rather than assumed, since a
-  theme with a scrolled-window frame would make it nonzero."
+  theme with a scrolled-window frame would make it nonzero.
+
+  P4.T7: make-popover's autohide branch connects the popover's own
+  \"closed\" signal (GtkPopover, Gtk-4.0.gir: emitted whenever the popover
+  closes, for any reason) to reset :open? to false. Rename (autohide ON)
+  is the first caller this matters for: GTK itself closes an autohide
+  popover on Escape or a click outside, with no call into this namespace
+  at all, so without this the :open? atom -- which hide! is otherwise the
+  only writer of -- would keep reading true after a GTK-side close.
+  hide!'s own gtk_popover_popdown call also ends in this SAME \"closed\"
+  signal, so an explicit hide! sets :open? false once directly and once
+  more (redundantly, harmlessly) when \"closed\" fires -- both writes
+  agree, and reset! has no failure mode from running twice with the same
+  value. Every non-autohide popover (completion, quick doc) never has
+  anything connected here and is unaffected."
   (:require [jolt.ffi :as ffi]
+            [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]))
 
 (defn- rect-alloc [[x y w h]]
@@ -73,16 +88,24 @@
   be inside one (true for the editor's and the console's views by the time
   P4.T4-T7 or a self-test row ever calls this). Returns {:popover :view
   :open?}; :open? is this popover's own visibility bit, true only between
-  show-at-caret! and hide!."
+  show-at-caret! and hide! -- and, for an autohide popover, also kept
+  false by the \"closed\" signal handler this connects when GTK closes it
+  on its own (see the ns docstring's P4.T7 paragraph)."
   [view {:keys [autohide? position]}]
-  (let [pop (g/gtk-popover-new)]
+  (let [pop (g/gtk-popover-new)
+        open? (atom false)]
     (g/gtk-widget-set-parent pop (g/gtk-widget-get-parent view))
     (g/gtk-widget-add-css-class pop "jonquil-popover")
     (g/gtk-popover-set-autohide pop (if autohide? 1 0))
     (g/gtk-popover-set-position pop (if (= position :top)
                                       g/POPOVER-POS-TOP
                                       g/POPOVER-POS-BOTTOM))
-    {:popover pop :view view :open? (atom false)}))
+    (when autohide?
+      (g/g-signal-connect-data pop "closed"
+                               (callable (fn [_pop _data] (reset! open? false) nil)
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT))
+    {:popover pop :view view :open? open?}))
 
 (defn set-child!
   "Sets pp's popover child widget (gtk_popover_set_child)."

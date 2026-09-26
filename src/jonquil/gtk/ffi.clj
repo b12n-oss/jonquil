@@ -879,3 +879,36 @@
 ;; another") matches completion's own always-one-highlighted-candidate UI;
 ;; nothing here ever selects by click, only gtk-list-box-select-row.
 (def SELECTION-MODE-BROWSE 2)
+
+;; --- P4.T7: context menus (GMenu/GSimpleActionGroup) and rename -------------
+;; Header citations re-verified directly against /opt/homebrew/include
+;; (gtk4 4.22.4, glib as installed by homebrew, 2026-09-26) -- the same
+;; lines the P4 probe (spikes/p4/p4_ffi.clj) cites.
+;;
+;; glib-2.0/gio/gmenu.h:47 GMenu *g_menu_new (void); gmenu.h:79-81 void
+;; g_menu_append (GMenu*, const gchar *label, const gchar
+;; *detailed_action). Both fixed arity.
+(ffi/defcfn g-menu-new "g_menu_new" [] :pointer)
+(ffi/defcfn g-menu-append "g_menu_append" [:pointer :string :string] :void)
+;; glib-2.0/gio/gsimpleactiongroup.h:70 GSimpleActionGroup *
+;; g_simple_action_group_new (void). Fixed arity. GSimpleActionGroup
+;; implements both GActionMap and GActionGroup, so the existing
+;; g-action-map-add-action/g-action-group-activate-action bindings (C3's
+;; own citation, above) already work on it unchanged -- no new binding
+;; needed for either.
+(ffi/defcfn g-simple-action-group-new "g_simple_action_group_new" [] :pointer)
+;; gtk-4.0/gtk/gtktextview.h:429-430 void gtk_text_view_set_extra_menu
+;; (GtkTextView*, GMenuModel*). Fixed arity; a GMenu* is a GMenuModel, so
+;; g-menu-new's own return passes here unchanged.
+(ffi/defcfn gtk-text-view-set-extra-menu "gtk_text_view_set_extra_menu" [:pointer :pointer] :void)
+;; gtk-4.0/gtk/gtkwidget.h:864-866 void gtk_widget_insert_action_group
+;; (GtkWidget*, const char *name, GActionGroup*). Fixed arity.
+;; gtk_widget_activate_action (gtkwidget.h:869-872) is variadic (a
+;; trailing `...` format-string argument) and is never bound here --
+;; every activation goes through g_action_group_activate_action instead
+;; (already bound above, C3's own citation), called directly on the
+;; GSimpleActionGroup with its own unprefixed action name, which probe 3
+;; measured equivalent to gtk_widget_activate_action_variant on the
+;; prefixed "p4.<name>" (gtkwidget.h:874-876, also fixed arity, but not
+;; needed here since the direct GActionGroup call already covers it).
+(ffi/defcfn gtk-widget-insert-action-group "gtk_widget_insert_action_group" [:pointer :string :pointer] :void)
