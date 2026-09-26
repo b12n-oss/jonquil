@@ -6,6 +6,10 @@
 ;; drives it with real key events routed by pid, and reads back real file
 ;; bytes, real window titles and real screen pixels.
 ;;
+;; P4.T8 adds five steps driving the P4 help keys the same way: completion
+;; (Ctrl+Space), quick doc (Ctrl+Q), jump (F12), rename (F2) and the
+;; context menu (Shift+F10) -- see this file's own "P4.T8" section below.
+;;
 ;; Run via `bb smoke:binary` (see bb.edn); this file is a plain babashka
 ;; script, not a jolt namespace -- it never touches the jolt/GTK process
 ;; from the inside, only from outside via cgevent and the filesystem.
@@ -411,6 +415,25 @@
     (when-not (zero? exit)
       (throw (ex-info "jolt -M -e (format-selection-text) failed" {:exit exit :err err})))
     out))
+
+(defn- candidates-via-jolt!
+  "P4.T8: the exact :symbol list jonquil.docs/candidates returns for
+  prefix/text/pos in the 'user namespace -- computed via a live `jolt -M
+  -e` call (AGENTS.md: `jolt -e` ignores deps.edn; `-M` loads the project
+  classpath), never hand-written, same reasoning as format-code-via-
+  jolt!/format-selection-via-jolt! above. 'user is never a guess: every
+  process this file launches is fresh (jonquil.session/make-session's own
+  default :prompt-ns), and none of this file's completion steps Run
+  anything first, so the program namespace never moves off 'user. Throws
+  on a non-zero exit, naming jolt's own stderr."
+  [prefix text pos]
+  (let [code (str "(require (quote [jonquil.docs :as docs])) "
+                  "(prn (mapv :symbol (docs/candidates 'user " (pr-str prefix) " " (pr-str text) " " pos ")))")
+        {:keys [exit out err]} (p/shell {:out :string :err :string :continue true}
+                                        "jolt" "-M" "-e" code)]
+    (when-not (zero? exit)
+      (throw (ex-info "jolt -M -e (docs/candidates) failed" {:exit exit :err err})))
+    (edn/read-string out)))
 
 ;; --- steps ----------------------------------------------------------------
 ;; Each step launches its own fresh process (dev/demo_shots.clj's own
@@ -1111,6 +1134,192 @@
                 (check! :theme-persists false {:pixel-at-exit exit :pixel-at-err err :rect [px py pw ph]})))
             (stop! {:proc proc :pid pid})))))))
 
+;; --- P4.T8: completion, quick doc, jump, rename, the context menu -------
+;; Everything below drives the P4 help keys through the built binary the
+;; same way every step above does -- pid-routed cgevent, no other input
+;; path. editor.clj's own set-text! always leaves the caret at the END of
+;; the buffer (a plain gtk_text_buffer_set_text moves the insert mark to
+;; the end of what it just inserted; this file's own header didn't need
+;; to say so before P4, since every earlier step either ran from the end
+;; of the buffer already or moved the caret with a chord of its own), so
+;; every fixture below is opened once and then, where a step needs the
+;; caret somewhere other than the end, moved there with Home (start of
+;; the CURRENT line) plus a measured number of Right presses -- never a
+;; click, never place-cursor! (that's an in-process call this external
+;; script has no access to). Every one of these landings was measured
+;; live against the built binary before being written here (see the
+;; report): Home+Right+Right on quickdoc.clj's one line lands on offset
+;; 2 (Ln 1, Col 3, OCR'd), and the same three keys on jump.clj/rename.clj
+;; (Home goes to the START OF LINE 2, since the caret starts at the end
+;; of that line) land on offset 22, inside the call's own "greet" --
+;; exactly the offset row-jump-top-level/setup-rename! already use
+;; against this same fixture text.
+
+(defn- step-completion!
+  "P4.T8 step 1. Ctrl+Space (`control + space`) was measured live against
+  this build, outside this driver, before writing this step (see the
+  report): CGEventPostToPid delivered it straight to Jonquil with no
+  macOS input-source switch intercepting it, so both halves below use the
+  real chord rather than the context-menu workaround the brief's own
+  context notes as a fallback.
+
+  Sub-step A (single candidate, auto-commit): fixture \"(mapca\", caret at
+  the end (set-text!'s own end-of-buffer caret). docs/candidates for
+  \"mapca\" is exactly [\"mapcat\"] (measured live against this build, and
+  matching P4.T5's own row-completion-single-inserts), so completion/
+  open! commits it at once with no popover; Cmd+S, then the file's own
+  bytes must read \"(mapcat\" -- anything else (nothing inserted, a
+  literal space, a popover left open) fails this outright.
+
+  Sub-step B (several candidates, navigate + commit): a FRESH process,
+  fixture \"(ma\", caret at the end. The expected candidate list comes
+  from a live `jolt -M -e` call into jonquil.docs/candidates
+  (candidates-via-jolt!, never hand-written, per this task's own
+  instructions); Down selects index 1, Return commits it -- the file's
+  own bytes after Cmd+S must equal \"(\" plus that SECOND candidate's own
+  symbol. A broken completion (Down/Return doing nothing, or falling
+  through to the plain editor -- Down moves a line, Return inserts a
+  newline) can't produce this exact text by accident."
+  []
+  (let [path (scratch-copy! "completion_single.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "control + space")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))]
+      (screenshot! pid "step-completion-single")
+      (check! :completion-single-insert (and title-ok (= "(mapcat" on-disk))
+              {:title-lost-star title-ok :on-disk on-disk}))
+    (stop! {:proc proc :pid pid}))
+  (let [path (scratch-copy! "completion_multi.clj")
+        expected (candidates-via-jolt! "ma" "(ma" 3)
+        second-sym (nth expected 1 nil)
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "control + space")
+    (cg-key! pid "down")
+    (cg-key! pid "return")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))
+          expected-text (when second-sym (str "(" second-sym))]
+      (screenshot! pid "step-completion-multi")
+      (check! :completion-navigate-commit
+              (and (some? second-sym) title-ok (= expected-text on-disk))
+              {:title-lost-star title-ok :on-disk on-disk :expected expected-text
+               :candidates expected}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-quick-doc!
+  "P4.T8 step 2: fixture \"(map inc [1])\", caret moved to offset 2
+  (Home, Right, Right -- measured live to land Ln 1, Col 3), Ctrl+Q. OCR
+  must find \"clojure.core/map\" while the popover is open; Escape then
+  closes it, checked by OCR no longer finding it. :quick-doc-closes only
+  counts the close as real when the open half already succeeded first --
+  otherwise a popover that never opened would let a no-op Escape read as
+  a spurious PASS."
+  []
+  (let [path (scratch-copy! "quickdoc.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "home")
+    (cg-key! pid "right")
+    (cg-key! pid "right")
+    (cg-key! pid "control + q")
+    (let [{:keys [ok]} (wait-for-ocr! pid 5000 "clojure.core/map")]
+      (screenshot! pid "step-quick-doc-open")
+      (check! :quick-doc ok {:opened ok})
+      (cg-key! pid "escape")
+      (let [closed (wait-for! 5000 200 (fn [] (not (str/includes? (ocr-text! pid) "clojure.core/map"))))]
+        (screenshot! pid "step-quick-doc-closed")
+        (check! :quick-doc-closes (and ok closed) {:opened ok :closed closed})))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-jump!
+  "P4.T8 step 3: fixture \"(defn greet [n] n)\\n(greet 1)\", caret moved
+  to offset 22 (Home, Right, Right -- Home lands at the START of line 2
+  since the caret starts at the end of the buffer; measured live to land
+  Ln 2, Col 3, i.e. offset 22, inside the call's own \"greet\", the exact
+  offset row-jump-top-level already uses against this fixture), F12.
+  help/jump-target lands the caret on the defn's own greet (offset 6,
+  line 1) -- checked here as the status bar's \"Ln 1,\" via OCR (the
+  trailing comma keeps this from ever matching a longer line number on a
+  bigger fixture, though this one only ever has two lines). A broken jump
+  (the chord not acting, or landing anywhere else) leaves the caret on
+  line 2, so \"Ln 1,\" never appears."
+  []
+  (let [path (scratch-copy! "jump.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "home")
+    (cg-key! pid "right")
+    (cg-key! pid "right")
+    (cg-key! pid "f12")
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "Ln 1,")]
+      (screenshot! pid "step-jump")
+      (check! :jump ok {:ocr last}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-rename!
+  "P4.T8 step 4: same fixture/caret as step-jump! (offset 22, inside the
+  call's own \"greet\"), F2 opens the rename popover -- prefilled with
+  \"greet\", selected (help-popover/show-rename!'s own contract), so
+  typing \"hello\" by pid chords replaces the selection outright. Return
+  applies edit/rename through apply-op! and closes the popover, Cmd+S
+  saves. The file's own bytes on disk must equal exactly \"(defn hello
+  [n] n)\\n(hello 1)\" -- byte-exact, not a substring check, so a rename
+  that missed an occurrence or left \"greet\" anywhere fails this."
+  []
+  (let [path (scratch-copy! "rename.clj")
+        {:keys [proc pid]} (launch! path)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "home")
+    (cg-key! pid "right")
+    (cg-key! pid "right")
+    (cg-key! pid "f2")
+    (type-text! pid "hello")
+    (cg-key! pid "return")
+    (cg-key! pid "command + s")
+    (let [title-ok (wait-for! 5000 200
+                              (fn [] (let [w (window-for pid)]
+                                       (and w (not (str/starts-with? (or (:name w) "") "*"))))))
+          on-disk (try (slurp path) (catch Exception _ nil))]
+      (screenshot! pid "step-rename")
+      (check! :rename (and title-ok (= "(defn hello [n] n)\n(hello 1)" on-disk))
+              {:title-lost-star title-ok :on-disk on-disk}))
+    (stop! {:proc proc :pid pid})))
+
+(defn- step-context-menu!
+  "P4.T8 step 5: Shift+F10 (`shift + f10`) opens the P4 extra-menu --
+  GTK's own native popup-menu keybinding, never anything jonquil.gtk.*
+  wires itself -- checked both as a SECOND top-level window for this pid
+  (the same `cgevent windows --pid` signal step-close-with-unsaved! uses
+  for a real GtkAlertDialog) and OCR finding \"Jump to Definition\".
+  Escape then closes it back down to one window with that text gone.
+  :context-menu-closes only counts the close as real when the open half
+  already succeeded, same reasoning as :quick-doc-closes above."
+  []
+  (let [{:keys [proc pid]} (launch! nil)]
+    (ensure-window! pid 8000)
+    (cg-key! pid "shift + f10")
+    (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Jump to Definition")
+          opened? (wait-for! 3000 200 (fn [] (= 2 (count (windows-edn! pid)))))]
+      (screenshot! pid "step-context-menu-open")
+      (check! :context-menu-opens (and ok opened?) {:ocr-found ok :second-window opened?})
+      (cg-key! pid "escape")
+      (let [closed-windows (wait-for! 5000 200 (fn [] (= 1 (count (windows-edn! pid)))))
+            closed-ocr (wait-for! 5000 200 (fn [] (not (str/includes? (ocr-text! pid) "Jump to Definition"))))]
+        (screenshot! pid "step-context-menu-closed")
+        (check! :context-menu-closes
+                (and ok opened? closed-windows closed-ocr)
+                {:closed-windows closed-windows :closed-ocr closed-ocr})))
+    (stop! {:proc proc :pid pid})))
+
 ;; --- driver ----------------------------------------------------------------
 
 (defn- build!
@@ -1146,7 +1355,12 @@
    ["latin1-warning" step-latin1-warning!]
    ["command-chord-close" step-command-chord-close!]
    ["close-while-running" step-close-while-running!]
-   ["theme-persists" step-theme-persists!]])
+   ["theme-persists" step-theme-persists!]
+   ["completion" step-completion!]
+   ["quick-doc" step-quick-doc!]
+   ["jump" step-jump!]
+   ["rename" step-rename!]
+   ["context-menu" step-context-menu!]])
 
 (defn -main [& args]
   (let [t0 (System/currentTimeMillis)
