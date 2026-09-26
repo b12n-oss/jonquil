@@ -105,16 +105,19 @@
              first)))
 
     (defn free-port
-      "First port from base up to base+20 that 127.0.0.1 will bind right now,
-       or nil. The engine does the real bind a moment later, so this is a
+      "First port from base up to base+20 that is free on every interface
+       right now, or nil. The engine does the real bind a moment later, so this is a
        probe: a port taken in between fails loudly in the engine, not
        silently. An explicit port is never scanned (see site:serve)."
       [base]
-      (some (fn [p]
-              (try (with-open [s (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName "127.0.0.1"))]
-                     (.getLocalPort s))
-                   (catch Exception _ nil)))
-            (range base (+ base 21))))
+      (let [binds? (fn [p addr]
+                     (try (with-open [_ (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName addr))] true)
+                          (catch Exception _ false)))]
+        ;; Both probes: a 127.0.0.1 bind succeeds on macOS even while another
+        ;; process holds *:p (measured: Docker on *:3001), and then localhost
+        ;; traffic silently reaches whichever listener the OS prefers.
+        (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1")) p))
+              (range base (+ base 21)))))
 
     (defn site-task
       "Runs one of the engine's tasks against this project."
