@@ -436,6 +436,21 @@
   that unparents itself right after hide!, e.g.
   row-window-escape-closes-popover) is skipped rather than warned at.
 
+  P4.T4 fix round 2: hide!s an OPEN popover FIRST (same idiom
+  close-popovers! uses), before unparenting it. Without this, an open
+  popover's own :open? atom stayed true after its widget was unparented
+  (and, for a floating-ref GtkWidget with no other reference, finalized
+  right there); window teardown itself then clears the editor's focus,
+  GtkEventControllerFocus's \"leave\" fires this window's own hide-on-
+  focus-lost listener, (popover/open? p) still reads true, and hide! calls
+  gtk_popover_popdown on the now-freed widget -- measured live: \"Gtk-
+  CRITICAL: gtk_popover_popdown: assertion 'GTK_IS_POPOVER (popover)'
+  failed\" (see the report's reproduction). Resetting :open? here, before
+  unparenting, means every later teardown-triggered listener's own
+  (popover/open? p) check already reads false and skips calling hide!
+  again -- the same reasoning that makes this function idempotent against
+  an already-unparented entry above.
+
   Called from close-request-fn's own REAL-quit branch only (below), right
   before g_application_quit and the return 0 that lets GTK actually start
   tearing the window down (close-request-fn's own docstring: \"once it
@@ -452,6 +467,7 @@
   [popovers]
   (doseq [p @popovers]
     (let [pop (:popover p)]
+      (when (popover/open? p) (popover/hide! p))
       (when-not (ffi/null? (g/gtk-widget-get-parent pop))
         (g/gtk-widget-unparent pop)))))
 

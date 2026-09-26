@@ -2497,16 +2497,34 @@
   this row runs -- the CI-facing evidence that closing mid-run didn't hang
   or crash is this whole process exiting cleanly afterward, which
   run-rows!'s own destroy-signal fallback (below) now guarantees happens
-  either way, pass or fail."
+  either way, pass or fail.
+
+  P4.T4 fix round 2: also opens quick doc (Ctrl+Q on \"loop\") before
+  starting the run, so THIS row's own real close -- the only one in this
+  file that reaches gtk_window_close's actual teardown -- now covers the
+  reviewer's own combination too: a program running AND the quick-doc
+  popover still open when the close chord lands (an ordinary Ctrl+Q then
+  Cmd+Q sequence for a user). :popover-was-open is read right at the
+  close chord itself, alongside started?/handled -- neither of those two
+  pre-existing assertions is weakened; this only adds a third. Nothing
+  here can catch the GTK-CRITICAL a regression would print on its own
+  (it's a log line, not a thrown exception) -- that's still the gates'
+  own stderr grep -- but this makes sure the exact call sequence actually
+  happens inside a real bb gtk:selftest run, not only the report's
+  standalone probe."
   [ui next]
   (editor/set-text! (:editor ui) "(loop [] (recur))")
+  (place-cursor! (:buf (:editor ui)) 2)
+  ((:quick-doc!* ui))
   ((:run!* ui))
   (poll-until 2000 20
               (fn [] (eval/evaluating? (:ctx (:session ui))))
               (fn [started?]
-                (let [handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
-                  (check :command-chord-close (and started? (= 1 handled))
-                         {:started started? :handled handled})
+                (let [popover-was-open? (popover/open? (:help-popover ui))
+                      handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
+                  (check :command-chord-close
+                         (and started? (= 1 handled) popover-was-open?)
+                         {:started started? :handled handled :popover-was-open popover-was-open?})
                   (next)))))
 
 (def ^:private row-fns
