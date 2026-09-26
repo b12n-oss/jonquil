@@ -56,6 +56,18 @@
 (ffi/defcfn gtk-widget-set-size-request "gtk_widget_set_size_request" [:pointer :int :int] :void)
 (ffi/defcfn gtk-scrolled-window-new "gtk_scrolled_window_new" [] :pointer)
 (ffi/defcfn gtk-scrolled-window-set-child "gtk_scrolled_window_set_child" [:pointer :pointer] :void)
+;; gtkscrolledwindow.h (GTK 4.22.4, installed headers): set_policy:111-113,
+;; set_max_content_height:161-162, set_propagate_natural_height:173-174. All
+;; fixed arity.
+(ffi/defcfn gtk-scrolled-window-set-policy "gtk_scrolled_window_set_policy" [:pointer :int :int] :void)
+(ffi/defcfn gtk-scrolled-window-set-max-content-height "gtk_scrolled_window_set_max_content_height"
+  [:pointer :int] :void)
+(ffi/defcfn gtk-scrolled-window-set-propagate-natural-height "gtk_scrolled_window_set_propagate_natural_height"
+  [:pointer :int] :void)
+;; GtkPolicyType: gtkscrolledwindow.h:85-88 (ALWAYS=0, AUTOMATIC=1, NEVER=2,
+;; EXTERNAL=3).
+(def POLICY-NEVER 2)
+(def POLICY-AUTOMATIC 1)
 (ffi/defcfn gtk-fixed-new "gtk_fixed_new" [] :pointer)
 (ffi/defcfn gtk-fixed-put "gtk_fixed_put" [:pointer :pointer :double :double] :void)     ; fixed, widget, x, y
 (ffi/defcfn gtk-fixed-move "gtk_fixed_move" [:pointer :pointer :double :double] :void)   ; reposition an existing child
@@ -66,6 +78,19 @@
 (ffi/defcfn gtk-label-new "gtk_label_new" [:string] :pointer)
 (ffi/defcfn gtk-label-set-text "gtk_label_set_text" [:pointer :string] :void)
 (ffi/defcfn gtk-label-set-xalign "gtk_label_set_xalign" [:pointer :float] :void)
+;; gtklabel.h (GTK 4.22.4, installed headers, /opt/homebrew/Cellar/gtk4):
+;; set_wrap:115-116, set_wrap_mode:120-121. Both fixed arity.
+(ffi/defcfn gtk-label-set-wrap "gtk_label_set_wrap" [:pointer :int] :void)
+(ffi/defcfn gtk-label-set-wrap-mode "gtk_label_set_wrap_mode" [:pointer :int] :void)
+;; PangoWrapMode: pango/pango-layout.h:91-93 (WORD=0, CHAR=1, WORD_CHAR=2 --
+;; falls back to character wrap only where a single word doesn't fit).
+(def PANGO-WRAP-WORD-CHAR 2)
+;; gtkwidget.h (GTK 4.22.4, installed headers): set_halign:581-582,
+;; set_valign:586-587. Both fixed arity.
+(ffi/defcfn gtk-widget-set-halign "gtk_widget_set_halign" [:pointer :int] :void)
+(ffi/defcfn gtk-widget-set-valign "gtk_widget_set_valign" [:pointer :int] :void)
+;; GtkAlign: gtkenums.h (FILL=0, START=1, END=2, CENTER=3).
+(def ALIGN-START 1)
 
 ;; --- text view / buffer ------------------------------------------------------
 (ffi/defcfn gtk-text-view-new "gtk_text_view_new" [] :pointer)

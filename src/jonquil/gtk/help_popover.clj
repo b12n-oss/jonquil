@@ -29,20 +29,14 @@
   "Builds the quick-doc popover anchored to view (the editor's
   GtkTextView): autohide off, position :bottom -- below the caret, per
   jonquil.gtk.popover's own docstring and P4 probe 2 -- so it never steals
-  keys from the editor (probe 1). Its child is a left-aligned label (CSS
-  class jonquil-doc, so jonquil.theme/code-css's popover rules give it the
-  theme's monospace font) inside a GtkScrolledWindow sized DOC-WIDTHxDOC-
-  HEIGHT, so a long docstring scrolls instead of growing the popover
-  without bound. Returns the jonquil.gtk.popover map ({:popover :view
+  keys from the editor (probe 1). Its child is jonquil.gtk.popover/make-
+  doc-scroll (fix wave item 5: wrapped, top-aligned, no horizontal
+  scrolling, sized to its content up to DOC-HEIGHT and scrollable beyond
+  that) at DOC-WIDTH. Returns the jonquil.gtk.popover map ({:popover :view
   :open?}) plus :label, the label widget show-doc!/quick-doc-text act on."
   [view]
-  (let [label (g/gtk-label-new "")
-        scroll (g/gtk-scrolled-window-new)
+  (let [{:keys [label scroll]} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
         pp (popover/make-popover view {:autohide? false :position :bottom})]
-    (g/gtk-widget-add-css-class label "jonquil-doc")
-    (g/gtk-label-set-xalign label 0.0)
-    (g/gtk-widget-set-size-request scroll DOC-WIDTH DOC-HEIGHT)
-    (g/gtk-scrolled-window-set-child scroll label)
     (popover/set-child! pp scroll)
     (assoc pp :label label)))
 
@@ -69,7 +63,11 @@
   case), the shape rename wants since its entry must receive typing. Its
   child is a vertical box: a GtkEntry (the new name) over a left-aligned
   problem label (class jonquil-doc, same styling as the quick-doc label
-  above), empty while there's nothing to report. Connects a SECOND
+  above), hidden while there's nothing to report (fix wave item 5: an
+  empty label still claims a row of vertical space in a GtkBox, which
+  looked like dead space under the entry -- gtk_widget_set_visible FALSE
+  removes it entirely; show-rename-problem! below shows it again the
+  moment there's real text). Connects a SECOND
   \"closed\" handler (jonquil.gtk.popover/make-popover's own autohide
   branch already connects the first, to keep :open? in sync) that gives
   keyboard focus back to view -- every close path (Enter's own hide!,
@@ -84,6 +82,7 @@
     (g/gtk-widget-set-size-request entry RENAME-WIDTH -1)
     (g/gtk-widget-add-css-class problem-label "jonquil-doc")
     (g/gtk-label-set-xalign problem-label 0.0)
+    (g/gtk-widget-set-visible problem-label 0)
     (g/gtk-box-append box entry)
     (g/gtk-box-append box problem-label)
     (popover/set-child! pp box)
@@ -96,23 +95,28 @@
 (defn show-rename!
   "Prefills rp's entry with symbol and selects all of it (GIR's own doc
   for gtk_editable_select_region: a negative end_pos selects to the end),
-  clears any earlier problem text, pops the popover up at the caret
-  (popover/show-at-caret!, same as show-doc! above) and only THEN selects/
-  focuses the entry: a later call touching selection can revoke an
-  earlier widget's, so every selection-touching call here happens last."
+  clears any earlier problem text and hides the (now empty) problem label
+  (fix wave item 5), pops the popover up at the caret (popover/show-at-
+  caret!, same as show-doc! above) and only THEN selects/focuses the
+  entry: a later call touching selection can revoke an earlier widget's,
+  so every selection-touching call here happens last."
   [rp symbol]
   (g/gtk-editable-set-text (:entry rp) symbol)
   (g/gtk-label-set-text (:problem-label rp) "")
+  (g/gtk-widget-set-visible (:problem-label rp) 0)
   (popover/show-at-caret! rp)
   (g/gtk-editable-select-region (:entry rp) 0 -1)
   (g/gtk-widget-grab-focus (:entry rp))
   nil)
 
 (defn show-rename-problem!
-  "Sets rp's problem label to text -- the ui's own :rename-to!* shows
-  rename-problem's sentence here instead of closing the popover."
+  "Sets rp's problem label to text and shows it (fix wave item 5: hidden
+  again once text is empty, same as make-rename-popover's own initial
+  state) -- the ui's own :rename-to!* shows rename-problem's sentence
+  here instead of closing the popover."
   [rp text]
   (g/gtk-label-set-text (:problem-label rp) text)
+  (g/gtk-widget-set-visible (:problem-label rp) (if (empty? text) 0 1))
   nil)
 
 (defn rename-entry-text

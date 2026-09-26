@@ -96,7 +96,11 @@
   or the code font without them. font-size on the list/row and
   label.jonquil-doc rules is this task's own addition (probe 7 didn't set
   it), so a zoom reaches the completion/doc popovers the same way it
-  already reaches the code views."
+  already reaches the code views. The entry rule (fix wave item 5, M8) is
+  the rename popover's own GtkEntry: background/text like the popover's
+  own contents, plus a selection rule so the prefilled, selected symbol
+  name reads against the theme's own selection colour rather than GTK's
+  default blue."
   [t px]
   (str ".jonquil-code { font-size: " px "px; "
        "background-color: " (:background t) "; "
@@ -117,4 +121,10 @@
        "color: " (:text t) "; } "
        "popover.jonquil-popover label.jonquil-doc { "
        "font-family: monospace; "
-       "font-size: " px "px; }"))
+       "font-size: " px "px; } "
+       "popover.jonquil-popover entry { "
+       "background-color: " (:background t) "; "
+       "color: " (:text t) "; } "
+       "popover.jonquil-popover entry selection { "
+       "background-color: " (:selection t) "; "
+       "color: " (:text t) "; }"))

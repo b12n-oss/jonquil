@@ -2238,7 +2238,12 @@
   "Probe 7's measured selector, read back from the shared provider's OWN
   serialisation (:code-css*, gtk_css_provider_to_string) -- like row-
   theme-css, GTK normalises the theme's hex colours to rgb(r,g,b): dark's
-  :background #000000 -> rgb(0,0,0), :selection #3e4451 -> rgb(62,68,81)."
+  :background #000000 -> rgb(0,0,0), :selection #3e4451 -> rgb(62,68,81).
+  Fix wave item 5 (M8): extended to assert the rename entry's own rule
+  (popover.jonquil-popover entry) is present too -- same rgb(0,0,0)/
+  rgb(62,68,81) pair, since entry uses :background/:selection same as the
+  rest of the popover, so no new colour value is needed to prove it's
+  there."
   [ui next]
   (let [ed (:editor ui) view (:view ed)
         pp (popover/make-popover view {:autohide? false :position :bottom})]
@@ -2248,6 +2253,7 @@
     (let [css ((:code-css* ui))]
       (check :popover-dark-colours
              (and (str/includes? css "popover.jonquil-popover")
+                  (str/includes? css "popover.jonquil-popover entry")
                   (str/includes? css "rgb(0,0,0)")
                   (str/includes? css "rgb(62,68,81)"))
              {:css css})

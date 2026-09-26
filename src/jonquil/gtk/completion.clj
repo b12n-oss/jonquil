@@ -110,12 +110,12 @@
   jonquil.gtk.help-popover, so it never steals keys from its view (probe
   1). Its child is a vertical box: a
   GtkListBox (BROWSE selection, so exactly one candidate row is always
-  selected) inside a GtkScrolledWindow sized LIST-WIDTHxLIST-HEIGHT, over a
-  left-aligned doc-preview label (class jonquil-doc, so jonquil.theme/
-  code-css's popover rules give it the theme's monospace font and size)
-  inside its own scroll sized LIST-WIDTHxDOC-HEIGHT -- mirroring help-
-  popover's own scrolled-label shape, so a long docstring scrolls instead
-  of growing the popover without bound. opts is {:ed :ns-fn :close-others!
+  selected) inside a GtkScrolledWindow sized LIST-WIDTHxLIST-HEIGHT, over
+  jonquil.gtk.popover/make-doc-scroll's own doc-preview label+scroll at
+  LIST-WIDTHxDOC-HEIGHT (fix wave item 5: wrapped, top-aligned, no
+  horizontal scrolling, sized to content up to DOC-HEIGHT) -- mirroring
+  help-popover's own doc popover shape, so a long docstring scrolls
+  instead of growing the popover without bound. opts is {:ed :ns-fn :close-others!
   :on-error :position :snapshot-fn :apply-op!} -- see the ns docstring.
   :position is :bottom (default, the editor's own anchor, probe 2) or :top
   (the console's, P4.T6). :snapshot-fn (fn [] -> a snapshot map, optionally
@@ -133,17 +133,12 @@
               apply-op! (fn [result] (editor/apply-op! ed result))}}]
   (let [list-box (g/gtk-list-box-new)
         list-scroll (g/gtk-scrolled-window-new)
-        doc-label (g/gtk-label-new "")
-        doc-scroll (g/gtk-scrolled-window-new)
+        {doc-label :label doc-scroll :scroll} (popover/make-doc-scroll LIST-WIDTH DOC-HEIGHT)
         box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         pp (popover/make-popover view {:autohide? false :position position})]
     (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
     (g/gtk-widget-set-size-request list-scroll LIST-WIDTH LIST-HEIGHT)
     (g/gtk-scrolled-window-set-child list-scroll list-box)
-    (g/gtk-widget-add-css-class doc-label "jonquil-doc")
-    (g/gtk-label-set-xalign doc-label 0.0)
-    (g/gtk-widget-set-size-request doc-scroll LIST-WIDTH DOC-HEIGHT)
-    (g/gtk-scrolled-window-set-child doc-scroll doc-label)
     (g/gtk-box-append box list-scroll)
     (g/gtk-box-append box doc-scroll)
     (popover/set-child! pp box)
@@ -172,7 +167,10 @@
   docs/symbol-doc looked up with st's own :text (the snapshot text open!/
   refine! saw when they built st -- mirroring window.clj's do-quick-doc!/
   do-jump!, which pass the target symbol's own start as pos) and the
-  prefix's own start."
+  prefix's own start. Fix wave item 5 (M2): each row's label gets xalign
+  0 and halign START -- GTK_ALIGN_FILL's default centres a GtkListBoxRow's
+  child when the row is wider than the label's own natural size, which is
+  every row here (list-box is LIST-WIDTH wide, a candidate name is not)."
   [c st]
   (let [{:keys [list-box doc-label ns-fn]} c
         text (:text st)
@@ -180,7 +178,10 @@
         sym (:symbol (help/selected st))]
     (g/gtk-list-box-remove-all list-box)
     (doseq [{:keys [symbol category]} (:candidates st)]
-      (g/gtk-list-box-append list-box (g/gtk-label-new (str symbol "  " (name category)))))
+      (let [row-label (g/gtk-label-new (str symbol "  " (name category)))]
+        (g/gtk-label-set-xalign row-label 0.0)
+        (g/gtk-widget-set-halign row-label g/ALIGN-START)
+        (g/gtk-list-box-append list-box row-label)))
     (g/gtk-list-box-select-row list-box (g/gtk-list-box-get-row-at-index list-box (:index st)))
     (g/gtk-label-set-text doc-label
                           (help/doc-text sym (docs/symbol-doc (ns-fn) sym text pos)))))

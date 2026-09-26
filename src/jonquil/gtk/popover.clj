@@ -94,6 +94,17 @@
         open? (atom false)]
     (g/gtk-widget-set-parent pop (g/gtk-widget-get-parent view))
     (g/gtk-widget-add-css-class pop "jonquil-popover")
+    ;; Fix wave item 5 (M2's left-edge finding): GTK_ALIGN_START on the
+    ;; popover's OWN widget, not just its child, moves its left edge to the
+    ;; caret instead of centring the popover on the pointing-to rect --
+    ;; measured live against the completion scene with a caret three
+    ;; columns from the editor's own left margin: image width dropped from
+    ;; 2082px to 1800px (exactly 900 logical x 2, the window's own width),
+    ;; and the popover's own rounded corner now sits inside the window
+    ;; frame instead of past it. Holds for every position (:top/:bottom),
+    ;; since GTK centres a BOTTOM/TOP popover along the perpendicular axis
+    ;; regardless of halign only when halign is left at its FILL default.
+    (g/gtk-widget-set-halign pop g/ALIGN-START)
     (g/gtk-popover-set-autohide pop (if autohide? 1 0))
     (g/gtk-popover-set-position pop (if (= position :top)
                                       g/POPOVER-POS-TOP
@@ -110,6 +121,41 @@
   [pp widget]
   (g/gtk-popover-set-child (:popover pp) widget)
   nil)
+
+(defn make-doc-scroll
+  "A scrolled, top-aligned, word-wrapped label (CSS class jonquil-doc, so
+  jonquil.theme/code-css's popover rules give it the theme's monospace
+  font), shared by jonquil.gtk.help-popover's quick-doc label and
+  jonquil.gtk.completion's doc-preview label -- fix wave item 5 (M2):
+  gtk_label_set_wrap plus PANGO_WRAP_WORD_CHAR (falling back to a
+  character break only where a single word doesn't fit its own line) in
+  place of the old clipped, unwrapped label; GTK_POLICY_NEVER on the
+  scroller's own horizontal axis, so a long unbroken token scrolls
+  vertically with the rest of the text instead of falling back to a
+  horizontal scrollbar the macOS overlay style hides; GTK_ALIGN_START on
+  the label's own valign, so short text sits at the top instead of the
+  default centre; and gtk_scrolled_window_set_propagate_natural_height
+  plus set_max_content_height in place of a fixed height request, so the
+  popover sizes to its actual content up to max-height and only scrolls
+  beyond that -- no more tall empty box under a one-line doc. width is
+  still a fixed size request (height -1, so only the max-content-height
+  clamp bounds the vertical size), keeping each popover's own width
+  exactly as before. Returns {:label :scroll}; callers set the label's
+  text and append :scroll into their own box (gtk_box_append)."
+  [width max-height]
+  (let [label (g/gtk-label-new "")
+        scroll (g/gtk-scrolled-window-new)]
+    (g/gtk-widget-add-css-class label "jonquil-doc")
+    (g/gtk-label-set-xalign label 0.0)
+    (g/gtk-label-set-wrap label 1)
+    (g/gtk-label-set-wrap-mode label g/PANGO-WRAP-WORD-CHAR)
+    (g/gtk-widget-set-valign label g/ALIGN-START)
+    (g/gtk-widget-set-size-request scroll width -1)
+    (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
+    (g/gtk-scrolled-window-set-propagate-natural-height scroll 1)
+    (g/gtk-scrolled-window-set-max-content-height scroll max-height)
+    (g/gtk-scrolled-window-set-child scroll label)
+    {:label label :scroll scroll}))
 
 (defn show-at-caret!
   "Points pp's popover at view's caret and pops it up. probe 2:
