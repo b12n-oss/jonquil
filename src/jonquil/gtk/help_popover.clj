@@ -21,7 +21,18 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]))
 
-(def ^:private DOC-WIDTH 420)
+;; Fix wave item 2: wide enough for a real docstring line's hard break to
+;; decide where the line ends, not the label's own soft wrap. Measured live
+;; (jonquil.gtk.ffi/gtk-widget-measure, HORIZONTAL, on this exact label once
+;; the popover is mapped): monospace 13px (commands/DEFAULT-FONT-PX) runs
+;; ~7.83px/char here, so 80 columns needs 627px, and the doc-scroll's own
+;; width-request lands on the label with NO scrolled-window overhead
+;; (allocated width read back as exactly the width-request at the old
+;; DOC-WIDTH 420). 660 clears 80 columns (627px) with room to spare --
+;; clojure.core/map's own longest line (measured at 70 columns, 548px)
+;; fits with margin, and the cushion reaches 84 columns (658px) before a
+;; line would soft-wrap at all.
+(def ^:private DOC-WIDTH 660)
 (def ^:private DOC-HEIGHT 260)
 (def ^:private RENAME-WIDTH 260)
 

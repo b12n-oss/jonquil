@@ -83,6 +83,12 @@
 (def ^:private LIST-WIDTH 320)
 (def ^:private LIST-HEIGHT 160)
 (def ^:private DOC-HEIGHT 110)
+;; Fix wave item 2: the doc-preview label's own width, no longer tied to
+;; LIST-WIDTH (the candidate list column stays LIST-WIDTH-wide; only the
+;; doc area below it widens) -- see jonquil.gtk.help-popover's DOC-WIDTH
+;; comment for the measurement this shares (monospace 13px, ~7.83px/char,
+;; 660 covers an 80-column docstring line with a cushion).
+(def ^:private DOC-WIDTH 660)
 
 ;; gdkkeysyms.h (re-verified against the installed header, matching every
 ;; other key table in this project): Up 0xff52, Down 0xff54, Page_Up
@@ -112,10 +118,13 @@
   GtkListBox (BROWSE selection, so exactly one candidate row is always
   selected) inside a GtkScrolledWindow sized LIST-WIDTHxLIST-HEIGHT, over
   jonquil.gtk.popover/make-doc-scroll's own doc-preview label+scroll at
-  LIST-WIDTHxDOC-HEIGHT (fix wave item 5: wrapped, top-aligned, no
-  horizontal scrolling, sized to content up to DOC-HEIGHT) -- mirroring
-  help-popover's own doc popover shape, so a long docstring scrolls
-  instead of growing the popover without bound. opts is {:ed :ns-fn :close-others!
+  DOC-WIDTHxDOC-HEIGHT (fix wave item 5: wrapped, top-aligned, no
+  horizontal scrolling, sized to content up to DOC-HEIGHT; fix wave item 2:
+  DOC-WIDTH is now its own constant, wider than LIST-WIDTH, so a docstring's
+  own hard breaks decide its line ends instead of an early soft wrap --
+  see DOC-WIDTH's own comment) -- mirroring help-popover's own doc popover
+  shape, so a long docstring scrolls instead of growing the popover without
+  bound. opts is {:ed :ns-fn :close-others!
   :on-error :position :snapshot-fn :apply-op!} -- see the ns docstring.
   :position is :bottom (default, the editor's own anchor, probe 2) or :top
   (the console's, P4.T6). :snapshot-fn (fn [] -> a snapshot map, optionally
@@ -133,7 +142,7 @@
               apply-op! (fn [result] (editor/apply-op! ed result))}}]
   (let [list-box (g/gtk-list-box-new)
         list-scroll (g/gtk-scrolled-window-new)
-        {doc-label :label doc-scroll :scroll} (popover/make-doc-scroll LIST-WIDTH DOC-HEIGHT)
+        {doc-label :label doc-scroll :scroll} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
         box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         pp (popover/make-popover view {:autohide? false :position position})]
     (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
