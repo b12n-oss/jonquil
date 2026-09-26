@@ -1093,12 +1093,15 @@
         ;; showing (context bullet #3), through the registry, never a
         ;; pairwise special case. ns-fn is called at every lookup, not
         ;; captured once -- the running program's namespace can change
-        ;; between Runs.
+        ;; between Runs. P4.T5 fix round 1: on-error is completion's own
+        ;; handle-key! reporting a throw from move!/commit!/close! to the
+        ;; status bar, the same set-status! every other lookup here uses.
         completion (completion/make-completion
                     (:view ed)
                     {:ed ed
                      :ns-fn (fn [] (:prompt-ns @(:state session)))
-                     :close-others! close-popovers-fn})
+                     :close-others! close-popovers-fn
+                     :on-error (fn [msg] (set-status! status-label msg))})
         complete-fn (fn [] (do-complete! ed completion status-label))
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))

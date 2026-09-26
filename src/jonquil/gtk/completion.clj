@@ -29,7 +29,23 @@
   way Escape closes any of them -- through the registry, never a pairwise
   special case. It is NOT called from refine! (already-open, only its
   CONTENT changes) or from the single-candidate commit branch (no popover
-  ever shows).
+  ever shows). on-error (opts) is window.clj's own (fn [msg] ->
+  set-status!) -- handle-key!'s own try/catch (below) is the only caller.
+
+  P4.T5 fix round 1 (Important): handle-key! wraps its whole cond in
+  try/catch and still returns 1 on a throw from move!/commit!/close! --
+  editor.clj's own handle-key! only falls through to plain-return?/Tab-
+  indent when the completion delegate returns 0, so a throw reaching that
+  wrapper unhandled (window.clj's own try/catch there returns 0 on catch)
+  used to mean Enter/Tab fell through into a SECOND, unrelated edit
+  (handle-return!'s own apply-op!, or Tab's indent) on top of whatever
+  commit! partially did -- a half-applied word, a stray edit, two undo
+  steps, and (measured live, forcing editor/apply-op! to throw via
+  with-redefs against this file's own commit! call) an actual crash, since
+  handle-return!'s apply-op! call has no try/catch of its own either and
+  the SAME forced throw fires there too, this time fully uncaught. Once a
+  key is one completion owns (state c was non-nil when handle-key! was
+  entered), the key is consumed regardless of what the owning branch does.
 
   refine! is wired by jonquil.gtk.window into editor/on-cursor-moved!
   (P3.T5's own Ln/Col mechanism), not a new editor.clj hook: that signal
@@ -89,11 +105,12 @@
   code-css's popover rules give it the theme's monospace font and size)
   inside its own scroll sized LIST-WIDTHxDOC-HEIGHT -- mirroring help-
   popover's own scrolled-label shape, so a long docstring scrolls instead
-  of growing the popover without bound. opts is {:ed :ns-fn :close-others!}
-  -- see the ns docstring. Returns the jonquil.gtk.popover map ({:popover
-  :view :open?}) plus :ed/:ns-fn/:close-others!/:list-box/:doc-label/
-  :state (an atom, the jonquil.help open-state map or nil)."
-  [view {:keys [ed ns-fn close-others!]}]
+  of growing the popover without bound. opts is {:ed :ns-fn :close-others!
+  :on-error} -- see the ns docstring. Returns the jonquil.gtk.popover map
+  ({:popover :view :open?}) plus :ed/:ns-fn/:close-others!/:on-error/
+  :list-box/:doc-label/:state (an atom, the jonquil.help open-state map or
+  nil)."
+  [view {:keys [ed ns-fn close-others! on-error]}]
   (let [list-box (g/gtk-list-box-new)
         list-scroll (g/gtk-scrolled-window-new)
         doc-label (g/gtk-label-new "")
@@ -114,6 +131,7 @@
            :ed ed
            :ns-fn ns-fn
            :close-others! close-others!
+           :on-error on-error
            :list-box list-box
            :doc-label doc-label
            :state (atom nil))))
@@ -188,21 +206,37 @@
   "The navigation/commit/escape keys, while c's popup is open (gated on
   (state c), see the ns docstring): Up/Down move by 1, PageUp/PageDown by
   8 (help/move's own clamp), Enter/KP-Enter/Tab commit (one apply-op!, one
-  undo step, then close -- see commit!'s ordering), Escape closes. Every
-  other key, or any key at all while c isn't open, returns 0 so the
+  undo step, then close -- see commit!'s ordering), Escape closes (a
+  fallback here: in production the window's own capture-phase controller
+  already closes any open P4 popover on Escape before the editor ever
+  sees the key -- P4.T3's registry -- so this clause mostly matters for a
+  direct call, e.g. a self-test row, or if that ordering ever changes).
+  Every other key, or any key at all while c isn't open, returns 0 so the
   editor's own handle-key! falls through to its normal dispatch (typing
-  continues)."
+  continues).
+
+  P4.T5 fix round 1: once state c is non-nil (this key IS one completion
+  owns), the whole cond runs inside try/catch and still returns 1 on a
+  throw from move!/commit!/close! -- reporting it through on-error rather
+  than letting it escape to editor.clj's own dispatch, which would
+  otherwise treat the key as unhandled and fall through into a second,
+  unrelated edit. See the ns docstring for the measured failure this
+  fixes."
   [c keyval state-mask]
   (if-not (state c)
     0
-    (cond
-      (= keyval KEY-UP) (do (move! c -1) 1)
-      (= keyval KEY-DOWN) (do (move! c 1) 1)
-      (= keyval KEY-PAGE-UP) (do (move! c (- PAGE-STEP)) 1)
-      (= keyval KEY-PAGE-DOWN) (do (move! c PAGE-STEP) 1)
-      (or (= keyval KEY-RETURN) (= keyval KEY-KP-ENTER) (= keyval KEY-TAB)) (do (commit! c) 1)
-      (= keyval KEY-ESCAPE) (do (close! c) 1)
-      :else 0)))
+    (try
+      (cond
+        (= keyval KEY-UP) (do (move! c -1) 1)
+        (= keyval KEY-DOWN) (do (move! c 1) 1)
+        (= keyval KEY-PAGE-UP) (do (move! c (- PAGE-STEP)) 1)
+        (= keyval KEY-PAGE-DOWN) (do (move! c PAGE-STEP) 1)
+        (or (= keyval KEY-RETURN) (= keyval KEY-KP-ENTER) (= keyval KEY-TAB)) (do (commit! c) 1)
+        (= keyval KEY-ESCAPE) (do (close! c) 1)
+        :else 0)
+      (catch :default e
+        ((:on-error c) (str "; complete: " (ex-message e)))
+        1))))
 
 (defn refine!
   "Called on every editor/on-cursor-moved! tick (window.clj's own wiring,

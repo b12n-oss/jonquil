@@ -2737,6 +2737,39 @@
             (completion/close! c)
             (next)))))))
 
+(defn- row-completion-commit-throw-consumes-key
+  "P4.T5 fix round 1 (Important): forces jonquil.gtk.editor/apply-op! to
+  throw for the duration of one Enter, through commit!'s own call to it --
+  with-redefs on that var DOES reach the call completion.clj makes
+  through its own `editor` alias (checked live before writing this row:
+  without the fix, this exact with-redefs, run through editor/handle-key!,
+  crashed the whole selftest process -- window.clj's :handle-key! wrapper
+  caught the first throw and returned 0, so editor.clj's own handle-key!
+  fell through to plain-return? -> handle-return!, whose OWN apply-op!
+  call has no try/catch and hit the SAME redefined throw uncaught; see the
+  report). With the fix, completion/handle-key! itself catches it and
+  still returns 1: the buffer keeps its pre-commit text (no newline, no
+  second edit), the popover is closed, and the status bar shows the
+  error."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui) status (:status-label ui)]
+    (editor/set-text! ed "(ma")
+    (place-cursor! (:buf ed) 3)
+    (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          handled (with-redefs [editor/apply-op! (fn [& _] (throw (ex-info "forced commit failure" {})))]
+                    (editor/handle-key! ed KEY-RETURN 0))
+          text (editor/editor-text ed)
+          closed? (nil? (completion/state c))]
+      (poll-until 1000 20
+                  (fn [] (str/includes? (g/label-text status) "forced commit failure"))
+                  (fn [status-ok?]
+                    (check :completion-commit-throw-consumes-key
+                           (and opened? (= 1 handled) (= "(ma" text) closed? status-ok?)
+                           {:opened opened? :handled handled :text text :closed closed?
+                            :status (g/label-text status)})
+                    (next))))))
+
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
   not idle -- the coordinator's own concern was exactly this combination
@@ -2889,6 +2922,7 @@
    row-completion-preedit-yields
    row-completion-closes-on-focus-loss
    row-completion-closes-other-popover
+   row-completion-commit-throw-consumes-key
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
