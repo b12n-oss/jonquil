@@ -335,9 +335,8 @@
 (def ^:private KEY-L 0x06c)
 (def ^:private KEY-Y 0x079)
 
-;; P4.T4 additions (gdkkeysyms.h, measured 2026-09-26 -- see the brief's key
-;; table): Ctrl+Q quick doc, F12/Ctrl+B jump to definition, Shift+F1 quick
-;; doc's second chord.
+;; P4.T4 additions (gdkkeysyms.h): Ctrl+Q quick doc, F12/Ctrl+B jump to
+;; definition, Shift+F1 quick doc's second chord.
 (def ^:private KEY-Q 0x071)
 (def ^:private KEY-B 0x062)
 (def ^:private KEY-F1 0xffbe)
@@ -348,8 +347,7 @@
 (def ^:private KEY-SPACE 0x020)
 
 ;; P4.T7 additions (gdkkeysyms.h, re-verified against the installed
-;; header, matching the brief's own measured values): Shift+F6/F2 open
-;; the rename popover.
+;; header): Shift+F6/F2 open the rename popover.
 (def ^:private KEY-F6 0xffc3)
 (def ^:private KEY-F2 0xffbf)
 
@@ -419,10 +417,10 @@
   (if (apply-op! ed result) 1 0))
 
 ;; P4.T7: named so the context menu's own items (window.clj) call the
-;; EXACT same function as their key, per the brief's own reviewer clause
-;; -- these five used to be inline lambdas inside handle-key!'s cond
-;; below, which a menu item could only have duplicated, never reused.
-;; Each does exactly what its own inline body used to.
+;; EXACT same function as their key -- these five used to be inline
+;; lambdas inside handle-key!'s cond below, which a menu item could only
+;; have duplicated, never reused. Each does exactly what its own inline
+;; body used to.
 
 (defn do-toggle-comment! [ed]
   (apply-edit! ed (edit/toggle-comment (snapshot ed))))
@@ -529,9 +527,9 @@
        ;; because the P4 global constraint is CONTROL-MASK only, rejecting
        ;; META-MASK -- unlike every chord above, which treats Control and
        ;; Meta as the same command chord. Shift+F1 checks shift-only? for
-       ;; the same reason, applied to its own Shift-based chord (fix round
-       ;; 1: it used to check shift-held? alone, so Cmd+Shift+F1 also
-       ;; matched). F12 additionally requires NO modifiers at all
+       ;; the same reason, applied to its own Shift-based chord, so
+       ;; Cmd+Shift+F1 doesn't also match it. F12 additionally requires
+       ;; NO modifiers at all
        ;; (no-modifiers?, stricter than no-command-modifiers? above, which
        ;; doesn't check Shift). Each runs the fn jonquil.gtk.window
        ;; registered (set-quick-doc-fn!/set-jump-fn!, below) and returns 1

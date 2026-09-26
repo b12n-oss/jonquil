@@ -428,7 +428,7 @@
            :else (cview/append! cv :error (str "; save: " error "\n"))))))
     :else nil))
 
-;; --- popover teardown (P4.T4 fix round 1) -----------------------------
+;; --- popover teardown --------------------------------------------------
 
 (defn- unparent-registered-popovers!
   "Unparents every popover in popovers (a jonquil.gtk.popover map) whose
@@ -438,16 +438,15 @@
   that unparents itself right after hide!, e.g.
   row-window-escape-closes-popover) is skipped rather than warned at.
 
-  P4.T4 fix round 2: hide!s an OPEN popover FIRST (same idiom
-  close-popovers! uses), before unparenting it. Without this, an open
-  popover's own :open? atom stayed true after its widget was unparented
-  (and, for a floating-ref GtkWidget with no other reference, finalized
-  right there); window teardown itself then clears the editor's focus,
-  GtkEventControllerFocus's \"leave\" fires this window's own hide-on-
-  focus-lost listener, (popover/open? p) still reads true, and hide! calls
-  gtk_popover_popdown on the now-freed widget -- measured live: \"Gtk-
-  CRITICAL: gtk_popover_popdown: assertion 'GTK_IS_POPOVER (popover)'
-  failed\" (see the report's reproduction). Resetting :open? here, before
+  Hides an OPEN popover FIRST (same idiom close-popovers! uses), before
+  unparenting it. Without this, an open popover's own :open? atom stays
+  true after its widget is unparented (and, for a floating-ref GtkWidget
+  with no other reference, finalized right there); window teardown itself
+  then clears the editor's focus, GtkEventControllerFocus's \"leave\"
+  fires this window's own hide-on-focus-lost listener, (popover/open? p)
+  still reads true, and hide! calls gtk_popover_popdown on the now-freed
+  widget -- measured live: \"Gtk-CRITICAL: gtk_popover_popdown: assertion
+  'GTK_IS_POPOVER (popover)' failed\". Resetting :open? here, before
   unparenting, means every later teardown-triggered listener's own
   (popover/open? p) check already reads false and skips calling hide!
   again -- the same reasoning that makes this function idempotent against
@@ -458,14 +457,14 @@
   tearing the window down (close-request-fn's own docstring: \"once it
   returns 0, GTK proceeds to actually tear the window down\"). A session-
   lifetime popover (jonquil.gtk.popover's hide! never unparents -- see its
-  ns docstring, an intentional P4.T3 design) is still parented to its
-  scrolled-window parent at that point; without this, GTK's own dispose
-  finds it still there when that widget finalizes and reports \"Finalizing
+  ns docstring, an intentional design) is still parented to its scrolled-
+  window parent at that point; without this, GTK's own dispose finds it
+  still there when that widget finalizes and reports \"Finalizing
   GtkScrolledWindow ..., but it still has children left: GtkPopover ...\"
-  (measured live, P4.T4 fix round 1's own report). Never called from the
-  self-test's suppress-close? branch -- that path returns 1 and never
-  actually closes anything, so unparenting there would silently break
-  every later row's use of the SAME session-lifetime popover."
+  (measured live). Never called from the self-test's suppress-close?
+  branch -- that path returns 1 and never actually closes anything, so
+  unparenting there would silently break every later row's use of the
+  SAME session-lifetime popover."
   [popovers]
   (doseq [p @popovers]
     (let [pop (:popover p)]
@@ -521,10 +520,10 @@
       (do (reset! closing? true)
           (if @suppress-close?
             (do (reset! confirmed-close? false) 1)
-            ;; P4.T4 fix round 1: unparent every registered P4 popover
-            ;; BEFORE the real quit -- see unparent-registered-popovers!'s
-            ;; own docstring for why this branch specifically, never the
-            ;; suppress-close? one above.
+            ;; Unparents every registered P4 popover BEFORE the real quit
+            ;; -- see unparent-registered-popovers!'s own docstring for
+            ;; why this branch specifically, never the suppress-close?
+            ;; one above.
             (do (unparent-registered-popovers! popovers)
                 (g/g-application-quit app)
                 0))))))
@@ -726,9 +725,9 @@
   current snapshot; none sets status \"No symbol at the caret.\"
   Otherwise looks up docs/symbol-doc in the session's own prompt
   namespace and shows help/doc-text in the quick-doc popover at the
-  caret. Wrapped in try/catch (the reviewer clause: no lookup may throw
-  out of a key handler) even though docs/symbol-doc already catches its
-  own exceptions -- help/doc-text and syntax/format-autocomplete-doc run
+  caret. Wrapped in try/catch, since no lookup here may throw out of a
+  key handler, even though docs/symbol-doc already catches its own
+  exceptions -- help/doc-text and syntax/format-autocomplete-doc run
   outside that catch, and this is the editor's own key dispatch calling
   straight through, with nothing else between it and a throw.
 
@@ -755,7 +754,7 @@
   quick-doc popover (closing every OTHER open P4 popover first, same
   close-popovers-fn reasoning as do-quick-doc! above); jump-target's own
   nil case (no definition anywhere) reads as \"No definition found for
-  <sym>.\" -- the brief's three cases. No symbol at the caret at all
+  <sym>.\" -- the three cases above. No symbol at the caret at all
   (help/target nil, so there is no sym to name) falls back to quick doc's
   own \"No symbol at the caret.\" message instead of naming a nil symbol;
   no row exercises this edge, it's just the sane completion of the two
@@ -804,8 +803,8 @@
       (set-status! status-label (str "; rename: " (ex-message e))))))
 
 (defn- occurrence-count-phrase
-  "\"n occurrence\" or \"n occurrences\" -- the brief's own plural rule
-  for the rename status line."
+  "\"n occurrence\" or \"n occurrences\" -- the plural rule for the rename
+  status line."
   [n]
   (str n " occurrence" (when (not= 1 n) "s")))
 
@@ -815,13 +814,13 @@
   -- non-nil shows that sentence in the popover's own problem label and
   returns it, applying nothing; nil applies edit/rename's result through
   editor/apply-op! (one user action, one undo step per apply-op!'s own
-  contract), closes the popover, sets the brief's own status wording and
+  contract), closes the popover, sets the rename status wording and
   returns nil. old is read once (help/target) and reused for both the
   status line and (inside rename-problem) the problem sentence, mirroring
   do-quick-doc!/do-jump!'s own snapshot-once shape. Wrapped in try/catch,
-  same reviewer-clause reasoning as every other P4 action here -- this is
-  the entry's own \"activate\" signal handler, so nothing else stands
-  between a throw here and GTK's own signal emission."
+  same reasoning as every other P4 action here -- this is the entry's own
+  \"activate\" signal handler, so nothing else stands between a throw
+  here and GTK's own signal emission."
   [ed rename-pop new-name status-label]
   (try
     (let [snap (editor/snapshot ed)
@@ -845,10 +844,10 @@
 
 (defn- do-complete!
   "Ctrl+Space, the ui's own :complete!*: completion/open! on ed's current
-  snapshot. Wrapped in try/catch, the same reviewer-clause reasoning as
-  do-quick-doc!/do-jump! above -- completion/open! runs help/prefix-at,
-  docs/candidates, help/open-state and, for a single candidate, editor/
-  apply-op! straight through, with nothing else between it and a throw."
+  snapshot. Wrapped in try/catch, the same reasoning as do-quick-doc!/
+  do-jump! above -- completion/open! runs help/prefix-at, docs/candidates,
+  help/open-state and, for a single candidate, editor/apply-op! straight
+  through, with nothing else between it and a throw."
   [ed completion status-label]
   (try
     (completion/open! completion (editor/snapshot ed))
@@ -879,6 +878,35 @@
       (completion/open! repl-completion (assoc snap :extra-context (repl-history-context session))))
     (catch :default e
       (set-status! status-label (str "; complete: " (ex-message e))))))
+
+(defn- wire-completion!
+  "Joins completion to the popover registry and its own view's key/caret/
+  focus hooks -- shared by the editor's and the console's completion
+  instance, which otherwise wire identically. set-fns! registers
+  :complete! and a :handle-key! that reports a throw to the status label
+  and returns 1 (completion/handle-key! already caught the key by the
+  time it reached this wrapper, so a throw escaping it still means the
+  key was owned, never a fall-through); on-moved! is the view's own
+  caret-move hook (on-cursor-moved! for the editor, on-input-changed! for
+  the console -- the callback ignores whatever args it's called with, so
+  one fn works for either) and refines the popup on every call, reporting
+  a throw the same way; on-focus-lost! closes the popup."
+  [completion complete-fn status-label register-popover-fn set-fns! on-moved! on-focus-lost!]
+  (register-popover-fn completion)
+  (set-fns!
+   {:complete! complete-fn
+    :handle-key! (fn [keyval state]
+                   (try
+                     (completion/handle-key! completion keyval state)
+                     (catch :default e
+                       (set-status! status-label (str "; complete: " (ex-message e)))
+                       1)))})
+  (on-moved! (fn [& _]
+               (try
+                 (completion/refine! completion)
+                 (catch :default e
+                   (set-status! status-label (str "; complete: " (ex-message e)))))))
+  (on-focus-lost! (fn [] (completion/close! completion))))
 
 ;; --- find/replace bar (P3.T4) -----------------------------------------
 
@@ -1121,8 +1149,8 @@
   GSimpleActionGroup holding one no-parameter GSimpleAction per item,
   each wired to call f (its \"activate\" signal), inserted on view under
   prefix \"p4\" (gtk_widget_insert_action_group). items is [[label
-  action-name f] ...] -- f is the SAME fn its own key chord calls, per
-  the brief's reviewer clause; every editor item below names one.
+  action-name f] ...] -- f is the SAME fn its own key chord calls; every
+  editor item below names one.
 
   Returns the GSimpleActionGroup pointer so a caller can fire an item by
   its own unprefixed action-name through g_action_group_activate_action
@@ -1131,14 +1159,14 @@
   prefixed name, since \"p4\" here is only this group's own insertion
   prefix, not a second name the action itself carries.
 
-  Fix round 1 (Important): every item's own \"activate\" callback runs
-  inside try/catch, reporting a throw through on-error (fn [msg] -> nil,
-  window.clj's own set-status!) rather than letting it escape. Measured
-  live: an uncaught throw from a GSimpleAction \"activate\" callback goes
-  through Jolt's foreign-callable and kills the process (exit 1) -- the
-  same class of failure P4.T5's own reviewer clause guards do-complete!/
-  handle-key! against, here at the one call site every menu item (current
-  and future) shares, rather than in each item's own fn."
+  Every item's own \"activate\" callback runs inside try/catch, reporting
+  a throw through on-error (fn [msg] -> nil, window.clj's own
+  set-status!) rather than letting it escape: an uncaught throw from a
+  GSimpleAction \"activate\" callback goes through Jolt's foreign-callable
+  and kills the process (exit 1), measured live -- the same failure mode
+  do-complete!/handle-key! guard against, here at the one call site every
+  menu item (current and future) shares, rather than in each item's own
+  fn."
   [view items on-error]
   (let [menu (g/g-menu-new)
         group (g/g-simple-action-group-new)]
@@ -1244,9 +1272,9 @@
         ;; showing (context bullet #3), through the registry, never a
         ;; pairwise special case. ns-fn is called at every lookup, not
         ;; captured once -- the running program's namespace can change
-        ;; between Runs. P4.T5 fix round 1: on-error is completion's own
-        ;; handle-key! reporting a throw from move!/commit!/close! to the
-        ;; status bar, the same set-status! every other lookup here uses.
+        ;; between Runs. on-error is completion's own handle-key!
+        ;; reporting a throw from move!/commit!/close! to the status bar,
+        ;; the same set-status! every other lookup here uses.
         ;; Shared by both completion instances below (P4.T6): the running
         ;; program's namespace, read fresh at every lookup either way.
         completion-ns-fn (fn [] (:prompt-ns @(:state session)))
@@ -1259,7 +1287,7 @@
         complete-fn (fn [] (do-complete! ed completion status-label))
         ;; P4.T6: a second jonquil.gtk.completion instance, on the
         ;; console's own input region -- :position :top (above the input
-        ;; line, per the brief and probe 2, vs. the editor's own :bottom),
+        ;; line, per probe 2, vs. the editor's own :bottom),
         ;; :snapshot-fn/:apply-op! overridden to cview/input-snapshot and
         ;; cview/apply-input-op! so refine!/commit! read and write the
         ;; input region instead of :ed's whole buffer (jonquil.gtk.
@@ -1431,8 +1459,8 @@
     ;; P4.T4: joins the SAME popover registry P4.T3 built (Escape closes
     ;; it), wires the editor's own Ctrl+Q/Shift+F1/F12/Ctrl+B key clauses
     ;; to quick-doc-fn/jump-fn, and closes the popover on any caret move
-    ;; or focus leaving the editor (the brief's own close conditions,
-    ;; beyond Escape, which the registry above already covers).
+    ;; or focus leaving the editor -- both beyond Escape, which the
+    ;; registry above already covers.
     (register-popover-fn help-pop)
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
@@ -1459,53 +1487,17 @@
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; P4.T5: joins the SAME popover registry, wires the editor's own
-    ;; Ctrl+Space chord and its nav/commit/escape keys to completion/
-    ;; open!/handle-key!, and refines/closes it on the SAME on-cursor-
-    ;; moved! hook Ln/Col already uses (covers both a buffer change and a
-    ;; plain caret move out of the word in one place -- see jonquil.gtk.
-    ;; completion's own ns docstring) plus on-focus-lost!. Both callbacks
-    ;; run inside try/catch, the same reviewer-clause reasoning as do-
-    ;; quick-doc!/do-jump! -- a throw here would otherwise cross back into
-    ;; GTK's own "notify::cursor-position"/key-pressed signal dispatch.
-    (register-popover-fn completion)
-    (editor/set-completion-fns!
-     ed {:complete! complete-fn
-         :handle-key! (fn [keyval state]
-                        (try
-                          (completion/handle-key! completion keyval state)
-                          (catch :default e
-                            (set-status! status-label (str "; complete: " (ex-message e)))
-                            0)))})
-    (editor/on-cursor-moved!
-     ed (fn [_lc]
-          (try
-            (completion/refine! completion)
-            (catch :default e
-              (set-status! status-label (str "; complete: " (ex-message e)))))))
-    (editor/on-focus-lost! ed (fn [] (completion/close! completion)))
-    ;; P4.T6: repl-completion joins the SAME popover registry and wires
-    ;; the console's own Ctrl+Space chord and its nav/commit/escape keys
-    ;; to completion/open!/handle-key!, refining/closing it on the
-    ;; console's own on-input-changed! (cview's own analogue of the
-    ;; editor's on-cursor-moved!, wired above) plus on-focus-lost!. Same
-    ;; try/catch reasoning as the editor's own wiring just above.
-    (register-popover-fn repl-completion)
-    (cview/set-completion-fns!
-     cv {:complete! repl-complete-fn
-         :handle-key! (fn [keyval state]
-                        (try
-                          (completion/handle-key! repl-completion keyval state)
-                          (catch :default e
-                            (set-status! status-label (str "; complete: " (ex-message e)))
-                            0)))})
-    (cview/on-input-changed!
-     cv (fn []
-          (try
-            (completion/refine! repl-completion)
-            (catch :default e
-              (set-status! status-label (str "; complete: " (ex-message e)))))))
-    (cview/on-focus-lost! cv (fn [] (completion/close! repl-completion)))
+    ;; P4.T5/P4.T6: the editor's and the console's own completion
+    ;; instance, wired identically -- see wire-completion!'s own
+    ;; docstring.
+    (wire-completion! completion complete-fn status-label register-popover-fn
+                      (fn [fns] (editor/set-completion-fns! ed fns))
+                      (fn [f] (editor/on-cursor-moved! ed f))
+                      (fn [f] (editor/on-focus-lost! ed f)))
+    (wire-completion! repl-completion repl-complete-fn status-label register-popover-fn
+                      (fn [fns] (cview/set-completion-fns! cv fns))
+                      (fn [f] (cview/on-input-changed! cv f))
+                      (fn [f] (cview/on-focus-lost! cv f)))
     (when file
       ;; A file argument that doesn't exist opens an empty editor with the
       ;; path remembered anyway, so Save creates it -- unlike the Open

@@ -3,29 +3,27 @@
   rename (P4.T4-T7). Anchored to the view it's built for (the editor or the
   REPL input), so it moves with whichever pane actually has the caret --
   but its actual GtkWidget parent (gtk_widget_set_parent) is that view's
-  own immediate container, never the view itself. That deviates from the
-  P4 probes' own code (spikes/p4/p4_1_popover_focus.clj,
-  p4_2_caret_anchor.clj, p4_7_popover_colours.clj all parent straight to
-  the GtkTextView) because of a live finding those probes never hit: every
-  probe process ends with System/exit, which skips GTK's own dispose
-  cascade entirely, so none of them ever destroyed the window they built.
-  Doing that for real (2026-09-26, sample'd via `sample <pid> 3` on a
-  hung bb gtk:selftest -- see the report) showed the main thread pinned at
-  100% CPU in gtk_text_view_dispose -> gtk_text_view_remove ->
-  g_log_structured_standard: GtkTextView's own dispose walks its
-  structural children to detach them, doesn't recognise a foreign
-  (non-anchor) child, logs \"GtkPopover is not a child of GtkTextView\"
-  every iteration, and never actually detaches it -- the loop never ends,
-  so closing the window (or the process exiting through the self-test's
-  own real close chord) hangs forever. A plain GtkScrolledWindow (the
-  view's actual parent in both the editor and the console -- GTK4's
-  GtkTextView implements GtkScrollable directly, so
-  gtk_scrolled_window_set_child attaches it with no extra GtkViewport in
-  between) has no such override and destroys cleanly, measured against
-  the same real teardown path. jonquil.gtk.window's own registry
-  (:close-popovers!*) still closes (popdown, not unparent) whichever P4
-  popover is open; nothing here unparents on hide!, since a production
-  popover is built once and shown/hidden for the rest of the session.
+  own immediate container, never the view itself. Parenting straight to
+  the GtkTextView (what the P4 probes' own code does --
+  spikes/p4/p4_1_popover_focus.clj, p4_2_caret_anchor.clj,
+  p4_7_popover_colours.clj) hangs a real window close: GtkTextView's own
+  dispose walks its structural children to detach them, doesn't recognise
+  a foreign (non-anchor) child, logs \"GtkPopover is not a child of
+  GtkTextView\" every iteration, and never actually detaches it, so the
+  main thread pins at 100% CPU in gtk_text_view_dispose ->
+  gtk_text_view_remove -> g_log_structured_standard forever (measured via
+  `sample <pid> 3` on a hung bb gtk:selftest). The probes themselves never
+  hit this, since every probe process ends with System/exit, which skips
+  GTK's own dispose cascade entirely, so none of them ever destroyed the
+  window they built. A plain GtkScrolledWindow (the view's actual parent
+  in both the editor and the console -- GTK4's GtkTextView implements
+  GtkScrollable directly, so gtk_scrolled_window_set_child attaches it
+  with no extra GtkViewport in between) has no such override and destroys
+  cleanly, measured against the same real teardown path. jonquil.gtk.
+  window's own registry (:close-popovers!*) still closes (popdown, not
+  unparent) whichever P4 popover is open; nothing here unparents on
+  hide!, since a production popover is built once and shown/hidden for
+  the rest of the session.
 
   Probe 1 (P4 findings #1): with autohide FALSE the popover stays visible
   and mapped, the window's focus widget stays the view, and the view's own
@@ -46,11 +44,11 @@
   jonquil.gtk.ffi/compute-point translates that point into the parent's
   own coordinate space before gtk_popover_set_pointing_to: GIR's own doc
   for set_pointing_to says the rectangle is in the coordinate space of
-  the popover's actual GtkWidget parent. Measured live (2026-09-26) against
-  a scrolled, margined view matching the editor's own setup: the
-  translated point equalled the untranslated one exactly (no border
-  between the view and its scrolled window in this theme), but the
-  translation is applied unconditionally rather than assumed, since a
+  the popover's actual GtkWidget parent. Measured against a scrolled,
+  margined view matching the editor's own setup: the translated point
+  equalled the untranslated one exactly (no border between the view and
+  its scrolled window in this theme), but the translation is applied
+  unconditionally rather than assumed, since a
   theme with a scrolled-window frame would make it nonzero.
 
   P4.T7: make-popover's autohide branch connects the popover's own

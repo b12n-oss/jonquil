@@ -98,9 +98,8 @@
   for gtk_editable_select_region: a negative end_pos selects to the end),
   clears any earlier problem text, pops the popover up at the caret
   (popover/show-at-caret!, same as show-doc! above) and only THEN selects/
-  focuses the entry -- find-bar/open!'s own fix round 2 measured that a
-  later call touching selection can revoke an earlier widget's, so every
-  selection-touching call here happens last, same order that fix uses."
+  focuses the entry: a later call touching selection can revoke an
+  earlier widget's, so every selection-touching call here happens last."
   [rp symbol]
   (g/gtk-editable-set-text (:entry rp) symbol)
   (g/gtk-label-set-text (:problem-label rp) "")

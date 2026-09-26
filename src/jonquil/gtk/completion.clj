@@ -44,20 +44,16 @@
   ever shows). on-error (opts) is window.clj's own (fn [msg] ->
   set-status!) -- handle-key!'s own try/catch (below) is the only caller.
 
-  P4.T5 fix round 1 (Important): handle-key! wraps its whole cond in
-  try/catch and still returns 1 on a throw from move!/commit!/close! --
-  editor.clj's own handle-key! only falls through to plain-return?/Tab-
-  indent when the completion delegate returns 0, so a throw reaching that
-  wrapper unhandled (window.clj's own try/catch there returns 0 on catch)
-  used to mean Enter/Tab fell through into a SECOND, unrelated edit
-  (handle-return!'s own apply-op!, or Tab's indent) on top of whatever
-  commit! partially did -- a half-applied word, a stray edit, two undo
-  steps, and (measured live, forcing editor/apply-op! to throw via
-  with-redefs against this file's own commit! call) an actual crash, since
-  handle-return!'s apply-op! call has no try/catch of its own either and
-  the SAME forced throw fires there too, this time fully uncaught. Once a
-  key is one completion owns (state c was non-nil when handle-key! was
-  entered), the key is consumed regardless of what the owning branch does.
+  handle-key! wraps its whole cond in try/catch and still returns 1 on a
+  throw from move!/commit!/close! -- editor.clj's own handle-key! only
+  falls through to plain-return?/Tab-indent when the completion delegate
+  returns 0, so an uncaught throw here would fall through into a SECOND,
+  unrelated edit (handle-return!'s own apply-op!, or Tab's indent) on top
+  of whatever commit! partially did, or crash the process outright, since
+  handle-return!'s own apply-op! call has no try/catch of its own either.
+  Once a key is one completion owns (state c was non-nil when handle-key!
+  was entered), the key is consumed regardless of what the owning branch
+  does.
 
   refine! is wired by jonquil.gtk.window into editor/on-cursor-moved!
   (P3.T5's own Ln/Col mechanism), not a new editor.clj hook: that signal
@@ -69,16 +65,15 @@
   no separate 'buffer changed' registration needed. The console instance is
   wired the same way, into jonquil.gtk.console-view/on-input-changed!.
 
-  commit! (Enter/Tab) closes BEFORE calling c's own :apply-op!, deliberately
-  not the order the brief's prose reads word for word: an insert through
-  apply-op! fires that same cursor-position notify, and if the popover were
-  still marked open at
-  that instant, refine! would recompute candidates for the JUST-INSERTED
-  symbol (often more than one, e.g. \"map\" itself matches five other
-  candidates) and reopen the popup a keystroke after the user asked it to
-  close. Closing first makes that refine! call a no-op (popover/open? c)
-  already false), so the observable result the brief describes -- one
-  undo step, popup closed -- still holds exactly."
+  commit! (Enter/Tab) closes BEFORE calling c's own :apply-op!: an insert
+  through apply-op! fires that same cursor-position notify, and if the
+  popover were still marked open at that instant, refine! would recompute
+  candidates for the JUST-INSERTED symbol (often more than one, e.g.
+  \"map\" itself matches five other candidates) and reopen the popup a
+  keystroke after the user asked it to close. Closing first makes that
+  refine! call a no-op (popover/open? c) already false), so the
+  observable result -- one undo step, popup closed -- still holds
+  exactly."
   (:require [jonquil.docs :as docs]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -91,11 +86,11 @@
 
 ;; gdkkeysyms.h (re-verified against the installed header, matching every
 ;; other key table in this project): Up 0xff52, Down 0xff54, Page_Up
-;; 0xff55, Page_Down 0xff56, Return 0xff0d, KP_Enter 0xff8d, Tab 0xff09,
-;; Escape 0xff1b. Return/KP-Enter/Tab match editor.clj's own KEY-RETURN/
-;; KEY-KP-ENTER/KEY-TAB values; kept as private copies here the same way
-;; window.clj keeps its own KEY-Q/KEY-B/KEY-F1/KEY-F12 rather than reaching
-;; into editor.clj's private defs.
+;; 0xff55, Page_Down 0xff56, Return 0xff0d, KP_Enter 0xff8d, Tab 0xff09.
+;; Return/KP-Enter/Tab match editor.clj's own KEY-RETURN/KEY-KP-ENTER/
+;; KEY-TAB values; kept as private copies here the same way window.clj
+;; keeps its own KEY-Q/KEY-B/KEY-F1/KEY-F12 rather than reaching into
+;; editor.clj's private defs.
 (def ^:private KEY-UP 0xff52)
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-PAGE-UP 0xff55)
@@ -103,10 +98,9 @@
 (def ^:private KEY-RETURN 0xff0d)
 (def ^:private KEY-KP-ENTER 0xff8d)
 (def ^:private KEY-TAB 0xff09)
-(def ^:private KEY-ESCAPE 0xff1b)
 
-;; PageUp/PageDown move by 8, clamped -- the brief's own number, measured
-;; against nothing further (a plain UI constant, not derived from a probe).
+;; PageUp/PageDown move by 8, clamped -- a plain UI constant, not derived
+;; from a probe.
 (def ^:private PAGE-STEP 8)
 
 (defn make-completion
@@ -204,9 +198,9 @@
   "help/prefix-at on snapshot; nil does nothing. Otherwise docs/candidates
   in the program namespace (ns-fn) with snapshot's own text/prefix-end/
   extra-context, then help/open-state: nil (no candidates) does nothing; a
-  single candidate commits at once through c's own :apply-op! (no popover,
-  per the brief); otherwise close-others! (P4.T3's registry, so any OTHER
-  open P4 popover closes first -- see the ns docstring) then renders and
+  single candidate commits at once through c's own :apply-op! (no
+  popover); otherwise close-others! (P4.T3's registry, so any OTHER open
+  P4 popover closes first -- see the ns docstring) then renders and
   shows. The state kept for a shown popover carries snapshot's own :text
   alongside help/open-state's own keys, so render!/refine! never need a
   second way to read \"the text this popup is showing candidates for\"."
@@ -236,28 +230,33 @@
     (close! c)
     ((:apply-op! c) (help/commit-op st))))
 
-(defn handle-key!
-  "The navigation/commit/escape keys, while c's popup is open (gated on
-  (state c), see the ns docstring): Up/Down move by 1, PageUp/PageDown by
-  8 (help/move's own clamp), Enter/KP-Enter/Tab commit (one apply-op!, one
-  undo step, then close -- see commit!'s ordering), Escape closes (a
-  fallback here: in production the window's own capture-phase controller
-  already closes any open P4 popover on Escape before the editor ever
-  sees the key -- P4.T3's registry -- so this clause mostly matters for a
-  direct call, e.g. a self-test row, or if that ordering ever changes).
-  Every other key, or any key at all while c isn't open, returns 0 so the
-  editor's own handle-key! falls through to its normal dispatch (typing
-  continues).
+(defn- nav-modifier-held?
+  "True when Control, Meta or Alt is held -- handle-key! ignores every
+  navigation/commit key while any of them is held (Ctrl+Up, Cmd+Return
+  and the like fall through to the editor's own dispatch instead of
+  being swallowed here). Shift is deliberately not checked: Shift+Up and
+  friends still navigate."
+  [state-mask]
+  (not (zero? (bit-and state-mask (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK)))))
 
-  P4.T5 fix round 1: once state c is non-nil (this key IS one completion
-  owns), the whole cond runs inside try/catch and still returns 1 on a
-  throw from move!/commit!/close! -- reporting it through on-error rather
-  than letting it escape to editor.clj's own dispatch, which would
-  otherwise treat the key as unhandled and fall through into a second,
-  unrelated edit. See the ns docstring for the measured failure this
-  fixes."
+(defn handle-key!
+  "The navigation/commit keys, while c's popup is open (gated on (state
+  c), see the ns docstring) and none of Control/Meta/Alt is held
+  (nav-modifier-held?): Up/Down move by 1, PageUp/PageDown by 8 (help/
+  move's own clamp), Enter/KP-Enter/Tab commit (one apply-op!, one undo
+  step, then close -- see commit!'s ordering). Every other key, any key
+  held with a nav modifier, or any key at all while c isn't open, returns
+  0 so the editor's own handle-key! falls through to its normal dispatch
+  (typing continues).
+
+  Once state c is non-nil (this key IS one completion owns), the whole
+  cond runs inside try/catch and still returns 1 on a throw from move!/
+  commit!/close! -- reporting it through on-error rather than letting it
+  escape to editor.clj's own dispatch, which would otherwise treat the
+  key as unhandled and fall through into a second, unrelated edit -- see
+  the ns docstring."
   [c keyval state-mask]
-  (if-not (state c)
+  (if (or (not (state c)) (nav-modifier-held? state-mask))
     0
     (try
       (cond
@@ -266,7 +265,6 @@
         (= keyval KEY-PAGE-UP) (do (move! c (- PAGE-STEP)) 1)
         (= keyval KEY-PAGE-DOWN) (do (move! c PAGE-STEP) 1)
         (or (= keyval KEY-RETURN) (= keyval KEY-KP-ENTER) (= keyval KEY-TAB)) (do (commit! c) 1)
-        (= keyval KEY-ESCAPE) (do (close! c) 1)
         :else 0)
       (catch :default e
         ((:on-error c) (str "; complete: " (ex-message e)))
