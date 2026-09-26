@@ -2870,29 +2870,48 @@
       (next))))
 
 (defn- row-repl-completion-history-symbols
-  "Submits \"(def zork 1)\" as a real REPL entry (evaluated, so zork
-  becomes a var in the running namespace AND lands in REPL history),
-  then \"(zo\" + Ctrl+Space: zork is offered, the console's own analogue
-  of row-quick-doc-run-defined finding a Run-defined name. Measured live:
-  \"zo\" matches zork ALONE (no clojure.core symbol starts with it), so
-  help/open-state's own :single? branch commits it at once, same as
-  row-completion-single-inserts for the editor -- no popover, and this
-  checks the committed text rather than a candidates row."
+  "Fix round 1 (Important, review finding): the ORIGINAL version of this
+  row submitted \"(def zork 1)\" as a real REPL entry, which interns zork
+  in `user` -- syntax/get-autocomplete-candidates has its own ns-publics
+  source, entirely independent of :extra-context, so that row passed even
+  with extra-context wired to a constant nil (measured by the reviewer:
+  (docs/candidates 'user \"zo\" \"(zo\" 3 nil) => [\"zork\"]). It proved
+  candidates come from the running namespace, not that history feeds
+  docs/candidates at all.
+
+  This version puts the symbol ONLY in history text, never evaluated:
+  eval/history-add (the exact fn repl-history-context's own :items read,
+  and submit-repl!'s own write path) records \"(let [wobbuquux 42]
+  wobbuquux)\" straight on the session's history atom, the same shape/API
+  repl-history-context reads. wobbuquux is never bound anywhere real, so
+  ns-publics can't find it either -- only jonquil.syntax's own extra-
+  context tokenizing can (measured: with that string as extra-context,
+  docs/candidates for \"wobb\"/\"(wobb\"/5 is exactly [wobbuquux]; with nil
+  extra-context it's [] and open! does nothing at all, not even a single-
+  candidate commit). \"(wobb\" + Ctrl+Space (through cview/handle-key!,
+  the real dispatch) then commits it at once (help/open-state's own
+  :single? branch, one candidate, no popover) to \"(wobbuquux\" -- a
+  result :extra-context alone can produce.
+
+  Captures the history atom's value before adding the fabricated entry
+  and resets it back verbatim afterward (not just popping the one item --
+  simpler, and correct regardless of what :index/:draft eval/history-add
+  itself touched), so later rows (repl-history-after-close in particular)
+  see the same history they would have without this row ever running."
   [ui next]
   (let [cv (:console ui) c (:repl-completion ui)
-        mark (out-end-offset ui)]
-    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(def zork 1)" -1 1)
-    (cview/handle-return! cv false)
-    (poll-until 3000 20
-                (fn [] (and (idle? ui) (str/includes? (since ui mark) "=> ")))
-                (fn [ok]
-                  (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(zo" -1 1)
-                  ((:repl-complete!* ui))
-                  (let [input (cview/input-text cv)]
-                    (check :repl-completion-history-symbols
-                           (and ok (nil? (completion/state c)) (= "(zork" input))
-                           {:ok ok :input input :state (completion/state c)})
-                    (next))))))
+        ctx (:ctx (:session ui))
+        hist-before @(:history ctx)]
+    (swap! (:history ctx) eval/history-add "(let [wobbuquux 42] wobbuquux)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(wobb" -1 1)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+          input (cview/input-text cv)
+          st (completion/state c)]
+      (reset! (:history ctx) hist-before)
+      (check :repl-completion-history-symbols
+             (and (= 1 handled) (nil? st) (= "(wobbuquux" input))
+             {:handled handled :input input :state st}))
+    (next)))
 
 (defn- row-repl-completion-outside-input
   "Caret placed at offset 0 -- always before input-start (input-snapshot's
