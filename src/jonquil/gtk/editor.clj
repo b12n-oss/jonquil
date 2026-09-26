@@ -157,6 +157,25 @@
   (reset! (:jump-fn ed) f)
   nil)
 
+(defn set-completion-fns!
+  "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
+  state] -> 0/1)}), the ui's own completion actions (P4.T5): :complete! is
+  the editor's Ctrl+Space chord's own action (jonquil.gtk.window's
+  :complete!*, single slot, same reasoning as set-quick-doc-fn!/
+  set-jump-fn!'s own docstrings). :handle-key! is asked FIRST, ahead of
+  every other clause in handle-key!'s own cond, for every key that isn't a
+  preedit -- jonquil.gtk.completion/handle-key! itself gates on whether
+  completion is actually open and returns 0 for every key otherwise, so
+  this is a safe, cheap no-op call before completion is wired (this
+  namespace's own pre-P4.T5 self-test callers) or while the popup is
+  closed. Completion's OWN close conditions (a caret move out of the word,
+  focus lost, another popover opening) are wired by jonquil.gtk.window
+  through the EXISTING on-cursor-moved!/on-focus-lost! hooks above, not a
+  third slot here -- see jonquil.gtk.completion's own ns docstring."
+  [ed fns]
+  (reset! (:completion-fns ed) fns)
+  nil)
+
 (defn focus! [ed]
   (g/gtk-widget-grab-focus (:view ed))
   nil)
@@ -308,6 +327,10 @@
 (def ^:private KEY-F1 0xffbe)
 (def ^:private KEY-F12 0xffc9)
 
+;; P4.T5 addition (gdkkeysyms.h:380, re-verified against the installed
+;; header): Ctrl+Space opens/commits completion.
+(def ^:private KEY-SPACE 0x020)
+
 ;; macOS hardware keycodes for the physical F and L keys (measured live
 ;; this session, pid-driven cgevent cmd+option+f/l against this build:
 ;; keycode 3 and 37 respectively, state carrying both ALT-MASK and
@@ -410,12 +433,31 @@
   real hardware keycode to check."
   ([ed keyval0 state] (handle-key! ed keyval0 0 state))
   ([ed keyval0 keycode state]
-   (let [keyval (g/gdk-keyval-to-lower keyval0)]
+   (let [keyval (g/gdk-keyval-to-lower keyval0)
+         cfns @(:completion-fns ed)]
      (cond
        @(:preedit-active? ed) 0
 
+       ;; P4.T5: completion's own nav/commit/escape keys (Up/Down/
+       ;; PageUp/PageDown/Enter/Tab/Escape) get first look, ahead of
+       ;; plain-return?/KEY-TAB below, whenever the popup is open --
+       ;; jonquil.gtk.completion/handle-key! gates on that itself and
+       ;; returns 0 otherwise, so this clause is a safe no-op the rest
+       ;; of the time. See set-completion-fns!'s docstring.
+       (when-let [f (:handle-key! cfns)] (= 1 (f keyval state)))
+       1
+
        (plain-return? keyval state)
        (if (handle-return! ed) 1 0)
+
+       ;; P4.T5: Ctrl+Space opens/commits completion. control-only? (not
+       ;; command-chord?), the same P4 rule as quick doc/jump below --
+       ;; CONTROL-MASK checked, META-MASK rejected. Always returns 1 once
+       ;; the chord matches, whether or not a popup actually opens
+       ;; (help/prefix-at nil, or a single candidate committed at once),
+       ;; so GTK never inserts a literal space.
+       (and (control-only? state) (= keyval KEY-SPACE))
+       (do (when-let [f (:complete! cfns)] (f)) 1)
 
        (and (command-chord? state) (contains? #{KEY-SLASH KEY-SEMICOLON} keyval))
        (apply-edit! ed (edit/toggle-comment (snapshot ed)))
@@ -512,7 +554,10 @@
             ;; P4.T4: single-slot registrations for the quick-doc/jump
             ;; chords -- see set-quick-doc-fn!/set-jump-fn!.
             :quick-doc-fn (atom nil)
-            :jump-fn (atom nil)}]
+            :jump-fn (atom nil)
+            ;; P4.T5: single-slot registration for completion -- see
+            ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
+            :completion-fns (atom nil)}]
     (g/gtk-text-view-set-editable view 1)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)

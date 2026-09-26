@@ -856,3 +856,26 @@
       (gtk-popover-get-pointing-to popover r)
       [(ffi/read r :int 0) (ffi/read r :int 4) (ffi/read r :int 8) (ffi/read r :int 12)]
       (finally (ffi/free r)))))
+
+;; --- GtkListBox (P4.T5: completion's candidate list) -------------------------
+;; gtklistbox.h (GTK 4.22.4, installed headers -- same citation style as the
+;; popover section above, re-verified directly against the header files on
+;; this machine): new:261, append:174 ("Append a widget to the list", per
+;; the Gtk-4.0.gir doc on gtklistbox.c:3028 -- GTK4 wraps a plain GtkWidget
+;; child in its own GtkListBoxRow automatically, so nothing here ever binds
+;; gtk_list_box_row_new/gtk_list_box_prepend/insert), remove_all:184
+;; (GDK_AVAILABLE_IN_4_12; this GTK is 4.22.4, so it's present),
+;; get_row_at_index:189, select_row:195, set_selection_mode:225. All fixed
+;; arity.
+(ffi/defcfn gtk-list-box-new "gtk_list_box_new" [] :pointer)
+(ffi/defcfn gtk-list-box-append "gtk_list_box_append" [:pointer :pointer] :void)
+(ffi/defcfn gtk-list-box-remove-all "gtk_list_box_remove_all" [:pointer] :void)
+(ffi/defcfn gtk-list-box-get-row-at-index "gtk_list_box_get_row_at_index" [:pointer :int] :pointer)
+(ffi/defcfn gtk-list-box-select-row "gtk_list_box_select_row" [:pointer :pointer] :void)
+(ffi/defcfn gtk-list-box-set-selection-mode "gtk_list_box_set_selection_mode" [:pointer :int] :void)
+;; GtkSelectionMode: gtkenums.h:557-559 (NONE=0, SINGLE=1, BROWSE=2).
+;; BROWSE (gtkenums.h:542: "Exactly one element is selected... the user
+;; can't deselect a currently selected element except by selecting
+;; another") matches completion's own always-one-highlighted-candidate UI;
+;; nothing here ever selects by click, only gtk-list-box-select-row.
+(def SELECTION-MODE-BROWSE 2)

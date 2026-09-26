@@ -20,6 +20,7 @@
     jonquil.gtk.popover
     jonquil.gtk.help-popover
     jonquil.gtk.editor
+    jonquil.gtk.completion
     jonquil.gtk.find-bar
     jonquil.gtk.console-view
     jonquil.gtk.window
