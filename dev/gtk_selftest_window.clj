@@ -102,6 +102,21 @@
   [buf offset]
   (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
 
+(defn- backspace-interactive!
+  "Deletes the character immediately before offset in buf, interactively --
+  what GTK's own default handling does for a plain Backspace once the key
+  controller returns 0 for it. Measured: jonquil.edit/backspace-pair
+  returns nil whenever the caret sits at the buffer's end (no character
+  after it to pair against, e.g. (edit/backspace-pair {:text \"(map\"
+  :caret 4 :sel-start 4 :sel-end 4}) => nil), so editor.clj's/console-
+  view.clj's own KEY-BACKSPACE handling does nothing in that case either --
+  same category as gtk-text-buffer-insert-interactive-at-cursor above,
+  standing in for GTK's default since a bare handle-key! call has no real
+  key event underneath it to trigger that default."
+  [buf offset]
+  (g/with-iters* buf (dec offset) offset
+    (fn [a b] (g/gtk-text-buffer-delete-interactive buf a b 1))))
+
 (defn- select-range!
   [buf a b]
   (g/with-iters* buf a b (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2))))
@@ -2263,6 +2278,14 @@
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-TAB 0xff09)
 
+;; I3 fix wave: this file's own private copies (measured against
+;; gdkkeysyms.h) for the keys the completion popup must never swallow --
+;; row-completion-keys-reach-editor/-closes-on-space and their console
+;; counterparts below.
+(def ^:private KEY-P 0x070)
+(def ^:private KEY-BACKSPACE 0xff08)
+(def ^:private KEY-LEFT 0xff51)
+
 (defn- row-quick-doc-core
   "editor/handle-key! directly with Ctrl+Q (control-only?, no synthesized
   keystroke): the popover opens at the caret and its label -- read back
@@ -2621,44 +2644,84 @@
       (next))))
 
 (defn- row-completion-keys-reach-editor
-  "Open on \"(ma\", insert \"p\" with insert_interactive_at_cursor (never a
-  synthesized keystroke -- this is what GTK's own default text handling
-  would do for a 'p' keypress editor.clj's dispatch doesn't otherwise
-  match): text \"(map\", popover still open and refined to docs/candidates
-  for the new \"map\" prefix -- on-cursor-moved!'s own refine! wiring
-  (jonquil.gtk.completion's ns docstring), not a poll, since the buffer's
-  cursor-position notify fires synchronously."
+  "Open on \"(ma\": p, Backspace and Left must never be swallowed by the
+  popup (I3 -- the old version of this row inserted \"p\" with
+  insert_interactive_at_cursor alone, bypassing editor/handle-key! entirely,
+  so it would still pass even if completion/handle-key! returned 1 for
+  every one of these). completion/handle-key! itself is checked directly
+  first and must return 0 for all three (none of Up/Down/PageUp/PageDown/
+  Return/KP-Enter/Tab), then editor/handle-key! -- the view's real dispatch
+  -- is called for real and must agree: 0 for every one of them, since
+  editor.clj has no clause for a bare letter or for Left, and
+  jonquil.edit/backspace-pair returns nil whenever the caret sits at the
+  buffer's end (see backspace-interactive!'s own docstring), so its own
+  KEY-BACKSPACE clause does nothing there either. A bare handle-key! call
+  never triggers GTK's own default handling underneath a 0 return (there is
+  no real key event driving it), so p's insert and Backspace's delete are
+  still reproduced with insert/delete-interactive, the same stand-ins the
+  rest of this file uses for GTK's default -- now gated on the checks
+  above, unlike before the fix. The popover stays open and refines through
+  both (still-valid?'s own prefix-start check holds for \"map\" then back to
+  \"ma\"). Left has no observable buffer effect to check beyond its own 0
+  return -- a bare call doesn't move the caret either."
   [ui next]
   (let [ed (:editor ui) c (:completion ui) ns-sym (:prompt-ns @(:state (:session ui)))]
     (editor/set-text! ed "(ma")
     (place-cursor! (:buf ed) 3)
     (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
-    (let [opened? (some? (completion/state c))]
+    (let [opened? (some? (completion/state c))
+          p-swallowed (completion/handle-key! c KEY-P 0)
+          p-handled (editor/handle-key! ed KEY-P 0)]
       (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "p" -1 1)
-      (let [text (editor/editor-text ed)
-            st (completion/state c)
-            expected (mapv :symbol (docs/candidates ns-sym "map" "(map" 4))
-            rows (mapv :symbol (:candidates st))]
-        (check :completion-keys-reach-editor
-               (and opened? (= "(map" text) (some? st) (= expected rows))
-               {:opened opened? :text text :expected expected :rows rows})
-        (completion/close! c)
-        (next)))))
+      (let [text-p (editor/editor-text ed)
+            st-p (completion/state c)
+            expected-p (mapv :symbol (docs/candidates ns-sym "map" "(map" 4))
+            rows-p (mapv :symbol (:candidates st-p))
+            bs-swallowed (completion/handle-key! c KEY-BACKSPACE 0)
+            bs-handled (editor/handle-key! ed KEY-BACKSPACE 0)]
+        (backspace-interactive! (:buf ed) (g/cursor-offset (:buf ed)))
+        (let [text-bs (editor/editor-text ed)
+              st-bs (completion/state c)
+              expected-bs (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3))
+              rows-bs (mapv :symbol (:candidates st-bs))
+              left-swallowed (completion/handle-key! c KEY-LEFT 0)
+              left-handled (editor/handle-key! ed KEY-LEFT 0)]
+          (check :completion-keys-reach-editor
+                 (and opened?
+                      (= 0 p-swallowed) (= 0 p-handled)
+                      (= "(map" text-p) (some? st-p) (= expected-p rows-p)
+                      (= 0 bs-swallowed) (= 0 bs-handled)
+                      (= "(ma" text-bs) (some? st-bs) (= expected-bs rows-bs)
+                      (= 0 left-swallowed) (= 0 left-handled))
+                 {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
+                  :text-p text-p :expected-p expected-p :rows-p rows-p
+                  :bs-swallowed bs-swallowed :bs-handled bs-handled
+                  :text-bs text-bs :expected-bs expected-bs :rows-bs rows-bs
+                  :left-swallowed left-swallowed :left-handled left-handled})
+          (completion/close! c)
+          (next))))))
 
 (defn- row-completion-closes-on-space
-  "Open, insert a space with insert_interactive_at_cursor: help/prefix-at
-  is nil right after the space, so refine! closes the popover -- no poll,
-  same synchronous reasoning as completion-keys-reach-editor."
+  "Open, then completion/handle-key! and editor/handle-key! must both
+  return 0 for a plain space (I3, the same check row-completion-keys-
+  reach-editor makes for p/Backspace/Left -- control-only? in editor.clj's
+  own Ctrl+Space clause rejects a bare space, mask 0). Only then insert a
+  space with insert_interactive_at_cursor: help/prefix-at is nil right
+  after the space, so refine! closes the popover -- no poll, same
+  synchronous reasoning as completion-keys-reach-editor."
   [ui next]
   (let [ed (:editor ui) c (:completion ui)]
     (editor/set-text! ed "(ma")
     (place-cursor! (:buf ed) 3)
     (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
-    (let [opened? (some? (completion/state c))]
+    (let [opened? (some? (completion/state c))
+          swallowed (completion/handle-key! c KEY-SPACE 0)
+          handled (editor/handle-key! ed KEY-SPACE 0)]
       (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1)
       (check :completion-closes-on-space
-             (and opened? (nil? (completion/state c)))
-             {:opened opened? :still-open (some? (completion/state c))})
+             (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
+             {:opened opened? :swallowed swallowed :handled handled
+              :still-open (some? (completion/state c))})
       (next))))
 
 (defn- row-completion-escape-while-running
@@ -3045,14 +3108,99 @@
              {:opened opened? :still-open (some? (completion/state c))})
       (next))))
 
+(defn- row-repl-completion-keys-reach-console
+  "Same reasoning as row-completion-keys-reach-editor, through the
+  console's own cview/handle-key! (I3: the REPL popup must not swallow
+  keys the input needs either). Open on \"(ma\" in the input: completion/
+  handle-key! itself returns 0 for p, Backspace and Left, and cview/
+  handle-key! -- the console's real dispatch -- agrees: console-view.clj
+  has no clause of its own for any of the three (unlike editor.clj's
+  KEY-BACKSPACE clause, which also does nothing here once the caret sits
+  at the buffer's end, per backspace-interactive!'s own docstring), so a
+  bare call never triggers GTK's own default handling underneath a 0
+  return -- p's insert and Backspace's delete are reproduced the same
+  insert/delete-interactive way row-completion-keys-reach-editor's own
+  stand-ins do, now gated on the checks above. Left has no observable
+  buffer effect to check beyond its own 0 return."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ns-sym (:prompt-ns @(:state (:session ui)))
+        history (str/join "\n" (:items @(:history (:ctx (:session ui)))))]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          p-swallowed (completion/handle-key! c KEY-P 0)
+          p-handled (cview/handle-key! cv KEY-P 0)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "p" -1 1)
+      (let [input-p (cview/input-text cv)
+            st-p (completion/state c)
+            expected-p (mapv :symbol (docs/candidates ns-sym "map" "(map" 4 history))
+            rows-p (mapv :symbol (:candidates st-p))
+            bs-swallowed (completion/handle-key! c KEY-BACKSPACE 0)
+            bs-handled (cview/handle-key! cv KEY-BACKSPACE 0)]
+        (backspace-interactive! (:buf cv) (g/cursor-offset (:buf cv)))
+        (let [input-bs (cview/input-text cv)
+              st-bs (completion/state c)
+              expected-bs (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3 history))
+              rows-bs (mapv :symbol (:candidates st-bs))
+              left-swallowed (completion/handle-key! c KEY-LEFT 0)
+              left-handled (cview/handle-key! cv KEY-LEFT 0)]
+          (check :repl-completion-keys-reach-console
+                 (and opened?
+                      (= 0 p-swallowed) (= 0 p-handled)
+                      (= "(map" input-p) (some? st-p) (= expected-p rows-p)
+                      (= 0 bs-swallowed) (= 0 bs-handled)
+                      (= "(ma" input-bs) (some? st-bs) (= expected-bs rows-bs)
+                      (= 0 left-swallowed) (= 0 left-handled))
+                 {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
+                  :input-p input-p :expected-p expected-p :rows-p rows-p
+                  :bs-swallowed bs-swallowed :bs-handled bs-handled
+                  :input-bs input-bs :expected-bs expected-bs :rows-bs rows-bs
+                  :left-swallowed left-swallowed :left-handled left-handled})
+          (completion/close! c)
+          (next))))))
+
+(defn- row-repl-completion-closes-on-space
+  "Same reasoning as row-completion-closes-on-space, through cview/
+  handle-key! (I3): completion/handle-key! and cview/handle-key! both
+  return 0 for a plain space (control-only? in console-view.clj's own
+  Ctrl+Space clause rejects mask 0). Only then insert a space with
+  insert_interactive_at_cursor: help/prefix-at is nil right after it, so
+  refine! closes the popover."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          swallowed (completion/handle-key! c KEY-SPACE 0)
+          handled (cview/handle-key! cv KEY-SPACE 0)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) " " -1 1)
+      (check :repl-completion-closes-on-space
+             (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
+             {:opened opened? :swallowed swallowed :handled handled
+              :still-open (some? (completion/state c))})
+      (next))))
+
 ;; --- P4.T7: rename and the P4 context menus --------------------------------
 
 (def ^:private rename-fixture
-  "\"(defn greet [n] n)\\n(greet 1) ; greet\\n\\\"greet\\\"\" -- two CODE
-  occurrences of greet (the defn and the call), one inside a comment, one
-  inside a string. Shared by every rename row below, each of which
-  re-applies it fresh (run-row! only clears text/input, not this)."
-  "(defn greet [n] n)\n(greet 1) ; greet\n\"greet\"")
+  "\"(defn greet [n] n)\\n(greet 1) ; greet\\n\\\"greet\\\"\\n:greet greeting\"
+  -- two CODE occurrences of greet (the defn and the call), one inside a
+  comment, one inside a string, plus a keyword (:greet) and a longer symbol
+  (greeting) that share the substring but are never themselves greet (I4:
+  a rename that did a naive substring replace, or one that also touched the
+  keyword, would still pass the OLD fixture, which had neither). Shared by
+  every rename row below, each of which re-applies it fresh (run-row! only
+  clears text/input, not this)."
+  "(defn greet [n] n)\n(greet 1) ; greet\n\"greet\"\n:greet greeting")
+
+(def ^:private rename-fixture-renamed
+  "rename-fixture with edit/rename's own two code occurrences of greet
+  applied as hello (measured: (edit/rename fixture caret) => {:edits [[6 11
+  hello] [20 25 hello]] ...}) -- the comment, the string, the keyword and
+  greeting are untouched. Shared by row-rename-applies/-one-undo so the
+  expected renamed text is defined once."
+  "(defn hello [n] n)\n(hello 1) ; greet\n\"greet\"\n:greet greeting")
 
 (defn- setup-rename! [ed]
   (editor/set-text! ed rename-fixture)
@@ -3063,7 +3211,9 @@
   rename's own code-occurrence rule (never a comment, string, regex or
   keyword) renames exactly the defn and the call, one apply-op! (one undo
   step, checked separately by row-rename-one-undo), status the brief's
-  own wording with the measured plural (2 occurrences)."
+  own wording with the measured plural (2 occurrences, unchanged by the
+  fixture's own :greet/greeting additions -- neither is a code occurrence
+  of greet)."
   [ui next]
   (let [ed (:editor ui) status (:status-label ui)]
     (setup-rename! ed)
@@ -3073,8 +3223,7 @@
                   (fn [status-ok?]
                     (check :rename-applies
                            (and (nil? result)
-                                (= "(defn hello [n] n)\n(hello 1) ; greet\n\"greet\""
-                                   (editor/editor-text ed))
+                                (= rename-fixture-renamed (editor/editor-text ed))
                                 status-ok?)
                            {:result result :text (editor/editor-text ed)
                             :status (g/label-text status)})
@@ -3082,31 +3231,37 @@
 
 (defn- row-rename-skips-comments-strings
   "Same fixture and rename as row-rename-applies, focused on the reviewer
-  clause's own concern: the comment's \"; greet\" and the string literal
-  \"greet\" read back byte-for-byte unchanged, never touched by the
-  rename's edits."
+  clause's own concern (I4): the WHOLE resulting text matches rename-
+  fixture-renamed byte for byte, not just \"still contains ; greet and
+  \\\"greet\\\"\" (true even when rename does nothing at all) -- the comment,
+  the string, the keyword :greet and the symbol greeting all read back
+  unchanged, and only the defn/call are hello now."
   [ui next]
   (let [ed (:editor ui)]
     (setup-rename! ed)
     ((:rename-to!* ui) "hello")
     (let [text (editor/editor-text ed)]
-      (check :rename-skips-comments-strings
-             (and (str/includes? text "; greet") (str/includes? text "\"greet\""))
-             {:text text})
+      (check :rename-skips-comments-strings (= rename-fixture-renamed text) {:text text})
       (next))))
 
 (defn- row-rename-one-undo
-  "The SAME rename as row-rename-applies, then ONE gtk_text_buffer_undo:
-  apply-op! wraps every edit in one begin/end_user_action (its own
-  contract), so one undo must restore the fixture verbatim."
+  "The SAME rename as row-rename-applies, checked BEFORE undoing (I4: the
+  old version of this row undid first and compared against the fixture,
+  which also holds when rename applied nothing at all -- an untouched
+  buffer undoes to itself), then ONE gtk_text_buffer_undo: apply-op! wraps
+  every edit in one begin/end_user_action (its own contract), so one undo
+  must restore the fixture verbatim."
   [ui next]
   (let [ed (:editor ui)]
     (setup-rename! ed)
     ((:rename-to!* ui) "hello")
-    (g/gtk-text-buffer-undo (:buf ed))
-    (let [text (editor/editor-text ed)]
-      (check :rename-one-undo (= rename-fixture text) {:text text})
-      (next))))
+    (let [renamed-text (editor/editor-text ed)]
+      (g/gtk-text-buffer-undo (:buf ed))
+      (let [text (editor/editor-text ed)]
+        (check :rename-one-undo
+               (and (= rename-fixture-renamed renamed-text) (= rename-fixture text))
+               {:renamed-text renamed-text :text text})
+        (next)))))
 
 (defn- row-rename-invalid
   "Same fixture, :rename-to!* \"a b\" (not a valid Clojure symbol,
@@ -3456,6 +3611,8 @@
    row-repl-completion-cmd-space-nothing
    row-repl-completion-preedit-yields
    row-repl-completion-closes-on-focus-loss
+   row-repl-completion-keys-reach-console
+   row-repl-completion-closes-on-space
    row-rename-applies
    row-rename-skips-comments-strings
    row-rename-one-undo
