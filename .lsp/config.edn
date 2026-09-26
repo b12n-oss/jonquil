@@ -1,0 +1,38 @@
+;; clojure-lsp configuration for Jonquil.
+;;
+;; :cljfmt matches the formatter to the style already in the tree, rather
+;; than reformatting the tree to the formatter's default. clojure-lsp's
+;; default splits a map literal one key-value pair per line; Jonquil writes
+;; short maps compactly, e.g.
+;;
+;;   {:edits [[0 (count text) out]] :caret (min caret (count out)) :sel nil}
+;;
+;; Measured 2026-09-26 (clojure-lsp 2026.05.05-12.58.26): with the default,
+;; `format --dry` over src/test/dev (minus dev/smoke/fixtures, see below)
+;; wanted 34 files reformatted, nearly all of them this one rule. With this
+;; setting, 13 remain — the rest are genuine indentation differences, not
+;; this rule. One setting instead of a 34-file churn commit.
+;;
+;; No :project-specs override: unlike a-private-sibling's AppKit/UIKit siblings,
+;; deps.edn here has no :deps map (jolt.ffi is a runtime builtin, not a
+;; resolved dependency) and no :local/root sibling checkout, so the default
+;; classpath heuristic resolves cleanly on its own.
+;;
+;; Not set here, because neither `bb lsp:*` task nor this file can fix it:
+;; dev/smoke/fixtures/*.clj are deliberately invalid or minimal Clojure
+;; (binary_smoke.clj feeds them to the built jonquil binary to exercise
+;; unclosed-paren recovery, completion, find, etc.). clojure-lsp's `format`
+;; and `clean-ns` commands parse every file under a discovered source-path
+;; with rewrite-clj, which throws a hard "Unexpected EOF" on
+;; fixtures/unclosed.clj and aborts the WHOLE run — measured against this
+;; same clojure-lsp build, both with no scoping and with
+;; :source-paths-ignore-regex targeting the fixtures path (neither stops the
+;; crash, because "dev" is itself the discovered source-path and the
+;; ignore-regex only filters candidate source-path roots, not files
+;; underneath one already chosen). The `.clj-kondo/config.edn`
+;; :output {:exclude-files} entry doesn't help either — that only silences
+;; clj-kondo's own diagnostics, and format/clean-ns don't consult it. The
+;; working fix lives in bb.edn's `lsp-filenames`, which passes format and
+;; clean-ns an explicit comma-separated --filenames list (src, test, and
+;; every real dev entry) that never includes dev/smoke/fixtures.
+{:cljfmt {:split-keypairs-over-multiple-lines? false}}

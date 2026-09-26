@@ -1,0 +1,49 @@
+;; clj-kondo configuration for Jonquil.
+;;
+;; Adapted from a-private-sibling's `.clj-kondo/config.edn`. That project imports
+;; an ObjC binding library's own exported config (its `objc`/`defclass`/`with-block` macros,
+;; plus :unquote-not-syntax-quoted for objc's `~x` argument syntax). None of
+;; that applies here: Jonquil binds GTK4 through jolt.ffi directly, with no
+;; an ObjC binding library dependency and no `~x`-outside-syntax-quote usage anywhere in
+;; src/dev (checked by grep; the only `~` in the tree is prose in docstrings
+;; and comments, e.g. "~80 bytes", "~200k-char").
+;;
+;; jolt.ffi itself is not a gitlib dependency with its own clj-kondo config
+;; to import: it is a namespace built into the jolt runtime. Measured
+;; (2026-09-26, jolt v0.8.12-30-gc9808c39, this project's deps.edn has no
+;; :deps at all, just :paths):
+;;
+;;   clj-kondo --lint "$(jolt path)" --dependencies --copy-configs
+;;   => "No configs copied."
+;;
+;; `jolt path` printed `./src`, this project's own source root, confirming
+;; there is no separate dependency tree to export from. So everything below
+;; is authored here, not imported.
+;;
+;; The standard for adding anything here: every entry covers something a
+;; MACRO (or, for :output, an intentionally-invalid fixture file) hides from
+;; static analysis. None silences a finding about code that could be wrong.
+;; If the linter is right and the code is wrong, fix the code.
+{:hooks {:analyze-call {jolt.ffi/defcfn hooks.jolt-ffi/defcfn}}
+
+ ;; 1. jolt.ffi/defcfn defines a var per bound C symbol. hooks/jolt_ffi.clj
+ ;;    rewrites each call into an equivalent `defn` — see that file for what
+ ;;    it fixes and the measured before/after counts.
+ ;;
+ ;; 2. jolt.ffi/with-c-string-array binds [labels 4] in
+ ;;    jonquil.gtk.window/confirm-close! (the alert-dialog button-label
+ ;;    array) — a NAME and a SIZE, not let pairs, so `labels` reads as
+ ;;    unresolved without this exclude. Measured: this is the only
+ ;;    with-c-string-array call site in the project (one occurrence).
+ :linters {:unresolved-symbol {:exclude [(jolt.ffi/with-c-string-array)]}}
+
+ ;; dev/smoke/fixtures/*.clj are deliberately invalid or minimal Clojure —
+ ;; binary_smoke.clj feeds them to the built jonquil binary to exercise
+ ;; unclosed-paren recovery, find, completion, etc. (see that file's own
+ ;; comment: "the checked-in dev/smoke/fixtures/*.clj files, never the
+ ;; fixtures ... owns"). Linting them as project code is a category error:
+ ;; measured, they contribute 10 parse/unresolved-symbol errors (unclosed.clj,
+ ;; completion_single.clj, completion_multi.clj, find.clj) that have nothing
+ ;; to do with Jonquil's own code and would make `lint:strict` and the
+ ;; pre-commit hook permanently red.
+ :output {:exclude-files ["dev/smoke/fixtures/"]}}

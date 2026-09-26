@@ -63,6 +63,27 @@ bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
 ```
 
+`bb info` (or `jolt info`, since jolt reads this same `bb.edn`) prints the full task list grouped by what it's for, including the quality and git-hook tasks below.
+
+## Quality and git hooks
+
+```bash
+bb lint                 # clj-kondo over src, test and dev (report only)
+bb lint:strict          # the same, but exit non-zero if there are any findings
+bb lsp:format-check     # clojure-lsp format, dry run
+bb lsp:clean-ns-check   # clojure-lsp clean-ns, dry run
+bb lsp:check            # the two dry runs together
+bb verify               # lint (report) + test (must pass): the pre-commit gate
+bb hooks:install        # a fast pre-commit hook: lint errors + format --dry
+bb hooks:install:full   # the same, plus the test suite (slower)
+bb hooks:uninstall      # remove the git pre-commit hook
+```
+
+`.github/workflows/lint.yml` runs the same lint and format check on GitHub
+Actions, but only when triggered by hand from the Actions tab. Jonquil is a
+private repo for now, so the workflow carries no push, pull request or
+schedule trigger.
+
 ## The name
 
 A jonquil (*Narcissus jonquilla*) is a small, scented narcissus with several yellow flowers to a stem.

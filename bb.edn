@@ -1,5 +1,117 @@
+;; Task runner for Jonquil -- a DrRacket-style Clojure IDE written in Jolt.
+;;
+;; Run these with EITHER `bb <task>` or `jolt <task>`; jolt reads this file
+;; as well as deps.edn, so both runners see the same task list. `bb info`
+;; (or `jolt info`) prints the grouped cheat-sheet; `bb tasks` lists
+;; everything alphabetically.
+;;
+;; NOTE: task bodies are EDN-parsed. No #"regex", no @deref, no #(...) --
+;; use (re-pattern "...") , (deref ...) and (fn [x] ...) instead.
 {:tasks
- {test  {:doc "Run tests; pass namespace names to run a subset"
+ {:requires ([babashka.fs :as fs]
+             [clojure.string :as str])
+
+  :init
+  (do
+    ;; bb sets babashka.version, jolt sets jolt.version. Only `info` needs
+    ;; this, to print the command the reader actually typed.
+    (def runner (if (System/getProperty "babashka.version") "bb" "jolt"))
+
+    (defn lsp-filenames
+      "The --filenames scope for clojure-lsp's format and clean-ns commands:
+       src, test, and every real dev/*.clj entry, joined with a comma (NOT
+       `::` -- measured against clojure-lsp 2026.05.05-12.58.26, a `::`-joined
+       multi-entry list throws a FileNotFoundException on the bare project
+       root instead of doing anything with the entries).
+
+       dev/smoke/fixtures/*.clj are deliberately invalid or minimal Clojure,
+       fed to the built jonquil binary by dev/smoke/binary_smoke.clj to
+       exercise unclosed-paren recovery, completion, find, etc. clojure-lsp's
+       format and clean-ns commands parse every file under a discovered
+       source-path with rewrite-clj, which throws a hard \"Unexpected EOF\"
+       on fixtures/unclosed.clj and aborts the whole run -- measured with no
+       scoping at all, and again with :source-paths-ignore-regex targeting
+       the fixtures path (neither stops the crash, because \"dev\" is itself
+       the discovered source-path and the ignore-regex only filters
+       candidate source-path roots, not files underneath one already
+       chosen). So this function is the one place that keeps fixtures out of
+       clojure-lsp's reach, by listing dev's real entries explicitly instead
+       of handing clojure-lsp the whole directory.
+
+       Rebuilt on every call rather than cached in a def, so a new top-level
+       dev/*.clj file is picked up the next time any lsp: task runs; only
+       dev/smoke/fixtures and dev/smoke/PixelAt.java need to stay off it,
+       and both are excluded by the .clj filter below, not by name."
+      []
+      (let [clj-or-dir (fn [p] (or (fs/directory? p) (str/ends-with? (str p) ".clj")))
+            dev-top (->> (fs/list-dir "dev")
+                         (remove (fn [p] (= "smoke" (str (fs/file-name p)))))
+                         (filter clj-or-dir))
+            smoke   (->> (fs/list-dir "dev/smoke")
+                         (filter (fn [p] (str/ends-with? (str p) ".clj"))))]
+        (->> (concat ["src" "test"] dev-top smoke)
+             (map str)
+             (str/join ","))))
+
+    (defn hook-preflight!
+      "Run the checks the hook will run, and say which of them fail RIGHT
+       NOW. Installing a pre-commit hook against a tree that already fails
+       its own checks blocks every commit, and the failure arrives later,
+       at the worst moment, looking like the hook itself is broken. So warn,
+       then install anyway -- the operator asked for the hook, and
+       --no-verify is one flag away."
+      []
+      (let [kondo  (:exit (shell {:continue true :out :string :err :string}
+                                 "clj-kondo" "--lint" "src" "test" "dev"))
+            fmt    (:exit (shell {:continue true :out :string :err :string}
+                                 "clojure-lsp" "format" "--dry" "--filenames" (lsp-filenames)))
+            broken (remove nil?
+                           [(when (= 3 kondo) "clj-kondo reports errors (exit 3)")
+                            (when-not (zero? fmt) "clojure-lsp format --dry reports diffs")])]
+        (when (seq broken)
+          (println "!! This tree does not pass the hook's own checks yet:")
+          (doseq [b broken] (println (str "     - " b)))
+          (println "   Installing anyway. Until these are clean the hook will")
+          (println "   reject every commit; bypass one with: git commit --no-verify")
+          (println)))))
+
+  info
+  {:doc "Grouped task cheat-sheet (start here; easier to scan than `tasks`)"
+   :task
+   (let [esc (str (char 27) "[")
+         col (fn [c s] (str esc c "m" s esc "0m"))
+         hdr (fn [s] (println (str "\n" (col "35" (str "── " s " ──")))))
+         row (fn [t d] (println (str "  " (col "36" (format "%-32s" (str runner " " t))) d)))]
+     (println (col "1;35" "\nJonquil — a DrRacket-style Clojure IDE written in Jolt"))
+     (println (col "2" (str "  runner: " runner "   ·   both `bb <task>` and `jolt <task>` work")))
+     (hdr "Verify")
+     (row "check" "require every project namespace headlessly, exit 0")
+     (row "test" "run the unit suite; pass namespace names to run a subset")
+     (row "verify" "lint (report) + test (must pass) — pre-commit gate")
+     (hdr "Run and build")
+     (row "app:run [file]" "launch Jonquil, optionally opening a file")
+     (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
+     (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
+     (hdr "Self-test and docs")
+     (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
+     (row "docs:shots" "self-capture docs/images/*.png (+ one GIF), one process per scene")
+     (hdr "Quality — lint and format")
+     (row "lint" "clj-kondo over src, test and dev (report only)")
+     (row "lint:strict" "lint, but exit non-zero if there are any findings")
+     (row "lsp:format" "reformat Clojure files (clojure-lsp; mutating)")
+     (row "lsp:format-check" "check formatting — dry run")
+     (row "lsp:clean-ns" "clean + organize ns forms (clojure-lsp; mutating)")
+     (row "lsp:clean-ns-check" "check ns forms — dry run")
+     (row "lsp:check" "format + clean-ns, both dry run")
+     (hdr "Git hooks")
+     (row "hooks:install" "install FAST pre-commit hook (lint errors + format --dry)")
+     (row "hooks:install:full" "install FULL pre-commit hook (+ unit tests, slower)")
+     (row "hooks:uninstall" "remove the git pre-commit hook")
+     (hdr "Upstream")
+     (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
+     (println (str "\n" (col "2" (str "first run: " runner " check, then " runner " test, then " runner " app:run")))))}
+
+  test  {:doc "Run tests; pass namespace names to run a subset"
          :task (apply shell "jolt" "-M:test" *command-line-args*)}
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
@@ -52,4 +164,93 @@
                pin (clojure.string/trim (slurp "UPSTREAM_PIN"))]
            (shell {:dir dir} "git" "fetch" "--quiet" "upstream")
            (shell {:dir dir} "git" "log" "--oneline"
-                  (str pin "..upstream/main") "--" "src" "test"))}}}
+                  (str pin "..upstream/main") "--" "src" "test"))}
+
+  verify
+  {:doc "Pre-commit gate: lint (report) + test (must pass)"
+   :task (do (shell {:continue true} "clj-kondo" "--lint" "src" "test" "dev")
+             (shell "jolt" "-M:test"))}
+
+  ;; --- quality ----------------------------------------------------------
+  lint
+  {:doc "clj-kondo over src, test and dev (report only)"
+   :task (let [{:keys [exit]} (shell {:continue true} "clj-kondo" "--lint" "src" "test" "dev")]
+           (println (if (zero? exit)
+                      "OK clj-kondo: no errors or warnings"
+                      "-- clj-kondo: see findings above")))}
+
+  lint:strict
+  {:doc "lint, but exit non-zero if clj-kondo reports any findings (2=warnings, 3=errors)"
+   :task (shell "clj-kondo" "--lint" "src" "test" "dev")}
+
+  lsp:format
+  {:doc "Reformat Clojure files (clojure-lsp; mutating). Skips dev/smoke/fixtures -- see lsp-filenames"
+   :task (shell "clojure-lsp" "format" "--filenames" (lsp-filenames))}
+
+  lsp:format-check
+  {:doc "Check formatting — dry run"
+   :task (shell "clojure-lsp" "format" "--dry" "--filenames" (lsp-filenames))}
+
+  lsp:clean-ns
+  {:doc "Clean + organize ns forms (clojure-lsp; mutating). Skips dev/smoke/fixtures -- see lsp-filenames"
+   :task (shell "clojure-lsp" "clean-ns" "--filenames" (lsp-filenames))}
+
+  lsp:clean-ns-check
+  {:doc "Check ns forms — dry run"
+   :task (shell "clojure-lsp" "clean-ns" "--dry" "--filenames" (lsp-filenames))}
+
+  lsp:check
+  {:doc "format + clean-ns, both dry run"
+   :task (do (shell "clojure-lsp" "format" "--dry" "--filenames" (lsp-filenames))
+             (shell "clojure-lsp" "clean-ns" "--dry" "--filenames" (lsp-filenames)))}
+
+  ;; --- git hooks ----------------------------------------------------------
+  hooks:install
+  {:doc "Install FAST git pre-commit hook (clj-kondo errors + clojure-lsp format --dry, ~2s)"
+   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))
+               files (lsp-filenames)]
+           (hook-preflight!)
+           (spit hook (str "#!/bin/bash\n"
+                           "# Jonquil pre-commit (FAST -- clj-kondo errors-only + clojure-lsp format --dry).\n"
+                           "# Full (+ test suite): bb hooks:install:full\n"
+                           "# The --filenames list below is a snapshot from `bb hooks:install` time.\n"
+                           "# Re-run that task after adding a new top-level dev/*.clj file or directory\n"
+                           "# so the hook picks it up (dev/smoke/fixtures must never be added to it).\n"
+                           "echo 'pre-commit 1/2: clj-kondo (errors only)'\n"
+                           "clj-kondo --lint src test dev\n"
+                           "LINT_EXIT=$?\n"
+                           "if [ \"$LINT_EXIT\" = \"3\" ]; then echo 'pre-commit: lint errors found'; exit 1; fi\n"
+                           "echo 'pre-commit 2/2: clojure-lsp format --dry'\n"
+                           "clojure-lsp format --dry --filenames \"" files "\" || { echo 'run bb lsp:format'; exit 1; }\n"
+                           "exit 0\n"))
+           (shell "chmod" "+x" hook)
+           (println "OK fast pre-commit hook installed")
+           (println ">> skip once with: git commit --no-verify"))}
+
+  hooks:install:full
+  {:doc "Install FULL git pre-commit hook (clj-kondo errors + format --dry + unit tests, slower)"
+   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))
+               files (lsp-filenames)]
+           (hook-preflight!)
+           (spit hook (str "#!/bin/bash\n"
+                           "# Jonquil pre-commit (FULL). Fast: bb hooks:install\n"
+                           "# See bb hooks:install's comment about the --filenames snapshot below.\n"
+                           "echo 'pre-commit 1/3: clj-kondo (errors only)'\n"
+                           "clj-kondo --lint src test dev\n"
+                           "LINT_EXIT=$?\n"
+                           "if [ \"$LINT_EXIT\" = \"3\" ]; then echo 'pre-commit: lint errors found'; exit 1; fi\n"
+                           "echo 'pre-commit 2/3: clojure-lsp format --dry'\n"
+                           "clojure-lsp format --dry --filenames \"" files "\" || { echo 'run bb lsp:format'; exit 1; }\n"
+                           "echo 'pre-commit 3/3: unit tests'\n"
+                           "jolt -M:test\n"
+                           "exit $?\n"))
+           (shell "chmod" "+x" hook)
+           (println "OK full pre-commit hook installed")
+           (println ">> skip once with: git commit --no-verify"))}
+
+  hooks:uninstall
+  {:doc "Remove the git pre-commit hook"
+   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))]
+           (if (fs/exists? hook)
+             (do (fs/delete hook) (println "OK pre-commit hook removed"))
+             (println ">> no pre-commit hook found")))}}}
