@@ -109,7 +109,7 @@ Two `bb` tasks drive the real GTK front end headlessly, without a human at the k
 - `bb gtk:selftest` opens two real GTK windows in turn and runs the P2 front-end self-test rows against them, exercising the same button/key handlers a person would use rather than calling internal functions directly.
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
-Both poll a condition against a deadline rather than sleeping, and both hand any blocking subprocess call (screenshots, GIF recording) to a `future` so the GTK thread itself never blocks.
+Both poll a condition against a deadline rather than sleeping, and both hand any blocking subprocess call (screenshots, GIF recording) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
 
 ### Themes
 

@@ -1,0 +1,22 @@
+;; Configuration for the documentation site, read by the docs-engine
+;; (https://github.com/jlt-commons/docs-engine).
+;;
+;; Build it locally with `bb site:serve` (or `jolt site:serve`). There is
+;; deliberately NO CI workflow and NO GitHub Pages site: this repo is private
+;; and staying that way for now. Publishing is two separate decisions, taken
+;; explicitly, and neither is implied by this file existing. Until the
+;; project is open-sourced, the only way to see this site is to build it on
+;; your own machine.
+{;; :base-path is what makes this a project site rather than an org one. Every
+ ;; URL the engine emits carries this prefix. Leave it out and the pages still
+ ;; render, each one loading the ORGANIZATION site's stylesheet while every
+ ;; asset 404s, which is a quiet way to ship a broken site.
+ :base-path   "/jonquil"
+
+ :title       "Jonquil"
+ :description "A DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops."
+
+ ;; docs/images holds the screenshots and the GIF the guide pages reference;
+ ;; copying it into the build is what keeps ../images/foo.png resolving from
+ ;; a rendered guide page.
+ :asset-dirs  ["images"]}
