@@ -694,14 +694,17 @@
   nil)
 
 (defn- close-popovers!
-  "Closes every OPEN popover in popovers (jonquil.gtk.popover/hide!) and
-  returns whether any was open -- the window's own :close-popovers!*, which
-  on-window-key's new Escape clause calls ahead of the evaluating? Stop
-  clause (probe 4 finding #2: the window's capture-phase controller runs
-  before a popover ever sees the key, so closing a popover during a run
-  must happen here, before Escape can also Stop the program)."
-  [popovers]
-  (let [open (filter popover/open? @popovers)]
+  "Closes every OPEN popover in popovers (jonquil.gtk.popover/hide!) except
+  skip, when given, and returns whether any OTHER one was open -- the
+  window's own :close-popovers!*, which on-window-key's Escape clause
+  calls (with no skip) ahead of the evaluating? Stop clause, so closing a
+  popover during a run must happen here, before Escape can also Stop the
+  program. A caller about to show or reposition skip passes it here
+  instead, so hiding and reshowing the SAME popover within one frame never
+  happens -- repositioning an already open popover
+  (jonquil.gtk.popover/show-at-caret!) is the clean path."
+  [popovers & [skip]]
+  (let [open (remove #(= % skip) (filter popover/open? @popovers))]
     (doseq [p open] (popover/hide! p))
     (boolean (seq open))))
 
@@ -738,7 +741,7 @@
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start]} (help/target snap)]
         (let [doc (docs/symbol-doc (:prompt-ns @(:state session)) symbol (:text snap) start)]
-          (close-popovers-fn)
+          (close-popovers-fn help-pop)
           (help-popover/show-doc! help-pop (help/doc-text symbol doc)))
         (set-status! status-label "No symbol at the caret.")))
     (catch :default e
@@ -769,7 +772,7 @@
                 (set-status! status-label (str "Jumped to " symbol ".")))
 
             (= :external (:kind target))
-            (do (close-popovers-fn)
+            (do (close-popovers-fn help-pop)
                 (help-popover/show-doc! help-pop (help/doc-text symbol (:doc target))))
 
             :else
@@ -1208,8 +1211,11 @@
         ;; quick doc, rename -- P4.T4-T7 register theirs via
         ;; register-popover-fn as they're created); close-popovers-fn is
         ;; what the window's own Escape clause and :close-popovers!* call.
+        ;; It takes an optional popover to skip -- a caller about to show
+        ;; or reposition ITS OWN popover passes it here, so that one is
+        ;; never hidden and reshown within the same frame.
         popovers (atom [])
-        close-popovers-fn (fn [] (close-popovers! popovers))
+        close-popovers-fn (fn [& [skip]] (close-popovers! popovers skip))
         register-popover-fn (fn [p] (register-popover! popovers p))
         ;; P4.T4: the quick-doc popover, built once on ed's view and
         ;; joined to the SAME registry above (Escape closes it, like every

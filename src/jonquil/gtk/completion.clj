@@ -219,7 +219,7 @@
         (nil? st) nil
         (:single? st) ((:apply-op! c) (help/commit-op st))
         :else (let [st (assoc st :text (:text snapshot))]
-                ((:close-others! c))
+                ((:close-others! c) c)
                 (reset! (:state c) st)
                 (render! c st)
                 (popover/show-at-caret! c)))))
