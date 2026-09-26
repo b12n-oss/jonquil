@@ -1,0 +1,659 @@
+(ns gtk-selftest-window.completion
+  "Completion with a doc preview, in both the editor and the REPL input."
+  (:require [clojure.string :as str]
+            [gtk-selftest-window.support :as support]
+            [jonquil.docs :as docs]
+            [jonquil.eval :as eval]
+            [jonquil.gtk.completion :as completion]
+            [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.popover :as popover]))
+
+;; P4.T5: this file's own private copies (measured against gdkkeysyms.h,
+;; same values jonquil.gtk.completion's own KEY-UP/KEY-DOWN/KEY-TAB use;
+;; KEY-ESCAPE/KEY-RETURN above already cover Escape/Enter for this file).
+(def ^:private KEY-SPACE 0x020)
+(def ^:private KEY-UP 0xff52)
+(def ^:private KEY-DOWN 0xff54)
+(def ^:private KEY-TAB 0xff09)
+
+;; I3 fix wave: this file's own private copies (measured against
+;; gdkkeysyms.h) for the keys the completion popup must never swallow --
+;; row-completion-keys-reach-editor/-closes-on-space and their console
+;; counterparts below.
+(def ^:private KEY-P 0x070)
+(def ^:private KEY-BACKSPACE 0xff08)
+(def ^:private KEY-LEFT 0xff51)
+
+;; --- P4.T5: completion with a doc preview ----------------------------------
+
+(defn row-completion-opens
+  "\"(ma\", caret 3, :complete!*: the popover opens and its rows equal
+  (mapv :symbol (docs/candidates ns \"ma\" \"(ma\" 3)) in order (measured
+  live: the first is macroexpand), and the preview contains
+  clojure.core/<first row>."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui) ns-sym (:prompt-ns @(:state (:session ui)))]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    ((:complete!* ui))
+    (let [st (completion/state c)
+          expected (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3))
+          rows (mapv :symbol (:candidates st))
+          preview (g/label-text (:doc-label c))]
+      (support/check :completion-opens
+             (and (some? st) (seq rows) (= expected rows)
+                  (str/includes? preview (str "clojure.core/" (first rows))))
+             {:expected expected :rows rows :preview preview})
+      (completion/close! c)
+      (next))))
+
+(defn row-completion-single-inserts
+  "\"(mapca\", caret 6, Ctrl+Space: docs/candidates for \"mapca\" is exactly
+  [mapcat] (measured live), so it commits at once -- text \"(mapcat\", no
+  popover."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(mapca")
+    (support/place-cursor! (:buf ed) 6)
+    (let [handled (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)]
+      (support/check :completion-single-inserts
+             (and (= 1 handled) (nil? (completion/state c)) (= "(mapcat" (editor/editor-text ed)))
+             {:handled handled :state (completion/state c) :text (editor/editor-text ed)})
+      (next))))
+
+(defn row-completion-no-prefix
+  "\"( \", caret 2, Ctrl+Space: help/prefix-at is nil (the char before the
+  caret is a space, not a symbol char) -- returns 1 so GTK never inserts a
+  literal space, nothing changes, no popover."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "( ")
+    (support/place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)]
+      (support/check :completion-no-prefix
+             (and (= 1 handled) (= "( " (editor/editor-text ed)) (nil? (completion/state c)))
+             {:handled handled :text (editor/editor-text ed) :state (completion/state c)})
+      (next))))
+
+(defn row-completion-navigate-commit
+  "Open on \"(ma\", Down, Enter: the selection moves to index 1, Enter
+  commits the SECOND candidate (apply-op!, one undo step) -- text is
+  \"(\" + that candidate's own symbol, and one gtk_text_buffer_undo gives
+  back \"(ma\"."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+    (let [st0 (completion/state c)
+          second-sym (:symbol (nth (:candidates st0) 1))
+          h1 (editor/handle-key! ed KEY-DOWN 0)
+          st1 (completion/state c)
+          h2 (editor/handle-key! ed support/KEY-RETURN 0)
+          text (editor/editor-text ed)]
+      (g/gtk-text-buffer-undo (:buf ed))
+      (let [text-after-undo (editor/editor-text ed)]
+        (support/check :completion-navigate-commit
+               (and (some? st0) (>= (count (:candidates st0)) 2)
+                    (= 1 h1) (some? st1) (= 1 (:index st1))
+                    (= 1 h2) (nil? (completion/state c))
+                    (= (str "(" second-sym) text)
+                    (= "(ma" text-after-undo))
+               {:candidate-count (count (:candidates st0)) :second-sym second-sym
+                :h1 h1 :index1 (:index st1) :h2 h2 :text text :text-after-undo text-after-undo})
+        (next)))))
+
+(defn row-completion-tab-commits
+  "Open, Tab: commits the selected (first) candidate the same way Enter
+  does, and closes the popover."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          h (editor/handle-key! ed KEY-TAB 0)]
+      (support/check :completion-tab-commits
+             (and opened? (= 1 h) (nil? (completion/state c)) (not= "(ma" (editor/editor-text ed)))
+             {:opened opened? :h h :text (editor/editor-text ed)})
+      (next))))
+
+(defn row-completion-keys-reach-editor
+  "Open on \"(ma\": p, Backspace and Left must never be swallowed by the
+  popup (I3 -- the old version of this row inserted \"p\" with
+  insert_interactive_at_cursor alone, bypassing editor/handle-key! entirely,
+  so it would still pass even if completion/handle-key! returned 1 for
+  every one of these). completion/handle-key! itself is checked directly
+  first and must return 0 for all three (none of Up/Down/PageUp/PageDown/
+  Return/KP-Enter/Tab), then editor/handle-key! -- the view's real dispatch
+  -- is called for real and must agree: 0 for every one of them, since
+  editor.clj has no clause for a bare letter or for Left, and
+  jonquil.edit/backspace-pair returns nil whenever the caret sits at the
+  buffer's end (see backspace-interactive!'s own docstring), so its own
+  KEY-BACKSPACE clause does nothing there either. A bare handle-key! call
+  never triggers GTK's own default handling underneath a 0 return (there is
+  no real key event driving it), so p's insert and Backspace's delete are
+  still reproduced with insert/delete-interactive, the same stand-ins the
+  rest of this file uses for GTK's default -- now gated on the checks
+  above, unlike before the fix. The popover stays open and refines through
+  both (still-valid?'s own prefix-start check holds for \"map\" then back to
+  \"ma\"). Left has no observable buffer effect to check beyond its own 0
+  return -- a bare call doesn't move the caret either."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui) ns-sym (:prompt-ns @(:state (:session ui)))]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          p-swallowed (completion/handle-key! c KEY-P 0)
+          p-handled (editor/handle-key! ed KEY-P 0)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "p" -1 1)
+      (let [text-p (editor/editor-text ed)
+            st-p (completion/state c)
+            expected-p (mapv :symbol (docs/candidates ns-sym "map" "(map" 4))
+            rows-p (mapv :symbol (:candidates st-p))
+            bs-swallowed (completion/handle-key! c KEY-BACKSPACE 0)
+            bs-handled (editor/handle-key! ed KEY-BACKSPACE 0)]
+        (support/backspace-interactive! (:buf ed) (g/cursor-offset (:buf ed)))
+        (let [text-bs (editor/editor-text ed)
+              st-bs (completion/state c)
+              expected-bs (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3))
+              rows-bs (mapv :symbol (:candidates st-bs))
+              left-swallowed (completion/handle-key! c KEY-LEFT 0)
+              left-handled (editor/handle-key! ed KEY-LEFT 0)]
+          (support/check :completion-keys-reach-editor
+                 (and opened?
+                      (= 0 p-swallowed) (= 0 p-handled)
+                      (= "(map" text-p) (some? st-p) (= expected-p rows-p)
+                      (= 0 bs-swallowed) (= 0 bs-handled)
+                      (= "(ma" text-bs) (some? st-bs) (= expected-bs rows-bs)
+                      (= 0 left-swallowed) (= 0 left-handled))
+                 {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
+                  :text-p text-p :expected-p expected-p :rows-p rows-p
+                  :bs-swallowed bs-swallowed :bs-handled bs-handled
+                  :text-bs text-bs :expected-bs expected-bs :rows-bs rows-bs
+                  :left-swallowed left-swallowed :left-handled left-handled})
+          (completion/close! c)
+          (next))))))
+
+(defn row-completion-closes-on-space
+  "Open, then completion/handle-key! and editor/handle-key! must both
+  return 0 for a plain space (I3, the same check row-completion-keys-
+  reach-editor makes for p/Backspace/Left -- control-only? in editor.clj's
+  own Ctrl+Space clause rejects a bare space, mask 0). Only then insert a
+  space with insert_interactive_at_cursor: help/prefix-at is nil right
+  after the space, so refine! closes the popover -- no poll, same
+  synchronous reasoning as completion-keys-reach-editor."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          swallowed (completion/handle-key! c KEY-SPACE 0)
+          handled (editor/handle-key! ed KEY-SPACE 0)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1)
+      (support/check :completion-closes-on-space
+             (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
+             {:opened opened? :swallowed swallowed :handled handled
+              :still-open (some? (completion/state c))})
+      (next))))
+
+(defn row-completion-escape-while-running
+  "Runs a real (loop [] (recur)), opens completion on \"l\" (many
+  candidates), sends window Escape -- the SAME registry-based clause
+  row-window-escape-closes-popover already proves for a test popover, now
+  exercised through the real completion popover: the popup closes and the
+  program keeps running; a second Escape (nothing left open) then falls
+  through to the evaluating? clause and Stops it, same as that row."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(loop [] (recur))")
+    (support/place-cursor! (:buf ed) 2)
+    ((:run!* ui))
+    (support/poll-until 2000 20
+                (fn [] (eval/evaluating? (:ctx (:session ui))))
+                (fn [started?]
+                  (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+                  (let [opened? (some? (completion/state c))
+                        mark (support/out-end-offset ui)
+                        h1 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
+                        closed? (nil? (completion/state c))
+                        still-running-1? (eval/evaluating? (:ctx (:session ui)))
+                        h2 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                    (support/poll-until 3000 20
+                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
+                                (fn [stopped?]
+                                  (support/check :completion-escape-while-running
+                                         (and started? opened? (= 1 h1) closed? still-running-1?
+                                              (= 1 h2) stopped?)
+                                         {:started started? :opened opened? :h1 h1 :closed closed?
+                                          :still-running-1 still-running-1? :h2 h2 :stopped stopped?})
+                                  (completion/close! c)
+                                  (next))))))))
+
+(defn row-completion-cmd-space-nothing
+  "0x20 with META only: control-only? rejects it (CONTROL-MASK checked,
+  META-MASK rejected, the P4 rule), so the chord falls through unhandled
+  and no popover opens."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (let [handled (editor/handle-key! ed KEY-SPACE g/META-MASK)]
+      (support/check :completion-cmd-space-nothing
+             (and (= 0 handled) (nil? (completion/state c)))
+             {:handled handled :state (completion/state c)})
+      (next))))
+
+(defn row-completion-preedit-yields
+  "With ed's own preedit-active? flag set (I5, same flag editor.clj's
+  handle-key! checks first for every key), Ctrl+Space returns 0 and opens
+  nothing."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (reset! (:preedit-active? ed) true)
+    (let [handled (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)]
+      (reset! (:preedit-active? ed) false)
+      (support/check :completion-preedit-yields
+             (and (= 0 handled) (nil? (completion/state c)))
+             {:handled handled})
+      (next))))
+
+(defn row-completion-closes-on-focus-loss
+  "Context bullet #4 (not in the brief's own row table): calls every fn
+  registered on ed's own :on-focus-fns directly -- the SAME ones
+  GtkEventControllerFocus's \"leave\" signal calls -- mirroring
+  row-quick-doc-closes-on-focus-loss, since this self-test window is never
+  the OS's key window and can't move real focus (P4.T3's own has_focus
+  finding)."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    ((:complete!* ui))
+    (let [opened? (some? (completion/state c))]
+      (doseq [f @(:on-focus-fns ed)] (f))
+      (support/check :completion-closes-on-focus-loss
+             (and opened? (nil? (completion/state c)))
+             {:opened opened? :still-open (some? (completion/state c))})
+      (next))))
+
+(defn row-completion-closes-other-popover
+  "Context bullet #3 (not in the brief's own row table, which has no row
+  for the two popovers together): opening completion while quick doc is
+  showing closes quick doc, and opening quick doc while completion is
+  showing closes completion -- both through close-popovers-fn (P4.T3's
+  registry), never a pairwise special case naming the other popover."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (support/place-cursor! (:buf ed) 2)
+    (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)
+    (let [quick-doc-open-1 (popover/open? hp)]
+      ((:complete!* ui))
+      (let [completion-open-1 (some? (completion/state c))
+            quick-doc-closed-by-completion (not (popover/open? hp))]
+        (completion/close! c)
+        (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)
+        (let [quick-doc-open-2 (popover/open? hp)]
+          ((:complete!* ui))
+          (let [completion-open-2 (some? (completion/state c))
+                quick-doc-closed-by-completion-2 (not (popover/open? hp))]
+            (support/check :completion-closes-other-popover
+                   (and quick-doc-open-1 completion-open-1 quick-doc-closed-by-completion
+                        quick-doc-open-2 completion-open-2 quick-doc-closed-by-completion-2)
+                   {:quick-doc-open-1 quick-doc-open-1 :completion-open-1 completion-open-1
+                    :quick-doc-closed-by-completion quick-doc-closed-by-completion
+                    :quick-doc-open-2 quick-doc-open-2 :completion-open-2 completion-open-2
+                    :quick-doc-closed-by-completion-2 quick-doc-closed-by-completion-2})
+            (popover/hide! hp)
+            (completion/close! c)
+            (next)))))))
+
+(defn row-completion-commit-throw-consumes-key
+  "P4.T5 fix round 1 (Important): forces jonquil.gtk.editor/apply-op! to
+  throw for the duration of one Enter, through commit!'s own call to it --
+  with-redefs on that var DOES reach the call completion.clj makes
+  through its own `editor` alias (checked live before writing this row:
+  without the fix, this exact with-redefs, run through editor/handle-key!,
+  crashed the whole selftest process -- window.clj's :handle-key! wrapper
+  caught the first throw and returned 0, so editor.clj's own handle-key!
+  fell through to plain-return? -> handle-return!, whose OWN apply-op!
+  call has no try/catch and hit the SAME redefined throw uncaught; see the
+  report). With the fix, completion/handle-key! itself catches it and
+  still returns 1: the buffer keeps its pre-commit text (no newline, no
+  second edit), the popover is closed, and the status bar shows the
+  error."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui) status (:status-label ui)]
+    (editor/set-text! ed "(ma")
+    (support/place-cursor! (:buf ed) 3)
+    (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          handled (with-redefs [editor/apply-op! (fn [& _] (throw (ex-info "forced commit failure" {})))]
+                    (editor/handle-key! ed support/KEY-RETURN 0))
+          text (editor/editor-text ed)
+          closed? (nil? (completion/state c))]
+      (support/poll-until 1000 20
+                  (fn [] (str/includes? (g/label-text status) "forced commit failure"))
+                  (fn [status-ok?]
+                    (support/check :completion-commit-throw-consumes-key
+                           (and opened? (= 1 handled) (= "(ma" text) closed? status-ok?)
+                           {:opened opened? :handled handled :text text :closed closed?
+                            :status (g/label-text status)})
+                    (next))))))
+
+(defn row-plain-return-apply-op-throw-contained
+  "Forces jonquil.gtk.editor/apply-op! to throw for the duration of one
+  plain Return, through handle-return!'s own call to it -- the same
+  with-redefs seam row-completion-commit-throw-consumes-key uses above.
+  Calls editor/dispatch-key!, the exact fn on-key calls (never handle-key!
+  directly, which has no try/catch of its own): the process survives, the
+  key is consumed (1), the buffer keeps its pre-Return text, and the
+  status bar shows the error."
+  [ui next]
+  (let [ed (:editor ui) status (:status-label ui)]
+    (editor/set-text! ed "(+ 1 2)")
+    (support/place-cursor! (:buf ed) 3)
+    (let [handled (with-redefs [editor/apply-op! (fn [& _] (throw (ex-info "forced return failure" {})))]
+                    (editor/dispatch-key! ed support/KEY-RETURN 0))
+          text (editor/editor-text ed)]
+      (support/poll-until 1000 20
+                  (fn [] (str/includes? (g/label-text status) "forced return failure"))
+                  (fn [status-ok?]
+                    (support/check :plain-return-apply-op-throw-contained
+                           (and (= 1 handled) (= "(+ 1 2)" text) status-ok?)
+                           {:handled handled :text text :status (g/label-text status)})
+                    (next))))))
+
+;; --- P4.T6: completion in the REPL input -----------------------------------
+
+(defn row-repl-completion-opens
+  "\"(ma\" in the console input, Ctrl+Space: the popover opens above the
+  input and its rows equal (mapv :symbol (docs/candidates ns \"ma\" \"(ma\"
+  3 history)) in order -- history being the exact REPL-history join do-
+  repl-complete! computes, captured here at the same moment so this stays
+  correct no matter how much earlier rows already left in the session's
+  history (measured live: none of it starts with \"ma\", so the rows
+  match what row-completion-opens measures for the editor -- first is
+  macroexpand -- regardless)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ns-sym (:prompt-ns @(:state (:session ui)))
+        history (str/join "\n" (:items @(:history (:ctx (:session ui)))))]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    ((:repl-complete!* ui))
+    (let [st (completion/state c)
+          expected (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3 history))
+          rows (mapv :symbol (:candidates st))
+          preview (g/label-text (:doc-label c))]
+      (support/check :repl-completion-opens
+             (and (some? st) (popover/open? c) (seq rows) (= expected rows)
+                  (str/includes? preview (str "clojure.core/" (first rows))))
+             {:expected expected :rows rows :preview preview})
+      (completion/close! c)
+      (next))))
+
+(defn row-repl-completion-precedence
+  "With history containing \"(inc 1)\", open on \"(ma\", Down, Enter, all
+  through cview/handle-key! -- the SAME precedence-ordered dispatch the
+  real key controller uses, never the raw actions, so a regression that
+  let Down browse history or Enter evaluate would show up here exactly as
+  it would for a real keystroke (see the report for the failing-first run
+  against a deliberately unordered handle-key!). The reviewer clause:
+  Enter must commit the SECOND candidate (apply-input-op!, one undo step),
+  never evaluate \"(ma\" (unbalanced, so console/input-action would
+  otherwise insert a newline, not evaluate it -- checked anyway, since
+  \"nothing was evaluated\" is the brief's own wording) and never browse
+  history (the history atom itself must come out exactly as history-add
+  left it)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ctx (:ctx (:session ui))
+        mark (support/out-end-offset ui)]
+    (swap! (:history ctx) eval/history-add "(inc 1)")
+    (let [hist-before @(:history ctx)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+      (let [h0 (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+            st0 (completion/state c)
+            second-sym (:symbol (nth (:candidates st0) 1))
+            h1 (cview/handle-key! cv KEY-DOWN 0)
+            st1 (completion/state c)
+            h2 (cview/handle-key! cv support/KEY-RETURN 0)
+            input (cview/input-text cv)
+            hist-after @(:history ctx)]
+        (support/check :repl-completion-precedence
+               ;; mark = out-end-offset ui unchanged proves nothing was
+               ;; evaluated: commit-input! (the ONLY thing that moves
+               ;; out-end) only ever runs from a real :eval/:send-stdin,
+               ;; never from completion's own commit (since's own "plus
+               ;; the live prompt/input tail" caveat means `(since ui
+               ;; mark)` is never actually "" -- it always includes that
+               ;; tail -- so out-end-offset is the precise check here).
+               (and (= 1 h0) (some? st0) (>= (count (:candidates st0)) 2)
+                    (= 1 h1) (some? st1) (= 1 (:index st1))
+                    (= 1 h2) (nil? (completion/state c))
+                    (= (str "(" second-sym) input)
+                    (= hist-before hist-after)
+                    (= mark (support/out-end-offset ui)))
+               {:h0 h0 :second-sym second-sym :h1 h1 :index1 (:index st1) :h2 h2
+                :input input :hist-before hist-before :hist-after hist-after
+                :out-end-before mark :out-end-after (support/out-end-offset ui)
+                :console (support/since ui mark)})
+        (next)))))
+
+(defn row-repl-history-after-close
+  "Open on \"(ma\", Escape (via (:close-popovers!* ui), the SAME registry
+  path a real Escape always uses, never completion/close! directly), then
+  Up: the popup is really closed (state nil, not left stale-open) and Up
+  browses history normally again -- the input becomes the last history
+  entry, not a completion navigation (see the report for the failing-first
+  run against repl-completion left out of the popover registry)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ctx (:ctx (:session ui))]
+    (swap! (:history ctx) eval/history-add "(inc 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          escaped ((:close-popovers!* ui))
+          closed? (nil? (completion/state c))
+          h (cview/handle-key! cv KEY-UP 0)
+          input (cview/input-text cv)]
+      (support/check :repl-history-after-close
+             (and opened? escaped closed? (= 1 h) (= "(inc 1)" input))
+             {:opened opened? :escaped escaped :closed closed? :h h :input input})
+      (next))))
+
+(defn row-repl-completion-history-symbols
+  "Fix round 1 (Important, review finding): the ORIGINAL version of this
+  row submitted \"(def zork 1)\" as a real REPL entry, which interns zork
+  in `user` -- syntax/get-autocomplete-candidates has its own ns-publics
+  source, entirely independent of :extra-context, so that row passed even
+  with extra-context wired to a constant nil (measured by the reviewer:
+  (docs/candidates 'user \"zo\" \"(zo\" 3 nil) => [\"zork\"]). It proved
+  candidates come from the running namespace, not that history feeds
+  docs/candidates at all.
+
+  This version puts the symbol ONLY in history text, never evaluated:
+  eval/history-add (the exact fn repl-history-context's own :items read,
+  and submit-repl!'s own write path) records \"(let [wobbuquux 42]
+  wobbuquux)\" straight on the session's history atom, the same shape/API
+  repl-history-context reads. wobbuquux is never bound anywhere real, so
+  ns-publics can't find it either -- only jonquil.syntax's own extra-
+  context tokenizing can (measured: with that string as extra-context,
+  docs/candidates for \"wobb\"/\"(wobb\"/5 is exactly [wobbuquux]; with nil
+  extra-context it's [] and open! does nothing at all, not even a single-
+  candidate commit). \"(wobb\" + Ctrl+Space (through cview/handle-key!,
+  the real dispatch) then commits it at once (help/open-state's own
+  :single? branch, one candidate, no popover) to \"(wobbuquux\" -- a
+  result :extra-context alone can produce.
+
+  Captures the history atom's value before adding the fabricated entry
+  and resets it back verbatim afterward (not just popping the one item --
+  simpler, and correct regardless of what :index/:draft eval/history-add
+  itself touched), so later rows (repl-history-after-close in particular)
+  see the same history they would have without this row ever running."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ctx (:ctx (:session ui))
+        hist-before @(:history ctx)]
+    (swap! (:history ctx) eval/history-add "(let [wobbuquux 42] wobbuquux)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(wobb" -1 1)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+          input (cview/input-text cv)
+          st (completion/state c)]
+      (reset! (:history ctx) hist-before)
+      (support/check :repl-completion-history-symbols
+             (and (= 1 handled) (nil? st) (= "(wobbuquux" input))
+             {:handled handled :input input :state st}))
+    (next)))
+
+(defn row-repl-completion-outside-input
+  "Caret placed at offset 0 -- always before input-start (input-snapshot's
+  own docstring: input-start starts at 2, right after the initial \"> \"
+  prompt, and only ever moves further right as output/prompt accumulate)
+  -- Ctrl+Space through the SAME cview/handle-key! dispatch: returns 0 and
+  opens nothing, input and output both untouched. Restores focus (cview/
+  focus!, back to the end of the input) before returning, the same way
+  every other row here leaves the console ready for the next one -- a
+  caret left outside the input would silently fail every later row's own
+  Ctrl+Space too, for the wrong reason."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        mark (support/out-end-offset ui)
+        input-before (cview/input-text cv)]
+    (support/place-cursor! (:buf cv) 0)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)]
+      (support/check :repl-completion-outside-input
+             (and (= 0 handled) (nil? (completion/state c))
+                  (= input-before (cview/input-text cv)) (= mark (support/out-end-offset ui)))
+             {:handled handled :state (completion/state c)
+              :input-unchanged (= input-before (cview/input-text cv))})
+      (cview/focus! cv)
+      (next))))
+
+(defn row-repl-completion-cmd-space-nothing
+  "0x20 with META only, caret in the input: control-only? rejects it
+  (CONTROL-MASK checked, META-MASK rejected, the same P4 rule the editor's
+  own completion chord follows), so the chord falls through unhandled and
+  no popover opens."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/META-MASK)]
+      (support/check :repl-completion-cmd-space-nothing
+             (and (= 0 handled) (nil? (completion/state c)))
+             {:handled handled :state (completion/state c)})
+      (next))))
+
+(defn row-repl-completion-preedit-yields
+  "With cv's own preedit-active? flag set (I5, the same flag console-
+  view/handle-key!'s Ctrl+Space clause checks), Ctrl+Space returns 0 and
+  opens nothing."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (reset! (:preedit-active? cv) true)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)]
+      (reset! (:preedit-active? cv) false)
+      (support/check :repl-completion-preedit-yields
+             (and (= 0 handled) (nil? (completion/state c)))
+             {:handled handled})
+      (next))))
+
+(defn row-repl-completion-closes-on-focus-loss
+  "Context bullet #3 (not in the brief's own row table): calls every fn
+  registered on cv's own :on-focus-fns directly -- the SAME ones
+  GtkEventControllerFocus's \"leave\" signal calls -- mirroring
+  row-completion-closes-on-focus-loss, since this self-test window is
+  never the OS's key window and can't move real focus (P4.T3's own
+  has_focus finding)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    ((:repl-complete!* ui))
+    (let [opened? (some? (completion/state c))]
+      (doseq [f @(:on-focus-fns cv)] (f))
+      (support/check :repl-completion-closes-on-focus-loss
+             (and opened? (nil? (completion/state c)))
+             {:opened opened? :still-open (some? (completion/state c))})
+      (next))))
+
+(defn row-repl-completion-keys-reach-console
+  "Same reasoning as row-completion-keys-reach-editor, through the
+  console's own cview/handle-key! (I3: the REPL popup must not swallow
+  keys the input needs either). Open on \"(ma\" in the input: completion/
+  handle-key! itself returns 0 for p, Backspace and Left, and cview/
+  handle-key! -- the console's real dispatch -- agrees: console-view.clj
+  has no clause of its own for any of the three (unlike editor.clj's
+  KEY-BACKSPACE clause, which also does nothing here once the caret sits
+  at the buffer's end, per backspace-interactive!'s own docstring), so a
+  bare call never triggers GTK's own default handling underneath a 0
+  return -- p's insert and Backspace's delete are reproduced the same
+  insert/delete-interactive way row-completion-keys-reach-editor's own
+  stand-ins do, now gated on the checks above. Left has no observable
+  buffer effect to check beyond its own 0 return."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ns-sym (:prompt-ns @(:state (:session ui)))
+        history (str/join "\n" (:items @(:history (:ctx (:session ui)))))]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          p-swallowed (completion/handle-key! c KEY-P 0)
+          p-handled (cview/handle-key! cv KEY-P 0)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "p" -1 1)
+      (let [input-p (cview/input-text cv)
+            st-p (completion/state c)
+            expected-p (mapv :symbol (docs/candidates ns-sym "map" "(map" 4 history))
+            rows-p (mapv :symbol (:candidates st-p))
+            bs-swallowed (completion/handle-key! c KEY-BACKSPACE 0)
+            bs-handled (cview/handle-key! cv KEY-BACKSPACE 0)]
+        (support/backspace-interactive! (:buf cv) (g/cursor-offset (:buf cv)))
+        (let [input-bs (cview/input-text cv)
+              st-bs (completion/state c)
+              expected-bs (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3 history))
+              rows-bs (mapv :symbol (:candidates st-bs))
+              left-swallowed (completion/handle-key! c KEY-LEFT 0)
+              left-handled (cview/handle-key! cv KEY-LEFT 0)]
+          (support/check :repl-completion-keys-reach-console
+                 (and opened?
+                      (= 0 p-swallowed) (= 0 p-handled)
+                      (= "(map" input-p) (some? st-p) (= expected-p rows-p)
+                      (= 0 bs-swallowed) (= 0 bs-handled)
+                      (= "(ma" input-bs) (some? st-bs) (= expected-bs rows-bs)
+                      (= 0 left-swallowed) (= 0 left-handled))
+                 {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
+                  :input-p input-p :expected-p expected-p :rows-p rows-p
+                  :bs-swallowed bs-swallowed :bs-handled bs-handled
+                  :input-bs input-bs :expected-bs expected-bs :rows-bs rows-bs
+                  :left-swallowed left-swallowed :left-handled left-handled})
+          (completion/close! c)
+          (next))))))
+
+(defn row-repl-completion-closes-on-space
+  "Same reasoning as row-completion-closes-on-space, through cview/
+  handle-key! (I3): completion/handle-key! and cview/handle-key! both
+  return 0 for a plain space (control-only? in console-view.clj's own
+  Ctrl+Space clause rejects mask 0). Only then insert a space with
+  insert_interactive_at_cursor: help/prefix-at is nil right after it, so
+  refine! closes the popover."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          swallowed (completion/handle-key! c KEY-SPACE 0)
+          handled (cview/handle-key! cv KEY-SPACE 0)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) " " -1 1)
+      (support/check :repl-completion-closes-on-space
+             (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
+             {:opened opened? :swallowed swallowed :handled handled
+              :still-open (some? (completion/state c))})
+      (next))))
