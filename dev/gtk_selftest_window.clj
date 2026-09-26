@@ -24,6 +24,7 @@
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
+            [jonquil.gtk.window :as window]
             [jonquil.main :as main]
             [jonquil.session :as session]
             [jonquil.settings :as settings]))
@@ -3447,6 +3448,32 @@
            {:threw-once @threw-once? :ran-second @ran-second?})
     (next)))
 
+(defn- row-window-key-throw-contained
+  "Fix wave item 1 (I2, parked item a): forces jonquil.gtk.window/do-
+  cycle-theme! to throw for one Cmd+Shift+M, through on-window-key's own
+  theme-cycle-fn call to it (with-redefs on that var reaches the call
+  even though it's unqualified and intra-namespace -- checked live before
+  writing this row, the same way row-completion-commit-throw-consumes-key
+  checked its own cross-namespace seam). Calls the exact fn the
+  \"key-pressed\" signal calls (:handle-window-key!), the same chord
+  row-theme-chord already drives (0x06d + META-MASK/CONTROL-MASK +
+  SHIFT-MASK). Without on-window-key's own try/catch, this exact
+  with-redefs crashed the whole self-test process before this row could
+  even record a result (measured live: no SUMMARY, non-zero exit -- see
+  the report). With the fix: the process survives, the key still counts
+  as consumed (1), and the status bar shows the error."
+  [ui next]
+  (let [status (:status-label ui)
+        handled (with-redefs [window/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
+                  ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))]
+    (poll-until 1000 20
+                (fn [] (str/includes? (g/label-text status) "forced window-key failure"))
+                (fn [status-ok?]
+                  (check :window-key-throw-contained
+                         (and (= 1 handled) status-ok?)
+                         {:handled handled :status (g/label-text status)})
+                  (next)))))
+
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
   not idle -- the coordinator's own concern was exactly this combination
@@ -3625,6 +3652,7 @@
    row-menu-actions-console-complete
    row-menu-action-throw-is-contained
    row-cursor-listener-throw-others-still-run
+   row-window-key-throw-contained
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

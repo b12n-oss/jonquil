@@ -1106,38 +1106,53 @@
   - A new clause, ahead of the evaluating? Stop clause: when
     close-popovers-fn finds any P4 popover open, Escape closes it and
     returns 1 without touching evaluating? at all, so closing a popover
-    during a run never also Stops the program."
+    during a run never also Stops the program.
+
+  Fix wave item 1 (I2, parked item a): the whole handler runs inside
+  try/catch, the same containment editor/dispatch-key! gives the editor's
+  own key path. A throw from any clause below -- run-fn, do-zoom!/do-
+  cycle-theme!/do-toggle-focus!/do-clear-console!/do-run-selection!
+  included -- is reported through set-status! and the key still counts as
+  consumed (1), instead of escaping into GTK's own signal emission and
+  killing the process. The find bar's own handle-key!/handle-nav-key! stay
+  unwrapped on their own account -- this only contains a throw because
+  they happen to be called from inside this same function."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
    run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
-   win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn]
+   win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
+   status-label]
   (fn [_ctl keyval0 _keycode state _data]
-    (let [keyval (g/gdk-keyval-to-lower keyval0)]
-      (cond
-        (= keyval KEY-F5) (do (run-fn) 1)
-        (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
-        (find-bar/handle-key! fb keyval0 state)
-        (and (= keyval KEY-ESCAPE) (close-popovers-fn)) 1
-        (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
-        (= keyval KEY-ESCAPE) 0
-        ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
-        ;; is open, wherever focus is (1 only when the bar acted).
-        (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
-        (and (= keyval KEY-F6) (not (shift-held? state))) (do (toggle-focus-fn) 1)
-        (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
-        (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
-        (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
-        (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
-        (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
-        (and (command-chord? state) (= keyval KEY-E)) (do (run-selection-fn) 1)
-        (and (command-chord? state) (not (alt-held? state)) (= keyval KEY-L)) (do (clear-console-fn) 1)
-        (and (command-chord? state) (not (alt-held? state)) (not (shift-held? state)) (= keyval KEY-F))
-        (do (open-find-fn) 1)
-        (and (command-chord? state) (= keyval KEY-H)) (do (open-replace-fn) 1)
-        (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
-        (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
-        (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
-        (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
-        :else 0))))
+    (try
+      (let [keyval (g/gdk-keyval-to-lower keyval0)]
+        (cond
+          (= keyval KEY-F5) (do (run-fn) 1)
+          (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
+          (find-bar/handle-key! fb keyval0 state)
+          (and (= keyval KEY-ESCAPE) (close-popovers-fn)) 1
+          (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
+          (= keyval KEY-ESCAPE) 0
+          ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
+          ;; is open, wherever focus is (1 only when the bar acted).
+          (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
+          (and (= keyval KEY-F6) (not (shift-held? state))) (do (toggle-focus-fn) 1)
+          (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
+          (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
+          (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
+          (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
+          (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
+          (and (command-chord? state) (= keyval KEY-E)) (do (run-selection-fn) 1)
+          (and (command-chord? state) (not (alt-held? state)) (= keyval KEY-L)) (do (clear-console-fn) 1)
+          (and (command-chord? state) (not (alt-held? state)) (not (shift-held? state)) (= keyval KEY-F))
+          (do (open-find-fn) 1)
+          (and (command-chord? state) (= keyval KEY-H)) (do (open-replace-fn) 1)
+          (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
+          (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
+          (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
+          (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
+          :else 0))
+      (catch :default e
+        (set-status! status-label (str "; key: " (ex-message e)))
+        1))))
 
 ;; --- context menus (P4.T7) -----------------------------------------------
 
@@ -1354,7 +1369,7 @@
                                      run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
                                      (fn [] (eval/evaluating? (:ctx session)))
                                      win fb open-find-fn open-replace-fn cycle-theme-fn
-                                     close-popovers-fn)
+                                     close-popovers-fn status-label)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
