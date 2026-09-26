@@ -1126,15 +1126,29 @@
   directly on the group -- probe 3 measured that equivalent to
   gtk_widget_activate_action_variant(view, \"p4.<name>\", NULL) on the
   prefixed name, since \"p4\" here is only this group's own insertion
-  prefix, not a second name the action itself carries."
-  [view items]
+  prefix, not a second name the action itself carries.
+
+  Fix round 1 (Important): every item's own \"activate\" callback runs
+  inside try/catch, reporting a throw through on-error (fn [msg] -> nil,
+  window.clj's own set-status!) rather than letting it escape. Measured
+  live: an uncaught throw from a GSimpleAction \"activate\" callback goes
+  through Jolt's foreign-callable and kills the process (exit 1) -- the
+  same class of failure P4.T5's own reviewer clause guards do-complete!/
+  handle-key! against, here at the one call site every menu item (current
+  and future) shares, rather than in each item's own fn."
+  [view items on-error]
   (let [menu (g/g-menu-new)
         group (g/g-simple-action-group-new)]
     (doseq [[label action-name f] items]
       (g/g-menu-append menu label (str "p4." action-name))
       (let [action (g/g-simple-action-new action-name ffi/null)]
         (g/g-signal-connect-data action "activate"
-                                 (callable (fn [_action _param _data] (f) nil)
+                                 (callable (fn [_action _param _data]
+                                             (try
+                                               (f)
+                                               (catch :default e
+                                                 (on-error (str "; " action-name ": " (ex-message e)))))
+                                             nil)
                                            [:pointer :pointer :pointer] :void)
                                  ffi/null ffi/null g/CONNECT-DEFAULT)
         (g/g-action-map-add-action group action)))
@@ -1294,8 +1308,11 @@
           ["Indent" "indent" (fn [] (editor/do-indent! ed))]
           ["Unindent" "unindent" (fn [] (editor/do-unindent! ed))]
           ["Find" "find" open-find-fn]
-          ["Replace" "replace" open-replace-fn]])
-        console-menu-group (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]])
+          ["Replace" "replace" open-replace-fn]]
+         (fn [msg] (set-status! status-label msg)))
+        console-menu-group
+        (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]]
+                               (fn [msg] (set-status! status-label msg)))
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action editor-menu-group name ffi/null))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))

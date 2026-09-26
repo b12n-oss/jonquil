@@ -2388,6 +2388,21 @@
              {:handled handled :open (popover/open? hp)})
       (next))))
 
+(defn- row-quick-doc-cmd-shift-f1-does-nothing
+  "0xffbe (F1) with SHIFT and META together: shift-only? rejects it (fix
+  round 1 -- it used to check shift-held? alone, so this chord opened
+  quick doc same as plain Shift+F1, measured live before the fix), so
+  the chord falls through unhandled and no popover opens."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-F1 (bit-or g/SHIFT-MASK g/META-MASK))]
+      (check :quick-doc-cmd-shift-f1-does-nothing
+             (and (= 0 handled) (not (popover/open? hp)))
+             {:handled handled :open (popover/open? hp)})
+      (next))))
+
 (defn- row-quick-doc-after-define
   "T2 review's Important, widened (context clue #3): a lookup before
   anything defines the name must not keep serving :not-found once a REPL
@@ -3103,6 +3118,21 @@
              {:handled handled :open (popover/open? rp)})
       (next))))
 
+(defn- row-rename-cmd-shift-f6-does-nothing
+  "0xffc3 (F6) with SHIFT and META together: shift-only? rejects it (fix
+  round 1 -- it used to check shift-held? alone, so this chord opened
+  rename same as plain Shift+F6, measured live before the fix), so the
+  chord falls through unhandled and no popover opens."
+  [ui next]
+  (let [ed (:editor ui) rp (:rename-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (let [handled (editor/handle-key! ed KEY-F6 (bit-or g/SHIFT-MASK g/META-MASK))]
+      (check :rename-cmd-shift-f6-does-nothing
+             (and (= 0 handled) (not (popover/open? rp)))
+             {:handled handled :open (popover/open? rp)})
+      (next))))
+
 (defn- row-rename-closed-signal-syncs
   "Context bullet #1: gtk_popover_popdown called DIRECTLY (never
   jonquil.gtk.popover/hide!) still leaves :open? false -- jonquil.gtk.
@@ -3169,6 +3199,32 @@
       (check :menu-actions-console-complete opened? {:opened opened?})
       (completion/close! c)
       (next))))
+
+(defn- row-menu-action-throw-is-contained
+  "Fix round 1 (Important): forces jonquil.gtk.editor/do-toggle-comment!
+  to throw for one activation (with-redefs, the seam row-completion-
+  commit-throw-consumes-key already proved reaches through a closure the
+  same shape), then activates p4.toggle-comment through :activate-menu-
+  action!*. Without install-context-menu!'s own try/catch, the SAME
+  throw crosses a GSimpleAction \"activate\" callback -- a Jolt foreign-
+  callable -- and kills this whole self-test process (measured live with
+  the fix reverted: exit 1, no SUMMARY). With the fix: the process
+  survives, the status bar shows the error, and the buffer is untouched
+  (do-toggle-comment! throws before any edit is ever applied)."
+  [ui next]
+  (let [ed (:editor ui) status (:status-label ui) activate! (:activate-menu-action!* ui)]
+    (editor/set-text! ed "(+ 1 2)")
+    (place-cursor! (:buf ed) 0)
+    (with-redefs [editor/do-toggle-comment! (fn [& _] (throw (ex-info "forced menu-action failure" {})))]
+      (activate! "toggle-comment"))
+    (let [text (editor/editor-text ed)]
+      (poll-until 1000 20
+                  (fn [] (str/includes? (g/label-text status) "forced menu-action failure"))
+                  (fn [status-ok?]
+                    (check :menu-action-throw-is-contained
+                           (and status-ok? (= "(+ 1 2)" text))
+                           {:status (g/label-text status) :text text})
+                    (next))))))
 
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
@@ -3305,6 +3361,7 @@
    row-quick-doc-closes
    row-quick-doc-closes-on-focus-loss
    row-quick-doc-cmd-does-nothing
+   row-quick-doc-cmd-shift-f1-does-nothing
    row-quick-doc-after-define
    row-jump-top-level
    row-jump-local-binding
@@ -3337,9 +3394,11 @@
    row-rename-invalid
    row-rename-keys
    row-rename-cmd-does-nothing
+   row-rename-cmd-shift-f6-does-nothing
    row-rename-closed-signal-syncs
    row-menu-actions
    row-menu-actions-console-complete
+   row-menu-action-throw-is-contained
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

@@ -390,6 +390,15 @@
   (and (not (zero? (bit-and state g/CONTROL-MASK)))
        (zero? (bit-and state g/META-MASK))))
 
+(defn- shift-only?
+  "P4 keys whose own chord is Shift-based (quick doc's Shift+F1, rename's
+  Shift+F6): Shift held and Meta NOT held, the same P4 rule control-only?
+  applies to the Control-based chords above -- Cmd+Shift+<key> must not
+  also match."
+  [state]
+  (and (not (zero? (bit-and state g/SHIFT-MASK)))
+       (zero? (bit-and state g/META-MASK))))
+
 (defn- no-modifiers?
   "True when none of Shift, Control, Meta or Alt is held -- F12's own P4
   requirement (\"no modifiers\"), stricter than no-command-modifiers?
@@ -510,16 +519,19 @@
        ;; P4.T4: quick doc and jump. control-only? (not command-chord?)
        ;; because the P4 global constraint is CONTROL-MASK only, rejecting
        ;; META-MASK -- unlike every chord above, which treats Control and
-       ;; Meta as the same command chord. F12 additionally requires NO
-       ;; modifiers at all (no-modifiers?, stricter than no-command-
-       ;; modifiers? above, which doesn't check Shift). Each runs the fn
-       ;; jonquil.gtk.window registered (set-quick-doc-fn!/set-jump-fn!,
-       ;; below) and returns 1 regardless of what that fn finds -- "acted"
-       ;; means the chord matched, not that a symbol/definition turned up.
+       ;; Meta as the same command chord. Shift+F1 checks shift-only? for
+       ;; the same reason, applied to its own Shift-based chord (fix round
+       ;; 1: it used to check shift-held? alone, so Cmd+Shift+F1 also
+       ;; matched). F12 additionally requires NO modifiers at all
+       ;; (no-modifiers?, stricter than no-command-modifiers? above, which
+       ;; doesn't check Shift). Each runs the fn jonquil.gtk.window
+       ;; registered (set-quick-doc-fn!/set-jump-fn!, below) and returns 1
+       ;; regardless of what that fn finds -- "acted" means the chord
+       ;; matched, not that a symbol/definition turned up.
        (and (control-only? state) (= keyval KEY-Q))
        (do (when-let [f @(:quick-doc-fn ed)] (f)) 1)
 
-       (and (shift-held? state) (= keyval KEY-F1))
+       (and (shift-only? state) (= keyval KEY-F1))
        (do (when-let [f @(:quick-doc-fn ed)] (f)) 1)
 
        (and (no-modifiers? state) (= keyval KEY-F12))
@@ -528,13 +540,15 @@
        (and (control-only? state) (= keyval KEY-B))
        (do (when-let [f @(:jump-fn ed)] (f)) 1)
 
-       ;; P4.T7: rename. Shift+F6/F2, neither gated by control-only? --
-       ;; matching Shift+F1/F12's own precedent just above (P4.T4), which
-       ;; checks shift-held?/no-modifiers? alone with no Meta exclusion.
-       ;; window.clj's own F6 clause already lets Shift+F6 fall through to
-       ;; here (P4.T3's own key-order change); F2 has no other clause to
-       ;; collide with.
-       (and (shift-held? state) (= keyval KEY-F6))
+       ;; P4.T7: rename. Shift+F6/F2. Shift+F6 checks shift-only? (fix
+       ;; round 1: it used to check shift-held? alone, so Cmd+Shift+F6
+       ;; also matched, the same gap Shift+F1 had above) rather than
+       ;; control-only?, since this is a Shift-based chord, not a
+       ;; Control-based one. window.clj's own F6 clause already lets
+       ;; Shift+F6 fall through to here (P4.T3's own key-order change);
+       ;; F2 has no other clause to collide with, and no-modifiers?
+       ;; already rejects Meta on its own.
+       (and (shift-only? state) (= keyval KEY-F6))
        (do (when-let [f @(:rename-fn ed)] (f)) 1)
 
        (and (no-modifiers? state) (= keyval KEY-F2))
