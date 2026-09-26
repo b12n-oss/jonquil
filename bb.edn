@@ -207,21 +207,19 @@
   ;; --- git hooks ----------------------------------------------------------
   hooks:install
   {:doc "Install FAST git pre-commit hook (clj-kondo errors + clojure-lsp format --dry, ~2s)"
-   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))
-               files (lsp-filenames)]
+   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))]
            (hook-preflight!)
            (spit hook (str "#!/bin/bash\n"
                            "# Jonquil pre-commit (FAST -- clj-kondo errors-only + clojure-lsp format --dry).\n"
                            "# Full (+ test suite): bb hooks:install:full\n"
-                           "# The --filenames list below is a snapshot from `bb hooks:install` time.\n"
-                           "# Re-run that task after adding a new top-level dev/*.clj file or directory\n"
-                           "# so the hook picks it up (dev/smoke/fixtures must never be added to it).\n"
+                           "# The format step runs `bb lsp:format-check`, so its file list (lsp-filenames\n"
+                           "# in bb.edn) is computed fresh on every commit.\n"
                            "echo 'pre-commit 1/2: clj-kondo (errors only)'\n"
                            "clj-kondo --lint src test dev\n"
                            "LINT_EXIT=$?\n"
                            "if [ \"$LINT_EXIT\" = \"3\" ]; then echo 'pre-commit: lint errors found'; exit 1; fi\n"
                            "echo 'pre-commit 2/2: clojure-lsp format --dry'\n"
-                           "clojure-lsp format --dry --filenames \"" files "\" || { echo 'run bb lsp:format'; exit 1; }\n"
+                           "bb lsp:format-check >/dev/null || { echo 'run bb lsp:format'; exit 1; }\n"
                            "exit 0\n"))
            (shell "chmod" "+x" hook)
            (println "OK fast pre-commit hook installed")
@@ -229,18 +227,16 @@
 
   hooks:install:full
   {:doc "Install FULL git pre-commit hook (clj-kondo errors + format --dry + unit tests, slower)"
-   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))
-               files (lsp-filenames)]
+   :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))]
            (hook-preflight!)
            (spit hook (str "#!/bin/bash\n"
                            "# Jonquil pre-commit (FULL). Fast: bb hooks:install\n"
-                           "# See bb hooks:install's comment about the --filenames snapshot below.\n"
                            "echo 'pre-commit 1/3: clj-kondo (errors only)'\n"
                            "clj-kondo --lint src test dev\n"
                            "LINT_EXIT=$?\n"
                            "if [ \"$LINT_EXIT\" = \"3\" ]; then echo 'pre-commit: lint errors found'; exit 1; fi\n"
                            "echo 'pre-commit 2/3: clojure-lsp format --dry'\n"
-                           "clojure-lsp format --dry --filenames \"" files "\" || { echo 'run bb lsp:format'; exit 1; }\n"
+                           "bb lsp:format-check >/dev/null || { echo 'run bb lsp:format'; exit 1; }\n"
                            "echo 'pre-commit 3/3: unit tests'\n"
                            "jolt -M:test\n"
                            "exit $?\n"))
