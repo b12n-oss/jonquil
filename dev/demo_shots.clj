@@ -43,10 +43,12 @@
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
             [jonquil.gtk.callbacks :as cb]
+            [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.popover :as popover]
             [jonquil.main :as main]))
 
 (def ^:private images-dir "docs/images")
@@ -111,6 +113,14 @@
     (mark-offset (:buf cv) (:out-end cv))))
 
 (defn- since [ui mark] (subs (console-text ui) mark))
+
+(defn- place-cursor!
+  "P4.T8: places buf's cursor at offset -- an ordinary GtkTextBuffer call,
+  copied from dev/gtk_selftest_window.clj's own place-cursor! (same
+  category as this file's own g/gtk-text-buffer-insert-interactive-at-
+  cursor calls elsewhere: never a synthesized keystroke)."
+  [buf offset]
+  (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
 
 ;; --- settle: wait a couple more repaint ticks after a text condition -----
 
@@ -515,6 +525,75 @@
 (defn- scene-theme-solarized [ui next] (scene-theme :theme-solarized :solarized ui next))
 (defn- scene-theme-navy [ui next] (scene-theme :theme-navy :navy ui next))
 
+(defn- scene-completion
+  "P4.T8: \"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
+  calls (jonquil.gtk.window's own do-complete!). \"ma\" has several
+  candidates (docs/candidates, measured live: macroexpand and friends),
+  so the popover opens with its own rows AND the selected candidate's doc
+  preview, both visible in the same shot -- the brief's own \"popup with
+  its preview\". set-text! already leaves the caret at the end of the
+  buffer (this file's own editor/set-text! calls elsewhere never move it
+  afterward either), so no place-cursor! call is needed here."
+  [ui next]
+  (let [ed (:editor ui) c (:completion ui)]
+    (editor/set-text! ed "(ma")
+    ((:complete!* ui))
+    (poll-until 3000 20
+                (fn [] (some? (completion/state c)))
+                (fn [ok]
+                  (settle! 2
+                           (fn []
+                             (screenshot! (image-path :completion "png") (own-pid)
+                                          (fn [{:keys [exit err]}]
+                                            (check! :completion (and ok (zero? exit))
+                                                    {:opened ok :screenshot-exit exit :screenshot-err err})
+                                            (completion/close! c)
+                                            (next)))))))))
+
+(defn- scene-quick-doc
+  "P4.T8: \"(map inc [1])\", caret on \"map\" (offset 2, place-cursor!),
+  :quick-doc!* -- the exact fn Ctrl+Q calls (do-quick-doc!). The popover
+  opens over clojure.core/map's own arglists and doc."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    ((:quick-doc!* ui))
+    (poll-until 3000 20
+                (fn [] (popover/open? hp))
+                (fn [ok]
+                  (settle! 2
+                           (fn []
+                             (screenshot! (image-path :quick-doc "png") (own-pid)
+                                          (fn [{:keys [exit err]}]
+                                            (check! :quick-doc (and ok (zero? exit))
+                                                    {:opened ok :screenshot-exit exit :screenshot-err err})
+                                            (popover/hide! hp)
+                                            (next)))))))))
+
+(defn- scene-rename
+  "P4.T8: \"(defn greet [n] n)\\n(greet 1)\", caret on the call's own
+  greet (offset 22, place-cursor! -- the same fixture/offset dev/smoke/
+  binary_smoke.clj's own step-rename! measures against the built binary),
+  :rename!* -- the exact fn Shift+F6/F2 calls (do-rename!). The rename
+  popover opens with its entry prefilled with \"greet\" and selected."
+  [ui next]
+  (let [ed (:editor ui) rp (:rename-popover ui)]
+    (editor/set-text! ed "(defn greet [n] n)\n(greet 1)")
+    (place-cursor! (:buf ed) 22)
+    ((:rename!* ui))
+    (poll-until 3000 20
+                (fn [] (popover/open? rp))
+                (fn [ok]
+                  (settle! 2
+                           (fn []
+                             (screenshot! (image-path :rename "png") (own-pid)
+                                          (fn [{:keys [exit err]}]
+                                            (check! :rename (and ok (zero? exit))
+                                                    {:opened ok :screenshot-exit exit :screenshot-err err})
+                                            (popover/hide! rp)
+                                            (next)))))))))
+
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
@@ -532,7 +611,10 @@
    [:theme-light scene-theme-light]
    [:theme-dark scene-theme-dark]
    [:theme-solarized scene-theme-solarized]
-   [:theme-navy scene-theme-navy]])
+   [:theme-navy scene-theme-navy]
+   [:completion scene-completion]
+   [:quick-doc scene-quick-doc]
+   [:rename scene-rename]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
