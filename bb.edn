@@ -90,16 +90,31 @@
     (def docs-engine-repo "https://github.com/jlt-commons/docs-engine")
 
     (defn docs-engine-dir
-      "Where the engine is checked out: $JLT_DOCS_ENGINE, else a sibling
-       directory, else the usual spot. nil when none of them exist."
+      "Where the engine is checked out: $JLT_DOCS_ENGINE, else the usual
+       jlt-commons spot, else a sibling directory. nil when none exist. The
+       jlt-commons checkout comes before ../docs-engine because a sibling
+       there can be an unrelated older fork (measured: ~/dev/b12n-oss has
+       one), which would otherwise shadow the real engine silently."
       []
       (let [home (System/getProperty "user.home")]
         (->> [(System/getenv "JLT_DOCS_ENGINE")
-              "../docs-engine"
-              (str home "/dev/jlt-commons/docs-engine")]
+              (str home "/dev/jlt-commons/docs-engine")
+              "../docs-engine"]
              (remove nil?)
              (filter (fn [d] (fs/exists? (fs/file d "bb.edn"))))
              first)))
+
+    (defn free-port
+      "First port from base up to base+20 that 127.0.0.1 will bind right now,
+       or nil. The engine does the real bind a moment later, so this is a
+       probe: a port taken in between fails loudly in the engine, not
+       silently. An explicit port is never scanned (see site:serve)."
+      [base]
+      (some (fn [p]
+              (try (with-open [s (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+                     (.getLocalPort s))
+                   (catch Exception _ nil)))
+            (range base (+ base 21))))
 
     (defn site-task
       "Runs one of the engine's tasks against this project."
@@ -110,7 +125,7 @@
           (when-not (zero? (:exit res)) (System/exit (:exit res))))
         (do
           (println "The docs engine is not checked out anywhere I looked:")
-          (println "  $JLT_DOCS_ENGINE, ../docs-engine, ~/dev/jlt-commons/docs-engine")
+          (println "  $JLT_DOCS_ENGINE, ~/dev/jlt-commons/docs-engine, ../docs-engine")
           (println)
           (println "  git clone" docs-engine-repo "../docs-engine")
           (println)
@@ -150,7 +165,7 @@
      (row "hooks:uninstall" "remove the git pre-commit hook")
      (hdr "Docs (local preview; the engine lives in jlt-commons/docs-engine)")
      (row "site:build" "build the documentation site into _site/")
-     (row "site:serve [port]" "build, then serve it at http://localhost:3000")
+     (row "site:serve [port]" "build, then serve it (first free port from 3000)")
      (row "site:clean" "delete the _site/ build output")
      (hdr "Upstream")
      (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
@@ -302,8 +317,13 @@
    :task (site-task "build")}
 
   site:serve
-  {:doc "Build the docs site and serve it at http://localhost:3000 (site:serve [port])"
-   :task (site-task "serve" (first *command-line-args*))}
+  {:doc "Build the docs site and serve it locally; first free port from 3000, or site:serve PORT (refused if busy)"
+   :task (let [asked (first *command-line-args*)
+               port  (or asked (free-port 3000))]
+           (if port
+             (site-task "serve" (str port))
+             (do (println "No free port in 3000-3020 on 127.0.0.1; pass one: bb site:serve PORT")
+                 (System/exit 1))))}
 
   site:clean
   {:doc "Delete the _site/ build output"
