@@ -791,6 +791,31 @@
     (catch :default e
       (set-status! status-label (str "; complete: " (ex-message e))))))
 
+;; --- REPL completion (P4.T6) --------------------------------------------
+
+(defn- repl-history-context
+  "The session's REPL history entries (jonquil.eval/create-history's own
+  :items), joined by newlines -- P4.T6's own extra-context for docs/
+  candidates' 5-arity, read straight off (:history (:ctx session)), the
+  SAME atom history-prev-fn/history-next-fn (above) read and write, never a
+  parallel copy of it."
+  [session]
+  (str/join "\n" (:items @(:history (:ctx session)))))
+
+(defn- do-repl-complete!
+  "Ctrl+Space in the console, the ui's own console-facing :complete!*:
+  cview/input-snapshot on cv, extended with repl-history-context as
+  :extra-context, then completion/open! on repl-completion -- nil from
+  input-snapshot (caret before input-start) does nothing, same gate the
+  console's own key dispatch already applies before ever calling this.
+  Same try/catch reasoning as do-complete! above."
+  [cv session repl-completion status-label]
+  (try
+    (when-let [snap (cview/input-snapshot cv)]
+      (completion/open! repl-completion (assoc snap :extra-context (repl-history-context session))))
+    (catch :default e
+      (set-status! status-label (str "; complete: " (ex-message e))))))
+
 ;; --- find/replace bar (P3.T4) -----------------------------------------
 
 (defn- find-bar-focused?
@@ -1096,13 +1121,38 @@
         ;; between Runs. P4.T5 fix round 1: on-error is completion's own
         ;; handle-key! reporting a throw from move!/commit!/close! to the
         ;; status bar, the same set-status! every other lookup here uses.
+        ;; Shared by both completion instances below (P4.T6): the running
+        ;; program's namespace, read fresh at every lookup either way.
+        completion-ns-fn (fn [] (:prompt-ns @(:state session)))
         completion (completion/make-completion
                     (:view ed)
                     {:ed ed
-                     :ns-fn (fn [] (:prompt-ns @(:state session)))
+                     :ns-fn completion-ns-fn
                      :close-others! close-popovers-fn
                      :on-error (fn [msg] (set-status! status-label msg))})
         complete-fn (fn [] (do-complete! ed completion status-label))
+        ;; P4.T6: a second jonquil.gtk.completion instance, on the
+        ;; console's own input region -- :position :top (above the input
+        ;; line, per the brief and probe 2, vs. the editor's own :bottom),
+        ;; :snapshot-fn/:apply-op! overridden to cview/input-snapshot and
+        ;; cview/apply-input-op! so refine!/commit! read and write the
+        ;; input region instead of :ed's whole buffer (jonquil.gtk.
+        ;; completion's own ns docstring). close-others!/on-error are the
+        ;; SAME registry-wide fns the editor's instance uses, so opening
+        ;; either instance still closes any other open P4 popover.
+        repl-completion (completion/make-completion
+                         (:view cv)
+                         ;; No :ed -- :snapshot-fn/:apply-op! below replace
+                         ;; every use the default closures would have made
+                         ;; of it, so there's no editor for this instance
+                         ;; to name.
+                         {:ns-fn completion-ns-fn
+                          :close-others! close-popovers-fn
+                          :on-error (fn [msg] (set-status! status-label msg))
+                          :position :top
+                          :snapshot-fn (fn [] (cview/input-snapshot cv))
+                          :apply-op! (fn [result] (cview/apply-input-op! cv result))})
+        repl-complete-fn (fn [] (do-repl-complete! cv session repl-completion status-label))
         run-fn (fn [] (do-run! ed cv session status-label))
         stop-fn (fn [] (do-stop! session))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
@@ -1259,6 +1309,28 @@
             (catch :default e
               (set-status! status-label (str "; complete: " (ex-message e)))))))
     (editor/on-focus-lost! ed (fn [] (completion/close! completion)))
+    ;; P4.T6: repl-completion joins the SAME popover registry and wires
+    ;; the console's own Ctrl+Space chord and its nav/commit/escape keys
+    ;; to completion/open!/handle-key!, refining/closing it on the
+    ;; console's own on-input-changed! (cview's own analogue of the
+    ;; editor's on-cursor-moved!, wired above) plus on-focus-lost!. Same
+    ;; try/catch reasoning as the editor's own wiring just above.
+    (register-popover-fn repl-completion)
+    (cview/set-completion-fns!
+     cv {:complete! repl-complete-fn
+         :handle-key! (fn [keyval state]
+                        (try
+                          (completion/handle-key! repl-completion keyval state)
+                          (catch :default e
+                            (set-status! status-label (str "; complete: " (ex-message e)))
+                            0)))})
+    (cview/on-input-changed!
+     cv (fn []
+          (try
+            (completion/refine! repl-completion)
+            (catch :default e
+              (set-status! status-label (str "; complete: " (ex-message e)))))))
+    (cview/on-focus-lost! cv (fn [] (completion/close! repl-completion)))
     (when file
       ;; A file argument that doesn't exist opens an empty editor with the
       ;; path remembered anyway, so Save creates it -- unlike the Open
@@ -1333,6 +1405,12 @@
                  ;; state.
                  :complete!* complete-fn
                  :completion completion
+                 ;; P4.T6: the ui's own console-facing completion action --
+                 ;; the exact fn console-view's own Ctrl+Space clause calls
+                 ;; -- and the console's completion popover itself, same
+                 ;; reasoning as :complete!*/:completion above.
+                 :repl-complete!* repl-complete-fn
+                 :repl-completion repl-completion
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not

@@ -34,7 +34,24 @@
   from the eval engine (I2) rather than mirrored into console-owned atoms:
   a mirror set by the caller AFTER starting an eval can lose a race against
   a fast eval's own completion clearing it first, stranding the console in
-  :busy forever."
+  :busy forever.
+
+  P4.T6: the console hosts a second jonquil.gtk.completion instance, so
+  handle-key! asks it first (set-completion-fns!, mirroring jonquil.gtk.
+  editor's own registration) before Return-evaluates or Up/Down-browses-
+  history ever run. input-snapshot is that instance's :snapshot-fn and the
+  Ctrl+Space clause's own gate: a snapshot scoped to the input region
+  (offsets relative to input-start, matching jonquil.gtk.editor/snapshot's
+  shape), or nil once the caret sits before input-start -- help/prefix-at
+  on a nil snapshot is itself nil, so refine!'s caller closes the popup
+  exactly like any other out-of-word caret move, with no separate check.
+  apply-input-op! is its :apply-op!: the same edits-back-to-front-then-
+  place-cursor shape as jonquil.gtk.editor/apply-op!, offset by input-
+  start and wrapped in one gtk_text_buffer_begin/end_user_action pair (one
+  undo step), so a commit can never touch the read-only output region.
+  on-input-changed!/on-focus-lost! are new registration lists, mirroring
+  editor.clj's on-cursor-moved!/on-focus-lost! -- the console's own
+  refine!/close! triggers."
   (:require [clojure.string :as str]
             [jonquil.console :as console]
             [jolt.ffi :as ffi]
@@ -76,6 +93,23 @@
     (text-range buf (mark-offset buf (:input-start cv))
                 (g/gtk-text-buffer-get-char-count buf))))
 
+(defn input-snapshot
+  "cv's completion-relevant snapshot, scoped to the input region the same
+  way jonquil.gtk.editor/snapshot scopes to the whole Definitions buffer:
+  :text is input-text, :caret/:sel-start/:sel-end are offsets relative to
+  input-start (0 there). nil when the caret sits before input-start (the
+  read-only output region) -- jonquil.gtk.completion's :snapshot-fn and
+  jonquil.gtk.window's own Ctrl+Space clause both read nil as \"not in the
+  input\", the P4.T6 brief's own gate."
+  [cv]
+  (let [buf (:buf cv)
+        start (mark-offset buf (:input-start cv))
+        caret (g/cursor-offset buf)]
+    (when (>= caret start)
+      (let [[a b] (g/selection-offsets buf)]
+        {:text (input-text cv) :caret (- caret start)
+         :sel-start (- a start) :sel-end (- b start)}))))
+
 (defn clear-input!
   "Deletes the input region back to empty, leaving the prompt untouched.
   GTK-thread only."
@@ -85,6 +119,35 @@
         end (g/gtk-text-buffer-get-char-count buf)]
     (when (< start end)
       (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-delete buf a b))))))
+
+(defn apply-input-op!
+  "Applies an edit-op result (jonquil.help/commit-op's own shape, as
+  jonquil.gtk.editor/apply-op! applies it) to the input region: result's
+  :edits/:caret are offsets relative to input-start (input-snapshot's own
+  convention), translated back to real buffer offsets here and applied
+  back to front inside one gtk_text_buffer_begin/end_user_action pair --
+  one undo step, mirroring apply-op!'s own grouping, the only difference
+  being this offset shift. input-start is read once, before any edit: it
+  is a left-gravity mark (this namespace's own ns docstring) so inserting
+  or deleting text at or after its own offset never moves it, and every
+  edit here stays at or after that offset by construction (input-snapshot
+  never hands out a negative one), so a commit can never reach into the
+  output region. Completion (P4.T6) is the only caller; its own result
+  never carries a :sel, so this has no equivalent of apply-op!'s own
+  selection branch for indent/unindent/toggle-comment."
+  [cv result]
+  (when result
+    (let [buf (:buf cv)
+          start (mark-offset buf (:input-start cv))
+          caret (+ start (:caret result))]
+      (g/gtk-text-buffer-begin-user-action buf)
+      (try
+        (doseq [[s e r] (rseq (vec (:edits result)))]
+          (g/with-iters* buf (+ start s) (+ start e) (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+          (g/with-iters* buf (+ start s) (+ start s) (fn [a _] (g/gtk-text-buffer-insert buf a r -1))))
+        (finally (g/gtk-text-buffer-end-user-action buf)))
+      (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+    true))
 
 (defn clear-output!
   "Deletes the output history [0, out-end), keeping the prompt and any
@@ -124,6 +187,43 @@
   earlier run already showed one. Safe from any thread: a plain atom reset."
   [cv]
   (reset! (:busy-hint-shown? cv) false))
+
+;; --- P4.T6: the console's own REPL completion registrations ---------------
+
+(defn set-completion-fns!
+  "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
+  state] -> 0/1)}), the ui's own REPL completion actions -- mirroring
+  jonquil.gtk.editor/set-completion-fns! exactly, single slot, same
+  reasoning. handle-key! (below) asks :handle-key! FIRST, ahead of every
+  other clause, for every key: jonquil.gtk.completion/handle-key! itself
+  gates on whether its popup is actually open and returns 0 otherwise, so
+  this is a safe, cheap no-op call before completion is wired or while the
+  popup is closed."
+  [cv fns]
+  (reset! (:completion-fns cv) fns)
+  nil)
+
+(defn on-input-changed!
+  "Registers f (fn [] -> nil) to be called, on the GTK thread, whenever the
+  buffer's insert-mark position changes -- the same \"notify::cursor-
+  position\" signal jonquil.gtk.editor/on-cursor-moved! registers against
+  (P3 fix wave I2's own citation: it covers typing, deletion and every
+  mark-set case in one signal), wired here for the console's own REPL
+  completion popup to refine!/close! on, mirroring the editor's on-cursor-
+  moved!. Multiple registrations fire in registration order."
+  [cv f]
+  (swap! (:on-input-fns cv) conj f)
+  nil)
+
+(defn on-focus-lost!
+  "Registers f (fn [] -> nil) to be called, on the GTK thread, whenever the
+  console's view (or a descendant) stops being the root's focus widget --
+  GtkEventControllerFocus's own \"leave\" signal, mirroring jonquil.gtk.
+  editor/on-focus-lost! exactly (same signal, same citation). Multiple
+  registrations fire in registration order."
+  [cv f]
+  (swap! (:on-focus-fns cv) conj f)
+  nil)
 
 ;; --- draining output ---------------------------------------------------
 
@@ -379,7 +479,7 @@
           false)
         false))))
 
-;; --- keys: Return/KP-Enter, a command-chord D, Up/Down ---------------------
+;; --- keys: Return/KP-Enter, a command-chord D, Up/Down, Ctrl+Space --------
 
 (def ^:private KEY-RETURN 0xff0d)
 (def ^:private KEY-KP-ENTER 0xff8d)
@@ -387,15 +487,53 @@
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-D 0x64)
 
+;; P4.T6 addition (gdkkeysyms.h:380, same value jonquil.gtk.editor's own
+;; KEY-SPACE cites): Ctrl+Space opens/commits the REPL completion popup.
+(def ^:private KEY-SPACE 0x020)
+
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
   works on Linux and macOS."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 
-(defn- on-key [cv]
-  (fn [_ctl keyval _keycode state _data]
+(defn- control-only?
+  "P4.T6's own rule for the completion chord (00-overview.md's global
+  constraints, the same rule jonquil.gtk.editor's own control-only? checks
+  for quick doc/jump/completion there): Control held and Meta NOT held,
+  unlike command-chord? above which treats either as the same chord."
+  [state]
+  (and (not (zero? (bit-and state g/CONTROL-MASK)))
+       (zero? (bit-and state g/META-MASK))))
+
+(defn handle-key!
+  "The console's key dispatch, first match wins -- mirrors jonquil.gtk.
+  editor/handle-key!'s own shape (a public fn, so self-test rows call this
+  directly with a synthetic keyval/state, never a synthesized OS
+  keystroke); on-key (below) is the real GTK callback's thin wrapper.
+
+  P4.T6: the REPL completion popup's own nav/commit/escape keys get first
+  look, ahead of Return-evaluates and Up/Down-browses-history below,
+  whenever the popup is open -- jonquil.gtk.completion/handle-key! gates on
+  that itself and returns 0 otherwise, so this clause is a safe no-op the
+  rest of the time, same reasoning as set-completion-fns!'s own docstring.
+  Guarded against an IME preedit composition (I5), same as the Ctrl+Space
+  clause below -- Return/Up/Down already guard themselves inside handle-
+  return!/handle-history!, so they are left exactly as they were.
+
+  Ctrl+Space (control-only?, not command-chord?, rejecting Meta) opens or
+  commits the popup, but only when the caret is at or after input-start
+  (input-snapshot non-nil) -- outside the input region this whole clause
+  is skipped and the key falls through to :else, unhandled, same as any
+  other key GTK's own default handling would get (and the read-only output
+  region refuses a literal space anyway)."
+  [cv keyval state]
+  (let [cfns @(:completion-fns cv)]
     (cond
+      (and (not @(:preedit-active? cv))
+           (when-let [f (:handle-key! cfns)] (= 1 (f keyval state))))
+      1
+
       (contains? #{KEY-RETURN KEY-KP-ENTER} keyval)
       (handle-return! cv (not (zero? (bit-and state g/SHIFT-MASK))))
 
@@ -405,7 +543,15 @@
       (= keyval KEY-UP) (if (handle-history! cv :prev) 1 0)
       (= keyval KEY-DOWN) (if (handle-history! cv :next) 1 0)
 
+      (and (not @(:preedit-active? cv)) (control-only? state) (= keyval KEY-SPACE)
+           (some? (input-snapshot cv)))
+      (do (when-let [f (:complete! cfns)] (f)) 1)
+
       :else 0)))
+
+(defn- on-key [cv]
+  (fn [_ctl keyval _keycode state _data]
+    (handle-key! cv keyval state)))
 
 ;; --- construction ------------------------------------------------------
 
@@ -455,6 +601,9 @@
         buf (g/gtk-text-view-get-buffer view)
         scroll (g/gtk-scrolled-window-new)
         keyctl (g/gtk-event-controller-key-new)
+        ;; P4.T6: GtkEventControllerFocus's own "leave" signal, the same
+        ;; one jonquil.gtk.editor/make-editor wires for on-focus-lost!.
+        focusctl (g/gtk-event-controller-focus-new)
         tags (make-tags! buf)
         readonly-tag (g/gtk-text-tag-new "console-readonly")]
     (g/set-bool-property! readonly-tag "editable" false)
@@ -486,7 +635,13 @@
               :preedit-active? (atom false)
               :on-submit on-submit
               :history-prev history-prev
-              :history-next history-next}]
+              :history-next history-next
+              ;; P4.T6: single-slot completion registration (set-
+              ;; completion-fns!) plus the on-input-changed!/on-focus-
+              ;; lost! registration lists -- see the ns docstring.
+              :completion-fns (atom nil)
+              :on-input-fns (atom [])
+              :on-focus-fns (atom [])}]
       (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
       (g/g-signal-connect-data keyctl "key-pressed"
                                (callable (on-key cv) [:pointer :uint :uint :uint :pointer] :int)
@@ -500,4 +655,24 @@
                                            nil)
                                          [:pointer :string :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
+      ;; P4.T6: the buffer's own "notify::cursor-position" property notify
+      ;; (jonquil.gtk.editor/make-editor's own citation: covers typing,
+      ;; deletion and every mark-set case in one signal) drives on-input-
+      ;; changed!'s registrants -- the console's own refine!/close! trigger
+      ;; for its REPL completion popup.
+      (g/g-signal-connect-data buf "notify::cursor-position"
+                               (callable (fn [_buf _pspec _data]
+                                           (doseq [f @(:on-input-fns cv)] (f))
+                                           nil)
+                                         [:pointer :pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
+      ;; P4.T6: mirrors jonquil.gtk.editor/make-editor's own focusctl wiring
+      ;; -- see on-focus-lost!'s own docstring.
+      (g/g-signal-connect-data focusctl "leave"
+                               (callable (fn [_ctl _data]
+                                           (doseq [f @(:on-focus-fns cv)] (f))
+                                           nil)
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
+      (g/gtk-widget-add-controller view focusctl)
       cv)))

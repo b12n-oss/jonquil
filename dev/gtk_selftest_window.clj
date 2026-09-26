@@ -2770,6 +2770,201 @@
                             :status (g/label-text status)})
                     (next))))))
 
+;; --- P4.T6: completion in the REPL input -----------------------------------
+
+(defn- row-repl-completion-opens
+  "\"(ma\" in the console input, Ctrl+Space: the popover opens above the
+  input and its rows equal (mapv :symbol (docs/candidates ns \"ma\" \"(ma\"
+  3 history)) in order -- history being the exact REPL-history join do-
+  repl-complete! computes, captured here at the same moment so this stays
+  correct no matter how much earlier rows already left in the session's
+  history (measured live: none of it starts with \"ma\", so the rows
+  match what row-completion-opens measures for the editor -- first is
+  macroexpand -- regardless)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ns-sym (:prompt-ns @(:state (:session ui)))
+        history (str/join "\n" (:items @(:history (:ctx (:session ui)))))]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    ((:repl-complete!* ui))
+    (let [st (completion/state c)
+          expected (mapv :symbol (docs/candidates ns-sym "ma" "(ma" 3 history))
+          rows (mapv :symbol (:candidates st))
+          preview (g/label-text (:doc-label c))]
+      (check :repl-completion-opens
+             (and (some? st) (popover/open? c) (seq rows) (= expected rows)
+                  (str/includes? preview (str "clojure.core/" (first rows))))
+             {:expected expected :rows rows :preview preview})
+      (completion/close! c)
+      (next))))
+
+(defn- row-repl-completion-precedence
+  "With history containing \"(inc 1)\", open on \"(ma\", Down, Enter, all
+  through cview/handle-key! -- the SAME precedence-ordered dispatch the
+  real key controller uses, never the raw actions, so a regression that
+  let Down browse history or Enter evaluate would show up here exactly as
+  it would for a real keystroke (see the report for the failing-first run
+  against a deliberately unordered handle-key!). The reviewer clause:
+  Enter must commit the SECOND candidate (apply-input-op!, one undo step),
+  never evaluate \"(ma\" (unbalanced, so console/input-action would
+  otherwise insert a newline, not evaluate it -- checked anyway, since
+  \"nothing was evaluated\" is the brief's own wording) and never browse
+  history (the history atom itself must come out exactly as history-add
+  left it)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ctx (:ctx (:session ui))
+        mark (out-end-offset ui)]
+    (swap! (:history ctx) eval/history-add "(inc 1)")
+    (let [hist-before @(:history ctx)]
+      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+      (let [h0 (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+            st0 (completion/state c)
+            second-sym (:symbol (nth (:candidates st0) 1))
+            h1 (cview/handle-key! cv KEY-DOWN 0)
+            st1 (completion/state c)
+            h2 (cview/handle-key! cv KEY-RETURN 0)
+            input (cview/input-text cv)
+            hist-after @(:history ctx)]
+        (check :repl-completion-precedence
+               ;; mark = out-end-offset ui unchanged proves nothing was
+               ;; evaluated: commit-input! (the ONLY thing that moves
+               ;; out-end) only ever runs from a real :eval/:send-stdin,
+               ;; never from completion's own commit (since's own "plus
+               ;; the live prompt/input tail" caveat means `(since ui
+               ;; mark)` is never actually "" -- it always includes that
+               ;; tail -- so out-end-offset is the precise check here).
+               (and (= 1 h0) (some? st0) (>= (count (:candidates st0)) 2)
+                    (= 1 h1) (some? st1) (= 1 (:index st1))
+                    (= 1 h2) (nil? (completion/state c))
+                    (= (str "(" second-sym) input)
+                    (= hist-before hist-after)
+                    (= mark (out-end-offset ui)))
+               {:h0 h0 :second-sym second-sym :h1 h1 :index1 (:index st1) :h2 h2
+                :input input :hist-before hist-before :hist-after hist-after
+                :out-end-before mark :out-end-after (out-end-offset ui)
+                :console (since ui mark)})
+        (next)))))
+
+(defn- row-repl-history-after-close
+  "Open on \"(ma\", Escape (via (:close-popovers!* ui), the SAME registry
+  path a real Escape always uses, never completion/close! directly), then
+  Up: the popup is really closed (state nil, not left stale-open) and Up
+  browses history normally again -- the input becomes the last history
+  entry, not a completion navigation (see the report for the failing-first
+  run against repl-completion left out of the popover registry)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        ctx (:ctx (:session ui))]
+    (swap! (:history ctx) eval/history-add "(inc 1)")
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)
+    (let [opened? (some? (completion/state c))
+          escaped ((:close-popovers!* ui))
+          closed? (nil? (completion/state c))
+          h (cview/handle-key! cv KEY-UP 0)
+          input (cview/input-text cv)]
+      (check :repl-history-after-close
+             (and opened? escaped closed? (= 1 h) (= "(inc 1)" input))
+             {:opened opened? :escaped escaped :closed closed? :h h :input input})
+      (next))))
+
+(defn- row-repl-completion-history-symbols
+  "Submits \"(def zork 1)\" as a real REPL entry (evaluated, so zork
+  becomes a var in the running namespace AND lands in REPL history),
+  then \"(zo\" + Ctrl+Space: zork is offered, the console's own analogue
+  of row-quick-doc-run-defined finding a Run-defined name. Measured live:
+  \"zo\" matches zork ALONE (no clojure.core symbol starts with it), so
+  help/open-state's own :single? branch commits it at once, same as
+  row-completion-single-inserts for the editor -- no popover, and this
+  checks the committed text rather than a candidates row."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        mark (out-end-offset ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(def zork 1)" -1 1)
+    (cview/handle-return! cv false)
+    (poll-until 3000 20
+                (fn [] (and (idle? ui) (str/includes? (since ui mark) "=> ")))
+                (fn [ok]
+                  (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(zo" -1 1)
+                  ((:repl-complete!* ui))
+                  (let [input (cview/input-text cv)]
+                    (check :repl-completion-history-symbols
+                           (and ok (nil? (completion/state c)) (= "(zork" input))
+                           {:ok ok :input input :state (completion/state c)})
+                    (next))))))
+
+(defn- row-repl-completion-outside-input
+  "Caret placed at offset 0 -- always before input-start (input-snapshot's
+  own docstring: input-start starts at 2, right after the initial \"> \"
+  prompt, and only ever moves further right as output/prompt accumulate)
+  -- Ctrl+Space through the SAME cview/handle-key! dispatch: returns 0 and
+  opens nothing, input and output both untouched. Restores focus (cview/
+  focus!, back to the end of the input) before returning, the same way
+  every other row here leaves the console ready for the next one -- a
+  caret left outside the input would silently fail every later row's own
+  Ctrl+Space too, for the wrong reason."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)
+        mark (out-end-offset ui)
+        input-before (cview/input-text cv)]
+    (place-cursor! (:buf cv) 0)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)]
+      (check :repl-completion-outside-input
+             (and (= 0 handled) (nil? (completion/state c))
+                  (= input-before (cview/input-text cv)) (= mark (out-end-offset ui)))
+             {:handled handled :state (completion/state c)
+              :input-unchanged (= input-before (cview/input-text cv))})
+      (cview/focus! cv)
+      (next))))
+
+(defn- row-repl-completion-cmd-space-nothing
+  "0x20 with META only, caret in the input: control-only? rejects it
+  (CONTROL-MASK checked, META-MASK rejected, the same P4 rule the editor's
+  own completion chord follows), so the chord falls through unhandled and
+  no popover opens."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/META-MASK)]
+      (check :repl-completion-cmd-space-nothing
+             (and (= 0 handled) (nil? (completion/state c)))
+             {:handled handled :state (completion/state c)})
+      (next))))
+
+(defn- row-repl-completion-preedit-yields
+  "With cv's own preedit-active? flag set (I5, the same flag console-
+  view/handle-key!'s Ctrl+Space clause checks), Ctrl+Space returns 0 and
+  opens nothing."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    (reset! (:preedit-active? cv) true)
+    (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)]
+      (reset! (:preedit-active? cv) false)
+      (check :repl-completion-preedit-yields
+             (and (= 0 handled) (nil? (completion/state c)))
+             {:handled handled})
+      (next))))
+
+(defn- row-repl-completion-closes-on-focus-loss
+  "Context bullet #3 (not in the brief's own row table): calls every fn
+  registered on cv's own :on-focus-fns directly -- the SAME ones
+  GtkEventControllerFocus's \"leave\" signal calls -- mirroring
+  row-completion-closes-on-focus-loss, since this self-test window is
+  never the OS's key window and can't move real focus (P4.T3's own
+  has_focus finding)."
+  [ui next]
+  (let [cv (:console ui) c (:repl-completion ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+    ((:repl-complete!* ui))
+    (let [opened? (some? (completion/state c))]
+      (doseq [f @(:on-focus-fns cv)] (f))
+      (check :repl-completion-closes-on-focus-loss
+             (and opened? (nil? (completion/state c)))
+             {:opened opened? :still-open (some? (completion/state c))})
+      (next))))
+
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
   not idle -- the coordinator's own concern was exactly this combination
@@ -2923,6 +3118,14 @@
    row-completion-closes-on-focus-loss
    row-completion-closes-other-popover
    row-completion-commit-throw-consumes-key
+   row-repl-completion-opens
+   row-repl-completion-precedence
+   row-repl-history-after-close
+   row-repl-completion-history-symbols
+   row-repl-completion-outside-input
+   row-repl-completion-cmd-space-nothing
+   row-repl-completion-preedit-yields
+   row-repl-completion-closes-on-focus-loss
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

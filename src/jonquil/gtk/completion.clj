@@ -1,10 +1,22 @@
 (ns jonquil.gtk.completion
   "The completion popover (P4.T5): a jonquil.gtk.popover carrying a
   GtkListBox of candidates over a doc-preview label (class jonquil-doc,
-  same as jonquil.gtk.help-popover's), anchored to the editor's view and
-  built once per editor by jonquil.gtk.window's activate! -- open!/close!/
-  refine! show, hide and update it for the rest of the session, the popover
-  itself is never rebuilt.
+  same as jonquil.gtk.help-popover's), anchored to the editor's or the
+  console's view and built once per view by jonquil.gtk.window's activate!
+  -- open!/close!/refine! show, hide and update it for the rest of the
+  session, the popover itself is never rebuilt.
+
+  P4.T6: a second instance lives on the console's input region. open!'s
+  snapshot argument and refine!'s own :snapshot-fn opt are already generic
+  ({:text :caret :sel-start :sel-end}, optionally :extra-context for docs/
+  candidates' 5-arity) -- jonquil.gtk.editor/snapshot is only the DEFAULT
+  source of one, not a hard dependency. :apply-op! is the matching write
+  seam: (fn [edit-op] -> nil), defaulting to jonquil.gtk.editor/apply-op!
+  on :ed. Both default closures reproduce the editor instance's exact prior
+  behaviour; the console instance overrides them to read and write its own
+  input region (jonquil.gtk.console-view/input-snapshot and its own grouped-
+  edit apply fn) instead of :ed. :position (:bottom default, :top for the
+  console, per probe 2) is the third opt this reuse needed.
 
   Unlike jonquil.gtk.help-popover, this namespace owns real interaction
   state (:state, a jonquil.help open-state map or nil) on top of the
@@ -54,10 +66,13 @@
   brief's two closing conditions in one place -- a buffer change (typing
   narrows/widens the candidates) and a plain caret move out of the word
   (still-valid? false, no text touched at all, e.g. a Left arrow) -- with
-  no separate 'buffer changed' registration needed. commit! (Enter/Tab)
-  closes BEFORE calling editor/apply-op!, deliberately not the order the
-  brief's prose reads word for word: apply-op!'s own insert fires that same
-  cursor-position notify, and if the popover were still marked open at
+  no separate 'buffer changed' registration needed. The console instance is
+  wired the same way, into jonquil.gtk.console-view/on-input-changed!.
+
+  commit! (Enter/Tab) closes BEFORE calling c's own :apply-op!, deliberately
+  not the order the brief's prose reads word for word: an insert through
+  apply-op! fires that same cursor-position notify, and if the popover were
+  still marked open at
   that instant, refine! would recompute candidates for the JUST-INSERTED
   symbol (often more than one, e.g. \"map\" itself matches five other
   candidates) and reopen the popup a keystroke after the user asked it to
@@ -95,10 +110,11 @@
 (def ^:private PAGE-STEP 8)
 
 (defn make-completion
-  "Builds the completion popover on view (the editor's GtkTextView):
-  autohide off, position :bottom, per jonquil.gtk.popover's own docstring
-  and P4 probe 2 -- same anchor as jonquil.gtk.help-popover, so it never
-  steals keys from the editor (probe 1). Its child is a vertical box: a
+  "Builds the completion popover on view (the editor's or the console's
+  GtkTextView): autohide off, position given by opts (:bottom default),
+  per jonquil.gtk.popover's own docstring and P4 probe 2 -- same anchor as
+  jonquil.gtk.help-popover, so it never steals keys from its view (probe
+  1). Its child is a vertical box: a
   GtkListBox (BROWSE selection, so exactly one candidate row is always
   selected) inside a GtkScrolledWindow sized LIST-WIDTHxLIST-HEIGHT, over a
   left-aligned doc-preview label (class jonquil-doc, so jonquil.theme/
@@ -106,17 +122,27 @@
   inside its own scroll sized LIST-WIDTHxDOC-HEIGHT -- mirroring help-
   popover's own scrolled-label shape, so a long docstring scrolls instead
   of growing the popover without bound. opts is {:ed :ns-fn :close-others!
-  :on-error} -- see the ns docstring. Returns the jonquil.gtk.popover map
-  ({:popover :view :open?}) plus :ed/:ns-fn/:close-others!/:on-error/
-  :list-box/:doc-label/:state (an atom, the jonquil.help open-state map or
-  nil)."
-  [view {:keys [ed ns-fn close-others! on-error]}]
+  :on-error :position :snapshot-fn :apply-op!} -- see the ns docstring.
+  :position is :bottom (default, the editor's own anchor, probe 2) or :top
+  (the console's, P4.T6). :snapshot-fn (fn [] -> a snapshot map, optionally
+  carrying :extra-context) defaults to (fn [] (editor/snapshot ed)) and is
+  refine!'s only source of a fresh one. :apply-op! (fn [edit-op] -> nil)
+  defaults to (fn [result] (editor/apply-op! ed result)) and is the only
+  way open!'s single-candidate branch and commit! ever write an edit.
+  Returns the jonquil.gtk.popover map ({:popover :view :open?}) plus
+  :ed/:ns-fn/:close-others!/:on-error/:snapshot-fn/:apply-op!/:list-box/
+  :doc-label/:state (an atom, the jonquil.help open-state map, extended
+  with :text for render!'s own doc-preview lookup, or nil)."
+  [view {:keys [ed ns-fn close-others! on-error position snapshot-fn apply-op!]
+         :or {position :bottom
+              snapshot-fn (fn [] (editor/snapshot ed))
+              apply-op! (fn [result] (editor/apply-op! ed result))}}]
   (let [list-box (g/gtk-list-box-new)
         list-scroll (g/gtk-scrolled-window-new)
         doc-label (g/gtk-label-new "")
         doc-scroll (g/gtk-scrolled-window-new)
         box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        pp (popover/make-popover view {:autohide? false :position :bottom})]
+        pp (popover/make-popover view {:autohide? false :position position})]
     (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
     (g/gtk-widget-set-size-request list-scroll LIST-WIDTH LIST-HEIGHT)
     (g/gtk-scrolled-window-set-child list-scroll list-box)
@@ -132,6 +158,8 @@
            :ns-fn ns-fn
            :close-others! close-others!
            :on-error on-error
+           :snapshot-fn snapshot-fn
+           :apply-op! apply-op!
            :list-box list-box
            :doc-label doc-label
            :state (atom nil))))
@@ -147,12 +175,13 @@
   "Rebuilds c's list-box rows from st's candidates (removing every old row
   first -- gtk_list_box_remove_all, 4.12+), selects st's own index, and
   sets the doc-preview label to help/doc-text for the selected candidate:
-  docs/symbol-doc looked up with the CURRENT buffer text and the prefix's
-  own start (mirroring window.clj's do-quick-doc!/do-jump!, which pass the
-  target symbol's own start as pos)."
+  docs/symbol-doc looked up with st's own :text (the snapshot text open!/
+  refine! saw when they built st -- mirroring window.clj's do-quick-doc!/
+  do-jump!, which pass the target symbol's own start as pos) and the
+  prefix's own start."
   [c st]
-  (let [{:keys [list-box doc-label ed ns-fn]} c
-        text (editor/editor-text ed)
+  (let [{:keys [list-box doc-label ns-fn]} c
+        text (:text st)
         pos (get-in st [:prefix-info :start])
         sym (:symbol (help/selected st))]
     (g/gtk-list-box-remove-all list-box)
@@ -173,22 +202,27 @@
 
 (defn open!
   "help/prefix-at on snapshot; nil does nothing. Otherwise docs/candidates
-  in the program namespace (ns-fn) with snapshot's own text/prefix-end,
-  then help/open-state: nil (no candidates) does nothing; a single
-  candidate commits at once through editor/apply-op! (no popover, per the
-  brief); otherwise close-others! (P4.T3's registry, so any OTHER open P4
-  popover closes first -- see the ns docstring) then renders and shows."
+  in the program namespace (ns-fn) with snapshot's own text/prefix-end/
+  extra-context, then help/open-state: nil (no candidates) does nothing; a
+  single candidate commits at once through c's own :apply-op! (no popover,
+  per the brief); otherwise close-others! (P4.T3's registry, so any OTHER
+  open P4 popover closes first -- see the ns docstring) then renders and
+  shows. The state kept for a shown popover carries snapshot's own :text
+  alongside help/open-state's own keys, so render!/refine! never need a
+  second way to read \"the text this popup is showing candidates for\"."
   [c snapshot]
   (when-let [p (help/prefix-at snapshot)]
-    (let [cands (docs/candidates ((:ns-fn c)) (:prefix p) (:text snapshot) (:end p))
+    (let [cands (docs/candidates ((:ns-fn c)) (:prefix p) (:text snapshot) (:end p)
+                                 (:extra-context snapshot))
           st (help/open-state p cands)]
       (cond
         (nil? st) nil
-        (:single? st) (editor/apply-op! (:ed c) (help/commit-op st))
-        :else (do ((:close-others! c))
-                  (reset! (:state c) st)
-                  (render! c st)
-                  (popover/show-at-caret! c)))))
+        (:single? st) ((:apply-op! c) (help/commit-op st))
+        :else (let [st (assoc st :text (:text snapshot))]
+                ((:close-others! c))
+                (reset! (:state c) st)
+                (render! c st)
+                (popover/show-at-caret! c)))))
   nil)
 
 (defn- move! [c delta]
@@ -200,7 +234,7 @@
 (defn- commit! [c]
   (when-let [st (state c)]
     (close! c)
-    (editor/apply-op! (:ed c) (help/commit-op st))))
+    ((:apply-op! c) (help/commit-op st))))
 
 (defn handle-key!
   "The navigation/commit/escape keys, while c's popup is open (gated on
@@ -241,23 +275,31 @@
 (defn refine!
   "Called on every editor/on-cursor-moved! tick (window.clj's own wiring,
   not a new editor.clj hook -- see the ns docstring): a no-op unless c is
-  actually open. help/prefix-at on the editor's current snapshot; nil
-  (caret left the word entirely, e.g. Left arrow past its start, or the
-  text now has a selection) closes. Otherwise fresh docs/candidates for
-  the new prefix, then help/refine -- nil (still-valid? false, e.g. a
-  space landed right after the word) closes; a fresh state renders and
+  actually open. c's own :snapshot-fn is the only source of the current
+  snapshot (editor/snapshot on :ed by default; nil is a valid answer --
+  the console's own input-snapshot returns nil once the caret has left the
+  input region entirely, and help/prefix-at on a nil snapshot is itself
+  nil, so that closes exactly like any other out-of-word caret move, with
+  no separate nil check needed here). help/prefix-at on it; nil (caret
+  left the word entirely, e.g. Left arrow past its start, or the text now
+  has a selection) closes. Otherwise fresh docs/candidates for the new
+  prefix and extra-context, then help/refine -- nil (still-valid? false,
+  e.g. a space landed right after the word) closes; a fresh state (again
+  carrying the snapshot's own :text, see open!'s own docstring) renders and
   re-anchors the popover at the caret's new position (popover/show-at-
   caret!, safe to call again on an already-open popover -- it repositions,
   it does not hide-then-reshow)."
   [c]
   (when (state c)
-    (let [snap (editor/snapshot (:ed c))]
+    (let [snap ((:snapshot-fn c))]
       (if-let [p (help/prefix-at snap)]
-        (let [cands (docs/candidates ((:ns-fn c)) (:prefix p) (:text snap) (:end p))
+        (let [cands (docs/candidates ((:ns-fn c)) (:prefix p) (:text snap) (:end p)
+                                     (:extra-context snap))
               st2 (help/refine @(:state c) snap cands)]
           (if st2
-            (do (reset! (:state c) st2)
-                (render! c st2)
-                (popover/show-at-caret! c))
+            (let [st2 (assoc st2 :text (:text snap))]
+              (reset! (:state c) st2)
+              (render! c st2)
+              (popover/show-at-caret! c))
             (close! c)))
         (close! c)))))
