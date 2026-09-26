@@ -3,42 +3,19 @@
    symbol navigation, smart indentation, formatting, documentation lookup and
    completion candidates. Pure functions over strings and character offsets.
    Lifted from DrClojure.syntax at 41c56b8; see UPSTREAM.md."
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            [jonquil.dialect :as dialect])
   (:import (java.util.regex Pattern Matcher)))
 
 ;; --- Token Definitions ---
 
 (def special-forms
-  #{"def" "defn" "defn-" "defmacro" "defmulti" "defmethod" "defprotocol"
-    "defrecord" "deftype" "definterface" "defonce"
-    "let" "loop" "recur" "binding" "with-open" "with-local-vars" "with-redefs"
-    "with-out-str" "with-in-str"
-    "if" "if-not" "if-let" "when" "when-not" "when-let" "when-first"
-    "when-some" "if-some" "cond" "condp" "case" "do"
-    "fn" "fn*"
-    "doseq" "dotimes" "for" "while"
-    "try" "catch" "finally" "throw"
-    "ns" "in-ns" "require" "use" "import" "refer"
-    "quote" "var" "set!"})
+  ;; Jonquil delta: the set lives in the Jolt dialect profile (jonquil.dialect).
+  (:special-forms dialect/jolt))
 
 (def core-builtins
-  #{"println" "print" "prn" "pr" "printf" "read-line" "read-string" "slurp" "spit"
-    "map" "filter" "reduce" "remove" "take" "drop" "take-while" "drop-while"
-    "concat" "into" "assoc" "dissoc" "get" "get-in" "assoc-in" "update" "update-in"
-    "conj" "disj" "contains?" "count" "empty?" "seq" "first" "rest" "next" "last"
-    "nth" "peek" "pop" "cons" "vec" "set" "hash-map" "vector" "list"
-    "keys" "vals" "select-keys" "zipmap" "merge" "merge-with" "sort" "sort-by"
-    "group-by" "partition" "partition-by" "flatten" "distinct" "reverse"
-    "interleave" "interpose" "keep"
-    "nil?" "some?" "true?" "false?" "string?" "number?" "integer?" "float?"
-    "boolean?" "keyword?" "symbol?" "fn?" "vector?" "map?" "set?" "seq?" "list?"
-    "coll?" "pos?" "neg?" "zero?" "even?" "odd?"
-    "+" "-" "*" "/" "inc" "dec" "max" "min" "quot" "rem" "mod" "abs"
-    "=" "==" "not=" "<" "<=" ">" ">=" "not" "and" "or"
-    "atom" "deref" "swap!" "reset!" "swap-vals!" "reset-vals!"
-    "future" "promise" "deliver" "realized?" "delay" "force"
-    "apply" "partial" "comp" "constantly" "identity" "juxt" "memoize" "complement"
-    "doc" "source" "apropos" "dir" "find-doc" "format" "str"})
+  ;; Jonquil delta: the set lives in the Jolt dialect profile (jonquil.dialect).
+  (:builtins dialect/jolt))
 
 (def constants
   #{"true" "false" "nil"})

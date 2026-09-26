@@ -21,6 +21,7 @@
     jonquil.session-test
     jonquil.commands-test
     jonquil.help-test
+    jonquil.dialect-test
     jonquil.gtk.ffi-test])
 
 (defn -main [& args]
