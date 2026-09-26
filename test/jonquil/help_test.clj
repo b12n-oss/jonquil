@@ -91,7 +91,27 @@
       (is (= {:kind :buffer :offset 12} (help/jump-target (snap text 16) nil)))))
   (testing "jump-local-binding's own case is unchanged"
     (let [text "(defn f [x] (let [y x] y))"]
-      (is (= {:kind :buffer :offset 18} (help/jump-target (snap text 23) nil))))))
+      (is (= {:kind :buffer :offset 18} (help/jump-target (snap text 23) nil)))))
+  (testing "quoted data whose first child is a vector is never a bare arity clause"
+    (let [text "(defn f [q] (println '([q] q)))"]
+      (is (= {:kind :buffer :offset 9} (help/jump-target (snap text 27) nil))
+          "the real param, not the quoted data's own q at 24")))
+  (testing "a quoted vector inside a doseq binding is never mistaken for a binding"
+    (let [text "(defn handler [msg] (doseq [rule '([msg :a] [msg :b])] (println msg)))"]
+      (is (= {:kind :buffer :offset 15} (help/jump-target (snap text 36) nil))
+          "handler's own param, never itself")
+      (is (= {:kind :buffer :offset 15} (help/jump-target (snap text 45) nil))
+          "handler's own param, never the sibling quoted vector")))
+  (testing "when-let's own binding shadows a top-level def of the same name"
+    (let [text "(def y 1)\n(defn f [] (when-let [y 2] y))"]
+      (is (= {:kind :buffer :offset 32} (help/jump-target (snap text 37) nil)))))
+  (testing "if-let's own binding is in scope in the THEN branch"
+    (let [text "(def z 1)\n(defn f [] (if-let [z 2] z z))"]
+      (is (= {:kind :buffer :offset 30} (help/jump-target (snap text 35) nil)))))
+  (testing "if-let's own binding is NOT in scope in the ELSE branch"
+    (let [text "(def z 1)\n(defn f [] (if-let [z 2] z z))"]
+      (is (= {:kind :buffer :offset 5} (help/jump-target (snap text 37) nil))
+          "the top-level def, since the if-let binding never reaches the else branch"))))
 
 (deftest doc-text-test
   (is (re-find #"No documentation found" (help/doc-text "zzz" nil)))

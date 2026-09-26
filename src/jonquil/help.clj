@@ -106,15 +106,28 @@
 ;;
 ;; The search walks the '(' forms enclosing the target's start, innermost
 ;; first, and for each one collects the names it binds: let/loop/binding/
-;; for/doseq's own bindings vector, fn/defn/defn-/defmacro params (every
-;; arity), and letfn's names. Vector and map destructuring patterns are
-;; unpacked recursively (:keys/:strs/:syms/:as, & for a vector's rest); :or
-;; is skipped, since its defaults reference already-bound names rather than
-;; introducing new ones. Not covered (see the fixwave report): when-let/
-;; if-let/if-some/when-some/for's own :let clause, and any macro that
-;; introduces bindings under a different shape.
+;; when-let/when-some/when-first/if-let/if-some's own bindings vector (fix
+;; wave item 1b -- if-let/if-some's own binding only reaches their THEN
+;; branch, via scoped-for?, below), for/doseq's own bindings vector,
+;; fn/defn/defn-/defmacro params (every arity, and only a REAL arity
+;; clause -- fix wave item 1a's bare-arity-clause? -- never quoted or
+;; literal data that merely looks like one), and letfn's names. Vector and
+;; map destructuring patterns are unpacked recursively (:keys/:strs/:syms/
+;; :as, & for a vector's rest); :or is skipped, since its defaults
+;; reference already-bound names rather than introducing new ones. Not
+;; covered (see the fixwave report): for's own :let clause, and any other
+;; macro that introduces bindings under a different shape.
 
-(def ^:private let-like-forms #{"let" "loop" "binding"})
+;; Fix wave item 1b: when-let/when-some/when-first share let's own
+;; [pattern val ...] bindings-vector shape (bindings-vector-names doesn't
+;; care how many pairs there are, so one pair works the same as let's own
+;; many), and their binding is in scope for every body form the same way
+;; let's is. if-let/if-some share the same shape but the binding is in
+;; scope ONLY in the THEN branch, not the ELSE branch -- see
+;; if-let-like-forms and scoped-for? below.
+(def ^:private let-like-forms
+  #{"let" "loop" "binding" "when-let" "when-some" "when-first" "if-let" "if-some"})
+(def ^:private if-let-like-forms #{"if-let" "if-some"})
 (def ^:private fn-like-forms #{"fn" "fn*" "defn" "defn-" "defmacro"})
 
 (defn- non-comment-tokens [text] (vec (remove #(= :comment (first %)) (syntax/tokenize text))))
@@ -258,17 +271,40 @@
           (= ch \() nil
           :else (recur (rest cs)))))))
 
+(defn- bare-arity-clause?
+  "Whether the '(' at open is one of a multi-arity fn/defn/defn-/defmacro
+  form's own clause lists, not quoted or literal data that merely LOOKS
+  like one because its own first child happens to be a vector (fix wave
+  item 1a). open's immediate structural parent -- the smallest '('
+  strictly enclosing open itself, i.e. enclosing-parens' own innermost
+  result -- must be a fn-like form, AND that parent must actually be in
+  multi-arity mode: fn-arity-params on its children (after its own
+  operator) returns nil, meaning the first non-skipped child there is a
+  LIST, not this clause's own params vector directly. A list can't occur
+  among a fn-like form's own name/docstring/attr-map prefix (none of
+  those are '(' forms), so once the parent is confirmed multi-arity, open
+  is necessarily one of its arity-clause lists."
+  [^String text tokens matches open]
+  (when-let [[popen pclose] (first (enclosing-parens text matches open))]
+    (let [pchildren (form-children tokens matches popen pclose)]
+      (when-let [[h0s h0e] (first pchildren)]
+        (and (contains? fn-like-forms (subs text h0s h0e))
+             (nil? (fn-arity-params text (rest pchildren))))))))
+
 (defn- ancestor-names
   "The names the '(' form spanning [open close] binds, or nil when it
   binds nothing. A bare arity clause -- a list whose OWN first child is a
   vector, as each clause of a multi-arity fn/defn/defmacro is -- is
   detected directly (its parens are their own ancestor of anything in
   their body), without needing to consult the outer fn-def form's own
-  operator."
+  operator, PROVIDED bare-arity-clause? confirms it really is one (fix
+  wave item 1a) -- quoted/literal data whose first child happens to be a
+  vector (e.g. `'([q] q)`) is never mistaken for one, since its immediate
+  parent isn't a fn-like form in multi-arity mode."
   [^String text tokens matches open close]
   (let [children (form-children tokens matches open close)]
     (when-let [[h0s h0e] (first children)]
-      (if (= \[ (.charAt text h0s))
+      (if (and (= \[ (.charAt text h0s)) (bare-arity-clause? text tokens matches open))
         (params-vector-names text tokens matches h0s h0e)
         (let [op (subs text h0s h0e)]
           (cond
@@ -294,18 +330,39 @@
   (mapcat (fn [[cs ce]] (binding-names text tokens matches cs ce))
           (remove (fn [[cs ce]] (= "&" (subs text cs ce))) (form-children tokens matches s e))))
 
+(defn- scoped-for?
+  "Whether the [open close] ancestor's own binding, if any, is in scope at
+  pos (fix wave item 1b) -- false only for if-let/if-some when pos sits in
+  the ELSE branch (children index 3), the one place the shared let-shaped
+  bindings-vector-names extraction would otherwise be wrong: if-let/
+  if-some's binding covers only the THEN branch (children index 2), never
+  the else. Every other ancestor (let-like, for/doseq, letfn, fn-like, or
+  anything unrecognised) is always in scope, same as before this item."
+  [^String text tokens matches open close pos]
+  (let [children (form-children tokens matches open close)]
+    (if-let [[h0s h0e] (first children)]
+      (if (contains? if-let-like-forms (subs text h0s h0e))
+        (if-let [[ts te] (nth children 2 nil)]
+          (and (<= ts pos) (< pos te))
+          true)
+        true)
+      true)))
+
 (defn- local-binding
   "The innermost binding of sym-name in scope at pos, as {:symbol :start
   :end}, or nil. Walks '(' forms enclosing pos outward; the first ancestor
   with a match wins, and within that ancestor's own name list the LAST
   match wins (a repeated name in one binding vector prefers the one
-  closest to the body)."
+  closest to the body). scoped-for? (fix wave item 1b) skips an ancestor
+  entirely -- as if it bound nothing -- when it's an if-let/if-some whose
+  binding doesn't reach pos (the ELSE branch)."
   [text pos sym-name]
   (let [{:keys [matches]} (syntax/compute-brackets text)
         tokens (non-comment-tokens text)]
     (some (fn [[open close]]
-            (last (filter #(= sym-name (:symbol %))
-                          (ancestor-names text tokens matches open close))))
+            (when (scoped-for? text tokens matches open close pos)
+              (last (filter #(= sym-name (:symbol %))
+                            (ancestor-names text tokens matches open close)))))
           (enclosing-parens text matches pos))))
 
 (defn jump-target
