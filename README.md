@@ -12,7 +12,7 @@ See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the win
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
-Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot; F12 or Ctrl+B jumps to where it's defined; Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
+Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
@@ -37,7 +37,7 @@ bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Hom
 The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
 
 ```
-jolt build: note: on macOS this binary is unsigned; to share it,
+jolt build: note — on macOS this binary is unsigned; to share it,
   `xattr -d com.apple.quarantine ./jonquil` on the target, or sign it.
 ```
 
