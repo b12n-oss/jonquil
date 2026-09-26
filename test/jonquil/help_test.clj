@@ -54,7 +54,7 @@
 
 (deftest jump-target-test
   (let [text "(defn greet [name] name)
-(greet "x")"]
+(greet \"x\")"]
     (is (= {:kind :buffer :offset 6} (help/jump-target (snap text 27) nil)))
     (testing "a local binding, with the caret anywhere in the usage"
       (doseq [c [19 20 23]]
@@ -62,6 +62,36 @@
     (is (= :external (:kind (help/jump-target (snap "(map inc [1])" 2) {:status :found :name "map" :ns "clojure.core"}))))
     (is (nil? (help/jump-target (snap "(nope 1)" 2) {:status :not-found})))
     (is (nil? (help/jump-target (snap "; nope" 3) nil)) "no symbol at the caret")))
+
+(deftest jump-target-scope-test
+  (testing "a param shadows a top-level def of the same name"
+    (let [text "(def x 1)\n(defn f [x] x)"]
+      (is (= {:kind :buffer :offset 19} (help/jump-target (snap text 22) nil)))))
+  (testing "a let binding shadows a top-level def of the same name"
+    (let [text "(def y 1)\n(defn f [x] (let [y x] y))"]
+      (is (= {:kind :buffer :offset 28} (help/jump-target (snap text 33) nil)))))
+  (testing "nested lets: the innermost binding wins"
+    (let [text "(let [x 1] (let [x 2] x))"]
+      (is (= {:kind :buffer :offset 17} (help/jump-target (snap text 22) nil)))))
+  (testing "a binding whose scope doesn't contain the caret is never chosen"
+    (let [text "(defn f [] (let [x 1] x))\n(defn g [] x)"]
+      (is (nil? (help/jump-target (snap text 37) nil)))))
+  (testing "an unbound usage gives nil, never an earlier usage of the same name"
+    (let [text "(println zz)\n(inc zz)"]
+      (is (nil? (help/jump-target (snap text 18) nil)))))
+  (testing "multi-arity fn: each arity's own params, not the other arity's"
+    (let [text "(defn f ([x] x) ([x y] (+ x y)))"]
+      (is (= {:kind :buffer :offset 20} (help/jump-target (snap text 28) nil)) "second arity's y")
+      (is (= {:kind :buffer :offset 18} (help/jump-target (snap text 26) nil))
+          "second arity's own x, not the first arity's")))
+  (testing "destructuring, where cheap: :keys and a vector pattern"
+    (let [text "(defn f [{:keys [a b]}] a)"]
+      (is (= {:kind :buffer :offset 17} (help/jump-target (snap text 24) nil))))
+    (let [text "(defn f [[a b]] b)"]
+      (is (= {:kind :buffer :offset 12} (help/jump-target (snap text 16) nil)))))
+  (testing "jump-local-binding's own case is unchanged"
+    (let [text "(defn f [x] (let [y x] y))"]
+      (is (= {:kind :buffer :offset 18} (help/jump-target (snap text 23) nil))))))
 
 (deftest doc-text-test
   (is (re-find #"No documentation found" (help/doc-text "zzz" nil)))

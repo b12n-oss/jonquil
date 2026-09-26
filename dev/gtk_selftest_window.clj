@@ -2508,6 +2508,24 @@
                            {:handled handled :status (g/label-text status)})
                     (next))))))
 
+(defn- row-jump-shadowed-param
+  "I1: \"(def x 1)\\n(defn f [x] x)\", caret 22 (the body's own x, a usage
+  of the PARAMETER, not the top-level def) -- jonquil.help/jump-target's
+  scope-aware search finds the enclosing param first, so F12 lands on the
+  param at offset 19, never the top-level def's own x at offset 5 (measured
+  live against the fix: test/jonquil/help_test.clj's own jump-target-
+  scope-test carries the same fixture/offsets, pure)."
+  [ui next]
+  (let [ed (:editor ui)]
+    (editor/set-text! ed "(def x 1)\n(defn f [x] x)")
+    (place-cursor! (:buf ed) 22)
+    (let [handled (editor/handle-key! ed KEY-F12 0)
+          caret (g/cursor-offset (:buf ed))]
+      (check :jump-shadowed-param
+             (and (= 1 handled) (= 19 caret))
+             {:handled handled :caret caret})
+      (next))))
+
 ;; --- P4.T5: completion with a doc preview ----------------------------------
 
 (defn- row-completion-opens
@@ -3415,6 +3433,7 @@
    row-jump-local-binding
    row-jump-external
    row-jump-none
+   row-jump-shadowed-param
    row-completion-opens
    row-completion-single-inserts
    row-completion-no-prefix

@@ -94,21 +94,239 @@
   (syntax/format-autocomplete-doc (or doc-info {:status :not-found :symbol sym})
                                   {:symbol sym}))
 
+;; --- jump to definition: scope-aware local search --------------------------
+;;
+;; syntax/find-definition (lifted, unchanged) checks top-level def* forms
+;; first and only then a scope-less "last earlier token with this text" --
+;; wrong for a shadowed name (a param or a let hides a same-named top-level
+;; def) and for a plain unbound usage (it lands on an earlier USE, not a
+;; definition). The fix lives here, not there: a real scope search first,
+;; then find-definition called with no pos at all, which runs only its
+;; top-level def* half.
+;;
+;; The search walks the '(' forms enclosing the target's start, innermost
+;; first, and for each one collects the names it binds: let/loop/binding/
+;; for/doseq's own bindings vector, fn/defn/defn-/defmacro params (every
+;; arity), and letfn's names. Vector and map destructuring patterns are
+;; unpacked recursively (:keys/:strs/:syms/:as, & for a vector's rest); :or
+;; is skipped, since its defaults reference already-bound names rather than
+;; introducing new ones. Not covered (see the fixwave report): when-let/
+;; if-let/if-some/when-some/for's own :let clause, and any macro that
+;; introduces bindings under a different shape.
+
+(def ^:private let-like-forms #{"let" "loop" "binding"})
+(def ^:private fn-like-forms #{"fn" "fn*" "defn" "defn-" "defmacro"})
+
+(defn- non-comment-tokens [text] (vec (remove #(= :comment (first %)) (syntax/tokenize text))))
+
+(defn- children-spans
+  "Top-level child spans [start end) within [lo hi) -- hi stops before the
+  enclosing form's own closing bracket. tokens is every non-comment token
+  in the buffer in order; matches is syntax/compute-brackets' bidirectional
+  open<->close map. A bracketed child comes back as one span covering its
+  own brackets; anything else is a single token span."
+  [tokens matches lo hi]
+  (loop [ts (drop-while (fn [[_ s _]] (< s lo)) tokens)
+         acc []]
+    (if (empty? ts)
+      acc
+      (let [[t-type s e] (first ts)]
+        (if (>= s hi)
+          acc
+          (if (and (= t-type :bracket) (contains? matches s) (> (get matches s) s))
+            (let [close (get matches s)]
+              (recur (drop-while (fn [[_ ts2 _]] (<= ts2 close)) ts) (conj acc [s (inc close)])))
+            (recur (rest ts) (conj acc [s e]))))))))
+
+(defn- form-children
+  "children-spans for the bracketed form spanning [form-start form-end)."
+  [tokens matches form-start form-end]
+  (children-spans tokens matches (inc form-start) (dec form-end)))
+
+(defn- enclosing-parens
+  "[open close] for every '(' enclosing pos, innermost (largest open) first.
+  close is the matching ')' 's own position, not one past it."
+  [^String text matches pos]
+  (->> matches
+       (keep (fn [[open close]]
+               (when (and (< open close) (< open pos) (< pos close) (= \( (.charAt text open)))
+                 [open close])))
+       (sort-by first >)))
+
+(defn- pairwise-patterns
+  "The pattern half of an alternating [pattern val pattern val ...] vector's
+  own children (let/loop/binding shape)."
+  [children]
+  (keep-indexed (fn [i c] (when (even? i) c)) children))
+
+(declare binding-names params-vector-names)
+
+(defn- vector-pattern-names
+  "Names bound by a [a b & rest :as all] destructuring pattern: every
+  element except & itself and :as's own marker (its target is still
+  walked, via the recursive binding-names call, same as any other
+  element)."
+  [text tokens matches s e]
+  (mapcat (fn [c] (binding-names text tokens matches (first c) (second c)))
+          (remove (fn [[cs ce]] (contains? #{"&" ":as"} (subs text cs ce)))
+                  (form-children tokens matches s e))))
+
+(defn- map-pattern-names
+  "Names bound by a {:keys [...] :strs [...] :syms [...] :as x} or a plain
+  {sym :key ...} destructuring pattern. :or's own map is skipped -- its
+  keys reference already-bound names, not new ones."
+  [text tokens matches s e]
+  (loop [cs (form-children tokens matches s e) acc []]
+    (if (or (empty? cs) (nil? (second cs)))
+      acc
+      (let [[c0s c0e] (first cs)
+            head (subs text c0s c0e)]
+        (cond
+          (contains? #{":keys" ":strs" ":syms"} head)
+          (let [[vs ve] (second cs)]
+            (recur (drop 2 cs)
+                   (into acc (map (fn [[ns ne]] {:symbol (subs text ns ne) :start ns :end ne})
+                                  (form-children tokens matches vs ve)))))
+
+          (= ":as" head)
+          (let [[ns ne] (second cs)]
+            (recur (drop 2 cs) (conj acc {:symbol (subs text ns ne) :start ns :end ne})))
+
+          (= ":or" head)
+          (recur (drop 2 cs) acc)
+
+          (str/starts-with? head ":")
+          (recur (drop 2 cs) acc)
+
+          :else
+          (recur (drop 2 cs) (conj acc {:symbol head :start c0s :end c0e})))))))
+
+(defn- binding-names
+  "The names a destructuring pattern spanning [s e) binds, recursively
+  through vector and map patterns; a plain symbol span is itself the one
+  bound name."
+  [^String text tokens matches s e]
+  (let [ch (.charAt text s)]
+    (cond
+      (= ch \[) (vector-pattern-names text tokens matches s e)
+      (= ch \{) (map-pattern-names text tokens matches s e)
+      :else [{:symbol (subs text s e) :start s :end e}])))
+
+(defn- bindings-vector-names
+  "Plain alternating [pattern val pattern val ...] bindings, as let/loop/
+  binding use."
+  [text tokens matches vs ve]
+  (mapcat (fn [[ps pe]] (binding-names text tokens matches ps pe))
+          (pairwise-patterns (form-children tokens matches vs ve))))
+
+(defn- for-doseq-names
+  "for/doseq's own bindings vector: [pattern seq-expr pattern seq-expr ...],
+  skipping (not unpacking) a :when/:while/:let modifier and its one
+  following form -- :let's own bindings aren't covered, see the ns note
+  above this section."
+  [^String text tokens matches vs ve]
+  (loop [cs (form-children tokens matches vs ve) acc []]
+    (if (or (empty? cs) (nil? (second cs)))
+      acc
+      (let [[c0s c0e] (first cs)]
+        (if (contains? #{":when" ":while" ":let"} (subs text c0s c0e))
+          (recur (drop 2 cs) acc)
+          (recur (drop 2 cs) (into acc (binding-names text tokens matches c0s c0e))))))))
+
+(defn- letfn-names
+  "letfn's own bindings vector: a list of (name [params] body) per entry --
+  only the names, not each function's own params (see the ns note above)."
+  [text tokens matches vs ve]
+  (mapcat (fn [[ls le]]
+            (when-let [[ns ne] (first (form-children tokens matches ls le))]
+              [{:symbol (subs text ns ne) :start ns :end ne}]))
+          (form-children tokens matches vs ve)))
+
+(defn- fn-arity-params
+  "The params-vector span among a fn/defn/defn-/defmacro form's children
+  after its own operator: skips an optional name symbol, docstring and
+  attr-map, stopping at the first vector (single arity -- this is it) or
+  list (multi-arity -- each arity clause is its own ancestor further in,
+  nothing to bind at this level). nil when neither turns up."
+  [^String text children]
+  (loop [cs children]
+    (when (seq cs)
+      (let [[s _] (first cs)
+            ch (.charAt text s)]
+        (cond
+          (= ch \[) (first cs)
+          (= ch \() nil
+          :else (recur (rest cs)))))))
+
+(defn- ancestor-names
+  "The names the '(' form spanning [open close] binds, or nil when it
+  binds nothing. A bare arity clause -- a list whose OWN first child is a
+  vector, as each clause of a multi-arity fn/defn/defmacro is -- is
+  detected directly (its parens are their own ancestor of anything in
+  their body), without needing to consult the outer fn-def form's own
+  operator."
+  [^String text tokens matches open close]
+  (let [children (form-children tokens matches open close)]
+    (when-let [[h0s h0e] (first children)]
+      (if (= \[ (.charAt text h0s))
+        (params-vector-names text tokens matches h0s h0e)
+        (let [op (subs text h0s h0e)]
+          (cond
+            (contains? let-like-forms op)
+            (when-let [[vs ve] (second children)] (bindings-vector-names text tokens matches vs ve))
+
+            (contains? #{"for" "doseq"} op)
+            (when-let [[vs ve] (second children)] (for-doseq-names text tokens matches vs ve))
+
+            (= "letfn" op)
+            (when-let [[vs ve] (second children)] (letfn-names text tokens matches vs ve))
+
+            (contains? fn-like-forms op)
+            (when-let [[vs ve] (fn-arity-params text (rest children))]
+              (params-vector-names text tokens matches vs ve))
+
+            :else nil))))))
+
+(defn- params-vector-names
+  "Names bound by a fn/defn param vector or a bare multi-arity clause's own
+  vector: every element except a lone & (its target is still walked)."
+  [text tokens matches s e]
+  (mapcat (fn [[cs ce]] (binding-names text tokens matches cs ce))
+          (remove (fn [[cs ce]] (= "&" (subs text cs ce))) (form-children tokens matches s e))))
+
+(defn- local-binding
+  "The innermost binding of sym-name in scope at pos, as {:symbol :start
+  :end}, or nil. Walks '(' forms enclosing pos outward; the first ancestor
+  with a match wins, and within that ancestor's own name list the LAST
+  match wins (a repeated name in one binding vector prefers the one
+  closest to the body)."
+  [text pos sym-name]
+  (let [{:keys [matches]} (syntax/compute-brackets text)
+        tokens (non-comment-tokens text)]
+    (some (fn [[open close]]
+            (last (filter #(= sym-name (:symbol %))
+                          (ancestor-names text tokens matches open close))))
+          (enclosing-parens text matches pos))))
+
 (defn jump-target
   "Where jump to definition goes from snapshot: {:kind :buffer :offset n} for
   a definition in the buffer, else {:kind :external :doc d} when doc-info (a
   jonquil.docs/symbol-doc result for the target symbol) found a var, else
-  nil. syntax/find-definition takes the START of the symbol under the
-  caret, not the caret: it searches local bindings among the tokens before
-  that position, and a caret inside the word would count the usage itself
-  as its own binding (measured 2026-09-26; upstream's own test passes the
-  usage's start)."
+  nil. Resolution order: the nearest enclosing local binding of the target
+  symbol (local-binding, above) in scope at its own start; then a top-level
+  def* anywhere in the buffer (syntax/find-definition called with NO pos,
+  so only its top-level half runs -- its own local search is scope-less and
+  would wrongly favour an earlier USE over an unbound name's own nil, see
+  the section note above); then external; else nil."
   [snapshot doc-info]
   (when-let [{:keys [symbol start]} (target snapshot)]
-    (if-let [d (syntax/find-definition (:text snapshot) symbol start)]
-      {:kind :buffer :offset (:start d)}
-      (when (= :found (:status doc-info))
-        {:kind :external :doc doc-info}))))
+    (let [text (:text snapshot)]
+      (if-let [b (local-binding text start symbol)]
+        {:kind :buffer :offset (:start b)}
+        (if-let [d (syntax/find-definition text symbol)]
+          {:kind :buffer :offset (:start d)}
+          (when (= :found (:status doc-info))
+            {:kind :external :doc doc-info}))))))
 
 (defn rename-problem
   "Why renaming the target symbol to new-name would do nothing, as a short
