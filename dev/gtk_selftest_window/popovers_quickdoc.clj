@@ -37,9 +37,9 @@
           [actual-x] (g/popover-pointing-to (:popover pp))
           visible (g/gtk-widget-get-visible (:popover pp))]
       (support/check :popover-at-caret
-             (and (popover/open? pp) (= 1 visible) (= (Math/round (double expected-x)) actual-x))
-             {:open (popover/open? pp) :visible visible
-              :expected-x expected-x :actual-x actual-x})
+                     (and (popover/open? pp) (= 1 visible) (= (Math/round (double expected-x)) actual-x))
+                     {:open (popover/open? pp) :visible visible
+                      :expected-x expected-x :actual-x actual-x})
       (popover/hide! pp)
       (g/gtk-widget-unparent (:popover pp))
       (next))))
@@ -61,8 +61,8 @@
     (popover/show-at-caret! pp)
     (let [handled (editor/handle-key! ed KEY-A 0)]
       (support/check :popover-keys-stay-with-editor
-             (and (= 0 handled) (popover/open? pp))
-             {:handled handled :open (popover/open? pp)})
+                     (and (= 0 handled) (popover/open? pp))
+                     {:handled handled :open (popover/open? pp)})
       (popover/hide! pp)
       (g/gtk-widget-unparent (:popover pp))
       (next))))
@@ -81,8 +81,8 @@
           handled ((:handle-window-key! ui) nil support/KEY-F6 0 g/SHIFT-MASK nil)
           after (g/gtk-root-get-focus win)]
       (support/check :window-shift-f6-reaches-editor
-             (and (= 0 handled) (= before after))
-             {:handled handled :before before :after after})
+                     (and (= 0 handled) (= before after))
+                     {:handled handled :before before :after after})
       (next))))
 
 (defn row-window-f6-still-toggles
@@ -99,8 +99,8 @@
           h2 ((:handle-window-key! ui) nil support/KEY-F6 0 0 nil)
           after-second (g/gtk-root-get-focus win)]
       (support/check :window-f6-still-toggles
-             (and (= 1 h1) (= after-first (:view cv)) (= 1 h2) (= after-second (:view ed)))
-             {:h1 h1 :h2 h2 :after-first after-first :after-second after-second})
+                     (and (= 1 h1) (= after-first (:view cv)) (= 1 h2) (= after-second (:view ed)))
+                     {:h1 h1 :h2 h2 :after-first after-first :after-second after-second})
       (next))))
 
 (defn row-window-escape-closes-popover
@@ -118,24 +118,24 @@
     (editor/set-text! ed "(loop [] (recur))")
     ((:run!* ui))
     (support/poll-until 2000 20
-                (fn [] (eval/evaluating? (:ctx (:session ui))))
-                (fn [started?]
-                  (popover/set-child! pp (g/gtk-label-new "candidate"))
-                  (popover/show-at-caret! pp)
-                  ((:register-popover!* ui) pp)
-                  (let [mark (support/out-end-offset ui)
-                        h1 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
-                        closed-open? (not (popover/open? pp))
-                        still-running-1? (eval/evaluating? (:ctx (:session ui)))
-                        h2 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-                    (support/poll-until 3000 20
-                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                (fn [stopped?]
-                                  (support/check :window-escape-closes-popover
-                                         (and started? (= 1 h1) closed-open? still-running-1?
-                                              (= 1 h2) stopped?)
-                                         {:started started? :h1 h1 :closed-open closed-open?
-                                          :still-running-1 still-running-1? :h2 h2 :stopped stopped?})
+                        (fn [] (eval/evaluating? (:ctx (:session ui))))
+                        (fn [started?]
+                          (popover/set-child! pp (g/gtk-label-new "candidate"))
+                          (popover/show-at-caret! pp)
+                          ((:register-popover!* ui) pp)
+                          (let [mark (support/out-end-offset ui)
+                                h1 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
+                                closed-open? (not (popover/open? pp))
+                                still-running-1? (eval/evaluating? (:ctx (:session ui)))
+                                h2 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                            (support/poll-until 3000 20
+                                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
+                                                (fn [stopped?]
+                                                  (support/check :window-escape-closes-popover
+                                                                 (and started? (= 1 h1) closed-open? still-running-1?
+                                                                      (= 1 h2) stopped?)
+                                                                 {:started started? :h1 h1 :closed-open closed-open?
+                                                                  :still-running-1 still-running-1? :h2 h2 :stopped stopped?})
                                   ;; Belt-and-braces: hide! is idempotent, so
                                   ;; this leaves clean state for later rows
                                   ;; even if close-popovers-fn didn't fire.
@@ -152,8 +152,8 @@
                                   ;; here, it stays a harmless, invisible, do-nothing widget for the
                                   ;; rest of the run and is cleaned up exactly once, safely, by that
                                   ;; same function at real window teardown.
-                                  (popover/hide! pp)
-                                  (next))))))))
+                                                  (popover/hide! pp)
+                                                  (next))))))))
 
 (defn row-popover-dark-colours
   "Probe 7's measured selector, read back from the shared provider's OWN
@@ -172,11 +172,11 @@
     (popover/show-at-caret! pp)
     (let [css ((:code-css* ui))]
       (support/check :popover-dark-colours
-             (and (str/includes? css "popover.jonquil-popover")
-                  (str/includes? css "popover.jonquil-popover entry")
-                  (str/includes? css "rgb(0,0,0)")
-                  (str/includes? css "rgb(62,68,81)"))
-             {:css css})
+                     (and (str/includes? css "popover.jonquil-popover")
+                          (str/includes? css "popover.jonquil-popover entry")
+                          (str/includes? css "rgb(0,0,0)")
+                          (str/includes? css "rgb(62,68,81)"))
+                     {:css css})
       (popover/hide! pp)
       (g/gtk-widget-unparent (:popover pp))
       ((:set-theme!* ui) :light)
@@ -203,10 +203,10 @@
     (let [handled (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)
           text (help-popover/quick-doc-text hp)]
       (support/check :quick-doc-core
-             (and (= 1 handled) (popover/open? hp)
-                  (str/includes? text "clojure.core/map")
-                  (str/includes? text "([f] [f coll]"))
-             {:handled handled :open (popover/open? hp) :text text})
+                     (and (= 1 handled) (popover/open? hp)
+                          (str/includes? text "clojure.core/map")
+                          (str/includes? text "([f] [f coll]"))
+                     {:handled handled :open (popover/open? hp) :text text})
       (popover/hide! hp)
       (next))))
 
@@ -216,18 +216,18 @@
   (greet 1) shows that docstring."
   [ui next]
   (support/run-and-wait! ui "(defn greet \"Says hi.\" [name] name)" 3000
-                 (fn [t] (str/includes? t "=> #'user/greet"))
-                 (fn [defined? _]
-                   (let [ed (:editor ui) hp (:help-popover ui)]
-                     (editor/set-text! ed "(greet 1)")
-                     (support/place-cursor! (:buf ed) 2)
-                     (let [handled (editor/handle-key! ed KEY-F1 g/SHIFT-MASK)
-                           text (help-popover/quick-doc-text hp)]
-                       (support/check :quick-doc-run-defined
-                              (and defined? (= 1 handled) (str/includes? text "Says hi."))
-                              {:defined defined? :handled handled :text text})
-                       (popover/hide! hp)
-                       (next))))))
+                         (fn [t] (str/includes? t "=> #'user/greet"))
+                         (fn [defined? _]
+                           (let [ed (:editor ui) hp (:help-popover ui)]
+                             (editor/set-text! ed "(greet 1)")
+                             (support/place-cursor! (:buf ed) 2)
+                             (let [handled (editor/handle-key! ed KEY-F1 g/SHIFT-MASK)
+                                   text (help-popover/quick-doc-text hp)]
+                               (support/check :quick-doc-run-defined
+                                              (and defined? (= 1 handled) (str/includes? text "Says hi."))
+                                              {:defined defined? :handled handled :text text})
+                               (popover/hide! hp)
+                               (next))))))
 
 (defn row-quick-doc-after-reset
   "Continues from the same defined greet, then forces Reset-on-Run mode
@@ -243,26 +243,26 @@
   second Run."
   [ui next]
   (support/run-and-wait! ui "(defn greet \"Says hi.\" [name] name)" 3000
-                 (fn [t] (str/includes? t "=> #'user/greet"))
-                 (fn [defined1? _]
-                   (session/set-mode! (:session ui) :reset)
-                   (support/run-and-wait! ui "(+ 1 1)" 3000
-                                  (fn [t] (str/includes? t "=> 2"))
-                                  (fn [reran? _]
-                                    (let [ed (:editor ui) hp (:help-popover ui)]
-                                      (editor/set-text! ed "(greet 1)")
-                                      (support/place-cursor! (:buf ed) 2)
-                                      (let [{:keys [handled threw]}
-                                            (try {:handled (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)}
-                                                 (catch Throwable e {:threw (ex-message e)}))
-                                            text (help-popover/quick-doc-text hp)]
-                                        (support/check :quick-doc-after-reset
-                                               (and defined1? reran? (nil? threw) (= 1 handled)
-                                                    (str/includes? text "No documentation found"))
-                                               {:defined1 defined1? :reran reran?
-                                                :handled handled :threw threw :text text})
-                                        (popover/hide! hp)
-                                        (next))))))))
+                         (fn [t] (str/includes? t "=> #'user/greet"))
+                         (fn [defined1? _]
+                           (session/set-mode! (:session ui) :reset)
+                           (support/run-and-wait! ui "(+ 1 1)" 3000
+                                                  (fn [t] (str/includes? t "=> 2"))
+                                                  (fn [reran? _]
+                                                    (let [ed (:editor ui) hp (:help-popover ui)]
+                                                      (editor/set-text! ed "(greet 1)")
+                                                      (support/place-cursor! (:buf ed) 2)
+                                                      (let [{:keys [handled threw]}
+                                                            (try {:handled (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)}
+                                                                 (catch Throwable e {:threw (ex-message e)}))
+                                                            text (help-popover/quick-doc-text hp)]
+                                                        (support/check :quick-doc-after-reset
+                                                                       (and defined1? reran? (nil? threw) (= 1 handled)
+                                                                            (str/includes? text "No documentation found"))
+                                                                       {:defined1 defined1? :reran reran?
+                                                                        :handled handled :threw threw :text text})
+                                                        (popover/hide! hp)
+                                                        (next))))))))
 
 (defn row-quick-doc-closes
   "gtk_text_buffer_place_cursor's own cursor-position notify (synchronous,
@@ -276,8 +276,8 @@
     (let [opened? (popover/open? hp)]
       (support/place-cursor! (:buf ed) 3)
       (support/check :quick-doc-closes
-             (and opened? (not (popover/open? hp)))
-             {:opened opened? :still-open (popover/open? hp)})
+                     (and opened? (not (popover/open? hp)))
+                     {:opened opened? :still-open (popover/open? hp)})
       (next))))
 
 (defn row-quick-doc-closes-on-focus-loss
@@ -298,8 +298,8 @@
     (let [opened? (popover/open? hp)]
       (doseq [f @(:on-focus-fns ed)] (f))
       (support/check :quick-doc-closes-on-focus-loss
-             (and opened? (not (popover/open? hp)))
-             {:opened opened? :still-open (popover/open? hp)})
+                     (and opened? (not (popover/open? hp)))
+                     {:opened opened? :still-open (popover/open? hp)})
       (next))))
 
 (defn row-quick-doc-cmd-does-nothing
@@ -312,8 +312,8 @@
     (support/place-cursor! (:buf ed) 2)
     (let [handled (editor/handle-key! ed support/KEY-Q g/META-MASK)]
       (support/check :quick-doc-cmd-does-nothing
-             (and (= 0 handled) (not (popover/open? hp)))
-             {:handled handled :open (popover/open? hp)})
+                     (and (= 0 handled) (not (popover/open? hp)))
+                     {:handled handled :open (popover/open? hp)})
       (next))))
 
 (defn row-quick-doc-cmd-shift-f1-does-nothing
@@ -326,8 +326,8 @@
     (support/place-cursor! (:buf ed) 2)
     (let [handled (editor/handle-key! ed KEY-F1 (bit-or g/SHIFT-MASK g/META-MASK))]
       (support/check :quick-doc-cmd-shift-f1-does-nothing
-             (and (= 0 handled) (not (popover/open? hp)))
-             {:handled handled :open (popover/open? hp)})
+                     (and (= 0 handled) (not (popover/open? hp)))
+                     {:handled handled :open (popover/open? hp)})
       (next))))
 
 (defn row-quick-doc-after-define
@@ -354,18 +354,18 @@
          (:buf cv) "(defn quickdocdefme \"Freshly defined.\" [n] n)" -1 1)
         (cview/handle-return! cv false)
         (support/poll-until 3000 20
-                    (fn [] (and (support/idle? ui) (str/includes? (support/since ui mark) "=> #'user/quickdocdefme")))
-                    (fn [defined?]
-                      (editor/set-text! ed code)
-                      (support/place-cursor! (:buf ed) 2)
-                      (let [h2 (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)
-                            after (help-popover/quick-doc-text hp)]
-                        (support/check :quick-doc-after-define
-                               (and (= 1 h1) (str/includes? before "No documentation found")
-                                    defined? (= 1 h2) (str/includes? after "Freshly defined."))
-                               {:h1 h1 :before before :defined defined? :h2 h2 :after after})
-                        (popover/hide! hp)
-                        (next))))))))
+                            (fn [] (and (support/idle? ui) (str/includes? (support/since ui mark) "=> #'user/quickdocdefme")))
+                            (fn [defined?]
+                              (editor/set-text! ed code)
+                              (support/place-cursor! (:buf ed) 2)
+                              (let [h2 (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK)
+                                    after (help-popover/quick-doc-text hp)]
+                                (support/check :quick-doc-after-define
+                                               (and (= 1 h1) (str/includes? before "No documentation found")
+                                                    defined? (= 1 h2) (str/includes? after "Freshly defined."))
+                                               {:h1 h1 :before before :defined defined? :h2 h2 :after after})
+                                (popover/hide! hp)
+                                (next))))))))
 
 (defn row-jump-top-level
   "\"(defn greet [n] n)\\n(greet 1)\", caret 22 (inside the SECOND greet,
@@ -379,8 +379,8 @@
     (let [handled (editor/handle-key! ed KEY-F12 0)
           caret (g/cursor-offset (:buf ed))]
       (support/check :jump-top-level
-             (and (= 1 handled) (= 6 caret))
-             {:handled handled :caret caret})
+                     (and (= 1 handled) (= 6 caret))
+                     {:handled handled :caret caret})
       (next))))
 
 (defn row-jump-local-binding
@@ -394,8 +394,8 @@
     (let [handled (editor/handle-key! ed KEY-B g/CONTROL-MASK)
           caret (g/cursor-offset (:buf ed))]
       (support/check :jump-local-binding
-             (and (= 1 handled) (= 18 caret))
-             {:handled handled :caret caret})
+                     (and (= 1 handled) (= 18 caret))
+                     {:handled handled :caret caret})
       (next))))
 
 (defn row-jump-external
@@ -409,8 +409,8 @@
     (let [handled (editor/handle-key! ed KEY-F12 0)
           text (help-popover/quick-doc-text hp)]
       (support/check :jump-external
-             (and (= 1 handled) (popover/open? hp) (str/includes? text "clojure.core/map"))
-             {:handled handled :open (popover/open? hp) :text text})
+                     (and (= 1 handled) (popover/open? hp) (str/includes? text "clojure.core/map"))
+                     {:handled handled :open (popover/open? hp) :text text})
       (popover/hide! hp)
       (next))))
 
@@ -425,12 +425,12 @@
     (support/place-cursor! (:buf ed) 2)
     (let [handled (editor/handle-key! ed KEY-F12 0)]
       (support/poll-until 1000 20
-                  (fn [] (= "No definition found for nope." (g/label-text status)))
-                  (fn [status-ok?]
-                    (support/check :jump-none
-                           (and (= 1 handled) status-ok?)
-                           {:handled handled :status (g/label-text status)})
-                    (next))))))
+                          (fn [] (= "No definition found for nope." (g/label-text status)))
+                          (fn [status-ok?]
+                            (support/check :jump-none
+                                           (and (= 1 handled) status-ok?)
+                                           {:handled handled :status (g/label-text status)})
+                            (next))))))
 
 (defn row-jump-shadowed-param
   "I1: \"(def x 1)\\n(defn f [x] x)\", caret 22 (the body's own x, a usage
@@ -446,6 +446,6 @@
     (let [handled (editor/handle-key! ed KEY-F12 0)
           caret (g/cursor-offset (:buf ed))]
       (support/check :jump-shadowed-param
-             (and (= 1 handled) (= 19 caret))
-             {:handled handled :caret caret})
+                     (and (= 1 handled) (= 19 caret))
+                     {:handled handled :caret caret})
       (next))))

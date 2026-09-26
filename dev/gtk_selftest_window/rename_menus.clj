@@ -50,15 +50,15 @@
     (setup-rename! ed)
     (let [result ((:rename-to!* ui) "hello")]
       (support/poll-until 1000 20
-                  (fn [] (= "Renamed 2 occurrences of 'greet' to 'hello'." (g/label-text status)))
-                  (fn [status-ok?]
-                    (support/check :rename-applies
-                           (and (nil? result)
-                                (= rename-fixture-renamed (editor/editor-text ed))
-                                status-ok?)
-                           {:result result :text (editor/editor-text ed)
-                            :status (g/label-text status)})
-                    (next))))))
+                          (fn [] (= "Renamed 2 occurrences of 'greet' to 'hello'." (g/label-text status)))
+                          (fn [status-ok?]
+                            (support/check :rename-applies
+                                           (and (nil? result)
+                                                (= rename-fixture-renamed (editor/editor-text ed))
+                                                status-ok?)
+                                           {:result result :text (editor/editor-text ed)
+                                            :status (g/label-text status)})
+                            (next))))))
 
 (defn row-rename-skips-comments-strings
   "Same fixture and rename as row-rename-applies (I4): the WHOLE
@@ -90,8 +90,8 @@
       (g/gtk-text-buffer-undo (:buf ed))
       (let [text (editor/editor-text ed)]
         (support/check :rename-one-undo
-               (and (= rename-fixture-renamed renamed-text) (= rename-fixture text))
-               {:renamed-text renamed-text :text text})
+                       (and (= rename-fixture-renamed renamed-text) (= rename-fixture text))
+                       {:renamed-text renamed-text :text text})
         (next)))))
 
 (defn row-rename-invalid
@@ -104,8 +104,8 @@
     (setup-rename! ed)
     (let [result ((:rename-to!* ui) "a b")]
       (support/check :rename-invalid
-             (and (= "Can't rename 'greet' to 'a b'." result) (= rename-fixture (editor/editor-text ed)))
-             {:result result :text (editor/editor-text ed)})
+                     (and (= "Can't rename 'greet' to 'a b'." result) (= rename-fixture (editor/editor-text ed)))
+                     {:result result :text (editor/editor-text ed)})
       (next))))
 
 (defn row-rename-keys
@@ -126,8 +126,8 @@
             open2? (popover/open? rp)
             text2 (help-popover/rename-entry-text rp)]
         (support/check :rename-keys
-               (and (= 1 h1) open1? (= "map" text1) (= 1 h2) open2? (= "map" text2))
-               {:h1 h1 :open1 open1? :text1 text1 :h2 h2 :open2 open2? :text2 text2})
+                       (and (= 1 h1) open1? (= "map" text1) (= 1 h2) open2? (= "map" text2))
+                       {:h1 h1 :open1 open1? :text1 text1 :h2 h2 :open2 open2? :text2 text2})
         (popover/hide! rp)
         (next)))))
 
@@ -141,8 +141,8 @@
     (support/place-cursor! (:buf ed) 2)
     (let [handled (editor/handle-key! ed KEY-F2 g/META-MASK)]
       (support/check :rename-cmd-does-nothing
-             (and (= 0 handled) (not (popover/open? rp)))
-             {:handled handled :open (popover/open? rp)})
+                     (and (= 0 handled) (not (popover/open? rp)))
+                     {:handled handled :open (popover/open? rp)})
       (next))))
 
 (defn row-rename-cmd-shift-f6-does-nothing
@@ -155,8 +155,8 @@
     (support/place-cursor! (:buf ed) 2)
     (let [handled (editor/handle-key! ed support/KEY-F6 (bit-or g/SHIFT-MASK g/META-MASK))]
       (support/check :rename-cmd-shift-f6-does-nothing
-             (and (= 0 handled) (not (popover/open? rp)))
-             {:handled handled :open (popover/open? rp)})
+                     (and (= 0 handled) (not (popover/open? rp)))
+                     {:handled handled :open (popover/open? rp)})
       (next))))
 
 (defn row-rename-closed-signal-syncs
@@ -174,12 +174,12 @@
     (let [opened? (popover/open? rp)]
       (g/gtk-popover-popdown (:popover rp))
       (support/poll-until 1000 20
-                  (fn [] (not (popover/open? rp)))
-                  (fn [closed?]
-                    (support/check :rename-closed-signal-syncs
-                           (and opened? closed?)
-                           {:opened opened? :closed closed?})
-                    (next))))))
+                          (fn [] (not (popover/open? rp)))
+                          (fn [closed?]
+                            (support/check :rename-closed-signal-syncs
+                                           (and opened? closed?)
+                                           {:opened opened? :closed closed?})
+                            (next))))))
 
 (defn row-menu-actions
   ":activate-menu-action!* for jump, quick-doc, toggle-comment, each
@@ -205,11 +205,11 @@
         (activate! "toggle-comment")
         (let [commented-text (editor/editor-text ed)]
           (support/check :menu-actions
-                 (and (= 6 jump-caret)
-                      quick-doc-open? (str/includes? quick-doc-text "clojure.core/map")
-                      (= "; (+ 1 2)" commented-text))
-                 {:jump-caret jump-caret :quick-doc-open quick-doc-open?
-                  :quick-doc-text quick-doc-text :commented-text commented-text})
+                         (and (= 6 jump-caret)
+                              quick-doc-open? (str/includes? quick-doc-text "clojure.core/map")
+                              (= "; (+ 1 2)" commented-text))
+                         {:jump-caret jump-caret :quick-doc-open quick-doc-open?
+                          :quick-doc-text quick-doc-text :commented-text commented-text})
           (next))))))
 
 (defn row-menu-actions-console-complete
@@ -245,9 +245,9 @@
       (activate! "toggle-comment"))
     (let [text (editor/editor-text ed)]
       (support/poll-until 1000 20
-                  (fn [] (str/includes? (g/label-text status) "forced menu-action failure"))
-                  (fn [status-ok?]
-                    (support/check :menu-action-throw-is-contained
-                           (and status-ok? (= "(+ 1 2)" text))
-                           {:status (g/label-text status) :text text})
-                    (next))))))
+                          (fn [] (str/includes? (g/label-text status) "forced menu-action failure"))
+                          (fn [status-ok?]
+                            (support/check :menu-action-throw-is-contained
+                                           (and status-ok? (= "(+ 1 2)" text))
+                                           {:status (g/label-text status) :text text})
+                            (next))))))

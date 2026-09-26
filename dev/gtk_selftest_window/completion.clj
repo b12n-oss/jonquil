@@ -43,9 +43,9 @@
           rows (mapv :symbol (:candidates st))
           preview (g/label-text (:doc-label c))]
       (support/check :completion-opens
-             (and (some? st) (seq rows) (= expected rows)
-                  (str/includes? preview (str "clojure.core/" (first rows))))
-             {:expected expected :rows rows :preview preview})
+                     (and (some? st) (seq rows) (= expected rows)
+                          (str/includes? preview (str "clojure.core/" (first rows))))
+                     {:expected expected :rows rows :preview preview})
       (completion/close! c)
       (next))))
 
@@ -59,8 +59,8 @@
     (support/place-cursor! (:buf ed) 6)
     (let [handled (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)]
       (support/check :completion-single-inserts
-             (and (= 1 handled) (nil? (completion/state c)) (= "(mapcat" (editor/editor-text ed)))
-             {:handled handled :state (completion/state c) :text (editor/editor-text ed)})
+                     (and (= 1 handled) (nil? (completion/state c)) (= "(mapcat" (editor/editor-text ed)))
+                     {:handled handled :state (completion/state c) :text (editor/editor-text ed)})
       (next))))
 
 (defn row-completion-no-prefix
@@ -73,8 +73,8 @@
     (support/place-cursor! (:buf ed) 2)
     (let [handled (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)]
       (support/check :completion-no-prefix
-             (and (= 1 handled) (= "( " (editor/editor-text ed)) (nil? (completion/state c)))
-             {:handled handled :text (editor/editor-text ed) :state (completion/state c)})
+                     (and (= 1 handled) (= "( " (editor/editor-text ed)) (nil? (completion/state c)))
+                     {:handled handled :text (editor/editor-text ed) :state (completion/state c)})
       (next))))
 
 (defn row-completion-navigate-commit
@@ -96,13 +96,13 @@
       (g/gtk-text-buffer-undo (:buf ed))
       (let [text-after-undo (editor/editor-text ed)]
         (support/check :completion-navigate-commit
-               (and (some? st0) (>= (count (:candidates st0)) 2)
-                    (= 1 h1) (some? st1) (= 1 (:index st1))
-                    (= 1 h2) (nil? (completion/state c))
-                    (= (str "(" second-sym) text)
-                    (= "(ma" text-after-undo))
-               {:candidate-count (count (:candidates st0)) :second-sym second-sym
-                :h1 h1 :index1 (:index st1) :h2 h2 :text text :text-after-undo text-after-undo})
+                       (and (some? st0) (>= (count (:candidates st0)) 2)
+                            (= 1 h1) (some? st1) (= 1 (:index st1))
+                            (= 1 h2) (nil? (completion/state c))
+                            (= (str "(" second-sym) text)
+                            (= "(ma" text-after-undo))
+                       {:candidate-count (count (:candidates st0)) :second-sym second-sym
+                        :h1 h1 :index1 (:index st1) :h2 h2 :text text :text-after-undo text-after-undo})
         (next)))))
 
 (defn row-completion-tab-commits
@@ -116,8 +116,8 @@
     (let [opened? (some? (completion/state c))
           h (editor/handle-key! ed KEY-TAB 0)]
       (support/check :completion-tab-commits
-             (and opened? (= 1 h) (nil? (completion/state c)) (not= "(ma" (editor/editor-text ed)))
-             {:opened opened? :h h :text (editor/editor-text ed)})
+                     (and opened? (= 1 h) (nil? (completion/state c)) (not= "(ma" (editor/editor-text ed)))
+                     {:opened opened? :h h :text (editor/editor-text ed)})
       (next))))
 
 (defn row-completion-keys-reach-editor
@@ -164,17 +164,17 @@
               left-swallowed (completion/handle-key! c KEY-LEFT 0)
               left-handled (editor/handle-key! ed KEY-LEFT 0)]
           (support/check :completion-keys-reach-editor
-                 (and opened?
-                      (= 0 p-swallowed) (= 0 p-handled)
-                      (= "(map" text-p) (some? st-p) (= expected-p rows-p)
-                      (= 0 bs-swallowed) (= 0 bs-handled)
-                      (= "(ma" text-bs) (some? st-bs) (= expected-bs rows-bs)
-                      (= 0 left-swallowed) (= 0 left-handled))
-                 {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
-                  :text-p text-p :expected-p expected-p :rows-p rows-p
-                  :bs-swallowed bs-swallowed :bs-handled bs-handled
-                  :text-bs text-bs :expected-bs expected-bs :rows-bs rows-bs
-                  :left-swallowed left-swallowed :left-handled left-handled})
+                         (and opened?
+                              (= 0 p-swallowed) (= 0 p-handled)
+                              (= "(map" text-p) (some? st-p) (= expected-p rows-p)
+                              (= 0 bs-swallowed) (= 0 bs-handled)
+                              (= "(ma" text-bs) (some? st-bs) (= expected-bs rows-bs)
+                              (= 0 left-swallowed) (= 0 left-handled))
+                         {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
+                          :text-p text-p :expected-p expected-p :rows-p rows-p
+                          :bs-swallowed bs-swallowed :bs-handled bs-handled
+                          :text-bs text-bs :expected-bs expected-bs :rows-bs rows-bs
+                          :left-swallowed left-swallowed :left-handled left-handled})
           (completion/close! c)
           (next))))))
 
@@ -196,9 +196,9 @@
           handled (editor/handle-key! ed KEY-SPACE 0)]
       (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1)
       (support/check :completion-closes-on-space
-             (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
-             {:opened opened? :swallowed swallowed :handled handled
-              :still-open (some? (completion/state c))})
+                     (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
+                     {:opened opened? :swallowed swallowed :handled handled
+                      :still-open (some? (completion/state c))})
       (next))))
 
 (defn row-completion-escape-while-running
@@ -214,25 +214,25 @@
     (support/place-cursor! (:buf ed) 2)
     ((:run!* ui))
     (support/poll-until 2000 20
-                (fn [] (eval/evaluating? (:ctx (:session ui))))
-                (fn [started?]
-                  (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
-                  (let [opened? (some? (completion/state c))
-                        mark (support/out-end-offset ui)
-                        h1 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
-                        closed? (nil? (completion/state c))
-                        still-running-1? (eval/evaluating? (:ctx (:session ui)))
-                        h2 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-                    (support/poll-until 3000 20
-                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                (fn [stopped?]
-                                  (support/check :completion-escape-while-running
-                                         (and started? opened? (= 1 h1) closed? still-running-1?
-                                              (= 1 h2) stopped?)
-                                         {:started started? :opened opened? :h1 h1 :closed closed?
-                                          :still-running-1 still-running-1? :h2 h2 :stopped stopped?})
-                                  (completion/close! c)
-                                  (next))))))))
+                        (fn [] (eval/evaluating? (:ctx (:session ui))))
+                        (fn [started?]
+                          (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+                          (let [opened? (some? (completion/state c))
+                                mark (support/out-end-offset ui)
+                                h1 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
+                                closed? (nil? (completion/state c))
+                                still-running-1? (eval/evaluating? (:ctx (:session ui)))
+                                h2 ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                            (support/poll-until 3000 20
+                                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
+                                                (fn [stopped?]
+                                                  (support/check :completion-escape-while-running
+                                                                 (and started? opened? (= 1 h1) closed? still-running-1?
+                                                                      (= 1 h2) stopped?)
+                                                                 {:started started? :opened opened? :h1 h1 :closed closed?
+                                                                  :still-running-1 still-running-1? :h2 h2 :stopped stopped?})
+                                                  (completion/close! c)
+                                                  (next))))))))
 
 (defn row-completion-cmd-space-nothing
   "0x20 with META only: control-only? rejects it (CONTROL-MASK checked,
@@ -244,8 +244,8 @@
     (support/place-cursor! (:buf ed) 3)
     (let [handled (editor/handle-key! ed KEY-SPACE g/META-MASK)]
       (support/check :completion-cmd-space-nothing
-             (and (= 0 handled) (nil? (completion/state c)))
-             {:handled handled :state (completion/state c)})
+                     (and (= 0 handled) (nil? (completion/state c)))
+                     {:handled handled :state (completion/state c)})
       (next))))
 
 (defn row-completion-preedit-yields
@@ -260,8 +260,8 @@
     (let [handled (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)]
       (reset! (:preedit-active? ed) false)
       (support/check :completion-preedit-yields
-             (and (= 0 handled) (nil? (completion/state c)))
-             {:handled handled})
+                     (and (= 0 handled) (nil? (completion/state c)))
+                     {:handled handled})
       (next))))
 
 (defn row-completion-closes-on-focus-loss
@@ -278,8 +278,8 @@
     (let [opened? (some? (completion/state c))]
       (doseq [f @(:on-focus-fns ed)] (f))
       (support/check :completion-closes-on-focus-loss
-             (and opened? (nil? (completion/state c)))
-             {:opened opened? :still-open (some? (completion/state c))})
+                     (and opened? (nil? (completion/state c)))
+                     {:opened opened? :still-open (some? (completion/state c))})
       (next))))
 
 (defn row-completion-closes-other-popover
@@ -303,12 +303,12 @@
           (let [completion-open-2 (some? (completion/state c))
                 quick-doc-closed-by-completion-2 (not (popover/open? hp))]
             (support/check :completion-closes-other-popover
-                   (and quick-doc-open-1 completion-open-1 quick-doc-closed-by-completion
-                        quick-doc-open-2 completion-open-2 quick-doc-closed-by-completion-2)
-                   {:quick-doc-open-1 quick-doc-open-1 :completion-open-1 completion-open-1
-                    :quick-doc-closed-by-completion quick-doc-closed-by-completion
-                    :quick-doc-open-2 quick-doc-open-2 :completion-open-2 completion-open-2
-                    :quick-doc-closed-by-completion-2 quick-doc-closed-by-completion-2})
+                           (and quick-doc-open-1 completion-open-1 quick-doc-closed-by-completion
+                                quick-doc-open-2 completion-open-2 quick-doc-closed-by-completion-2)
+                           {:quick-doc-open-1 quick-doc-open-1 :completion-open-1 completion-open-1
+                            :quick-doc-closed-by-completion quick-doc-closed-by-completion
+                            :quick-doc-open-2 quick-doc-open-2 :completion-open-2 completion-open-2
+                            :quick-doc-closed-by-completion-2 quick-doc-closed-by-completion-2})
             (popover/hide! hp)
             (completion/close! c)
             (next)))))))
@@ -337,13 +337,13 @@
           text (editor/editor-text ed)
           closed? (nil? (completion/state c))]
       (support/poll-until 1000 20
-                  (fn [] (str/includes? (g/label-text status) "forced commit failure"))
-                  (fn [status-ok?]
-                    (support/check :completion-commit-throw-consumes-key
-                           (and opened? (= 1 handled) (= "(ma" text) closed? status-ok?)
-                           {:opened opened? :handled handled :text text :closed closed?
-                            :status (g/label-text status)})
-                    (next))))))
+                          (fn [] (str/includes? (g/label-text status) "forced commit failure"))
+                          (fn [status-ok?]
+                            (support/check :completion-commit-throw-consumes-key
+                                           (and opened? (= 1 handled) (= "(ma" text) closed? status-ok?)
+                                           {:opened opened? :handled handled :text text :closed closed?
+                                            :status (g/label-text status)})
+                            (next))))))
 
 (defn row-plain-return-apply-op-throw-contained
   "Forces jonquil.gtk.editor/apply-op! to throw for the duration of one
@@ -361,12 +361,12 @@
                     (editor/dispatch-key! ed support/KEY-RETURN 0))
           text (editor/editor-text ed)]
       (support/poll-until 1000 20
-                  (fn [] (str/includes? (g/label-text status) "forced return failure"))
-                  (fn [status-ok?]
-                    (support/check :plain-return-apply-op-throw-contained
-                           (and (= 1 handled) (= "(+ 1 2)" text) status-ok?)
-                           {:handled handled :text text :status (g/label-text status)})
-                    (next))))))
+                          (fn [] (str/includes? (g/label-text status) "forced return failure"))
+                          (fn [status-ok?]
+                            (support/check :plain-return-apply-op-throw-contained
+                                           (and (= 1 handled) (= "(+ 1 2)" text) status-ok?)
+                                           {:handled handled :text text :status (g/label-text status)})
+                            (next))))))
 
 ;; --- P4.T6: completion in the REPL input -----------------------------------
 
@@ -390,9 +390,9 @@
           rows (mapv :symbol (:candidates st))
           preview (g/label-text (:doc-label c))]
       (support/check :repl-completion-opens
-             (and (some? st) (popover/open? c) (seq rows) (= expected rows)
-                  (str/includes? preview (str "clojure.core/" (first rows))))
-             {:expected expected :rows rows :preview preview})
+                     (and (some? st) (popover/open? c) (seq rows) (= expected rows)
+                          (str/includes? preview (str "clojure.core/" (first rows))))
+                     {:expected expected :rows rows :preview preview})
       (completion/close! c)
       (next))))
 
@@ -430,16 +430,16 @@
                ;; the live prompt/input tail" caveat means `(since ui
                ;; mark)` is never actually "" -- it always includes that
                ;; tail -- so out-end-offset is the precise check here).
-               (and (= 1 h0) (some? st0) (>= (count (:candidates st0)) 2)
-                    (= 1 h1) (some? st1) (= 1 (:index st1))
-                    (= 1 h2) (nil? (completion/state c))
-                    (= (str "(" second-sym) input)
-                    (= hist-before hist-after)
-                    (= mark (support/out-end-offset ui)))
-               {:h0 h0 :second-sym second-sym :h1 h1 :index1 (:index st1) :h2 h2
-                :input input :hist-before hist-before :hist-after hist-after
-                :out-end-before mark :out-end-after (support/out-end-offset ui)
-                :console (support/since ui mark)})
+                       (and (= 1 h0) (some? st0) (>= (count (:candidates st0)) 2)
+                            (= 1 h1) (some? st1) (= 1 (:index st1))
+                            (= 1 h2) (nil? (completion/state c))
+                            (= (str "(" second-sym) input)
+                            (= hist-before hist-after)
+                            (= mark (support/out-end-offset ui)))
+                       {:h0 h0 :second-sym second-sym :h1 h1 :index1 (:index st1) :h2 h2
+                        :input input :hist-before hist-before :hist-after hist-after
+                        :out-end-before mark :out-end-after (support/out-end-offset ui)
+                        :console (support/since ui mark)})
         (next)))))
 
 (defn row-repl-history-after-close
@@ -460,8 +460,8 @@
           h (cview/handle-key! cv KEY-UP 0)
           input (cview/input-text cv)]
       (support/check :repl-history-after-close
-             (and opened? escaped closed? (= 1 h) (= "(inc 1)" input))
-             {:opened opened? :escaped escaped :closed closed? :h h :input input})
+                     (and opened? escaped closed? (= 1 h) (= "(inc 1)" input))
+                     {:opened opened? :escaped escaped :closed closed? :h h :input input})
       (next))))
 
 (defn row-repl-completion-history-symbols
@@ -503,8 +503,8 @@
           st (completion/state c)]
       (reset! (:history ctx) hist-before)
       (support/check :repl-completion-history-symbols
-             (and (= 1 handled) (nil? st) (= "(wobbuquux" input))
-             {:handled handled :input input :state st}))
+                     (and (= 1 handled) (nil? st) (= "(wobbuquux" input))
+                     {:handled handled :input input :state st}))
     (next)))
 
 (defn row-repl-completion-outside-input
@@ -524,10 +524,10 @@
     (support/place-cursor! (:buf cv) 0)
     (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)]
       (support/check :repl-completion-outside-input
-             (and (= 0 handled) (nil? (completion/state c))
-                  (= input-before (cview/input-text cv)) (= mark (support/out-end-offset ui)))
-             {:handled handled :state (completion/state c)
-              :input-unchanged (= input-before (cview/input-text cv))})
+                     (and (= 0 handled) (nil? (completion/state c))
+                          (= input-before (cview/input-text cv)) (= mark (support/out-end-offset ui)))
+                     {:handled handled :state (completion/state c)
+                      :input-unchanged (= input-before (cview/input-text cv))})
       (cview/focus! cv)
       (next))))
 
@@ -541,8 +541,8 @@
     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
     (let [handled (cview/handle-key! cv KEY-SPACE g/META-MASK)]
       (support/check :repl-completion-cmd-space-nothing
-             (and (= 0 handled) (nil? (completion/state c)))
-             {:handled handled :state (completion/state c)})
+                     (and (= 0 handled) (nil? (completion/state c)))
+                     {:handled handled :state (completion/state c)})
       (next))))
 
 (defn row-repl-completion-preedit-yields
@@ -556,8 +556,8 @@
     (let [handled (cview/handle-key! cv KEY-SPACE g/CONTROL-MASK)]
       (reset! (:preedit-active? cv) false)
       (support/check :repl-completion-preedit-yields
-             (and (= 0 handled) (nil? (completion/state c)))
-             {:handled handled})
+                     (and (= 0 handled) (nil? (completion/state c)))
+                     {:handled handled})
       (next))))
 
 (defn row-repl-completion-closes-on-focus-loss
@@ -573,8 +573,8 @@
     (let [opened? (some? (completion/state c))]
       (doseq [f @(:on-focus-fns cv)] (f))
       (support/check :repl-completion-closes-on-focus-loss
-             (and opened? (nil? (completion/state c)))
-             {:opened opened? :still-open (some? (completion/state c))})
+                     (and opened? (nil? (completion/state c)))
+                     {:opened opened? :still-open (some? (completion/state c))})
       (next))))
 
 (defn row-repl-completion-keys-reach-console
@@ -615,17 +615,17 @@
               left-swallowed (completion/handle-key! c KEY-LEFT 0)
               left-handled (cview/handle-key! cv KEY-LEFT 0)]
           (support/check :repl-completion-keys-reach-console
-                 (and opened?
-                      (= 0 p-swallowed) (= 0 p-handled)
-                      (= "(map" input-p) (some? st-p) (= expected-p rows-p)
-                      (= 0 bs-swallowed) (= 0 bs-handled)
-                      (= "(ma" input-bs) (some? st-bs) (= expected-bs rows-bs)
-                      (= 0 left-swallowed) (= 0 left-handled))
-                 {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
-                  :input-p input-p :expected-p expected-p :rows-p rows-p
-                  :bs-swallowed bs-swallowed :bs-handled bs-handled
-                  :input-bs input-bs :expected-bs expected-bs :rows-bs rows-bs
-                  :left-swallowed left-swallowed :left-handled left-handled})
+                         (and opened?
+                              (= 0 p-swallowed) (= 0 p-handled)
+                              (= "(map" input-p) (some? st-p) (= expected-p rows-p)
+                              (= 0 bs-swallowed) (= 0 bs-handled)
+                              (= "(ma" input-bs) (some? st-bs) (= expected-bs rows-bs)
+                              (= 0 left-swallowed) (= 0 left-handled))
+                         {:opened opened? :p-swallowed p-swallowed :p-handled p-handled
+                          :input-p input-p :expected-p expected-p :rows-p rows-p
+                          :bs-swallowed bs-swallowed :bs-handled bs-handled
+                          :input-bs input-bs :expected-bs expected-bs :rows-bs rows-bs
+                          :left-swallowed left-swallowed :left-handled left-handled})
           (completion/close! c)
           (next))))))
 
@@ -645,7 +645,7 @@
           handled (cview/handle-key! cv KEY-SPACE 0)]
       (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) " " -1 1)
       (support/check :repl-completion-closes-on-space
-             (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
-             {:opened opened? :swallowed swallowed :handled handled
-              :still-open (some? (completion/state c))})
+                     (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
+                     {:opened opened? :swallowed swallowed :handled handled
+                      :still-open (some? (completion/state c))})
       (next))))

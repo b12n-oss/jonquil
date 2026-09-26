@@ -48,8 +48,16 @@
                          (remove (fn [p] (= "smoke" (str (fs/file-name p)))))
                          (filter clj-or-dir))
             smoke   (->> (fs/list-dir "dev/smoke")
-                         (filter (fn [p] (str/ends-with? (str p) ".clj"))))]
-        (->> (concat ["src" "test"] dev-top smoke)
+                         (filter (fn [p] (str/ends-with? (str p) ".clj"))))
+            ;; Upstream lifts stay byte-close to kimtg/DrClojure-Neo so a
+            ;; future re-sync diffs cleanly; the formatter would double their
+            ;; divergence (syntax.clj: 170 -> 324 differing lines, measured).
+            lifted  #{"src/jonquil/syntax.clj" "test/jonquil/upstream/syntax_test.clj"}
+            src+test (->> (concat (fs/glob "src" "**.clj") (fs/glob "test" "**.clj"))
+                          (map str)
+                          (remove lifted)
+                          sort)]
+        (->> (concat src+test dev-top smoke)
              (map str)
              (str/join ","))))
 

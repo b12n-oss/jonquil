@@ -174,7 +174,7 @@
   (editor/set-text! (:editor ui) "")
   (cview/clear-input! (:console ui))
   (support/poll-until 2000 20 (fn [] (support/idle? ui))
-              (fn [_idle?] (row-fn ui next))))
+                      (fn [_idle?] (row-fn ui next))))
 
 ;; P2.T10 fix round 1, Important #2: removing run-rows!'s old unconditional
 ;; close made row-command-chord-close the only way out, so a REGRESSION in
@@ -214,15 +214,15 @@
     ;; itself stays a real check; this is only a backstop for when it
     ;; fails.
     (support/poll-until WINDOW-CLOSE-FALLBACK-DEADLINE-MS 50
-                (fn [] @window-destroyed?)
-                (fn [closed?]
-                  (when-not closed?
-                    (support/check :command-chord-close-forced false
-                           {:reason "window still open after the close chord; forced closed to avoid hanging the run"})
-                    (g/gtk-window-close (:window ui)))
-                  (let [passed (count (filter second @support/results)) total (count @support/results)]
-                    (reset! finished? true)
-                    (println (str "SUMMARY " passed " of " total " passed")))))
+                        (fn [] @window-destroyed?)
+                        (fn [closed?]
+                          (when-not closed?
+                            (support/check :command-chord-close-forced false
+                                           {:reason "window still open after the close chord; forced closed to avoid hanging the run"})
+                            (g/gtk-window-close (:window ui)))
+                          (let [passed (count (filter second @support/results)) total (count @support/results)]
+                            (reset! finished? true)
+                            (println (str "SUMMARY " passed " of " total " passed")))))
     (run-row! ui (first fns) (fn [] (run-rows! ui (rest fns))))))
 
 (defn -main [& _]

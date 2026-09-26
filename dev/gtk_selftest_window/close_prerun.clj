@@ -20,10 +20,10 @@
     (editor/set-text! (:editor ui) "(+ 1 1)\n\n(defn f [x]")
     ((:run!* ui))
     (support/poll-until 3000 20
-                (fn [] (str/includes? (support/since ui mark) "The ( on line 3 is never closed."))
-                (fn [ok]
-                  (support/check :run-unbalanced ok {:console (support/since ui mark)})
-                  (next)))))
+                        (fn [] (str/includes? (support/since ui mark) "The ( on line 3 is never closed."))
+                        (fn [ok]
+                          (support/check :run-unbalanced ok {:console (support/since ui mark)})
+                          (next)))))
 
 (defn row-repl-eof-no-editor-hint
   "M11: the EOF-unclosed-bracket hint reads the DEFINITIONS editor's text,
@@ -45,12 +45,12 @@
     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(load-string \"(+ 1\")" -1 1)
     (cview/handle-return! cv false)
     (support/poll-until 3000 20
-                (fn [] (and (support/idle? ui) (str/includes? (support/since ui mark) "EOF while reading")))
-                (fn [ok]
-                  (support/check :repl-eof-no-editor-hint
-                         (and ok (not (str/includes? (support/since ui mark) "is never closed.")))
-                         {:console (support/since ui mark)})
-                  (next)))))
+                        (fn [] (and (support/idle? ui) (str/includes? (support/since ui mark) "EOF while reading")))
+                        (fn [ok]
+                          (support/check :repl-eof-no-editor-hint
+                                         (and ok (not (str/includes? (support/since ui mark) "is never closed.")))
+                                         {:console (support/since ui mark)})
+                          (next)))))
 
 ;; --- P3.T5: Line/Col, ask before closing, bracket check before Run --------
 
@@ -86,7 +86,7 @@
       (reset! (:suppress-close? ui) false)
       (reset! (:closing? ui) false)
       (support/check :close-clean (and (not dirty-after) closing)
-             {:dirty-after dirty-after :closing closing})
+                     {:dirty-after dirty-after :closing closing})
       (next))))
 
 (defn row-close-dirty-cancel
@@ -122,9 +122,9 @@
         (reset! (:closing? ui) false)
         (reset! (:alert-pending? ui) false)
         (support/check :close-dirty-cancel
-               (and dirty-before (= text-before text-after) dirty-after (not closing))
-               {:dirty-before dirty-before :dirty-after dirty-after
-                :text-before text-before :text-after text-after :closing closing})
+                       (and dirty-before (= text-before text-after) dirty-after (not closing))
+                       {:dirty-before dirty-before :dirty-after dirty-after
+                        :text-before text-before :text-after text-after :closing closing})
         (next)))))
 
 (defn row-close-dirty-discard
@@ -150,7 +150,7 @@
         (reset! (:closing? ui) false)
         (reset! (:alert-pending? ui) false)
         (support/check :close-dirty-discard (and dirty-before closing)
-               {:dirty-before dirty-before :closing closing})
+                       {:dirty-before dirty-before :closing closing})
         (next)))))
 
 (defn row-close-dirty-save
@@ -181,9 +181,9 @@
         (reset! (:closing? ui) false)
         (reset! (:alert-pending? ui) false)
         (support/check :close-dirty-save
-               (and dirty-before closing (not dirty-after) (= "(+ 5 5)z" saved-content))
-               {:dirty-before dirty-before :closing closing :dirty-after dirty-after
-                :saved-content saved-content})
+                       (and dirty-before closing (not dirty-after) (= "(+ 5 5)z" saved-content))
+                       {:dirty-before dirty-before :closing closing :dirty-after dirty-after
+                        :saved-content saved-content})
         (.delete (java.io.File. ^String tmp))
         (next)))))
 
@@ -197,13 +197,13 @@
     (editor/set-text! (:editor ui) "(undefined-fn)\n(defn g [y]")
     ((:run!* ui))
     (support/poll-until 3000 20
-                (fn [] (str/includes? (support/since ui mark) "The ( on line 2 is never closed."))
-                (fn [ok]
-                  (let [t (support/since ui mark)]
-                    (support/check :pre-run-hidden-by-error
-                           (and ok (not (str/includes? t "Unable to resolve symbol")))
-                           {:console t})
-                    (next))))))
+                        (fn [] (str/includes? (support/since ui mark) "The ( on line 2 is never closed."))
+                        (fn [ok]
+                          (let [t (support/since ui mark)]
+                            (support/check :pre-run-hidden-by-error
+                                           (and ok (not (str/includes? t "Unable to resolve symbol")))
+                                           {:console t})
+                            (next))))))
 
 (defn row-pre-run-stray-closer
   "An extra closer with no opener at all (as opposed to an unclosed
@@ -213,10 +213,10 @@
     (editor/set-text! (:editor ui) "(+ 1 2))")
     ((:run!* ui))
     (support/poll-until 3000 20
-                (fn [] (str/includes? (support/since ui mark) "The ) on line 1 has no matching opener."))
-                (fn [ok]
-                  (support/check :pre-run-stray-closer ok {:console (support/since ui mark)})
-                  (next)))))
+                        (fn [] (str/includes? (support/since ui mark) "The ) on line 1 has no matching opener."))
+                        (fn [ok]
+                          (support/check :pre-run-stray-closer ok {:console (support/since ui mark)})
+                          (next)))))
 
 ;; --- P3.T5: close-alert dialog identity, and the run-while-running warning
 
@@ -245,8 +245,8 @@
         (reset! (:closing? ui) false)
         (reset! (:alert-pending? ui) false)
         (support/check :close-alert-pending-guard
-               (and (= 1 dialogs-created) closing)
-               {:dialogs-created dialogs-created :closing closing})
+                       (and (= 1 dialogs-created) closing)
+                       {:dialogs-created dialogs-created :closing closing})
         (next)))))
 
 (defn row-close-alert-routing
@@ -277,9 +277,9 @@
     ((:complete-alert-for-test! ui) :dialog-a {:index 1}) ; stray re-invocation
     (reset! (:alert-release! ui) prior-release)
     (support/check :close-alert-routing
-           (and (= [[:b {:index 0}] [:a {:index 1}]] @calls)
-                (= [:dialog-b :dialog-a] @released))
-           {:calls @calls :released @released})
+                   (and (= [[:b {:index 0}] [:a {:index 1}]] @calls)
+                        (= [:dialog-b :dialog-a] @released))
+                   {:calls @calls :released @released})
     (next)))
 
 (defn row-run-while-running-keeps-warning
@@ -297,26 +297,26 @@
     (editor/set-text! (:editor ui) "(loop [] (recur))")
     ((:run!* ui))
     (support/poll-until 2000 20
-                (fn [] (eval/evaluating? (:ctx (:session ui))))
-                (fn [started?]
-                  (editor/set-text! (:editor ui) "(+ 1 2))")
-                  ((:run!* ui))
-                  (support/poll-until 1000 20
-                              (fn [] (str/includes? (support/since ui mark) "already in progress"))
-                              (fn [warned?]
-                                (let [t (support/since ui mark)
-                                      status (g/label-text (:status-label ui))]
-                                  ((:stop!* ui))
-                                  (support/poll-until 3000 20
-                                              (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                              (fn [stopped?]
-                                                (support/check :run-while-running-keeps-warning
-                                                       (and started? warned? stopped?
-                                                            (= "Running…" status)
-                                                            (not (str/includes? t "no matching opener")))
-                                                       {:started started? :warned warned? :stopped stopped?
-                                                        :status status :console t})
-                                                (next))))))))))
+                        (fn [] (eval/evaluating? (:ctx (:session ui))))
+                        (fn [started?]
+                          (editor/set-text! (:editor ui) "(+ 1 2))")
+                          ((:run!* ui))
+                          (support/poll-until 1000 20
+                                              (fn [] (str/includes? (support/since ui mark) "already in progress"))
+                                              (fn [warned?]
+                                                (let [t (support/since ui mark)
+                                                      status (g/label-text (:status-label ui))]
+                                                  ((:stop!* ui))
+                                                  (support/poll-until 3000 20
+                                                                      (fn [] (str/includes? (support/since ui mark) "; interrupted"))
+                                                                      (fn [stopped?]
+                                                                        (support/check :run-while-running-keeps-warning
+                                                                                       (and started? warned? stopped?
+                                                                                            (= "Running…" status)
+                                                                                            (not (str/includes? t "no matching opener")))
+                                                                                       {:started started? :warned warned? :stopped stopped?
+                                                                                        :status status :console t})
+                                                                        (next))))))))))
 
 (defn row-line-col-typing
   "I2: an insert moves the insert mark by gravity without emitting
@@ -331,7 +331,7 @@
       (g/gtk-text-buffer-insert-interactive-at-cursor buf "x" -1 1)
       (let [after (g/label-text (:line-col-label ui))]
         (support/check :line-col-typing (and (= "Ln 2, Col 2" before) (= "Ln 2, Col 3" after))
-               {:before before :after after})
+                       {:before before :after after})
         (next)))))
 
 (defn row-close-dismissed
@@ -350,9 +350,9 @@
         (reset! (:suppress-close? ui) false)
         (reset! (:closing? ui) false)
         (support/check :close-dismissed
-               (and (not closing) dirty-after (= text-before text-after))
-               {:closing closing :dirty-after dirty-after
-                :text-before text-before :text-after text-after})
+                       (and (not closing) dirty-after (= text-before text-after))
+                       {:closing closing :dirty-after dirty-after
+                        :text-before text-before :text-after text-after})
         (next)))))
 
 (defn row-close-save-failed
@@ -381,14 +381,14 @@
         (reset! (:suppress-close? ui) false)
         (reset! (:closing? ui) false)
         (support/poll-until 1000 20
-                    (fn [] (str/includes? (support/since ui mark) "; save:"))
-                    (fn [reported?]
-                      (support/check :close-save-failed
-                             (and (not closing) dirty-after (= text-before text-after) reported?
-                                  (not (.exists dir)))
-                             {:closing closing :dirty-after dirty-after :text-before text-before
-                              :text-after text-after :reported reported? :console (support/since ui mark)})
-                      (next)))))))
+                            (fn [] (str/includes? (support/since ui mark) "; save:"))
+                            (fn [reported?]
+                              (support/check :close-save-failed
+                                             (and (not closing) dirty-after (= text-before text-after) reported?
+                                                  (not (.exists dir)))
+                                             {:closing closing :dirty-after dirty-after :text-before text-before
+                                              :text-after text-after :reported reported? :console (support/since ui mark)})
+                              (next)))))))
 
 (defn row-close-alert-build-throws
   "#10: if building the alert throws after alert-pending? is set, the flag
@@ -411,13 +411,13 @@
       (reset! (:closing? ui) false)
       (reset! (:alert-pending? ui) false)
       (support/poll-until 1000 20
-                  (fn [] (str/includes? (support/since ui mark) "forced alert build failure"))
-                  (fn [reported?]
-                    (support/check :close-alert-build-throws
-                           (and (not pending) (not closing) dirty-after reported?)
-                           {:pending pending :closing closing :dirty-after dirty-after
-                            :reported reported? :console (support/since ui mark)})
-                    (next))))))
+                          (fn [] (str/includes? (support/since ui mark) "forced alert build failure"))
+                          (fn [reported?]
+                            (support/check :close-alert-build-throws
+                                           (and (not pending) (not closing) dirty-after reported?)
+                                           {:pending pending :closing closing :dirty-after dirty-after
+                                            :reported reported? :console (support/since ui mark)})
+                            (next))))))
 
 (defn row-quit-action-prompts
   "C3: the application's \"quit\" action, activated the way GTK's macOS
@@ -443,8 +443,8 @@
         (reset! (:suppress-close? ui) false)
         (reset! (:closing? ui) false)
         (support/check :quit-action-prompts
-               (and (= 1 dialogs) pending (not closing-dirty) (= "(+ 1 1)z" text-after)
-                    closing-clean)
-               {:dialogs dialogs :pending pending :closing-dirty closing-dirty
-                :text-after text-after :closing-clean closing-clean})
+                       (and (= 1 dialogs) pending (not closing-dirty) (= "(+ 1 1)z" text-after)
+                            closing-clean)
+                       {:dialogs dialogs :pending pending :closing-dirty closing-dirty
+                        :text-after text-after :closing-clean closing-clean})
         (next)))))

@@ -22,18 +22,18 @@
     (editor/set-text! (:editor ui) "(loop [] (recur))")
     ((:run!* ui))
     (support/poll-until 2000 20
-                (fn [] (eval/evaluating? (:ctx (:session ui))))
-                (fn [started?]
-                  (let [mark (support/out-end-offset ui)
-                        running-result ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-                    (support/poll-until 3000 20
-                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                (fn [stopped?]
-                                  (support/check :escape-yields-when-idle
-                                         (and (= 0 idle-result) started? (= 1 running-result) stopped?)
-                                         {:idle-result idle-result :started started?
-                                          :running-result running-result :stopped stopped?})
-                                  (next))))))))
+                        (fn [] (eval/evaluating? (:ctx (:session ui))))
+                        (fn [started?]
+                          (let [mark (support/out-end-offset ui)
+                                running-result ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                            (support/poll-until 3000 20
+                                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
+                                                (fn [stopped?]
+                                                  (support/check :escape-yields-when-idle
+                                                                 (and (= 0 idle-result) started? (= 1 running-result) stopped?)
+                                                                 {:idle-result idle-result :started started?
+                                                                  :running-result running-result :stopped stopped?})
+                                                  (next))))))))
 
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
 ;; Shift bit set in state -- window.clj's own copy is private.
@@ -57,8 +57,8 @@
     (let [handled ((:handle-window-key! ui) nil KEY-S-CAPS 0 g/CONTROL-MASK nil)
           saved-content (slurp tmp)]
       (support/check :command-chord-capslock
-             (and (= 1 handled) (= "(+ 2 2)" saved-content))
-             {:handled handled :saved-content saved-content})
+                     (and (= 1 handled) (= "(+ 2 2)" saved-content))
+                     {:handled handled :saved-content saved-content})
       (.delete (java.io.File. ^String tmp))
       (next))))
 
@@ -74,9 +74,9 @@
       ((:toggle-focus!* ui))
       (let [after-second (g/gtk-root-get-focus win)]
         (support/check :toggle-focus
-               (and (= after-first (:view cv)) (= after-second (:view ed)))
-               {:after-first after-first :after-second after-second
-                :editor-view (:view ed) :console-view (:view cv)})
+                       (and (= after-first (:view cv)) (= after-second (:view ed)))
+                       {:after-first after-first :after-second after-second
+                        :editor-view (:view ed) :console-view (:view cv)})
         (next)))))
 
 (defn row-zoom-in-out
@@ -121,8 +121,8 @@
     (editor/on-cursor-moved! ed (fn [_lc] (reset! ran-second? true)))
     (support/place-cursor! (:buf ed) 3)
     (support/check :cursor-listener-throw-others-still-run
-           (and @threw-once? @ran-second?)
-           {:threw-once @threw-once? :ran-second @ran-second?})
+                   (and @threw-once? @ran-second?)
+                   {:threw-once @threw-once? :ran-second @ran-second?})
     (next)))
 
 (defn row-window-key-throw-contained
@@ -142,12 +142,12 @@
         handled (with-redefs [window/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
                   ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))]
     (support/poll-until 1000 20
-                (fn [] (str/includes? (g/label-text status) "forced window-key failure"))
-                (fn [status-ok?]
-                  (support/check :window-key-throw-contained
-                         (and (= 1 handled) status-ok?)
-                         {:handled handled :status (g/label-text status)})
-                  (next)))))
+                        (fn [] (str/includes? (g/label-text status) "forced window-key failure"))
+                        (fn [status-ok?]
+                          (support/check :window-key-throw-contained
+                                         (and (= 1 handled) status-ok?)
+                                         {:handled handled :status (g/label-text status)})
+                          (next)))))
 
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
@@ -189,11 +189,11 @@
   ((:quick-doc!* ui))
   ((:run!* ui))
   (support/poll-until 2000 20
-              (fn [] (eval/evaluating? (:ctx (:session ui))))
-              (fn [started?]
-                (let [popover-was-open? (popover/open? (:help-popover ui))
-                      handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
-                  (support/check :command-chord-close
-                         (and started? (= 1 handled) popover-was-open?)
-                         {:started started? :handled handled :popover-was-open popover-was-open?})
-                  (next)))))
+                      (fn [] (eval/evaluating? (:ctx (:session ui))))
+                      (fn [started?]
+                        (let [popover-was-open? (popover/open? (:help-popover ui))
+                              handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
+                          (support/check :command-chord-close
+                                         (and started? (= 1 handled) popover-was-open?)
+                                         {:started started? :handled handled :popover-was-open popover-was-open?})
+                          (next)))))

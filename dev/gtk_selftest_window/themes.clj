@@ -43,14 +43,14 @@
             fb-light (g/rgba-property-hex fb-tag "background-rgba")
             fbfg-light (g/rgba-property-hex fb-tag "foreground-rgba")]
         (support/check :theme-retints-tags
-               (and (= "#c792ea" kw-navy) (= "#f78c6c" rb0-navy) (= "#f07178" um-navy)
-                    (= "#c3e88d" result-navy) (= "#4d4520" fb-navy) (= "#c8cad8" fbfg-navy)
-                    (= "#cf222e" kw-light) (= "#953800" rb0-light) (= "#cf222e" um-light)
-                    (= "#0a3069" result-light) (= "#fff2a8" fb-light) (= "#24292f" fbfg-light))
-               {:kw-navy kw-navy :rb0-navy rb0-navy :um-navy um-navy
-                :result-navy result-navy :fb-navy fb-navy :fbfg-navy fbfg-navy
-                :kw-light kw-light :rb0-light rb0-light :um-light um-light
-                :result-light result-light :fb-light fb-light :fbfg-light fbfg-light})
+                       (and (= "#c792ea" kw-navy) (= "#f78c6c" rb0-navy) (= "#f07178" um-navy)
+                            (= "#c3e88d" result-navy) (= "#4d4520" fb-navy) (= "#c8cad8" fbfg-navy)
+                            (= "#cf222e" kw-light) (= "#953800" rb0-light) (= "#cf222e" um-light)
+                            (= "#0a3069" result-light) (= "#fff2a8" fb-light) (= "#24292f" fbfg-light))
+                       {:kw-navy kw-navy :rb0-navy rb0-navy :um-navy um-navy
+                        :result-navy result-navy :fb-navy fb-navy :fbfg-navy fbfg-navy
+                        :kw-light kw-light :rb0-light rb0-light :um-light um-light
+                        :result-light result-light :fb-light fb-light :fbfg-light fbfg-light})
         ((:zoom!* ui) :reset)
         (next)))))
 
@@ -67,10 +67,10 @@
   ((:set-theme!* ui) :dark)
   (let [css ((:code-css* ui))]
     (support/check :theme-css
-           (and (str/includes? css "background-color: rgb(0,0,0);")
-                (str/includes? css "color: rgb(224,224,224);")
-                (str/includes? css "font-size: 13px;"))
-           {:css css})
+                   (and (str/includes? css "background-color: rgb(0,0,0);")
+                        (str/includes? css "color: rgb(224,224,224);")
+                        (str/includes? css "font-size: 13px;"))
+                   {:css css})
     ((:set-theme!* ui) :light)
     ((:zoom!* ui) :reset)
     (next)))
@@ -89,7 +89,7 @@
     ((:set-theme!* ui) :solarized)
     (let [solarized-dark? (g/color-scheme-dark? (g/gtk-settings-get-default))]
       (support/check :theme-prefer-dark (and dark? (not solarized-dark?))
-             {:dark dark? :solarized-dark solarized-dark?})
+                     {:dark dark? :solarized-dark solarized-dark?})
       ((:set-theme!* ui) :light)
       ((:zoom!* ui) :reset)
       (next))))
@@ -113,8 +113,8 @@
       (g/gtk-text-buffer-undo buf)
       (let [undone (editor/editor-text ed)]
         (support/check :theme-keeps-text-and-undo
-               (and (= "(def a 1)x" text) (= [0 4] sel) can-undo (= "(def a 1)" undone))
-               {:text text :sel sel :can-undo can-undo :undone undone})
+                       (and (= "(def a 1)x" text) (= [0 4] sel) can-undo (= "(def a 1)" undone))
+                       {:text text :sel sel :can-undo can-undo :undone undone})
         ((:set-theme!* ui) :light)
         ((:zoom!* ui) :reset)
         (next)))))
@@ -148,10 +148,10 @@
             syntax-priority (g/gtk-text-tag-get-priority special-form-tag)]
         (find-bar/close! fb)
         (support/check :theme-keeps-find-highlight
-               (and tag0 tag8 (= label-before label-after) (= "#5c4b00" bg) (= "#e0e0e0" fg)
-                    (> fb-priority syntax-priority))
-               {:tag0 tag0 :tag8 tag8 :label-before label-before :label-after label-after
-                :bg bg :fg fg :fb-priority fb-priority :syntax-priority syntax-priority})
+                       (and tag0 tag8 (= label-before label-after) (= "#5c4b00" bg) (= "#e0e0e0" fg)
+                            (> fb-priority syntax-priority))
+                       {:tag0 tag0 :tag8 tag8 :label-before label-before :label-after label-after
+                        :bg bg :fg fg :fb-priority fb-priority :syntax-priority syntax-priority})
         ((:set-theme!* ui) :light)
         ((:zoom!* ui) :reset)
         (next)))))
@@ -171,9 +171,9 @@
     ((:zoom!* ui) :in)
     (let [css2 ((:code-css* ui))]
       (support/check :theme-and-zoom-share-css
-             (and (str/includes? css1 "font-size: 14px;") (str/includes? css1 "rgb(26,27,46)")
-                  (str/includes? css2 "font-size: 16px;") (str/includes? css2 "rgb(26,27,46)"))
-             {:css1 css1 :css2 css2})
+                     (and (str/includes? css1 "font-size: 14px;") (str/includes? css1 "rgb(26,27,46)")
+                          (str/includes? css2 "font-size: 16px;") (str/includes? css2 "rgb(26,27,46)"))
+                     {:css1 css1 :css2 css2})
       ((:set-theme!* ui) :light)
       ((:zoom!* ui) :reset)
       (next))))
@@ -190,15 +190,15 @@
     ((:set-theme!* ui) :navy)
     (editor/set-text! ed "(defn f [x] :k)")
     (support/poll-until 500 20
-                (fn [] (g/has-tag-at? buf 1 tag))
-                (fn [tagged?]
-                  (let [fg (g/rgba-property-hex tag "foreground-rgba")]
-                    (support/check :theme-applies-to-new-text
-                           (and tagged? (= "#c792ea" fg))
-                           {:tagged tagged? :fg fg})
-                    ((:set-theme!* ui) :light)
-                    ((:zoom!* ui) :reset)
-                    (next))))))
+                        (fn [] (g/has-tag-at? buf 1 tag))
+                        (fn [tagged?]
+                          (let [fg (g/rgba-property-hex tag "foreground-rgba")]
+                            (support/check :theme-applies-to-new-text
+                                           (and tagged? (= "#c792ea" fg))
+                                           {:tagged tagged? :fg fg})
+                            ((:set-theme!* ui) :light)
+                            ((:zoom!* ui) :reset)
+                            (next))))))
 
 (defn row-theme-cycle
   "Four :cycle-theme!* calls with no program running walk theme/theme-names
@@ -216,25 +216,25 @@
   [ui next]
   ((:cycle-theme!* ui))
   (support/poll-until 500 20
-              (fn [] (= "Theme: dark" (g/label-text (:status-label ui))))
-              (fn [status1-ok?]
-                (let [name1 ((:theme-name* ui))
-                      status1 (g/label-text (:status-label ui))
-                      settings1 (settings/load-settings ((:settings-path* ui)))]
-                  ((:cycle-theme!* ui))
-                  (let [name2 ((:theme-name* ui))]
-                    ((:cycle-theme!* ui))
-                    (let [name3 ((:theme-name* ui))]
-                      ((:cycle-theme!* ui))
-                      (let [name4 ((:theme-name* ui))]
-                        (support/check :theme-cycle
-                               (and (= :dark name1) (= :solarized name2) (= :navy name3) (= :light name4)
-                                    status1-ok? (= :dark (:theme settings1)))
-                               {:name1 name1 :name2 name2 :name3 name3 :name4 name4
-                                :status1 status1 :settings1 settings1})
-                        ((:set-theme!* ui) :light)
-                        ((:zoom!* ui) :reset)
-                        (next))))))))
+                      (fn [] (= "Theme: dark" (g/label-text (:status-label ui))))
+                      (fn [status1-ok?]
+                        (let [name1 ((:theme-name* ui))
+                              status1 (g/label-text (:status-label ui))
+                              settings1 (settings/load-settings ((:settings-path* ui)))]
+                          ((:cycle-theme!* ui))
+                          (let [name2 ((:theme-name* ui))]
+                            ((:cycle-theme!* ui))
+                            (let [name3 ((:theme-name* ui))]
+                              ((:cycle-theme!* ui))
+                              (let [name4 ((:theme-name* ui))]
+                                (support/check :theme-cycle
+                                               (and (= :dark name1) (= :solarized name2) (= :navy name3) (= :light name4)
+                                                    status1-ok? (= :dark (:theme settings1)))
+                                               {:name1 name1 :name2 name2 :name3 name3 :name4 name4
+                                                :status1 status1 :settings1 settings1})
+                                ((:set-theme!* ui) :light)
+                                ((:zoom!* ui) :reset)
+                                (next))))))))
 
 (defn row-theme-chord
   "The window's own key dispatch, driven directly (never a synthesized
@@ -250,8 +250,8 @@
         h2 ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/META-MASK g/SHIFT-MASK) nil)
         after2 ((:theme-name* ui))]
     (support/check :theme-chord
-           (and (= 1 h1) (not= before after1) (= 1 h2) (not= after1 after2))
-           {:before before :h1 h1 :after1 after1 :h2 h2 :after2 after2})
+                   (and (= 1 h1) (not= before after1) (= 1 h2) (not= after1 after2))
+                   {:before before :h1 h1 :after1 after1 :h2 h2 :after2 after2})
     ((:set-theme!* ui) :light)
     ((:zoom!* ui) :reset)
     (next)))
@@ -265,7 +265,7 @@
         handled ((:handle-window-key! ui) nil 0x06d 0 g/CONTROL-MASK nil)
         after ((:theme-name* ui))]
     (support/check :theme-chord-needs-shift (and (= 0 handled) (= before after))
-           {:handled handled :before before :after after})
+                   {:handled handled :before before :after after})
     ((:set-theme!* ui) :light)
     ((:zoom!* ui) :reset)
     (next)))
@@ -292,15 +292,15 @@
       ((:set-theme!* ui) :light)
       ((:zoom!* ui) :reset)
       (support/check :settings-isolated
-             (and (str/starts-with? window-path (System/getProperty "java.io.tmpdir"))
-                  (not= window-path real-path)
-                  (= existed-before existed-after)
-                  (= mtime-before mtime-after)
-                  (= length-before length-after))
-             {:window-path window-path :real-path real-path
-              :existed-before existed-before :existed-after existed-after
-              :mtime-before mtime-before :mtime-after mtime-after
-              :length-before length-before :length-after length-after})
+                     (and (str/starts-with? window-path (System/getProperty "java.io.tmpdir"))
+                          (not= window-path real-path)
+                          (= existed-before existed-after)
+                          (= mtime-before mtime-after)
+                          (= length-before length-after))
+                     {:window-path window-path :real-path real-path
+                      :existed-before existed-before :existed-after existed-after
+                      :mtime-before mtime-before :mtime-after mtime-after
+                      :length-before length-before :length-after length-after})
       (next))))
 
 (defn row-settings-unreadable-warns
@@ -316,16 +316,16 @@
     (spit tmp "{:theme")
     ((:load-settings!* ui) tmp)
     (support/poll-until 1000 20
-                (fn [] (str/includes? (support/since ui mark) "; settings: couldn't read"))
-                (fn [warned?]
-                  (let [theme-name ((:theme-name* ui))]
-                    (support/check :settings-unreadable-warns
-                           (and (= :light theme-name) warned?)
-                           {:theme-name theme-name :console (support/since ui mark)})
-                    (.delete (java.io.File. ^String tmp))
-                    ((:set-theme!* ui) :light)
-                    ((:zoom!* ui) :reset)
-                    (next))))))
+                        (fn [] (str/includes? (support/since ui mark) "; settings: couldn't read"))
+                        (fn [warned?]
+                          (let [theme-name ((:theme-name* ui))]
+                            (support/check :settings-unreadable-warns
+                                           (and (= :light theme-name) warned?)
+                                           {:theme-name theme-name :console (support/since ui mark)})
+                            (.delete (java.io.File. ^String tmp))
+                            ((:set-theme!* ui) :light)
+                            ((:zoom!* ui) :reset)
+                            (next))))))
 
 (defn row-theme-save-failure-reported
   "Test hook: :settings-path!* (TH.T5's own self-test-only addition,
@@ -347,16 +347,16 @@
       ((:cycle-theme!* ui))
       (let [after ((:theme-name* ui))]
         (support/poll-until 1000 20
-                    (fn [] (str/includes? (support/since ui mark) "; settings: couldn't save"))
-                    (fn [reported?]
-                      ((:settings-path!* ui) original-path)
-                      (support/check :theme-save-failure-reported
-                             (and (not= before after) reported?)
-                             {:before before :after after :reported reported? :console (support/since ui mark)})
-                      (.delete (java.io.File. ^String blocking-file))
-                      ((:set-theme!* ui) :light)
-                      ((:zoom!* ui) :reset)
-                      (next)))))))
+                            (fn [] (str/includes? (support/since ui mark) "; settings: couldn't save"))
+                            (fn [reported?]
+                              ((:settings-path!* ui) original-path)
+                              (support/check :theme-save-failure-reported
+                                             (and (not= before after) reported?)
+                                             {:before before :after after :reported reported? :console (support/since ui mark)})
+                              (.delete (java.io.File. ^String blocking-file))
+                              ((:set-theme!* ui) :light)
+                              ((:zoom!* ui) :reset)
+                              (next)))))))
 
 (defn row-theme-switch-while-running
   "Cycling the theme while a program is running must not overwrite a
@@ -379,27 +379,27 @@
     (editor/set-text! (:editor ui) "(loop [] (recur))")
     ((:run!* ui))
     (support/poll-until 2000 20
-                (fn [] (= "Running…" (g/label-text (:status-label ui))))
-                (fn [running?]
-                  (let [before ((:theme-name* ui))]
-                    ((:cycle-theme!* ui))
-                    (let [after ((:theme-name* ui))
-                          status-right-after (g/label-text (:status-label ui))
-                          handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-                      (support/poll-until 3000 20
-                                  (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                  (fn [stopped?]
-                                    (support/poll-until 2000 20
-                                                (fn [] (= "Stopped" (g/label-text (:status-label ui))))
-                                                (fn [settled?]
-                                                  (support/check :theme-switch-while-running
-                                                         (and running? (not= before after)
-                                                              (= "Running…" status-right-after)
-                                                              (= 1 handled) stopped? settled?)
-                                                         {:running running? :before before :after after
-                                                          :status status-right-after :handled handled
-                                                          :stopped stopped? :settled settled?
-                                                          :console (support/since ui mark)})
-                                                  ((:set-theme!* ui) :light)
-                                                  ((:zoom!* ui) :reset)
-                                                  (next)))))))))))
+                        (fn [] (= "Running…" (g/label-text (:status-label ui))))
+                        (fn [running?]
+                          (let [before ((:theme-name* ui))]
+                            ((:cycle-theme!* ui))
+                            (let [after ((:theme-name* ui))
+                                  status-right-after (g/label-text (:status-label ui))
+                                  handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                              (support/poll-until 3000 20
+                                                  (fn [] (str/includes? (support/since ui mark) "; interrupted"))
+                                                  (fn [stopped?]
+                                                    (support/poll-until 2000 20
+                                                                        (fn [] (= "Stopped" (g/label-text (:status-label ui))))
+                                                                        (fn [settled?]
+                                                                          (support/check :theme-switch-while-running
+                                                                                         (and running? (not= before after)
+                                                                                              (= "Running…" status-right-after)
+                                                                                              (= 1 handled) stopped? settled?)
+                                                                                         {:running running? :before before :after after
+                                                                                          :status status-right-after :handled handled
+                                                                                          :stopped stopped? :settled settled?
+                                                                                          :console (support/since ui mark)})
+                                                                          ((:set-theme!* ui) :light)
+                                                                          ((:zoom!* ui) :reset)
+                                                                          (next)))))))))))

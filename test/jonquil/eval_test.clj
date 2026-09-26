@@ -266,9 +266,9 @@
         status-threw? (atom false)]
     (sut/eval-async ctx "(+ 1 1)"
                     {:on-status-change (fn [s]
-                                          (when (= :idle s)
-                                            (reset! status-threw? true)
-                                            (throw (ex-info "boom from on-status-change" {}))))
+                                         (when (= :idle s)
+                                           (reset! status-threw? true)
+                                           (throw (ex-info "boom from on-status-change" {}))))
                      :on-complete (fn [r] (deliver done r))})
     (let [r (deref done 3000 :timeout)]
       (is (true? @status-threw?))

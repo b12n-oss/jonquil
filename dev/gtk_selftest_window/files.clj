@@ -25,22 +25,22 @@
     (let [dirty-before (editor/dirty? ed)]
       ((:open-path! ui) tmp)
       (support/poll-until 1000 20
-                  (fn [] (str/includes? (support/since ui mark)
-                                        "Unsaved changes. Save first, or Open again to discard them."))
-                  (fn [refused?]
-                    (let [text-after-first (editor/editor-text ed)]
-                      ((:open-path! ui) tmp)
-                      (let [text-after-second (editor/editor-text ed)]
-                        (support/check :open-refuses-dirty
-                               (and dirty-before refused?
-                                    (= "(+ 1 1)z" text-after-first)
-                                    (= "(+ 9 9)" text-after-second))
-                               {:dirty-before dirty-before :refused refused?
-                                :text-after-first text-after-first
-                                :text-after-second text-after-second
-                                :console (support/since ui mark)})
-                        (.delete (java.io.File. ^String tmp))
-                        (next))))))))
+                          (fn [] (str/includes? (support/since ui mark)
+                                                "Unsaved changes. Save first, or Open again to discard them."))
+                          (fn [refused?]
+                            (let [text-after-first (editor/editor-text ed)]
+                              ((:open-path! ui) tmp)
+                              (let [text-after-second (editor/editor-text ed)]
+                                (support/check :open-refuses-dirty
+                                               (and dirty-before refused?
+                                                    (= "(+ 1 1)z" text-after-first)
+                                                    (= "(+ 9 9)" text-after-second))
+                                               {:dirty-before dirty-before :refused refused?
+                                                :text-after-first text-after-first
+                                                :text-after-second text-after-second
+                                                :console (support/since ui mark)})
+                                (.delete (java.io.File. ^String tmp))
+                                (next))))))))
 
 (defn row-open-invalid-utf8
   "I6: a file with a stray non-UTF-8 byte (0xE9) loads as U+FFFD without
@@ -56,14 +56,14 @@
       (.write os (byte-array [(byte 0x28) (unchecked-byte 0xE9) (byte 0x29)])))
     ((:open-path! ui) tmp)
     (support/poll-until 1000 20
-                (fn [] (str/includes? (support/since ui mark) "isn't valid UTF-8"))
-                (fn [warned?]
-                  (let [text (editor/editor-text ed)]
-                    (support/check :open-invalid-utf8
-                           (and (str/includes? text "�") warned?)
-                           {:text text :warned warned? :console (support/since ui mark)})
-                    (.delete (java.io.File. ^String tmp))
-                    (next))))))
+                        (fn [] (str/includes? (support/since ui mark) "isn't valid UTF-8"))
+                        (fn [warned?]
+                          (let [text (editor/editor-text ed)]
+                            (support/check :open-invalid-utf8
+                                           (and (str/includes? text "�") warned?)
+                                           {:text text :warned warned? :console (support/since ui mark)})
+                            (.delete (java.io.File. ^String tmp))
+                            (next))))))
 
 (defn row-save-atomic
   "M12: save-to! writes a temp file beside the target and renames over it,
@@ -82,18 +82,18 @@
     (editor/set-text! ed "(+ 3 3)")
     ((:save-to! ui) bad-path)
     (support/poll-until 1000 20
-                (fn [] (str/includes? (support/since ui mark) "; save:"))
-                (fn [error-shown?]
-                  (let [bad-path-exists? (.exists (java.io.File. ^String bad-path))]
-                    (editor/set-text! ed "(+ 4 4)")
-                    ((:save-to! ui) good-tmp)
-                    (let [round-tripped? (= "(+ 4 4)" (slurp good-tmp))]
-                      (support/check :save-atomic
-                             (and error-shown? (not bad-path-exists?) round-tripped?)
-                             {:error-shown error-shown? :bad-path-exists bad-path-exists?
-                              :round-tripped round-tripped? :console (support/since ui mark)})
-                      (.delete (java.io.File. ^String good-tmp))
-                      (next)))))))
+                        (fn [] (str/includes? (support/since ui mark) "; save:"))
+                        (fn [error-shown?]
+                          (let [bad-path-exists? (.exists (java.io.File. ^String bad-path))]
+                            (editor/set-text! ed "(+ 4 4)")
+                            ((:save-to! ui) good-tmp)
+                            (let [round-tripped? (= "(+ 4 4)" (slurp good-tmp))]
+                              (support/check :save-atomic
+                                             (and error-shown? (not bad-path-exists?) round-tripped?)
+                                             {:error-shown error-shown? :bad-path-exists bad-path-exists?
+                                              :round-tripped round-tripped? :console (support/since ui mark)})
+                              (.delete (java.io.File. ^String good-tmp))
+                              (next)))))))
 
 (defn row-save-follows-symlink
   "M12 follow-up (a): the atomic rename used to target the SAVE PATH
@@ -120,8 +120,8 @@
           real-content (slurp real)
           via-link-content (slurp link)]
       (support/check :save-follows-symlink
-             (and still-symlink? (= "(+ 9 9)" real-content) (= "(+ 9 9)" via-link-content))
-             {:still-symlink still-symlink? :real-content real-content :via-link-content via-link-content})
+                     (and still-symlink? (= "(+ 9 9)" real-content) (= "(+ 9 9)" via-link-content))
+                     {:still-symlink still-symlink? :real-content real-content :via-link-content via-link-content})
       (.delete (java.io.File. ^String link))
       (.delete (java.io.File. ^String real))
       (next))))
@@ -145,8 +145,8 @@
                 (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String path))))
           content (slurp path)]
       (support/check :save-executable-keeps-mode
-             (and (= "rwxr-xr-x" mode) (= "(+ 1 1)" content))
-             {:mode mode :content content})
+                     (and (= "rwxr-xr-x" mode) (= "(+ 1 1)" content))
+                     {:mode mode :content content})
       (.delete (java.io.File. ^String path))
       (next))))
 
@@ -173,28 +173,28 @@
     (editor/set-text! ed "(+ 1 1)")
     ((:save-to! ui) path)
     (support/poll-until 1000 20
-                (fn [] (str/includes? (support/since ui mark) "; save:"))
-                (fn [error-shown?]
-                  (let [error-text (support/since ui mark)
-                        content-intact? (= "(+ 0 0)" (slurp path))
-                        stray-tmp? (boolean (some (fn [n] (str/includes? n ".jonquil-tmp-"))
-                                                  (seq (.list (java.io.File. ^String dir)))))
-                        names-user-path? (str/includes? error-text path)
-                        names-tmp? (str/includes? error-text ".jonquil-tmp-")]
+                        (fn [] (str/includes? (support/since ui mark) "; save:"))
+                        (fn [error-shown?]
+                          (let [error-text (support/since ui mark)
+                                content-intact? (= "(+ 0 0)" (slurp path))
+                                stray-tmp? (boolean (some (fn [n] (str/includes? n ".jonquil-tmp-"))
+                                                          (seq (.list (java.io.File. ^String dir)))))
+                                names-user-path? (str/includes? error-text path)
+                                names-tmp? (str/includes? error-text ".jonquil-tmp-")]
                     ;; restore write access before deleting, or .delete may
                     ;; itself fail against the still-read-only directory.
-                    (java.nio.file.Files/setPosixFilePermissions
-                     (.toPath (java.io.File. ^String dir))
-                     (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x"))
-                    (support/check :save-failure-leaves-original-intact
-                           (and error-shown? content-intact? (not stray-tmp?)
-                                names-user-path? (not names-tmp?))
-                           {:error-shown error-shown? :content-intact content-intact?
-                            :stray-tmp stray-tmp? :names-user-path names-user-path?
-                            :names-tmp names-tmp? :error-text error-text})
-                    (.delete (java.io.File. ^String path))
-                    (.delete (java.io.File. ^String dir))
-                    (next))))))
+                            (java.nio.file.Files/setPosixFilePermissions
+                             (.toPath (java.io.File. ^String dir))
+                             (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x"))
+                            (support/check :save-failure-leaves-original-intact
+                                           (and error-shown? content-intact? (not stray-tmp?)
+                                                names-user-path? (not names-tmp?))
+                                           {:error-shown error-shown? :content-intact content-intact?
+                                            :stray-tmp stray-tmp? :names-user-path names-user-path?
+                                            :names-tmp names-tmp? :error-text error-text})
+                            (.delete (java.io.File. ^String path))
+                            (.delete (java.io.File. ^String dir))
+                            (next))))))
 
 (defn row-dialog-dismissed-silent
   "M2 follow-up: cancelling/dismissing a file dialog
@@ -228,16 +228,16 @@
     ;; a genuine, different-code error: something real to poll for.
     ((:simulate-open-result! ui) {:error "boom" :code 1 :domain real-domain})
     (support/poll-until 1000 20
-                (fn [] (str/includes? (support/since ui mark) "; open: boom"))
-                (fn [boom-shown?]
-                  (let [text (support/since ui mark)]
-                    (support/check :dialog-dismissed-silent
-                           (and boom-shown?
-                                (str/includes? text "; open: exists")
-                                (not (str/includes? text "; open: Dismissed by user"))
-                                (not (str/includes? text "; save: Dismissed by user")))
-                           {:console text})
-                    (next))))))
+                        (fn [] (str/includes? (support/since ui mark) "; open: boom"))
+                        (fn [boom-shown?]
+                          (let [text (support/since ui mark)]
+                            (support/check :dialog-dismissed-silent
+                                           (and boom-shown?
+                                                (str/includes? text "; open: exists")
+                                                (not (str/includes? text "; open: Dismissed by user"))
+                                                (not (str/includes? text "; save: Dismissed by user")))
+                                           {:console text})
+                            (next))))))
 
 (defn row-save-and-open [ui next]
   (let [tmp (str (System/getProperty "java.io.tmpdir")
@@ -250,8 +250,8 @@
       (let [text (editor/editor-text (:editor ui))
             title (g/window-title (:window ui))]
         (support/check :save-and-open
-               (and (= "(+ 1 1)" saved-content) (= "(+ 1 1)" text)
-                    (some? title) (not (str/includes? title "* ")))
-               {:saved-content saved-content :text text :title title})
+                       (and (= "(+ 1 1)" saved-content) (= "(+ 1 1)" text)
+                            (some? title) (not (str/includes? title "* ")))
+                       {:saved-content saved-content :text text :title title})
         (.delete (java.io.File. ^String tmp))
         (next)))))
