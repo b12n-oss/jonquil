@@ -18,8 +18,8 @@
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-TAB 0xff09)
 
-;; I3 fix wave: this file's own private copies (measured against
-;; gdkkeysyms.h) for the keys the completion popup must never swallow --
+;; This file's own private copies (measured against gdkkeysyms.h) for
+;; the keys the completion popup must never swallow --
 ;; row-completion-keys-reach-editor/-closes-on-space and their console
 ;; counterparts below.
 (def ^:private KEY-P 0x070)
@@ -265,12 +265,11 @@
       (next))))
 
 (defn row-completion-closes-on-focus-loss
-  "Context bullet #4 (not in the brief's own row table): calls every fn
-  registered on ed's own :on-focus-fns directly -- the SAME ones
-  GtkEventControllerFocus's \"leave\" signal calls -- mirroring
-  row-quick-doc-closes-on-focus-loss, since this self-test window is never
-  the OS's key window and can't move real focus (P4.T3's own has_focus
-  finding)."
+  "Calls every fn registered on ed's own :on-focus-fns directly -- the
+  SAME ones GtkEventControllerFocus's \"leave\" signal calls --
+  mirroring row-quick-doc-closes-on-focus-loss, since this self-test
+  window is never the OS's key window and can't move real focus (P4.T3's
+  own has_focus finding)."
   [ui next]
   (let [ed (:editor ui) c (:completion ui)]
     (editor/set-text! ed "(ma")
@@ -284,11 +283,10 @@
       (next))))
 
 (defn row-completion-closes-other-popover
-  "Context bullet #3 (not in the brief's own row table, which has no row
-  for the two popovers together): opening completion while quick doc is
-  showing closes quick doc, and opening quick doc while completion is
-  showing closes completion -- both through close-popovers-fn (P4.T3's
-  registry), never a pairwise special case naming the other popover."
+  "Opening completion while quick doc is showing closes quick doc, and
+  opening quick doc while completion is showing closes completion --
+  both through close-popovers-fn (P4.T3's registry), never a pairwise
+  special case naming the other popover."
   [ui next]
   (let [ed (:editor ui) c (:completion ui) hp (:help-popover ui)]
     (editor/set-text! ed "(map inc [1])")
@@ -316,19 +314,18 @@
             (next)))))))
 
 (defn row-completion-commit-throw-consumes-key
-  "P4.T5 fix round 1 (Important): forces jonquil.gtk.editor/apply-op! to
-  throw for the duration of one Enter, through commit!'s own call to it --
-  with-redefs on that var DOES reach the call completion.clj makes
-  through its own `editor` alias (checked live before writing this row:
-  without the fix, this exact with-redefs, run through editor/handle-key!,
-  crashed the whole selftest process -- window.clj's :handle-key! wrapper
-  caught the first throw and returned 0, so editor.clj's own handle-key!
-  fell through to plain-return? -> handle-return!, whose OWN apply-op!
-  call has no try/catch and hit the SAME redefined throw uncaught; see the
-  report). With the fix, completion/handle-key! itself catches it and
-  still returns 1: the buffer keeps its pre-commit text (no newline, no
-  second edit), the popover is closed, and the status bar shows the
-  error."
+  "Forces jonquil.gtk.editor/apply-op! to throw for the duration of one
+  Enter, through commit!'s own call to it -- with-redefs on that var
+  DOES reach the call completion.clj makes through its own `editor`
+  alias (without completion/handle-key!'s own catch, this exact
+  with-redefs, run through editor/handle-key!, crashes the whole selftest
+  process: window.clj's :handle-key! wrapper catches the first throw and
+  returns 0, so editor.clj's own handle-key! falls through to
+  plain-return? -> handle-return!, whose OWN apply-op! call has no
+  try/catch and hits the SAME redefined throw uncaught). With its own
+  catch, completion/handle-key! itself catches it and still returns 1:
+  the buffer keeps its pre-commit text (no newline, no second edit), the
+  popover is closed, and the status bar shows the error."
   [ui next]
   (let [ed (:editor ui) c (:completion ui) status (:status-label ui)]
     (editor/set-text! ed "(ma")
@@ -404,14 +401,12 @@
   through cview/handle-key! -- the SAME precedence-ordered dispatch the
   real key controller uses, never the raw actions, so a regression that
   let Down browse history or Enter evaluate would show up here exactly as
-  it would for a real keystroke (see the report for the failing-first run
-  against a deliberately unordered handle-key!). The reviewer clause:
-  Enter must commit the SECOND candidate (apply-input-op!, one undo step),
-  never evaluate \"(ma\" (unbalanced, so console/input-action would
-  otherwise insert a newline, not evaluate it -- checked anyway, since
-  \"nothing was evaluated\" is the brief's own wording) and never browse
-  history (the history atom itself must come out exactly as history-add
-  left it)."
+  it would for a real keystroke. Enter must commit the SECOND candidate
+  (apply-input-op!, one undo step), never evaluate \"(ma\" (unbalanced,
+  so console/input-action would otherwise insert a newline, not evaluate
+  it -- checked anyway, since nothing here is actually evaluated) and
+  never browse history (the history atom itself must come out exactly as
+  history-add left it)."
   [ui next]
   (let [cv (:console ui) c (:repl-completion ui)
         ctx (:ctx (:session ui))
@@ -452,8 +447,7 @@
   path a real Escape always uses, never completion/close! directly), then
   Up: the popup is really closed (state nil, not left stale-open) and Up
   browses history normally again -- the input becomes the last history
-  entry, not a completion navigation (see the report for the failing-first
-  run against repl-completion left out of the popover registry)."
+  entry, not a completion navigation."
   [ui next]
   (let [cv (:console ui) c (:repl-completion ui)
         ctx (:ctx (:session ui))]
@@ -471,14 +465,13 @@
       (next))))
 
 (defn row-repl-completion-history-symbols
-  "Fix round 1 (Important, review finding): the ORIGINAL version of this
-  row submitted \"(def zork 1)\" as a real REPL entry, which interns zork
-  in `user` -- syntax/get-autocomplete-candidates has its own ns-publics
-  source, entirely independent of :extra-context, so that row passed even
-  with extra-context wired to a constant nil (measured by the reviewer:
-  (docs/candidates 'user \"zo\" \"(zo\" 3 nil) => [\"zork\"]). It proved
-  candidates come from the running namespace, not that history feeds
-  docs/candidates at all.
+  "The ORIGINAL version of this row submitted \"(def zork 1)\" as a real
+  REPL entry, which interns zork in `user` -- syntax/get-autocomplete-
+  candidates has its own ns-publics source, entirely independent of
+  :extra-context, so that row passed even with extra-context wired to a
+  constant nil (measured: (docs/candidates 'user \"zo\" \"(zo\" 3 nil) =>
+  [\"zork\"]). It proved candidates come from the running namespace, not
+  that history feeds docs/candidates at all.
 
   This version puts the symbol ONLY in history text, never evaluated:
   eval/history-add (the exact fn repl-history-context's own :items read,
@@ -568,12 +561,11 @@
       (next))))
 
 (defn row-repl-completion-closes-on-focus-loss
-  "Context bullet #3 (not in the brief's own row table): calls every fn
-  registered on cv's own :on-focus-fns directly -- the SAME ones
-  GtkEventControllerFocus's \"leave\" signal calls -- mirroring
-  row-completion-closes-on-focus-loss, since this self-test window is
-  never the OS's key window and can't move real focus (P4.T3's own
-  has_focus finding)."
+  "Calls every fn registered on cv's own :on-focus-fns directly -- the
+  SAME ones GtkEventControllerFocus's \"leave\" signal calls --
+  mirroring row-completion-closes-on-focus-loss, since this self-test
+  window is never the OS's key window and can't move real focus (P4.T3's
+  own has_focus finding)."
   [ui next]
   (let [cv (:console ui) c (:repl-completion ui)]
     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)

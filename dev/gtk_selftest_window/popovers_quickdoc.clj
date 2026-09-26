@@ -140,28 +140,18 @@
                                   ;; this leaves clean state for later rows
                                   ;; even if close-popovers-fn didn't fire.
                                   ;;
-                                  ;; P4.T4 fix round 1: does NOT unparent pp
-                                  ;; itself, unlike every other throwaway-
-                                  ;; popover row in this file. pp is
-                                  ;; REGISTERED (:register-popover!* above),
-                                  ;; and unparenting a floating-ref GtkWidget
-                                  ;; drops its last reference and finalizes
-                                  ;; it right there (measured: this row used
-                                  ;; to leave a dangling pointer in the
-                                  ;; window's own registry for the rest of
-                                  ;; the run, and window.clj's own new
-                                  ;; unparent-registered-popovers! -- run
-                                  ;; once, for real, at close-request-fn's
-                                  ;; real-quit branch -- then called
-                                  ;; gtk_widget_get_parent on that freed
-                                  ;; pointer: \"Gtk-CRITICAL:
-                                  ;; gtk_widget_get_parent: assertion
-                                  ;; GTK_IS_WIDGET (widget) failed\"). Left
-                                  ;; parented (hidden) here, it stays a
-                                  ;; harmless, invisible, do-nothing widget
-                                  ;; for the rest of the run and is cleaned
-                                  ;; up exactly once, safely, by that same
-                                  ;; function at real window teardown.
+                                  ;; Does NOT unparent pp itself, unlike every other throwaway-popover
+                                  ;; row in this file. pp is REGISTERED (:register-popover!* above), and
+                                  ;; unparenting a floating-ref GtkWidget drops its last reference and
+                                  ;; finalizes it right there, which would leave a dangling pointer in
+                                  ;; the window's own registry for the rest of the run: window.clj's own
+                                  ;; unparent-registered-popovers!, run once for real at close-request-
+                                  ;; fn's real-quit branch, would then call gtk_widget_get_parent on
+                                  ;; that freed pointer and hit \"Gtk-CRITICAL: gtk_widget_get_parent:
+                                  ;; assertion GTK_IS_WIDGET (widget) failed\". Left parented (hidden)
+                                  ;; here, it stays a harmless, invisible, do-nothing widget for the
+                                  ;; rest of the run and is cleaned up exactly once, safely, by that
+                                  ;; same function at real window teardown.
                                   (popover/hide! pp)
                                   (next))))))))
 
@@ -170,11 +160,10 @@
   serialisation (:code-css*, gtk_css_provider_to_string) -- like row-
   theme-css, GTK normalises the theme's hex colours to rgb(r,g,b): dark's
   :background #000000 -> rgb(0,0,0), :selection #3e4451 -> rgb(62,68,81).
-  Fix wave item 5 (M8): extended to assert the rename entry's own rule
-  (popover.jonquil-popover entry) is present too -- same rgb(0,0,0)/
-  rgb(62,68,81) pair, since entry uses :background/:selection same as the
-  rest of the popover, so no new colour value is needed to prove it's
-  there."
+  Also asserts the rename entry's own rule (popover.jonquil-popover
+  entry) is present, with the same rgb(0,0,0)/rgb(62,68,81) pair, since
+  entry uses :background/:selection same as the rest of the popover, so
+  no new colour value is needed to prove it's there."
   [ui next]
   (let [ed (:editor ui) view (:view ed)
         pp (popover/make-popover view {:autohide? false :position :bottom})]
@@ -251,7 +240,7 @@
   since docs/symbol-doc memoises on [ns sym text] and this reuses the
   EXACT SAME key row-quick-doc-run-defined just cached with a real doc,
   this also depends on window.clj's clear-doc-cache! running after the
-  second Run (P4.T2 review's Important)."
+  second Run."
   [ui next]
   (support/run-and-wait! ui "(defn greet \"Says hi.\" [name] name)" 3000
                  (fn [t] (str/includes? t "=> #'user/greet"))
@@ -292,15 +281,15 @@
       (next))))
 
 (defn row-quick-doc-closes-on-focus-loss
-  "P4.T4 fix round 1 (Minor): calls every fn registered on ed's own
-  :on-focus-fns directly -- the SAME ones GtkEventControllerFocus's own
-  \"leave\" signal calls (editor.clj's make-editor) -- rather than trying
-  to move real OS/window focus, which the self-test window can't reliably
-  do (P4.T3's own has_focus finding: this window is never the OS's key
-  window, so has_focus stays false throughout and a real focus transfer
-  can't be observed here the way gtk_root_get_focus's own focus-WITHIN
-  tracking can). Fails first with window.clj's hide-on-focus-lost closure
-  temporarily removed (see the report)."
+  "Calls every fn registered on ed's own :on-focus-fns directly -- the
+  SAME ones GtkEventControllerFocus's own \"leave\" signal calls
+  (editor.clj's make-editor) -- rather than trying to move real OS/window
+  focus, which the self-test window can't reliably do (P4.T3's own
+  has_focus finding: this window is never the OS's key window, so
+  has_focus stays false throughout and a real focus transfer can't be
+  observed here the way gtk_root_get_focus's own focus-WITHIN tracking
+  can). A regression that drops window.clj's hide-on-focus-lost closure
+  would leave the popover open here."
   [ui next]
   (let [ed (:editor ui) hp (:help-popover ui)]
     (editor/set-text! ed "(map inc [1])")
@@ -328,10 +317,9 @@
       (next))))
 
 (defn row-quick-doc-cmd-shift-f1-does-nothing
-  "0xffbe (F1) with SHIFT and META together: shift-only? rejects it (fix
-  round 1 -- it used to check shift-held? alone, so this chord opened
-  quick doc same as plain Shift+F1, measured live before the fix), so
-  the chord falls through unhandled and no popover opens."
+  "0xffbe (F1) with SHIFT and META together: shift-only? rejects it
+  (checking shift-held? alone would treat this chord the same as plain
+  Shift+F1), so the chord falls through unhandled and no popover opens."
   [ui next]
   (let [ed (:editor ui) hp (:help-popover ui)]
     (editor/set-text! ed "(map inc [1])")
@@ -343,18 +331,16 @@
       (next))))
 
 (defn row-quick-doc-after-define
-  "T2 review's Important, widened (context clue #3): a lookup before
-  anything defines the name must not keep serving :not-found once a REPL
-  entry defines it. Looks up quickdocdefme -- a name unique to this row --
-  before anything defines it (help/doc-text's own \"No documentation
-  found\"), defines it through the SAME path the console's Return uses
-  (an interactive insert + handle-return!, never a synthesized key), then
-  looks it up again with the IDENTICAL buffer text: the memo key
-  ([ns sym text]) is the same both times, so this fails if window.clj's
-  clear-doc-cache! call after a completed REPL eval is removed -- verified
-  live (see the report) by removing that call, confirming this row (and
-  quick-doc-after-reset above, which depends on the SAME call site for its
-  own Run) both fail, then restoring it."
+  "A lookup before anything defines the name must not keep serving
+  :not-found once a REPL entry defines it. Looks up quickdocdefme -- a
+  name unique to this row -- before anything defines it (help/doc-text's
+  own \"No documentation found\"), defines it through the SAME path the
+  console's Return uses (an interactive insert + handle-return!, never a
+  synthesized key), then looks it up again with the IDENTICAL buffer
+  text: the memo key ([ns sym text]) is the same both times, so this
+  fails if window.clj's clear-doc-cache! call after a completed REPL eval
+  is removed (quick-doc-after-reset above depends on the same call site
+  for its own Run)."
   [ui next]
   (let [ed (:editor ui) hp (:help-popover ui) cv (:console ui)
         code "(quickdocdefme 1)"]
@@ -400,8 +386,7 @@
 (defn row-jump-local-binding
   "\"(defn f [x] (let [y x] y))\", caret 23 (the LAST y, the usage inside
   the body) -- Ctrl+B (control-only?) lands on the BINDING y inside
-  [y x], offset 18 (measured with the pure spike's help/jump-target, per
-  the brief)."
+  [y x], offset 18 (measured with the pure spike's help/jump-target)."
   [ui next]
   (let [ed (:editor ui)]
     (editor/set-text! ed "(defn f [x] (let [y x] y))")

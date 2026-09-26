@@ -18,9 +18,9 @@
   (#c792ea), [:rainbow 0] (#f78c6c), :unmatched (:red, #f07178), the
   console's :result (#c3e88d) and the find bar's :find-highlight
   (#4d4520); then light's same five (#cf222e, #953800, #cf222e, #0a3069,
-  #fff2a8). Fix wave item 1: also the find bar tag's own foreground-rgba,
-  which must equal the theme's :text (navy #c8cad8, light #24292f) so
-  matched text stays readable on top of the highlight."
+  #fff2a8). Also asserts the find bar tag's own foreground-rgba, which
+  must equal the theme's :text (navy #c8cad8, light #24292f) so matched
+  text stays readable on top of the highlight."
   [ui next]
   (let [ed (:editor ui) cv (:console ui) fb (:find-bar ui)
         kw-tag (get (:tags ed) :keyword)
@@ -56,9 +56,9 @@
 
 (defn row-theme-css
   "dark's code-css (jonquil.theme/code-css) at the default font size, read
-  back from the shared GtkCssProvider's OWN serialisation (fix wave item
-  7: :code-css* now calls gtk_css_provider_to_string instead of reading
-  the code-css atom mirror). Measured (2026-09-26): GTK normalises hex
+  back from the shared GtkCssProvider's OWN serialisation (:code-css*
+  calls gtk_css_provider_to_string, not the code-css atom mirror).
+  Measured (2026-09-26): GTK normalises hex
   colours to rgb(r,g,b) and re-orders/re-indents the declarations, but
   keeps \"font-size: <n>px;\" verbatim -- background-color rgb(0,0,0),
   color rgb(224,224,224), font-size 13px."
@@ -77,12 +77,12 @@
 
 (defn row-theme-prefer-dark
   "GtkSettings' colour scheme, read back via color-scheme-dark?: true for
-  dark's :dark? true, false for solarized's :dark? false. Fix wave item 2:
+  dark's :dark? true, false for solarized's :dark? false.
   gtk-application-prefer-dark-theme is deprecated (GTK 4.20+, a
   g_warning from 4.23.1); apply-window-theme! now sets the replacement,
   gtk-interface-color-scheme, so this row reads that property instead
-  (measured live to darken the chrome exactly as the old boolean did --
-  see ffi.clj's own citation)."
+  (measured to darken the chrome exactly as the old boolean did -- see
+  ffi.clj's own citation)."
   [ui next]
   ((:set-theme!* ui) :dark)
   (let [dark? (g/color-scheme-dark? (g/gtk-settings-get-default))]
@@ -123,8 +123,8 @@
   "A theme switch never touches the find bar's :matches: with the bar open
   on \"foo bar foo\" (matches at [0 3] and [8 11]), switching theme must
   leave both tagged, the count label unchanged, the tag's background
-  retinted (dark's #5c4b00) and, fix wave item 1, its foreground equal to
-  the theme's :text (dark #e0e0e0) so matched text stays readable. Also
+  retinted (dark's #5c4b00) and its foreground equal to the theme's
+  :text (dark #e0e0e0) so matched text stays readable. Also
   checks the search-match tag's tag-table priority against a syntax tag's
   (:special-form, present in the buffer as \"foo\" isn't a token but the
   tag object exists once the editor's paint plan has run) -- GTK's
@@ -160,9 +160,9 @@
   "Zoom and theme reload the SAME shared provider and must not overwrite
   each other's part of the CSS: zoom :in (13->14px), switch to navy (css1:
   14px + navy's #1a1b2e background), zoom :in again (14->16px; css2: 16px
-  and STILL navy's #1a1b2e, not the default theme's). Fix wave item 7:
-  read from the provider's own serialisation (:code-css*), where navy's
-  #1a1b2e prints as rgb(26,27,46) (measured 2026-09-26)."
+  and STILL navy's #1a1b2e, not the default theme's). Also reads from
+  the provider's own serialisation (:code-css*), where navy's #1a1b2e
+  prints as rgb(26,27,46) (measured 2026-09-26)."
   [ui next]
   ((:zoom!* ui) :reset)
   ((:zoom!* ui) :in)
@@ -275,10 +275,9 @@
   java.io.tmpdir and differs from the real one (jonquil.settings/
   settings-path, no env/home override -- the actual production path);
   cycling the theme, which writes to the WINDOW's path, must never touch
-  the real file. Fix wave item 5: checked via .exists/.lastModified/
-  .length only -- never a slurp of the real file's content, which used to
-  read (and, on every check, print) whatever theme the user's own real
-  settings.edn happens to hold."
+  the real file. Checked via .exists/.lastModified/.length only --
+  never a slurp of the real file's content, which would read (and print)
+  whatever theme the user's own real settings.edn happens to hold."
   [ui next]
   (let [window-path ((:settings-path* ui))
         real-path (settings/settings-path)
@@ -360,24 +359,21 @@
                       (next)))))))
 
 (defn row-theme-switch-while-running
-  "The locked status-bar decision (the brief): cycling the theme while a
-  program is running must not overwrite a live Running…/Waiting for input
-  with 'Theme: <name>'. Runs (loop [] (recur)), waits for the status to
-  actually read Running…, cycles the theme, and requires the status to
-  STILL read Running… right after, the theme to have advanced, and Escape
-  (via :handle-window-key!, still the same real Stop path) to still stop
-  the program.
+  "Cycling the theme while a program is running must not overwrite a
+  live Running…/Waiting for input with 'Theme: <name>'. Runs (loop []
+  (recur)), waits for the status to actually read Running…, cycles the
+  theme, and requires the status to STILL read Running… right after, the
+  theme to have advanced, and Escape (via :handle-window-key!, still the
+  same real Stop path) to still stop the program.
 
-  The brief's own row text says 'wait for Ready' at the end; measured
+  Waits for the settled terminal status 'Stopped', never 'Ready': measured
   against make-eval-opts' :on-complete (window.clj), an INTERRUPTED run's
   terminal status is 'Stopped', never 'Ready' -- :on-status-change sets
   'Ready' first (the :idle notification), then :on-complete immediately
   overwrites it with 'Stopped' since (:status result) is :interrupted here.
   'Ready' is only ever the terminal text for a run that finishes on its
-  own (row-run-output's own case). This row waits for the settled terminal
-  status instead, 'Stopped', which is what a poll for 'Ready' would never
-  see after an Escape-stop -- confirmed live: with the literal brief text
-  this row FAILed with :ready false every run."
+  own (row-run-output's own case), which a poll for 'Ready' would never
+  see after an Escape-stop."
   [ui next]
   (let [mark (support/out-end-offset ui)]
     (editor/set-text! (:editor ui) "(loop [] (recur))")

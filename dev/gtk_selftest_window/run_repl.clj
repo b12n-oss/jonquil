@@ -275,9 +275,9 @@
     (support/place-cursor! (:buf ed) (count "(def a 1)\n")) ; the blank line 2
     (let [baseline (support/since ui mark)]
       ((:run-selection!* ui))
-      ;; The brief's one allowed fixed wait: absence has no positive
-      ;; condition to poll for, so this waits out the full window rather
-      ;; than polling for something that should never appear.
+      ;; Absence has no positive condition to poll for, so this waits
+      ;; out the full window rather than polling for something that
+      ;; should never appear.
       (support/later 500
              (fn []
                (let [t (support/since ui mark)]

@@ -43,8 +43,8 @@
                         (next))))))))
 
 (defn row-open-invalid-utf8
-  "I6: a file with a stray non-UTF-8 byte (0xE9, the brief's own example)
-  loads as U+FFFD without throwing; Open must append a :system warning
+  "I6: a file with a stray non-UTF-8 byte (0xE9) loads as U+FFFD without
+  throwing; Open must append a :system warning
   rather than silently accept the loss. Poll for the warning -- same
   on-gui! drain lesson as row-open-refuses-dirty."
   [ui next]

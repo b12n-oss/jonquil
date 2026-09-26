@@ -155,7 +155,7 @@
       (next))))
 
 (defn row-find-survives-repaint
-  "Fix round 1, Important #1: editor.clj's repaint! (60ms debounce after
+  "editor.clj's repaint! (60ms debounce after
   the buffer's own \"changed\" signal) used to strip EVERY tag over the
   whole buffer via gtk_text_buffer_remove_all_tags, including
   search-match -- and since a repaint's own tag-only mutation never fires
@@ -183,7 +183,7 @@
                (next))))))
 
 (defn row-find-preedit-yields
-  "Fix round 1, Important #2: find_bar.clj's handle-key! is a capture-phase
+  "find_bar.clj's handle-key! is a capture-phase
   controller on the bar's own :box, so it used to consume Escape/Return
   before either entry's IM context ever saw it -- setting the atom
   directly proves the yield without needing a real IME, same pattern as
@@ -213,21 +213,20 @@
         (next)))))
 
 (defn row-find-prefill-selects
-  "Fix round 1, Missing requirement: open! must select the whole prefilled
-  query text (per the brief), not just prefill and focus it. Selects
-  \"bar\" in the editor first, so open!'s own prefill (single-line
-  selection) puts exactly that text in the query.
+  "open! must select the whole prefilled query text, not just prefill
+  and focus it. Selects \"bar\" in the editor first, so open!'s own
+  prefill (single-line selection) puts exactly that text in the query.
 
-  Fix round 2: this used to read the query's selection synchronously, in
-  the same tick as open! -- fails intermittently once the bar has already
-  been through an earlier open! cycle (row-find-preedit-yields, right
-  before this one, is exactly such a cycle): open!'s own recompute-matches!
-  selects a match IN THE EDITOR, which revokes GTK's shared primary
-  selection the query had just claimed, and open!'s fix (recompute-matches!
-  now runs before the query's own select_region) makes that a non-issue,
-  but a same-tick read can't tell \"fixed\" apart from \"just hasn't been
-  revoked yet\" -- so this polls with a deadline instead, and genuinely
-  fails (not hangs) if the selection never settles."
+  Reading the query's selection synchronously, in the same tick as
+  open!, fails intermittently once the bar has already been through an
+  earlier open! cycle (row-find-preedit-yields, right before this one,
+  is exactly such a cycle): open!'s own recompute-matches! selects a
+  match IN THE EDITOR, which revokes GTK's shared primary selection the
+  query had just claimed, and open! now runs recompute-matches! before
+  the query's own select_region, but a same-tick read still can't tell
+  \"already settled\" apart from \"just hasn't been revoked yet\" -- so
+  this polls with a deadline instead, and genuinely fails (not hangs) if
+  the selection never settles."
   [ui next]
   (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
     (editor/set-text! ed "foo bar foo baz foo")
@@ -243,19 +242,19 @@
                   (find-bar/close! fb)
                   (next)))))
 
-;; --- P3.T4 fix round 3: Escape via the WINDOW's own dispatch -------------
+;; --- P3.T4: Escape via the WINDOW's own dispatch -------------------------
 ;; (:handle-window-key! ui), never find-bar/handle-key! directly -- these
 ;; rows exercise find-bar-focused?'s own routing, not the bar's internal
 ;; key handling (already covered by find-escape/find-preedit-yields).
 
 (defn row-window-escape-closes-bar-while-running
-  "Fix round 3, Important: window.clj's find-bar-focused? used to compare
-  gtk_root_get_focus against the outer (:query fb)/(:replacement fb)
-  widgets directly, which is always false (fix round 2's own diagnosis:
-  the real focus widget is an entry's internal GtkText delegate, never the
-  entry itself) -- so with a program running and the find bar's query
-  focused, the window's own Escape clause never matched and fell through
-  to Stop, stopping the program instead of closing the bar. Starts a real
+  "window.clj's find-bar-focused? must compare gtk_root_get_focus against
+  the entry's internal GtkText delegate, never the outer (:query fb)/
+  (:replacement fb) widgets directly -- comparing against the outer
+  widgets is always false, so with a program running and the find bar's
+  query focused, the window's own Escape clause would never match and
+  would fall through to Stop, stopping the program instead of closing
+  the bar. Starts a real
   (loop [] (recur)), waits for it to actually be running, opens the find
   bar (which focuses the query), then drives the WINDOW's own key
   dispatch with Escape: the bar must close, focus must return to the
@@ -284,11 +283,10 @@
                                 (fn [_] (next))))))))
 
 (defn row-window-escape-yields-preedit-while-running
-  "Fix round 3: with the find bar's own preedit flag set (fix round 1),
-  window.clj's Escape clause must yield (0) too, not just find-bar/
-  handle-key! in isolation -- the clause now returns handle-key!'s OWN
-  result directly (fix round 1's own change), so this exercises that
-  through the WINDOW dispatch specifically, with a program running.
+  "With the find bar's own preedit flag set, window.clj's Escape clause
+  must yield (0) too, not just find-bar/handle-key! in isolation -- the
+  clause returns handle-key!'s OWN result directly, so this exercises
+  that through the WINDOW dispatch specifically, with a program running.
   Starts a real running program, opens the bar, sets preedit-active?
   true, sends window Escape: must return 0, the bar must stay open, and
   the program must still be running."
@@ -316,8 +314,8 @@
                                 (fn [_] (next))))))))
 
 (defn row-window-escape-stops-when-editor-focused
-  "Fix round 3: Escape must keep its P2 meaning (Stop) when focus is
-  OUTSIDE the find bar -- find-bar-focused? must read false here.
+  "Escape must keep its P2 meaning (Stop) when focus is OUTSIDE the find
+  bar -- find-bar-focused? must read false here.
   Explicitly grabs editor focus (not just relying on whatever an earlier
   row left focused), starts a real running program, sends window Escape:
   the program must stop."
@@ -339,7 +337,7 @@
                                          {:started started? :handled handled :stopped stopped?})
                                   (next))))))))
 
-;; --- P3 fix wave -----------------------------------------------------------
+;; --- P3: find bar caret and key routing ----------------------------------
 
 ;; gtk-keys.md's shared table (gdkkeysyms.h) -- the product's copies are private.
 (def ^:private KEY-F3 0xffc0)

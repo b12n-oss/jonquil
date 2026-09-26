@@ -42,10 +42,9 @@
   "Caret inside the call's own greet, :rename-to!* \"hello\": edit/
   rename's own code-occurrence rule (never a comment, string, regex or
   keyword) renames exactly the defn and the call, one apply-op! (one undo
-  step, checked separately by row-rename-one-undo), status the brief's
-  own wording with the measured plural (2 occurrences, unchanged by the
-  fixture's own :greet/greeting additions -- neither is a code occurrence
-  of greet)."
+  step, checked separately by row-rename-one-undo), status reads the
+  measured plural (2 occurrences, unchanged by the fixture's own
+  :greet/greeting additions -- neither is a code occurrence of greet)."
   [ui next]
   (let [ed (:editor ui) status (:status-label ui)]
     (setup-rename! ed)
@@ -62,10 +61,10 @@
                     (next))))))
 
 (defn row-rename-skips-comments-strings
-  "Same fixture and rename as row-rename-applies, focused on the reviewer
-  clause's own concern (I4): the WHOLE resulting text matches rename-
-  fixture-renamed byte for byte, not just \"still contains ; greet and
-  \\\"greet\\\"\" (true even when rename does nothing at all) -- the comment,
+  "Same fixture and rename as row-rename-applies (I4): the WHOLE
+  resulting text matches rename-fixture-renamed byte for byte, not just
+  \"still contains ; greet and \\\"greet\\\"\" (true even when rename does
+  nothing at all) -- the comment,
   the string, the keyword :greet and the symbol greeting all read back
   unchanged, and only the defn/call are hello now."
   [ui next]
@@ -147,10 +146,9 @@
       (next))))
 
 (defn row-rename-cmd-shift-f6-does-nothing
-  "0xffc3 (F6) with SHIFT and META together: shift-only? rejects it (fix
-  round 1 -- it used to check shift-held? alone, so this chord opened
-  rename same as plain Shift+F6, measured live before the fix), so the
-  chord falls through unhandled and no popover opens."
+  "0xffc3 (F6) with SHIFT and META together: shift-only? rejects it
+  (checking shift-held? alone would treat this chord the same as plain
+  Shift+F6), so the chord falls through unhandled and no popover opens."
   [ui next]
   (let [ed (:editor ui) rp (:rename-popover ui)]
     (editor/set-text! ed "(map inc [1])")
@@ -184,10 +182,10 @@
                     (next))))))
 
 (defn row-menu-actions
-  "The brief's own table row: :activate-menu-action!* for jump, quick-
-  doc, toggle-comment, each against the fixture/caret its own existing
-  row (row-jump-top-level/row-quick-doc-core/dev/gtk_selftest.clj's
-  row-edit-toggle-comment) already established, but fired through the
+  ":activate-menu-action!* for jump, quick-doc, toggle-comment, each
+  against the fixture/caret its own existing row (row-jump-top-level/
+  row-quick-doc-core/dev/gtk_selftest.clj's row-edit-toggle-comment)
+  already established, but fired through the
   editor's own P4 GSimpleActionGroup (g_action_group_activate_action, per
   install-context-menu!'s own docstring) instead of the key."
   [ui next]
@@ -215,10 +213,10 @@
           (next))))))
 
 (defn row-menu-actions-console-complete
-  "Extra row (not in the brief's own table): activates the REPL's own
-  p4.complete (:repl-activate-menu-action!*, the console's own P4 action
-  group) and checks it has the SAME effect Ctrl+Space does -- the
-  completion popover opens over \"(ma\"'s own candidates."
+  "Activates the REPL's own p4.complete (:repl-activate-menu-action!*,
+  the console's own P4 action group) and checks it has the SAME effect
+  Ctrl+Space does -- the completion popover opens over \"(ma\"'s own
+  candidates."
   [ui next]
   (let [cv (:console ui) c (:repl-completion ui)]
     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
@@ -229,16 +227,16 @@
       (next))))
 
 (defn row-menu-action-throw-is-contained
-  "Fix round 1 (Important): forces jonquil.gtk.editor/do-toggle-comment!
-  to throw for one activation (with-redefs, the seam row-completion-
-  commit-throw-consumes-key already proved reaches through a closure the
-  same shape), then activates p4.toggle-comment through :activate-menu-
-  action!*. Without install-context-menu!'s own try/catch, the SAME
-  throw crosses a GSimpleAction \"activate\" callback -- a Jolt foreign-
-  callable -- and kills this whole self-test process (measured live with
-  the fix reverted: exit 1, no SUMMARY). With the fix: the process
-  survives, the status bar shows the error, and the buffer is untouched
-  (do-toggle-comment! throws before any edit is ever applied)."
+  "Forces jonquil.gtk.editor/do-toggle-comment! to throw for one
+  activation (with-redefs, the same seam row-completion-commit-throw-
+  consumes-key reaches through a closure of the same shape), then
+  activates p4.toggle-comment through :activate-menu-action!*. Without
+  install-context-menu!'s own try/catch, the SAME throw crosses a
+  GSimpleAction \"activate\" callback -- a Jolt foreign-callable -- and
+  kills this whole self-test process outright (exit 1, no SUMMARY). With
+  the guard: the process survives, the status bar shows the error, and
+  the buffer is untouched (do-toggle-comment! throws before any edit is
+  ever applied)."
   [ui next]
   (let [ed (:editor ui) status (:status-label ui) activate! (:activate-menu-action!* ui)]
     (editor/set-text! ed "(+ 1 2)")

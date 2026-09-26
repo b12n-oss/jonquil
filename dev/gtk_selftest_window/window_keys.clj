@@ -126,19 +126,17 @@
     (next)))
 
 (defn row-window-key-throw-contained
-  "Fix wave item 1 (I2, parked item a): forces jonquil.gtk.window/do-
-  cycle-theme! to throw for one Cmd+Shift+M, through on-window-key's own
-  theme-cycle-fn call to it (with-redefs on that var reaches the call
-  even though it's unqualified and intra-namespace -- checked live before
-  writing this row, the same way row-completion-commit-throw-consumes-key
-  checked its own cross-namespace seam). Calls the exact fn the
-  \"key-pressed\" signal calls (:handle-window-key!), the same chord
-  row-theme-chord already drives (0x06d + META-MASK/CONTROL-MASK +
-  SHIFT-MASK). Without on-window-key's own try/catch, this exact
-  with-redefs crashed the whole self-test process before this row could
-  even record a result (measured live: no SUMMARY, non-zero exit -- see
-  the report). With the fix: the process survives, the key still counts
-  as consumed (1), and the status bar shows the error."
+  "Forces jonquil.gtk.window/do-cycle-theme! to throw for one Cmd+Shift+M,
+  through on-window-key's own theme-cycle-fn call to it (with-redefs on
+  that var reaches the call even though it's unqualified and intra-
+  namespace, the same seam row-completion-commit-throw-consumes-key
+  checks). Calls the exact fn the \"key-pressed\" signal calls
+  (:handle-window-key!), the same chord row-theme-chord already drives
+  (0x06d + META-MASK/CONTROL-MASK + SHIFT-MASK). Without on-window-key's
+  own try/catch, this exact with-redefs crashes the whole self-test
+  process before this row can even record a result (no SUMMARY, non-zero
+  exit). With the guard: the process survives, the key still counts as
+  consumed (1), and the status bar shows the error."
   [ui next]
   (let [status (:status-label ui)
         handled (with-redefs [window/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
@@ -154,12 +152,11 @@
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 (defn row-command-chord-close
-  "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
-  not idle -- the coordinator's own concern was exactly this combination
-  (the eval worker's on-gui!/cview/append! calls racing gtk_window_close's
-  widget teardown), so this row now starts (loop [] (recur)), waits for it
-  to actually be evaluating, and only then sends the chord. A command
-  chord (Control here) plus W closes the window, which already quits the
+  "Closes WHILE a program is running, not idle, since the eval worker's
+  own on-gui!/cview/append! calls could otherwise race gtk_window_close's
+  widget teardown: this row starts (loop [] (recur)), waits for it to
+  actually be evaluating, and only then sends the chord. A command chord
+  (Control here) plus W closes the window, which already quits the
   app -- gtk_window_close fires the SAME close-request path a real
   close-button click or OS window-close would. Calls the exact fn the
   key-pressed signal calls (window.clj's :handle-window-key!), never a
@@ -174,19 +171,18 @@
   run-rows!'s own destroy-signal fallback (below) now guarantees happens
   either way, pass or fail.
 
-  P4.T4 fix round 2: also opens quick doc (Ctrl+Q on \"loop\") before
-  starting the run, so THIS row's own real close -- the only one in this
-  file that reaches gtk_window_close's actual teardown -- now covers the
-  reviewer's own combination too: a program running AND the quick-doc
-  popover still open when the close chord lands (an ordinary Ctrl+Q then
-  Cmd+Q sequence for a user). :popover-was-open is read right at the
-  close chord itself, alongside started?/handled -- neither of those two
-  pre-existing assertions is weakened; this only adds a third. Nothing
-  here can catch the GTK-CRITICAL a regression would print on its own
-  (it's a log line, not a thrown exception) -- that's still the gates'
-  own stderr grep -- but this makes sure the exact call sequence actually
-  happens inside a real bb gtk:selftest run, not only the report's
-  standalone probe."
+  Also opens quick doc (Ctrl+Q on \"loop\") before starting the run, so
+  THIS row's own real close -- the only one in this file that reaches
+  gtk_window_close's actual teardown -- also covers a program running
+  AND the quick-doc popover still open when the close chord lands (an
+  ordinary Ctrl+Q then Cmd+Q sequence for a user). :popover-was-open is
+  read right at the close chord itself, alongside started?/handled --
+  neither of those two pre-existing assertions is weakened; this only
+  adds a third. Nothing here can catch the GTK-CRITICAL a regression
+  would print on its own (it's a log line, not a thrown exception) --
+  that's still the gates' own stderr grep -- but this makes sure the
+  exact call sequence actually happens inside a real bb gtk:selftest
+  run."
   [ui next]
   (editor/set-text! (:editor ui) "(loop [] (recur))")
   (support/place-cursor! (:buf (:editor ui)) 2)

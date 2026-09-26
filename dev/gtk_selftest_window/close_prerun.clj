@@ -9,13 +9,13 @@
             [jonquil.gtk.ffi :as g]))
 
 (defn row-run-unbalanced [ui next]
-  ;; The brief's literal fixture was "(ok)\n\n(defn f [x]" -- measured against
-  ;; the real engine, (ok) throws an unresolved-symbol error at EVAL time,
-  ;; before load-string's read/eval loop ever reaches the unclosed third
-  ;; form, so the result is a plain :error, never "EOF while reading", and
-  ;; the unclosed-bracket message never fires. (+ 1 1) evaluates cleanly, so
-  ;; the loop advances to read the still-unclosed third form and genuinely
-  ;; hits EOF -- same line-3 shape, the intended code path.
+  ;; A fixture starting "(ok)" would throw an unresolved-symbol error at
+  ;; EVAL time, before load-string's read/eval loop ever reaches the
+  ;; unclosed third form, so the result would be a plain :error, never
+  ;; "EOF while reading", and the unclosed-bracket message would never
+  ;; fire. (+ 1 1) evaluates cleanly, so the loop advances to read the
+  ;; still-unclosed third form and genuinely hits EOF -- same line-3
+  ;; shape, the intended code path.
   (let [mark (support/out-end-offset ui)]
     (editor/set-text! (:editor ui) "(+ 1 1)\n\n(defn f [x]")
     ((:run!* ui))
@@ -98,12 +98,12 @@
   verify the decision logic without a human: index 2 (Cancel) must do
   nothing, leaving the window open, the text unchanged, and still dirty.
 
-  Fix round 1: request-close!* leaves a real, abandoned alert pending
-  (close-choice! is driven synthetically here, never through the real
-  dialog's own completion), so alert-pending? is reset by hand afterward
-  -- otherwise the next dirty close-request row would find one still
-  \"pending\" and never open its own alert at all (row-close-alert-
-  pending-guard's own guard, applied to a row that isn't testing it)."
+  request-close!* leaves a real, abandoned alert pending (close-choice!
+  is driven synthetically here, never through the real dialog's own
+  completion), so alert-pending? is reset by hand afterward -- otherwise
+  the next dirty close-request row would find one still \"pending\" and
+  never open its own alert at all (row-close-alert-pending-guard's own
+  guard, applied to a row that isn't testing it)."
   [ui next]
   (let [ed (:editor ui)]
     (editor/set-text! ed "(+ 1 1)")
@@ -111,9 +111,8 @@
     (let [dirty-before (editor/dirty? ed)
           text-before (editor/editor-text ed)]
       ((:request-close!* ui))
-      ;; P3 fix wave (#7): suppress-close? so a Cancel that wrongly
-      ;; confirmed the close shows up as closing? here instead of ending
-      ;; the run.
+      ;; suppress-close? so a Cancel that wrongly confirmed the close
+      ;; shows up as closing? here instead of ending the run.
       (reset! (:suppress-close? ui) true)
       ((:close-choice! ui) {:index 2})
       (let [dirty-after (editor/dirty? ed)
@@ -136,8 +135,8 @@
   asserted through this test hook rather than an actual close, is the
   row's evidence that the confirm-and-close decision fired.
 
-  Fix round 1: also resets alert-pending? -- see close-dirty-cancel's own
-  note on why."
+  Also resets alert-pending? -- see close-dirty-cancel's own note on
+  why."
   [ui next]
   (let [ed (:editor ui)]
     (editor/set-text! ed "(+ 1 1)")
@@ -161,8 +160,8 @@
   path and, since the save clears dirty?, confirm and close (suppressed,
   same as close-dirty-discard).
 
-  Fix round 1: also resets alert-pending? -- see close-dirty-cancel's own
-  note on why."
+  Also resets alert-pending? -- see close-dirty-cancel's own note on
+  why."
   [ui next]
   (let [ed (:editor ui)
         tmp (str (System/getProperty "java.io.tmpdir")
@@ -219,15 +218,15 @@
                   (support/check :pre-run-stray-closer ok {:console (support/since ui mark)})
                   (next)))))
 
-;; --- P3.T5 fix round 1 ----------------------------------------------------
+;; --- P3.T5: close-alert dialog identity, and the run-while-running warning
 
 (defn row-close-alert-pending-guard
-  "Fix round 1, Important #1 (the guard half): a second close request
-  while the first alert is still pending used to build a SECOND real
-  GtkAlertDialog and silently hand it the shared 'current dialog' state,
-  orphaning the first (row-close-alert-routing, below, covers the other
-  half -- per-dialog completion routing). close-request-fn now refuses to
-  open a second alert while one is pending. Two dirty :request-close!*
+  "The guard half: a second close request while the first alert is still
+  pending must not build a SECOND real GtkAlertDialog and silently hand
+  it the shared 'current dialog' state, orphaning the first
+  (row-close-alert-routing, below, covers the other half -- per-dialog
+  completion routing). close-request-fn refuses to open a second alert
+  while one is pending. Two dirty :request-close!*
   calls in a row must build only ONE real dialog (alert-dialog-count);
   answering that one pending alert with a synthetic Don't Save must still
   confirm the close via :closing?."
@@ -251,14 +250,14 @@
         (next)))))
 
 (defn row-close-alert-routing
-  "Fix round 1, Important #1 (the routing half): the completion callback
-  must route by its OWN dialog identity (src -- GAsyncReadyCallback's own
-  source_object argument for a real dialog), never a shared 'current
-  dialog' atom. Drives complete-alert! directly with two distinct
-  SYNTHETIC \"dialogs\" (plain keywords, never passed to any real GTK
-  call) and a counting release stub swapped in via :alert-release! (so
-  nothing GTK-side is ever touched, per the review's own crash-safety
-  note), completing them in REVERSE registration order -- the shared-atom
+  "The routing half: the completion callback must route by its OWN
+  dialog identity (src -- GAsyncReadyCallback's own source_object
+  argument for a real dialog), never a shared 'current dialog' atom.
+  Drives complete-alert! directly with two distinct SYNTHETIC \"dialogs\"
+  (plain keywords, never passed to any real GTK call) and a counting
+  release stub swapped in via :alert-release! (so nothing GTK-side is
+  ever touched), completing them in REVERSE registration order -- the
+  shared-atom
   bug's exact failure shape: with :dialog-b registered after :dialog-a,
   completing :dialog-b first coincidentally looks right (it IS the
   'current' one), but completing :dialog-a next still uses the STALE
@@ -284,11 +283,11 @@
     (next)))
 
 (defn row-run-while-running-keeps-warning
-  "Fix round 1, Important #2: a Run while one is already running used to
-  run commands/pre-run-problem on the SECOND buffer regardless, so an
-  unbalanced buffer set status to Ready (the FIRST program is still
-  running) and appended a bracket :error into the middle of its output
-  instead of P2's own 'already in progress' warning. Starts (loop []
+  "A Run while one is already running must not run commands/pre-run-
+  problem on the SECOND buffer regardless: an unbalanced second buffer
+  must not set status to Ready (the FIRST program is still running) or
+  append a bracket :error into the middle of its output instead of P2's
+  own 'already in progress' warning. Starts (loop []
   (recur)), waits for it to really be evaluating, THEN sets an unbalanced
   buffer and calls run!* again: the console must show the P2 warning and
   no bracket sentence, and the status must still read the running status,
