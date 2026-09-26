@@ -2190,8 +2190,30 @@
                                   ;; Belt-and-braces: hide! is idempotent, so
                                   ;; this leaves clean state for later rows
                                   ;; even if close-popovers-fn didn't fire.
+                                  ;;
+                                  ;; P4.T4 fix round 1: does NOT unparent pp
+                                  ;; itself, unlike every other throwaway-
+                                  ;; popover row in this file. pp is
+                                  ;; REGISTERED (:register-popover!* above),
+                                  ;; and unparenting a floating-ref GtkWidget
+                                  ;; drops its last reference and finalizes
+                                  ;; it right there (measured: this row used
+                                  ;; to leave a dangling pointer in the
+                                  ;; window's own registry for the rest of
+                                  ;; the run, and window.clj's own new
+                                  ;; unparent-registered-popovers! -- run
+                                  ;; once, for real, at close-request-fn's
+                                  ;; real-quit branch -- then called
+                                  ;; gtk_widget_get_parent on that freed
+                                  ;; pointer: \"Gtk-CRITICAL:
+                                  ;; gtk_widget_get_parent: assertion
+                                  ;; GTK_IS_WIDGET (widget) failed\"). Left
+                                  ;; parented (hidden) here, it stays a
+                                  ;; harmless, invisible, do-nothing widget
+                                  ;; for the rest of the run and is cleaned
+                                  ;; up exactly once, safely, by that same
+                                  ;; function at real window teardown.
                                   (popover/hide! pp)
-                                  (g/gtk-widget-unparent (:popover pp))
                                   (next))))))))
 
 (defn- row-popover-dark-colours
@@ -2311,6 +2333,28 @@
     (let [opened? (popover/open? hp)]
       (place-cursor! (:buf ed) 3)
       (check :quick-doc-closes
+             (and opened? (not (popover/open? hp)))
+             {:opened opened? :still-open (popover/open? hp)})
+      (next))))
+
+(defn- row-quick-doc-closes-on-focus-loss
+  "P4.T4 fix round 1 (Minor): calls every fn registered on ed's own
+  :on-focus-fns directly -- the SAME ones GtkEventControllerFocus's own
+  \"leave\" signal calls (editor.clj's make-editor) -- rather than trying
+  to move real OS/window focus, which the self-test window can't reliably
+  do (P4.T3's own has_focus finding: this window is never the OS's key
+  window, so has_focus stays false throughout and a real focus transfer
+  can't be observed here the way gtk_root_get_focus's own focus-WITHIN
+  tracking can). Fails first with window.clj's hide-on-focus-lost closure
+  temporarily removed (see the report)."
+  [ui next]
+  (let [ed (:editor ui) hp (:help-popover ui)]
+    (editor/set-text! ed "(map inc [1])")
+    (place-cursor! (:buf ed) 2)
+    (editor/handle-key! ed KEY-Q g/CONTROL-MASK)
+    (let [opened? (popover/open? hp)]
+      (doseq [f @(:on-focus-fns ed)] (f))
+      (check :quick-doc-closes-on-focus-loss
              (and opened? (not (popover/open? hp)))
              {:opened opened? :still-open (popover/open? hp)})
       (next))))
@@ -2549,6 +2593,7 @@
    row-quick-doc-run-defined
    row-quick-doc-after-reset
    row-quick-doc-closes
+   row-quick-doc-closes-on-focus-loss
    row-quick-doc-cmd-does-nothing
    row-quick-doc-after-define
    row-jump-top-level

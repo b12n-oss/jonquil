@@ -426,6 +426,35 @@
            :else (cview/append! cv :error (str "; save: " error "\n"))))))
     :else nil))
 
+;; --- popover teardown (P4.T4 fix round 1) -----------------------------
+
+(defn- unparent-registered-popovers!
+  "Unparents every popover in popovers (a jonquil.gtk.popover map) whose
+  GtkWidget parent isn't already null -- gtk_widget_unparent asserts a
+  non-null parent (a critical warning, not a crash, but pointless noise),
+  so an already-unparented entry (a self-test row's own throwaway popover
+  that unparents itself right after hide!, e.g.
+  row-window-escape-closes-popover) is skipped rather than warned at.
+
+  Called from close-request-fn's own REAL-quit branch only (below), right
+  before g_application_quit and the return 0 that lets GTK actually start
+  tearing the window down (close-request-fn's own docstring: \"once it
+  returns 0, GTK proceeds to actually tear the window down\"). A session-
+  lifetime popover (jonquil.gtk.popover's hide! never unparents -- see its
+  ns docstring, an intentional P4.T3 design) is still parented to its
+  scrolled-window parent at that point; without this, GTK's own dispose
+  finds it still there when that widget finalizes and reports \"Finalizing
+  GtkScrolledWindow ..., but it still has children left: GtkPopover ...\"
+  (measured live, P4.T4 fix round 1's own report). Never called from the
+  self-test's suppress-close? branch -- that path returns 1 and never
+  actually closes anything, so unparenting there would silently break
+  every later row's use of the SAME session-lifetime popover."
+  [popovers]
+  (doseq [p @popovers]
+    (let [pop (:popover p)]
+      (when-not (ffi/null? (g/gtk-widget-get-parent pop))
+        (g/gtk-widget-unparent pop)))))
+
 (defn- close-request-fn
   "The window's close-request handler (P3.T5). Dirty and unconfirmed shows
   the alert and suppresses the close (returns 1, GTK does not proceed);
@@ -453,7 +482,7 @@
   still suppresses the close (returns 1), same as any other dirty-and-
   unconfirmed attempt, so the user just sees the same already-open alert
   again instead of a confusing second window."
-  [ed cv win app path-atom confirmed-close? suppress-close? closing?]
+  [ed cv win app path-atom confirmed-close? suppress-close? closing? popovers]
   (fn [_win _data]
     (if (and (editor/dirty? ed) (not @confirmed-close?))
       (do (when-not @alert-pending?
@@ -474,7 +503,13 @@
       (do (reset! closing? true)
           (if @suppress-close?
             (do (reset! confirmed-close? false) 1)
-            (do (g/g-application-quit app) 0))))))
+            ;; P4.T4 fix round 1: unparent every registered P4 popover
+            ;; BEFORE the real quit -- see unparent-registered-popovers!'s
+            ;; own docstring for why this branch specifically, never the
+            ;; suppress-close? one above.
+            (do (unparent-registered-popovers! popovers)
+                (g/g-application-quit app)
+                0))))))
 
 ;; --- Run / Stop ------------------------------------------------------------
 
@@ -1109,7 +1144,7 @@
     (g/gtk-widget-add-controller win keyctl)
     (g/g-signal-connect-data win "close-request"
                              (callable (close-request-fn ed cv win app path confirmed-close?
-                                                         suppress-close? closing?)
+                                                         suppress-close? closing? popovers)
                                        [:pointer :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
