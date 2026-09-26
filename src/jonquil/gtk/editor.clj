@@ -138,6 +138,15 @@
   (swap! (:on-focus-fns ed) conj f)
   nil)
 
+(defn set-error-fn!
+  "Registers f (fn [msg] -> nil), the ui's own error reporter (set-status!
+  on the window's status label), to run whenever a key dispatch or a
+  listener call throws. A single slot, same late-registration shape as
+  set-quick-doc-fn! below -- ed is built before the status label exists."
+  [ed f]
+  (reset! (:on-error-fn ed) f)
+  nil)
+
 (defn set-quick-doc-fn!
   "Registers f (fn [] -> nil), the ui's own :quick-doc!* action, to run
   for the editor's quick-doc chords (Ctrl+Q, Shift+F1). A single slot, not
@@ -578,9 +587,26 @@
 
        :else 0))))
 
+(defn dispatch-key!
+  "Wraps handle-key! so a throw from any dispatch clause is reported
+  through the error hook (set-error-fn!) and the key still counts as
+  consumed (1), instead of escaping into GTK's own signal emission and
+  killing the process. on-key (below) is the real \"key-pressed\" callback
+  and always calls this; a self-test row can call it directly with a
+  synthetic keyval/keycode/state, exactly as on-key does.
+
+  Two arities, mirroring handle-key!'s own."
+  ([ed keyval0 state] (dispatch-key! ed keyval0 0 state))
+  ([ed keyval0 keycode state]
+   (try
+     (handle-key! ed keyval0 keycode state)
+     (catch :default e
+       (when-let [f @(:on-error-fn ed)] (f (str "; key: " (ex-message e))))
+       1))))
+
 (defn- on-key [ed]
   (fn [_ctl keyval keycode state _data]
-    (handle-key! ed keyval keycode state)))
+    (dispatch-key! ed keyval keycode state)))
 
 ;; --- construction ----------------------------------------------------------
 
@@ -620,7 +646,12 @@
             :rename-fn (atom nil)
             ;; P4.T5: single-slot registration for completion -- see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
-            :completion-fns (atom nil)}]
+            :completion-fns (atom nil)
+            ;; Single-slot registration for error reporting -- see
+            ;; set-error-fn!. nil until jonquil.gtk.window wires it, so a
+            ;; throw before that point is silently dropped rather than
+            ;; reported (there is no status label to report it to yet).
+            :on-error-fn (atom nil)}]
     (g/gtk-text-view-set-editable view 1)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
@@ -646,7 +677,11 @@
     (g/g-signal-connect-data buf "notify::cursor-position"
                              (callable (fn [_buf _pspec _data]
                                          (doseq [f @(:on-cursor-fns ed)]
-                                           (f (g/cursor-line-col buf)))
+                                           (try
+                                             (f (g/cursor-line-col buf))
+                                             (catch :default e
+                                               (when-let [ef @(:on-error-fn ed)]
+                                                 (ef (str "; cursor: " (ex-message e)))))))
                                          nil)
                                        [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -667,7 +702,12 @@
     ;; root's focus widget. No signal args beyond instance/user_data.
     (g/g-signal-connect-data focusctl "leave"
                              (callable (fn [_ctl _data]
-                                         (doseq [f @(:on-focus-fns ed)] (f))
+                                         (doseq [f @(:on-focus-fns ed)]
+                                           (try
+                                             (f)
+                                             (catch :default e
+                                               (when-let [ef @(:on-error-fn ed)]
+                                                 (ef (str "; focus: " (ex-message e)))))))
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

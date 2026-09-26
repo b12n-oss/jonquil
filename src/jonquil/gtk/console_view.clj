@@ -225,6 +225,15 @@
   (swap! (:on-focus-fns cv) conj f)
   nil)
 
+(defn set-error-fn!
+  "Registers f (fn [msg] -> nil), the ui's own error reporter (set-status!
+  on the window's status label), to run whenever a key dispatch or a
+  listener call throws. A single slot, mirroring jonquil.gtk.editor/
+  set-error-fn! exactly."
+  [cv f]
+  (reset! (:on-error-fn cv) f)
+  nil)
+
 ;; --- draining output ---------------------------------------------------
 
 (defn- coalesce
@@ -549,9 +558,23 @@
 
       :else 0)))
 
+(defn dispatch-key!
+  "Wraps handle-key! so a throw from any dispatch clause is reported
+  through the error hook (set-error-fn!) and the key still counts as
+  consumed (1), instead of escaping into GTK's own signal emission and
+  killing the process. on-key (below) is the real \"key-pressed\" callback
+  and always calls this; a self-test row can call it directly with a
+  synthetic keyval/state, exactly as on-key does."
+  [cv keyval state]
+  (try
+    (handle-key! cv keyval state)
+    (catch :default e
+      (when-let [f @(:on-error-fn cv)] (f (str "; key: " (ex-message e))))
+      1)))
+
 (defn- on-key [cv]
   (fn [_ctl keyval _keycode state _data]
-    (handle-key! cv keyval state)))
+    (dispatch-key! cv keyval state)))
 
 ;; --- construction ------------------------------------------------------
 
@@ -641,7 +664,10 @@
               ;; lost! registration lists -- see the ns docstring.
               :completion-fns (atom nil)
               :on-input-fns (atom [])
-              :on-focus-fns (atom [])}]
+              :on-focus-fns (atom [])
+              ;; Single-slot registration for error reporting -- see
+              ;; set-error-fn!. nil until jonquil.gtk.window wires it.
+              :on-error-fn (atom nil)}]
       (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
       (g/g-signal-connect-data keyctl "key-pressed"
                                (callable (on-key cv) [:pointer :uint :uint :uint :pointer] :int)
@@ -662,7 +688,12 @@
       ;; for its REPL completion popup.
       (g/g-signal-connect-data buf "notify::cursor-position"
                                (callable (fn [_buf _pspec _data]
-                                           (doseq [f @(:on-input-fns cv)] (f))
+                                           (doseq [f @(:on-input-fns cv)]
+                                             (try
+                                               (f)
+                                               (catch :default e
+                                                 (when-let [ef @(:on-error-fn cv)]
+                                                   (ef (str "; cursor: " (ex-message e)))))))
                                            nil)
                                          [:pointer :pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -670,7 +701,12 @@
       ;; -- see on-focus-lost!'s own docstring.
       (g/g-signal-connect-data focusctl "leave"
                                (callable (fn [_ctl _data]
-                                           (doseq [f @(:on-focus-fns cv)] (f))
+                                           (doseq [f @(:on-focus-fns cv)]
+                                             (try
+                                               (f)
+                                               (catch :default e
+                                                 (when-let [ef @(:on-error-fn cv)]
+                                                   (ef (str "; focus: " (ex-message e)))))))
                                            nil)
                                          [:pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)

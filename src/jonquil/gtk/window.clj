@@ -1413,6 +1413,8 @@
                                          [:pointer :pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (g/g-action-map-add-action app quit-action))
+    (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
+    (cview/set-error-fn! cv (fn [msg] (set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [_dirty] (update-title! ed win path)))
     ;; I4: a dirty->clean transition (a successful Save) re-arms the
     ;; discard warning, so an unrelated LATER dirty streak earns its own.
@@ -1444,7 +1446,10 @@
     (editor/set-rename-fn! ed rename-fn)
     (g/g-signal-connect-data (:entry rename-pop) "activate"
                              (callable (fn [_entry _data]
-                                         (rename-to-fn (help-popover/rename-entry-text rename-pop))
+                                         (try
+                                           (rename-to-fn (help-popover/rename-entry-text rename-pop))
+                                           (catch :default e
+                                             (set-status! status-label (str "; rename: " (ex-message e)))))
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

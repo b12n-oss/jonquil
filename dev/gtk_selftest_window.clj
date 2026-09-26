@@ -2790,6 +2790,29 @@
                             :status (g/label-text status)})
                     (next))))))
 
+(defn- row-plain-return-apply-op-throw-contained
+  "Forces jonquil.gtk.editor/apply-op! to throw for the duration of one
+  plain Return, through handle-return!'s own call to it -- the same
+  with-redefs seam row-completion-commit-throw-consumes-key uses above.
+  Calls editor/dispatch-key!, the exact fn on-key calls (never handle-key!
+  directly, which has no try/catch of its own): the process survives, the
+  key is consumed (1), the buffer keeps its pre-Return text, and the
+  status bar shows the error."
+  [ui next]
+  (let [ed (:editor ui) status (:status-label ui)]
+    (editor/set-text! ed "(+ 1 2)")
+    (place-cursor! (:buf ed) 3)
+    (let [handled (with-redefs [editor/apply-op! (fn [& _] (throw (ex-info "forced return failure" {})))]
+                    (editor/dispatch-key! ed KEY-RETURN 0))
+          text (editor/editor-text ed)]
+      (poll-until 1000 20
+                  (fn [] (str/includes? (g/label-text status) "forced return failure"))
+                  (fn [status-ok?]
+                    (check :plain-return-apply-op-throw-contained
+                           (and (= 1 handled) (= "(+ 1 2)" text) status-ok?)
+                           {:handled handled :text text :status (g/label-text status)})
+                    (next))))))
+
 ;; --- P4.T6: completion in the REPL input -----------------------------------
 
 (defn- row-repl-completion-opens
@@ -3226,6 +3249,31 @@
                            {:status (g/label-text status) :text text})
                     (next))))))
 
+(defn- row-cursor-listener-throw-others-still-run
+  "Registers two on-cursor-moved! listeners: the first throws once, the
+  second flips a flag. Moving the caret proves editor.clj's own
+  notify::cursor-position callback runs each listener in its own try --
+  the second listener's flag still flips even though the first one threw
+  right before it. Each listener stays registered for the rest of the
+  run; the first one only ever throws this once (guarded by its own
+  atom), so later rows are unaffected."
+  [ui next]
+  (let [ed (:editor ui)
+        threw-once? (atom false)
+        ran-second? (atom false)]
+    (editor/set-text! ed "(+ 1 2)")
+    (editor/on-cursor-moved!
+     ed (fn [_lc]
+          (when-not @threw-once?
+            (reset! threw-once? true)
+            (throw (ex-info "forced cursor-listener failure" {})))))
+    (editor/on-cursor-moved! ed (fn [_lc] (reset! ran-second? true)))
+    (place-cursor! (:buf ed) 3)
+    (check :cursor-listener-throw-others-still-run
+           (and @threw-once? @ran-second?)
+           {:threw-once @threw-once? :ran-second @ran-second?})
+    (next)))
+
 (defn- row-command-chord-close
   "P2.T10 fix round 1, Important #1: closes WHILE a program is running,
   not idle -- the coordinator's own concern was exactly this combination
@@ -3380,6 +3428,7 @@
    row-completion-closes-on-focus-loss
    row-completion-closes-other-popover
    row-completion-commit-throw-consumes-key
+   row-plain-return-apply-op-throw-contained
    row-repl-completion-opens
    row-repl-completion-precedence
    row-repl-history-after-close
@@ -3399,6 +3448,7 @@
    row-menu-actions
    row-menu-actions-console-complete
    row-menu-action-throw-is-contained
+   row-cursor-listener-throw-others-still-run
    row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
