@@ -81,7 +81,40 @@
           (doseq [b broken] (println (str "     - " b)))
           (println "   Installing anyway. Until these are clean the hook will")
           (println "   reject every commit; bypass one with: git commit --no-verify")
-          (println)))))
+          (println))))
+
+    ;; --- documentation site -------------------------------------------------
+    ;; The generator lives in jlt-commons/docs-engine, not here, so these
+    ;; tasks are local preview only and are the one place needing that
+    ;; checkout.
+    (def docs-engine-repo "https://github.com/jlt-commons/docs-engine")
+
+    (defn docs-engine-dir
+      "Where the engine is checked out: $JLT_DOCS_ENGINE, else a sibling
+       directory, else the usual spot. nil when none of them exist."
+      []
+      (let [home (System/getProperty "user.home")]
+        (->> [(System/getenv "JLT_DOCS_ENGINE")
+              "../docs-engine"
+              (str home "/dev/jlt-commons/docs-engine")]
+             (remove nil?)
+             (filter (fn [d] (fs/exists? (fs/file d "bb.edn"))))
+             first)))
+
+    (defn site-task
+      "Runs one of the engine's tasks against this project."
+      [task & args]
+      (if-let [engine (docs-engine-dir)]
+        (let [argv (into ["bb" task (str (fs/cwd))] (remove nil? args))
+              res  (apply shell {:dir (str engine) :continue true} argv)]
+          (when-not (zero? (:exit res)) (System/exit (:exit res))))
+        (do
+          (println "The docs engine is not checked out anywhere I looked:")
+          (println "  $JLT_DOCS_ENGINE, ../docs-engine, ~/dev/jlt-commons/docs-engine")
+          (println)
+          (println "  git clone" docs-engine-repo "../docs-engine")
+          (println)
+          (System/exit 1)))))
 
   info
   {:doc "Grouped task cheat-sheet (start here; easier to scan than `tasks`)"
@@ -115,6 +148,10 @@
      (row "hooks:install" "install FAST pre-commit hook (lint errors + format --dry)")
      (row "hooks:install:full" "install FULL pre-commit hook (+ unit tests, slower)")
      (row "hooks:uninstall" "remove the git pre-commit hook")
+     (hdr "Docs (local preview; the engine lives in jlt-commons/docs-engine)")
+     (row "site:build" "build the documentation site into _site/")
+     (row "site:serve [port]" "build, then serve it at http://localhost:3000")
+     (row "site:clean" "delete the _site/ build output")
      (hdr "Upstream")
      (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
      (println (str "\n" (col "2" (str "first run: " runner " check, then " runner " test, then " runner " app:run")))))}
@@ -257,4 +294,17 @@
    :task (let [hook (str/trim (:out (shell {:out :string} "git" "rev-parse" "--git-path" "hooks/pre-commit")))]
            (if (fs/exists? hook)
              (do (fs/delete hook) (println "OK pre-commit hook removed"))
-             (println ">> no pre-commit hook found")))}}}
+             (println ">> no pre-commit hook found")))}
+
+  ;; --- docs -----------------------------------------------------------------
+  site:build
+  {:doc "Build the documentation site into _site/ (needs a docs-engine checkout)"
+   :task (site-task "build")}
+
+  site:serve
+  {:doc "Build the docs site and serve it at http://localhost:3000 (site:serve [port])"
+   :task (site-task "serve" (first *command-line-args*))}
+
+  site:clean
+  {:doc "Delete the _site/ build output"
+   :task (site-task "clean")}}}
