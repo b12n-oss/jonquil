@@ -1320,6 +1320,58 @@
                 {:closed-windows closed-windows :closed-ocr closed-ocr})))
     (stop! {:proc proc :pid pid})))
 
+;; --- D2.T6: the built binary drives an nREPL project --------------------
+
+(defn- nrepl-fixture!
+  "D2.T6: a throwaway nREPL project under out-dir -- deps.edn, .jonquil.edn
+  {:runtime :nrepl}, a .nrepl-port that belongs to someone else (4242), and
+  src/demo/core.clj ending in a call. {:file :dir}."
+  []
+  (let [d (io/file out-dir (str (System/nanoTime) "-nrepl"))
+        f (io/file d "src/demo/core.clj")]
+    (fs/create-dirs (.getParentFile f))
+    (spit (io/file d "deps.edn") "{:paths [\"src\"]}")
+    (spit (io/file d ".jonquil.edn") "{:runtime :nrepl}")
+    (spit (io/file d ".nrepl-port") "4242\n")
+    (spit f "(ns demo.core)\n(defn greet [n] (println \"hi\" n) :hi)\n(greet 1)\n")
+    {:file (.getPath f) :dir d}))
+
+(defn- children-of
+  "The pids whose parent is pid (pgrep -P), as a set."
+  [pid]
+  (->> (str/split-lines (:out (p/sh "pgrep" "-P" (str pid))))
+       (keep parse-long)
+       set))
+
+(defn- pid-alive? [pid]
+  (str/includes? (:out (p/sh "ps" "-p" (str pid) "-o" "pid=")) (str pid)))
+
+(defn- step-nrepl-run-and-close!
+  "D2.T6: the built binary on a {:runtime :nrepl} project. It starts its own
+  Jolt child, F5 prints through it, and Cmd+W quits with that child gone and
+  the project's .nrepl-port back as it was before."
+  []
+  (let [{:keys [file dir]} (nrepl-fixture!)
+        {:keys [proc pid]} (launch! file)]
+    (ensure-window! pid 8000)
+    (let [{ready :ok} (wait-for-ocr! pid 20000 "is running")
+          kids (children-of pid)]
+      (check! :nrepl-starts (and ready (= 1 (count kids))) {:children kids})
+      (cg-key! pid "f5")
+      (let [{:keys [ok last]} (wait-for-ocr! pid 10000 "=> :hi")]
+        (screenshot! pid "nrepl-run")
+        (check! :nrepl-run-output ok {:console last}))
+      (cg-key! pid "command + w")
+      (let [exit (deref proc 10000 ::timeout)]
+        (if (= ::timeout exit)
+          (do (check! :nrepl-close false {:reason "process did not exit within 10000ms"})
+              (stop! {:proc proc :pid pid}))
+          (let [left (filterv pid-alive? kids)
+                port-file (slurp (io/file dir ".nrepl-port"))]
+            (check! :nrepl-close (and (zero? (:exit exit)) (empty? left) (= "4242\n" port-file))
+                    {:exit (:exit exit) :children-left left :port-file port-file})
+            (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v))))))))))
+
 ;; --- driver ----------------------------------------------------------------
 
 (defn- build!
@@ -1360,7 +1412,8 @@
    ["quick-doc" step-quick-doc!]
    ["jump" step-jump!]
    ["rename" step-rename!]
-   ["context-menu" step-context-menu!]])
+   ["context-menu" step-context-menu!]
+   ["nrepl-run-and-close" step-nrepl-run-and-close!]])
 
 (defn -main [& args]
   (let [t0 (System/currentTimeMillis)
