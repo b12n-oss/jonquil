@@ -130,8 +130,8 @@
   own hard breaks decide its line ends instead of an early soft wrap --
   see DOC-WIDTH's own comment) -- mirroring help-popover's own doc popover
   shape, so a long docstring scrolls instead of growing the popover without
-  bound. opts is {:ed :ns-fn :close-others!
-  :on-error :position :snapshot-fn :apply-op!} -- see the ns docstring.
+  bound. opts is {:ed :ns-fn :candidates-fn :doc-fn
+  :close-others! :on-error :position :snapshot-fn :apply-op!} -- see the ns docstring.
   :position is :bottom (default, the editor's own anchor, probe 2) or :top
   (the console's, P4.T6). :snapshot-fn (fn [] -> a snapshot map, optionally
   carrying :extra-context) defaults to (fn [] (editor/snapshot ed)) and is
@@ -139,7 +139,8 @@
   defaults to (fn [result] (editor/apply-op! ed result)) and is the only
   way open!'s single-candidate branch and commit! ever write an edit.
   Returns the jonquil.gtk.popover map ({:popover :view :open?}) plus
-  :ed/:ns-fn/:close-others!/:on-error/:snapshot-fn/:apply-op!/:list-box/
+  :ed/:ns-fn/:candidates-fn/:doc-fn/:close-others!/:on-error/:snapshot-fn/
+  :apply-op!/:list-box/
   :doc-label/:state (an atom, the jonquil.help open-state map, extended
   with :text for render!'s own doc-preview lookup, or nil)."
   [view {:keys [ed ns-fn candidates-fn doc-fn close-others! on-error position snapshot-fn apply-op!]

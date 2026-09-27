@@ -1,8 +1,9 @@
 (ns jonquil.gtk.window
   "The Jonquil window: a toolbar (Run/Stop/Open/Save/Reset-on-Run) over a
   vertical GtkPaned holding the Definitions editor (P2.T5) above the
-  Interactions console (P2.T6), over a status label. Wires jonquil.session's
-  Run and REPL, both over one jonquil.eval context, to the two views.
+  Interactions console (P2.T6), over a status label. Wires the window's
+  jonquil.evaluator (jonquil.session's in-process record by default) to the
+  two views: Run and the REPL both go through it.
 
   Lock caller rule (global.md, jonquil.eval's docstring): on-output,
   on-wait-input, on-status-change and on-complete all run on the eval worker
@@ -1586,7 +1587,10 @@
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :dialect-label dialect-label :sel* sel*}]
-      (show-selection! cv dialect-label @sel*)
+      (try
+        (show-selection! cv dialect-label @sel*)
+        (catch :default e
+          (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       (add-watch path ::dialect
                  (fn [_ _ old new]
                    (when (not= old new)
