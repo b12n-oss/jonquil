@@ -434,7 +434,7 @@ at all.
 Three limits are worth knowing going in. There's no stdin: a program that
 calls `read-line` or `read` gets nil or an EOF straight away. Output
 appears only once an evaluation finishes rather than as it prints
-(jolt-lang/jolt#1153), so a program that prints once a second for ten
+(the jolt-lang/nrepl middleware sends it at the end), so a program that prints once a second for ten
 seconds shows nothing for those ten seconds and then everything at once.
 And jump to definition can't leave the buffer, because the wire op it
 would need for that (`info`) isn't there yet, only `lookup`, which

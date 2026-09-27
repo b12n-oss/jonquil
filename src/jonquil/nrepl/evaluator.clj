@@ -318,7 +318,7 @@
       (catch Throwable _ nil)))
   (limitations [this]
     (cond-> ["No stdin: read-line returns nil and read fails with EOF."
-             "Output appears when an evaluation finishes, not while it runs (jolt-lang/jolt#1153)."
+             "Output appears when an evaluation finishes, not while it runs (the jolt-lang/nrepl middleware sends it at the end)."
              "Jump to definition stays in this buffer: lookup reports no file or line."]
       (and (live? this) (not (contains? (:ops (runtime this)) "interrupt")))
       (conj "Stop restarts the runtime: this server has no interrupt op."))))
