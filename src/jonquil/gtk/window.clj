@@ -37,6 +37,7 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
@@ -571,7 +572,12 @@
                        ;; The window is going away, so the console can't show
                        ;; it; the process's real stderr can.
                        (binding [*out* *err*]
-                         (println "jonquil: stopping the runtime failed:" (ex-message e)))))
+                         (println "jonquil: stopping the runtime failed:" (ex-message e))))
+                     ;; Leaves jonquil.runtime-registry: this evaluator is
+                     ;; stopped (or its stop! call at least ran), so
+                     ;; jonquil.main's stop-all! has nothing left to do for
+                     ;; it once the whole app quits.
+                     (finally (registry/unregister! @ev*)))
                 (g/g-application-quit app)
                 0))))))
 
@@ -616,23 +622,35 @@
   "Makes sel the window's selection. When it needs a different evaluator
   (jonquil.dialect/selection-key), the old one is interrupted and stopped
   off the GTK thread and a new one starts. sel-ctx is {:cv :status-label
-  :dialect-label :sel* :ev* :mode-fn}."
+  :dialect-label :sel* :ev* :mode-fn}.
+
+  The new evaluator joins jonquil.runtime-registry as soon as it's made
+  (so jonquil.main's stop-all! can never miss it, even if the window
+  closes before it ever starts); the old one leaves once it's stopped.
+
+  Fix round 2 (Important): interrupt! and stop! on the old evaluator are
+  two separately-guarded steps, not one try wrapping both -- a throwing
+  interrupt! used to skip stop! entirely and orphan the old child. Each
+  step's own throw is reported and the next step still runs."
   [{:keys [cv status-label dialect-label sel* ev* mode-fn]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
     (when (not= (dialect/selection-key old-sel) (dialect/selection-key sel))
       (let [old @ev*
-            new (ev/make sel)]
+            new (doto (ev/make sel) registry/register!)]
         (ev/set-mode! new (mode-fn))
         (reset! ev* new)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
         (future
           (try (when (ev/evaluating? old) (ev/interrupt! old))
-               (ev/stop! old)
                (catch :default ex
-                 (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))))
+                 (cview/append! cv :error (str "; switch: " (ex-message ex) "\n"))))
+          (try (ev/stop! old)
+               (catch :default ex
+                 (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))
+               (finally (registry/unregister! old))))
         (start-and-report! cv status-label new sel)))))
 
 (defn- make-eval-opts
@@ -1322,9 +1340,10 @@
         ;; and its one evaluator. ev* is an atom because D2.T5 swaps it when
         ;; a file from another runtime opens; every reader derefs it at
         ;; call time. session stays the evaluator the window started with,
-        ;; for the ui map's :session.
+        ;; for the ui map's :session. Joins jonquil.runtime-registry right
+        ;; away, same as every later evaluator apply-selection! makes.
         sel* (atom (select-for file @settings-path*))
-        ev* (atom (ev/make @sel*))
+        ev* (atom (doto (ev/make @sel*) registry/register!))
         session @ev*
         evaluating-fn (fn [] (ev/evaluating? @ev*))
         path (atom file)

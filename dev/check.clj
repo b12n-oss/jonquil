@@ -20,6 +20,7 @@
     jonquil.nrepl.client
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
+    jonquil.runtime-registry
     jonquil.commands
     jonquil.help
     jonquil.gtk.ffi

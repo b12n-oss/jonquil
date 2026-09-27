@@ -18,7 +18,8 @@
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.ops :as ops]))
+            [jonquil.nrepl.ops :as ops])
+  (:import (java.util.concurrent.locks ReentrantLock)))
 
 (def request-timeout-ms
   ;; estimate: describe, clone and the reset form answered in 1-6 ms in the
@@ -50,22 +51,41 @@
   (let [{:keys [child conn]} (runtime ev)]
     (and (child/alive? child) (client/open? conn))))
 
+(defn- teardown!
+  "The actual work, run only by whoever is holding start-lock: kills the
+  child, then closes the socket, if any. Leaves :runtime nil. Kill first:
+  the child's end closing gives the reader its EOF, and a socket closed
+  under a blocked reader never does (measured)."
+  [state]
+  (let [{:keys [child conn]} (:runtime (first (swap-vals! state assoc :runtime nil)))]
+    (child/kill! child)
+    (client/close! conn)
+    nil))
+
 (defn- shutdown-runtime!
-  "Kills the child, then closes the socket, if any. Leaves :runtime nil.
-  Kill first: the child's end closing gives the reader its EOF, and a
-  socket closed under a blocked reader never does (measured). Takes
-  start-lock (reentrant, so start-runtime! can call this on itself)
-  so a start-runtime! that's mid-spawn can't register a runtime this
-  misses: it either runs before start-runtime! grabs the lock (nothing
-  to tear down yet, but the stopped flag it also sets is already up
-  for start-runtime! to see) or after it releases the lock (whatever
-  it just registered is already gone)."
-  [{:keys [start-lock] :as ev}]
-  (locking start-lock
-    (let [{:keys [child conn]} (:runtime (first (swap-vals! (:state ev) assoc :runtime nil)))]
-      (child/kill! child)
-      (client/close! conn)
-      nil)))
+  "Blocks on start-lock (a ReentrantLock, so start-runtime! can call this
+  on itself -- reentrant, same thread -- and restart-for-stop!, already
+  off the GTK thread, can wait out a start already in flight), then
+  tears down. stop! never calls this directly: see try-shutdown-runtime!,
+  its own non-blocking teardown."
+  [{:keys [^ReentrantLock start-lock] :as ev}]
+  (.lock start-lock)
+  (try (teardown! (:state ev))
+       (finally (.unlock start-lock))))
+
+(defn- try-shutdown-runtime!
+  "stop!'s own teardown: a tryLock, never a wait -- so closing a window
+  never blocks the GTK thread on a start that's mid-spawn (start-lock can
+  be held for up to ready-deadline-ms, plus term-grace-ms to tear itself
+  down). Wins the lock and tears down synchronously when nothing else
+  holds it. When it doesn't -- a start is in flight -- returns nil at once
+  and does nothing further: start-runtime! already checks :stopped? right
+  after it registers :runtime and tears down what it just started (see
+  there), so the child still gets killed, just not by this call."
+  [{:keys [^ReentrantLock start-lock] :as ev}]
+  (when (.tryLock start-lock)
+    (try (teardown! (:state ev))
+         (finally (.unlock start-lock)))))
 
 (defn- eval-sync!
   "One eval on conn, waiting for done. The printed value, or throws."
@@ -82,9 +102,13 @@
   "Launches and connects a child if none is live. nil, or a sentence.
   stop! is terminal for the evaluator: once its :stopped? flag is up, no
   new child may start, even one whose spawn/connect/clone was already
-  under way when stop! ran."
-  [{:keys [start-lock] :as ev}]
-  (locking start-lock
+  under way when stop! ran. Holds start-lock for the whole attempt, so
+  try-shutdown-runtime! (stop!'s own non-blocking teardown) can't win the
+  lock while this is spawning, connecting or cloning -- it just leaves
+  the teardown to the check below instead."
+  [{:keys [^ReentrantLock start-lock] :as ev}]
+  (.lock start-lock)
+  (try
     (when-not (live? ev)
       (shutdown-runtime! ev)
       (let [ch (atom nil)]
@@ -96,14 +120,15 @@
                 baseline (read-string (eval-sync! conn sid "(pr-str (mapv ns-name (all-ns)))"))]
             (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops :baseline baseline})
             ;; stop! may have run while this was spawning/connecting/cloning:
-            ;; it can't have torn this down (shutdown-runtime! shares
-            ;; start-lock with this fn), so tear it down here instead.
+            ;; it can't have torn this down (try-shutdown-runtime! only wins
+            ;; the lock once this releases it), so tear it down here instead.
             (when (:stopped? @(:state ev))
               (shutdown-runtime! ev))
             nil)
           (catch Throwable e
             (child/kill! @ch)
-            (str "Couldn't start Jolt over nREPL: " (ex-message e))))))))
+            (str "Couldn't start Jolt over nREPL: " (ex-message e))))))
+    (finally (.unlock start-lock))))
 
 (defn- finish!
   "Ends the running evaluation: idle first, then on-complete, as
@@ -183,9 +208,14 @@
   (stop! [this]
     ;; Terminal: :stopped? stays true for this evaluator's whole life, so
     ;; start-runtime! never registers a child after this point (see there).
+    ;; Never blocks the caller -- the GTK thread, for a real window close --
+    ;; on a start already in flight: try-shutdown-runtime! is a tryLock,
+    ;; and when it loses, start-runtime! itself tears down what it just
+    ;; started once it notices :stopped?.
     (swap! state (fn [s] (cond-> (assoc s :stopped? true)
                            (:running s) (assoc-in [:running :stop-requested?] true))))
-    (shutdown-runtime! this))
+    (try-shutdown-runtime! this)
+    nil)
   (eval! [this code opts]
     ;; A REPL entry is recorded even when refused, as jonquil.session's
     ;; submit-repl! does. Claiming is a swap, never start-lock: a Run pressed
@@ -255,12 +285,15 @@
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result
-  whose :project-dir is set."
+  whose :project-dir is set. start-lock is a ReentrantLock (not a plain
+  Object): shutdown-runtime!/start-runtime! block on it (reentrant, so
+  start-runtime! can call shutdown-runtime! on itself), while stop!'s own
+  try-shutdown-runtime! only ever tries it, never waits."
   [selection]
   (->NRepl selection
            (atom {:mode :reset :prompt-ns 'user :running nil :runtime nil :stopped? false})
            (atom (eval/create-history))
-           (Object.)))
+           (ReentrantLock.)))
 
 (defmethod ev/make :nrepl [selection] (make-nrepl selection))
 
@@ -273,3 +306,13 @@
   "The live child's port, or nil."
   [ev]
   (:port (:child (runtime ev))))
+
+(defn settled?
+  "True once ev holds no start-lock (no start, and no self-teardown a
+  start triggered, is in flight) and names no live child. jonquil.
+  runtime-registry's stop-all! polls this after ev/stop!, which -- unlike
+  this -- never blocks on a start already in flight (see stop!'s own
+  comment)."
+  [{:keys [^ReentrantLock start-lock] :as ev}]
+  (and (not (.isLocked start-lock))
+       (not (child/alive? (:child (runtime ev))))))

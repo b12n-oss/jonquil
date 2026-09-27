@@ -194,6 +194,35 @@
       (finally
         (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
 
+(deftest stop-during-cold-start-returns-fast-test
+  (let [dir (temp-project) e (make dir)
+        real-start child/start!
+        captured (atom nil)]
+    (try
+      (with-redefs [child/start! (fn [d root]
+                                   ;; A cold start (child/start! itself, not
+                                   ;; just the connect/clone after it) takes
+                                   ;; 5s here, well past start-lock's own
+                                   ;; ready-deadline-ms window in spirit --
+                                   ;; long enough that a blocking stop! would
+                                   ;; freeze the GTK thread for real.
+                                   (Thread/sleep 5000)
+                                   (let [c (real-start d root)]
+                                     (reset! captured c)
+                                     c))]
+        (let [start-fut (future (ev/start! e))]
+          (Thread/sleep 500) ;; start-runtime! is now blocked in child/start!, holding start-lock
+          (let [t0 (System/currentTimeMillis)]
+            (ev/stop! e)
+            (let [elapsed (- (System/currentTimeMillis) t0)]
+              (is (< elapsed 200) (str "stop! during a cold start took " elapsed " ms"))))
+          (is (wait-until (fn [] (some? @captured)) 8000) "the delayed start eventually spawned a child")
+          (is (wait-until (fn [] (not (child/alive? @captured))) 8000) "and it's dead, not orphaned")
+          (is (nil? (nrepl/child-pid e)))
+          @start-fut))
+      (finally
+        (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
+
 (deftest double-stop-restarts-once-test
   (let [e (make (temp-project)) done (promise) out (atom [])
         complete-count (atom 0)]

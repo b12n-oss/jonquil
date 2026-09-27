@@ -31,7 +31,8 @@
   ;; Tests that spawn real Jolt nREPL children and need the jolt-lang/nrepl
   ;; checkout. Run with `bb test:nrepl`, not `bb test`.
   '[jonquil.nrepl.child-test
-    jonquil.nrepl.evaluator-test])
+    jonquil.nrepl.evaluator-test
+    jonquil.runtime-registry-test])
 
 (defn -main [& args]
   (let [nss (cond (= ["--live"] args) live-namespaces (seq args) (mapv symbol args) :else test-namespaces)]
