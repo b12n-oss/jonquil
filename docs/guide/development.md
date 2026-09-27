@@ -34,20 +34,34 @@ others can't.
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
-(`dev/gtk_selftest.clj`); the second covers the full application window
-(`dev/gtk_selftest_window.clj`), with its rows split by feature area under
-`dev/gtk_selftest_window/`: `support`, `run_repl`, `files`, `find_replace`,
-`close_prerun`, `window_keys`, `themes`, `popovers_quickdoc`, `completion`,
-`rename_menus`, and `dialects`. The third (`dev/gtk_selftest_nrepl.clj`)
-opens against a throwaway project whose `.jonquil.edn` asks for
-`{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
-cover starting, running, Stop, help, and closing over that live
-connection; it needs the jolt-lang/nrepl checkout the same way
-`bb test:nrepl` does, and records a single failing row rather than
-opening anything if that checkout isn't there. Every row polls a
-condition against a deadline instead of sleeping, and every row resets
-the editor and console before returning control to the driver, so one
-row's leftover state can't leak into the next.
+(`dev/gtk_selftest.clj`, 35 rows); the second covers the full application
+window (`dev/gtk_selftest_window.clj`, 136 rows), with its rows split by
+feature area under `dev/gtk_selftest_window/`: `support`, `run_repl`,
+`files`, `find_replace`, `close_prerun`, `window_keys`, `themes`,
+`popovers_quickdoc`, `completion`, `rename_menus`, `console_layout`, and
+`dialects`. The third (`dev/gtk_selftest_nrepl.clj`, 15 rows) opens against
+a throwaway project whose `.jonquil.edn` asks for `{:runtime :nrepl}`, so a
+real Jolt child runs behind it, and its rows cover starting, running, Stop,
+help, and closing over that live connection; it needs the jolt-lang/nrepl
+checkout the same way `bb test:nrepl` does, and records a single failing
+row rather than opening anything if that checkout isn't there.
+
+Each row is a core.async go block that reads top to bottom instead of a
+chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
+order, and a per-row timeout records a FAIL rather than letting one stuck
+row hang the whole run. The one hard rule underneath every harness: the
+GTK thread never parks. A go block runs on its own OS thread, the default
+`:thread` backend, so every GTK, editor, or console call goes through
+`on-gtk` or an `await-until` predicate from `dev/gtk_async.clj`, both of
+which hop onto the GTK thread and park the go block until the call
+finishes; a row's body never calls GTK directly. When a row throws,
+`go-row` catches it, records a FAIL, and the run moves on to the next row.
+Every row also resets the editor and console before returning control to
+the driver, so one row's leftover state can't leak into the next. Since
+the fix wave that followed the arc-close review, every driver closes its
+window through `gtk-async/close-window-bounded!`, which asks the window to
+close and then waits, bounded, for it to actually go away, rather than
+trusting the close call by itself.
 
 **`bb smoke:binary`** is the one harness that runs outside the GTK process
 under test. It builds `./jonquil` (skip the build with `--no-build`),

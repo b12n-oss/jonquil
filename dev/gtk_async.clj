@@ -101,24 +101,6 @@
               (~record! ~row-id false {:threw (ex-message e#)})
               :threw))))
 
-(defn from-callback
-  "The migration shim: wraps a callback-style row (fn [ui next] ...) as a
-  go-style one (fn [ui] ch). The row starts on the GTK thread, exactly as
-  it did from the old driver, and its (next) puts :done on the channel. A
-  throw from the row's first step records (record! :row-threw false
-  {:threw msg}); a throw from a later GTK callback still ends the process,
-  as it always has."
-  [record! row-fn]
-  (fn [ui]
-    (let [done (promise-chan)]
-      (cb/on-gui!
-       (fn []
-         (try (row-fn ui (fn [] (put! done :done)))
-              (catch :default e
-                (record! :row-threw false {:threw (ex-message e)})
-                (put! done :threw)))))
-      done)))
-
 (defn run-rows
   "Runs steps strictly in order. Each step is a zero-argument fn returning a
   channel, and the next step starts only once that channel delivers or

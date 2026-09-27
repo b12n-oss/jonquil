@@ -1,15 +1,14 @@
 (ns gtk-selftest-window.support
   "Shared plumbing for the window self-test's feature namespaces: the
-  results atom and its `check` recorder, the settings-path/poll/timer
+  results atom and its `check` recorder, the settings-path/console/buffer
   helpers every row is built from, and the key constants more than one
   feature area needs.
 
-  Each row is (fn [ui next] ...): it acts on ui, records exactly one
-  check, then calls (next)."
+  Each row is (fn [ui] ch): a go-row (dev/gtk_async.clj) that records
+  exactly one check and returns a channel."
   (:require [gtk-async :refer [on-gtk await-until]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
-            [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]))
 
@@ -28,21 +27,6 @@
   (str (System/getProperty "java.io.tmpdir")
        "/jonquil-selftest-window-settings-" (System/currentTimeMillis) "-" (System/nanoTime)
        "/settings.edn"))
-
-(defn later [ms f]
-  (g/g-timeout-add ms (cb/callable (fn [_data] (f) 0) [:pointer] :int) ffi/null))
-
-(defn poll-until
-  "Polls (pred?) every interval-ms via g_timeout_add until it's truthy or
-  deadline-ms elapses, then calls (done final-pred-value). Never sleeps."
-  [deadline-ms interval-ms pred? done]
-  (let [t0 (System/currentTimeMillis)]
-    (letfn [(step []
-              (cond
-                (pred?) (done true)
-                (>= (- (System/currentTimeMillis) t0) deadline-ms) (done false)
-                :else (later interval-ms step)))]
-      (step))))
 
 (defn console-text [ui] (g/buffer-text (:buf (:console ui))))
 
@@ -107,37 +91,14 @@
   [buf a b]
   (g/with-iters* buf a b (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2))))
 
-(defn run-and-wait!
-  "editor/set-text! code, run!*, then waits (up to deadline-ms) until BOTH
-  the engine has gone idle AND (expect-fn text-since-start) is true, where
-  text-since-start is the console text from a mark captured right before
-  run!* -- exactly this run's own output, never a prior run's. (done ok
-  mark) is called with the poll's final result and that same mark, so a
-  caller can scope its own further assertions to exactly this run's output.
-
-  I1: engine-idle alone is not enough. The engine flips to idle BEFORE
-  on-complete's own on-gui!-scheduled append lands the result line (the
-  worker resets running-state to idle-state, then only afterward calls
-  on-complete, which enqueues the console append for a later GTK-thread
-  drain) -- so a poll on idle? alone can resolve before the result is
-  actually visible, exactly what reset-vs-accumulate's flaky first-error?
-  false demonstrated."
-  [ui code deadline-ms expect-fn done]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) code)
-    ((:run!* ui))
-    (poll-until deadline-ms 20
-                (fn [] (and (idle? ui) (expect-fn (since ui mark))))
-                (fn [ok] (done ok mark)))))
-
 (defn run-and-await
-  "Go-style run-and-wait!, for a go block. In one GTK step it captures the
-  console's out-end offset, sets the editor to code and Runs it; then it
-  parks until BOTH the engine is idle AND (expect-fn text-since-start) is
-  true, or deadline-ms passes. Returns [ok mark], so a caller can scope its
-  own further assertions to exactly this run's output. I1 (see
-  run-and-wait!): engine-idle alone is not enough, because the result line
-  lands through a later on-gui! drain."
+  "A go-block run step: in one GTK step it captures the console's out-end
+  offset, sets the editor to code and Runs it; then it parks until BOTH
+  the engine is idle AND (expect-fn text-since-start) is true, or
+  deadline-ms passes. Returns [ok mark], so a caller can scope its own
+  further assertions to exactly this run's output. I1: engine-idle alone
+  is not enough, because the result line lands through a later on-gui!
+  drain."
   [ui code deadline-ms expect-fn]
   (let [mark (on-gtk (let [m (out-end-offset ui)]
                        (editor/set-text! (:editor ui) code)
@@ -146,31 +107,14 @@
         ok (await-until deadline-ms 20 #(and (idle? ui) (expect-fn (since ui mark))))]
     [ok mark]))
 
-(defn wait-stable-height
-  "Polls widget's natural-height (probe 4's numeric proxy for \"did the CSS
-  font-size actually apply\") until two consecutive reads 20ms apart agree,
-  up to deadline-ms, then calls (done height). Probe 4 measured
-  gtk_widget_measure answering a value from BEFORE the most recent
-  change (a CSS reload, or here also a big buffer deletion just before
-  this row from row-clear-console) until GTK runs at least one more
-  main-loop layout pass; polling for the reading to settle -- rather than
-  trusting a single synchronous read -- waits that out without a fixed
-  sleep."
-  [widget deadline-ms done]
-  (let [prev (atom ::none)]
-    (poll-until deadline-ms 20
-                (fn []
-                  (let [cur (g/natural-height widget)
-                        stable? (= cur @prev)]
-                    (reset! prev cur)
-                    stable?))
-                (fn [_] (done @prev)))))
-
 (defn await-stable-height
-  "Go-style wait-stable-height: parks until widget's natural height reads
-  the same on two consecutive checks 20ms apart, or deadline-ms passes, and
-  returns the last height read. See wait-stable-height for why a single
-  synchronous read isn't enough (probe 4)."
+  "Parks until widget's natural height reads the same on two consecutive
+  checks 20ms apart, or deadline-ms passes, and returns the last height
+  read. A single synchronous read isn't enough: probe 4 measured
+  gtk_widget_measure answering a value from BEFORE the most recent change
+  (a CSS reload, or a big buffer deletion just before this row from
+  row-clear-console) until GTK runs at least one more main-loop layout
+  pass."
   [widget deadline-ms]
   (let [prev (atom ::none)]
     (await-until deadline-ms 20
