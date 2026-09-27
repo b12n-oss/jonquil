@@ -14,4 +14,10 @@
  ;; code is a category error: measured, they contribute 10 parse and
  ;; unresolved-symbol errors that have nothing to do with Jonquil's code and
  ;; would keep `lint:strict` and the pre-commit hook permanently red.
- :output {:exclude-files ["dev/smoke/fixtures/"]}}
+ :output {:exclude-files ["dev/smoke/fixtures/"]}
+
+ ;; clojure.core.async is built into Jolt (the dev harnesses' go driver,
+ ;; dev/gtk_async.clj, and its rows use it), so it's on no classpath
+ ;; clj-kondo can analyse, and every referred or alias-qualified var reads
+ ;; as unresolved. Measured: 17 such warnings after the go driver landed.
+ :linters {:unresolved-var {:exclude [clojure.core.async]}}}
