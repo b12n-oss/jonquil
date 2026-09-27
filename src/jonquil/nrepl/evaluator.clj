@@ -53,12 +53,19 @@
 (defn- shutdown-runtime!
   "Kills the child, then closes the socket, if any. Leaves :runtime nil.
   Kill first: the child's end closing gives the reader its EOF, and a
-  socket closed under a blocked reader never does (measured)."
-  [ev]
-  (let [{:keys [child conn]} (:runtime (first (swap-vals! (:state ev) assoc :runtime nil)))]
-    (child/kill! child)
-    (client/close! conn)
-    nil))
+  socket closed under a blocked reader never does (measured). Takes
+  start-lock (reentrant, so start-runtime! can call this on itself)
+  so a start-runtime! that's mid-spawn can't register a runtime this
+  misses: it either runs before start-runtime! grabs the lock (nothing
+  to tear down yet, but the stopped flag it also sets is already up
+  for start-runtime! to see) or after it releases the lock (whatever
+  it just registered is already gone)."
+  [{:keys [start-lock] :as ev}]
+  (locking start-lock
+    (let [{:keys [child conn]} (:runtime (first (swap-vals! (:state ev) assoc :runtime nil)))]
+      (child/kill! child)
+      (client/close! conn)
+      nil)))
 
 (defn- eval-sync!
   "One eval on conn, waiting for done. The printed value, or throws."
@@ -72,7 +79,10 @@
         (throw (ex-info (or (:error-text res) "evaluation failed") {}))))))
 
 (defn- start-runtime!
-  "Launches and connects a child if none is live. nil, or a sentence."
+  "Launches and connects a child if none is live. nil, or a sentence.
+  stop! is terminal for the evaluator: once its :stopped? flag is up, no
+  new child may start, even one whose spawn/connect/clone was already
+  under way when stop! ran."
   [{:keys [start-lock] :as ev}]
   (locking start-lock
     (when-not (live? ev)
@@ -85,6 +95,11 @@
                 sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))
                 baseline (read-string (eval-sync! conn sid "(pr-str (mapv ns-name (all-ns)))"))]
             (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops :baseline baseline})
+            ;; stop! may have run while this was spawning/connecting/cloning:
+            ;; it can't have torn this down (shutdown-runtime! shares
+            ;; start-lock with this fn), so tear it down here instead.
+            (when (:stopped? @(:state ev))
+              (shutdown-runtime! ev))
             nil)
           (catch Throwable e
             (child/kill! @ch)
@@ -166,7 +181,10 @@
   ev/Evaluator
   (start! [this] (start-runtime! this))
   (stop! [this]
-    (swap! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))
+    ;; Terminal: :stopped? stays true for this evaluator's whole life, so
+    ;; start-runtime! never registers a child after this point (see there).
+    (swap! state (fn [s] (cond-> (assoc s :stopped? true)
+                           (:running s) (assoc-in [:running :stop-requested?] true))))
     (shutdown-runtime! this))
   (eval! [this code opts]
     ;; A REPL entry is recorded even when refused, as jonquil.session's
@@ -184,17 +202,23 @@
       ;; No :id yet means the request hasn't gone out: run-worker! sees the
       ;; flag and finishes as :interrupted without sending it.
       (when id
-        (future
-          (let [{:keys [conn session ops]} (runtime this)
-                answered? (and (contains? ops "interrupt")
-                               (vector? (client/request-sync conn {:op "interrupt" :session session :interrupt-id id}
-                                                             interrupt-timeout-ms)))
-                ended? (and answered?
-                            (loop [n 0]
-                              (cond (not (:running @state)) true
-                                    (>= (* n 20) interrupt-timeout-ms) false
-                                    :else (do (Thread/sleep 20) (recur (inc n))))))]
-            (when-not ended? (restart-for-stop! this (:on-output opts)))))))
+        ;; Only the first interrupt! for this running id sends anything or
+        ;; can restart: a CAS on :restart-triggered? per the current
+        ;; :running map, so repeated Stop presses don't each trigger their
+        ;; own restart.
+        (let [[old _] (swap-vals! state assoc-in [:running :restart-triggered?] true)]
+          (when-not (get-in old [:running :restart-triggered?])
+            (future
+              (let [{:keys [conn session ops]} (runtime this)
+                    answered? (and (contains? ops "interrupt")
+                                   (vector? (client/request-sync conn {:op "interrupt" :session session :interrupt-id id}
+                                                                 interrupt-timeout-ms)))
+                    ended? (and answered?
+                                (loop [n 0]
+                                  (cond (not (:running @state)) true
+                                        (>= (* n 20) interrupt-timeout-ms) false
+                                        :else (do (Thread/sleep 20) (recur (inc n))))))]
+                (when-not ended? (restart-for-stop! this (:on-output opts)))))))))
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] false)
@@ -206,8 +230,8 @@
   (complete [this prefix text pos extra-context]
     (let [offline (docs/candidates 'user prefix text pos extra-context)]
       (try
-        (let [{:keys [conn session]} (runtime this)
-              r (when (live? this)
+        (let [{:keys [child conn session]} (runtime this)
+              r (when (and (child/alive? child) (client/open? conn))
                   (client/request-sync conn {:op "completions" :prefix prefix
                                              :ns (str (:prompt-ns @state)) :session session}
                                        help-timeout-ms))]
@@ -215,8 +239,8 @@
         (catch Throwable _ offline))))
   (lookup [this sym text pos]
     (try
-      (or (let [{:keys [conn]} (runtime this)
-                r (when (and (live? this) (contains? (:ops (runtime this)) "lookup"))
+      (or (let [{:keys [child conn ops]} (runtime this)
+                r (when (and (child/alive? child) (client/open? conn) (contains? ops "lookup"))
                     (client/request-sync conn {:op "lookup" :sym sym :ns (str (:prompt-ns @state))}
                                          help-timeout-ms))]
             (when (vector? r) (ops/doc-info sym r)))
@@ -234,7 +258,7 @@
   whose :project-dir is set."
   [selection]
   (->NRepl selection
-           (atom {:mode :reset :prompt-ns 'user :running nil :runtime nil})
+           (atom {:mode :reset :prompt-ns 'user :running nil :runtime nil :stopped? false})
            (atom (eval/create-history))
            (Object.)))
 

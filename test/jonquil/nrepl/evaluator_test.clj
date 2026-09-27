@@ -167,3 +167,51 @@
           (is (= :interrupted (:status (deref done 5000 :timeout))))
           (is (wait-until (fn [] (let [p (nrepl/child-pid e)] (and p (not= p pid)))) 10000) "restarted"))
         (finally (ev/stop! e))))))
+
+(deftest stop-during-start-leaves-no-child-test
+  (let [dir (temp-project) e (make dir)
+        release (promise)
+        real-start child/start!
+        captured (atom nil)]
+    (try
+      (with-redefs [child/start! (fn [d root]
+                                   ;; Blocks the spawn step so the test can call
+                                   ;; stop! while start-runtime! is still inside it.
+                                   (deref release 5000 nil)
+                                   (let [c (real-start d root)]
+                                     (reset! captured c)
+                                     c))]
+        (let [start-fut (future (ev/start! e))]
+          (Thread/sleep 300) ;; start-runtime! is now blocked in child/start!, holding start-lock
+          (let [stop-fut (future (ev/stop! e))]
+            (Thread/sleep 200) ;; stop! has set its stopping flag and is now blocked on start-lock
+            (deliver release true)
+            @start-fut
+            @stop-fut))
+        (is (wait-until (fn [] (some? @captured)) 5000) "a child was spawned")
+        (is (wait-until (fn [] (not (child/alive? @captured))) 3000) "and it's dead, not orphaned")
+        (is (nil? (nrepl/child-pid e))))
+      (finally
+        (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
+
+(deftest double-stop-restarts-once-test
+  (let [e (make (temp-project)) done (promise) out (atom [])
+        complete-count (atom 0)]
+    (try
+      (ev/start! e)
+      (let [pid (nrepl/child-pid e)]
+        (ev/eval! e "(loop [] (recur))" {:run? false
+                                         :on-output (fn [k s] (swap! out conj [k s]))
+                                         :on-complete (fn [r] (swap! complete-count inc) (deliver done r))})
+        (Thread/sleep 300)
+        (shell/sh "kill" "-STOP" (str pid))
+        (ev/interrupt! e)
+        (ev/interrupt! e)
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 10000 :timeout))))
+        (is (wait-until (fn [] (some? (nrepl/child-pid e))) 10000) "a new child")
+        (Thread/sleep 300)
+        (is (= 1 (count (filter (fn [[_ s]] (str/includes? s "Stop restarted the Jolt runtime")) @out)))
+            "exactly one restart line for three presses")
+        (is (= 1 @complete-count) "on-complete fires once"))
+      (finally (ev/stop! e)))))
