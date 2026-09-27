@@ -21,10 +21,18 @@
     (.getCanonicalPath f)))
 
 (defn- open-then-run
-  "Opens a fresh project's file, then Runs (+ 1 2). Passes when the run
+  "Opens a fresh project's file, then Runs (+ 1 2). opts is {:row :config
+  :expect} (:row the check keyword, :config .jonquil.edn text or nil,
+  :expect the substring warned must hold, or nil). Passes when the run
   printed => 3, the label still reads Jolt, the evaluator is the same
   one, and the console since the open holds expect (a string) or, for
-  nil, no \"; project:\" line at all.
+  nil, no \"; project:\" line at all. ui and next stay positional (the
+  same [ui next] shape every row-fn in this whole self-test suite uses,
+  ui first since it's the structural thing every helper acts on, next
+  last since it's the continuation), but :row/:config/:expect -- the
+  actual per-call configuration -- go in an explicit map, the same shape
+  jonquil.gtk.completion/make-completion's own opts uses, rather than
+  three more positional slots a caller has to count.
 
   Deviation from the brief's verbatim code (reported; see the report):
   cview/append! (window.clj's show-selection!, called synchronously from
@@ -38,7 +46,7 @@
   has gone idle -- by then the main loop has ticked many times, and every
   other row's own on-gui!-deferred output (the run's banner, its own
   \"=> 3\") is already proven to land reliably by that same point."
-  [ui row config expect next]
+  [ui {:keys [row config expect]} next]
   (let [file (temp-project! config)
         mark (support/out-end-offset ui)
         before ((:evaluator* ui))]
@@ -71,13 +79,16 @@
   (next))
 
 (defn row-project-config-malformed-warns [ui next]
-  (open-then-run ui :project-config-malformed-warns "{:runtime"
-                 "; project: .jonquil.edn isn't valid EDN, so it is ignored" next))
+  (open-then-run ui {:row :project-config-malformed-warns
+                     :config "{:runtime"
+                     :expect "; project: .jonquil.edn isn't valid EDN, so it is ignored"}
+                 next))
 
 (defn row-project-config-unknown-runtime-warns [ui next]
-  (open-then-run ui :project-config-unknown-runtime-warns "{:runtime :bogus}"
-                 "; project: .jonquil.edn asks for runtime :bogus, which Jolt doesn't offer here; using in-process"
+  (open-then-run ui {:row :project-config-unknown-runtime-warns
+                     :config "{:runtime :bogus}"
+                     :expect "; project: .jonquil.edn asks for runtime :bogus, which Jolt doesn't offer here; using in-process"}
                  next))
 
 (defn row-project-open-keeps-evaluator [ui next]
-  (open-then-run ui :project-open-keeps-evaluator nil nil next))
+  (open-then-run ui {:row :project-open-keeps-evaluator :config nil :expect nil} next))
