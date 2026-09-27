@@ -50,7 +50,7 @@
    run-repl/row-run-while-running
    run-repl/row-stdin-roundtrip
    run-repl/row-stop-while-reading
-   (shim close-prerun/row-run-unbalanced)
+   close-prerun/row-run-unbalanced
    run-repl/row-reset-vs-accumulate
    run-repl/row-repl-after-run
    run-repl/row-fast-repl-twice
@@ -58,7 +58,7 @@
    run-repl/row-console-history-down-empty
    (shim window-keys/row-escape-yields-when-idle)
    (shim window-keys/row-command-chord-capslock)
-   (shim close-prerun/row-repl-eof-no-editor-hint)
+   close-prerun/row-repl-eof-no-editor-hint
    (shim files/row-open-refuses-dirty)
    (shim files/row-open-invalid-utf8)
    (shim files/row-save-atomic)
@@ -85,27 +85,27 @@
    (shim find-replace/row-find-survives-repaint)
    (shim find-replace/row-find-preedit-yields)
    (shim find-replace/row-find-prefill-selects)
-   (shim close-prerun/row-line-col)
-   (shim close-prerun/row-close-clean)
-   (shim close-prerun/row-close-dirty-cancel)
-   (shim close-prerun/row-close-dirty-discard)
-   (shim close-prerun/row-close-dirty-save)
-   (shim close-prerun/row-pre-run-hidden-by-error)
-   (shim close-prerun/row-pre-run-stray-closer)
-   (shim close-prerun/row-close-alert-pending-guard)
-   (shim close-prerun/row-close-alert-routing)
-   (shim close-prerun/row-run-while-running-keeps-warning)
+   close-prerun/row-line-col
+   close-prerun/row-close-clean
+   close-prerun/row-close-dirty-cancel
+   close-prerun/row-close-dirty-discard
+   close-prerun/row-close-dirty-save
+   close-prerun/row-pre-run-hidden-by-error
+   close-prerun/row-pre-run-stray-closer
+   close-prerun/row-close-alert-pending-guard
+   close-prerun/row-close-alert-routing
+   close-prerun/row-run-while-running-keeps-warning
    (shim find-replace/row-window-escape-closes-bar-while-running)
    (shim find-replace/row-window-escape-yields-preedit-while-running)
    (shim find-replace/row-window-escape-stops-when-editor-focused)
    (shim find-replace/row-find-typing-keeps-caret)
    (shim find-replace/row-find-return-in-replacement)
    (shim find-replace/row-window-find-keys-editor-focused)
-   (shim close-prerun/row-line-col-typing)
-   (shim close-prerun/row-close-dismissed)
-   (shim close-prerun/row-close-save-failed)
-   (shim close-prerun/row-close-alert-build-throws)
-   (shim close-prerun/row-quit-action-prompts)
+   close-prerun/row-line-col-typing
+   close-prerun/row-close-dismissed
+   close-prerun/row-close-save-failed
+   close-prerun/row-close-alert-build-throws
+   close-prerun/row-quit-action-prompts
    (shim themes/row-theme-retints-tags)
    (shim themes/row-theme-css)
    (shim themes/row-theme-prefer-dark)
