@@ -59,14 +59,14 @@
    (shim window-keys/row-escape-yields-when-idle)
    (shim window-keys/row-command-chord-capslock)
    close-prerun/row-repl-eof-no-editor-hint
-   (shim files/row-open-refuses-dirty)
-   (shim files/row-open-invalid-utf8)
-   (shim files/row-save-atomic)
-   (shim files/row-save-follows-symlink)
-   (shim files/row-save-executable-keeps-mode)
-   (shim files/row-save-failure-leaves-original-intact)
-   (shim files/row-dialog-dismissed-silent)
-   (shim files/row-save-and-open)
+   files/row-open-refuses-dirty
+   files/row-open-invalid-utf8
+   files/row-save-atomic
+   files/row-save-follows-symlink
+   files/row-save-executable-keeps-mode
+   files/row-save-failure-leaves-original-intact
+   files/row-dialog-dismissed-silent
+   files/row-save-and-open
    run-repl/row-run-selection-line
    run-repl/row-run-selection-sel
    run-repl/row-run-selection-blank
@@ -163,17 +163,17 @@
    completion/row-repl-completion-closes-on-focus-loss
    completion/row-repl-completion-keys-reach-console
    completion/row-repl-completion-closes-on-space
-   (shim rename-menus/row-rename-applies)
-   (shim rename-menus/row-rename-skips-comments-strings)
-   (shim rename-menus/row-rename-one-undo)
-   (shim rename-menus/row-rename-invalid)
-   (shim rename-menus/row-rename-keys)
-   (shim rename-menus/row-rename-cmd-does-nothing)
-   (shim rename-menus/row-rename-cmd-shift-f6-does-nothing)
-   (shim rename-menus/row-rename-closed-signal-syncs)
-   (shim rename-menus/row-menu-actions)
-   (shim rename-menus/row-menu-actions-console-complete)
-   (shim rename-menus/row-menu-action-throw-is-contained)
+   rename-menus/row-rename-applies
+   rename-menus/row-rename-skips-comments-strings
+   rename-menus/row-rename-one-undo
+   rename-menus/row-rename-invalid
+   rename-menus/row-rename-keys
+   rename-menus/row-rename-cmd-does-nothing
+   rename-menus/row-rename-cmd-shift-f6-does-nothing
+   rename-menus/row-rename-closed-signal-syncs
+   rename-menus/row-menu-actions
+   rename-menus/row-menu-actions-console-complete
+   rename-menus/row-menu-action-throw-is-contained
    (shim dialects/row-dialect-label-default)
    (shim dialects/row-evaluator-is-the-session)
    (shim dialects/row-project-config-malformed-warns)
