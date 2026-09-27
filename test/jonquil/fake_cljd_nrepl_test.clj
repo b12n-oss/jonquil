@@ -30,8 +30,18 @@
                                                    :file-path "/p/c/d.cljd" :file-name "d.cljd" :session sid} 2000)))))
         (testing "in-ns is refused"
           (is (= [{:err fake/in-ns-err :status ["done" "eval-error"]}]
-                 (strip (client/request-sync conn {:op "eval" :code "(in-ns 'x)" :session sid} 2000))))))
-      (is (= ["describe" "clone" "eval" "eval" "eval" "load-file" "eval"] (fake/ops-seen srv)))
+                 (strip (client/request-sync conn {:op "eval" :code "(in-ns 'x)" :session sid} 2000)))))
+        (testing "defn in cljd.user is refused; defn in another namespace still answers the closure string"
+          (let [sid2 (:new-session (first (client/request-sync conn {:op "clone"} 2000)))]
+            (is (= [{:out fake/banner} {:ns "cljd.user"} {:err fake/defn-in-cljd-user-err :status ["done" "eval-error"]}]
+                   (strip (client/request-sync conn {:op "eval" :code "(defn g [])" :session sid2} 2000))))
+            (is (= [{:err fake/defn-in-cljd-user-err :status ["done" "eval-error"]}]
+                   (strip (client/request-sync conn {:op "eval" :code "(defn- g [])" :session sid2} 2000))))
+            (client/request-sync conn {:op "eval" :code "(ns c.d)" :session sid2} 2000)
+            (is (= [{:value "Closure: () => dynamic from Function 'g': static."} {:ns "c.d"} {:status ["done"]}]
+                   (strip (client/request-sync conn {:op "eval" :code "(defn g [])" :session sid2} 2000)))))))
+      (is (= ["describe" "clone" "eval" "eval" "eval" "load-file" "eval" "clone" "eval" "eval" "eval" "eval"]
+             (fake/ops-seen srv)))
       (finally (client/close! conn) (fake/stop! srv)))))
 
 (deftest fake-prints-and-looks-up-test
@@ -58,3 +68,55 @@
     (is (not (client/open? conn)))
     (fake/stop! srv)
     (is (thrown? java.io.IOException (client/connect (:port srv))) "stopped: the port refuses")))
+
+(deftest fake-drop-connections-test
+  (let [srv (fake/start!)
+        conn (client/connect (:port srv))
+        sid (:new-session (first (client/request-sync conn {:op "clone"} 2000)))]
+    (fake/drop-connections! srv)
+    (is (= [{:status ["done" "jonquil-disconnected"]}]
+           (strip (client/request-sync conn {:op "eval" :code "1" :session sid} 2000)))
+        "the server dropping every client reads the same way as an app that quits")
+    (fake/stop! srv)))
+
+(deftest fake-ops-override-test
+  (let [srv (fake/start! {:ops ["describe" "clone"]})
+        conn (client/connect (:port srv))]
+    (is (= #{"describe" "clone"} (ops/op-names (client/request-sync conn {:op "describe"} 2000))))
+    (client/close! conn)
+    (fake/stop! srv)))
+
+(deftest fake-slow-test
+  (let [srv (fake/start! {:slow {"(slow)" 200}})
+        conn (client/connect (:port srv))
+        sid (:new-session (first (client/request-sync conn {:op "clone"} 2000)))
+        _ (client/request-sync conn {:op "eval" :code "1" :session sid} 2000)
+        start (System/currentTimeMillis)]
+    (is (= [{:value ":ok"} {:ns "cljd.user"} {:status ["done"]}]
+           (strip (client/request-sync conn {:op "eval" :code "(slow)" :session sid} 2000))))
+    (is (<= 200 (- (System/currentTimeMillis) start)) "the reply is delayed by :slow's ms")
+    (client/close! conn)
+    (fake/stop! srv)))
+
+(deftest fake-asleep-for-test
+  (let [srv (fake/start! {:asleep-for 1})
+        conn (client/connect (:port srv))
+        sid (:new-session (first (client/request-sync conn {:op "clone"} 2000)))]
+    (is (= [{:out fake/banner} {:ns "cljd.user"} {:value "nil"} {:ns "cljd.user"} {:status ["done"]}]
+           (strip (client/request-sync conn {:op "eval" :code "(+ 1 2)" :session sid} 2000)))
+        "the first request answers nil without evaluating")
+    (is (= [{:value "3"} {:ns "cljd.user"} {:status ["done"]}]
+           (strip (client/request-sync conn {:op "eval" :code "(+ 1 2)" :session sid} 2000)))
+        "the next request evaluates for real")
+    (client/close! conn)
+    (fake/stop! srv)))
+
+(deftest fake-mute-test
+  (let [srv (fake/start! {:mute? true})
+        conn (client/connect (:port srv))]
+    (client/request! conn {:op "describe"} (fn [_]))
+    (Thread/sleep 200)
+    (is (client/open? conn) "a muted connection stays open; it never answers")
+    (is (= ["describe"] (fake/ops-seen srv)) "the request is still logged")
+    (client/close! conn)
+    (fake/stop! srv)))

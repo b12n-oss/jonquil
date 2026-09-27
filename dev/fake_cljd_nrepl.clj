@@ -43,6 +43,10 @@
   ;; The fork's own refusal, measured.
   "`in-ns` is not available as a standalone REPL form in ClojureDart. Declare namespace dependencies in an `(ns ...)` form.")
 
+(def defn-in-cljd-user-err
+  ;; The fork's own refusal, measured in probe A.
+  "`defn` in cljd.user is not supported — cljd.user has no source file, so top-level defs cannot be hot-reloaded. Put the form in a real namespace under src/ and save the file to let the watcher compile it. `swap!`, `reset!`, and plain expressions are fine in cljd.user.")
+
 (defn- read-forms
   "code's top-level forms, in order. Throws on unbalanced code."
   [code]
@@ -99,6 +103,9 @@
                 (= 'in-ns (head f))
                 (reply {"err" in-ns-err "status" ["done" "eval-error"]})
 
+                (and (#{'defn 'defn-} (head f)) (= "cljd.user" (cur)))
+                (reply {"err" defn-in-cljd-user-err "status" ["done" "eval-error"]})
+
                 (matches? (:fail-on opts) f)
                 (do (reply {"err" fail-err}) (reply {"ns" (cur)}) (reply {"status" ["done" "eval-error"]}))
 
@@ -134,12 +141,12 @@
         (let [m (bencode/decode src)]
           (when-not (= ::bencode/eof m)
             (let [reply (fn [kv]
-                          (locking lock
-                            (.write ^java.io.OutputStream out ^bytes (bencode/encode (assoc kv "id" (get m "id"))))
-                            (.flush ^java.io.OutputStream out)))]
-              (when-not (:mute? opts)
-                (when-not (= :dropped (handle! srv sock reply m))
-                  (recur)))))))
+                          (when-not (:mute? opts)
+                            (locking lock
+                              (.write ^java.io.OutputStream out ^bytes (bencode/encode (assoc kv "id" (get m "id"))))
+                              (.flush ^java.io.OutputStream out))))]
+              (when-not (= :dropped (handle! srv sock reply m))
+                (recur))))))
       (catch Throwable _ nil)
       (finally
         (try (.close sock) (catch Throwable _ nil))))))
