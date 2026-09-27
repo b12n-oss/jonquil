@@ -19,6 +19,7 @@
     jonquil.nrepl.ops
     jonquil.nrepl.client
     jonquil.nrepl.child
+    jonquil.nrepl.evaluator
     jonquil.commands
     jonquil.help
     jonquil.gtk.ffi
