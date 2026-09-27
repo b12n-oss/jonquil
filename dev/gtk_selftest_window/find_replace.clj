@@ -12,8 +12,8 @@
 
 ;; --- P3.T4: find and replace bar ------------------------------------------
 ;; Each row is self-contained (its own editor/set-text!, open! and query)
-;; rather than chaining off a prior row's leftover selection, since
-;; run-row! resets the editor text before every row anyway.
+;; rather than chaining off a prior row's leftover selection, since the
+;; driver's own run-row resets the editor text before every row anyway.
 
 (defn row-find-highlights
   "\"foo bar foo baz foo\" has three occurrences of \"foo\", at character

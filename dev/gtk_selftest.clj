@@ -687,8 +687,14 @@
                                                      [:pointer] :int)
                                      ffi/null))
           _ (future (dotimes [i 100000] (cview/append! cv :out (str i "\n"))))
-          ok (await-until 60000 50 #(str/includes? (g/buffer-text (:buf cv)) "99999\n"))]
-      (reset! active? false)
+          ;; M2: active? must always be reset, even if await-until itself
+          ;; throws (its predicate reads g/buffer-text, which could) --
+          ;; otherwise the sampler's 20 ms GTK timer callable keeps
+          ;; re-arming (its own (if @active? ... 1) branch) for the rest
+          ;; of the run instead of stopping with this row.
+          ok (try
+               (await-until 60000 50 #(str/includes? (g/buffer-text (:buf cv)) "99999\n"))
+               (finally (reset! active? false)))]
       (on-gtk (let [gaps (map - (rest @samples) @samples)
                     max-gap (if (seq gaps) (apply max gaps) 0)
                     out-chars (- (count (g/buffer-text (:buf cv))) 2)]

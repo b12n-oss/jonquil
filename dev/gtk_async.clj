@@ -68,9 +68,17 @@
 (defn settle
   "Parks for n more 20 ms ticks after a text condition passed, so the frame
   repaints before a screenshot reads it. A settle for painting, never a
-  sleep for correctness."
+  sleep for correctness.
+
+  M1: this used to park on GTK ticks (settle!'s own poll-until-style
+  loop), so it proved the main loop turned. Now that it parks on
+  wall-clock time instead, that proof is gone -- a frozen main loop would
+  pass this the same as a healthy one. The trailing on-gtk round trip
+  restores it: it can only return once the GTK thread has actually run
+  the thunk."
   [n]
-  (<! (timeout (* 20 n))))
+  (<! (timeout (* 20 n)))
+  (on-gtk nil))
 
 (defn sh
   "clojure.java.shell/sh on its own thread (a/thread); parks until the

@@ -23,7 +23,7 @@
 ;; row (row-nrepl-open-switches-evaluator, reopening it after switching
 ;; away) and after-close-checks! (reading its .nrepl-port back, after
 ;; main/start! has returned and -main's own local is out of scope) can
-;; both reach it without threading it through every row-fn's [ui next]
+;; both reach it without threading it through every row-fn's [ui]
 ;; signature.
 (defonce ^:private fixture* (atom nil))
 

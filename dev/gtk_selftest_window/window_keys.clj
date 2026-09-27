@@ -158,8 +158,9 @@
   g_application main loop stops once it returns to it and nothing after
   this row runs -- the CI-facing evidence that closing mid-run didn't hang
   or crash is this whole process exiting cleanly afterward, which
-  run-rows!'s own destroy-signal fallback (below) now guarantees happens
-  either way, pass or fail.
+  dev/gtk_selftest_window.clj's own finish (its destroy-signal poll, and
+  gtk-async/close-window-bounded!'s own forced-close fallback) now
+  guarantees happens either way, pass or fail.
 
   Also opens quick doc (Ctrl+Q on \"loop\") before starting the run, so
   THIS row's own real close -- the only one in this file that reaches

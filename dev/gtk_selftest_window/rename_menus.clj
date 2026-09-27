@@ -18,8 +18,8 @@
   (greeting) that share the substring but are never themselves greet (I4:
   a rename that did a naive substring replace, or one that also touched the
   keyword, would still pass the OLD fixture, which had neither). Shared by
-  every rename row below, each of which re-applies it fresh (run-row! only
-  clears text/input, not this)."
+  every rename row below, each of which re-applies it fresh (the driver's
+  own run-row only clears text/input, not this)."
   "(defn greet [n] n)\n(greet 1) ; greet\n\"greet\"\n:greet greeting")
 
 (def ^:private rename-fixture-renamed

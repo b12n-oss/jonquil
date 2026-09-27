@@ -73,10 +73,10 @@
 (defn since
   "Console text from mark onward -- see out-end-offset. Every row below
   scopes its own assertions to this instead of the whole accumulated
-  console-text, because run-row! only clears the editor and the console's
-  INPUT, never its output history, so a plain (console-text ui) search can
-  match a prior row's (or a prior step's) leftover line and pass for the
-  wrong reason."
+  console-text, because run-row (the driver's own, dev/gtk_selftest_
+  window.clj) only clears the editor and the console's INPUT, never its
+  output history, so a plain (console-text ui) search can match a prior
+  row's (or a prior step's) leftover line and pass for the wrong reason."
   [ui mark]
   (subs (console-text ui) mark))
 
