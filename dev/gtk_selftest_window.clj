@@ -120,25 +120,25 @@
    (shim themes/row-settings-unreadable-warns)
    (shim themes/row-theme-save-failure-reported)
    (shim themes/row-theme-switch-while-running)
-   (shim popovers-quickdoc/row-popover-at-caret)
-   (shim popovers-quickdoc/row-popover-keys-stay-with-editor)
-   (shim popovers-quickdoc/row-window-shift-f6-reaches-editor)
-   (shim popovers-quickdoc/row-window-f6-still-toggles)
-   (shim popovers-quickdoc/row-window-escape-closes-popover)
-   (shim popovers-quickdoc/row-popover-dark-colours)
-   (shim popovers-quickdoc/row-quick-doc-core)
-   (shim popovers-quickdoc/row-quick-doc-run-defined)
-   (shim popovers-quickdoc/row-quick-doc-after-reset)
-   (shim popovers-quickdoc/row-quick-doc-closes)
-   (shim popovers-quickdoc/row-quick-doc-closes-on-focus-loss)
-   (shim popovers-quickdoc/row-quick-doc-cmd-does-nothing)
-   (shim popovers-quickdoc/row-quick-doc-cmd-shift-f1-does-nothing)
-   (shim popovers-quickdoc/row-quick-doc-after-define)
-   (shim popovers-quickdoc/row-jump-top-level)
-   (shim popovers-quickdoc/row-jump-local-binding)
-   (shim popovers-quickdoc/row-jump-external)
-   (shim popovers-quickdoc/row-jump-none)
-   (shim popovers-quickdoc/row-jump-shadowed-param)
+   popovers-quickdoc/row-popover-at-caret
+   popovers-quickdoc/row-popover-keys-stay-with-editor
+   popovers-quickdoc/row-window-shift-f6-reaches-editor
+   popovers-quickdoc/row-window-f6-still-toggles
+   popovers-quickdoc/row-window-escape-closes-popover
+   popovers-quickdoc/row-popover-dark-colours
+   popovers-quickdoc/row-quick-doc-core
+   popovers-quickdoc/row-quick-doc-run-defined
+   popovers-quickdoc/row-quick-doc-after-reset
+   popovers-quickdoc/row-quick-doc-closes
+   popovers-quickdoc/row-quick-doc-closes-on-focus-loss
+   popovers-quickdoc/row-quick-doc-cmd-does-nothing
+   popovers-quickdoc/row-quick-doc-cmd-shift-f1-does-nothing
+   popovers-quickdoc/row-quick-doc-after-define
+   popovers-quickdoc/row-jump-top-level
+   popovers-quickdoc/row-jump-local-binding
+   popovers-quickdoc/row-jump-external
+   popovers-quickdoc/row-jump-none
+   popovers-quickdoc/row-jump-shadowed-param
    completion/row-completion-opens
    completion/row-completion-single-inserts
    completion/row-completion-no-prefix
