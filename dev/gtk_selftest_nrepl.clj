@@ -50,24 +50,20 @@
             [jonquil.main :as main]
             [jonquil.nrepl.child :as child]))
 
-(def ^:private shim
-  "A callback-style row (fn [ui next] ...) as a go-style row (fn [ui] ch)."
-  (partial ga/from-callback support/check))
-
 (def ^:private row-fns
-  [(shim rows/row-nrepl-starts-and-reports)
-   (shim rows/row-nrepl-run-output)
-   (shim rows/row-nrepl-repl-follows-run)
-   (shim rows/row-nrepl-error-is-text)
-   (shim rows/row-nrepl-reset-clears-child)
-   (shim rows/row-nrepl-stdin-notice)
-   (shim rows/row-nrepl-completion-from-child)
-   (shim rows/row-nrepl-quick-doc-from-child)
-   (shim rows/row-nrepl-stop-interrupts)
-   (shim rows/row-nrepl-stop-unresponsive-restarts)
-   (shim rows/row-nrepl-child-dies-mid-eval)
-   (shim rows/row-nrepl-open-switches-evaluator)
-   (shim rows/row-nrepl-close-kills-child)])
+  [rows/row-nrepl-starts-and-reports
+   rows/row-nrepl-run-output
+   rows/row-nrepl-repl-follows-run
+   rows/row-nrepl-error-is-text
+   rows/row-nrepl-reset-clears-child
+   rows/row-nrepl-stdin-notice
+   rows/row-nrepl-completion-from-child
+   rows/row-nrepl-quick-doc-from-child
+   rows/row-nrepl-stop-interrupts
+   rows/row-nrepl-stop-unresponsive-restarts
+   rows/row-nrepl-child-dies-mid-eval
+   rows/row-nrepl-open-switches-evaluator
+   rows/row-nrepl-close-kills-child])
 
 ;; --- driver ----------------------------------------------------------------
 
@@ -143,10 +139,10 @@
                         (a/put! driver-done :done)))})
       ;; D2.T5: the GTK loop is gone once main/start! returns -- rows/
       ;; after-close-checks!'s own blocking shell/sh calls are safe here,
-      ;; unlike inside a row (which must go through shell-then, since
-      ;; g_timeout_add needs a live main loop). SUMMARY (and finished?)
-      ;; wait for these three checks so the exit code reflects all of
-      ;; them, not just the rows.
+      ;; unlike inside a row (which must go through sh-within, bounded to
+      ;; 5000 ms, so a row never hangs the whole run waiting on a shell
+      ;; command). SUMMARY (and finished?) wait for these three checks so
+      ;; the exit code reflects all of them, not just the rows.
       (a/alts!! [driver-done (timeout 5000)])
       (rows/after-close-checks!)
       (let [passed (count (filter second @support/results)) total (count @support/results)]
