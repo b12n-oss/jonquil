@@ -29,6 +29,24 @@
 (defn- wait-until [pred ms]
   (loop [n 0] (cond (pred) true (> (* n 20) ms) false :else (do (Thread/sleep 20) (recur (inc n))))))
 
+(defn- wait-for-eval-id
+  "Polls (:state e)'s [:running :id] every 10 ms, up to about 5000 ms,
+  standing in for 'the eval request is out' instead of a fixed sleep: a
+  guessed sleep could still fire before send-main! records :id (evaluator.
+  clj's own send-main!/interrupt!), under load, sending the caller's next
+  step (an interrupt or a kill signal) too early. Fails the test with a
+  clear message on timeout rather than silently letting the next step run
+  against a request that was never sent."
+  [e]
+  (let [deadline (+ (System/currentTimeMillis) 5000)]
+    (loop []
+      (if-let [id (get-in @(:state e) [:running :id])]
+        id
+        (if (< (System/currentTimeMillis) deadline)
+          (do (Thread/sleep 10) (recur))
+          (do (is false "the eval request's :id never appeared in :running within 5000 ms")
+              nil))))))
+
 (defn- alive? [pid] (str/includes? (:out (shell/sh "ps" "-p" (str pid) "-o" "pid=")) (str pid)))
 
 (deftest make-dispatches-on-runtime-test
@@ -87,7 +105,7 @@
       (ev/start! e)
       (let [pid (nrepl/child-pid e)]
         (ev/eval! e "(def before 1) (loop [] (recur))" {:run? false :on-complete (fn [r] (deliver done r))})
-        (Thread/sleep 300)
+        (wait-for-eval-id e)
         (ev/interrupt! e)
         (is (= :interrupted (:status (deref done 5000 :timeout))))
         (is (= pid (nrepl/child-pid e)) "interrupt, not a restart")
@@ -102,7 +120,7 @@
         (ev/eval! e "(loop [] (recur))" {:run? false
                                          :on-output (fn [k s] (swap! out conj [k s]))
                                          :on-complete (fn [r] (deliver done r))})
-        (Thread/sleep 300)
+        (wait-for-eval-id e)
         (shell/sh "kill" "-STOP" (str pid))
         (ev/interrupt! e)
         (is (= :interrupted (:status (deref done 10000 :timeout))))
@@ -119,7 +137,7 @@
       (ev/start! e)
       (let [pid (nrepl/child-pid e)]
         (ev/eval! e "(Thread/sleep 30000)" {:run? false :on-complete (fn [r] (deliver done r))})
-        (Thread/sleep 300)
+        (wait-for-eval-id e)
         (shell/sh "kill" "-9" (str pid))
         (is (= {:status :error :error-text "The Jolt runtime exited before this evaluation finished."}
                (deref done 5000 :timeout)))
@@ -163,7 +181,7 @@
         (is (some #(str/includes? % "no interrupt op") (ev/limitations e)))
         (let [pid (nrepl/child-pid e)]
           (ev/eval! e "(loop [] (recur))" {:run? false :on-complete (fn [r] (deliver done r))})
-          (Thread/sleep 300)
+          (wait-for-eval-id e)
           (ev/interrupt! e)
           (is (= :interrupted (:status (deref done 5000 :timeout))))
           (is (wait-until (fn [] (let [p (nrepl/child-pid e)] (and p (not= p pid)))) 10000) "restarted"))
@@ -249,7 +267,7 @@
         (ev/eval! e "(loop [] (recur))" {:run? false
                                          :on-output (fn [k s] (swap! out conj [k s]))
                                          :on-complete (fn [r] (swap! complete-count inc) (deliver done r))})
-        (Thread/sleep 300)
+        (wait-for-eval-id e)
         (shell/sh "kill" "-STOP" (str pid))
         (ev/interrupt! e)
         (ev/interrupt! e)
@@ -325,7 +343,7 @@
         (ev/eval! e "(loop [] (recur))" {:run? false
                                          :on-output (fn [k s] (swap! out conj [k s]))
                                          :on-complete (fn [r] (deliver done r))})
-        (Thread/sleep 300)
+        (wait-for-eval-id e)
         (shell/sh "kill" "-STOP" (str pid))
         (with-redefs [child/start! (fn [_ _] (throw (ex-info "boom" {})))]
           (ev/interrupt! e)
