@@ -6,7 +6,8 @@
 
   Each row is (fn [ui next] ...): it acts on ui, records exactly one
   check, then calls (next)."
-  (:require [jolt.ffi :as ffi]
+  (:require [gtk-async :refer [on-gtk await-until]]
+            [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.editor :as editor]
@@ -128,6 +129,22 @@
     (poll-until deadline-ms 20
                 (fn [] (and (idle? ui) (expect-fn (since ui mark))))
                 (fn [ok] (done ok mark)))))
+
+(defn run-and-await
+  "Go-style run-and-wait!, for a go block. In one GTK step it captures the
+  console's out-end offset, sets the editor to code and Runs it; then it
+  parks until BOTH the engine is idle AND (expect-fn text-since-start) is
+  true, or deadline-ms passes. Returns [ok mark], so a caller can scope its
+  own further assertions to exactly this run's output. I1 (see
+  run-and-wait!): engine-idle alone is not enough, because the result line
+  lands through a later on-gui! drain."
+  [ui code deadline-ms expect-fn]
+  (let [mark (on-gtk (let [m (out-end-offset ui)]
+                       (editor/set-text! (:editor ui) code)
+                       ((:run!* ui))
+                       m))
+        ok (await-until deadline-ms 20 #(and (idle? ui) (expect-fn (since ui mark))))]
+    [ok mark]))
 
 (defn wait-stable-height
   "Polls widget's natural-height (probe 4's numeric proxy for \"did the CSS

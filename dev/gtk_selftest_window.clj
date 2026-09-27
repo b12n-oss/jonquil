@@ -46,16 +46,16 @@
   (partial ga/from-callback support/check))
 
 (def ^:private row-fns
-  [(shim run-repl/row-run-output)
-   (shim run-repl/row-run-while-running)
-   (shim run-repl/row-stdin-roundtrip)
-   (shim run-repl/row-stop-while-reading)
+  [run-repl/row-run-output
+   run-repl/row-run-while-running
+   run-repl/row-stdin-roundtrip
+   run-repl/row-stop-while-reading
    (shim close-prerun/row-run-unbalanced)
-   (shim run-repl/row-reset-vs-accumulate)
-   (shim run-repl/row-repl-after-run)
-   (shim run-repl/row-fast-repl-twice)
-   (shim run-repl/row-busy-hint-once)
-   (shim run-repl/row-console-history-down-empty)
+   run-repl/row-reset-vs-accumulate
+   run-repl/row-repl-after-run
+   run-repl/row-fast-repl-twice
+   run-repl/row-busy-hint-once
+   run-repl/row-console-history-down-empty
    (shim window-keys/row-escape-yields-when-idle)
    (shim window-keys/row-command-chord-capslock)
    (shim close-prerun/row-repl-eof-no-editor-hint)
@@ -67,11 +67,11 @@
    (shim files/row-save-failure-leaves-original-intact)
    (shim files/row-dialog-dismissed-silent)
    (shim files/row-save-and-open)
-   (shim run-repl/row-run-selection-line)
-   (shim run-repl/row-run-selection-sel)
-   (shim run-repl/row-run-selection-blank)
+   run-repl/row-run-selection-line
+   run-repl/row-run-selection-sel
+   run-repl/row-run-selection-blank
    (shim window-keys/row-toggle-focus)
-   (shim run-repl/row-clear-console)
+   run-repl/row-clear-console
    (shim console-layout/row-console-wraps-long-lines)
    (shim window-keys/row-zoom-in-out)
    (shim find-replace/row-find-highlights)
