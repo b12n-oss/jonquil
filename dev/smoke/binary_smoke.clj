@@ -1346,6 +1346,15 @@
 (defn- pid-alive? [pid]
   (str/includes? (:out (p/sh "ps" "-p" (str pid) "-o" "pid=")) (str pid)))
 
+(defn- kill-pid!
+  "SIGKILLs pid directly. Jonquil's own child (the Jolt nrepl-server, a
+  grandchild of this script) is never itself in `launched` -- only the
+  jonquil pid this script spawned is -- so stop!/kill-all-launched! never
+  reach it, and it has no signal handling of its own. Best-effort: an
+  already-dead pid failing to kill is not this step's problem to report."
+  [pid]
+  (try (p/sh "kill" "-9" (str pid)) (catch Exception _ nil)))
+
 (defn- step-nrepl-run-and-close!
   "D2.T6: the built binary on a {:runtime :nrepl} project. It starts its own
   Jolt child, F5 prints through it, and Cmd+W quits with that child gone and
@@ -1365,11 +1374,13 @@
       (let [exit (deref proc 10000 ::timeout)]
         (if (= ::timeout exit)
           (do (check! :nrepl-close false {:reason "process did not exit within 10000ms"})
+              (doseq [k kids] (kill-pid! k))
               (stop! {:proc proc :pid pid}))
           (let [left (filterv pid-alive? kids)
-                port-file (slurp (io/file dir ".nrepl-port"))]
-            (check! :nrepl-close (and (zero? (:exit exit)) (empty? left) (= "4242\n" port-file))
-                    {:exit (:exit exit) :children-left left :port-file port-file})
+                port-file (slurp (io/file dir ".nrepl-port"))
+                ok (and (zero? (:exit exit)) (empty? left) (= "4242\n" port-file))]
+            (check! :nrepl-close ok {:exit (:exit exit) :children-left left :port-file port-file})
+            (when-not ok (doseq [k left] (kill-pid! k)))
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v))))))))))
 
 ;; --- driver ----------------------------------------------------------------
