@@ -258,16 +258,6 @@
         (>= (- (System/currentTimeMillis) t0) deadline-ms) false
         :else (do (Thread/sleep (long interval-ms)) (recur))))))
 
-(defn- wait-for-ocr!
-  "Polls OCR until it contains needle or deadline-ms elapses. Returns
-  {:ok bool :last last-ocr-text} -- \"prints what OCR saw\" on a failed
-  wait, per this task's own design."
-  [pid deadline-ms needle]
-  (let [last (atom "")]
-    (let [ok (wait-for! deadline-ms 300
-                        (fn [] (let [t (ocr-text! pid)] (reset! last t) (str/includes? t needle))))]
-      {:ok ok :last @last})))
-
 (defn- ocr-rows->loose-text
   "rows' own :text values joined by a single SPACE (P3.T6), not ocr-text!'s
   \"\\n\": measured live this session, cgevent sometimes renders a short
@@ -281,18 +271,63 @@
   [rows]
   (str/join " " (keep :text rows)))
 
+(defn- ocr-matches?
+  "Whether rows' OCR text matches needle. A String needle is checked
+  against both joined (newline-joined) and rows' own loose (space-joined,
+  ocr-rows->loose-text) form, via str/includes? -- unchanged behaviour,
+  for a caller matching a fixed substring that OCR sometimes splits
+  across two adjacent rows. A java.util.regex.Pattern needle is matched
+  with re-find against joined ONLY: the loose text has no line structure
+  (it's a single space-joined string, no \\n anywhere), so a (?m) line
+  anchor in the pattern -- needed to tolerate OCR dropping a result line's
+  leading \"=>\" entirely without also matching a stray digit or word
+  elsewhere on screen -- would be meaningless against it."
+  [rows joined needle]
+  (if (instance? java.util.regex.Pattern needle)
+    (boolean (re-find needle joined))
+    (or (str/includes? joined needle)
+        (str/includes? (ocr-rows->loose-text rows) needle))))
+
+(defn- wait-for-ocr!
+  "Polls OCR until ocr-matches? (a String needle via str/includes? against
+  both the newline-joined and loose text; a java.util.regex.Pattern needle
+  via re-find against the newline-joined text only) is true, or deadline-ms
+  elapses. Returns {:ok bool :last last-ocr-text} -- \"prints what OCR saw\"
+  on a failed wait, per this task's own design; :last is the newline-joined
+  form. Reads ocr-rows! once per poll tick rather than calling
+  ocr-text!/ocr-rows! separately (two cgevent calls per tick, from two
+  different OCR passes that could disagree with each other)."
+  [pid deadline-ms needle]
+  (let [last (atom "")]
+    (let [ok (wait-for! deadline-ms 300
+                        (fn []
+                          (let [rows (ocr-rows! pid)
+                                joined (str/join "\n" (keep :text rows))]
+                            (reset! last joined)
+                            (ocr-matches? rows joined needle))))]
+      {:ok ok :last @last})))
+
 (defn- wait-for-ocr-count!
   "Polls until re matches at least n times (non-overlapping, via re-seq)
-  against ocr-rows->loose-text's own join of ocr-rows!, or deadline-ms
-  elapses. Returns {:ok bool :count n :last last-loose-text}, the same
-  \"prints what OCR saw\" shape wait-for-ocr! uses. Used where a step needs
-  to count repeated occurrences (P3.T6 step 1's two \"=> 2\" round trips),
-  where a plain wait-for-ocr! could only ever prove \"at least once\"."
+  against the NEWLINE-joined text of ocr-rows!, or deadline-ms elapses.
+  Returns {:ok bool :count n :last last-joined-text}, the same \"prints
+  what OCR saw\" shape wait-for-ocr! uses. Used where a step needs to
+  count repeated occurrences (P3.T6 step 1's two \"=> 2\" round trips),
+  where a plain wait-for-ocr! could only ever prove \"at least once\".
+
+  Matches against the newline-joined text, not ocr-rows->loose-text's
+  space-joined one: re is a (?m) line-anchored pattern (fix-wave pass 4),
+  needed to tolerate OCR dropping a result line's leading \"=>\" entirely
+  without also matching a stray digit elsewhere on screen, and a line
+  anchor is meaningless against loose text, which has no \\n at all. A
+  short result split across two adjacent OCR rows (the original reason
+  for the loose join) still matches here when it lands on its own line,
+  since re's own leading group is optional -- see the two call sites."
   [pid deadline-ms re n]
   (let [last-count (atom 0) last-text (atom "")]
     (let [ok (wait-for! deadline-ms 300
                         (fn []
-                          (let [t (ocr-rows->loose-text (ocr-rows! pid))
+                          (let [t (str/join "\n" (keep :text (ocr-rows! pid)))
                                 c (count (re-seq re t))]
                             (reset! last-count c)
                             (reset! last-text t)
@@ -521,12 +556,23 @@
     (cg-key! pid "f6")
     (type-text! pid "(inc 1)")
     (cg-key! pid "return")
-    (let [{:keys [ok count]} (wait-for-ocr-count! pid 5000 #"=>\s*2" 1)]
+    ;; Measured live (2026-09-27 fix wave, pass 4): OCR renders the result
+    ;; line's leading arrow as "=>", "=", ">", "→", or drops it entirely --
+    ;; an unanchored "bare 2 with a word boundary" pattern would also match
+    ;; the "2" in "(inc 1)"'s own echoed line or a stray "Ln 2"/"Col 2" in
+    ;; the status bar, so this instead anchors to a LINE that holds only
+    ;; the result: (?m) plus ^...$, matched against wait-for-ocr-count!'s
+    ;; newline-joined text (never the loose, space-joined one -- a line
+    ;; anchor is meaningless there). The optional arrow-class group still
+    ;; matches a short result split across two adjacent OCR rows (the
+    ;; original reason for the loose join): a lone "2" line satisfies this
+    ;; pattern with the group matching zero characters.
+    (let [{:keys [ok count]} (wait-for-ocr-count! pid 5000 #"(?m)^\s*(?:[=→>]{1,2}\s*)?2\s*$" 1)]
       (when-not ok
         (check! :repl-history-first-eval false {:reason "no => 2 after the first Return" :count count})))
     (cg-key! pid "up")
     (cg-key! pid "return")
-    (let [{:keys [ok count last]} (wait-for-ocr-count! pid 5000 #"=>\s*2" 2)]
+    (let [{:keys [ok count last]} (wait-for-ocr-count! pid 5000 #"(?m)^\s*(?:[=→>]{1,2}\s*)?2\s*$" 2)]
       (screenshot! pid "step1-repl-history")
       (check! :repl-history (and ok (>= count 2)) {:count count :console last}))
     (stop! {:proc proc :pid pid})))
@@ -576,7 +622,16 @@
         {:keys [proc pid]} (launch! path)]
     (ensure-window! pid 8000)
     (cg-key! pid "command + e")
-    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "=> 42")]
+    ;; Measured live (2026-09-27 fix wave, pass 4): OCR renders the result
+    ;; line's leading arrow as "=>", "=", ">", "→", or drops it entirely,
+    ;; leaving a bare "42" -- not just a partial "=" with the ">" dropped,
+    ;; the way step-run-and-colour!'s own "=>?\s*nil" tolerates. An
+    ;; unanchored "42\b" would also match "(+ 40 2)"'s own echoed line if
+    ;; OCR ever merged its digits, so this anchors to a LINE that holds
+    ;; only the result ((?m) plus ^...$), matched (via wait-for-ocr!) only
+    ;; against the newline-joined text -- a line anchor is meaningless
+    ;; against the loose, space-joined one.
+    (let [{:keys [ok last]} (wait-for-ocr! pid 5000 #"(?m)^\s*(?:[=→>]{1,2}\s*)?42\s*$")]
       (screenshot! pid "step3-run-selection")
       (check! :run-selection ok {:console last}))
     (stop! {:proc proc :pid pid})))
@@ -1367,7 +1422,17 @@
           kids (children-of pid)]
       (check! :nrepl-starts (and ready (= 1 (count kids))) {:children kids})
       (cg-key! pid "f5")
-      (let [{:keys [ok last]} (wait-for-ocr! pid 10000 "=> :hi")]
+      ;; Measured live (2026-09-27 fix wave, pass 4): three different OCR
+      ;; renderings of the SAME result line, seen across separate runs --
+      ;; "=> : hi" (arrow intact, a stray space inserted inside the
+      ;; keyword), and a bare ": hi" with no arrow at all. The editor pane's own
+      ;; source text also contains a line that reads back as ": hi)" (the
+      ;; wrapped end of "(println \"hi\" n) :hi)"), which must NOT match --
+      ;; an unanchored "hi\b" would. So this anchors to a LINE that holds
+      ;; only the result ((?m) plus ^...$, with a trailing \s*$ that the
+      ;; source line's own ")" fails), matched (via wait-for-ocr!) only
+      ;; against the newline-joined text.
+      (let [{:keys [ok last]} (wait-for-ocr! pid 10000 #"(?m)^\s*(?:[=→>]{1,2}\s*)?:\s*hi\s*$")]
         (screenshot! pid "nrepl-run")
         (check! :nrepl-run-output ok {:console last}))
       (cg-key! pid "command + w")
