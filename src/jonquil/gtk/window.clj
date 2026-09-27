@@ -1671,11 +1671,15 @@
         (show-selection! cv dialect-label @sel*)
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
+      ;; P1.T2 (cljd plan): the editor paints with the selected profile's
+      ;; own sets, here and after every re-selection below.
+      (editor/set-profile! ed (:profile @sel*))
       (start-and-report! cv status-label @ev* @sel*)
       (add-watch path ::dialect
                  (fn [_ _ old new]
                    (when (not= old new)
                      (try (apply-selection! sel-ctx (select-for new @settings-path*))
+                          (editor/set-profile! ed (:profile @sel*))
                           (catch :default e
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))))))
     (update-title! ed win path)

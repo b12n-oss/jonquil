@@ -192,6 +192,17 @@
   (reset! (:completion-fns ed) fns)
   nil)
 
+(defn set-profile!
+  "Paints ed with profile's own :special-forms and :builtins (a
+  jonquil.dialect profile; nil paints with jonquil.syntax's, the Jolt
+  profile's). The repaint happens on the next 20 ms tick, the same path a
+  keystroke's repaint takes, so this is safe from the GTK thread at any
+  point, including before the view is shown."
+  [ed profile]
+  (reset! (:profile ed) profile)
+  (reset! (:dirty-at ed) 0)
+  nil)
+
 (defn focus! [ed]
   (g/gtk-widget-grab-focus (:view ed))
   nil)
@@ -270,7 +281,7 @@
 (defn- repaint! [ed]
   (let [{:keys [buf tags]} ed
         text (g/buffer-text buf)
-        plan (paint/paint-plan text)
+        plan (paint/paint-plan @(:profile ed) text)
         len (count text)]
     ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
     ;; remove_all_tags -- a tag another namespace applies over the same
@@ -645,6 +656,9 @@
             ;; P4.T5: single-slot registration for completion -- see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
             :completion-fns (atom nil)
+            ;; P1.T2 (cljd plan): the dialect profile whose sets paint
+            ;; symbols -- see set-profile!. nil until the window sets it.
+            :profile (atom nil)
             ;; Single-slot registration for error reporting -- see
             ;; set-error-fn!. nil until jonquil.gtk.window wires it, so a
             ;; throw before that point is silently dropped rather than

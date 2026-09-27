@@ -43,17 +43,35 @@
   (some (fn [[k s e]] (when (and (<= s pos) (< pos e)) (style t k)))
         (rseq plan)))
 
+(defn- reclassify
+  "A symbol-like token's kind under profile's own :special-forms and
+  :builtins (a jonquil.dialect profile) instead of jonquil.syntax's, which
+  are the Jolt profile's. Every other token kind is left as tokenize gave
+  it, so constants, keywords and the rest paint the same in every dialect."
+  [profile text [t s e :as token]]
+  (if (#{:symbol :special-form :builtin} t)
+    (let [sym (subs text s e)]
+      [(cond (contains? (:special-forms profile) sym) :special-form
+             (contains? (:builtins profile) sym) :builtin
+             :else :symbol)
+       s e])
+    token))
+
 (defn paint-plan
   "Returns a vector of [style-key start end]. Style keys are token types,
-  [:rainbow n] with n in 0..6, or :unmatched."
-  [text]
-  (if (or (nil? text) (= "" text))
-    []
-    (let [tokens (into []
-                       (keep (fn [[t s e]] (when (contains? token-styles t) [t s e])))
-                       (syntax/tokenize text))
-          n rainbow-count
-          brackets (mapv (fn [[s e depth kind]]
-                           [(if (= kind :unmatched) :unmatched [:rainbow (mod depth n)]) s e])
-                         (:bracket-tokens (syntax/compute-brackets text)))]
-      (into tokens brackets))))
+  [:rainbow n] with n in 0..6, or :unmatched. With a profile (a
+  jonquil.dialect profile), symbols are classified by that profile's sets;
+  without one, or with the Jolt profile, the plan is jonquil.syntax's own."
+  ([text] (paint-plan nil text))
+  ([profile text]
+   (if (or (nil? text) (= "" text))
+     []
+     (let [raw (syntax/tokenize text)
+           tokens (into []
+                        (keep (fn [[t s e]] (when (contains? token-styles t) [t s e])))
+                        (if profile (map (fn [tok] (reclassify profile text tok)) raw) raw))
+           n rainbow-count
+           brackets (mapv (fn [[s e depth kind]]
+                            [(if (= kind :unmatched) :unmatched [:rainbow (mod depth n)]) s e])
+                          (:bracket-tokens (syntax/compute-brackets text)))]
+       (into tokens brackets)))))

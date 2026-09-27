@@ -3,9 +3,11 @@
   Evaluator seam, and .jonquil.edn warnings when a file opens."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [gtk-async :refer [on-gtk go-row]]
+            [gtk-async :refer [await-until on-gtk go-row]]
             [gtk-selftest-window.support :as support]
+            [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]))
 
 (defn- temp-project!
@@ -116,3 +118,28 @@
 
 (defn row-project-open-keeps-evaluator [ui]
   (open-then-run ui {:row :project-open-keeps-evaluator :config nil :expect nil}))
+
+(defn row-editor-paints-profile-sets
+  "P1.T2 (cljd plan): with the cljd profile, the editor paints f/widget
+  with the special-form tag; back on the window's own profile (Jolt's) it
+  paints plain. The row restores the window's profile before it records,
+  so later rows paint as before.
+
+  Deviation from the brief's verbatim code (reported; see the report):
+  the brief names the has-tag-at? check `special?`, a let-bound fn passed
+  to await-until by symbol and reused negated. audit_gtk_calls.clj only
+  exempts a GTK-touching call sitting INSIDE on-gtk or literally as
+  await-until's own third argument -- a fn bound earlier and passed by
+  name is walked at its OWN definition site (the let), where it isn't
+  exempt, and flags the g/has-tag-at? call inside it. Inlining the same
+  check as await-until's literal third argument, once plain and once
+  negated, keeps it exempt without changing what the row does."
+  [ui]
+  (go-row :editor-paints-profile-sets support/check
+    (let [ed (:editor ui)]
+      (on-gtk (editor/set-profile! ed dialect/cljd)
+              (editor/set-text! ed "(f/widget 1)"))
+      (let [cljd? (await-until 2000 20 (fn [] (g/has-tag-at? (:buf ed) 1 (get (:tags ed) :special-form))))
+            _ (on-gtk (editor/set-profile! ed (:profile ((:selection* ui)))))
+            plain? (await-until 2000 20 (fn [] (not (g/has-tag-at? (:buf ed) 1 (get (:tags ed) :special-form)))))]
+        (support/check :editor-paints-profile-sets (and cljd? plain?) {:cljd cljd? :plain plain?})))))

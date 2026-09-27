@@ -6,6 +6,7 @@
   upstream's."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [jonquil.dialect :as dialect]
             [jonquil.paint :as paint]
             [jonquil.syntax :as syntax]
             [jonquil.theme :as theme]))
@@ -46,3 +47,21 @@
   (is (= [] (paint/paint-plan "")))
   (is (= [] (paint/paint-plan nil)))
   (is (nil? (paint/style-at light (paint/paint-plan "abc") 0))))
+
+;; P1.T2: a profile's own sets decide how symbols paint.
+(deftest paint-plan-profile-test
+  (let [text "(ns a.b (:require [cljd.flutter :as f]))\n(f/widget :padding 8 (await (fetch)))\n(defn g [x] (map inc x))"
+        kind-at (fn [plan pos] (some (fn [[k s e]] (when (and (keyword? k) (<= s pos) (< pos e)) k)) plan))
+        at (fn [needle] (str/index-of text needle))]
+    (testing "the Jolt profile paints exactly as before"
+      (is (= (paint/paint-plan text) (paint/paint-plan dialect/jolt text))))
+    (testing "the cljd profile paints its own forms as special forms"
+      (let [plan (paint/paint-plan dialect/cljd text)]
+        (is (= :special-form (kind-at plan (at "f/widget"))))
+        (is (= :special-form (kind-at plan (at "await"))))
+        (is (= :special-form (kind-at plan (at "defn"))) "Jolt's set is still there")
+        (is (= :builtin (kind-at plan (at "map"))))
+        (is (nil? (kind-at plan (at "fetch"))) "a plain symbol keeps the default style")
+        (is (= :keyword (kind-at plan (at ":padding"))))))
+    (testing "Jolt doesn't know ClojureDart's forms"
+      (is (nil? (kind-at (paint/paint-plan text) (at "f/widget")))))))

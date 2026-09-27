@@ -174,6 +174,7 @@
    dialects/row-project-config-malformed-warns
    dialects/row-project-config-unknown-runtime-warns
    dialects/row-project-open-keeps-evaluator
+   dialects/row-editor-paints-profile-sets
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])
