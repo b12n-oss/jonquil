@@ -74,17 +74,17 @@
    run-repl/row-clear-console
    (shim console-layout/row-console-wraps-long-lines)
    (shim window-keys/row-zoom-in-out)
-   (shim find-replace/row-find-highlights)
-   (shim find-replace/row-find-next-wraps)
-   (shim find-replace/row-find-prev)
-   (shim find-replace/row-find-no-match)
-   (shim find-replace/row-replace-one)
-   (shim find-replace/row-replace-all)
-   (shim find-replace/row-find-escape)
-   (shim find-replace/row-find-hangul)
-   (shim find-replace/row-find-survives-repaint)
-   (shim find-replace/row-find-preedit-yields)
-   (shim find-replace/row-find-prefill-selects)
+   find-replace/row-find-highlights
+   find-replace/row-find-next-wraps
+   find-replace/row-find-prev
+   find-replace/row-find-no-match
+   find-replace/row-replace-one
+   find-replace/row-replace-all
+   find-replace/row-find-escape
+   find-replace/row-find-hangul
+   find-replace/row-find-survives-repaint
+   find-replace/row-find-preedit-yields
+   find-replace/row-find-prefill-selects
    close-prerun/row-line-col
    close-prerun/row-close-clean
    close-prerun/row-close-dirty-cancel
@@ -95,12 +95,12 @@
    close-prerun/row-close-alert-pending-guard
    close-prerun/row-close-alert-routing
    close-prerun/row-run-while-running-keeps-warning
-   (shim find-replace/row-window-escape-closes-bar-while-running)
-   (shim find-replace/row-window-escape-yields-preedit-while-running)
-   (shim find-replace/row-window-escape-stops-when-editor-focused)
-   (shim find-replace/row-find-typing-keeps-caret)
-   (shim find-replace/row-find-return-in-replacement)
-   (shim find-replace/row-window-find-keys-editor-focused)
+   find-replace/row-window-escape-closes-bar-while-running
+   find-replace/row-window-escape-yields-preedit-while-running
+   find-replace/row-window-escape-stops-when-editor-focused
+   find-replace/row-find-typing-keeps-caret
+   find-replace/row-find-return-in-replacement
+   find-replace/row-window-find-keys-editor-focused
    close-prerun/row-line-col-typing
    close-prerun/row-close-dismissed
    close-prerun/row-close-save-failed

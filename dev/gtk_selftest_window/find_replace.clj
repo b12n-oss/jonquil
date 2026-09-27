@@ -1,7 +1,9 @@
 (ns gtk-selftest-window.find-replace
   "The find/replace bar: highlighting, wrap, replace-one/-all, Escape and
   preedit, and its routing through the window's own key dispatch."
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :refer [<! timeout]]
+            [clojure.string :as str]
+            [gtk-async :refer [on-gtk await-until go-row]]
             [gtk-selftest-window.support :as support]
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]
@@ -18,141 +20,141 @@
   offsets [0 3], [8 11] and [16 19] (measured). Opening find and setting
   the query to \"foo\" must tag all three, show \"1 of 3\", and select the
   first."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (let [tag0 (g/has-tag-at? buf 0 (:tag fb))
-          tag8 (g/has-tag-at? buf 8 (:tag fb))
-          tag16 (g/has-tag-at? buf 16 (:tag fb))
-          label (g/label-text (:count-label fb))
-          sel (g/selection-offsets buf)]
-      (support/check :find-highlights
-                     (and tag0 tag8 tag16 (= "1 of 3" label) (= [0 3] sel))
-                     {:tag0 tag0 :tag8 tag8 :tag16 tag16 :label label :sel sel})
-      (next))))
+  [ui]
+  (go-row :find-highlights support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (let [tag0 (g/has-tag-at? buf 0 (:tag fb))
+                    tag8 (g/has-tag-at? buf 8 (:tag fb))
+                    tag16 (g/has-tag-at? buf 16 (:tag fb))
+                    label (g/label-text (:count-label fb))
+                    sel (g/selection-offsets buf)]
+                (support/check :find-highlights
+                               (and tag0 tag8 tag16 (= "1 of 3" label) (= [0 3] sel))
+                               {:tag0 tag0 :tag8 tag8 :tag16 tag16 :label label :sel sel}))))))
 
 (defn row-find-next-wraps
   "From the initial [0 3] (find-highlights' own finding), three find-next!
   calls step to [8 11], [16 19], then wrap back to [0 3]."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (find-bar/find-next! fb)
-    (let [sel1 (g/selection-offsets buf)]
-      (find-bar/find-next! fb)
-      (let [sel2 (g/selection-offsets buf)]
-        (find-bar/find-next! fb)
-        (let [sel3 (g/selection-offsets buf)]
-          (support/check :find-next-wraps
-                         (and (= [8 11] sel1) (= [16 19] sel2) (= [0 3] sel3))
-                         {:sel1 sel1 :sel2 sel2 :sel3 sel3})
-          (next))))))
+  [ui]
+  (go-row :find-next-wraps support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (find-bar/find-next! fb)
+              (let [sel1 (g/selection-offsets buf)]
+                (find-bar/find-next! fb)
+                (let [sel2 (g/selection-offsets buf)]
+                  (find-bar/find-next! fb)
+                  (let [sel3 (g/selection-offsets buf)]
+                    (support/check :find-next-wraps
+                                   (and (= [8 11] sel1) (= [16 19] sel2) (= [0 3] sel3))
+                                   {:sel1 sel1 :sel2 sel2 :sel3 sel3}))))))))
 
 (defn row-find-prev
   "From the initial [0 3], find-prev! wraps back to the last match, [16 19]."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (let [initial (g/selection-offsets buf)]
-      (find-bar/find-prev! fb)
-      (let [sel (g/selection-offsets buf)]
-        (support/check :find-prev (and (= [0 3] initial) (= [16 19] sel))
-                       {:initial initial :sel sel})
-        (next)))))
+  [ui]
+  (go-row :find-prev support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (let [initial (g/selection-offsets buf)]
+                (find-bar/find-prev! fb)
+                (let [sel (g/selection-offsets buf)]
+                  (support/check :find-prev (and (= [0 3] initial) (= [16 19] sel))
+                                 {:initial initial :sel sel})))))))
 
 (defn row-find-no-match
   "A query with no occurrences shows \"No matches\" and leaves no
   search-match tag anywhere the earlier \"foo\" matches were."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "zzz")
-    (let [label (g/label-text (:count-label fb))
-          any-tag? (or (g/has-tag-at? buf 0 (:tag fb))
-                       (g/has-tag-at? buf 8 (:tag fb))
-                       (g/has-tag-at? buf 16 (:tag fb)))]
-      (support/check :find-no-match (and (= "No matches" label) (not any-tag?))
-                     {:label label :any-tag any-tag?})
-      (next))))
+  [ui]
+  (go-row :find-no-match support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "zzz")
+              (let [label (g/label-text (:count-label fb))
+                    any-tag? (or (g/has-tag-at? buf 0 (:tag fb))
+                                 (g/has-tag-at? buf 8 (:tag fb))
+                                 (g/has-tag-at? buf 16 (:tag fb)))]
+                (support/check :find-no-match (and (= "No matches" label) (not any-tag?))
+                               {:label label :any-tag any-tag?}))))))
 
 (defn row-replace-one
   "replace-one! from the initial [0 3] match replaces only that occurrence
   (commands/replace-current), landing the selection on the shifted next
   match."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :replace)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (g/gtk-editable-set-text (:replacement fb) "X")
-    (find-bar/replace-one! fb)
-    (let [text (editor/editor-text ed)
-          sel (g/selection-offsets buf)]
-      (support/check :replace-one (and (= "X bar foo baz foo" text) (= [6 9] sel))
-                     {:text text :sel sel})
-      (next))))
+  [ui]
+  (go-row :replace-one support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :replace)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (g/gtk-editable-set-text (:replacement fb) "X")
+              (find-bar/replace-one! fb)
+              (let [text (editor/editor-text ed)
+                    sel (g/selection-offsets buf)]
+                (support/check :replace-one (and (= "X bar foo baz foo" text) (= [6 9] sel))
+                               {:text text :sel sel}))))))
 
 (defn row-replace-all
   "replace-all! replaces every match in one edit (commands/replace-all,
   applied through one apply-op! call, so one undo restores every original
   occurrence)."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :replace)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (g/gtk-editable-set-text (:replacement fb) "X")
-    (find-bar/replace-all! fb)
-    (let [text (editor/editor-text ed)
-          label (g/label-text (:count-label fb))]
-      (g/gtk-text-buffer-undo buf)
-      (let [restored (editor/editor-text ed)]
-        (support/check :replace-all
-                       (and (= "X bar X baz X" text) (= "Replaced 3" label)
-                            (= "foo bar foo baz foo" restored))
-                       {:text text :label label :restored restored})
-        (next)))))
+  [ui]
+  (go-row :replace-all support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :replace)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (g/gtk-editable-set-text (:replacement fb) "X")
+              (find-bar/replace-all! fb)
+              (let [text (editor/editor-text ed)
+                    label (g/label-text (:count-label fb))]
+                (g/gtk-text-buffer-undo buf)
+                (let [restored (editor/editor-text ed)]
+                  (support/check :replace-all
+                                 (and (= "X bar X baz X" text) (= "Replaced 3" label)
+                                      (= "foo bar foo baz foo" restored))
+                                 {:text text :label label :restored restored})))))))
 
 (defn row-find-escape
   "Escape, driven through the bar's own handle-key! (never a synthesized
   keystroke), closes the bar, strips every search-match tag, and returns
   focus to the editor view."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed) win (:window ui)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (let [handled (find-bar/handle-key! fb support/KEY-ESCAPE 0)
-          visible (g/gtk-widget-get-visible (:box fb))
-          any-tag? (or (g/has-tag-at? buf 0 (:tag fb))
-                       (g/has-tag-at? buf 8 (:tag fb))
-                       (g/has-tag-at? buf 16 (:tag fb)))
-          focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))]
-      (support/check :find-escape
-                     (and (= 1 handled) (zero? visible) (not any-tag?) focus-is-editor?)
-                     {:handled handled :visible visible :any-tag any-tag?
-                      :focus-is-editor focus-is-editor?})
-      (next))))
+  [ui]
+  (go-row :find-escape support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed) win (:window ui)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (let [handled (find-bar/handle-key! fb support/KEY-ESCAPE 0)
+                    visible (g/gtk-widget-get-visible (:box fb))
+                    any-tag? (or (g/has-tag-at? buf 0 (:tag fb))
+                                 (g/has-tag-at? buf 8 (:tag fb))
+                                 (g/has-tag-at? buf 16 (:tag fb)))
+                    focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))]
+                (support/check :find-escape
+                               (and (= 1 handled) (zero? visible) (not any-tag?) focus-is-editor?)
+                               {:handled handled :visible visible :any-tag any-tag?
+                                :focus-is-editor focus-is-editor?}))))))
 
 (defn row-find-hangul
   "Hangul syllables are single characters on this Jolt/JVM string
   representation (not surrogate pairs), so \"안녕 hello 안녕\" matches
   \"안녕\" at character offsets [0 2] and [9 11] (measured)."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui)]
-    (editor/set-text! ed "안녕 hello 안녕")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "안녕")
-    (let [matches @(:matches fb)]
-      (support/check :find-hangul (= [[0 2] [9 11]] matches) {:matches matches})
-      (next))))
+  [ui]
+  (go-row :find-hangul support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui)]
+              (editor/set-text! ed "안녕 hello 안녕")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "안녕")
+              (let [matches @(:matches fb)]
+                (support/check :find-hangul (= [[0 2] [9 11]] matches) {:matches matches}))))))
 
 (defn row-find-survives-repaint
   "editor.clj's repaint! (60ms debounce after
@@ -166,21 +168,20 @@
   they don't -- so this is the same one-shot-wait-then-check pattern
   row-run-selection-blank already uses) before checking the tags are still
   there."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (support/place-cursor! buf (count (editor/editor-text ed)))
-    (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1)
-    (support/later 300
-                   (fn []
-                     (let [tags-survived? (and (g/has-tag-at? buf 0 (:tag fb))
-                                               (g/has-tag-at? buf 8 (:tag fb))
-                                               (g/has-tag-at? buf 16 (:tag fb)))]
-                       (support/check :find-survives-repaint tags-survived?
-                                      {:tags-survived tags-survived? :text (editor/editor-text ed)})
-                       (next))))))
+  [ui]
+  (go-row :find-survives-repaint support/check
+    (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)
+          _ (on-gtk (editor/set-text! ed "foo bar foo baz foo")
+                    (find-bar/open! fb :find)
+                    (g/gtk-editable-set-text (:query fb) "foo")
+                    (support/place-cursor! buf (count (editor/editor-text ed)))
+                    (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1))]
+      (<! (timeout 300))
+      (on-gtk (let [tags-survived? (and (g/has-tag-at? buf 0 (:tag fb))
+                                        (g/has-tag-at? buf 8 (:tag fb))
+                                        (g/has-tag-at? buf 16 (:tag fb)))]
+                (support/check :find-survives-repaint tags-survived?
+                               {:tags-survived tags-survived? :text (editor/editor-text ed)}))))))
 
 (defn row-find-preedit-yields
   "find_bar.clj's handle-key! is a capture-phase
@@ -191,26 +192,26 @@
   preedit-changed wiring on each entry's GtkText delegate was verified
   separately with a throwaway probe, see ffi.clj's gtk-editable-get-
   delegate citation)."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (let [sel-before (g/selection-offsets buf)
-          visible-before (g/gtk-widget-get-visible (:box fb))]
-      (reset! (:preedit-active? fb) true)
-      (let [return-result (find-bar/handle-key! fb support/KEY-RETURN 0)
-            escape-result (find-bar/handle-key! fb support/KEY-ESCAPE 0)
-            sel-after (g/selection-offsets buf)
-            visible-after (g/gtk-widget-get-visible (:box fb))]
-        (reset! (:preedit-active? fb) false)
-        (support/check :find-preedit-yields
-                       (and (= 0 return-result) (= 0 escape-result)
-                            (= sel-before sel-after) (= visible-before visible-after))
-                       {:return-result return-result :escape-result escape-result
-                        :sel-before sel-before :sel-after sel-after
-                        :visible-before visible-before :visible-after visible-after})
-        (next)))))
+  [ui]
+  (go-row :find-preedit-yields support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (let [sel-before (g/selection-offsets buf)
+                    visible-before (g/gtk-widget-get-visible (:box fb))]
+                (reset! (:preedit-active? fb) true)
+                (let [return-result (find-bar/handle-key! fb support/KEY-RETURN 0)
+                      escape-result (find-bar/handle-key! fb support/KEY-ESCAPE 0)
+                      sel-after (g/selection-offsets buf)
+                      visible-after (g/gtk-widget-get-visible (:box fb))]
+                  (reset! (:preedit-active? fb) false)
+                  (support/check :find-preedit-yields
+                                 (and (= 0 return-result) (= 0 escape-result)
+                                      (= sel-before sel-after) (= visible-before visible-after))
+                                 {:return-result return-result :escape-result escape-result
+                                  :sel-before sel-before :sel-after sel-after
+                                  :visible-before visible-before :visible-after visible-after})))))))
 
 (defn row-find-prefill-selects
   "open! must select the whole prefilled query text, not just prefill
@@ -227,20 +228,18 @@
   \"already settled\" apart from \"just hasn't been revoked yet\" -- so
   this polls with a deadline instead, and genuinely fails (not hangs) if
   the selection never settles."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (support/select-range! buf 4 7) ; "bar"
-    (find-bar/open! fb :find)
-    (support/poll-until 500 20
-                        (fn [] (and (= "bar" (g/editable-text (:query fb)))
-                                    (= [0 3] (g/editable-selection-bounds (:query fb)))))
-                        (fn [ok?]
-                          (support/check :find-prefill-selects ok?
-                                         {:query-text (g/editable-text (:query fb))
-                                          :sel (g/editable-selection-bounds (:query fb))})
-                          (find-bar/close! fb)
-                          (next)))))
+  [ui]
+  (go-row :find-prefill-selects support/check
+    (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)
+          _ (on-gtk (editor/set-text! ed "foo bar foo baz foo")
+                    (support/select-range! buf 4 7) ; "bar"
+                    (find-bar/open! fb :find))
+          ok? (await-until 500 20 #(and (= "bar" (g/editable-text (:query fb)))
+                                        (= [0 3] (g/editable-selection-bounds (:query fb)))))]
+      (on-gtk (support/check :find-prefill-selects ok?
+                             {:query-text (g/editable-text (:query fb))
+                              :sel (g/editable-selection-bounds (:query fb))})
+              (find-bar/close! fb)))))
 
 ;; --- P3.T4: Escape via the WINDOW's own dispatch -------------------------
 ;; (:handle-window-key! ui), never find-bar/handle-key! directly -- these
@@ -260,27 +259,24 @@
   dispatch with Escape: the bar must close, focus must return to the
   editor, and the program must STILL be running (stopped in this row's
   own cleanup, not by the Escape press)."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) win (:window ui)]
-    (editor/set-text! ed "(loop [] (recur))")
-    ((:run!* ui))
-    (support/poll-until 2000 20
-                        (fn [] (eval/evaluating? (:ctx (:session ui))))
-                        (fn [started?]
-                          (find-bar/open! fb :find)
-                          (let [handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
-                                bar-visible (g/gtk-widget-get-visible (:box fb))
-                                focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
-                                still-running? (eval/evaluating? (:ctx (:session ui)))]
-                            (support/check :window-escape-closes-bar-while-running
-                                           (and started? (= 1 handled) (zero? bar-visible)
-                                                focus-is-editor? still-running?)
-                                           {:started started? :handled handled :bar-visible bar-visible
-                                            :focus-is-editor focus-is-editor? :still-running still-running?})
-                            ((:stop!* ui))
-                            (support/poll-until 3000 20
-                                                (fn [] (not (eval/evaluating? (:ctx (:session ui)))))
-                                                (fn [_] (next))))))))
+  [ui]
+  (go-row :window-escape-closes-bar-while-running support/check
+    (let [ed (:editor ui) fb (:find-bar ui) win (:window ui)
+          _ (on-gtk (editor/set-text! ed "(loop [] (recur))")
+                    ((:run!* ui)))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))]
+      (on-gtk (find-bar/open! fb :find)
+              (let [handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
+                    bar-visible (g/gtk-widget-get-visible (:box fb))
+                    focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
+                    still-running? (eval/evaluating? (:ctx (:session ui)))]
+                (support/check :window-escape-closes-bar-while-running
+                               (and started? (= 1 handled) (zero? bar-visible)
+                                    focus-is-editor? still-running?)
+                               {:started started? :handled handled :bar-visible bar-visible
+                                :focus-is-editor focus-is-editor? :still-running still-running?})
+                ((:stop!* ui))))
+      (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
 
 (defn row-window-escape-yields-preedit-while-running
   "With the find bar's own preedit flag set, window.clj's Escape clause
@@ -290,28 +286,25 @@
   Starts a real running program, opens the bar, sets preedit-active?
   true, sends window Escape: must return 0, the bar must stay open, and
   the program must still be running."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui)]
-    (editor/set-text! ed "(loop [] (recur))")
-    ((:run!* ui))
-    (support/poll-until 2000 20
-                        (fn [] (eval/evaluating? (:ctx (:session ui))))
-                        (fn [started?]
-                          (find-bar/open! fb :find)
-                          (reset! (:preedit-active? fb) true)
-                          (let [handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
-                                bar-visible (g/gtk-widget-get-visible (:box fb))
-                                still-running? (eval/evaluating? (:ctx (:session ui)))]
-                            (reset! (:preedit-active? fb) false)
-                            (support/check :window-escape-yields-preedit-while-running
-                                           (and started? (= 0 handled) (= 1 bar-visible) still-running?)
-                                           {:started started? :handled handled :bar-visible bar-visible
-                                            :still-running still-running?})
-                            (find-bar/close! fb)
-                            ((:stop!* ui))
-                            (support/poll-until 3000 20
-                                                (fn [] (not (eval/evaluating? (:ctx (:session ui)))))
-                                                (fn [_] (next))))))))
+  [ui]
+  (go-row :window-escape-yields-preedit-while-running support/check
+    (let [ed (:editor ui) fb (:find-bar ui)
+          _ (on-gtk (editor/set-text! ed "(loop [] (recur))")
+                    ((:run!* ui)))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))]
+      (on-gtk (find-bar/open! fb :find)
+              (reset! (:preedit-active? fb) true)
+              (let [handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
+                    bar-visible (g/gtk-widget-get-visible (:box fb))
+                    still-running? (eval/evaluating? (:ctx (:session ui)))]
+                (reset! (:preedit-active? fb) false)
+                (support/check :window-escape-yields-preedit-while-running
+                               (and started? (= 0 handled) (= 1 bar-visible) still-running?)
+                               {:started started? :handled handled :bar-visible bar-visible
+                                :still-running still-running?})
+                (find-bar/close! fb)
+                ((:stop!* ui))))
+      (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
 
 (defn row-window-escape-stops-when-editor-focused
   "Escape must keep its P2 meaning (Stop) when focus is OUTSIDE the find
@@ -319,23 +312,20 @@
   Explicitly grabs editor focus (not just relying on whatever an earlier
   row left focused), starts a real running program, sends window Escape:
   the program must stop."
-  [ui next]
-  (let [ed (:editor ui)]
-    (editor/focus! ed)
-    (editor/set-text! ed "(loop [] (recur))")
-    ((:run!* ui))
-    (support/poll-until 2000 20
-                        (fn [] (eval/evaluating? (:ctx (:session ui))))
-                        (fn [started?]
-                          (let [mark (support/out-end-offset ui)
-                                handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-                            (support/poll-until 3000 20
-                                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                                (fn [stopped?]
-                                                  (support/check :window-escape-stops-when-editor-focused
-                                                                 (and started? (= 1 handled) stopped?)
-                                                                 {:started started? :handled handled :stopped stopped?})
-                                                  (next))))))))
+  [ui]
+  (go-row :window-escape-stops-when-editor-focused support/check
+    (let [ed (:editor ui)
+          _ (on-gtk (editor/focus! ed)
+                    (editor/set-text! ed "(loop [] (recur))")
+                    ((:run!* ui)))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          [mark handled] (on-gtk (let [m (support/out-end-offset ui)
+                                       handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                                   [m handled]))
+          stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
+      (support/check :window-escape-stops-when-editor-focused
+                     (and started? (= 1 handled) stopped?)
+                     {:started started? :handled handled :stopped stopped?}))))
 
 ;; --- P3: find bar caret and key routing ----------------------------------
 
@@ -353,71 +343,71 @@
   the caret right after the z. The second keystroke is reproduced the way
   GtkTextView's own commit_text does it (delete_selection, then insert at
   the cursor), and every \"foo\" must survive it."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (support/place-cursor! buf 5)
-    (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1)
-    (let [sel1 (g/selection-offsets buf)
-          caret1 (g/cursor-offset buf)]
-      (g/gtk-text-buffer-delete-selection buf 1 1)
-      (g/gtk-text-buffer-insert-interactive-at-cursor buf "q" -1 1)
-      (let [text (editor/editor-text ed)
-            matches @(:matches fb)]
-        (find-bar/close! fb)
-        (support/check :find-typing-keeps-caret
-                       (and (= [6 6] sel1) (= 6 caret1)
-                            (= "foo bzqar foo baz foo" text) (= 3 (count matches)))
-                       {:sel1 sel1 :caret1 caret1 :text text :matches matches})
-        (next)))))
+  [ui]
+  (go-row :find-typing-keeps-caret support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (support/place-cursor! buf 5)
+              (g/gtk-text-buffer-insert-interactive-at-cursor buf "z" -1 1)
+              (let [sel1 (g/selection-offsets buf)
+                    caret1 (g/cursor-offset buf)]
+                (g/gtk-text-buffer-delete-selection buf 1 1)
+                (g/gtk-text-buffer-insert-interactive-at-cursor buf "q" -1 1)
+                (let [text (editor/editor-text ed)
+                      matches @(:matches fb)]
+                  (find-bar/close! fb)
+                  (support/check :find-typing-keeps-caret
+                                 (and (= [6 6] sel1) (= 6 caret1)
+                                      (= "foo bzqar foo baz foo" text) (= 3 (count matches)))
+                                 {:sel1 sel1 :caret1 caret1 :text text :matches matches})))))))
 
 (defn row-find-return-in-replacement
   "I1: Return with focus in the replacement entry replaces the current
   match. gtk_root_get_focus returns the entry's internal GtkText delegate,
   so comparing it with the entry itself was always false and Return ran
   find-next! instead."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :replace)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (g/gtk-editable-set-text (:replacement fb) "X")
-    (g/gtk-widget-grab-focus (:replacement fb))
-    (let [handled (find-bar/handle-key! fb support/KEY-RETURN 0)
-          text (editor/editor-text ed)
-          sel (g/selection-offsets buf)]
-      (find-bar/close! fb)
-      (support/check :find-return-in-replacement
-                     (and (= 1 handled) (= "X bar foo baz foo" text) (= [6 9] sel))
-                     {:handled handled :text text :sel sel})
-      (next))))
+  [ui]
+  (go-row :find-return-in-replacement support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :replace)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (g/gtk-editable-set-text (:replacement fb) "X")
+              (g/gtk-widget-grab-focus (:replacement fb))
+              (let [handled (find-bar/handle-key! fb support/KEY-RETURN 0)
+                    text (editor/editor-text ed)
+                    sel (g/selection-offsets buf)]
+                (find-bar/close! fb)
+                (support/check :find-return-in-replacement
+                               (and (= 1 handled) (= "X bar foo baz foo" text) (= [6 9] sel))
+                               {:handled handled :text text :sel sel}))))))
 
 (defn row-window-find-keys-editor-focused
   "I4: with the bar open and focus back in the editor, F3, Cmd+G and
   Shift+F3 still move between matches, through the WINDOW's own key
   dispatch (:handle-window-key!), not the bar's controller."
-  [ui next]
-  (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed) win (:window ui)]
-    (editor/set-text! ed "foo bar foo baz foo")
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "foo")
-    (editor/focus! ed)
-    (let [focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
-          initial (g/selection-offsets buf)
-          h1 ((:handle-window-key! ui) nil KEY-F3 0 0 nil)
-          sel1 (g/selection-offsets buf)
-          h2 ((:handle-window-key! ui) nil KEY-G 0 g/CONTROL-MASK nil)
-          sel2 (g/selection-offsets buf)
-          h3 ((:handle-window-key! ui) nil KEY-F3 0 g/SHIFT-MASK nil)
-          sel3 (g/selection-offsets buf)]
-      (find-bar/close! fb)
-      (support/check :window-find-keys-editor-focused
-                     (and focus-is-editor? (= [0 3] initial)
-                          (= 1 h1) (= [8 11] sel1)
-                          (= 1 h2) (= [16 19] sel2)
-                          (= 1 h3) (= [8 11] sel3))
-                     {:focus-is-editor focus-is-editor? :initial initial
-                      :h1 h1 :sel1 sel1 :h2 h2 :sel2 sel2 :h3 h3 :sel3 sel3})
-      (next))))
+  [ui]
+  (go-row :window-find-keys-editor-focused support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed) win (:window ui)]
+              (editor/set-text! ed "foo bar foo baz foo")
+              (find-bar/open! fb :find)
+              (g/gtk-editable-set-text (:query fb) "foo")
+              (editor/focus! ed)
+              (let [focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
+                    initial (g/selection-offsets buf)
+                    h1 ((:handle-window-key! ui) nil KEY-F3 0 0 nil)
+                    sel1 (g/selection-offsets buf)
+                    h2 ((:handle-window-key! ui) nil KEY-G 0 g/CONTROL-MASK nil)
+                    sel2 (g/selection-offsets buf)
+                    h3 ((:handle-window-key! ui) nil KEY-F3 0 g/SHIFT-MASK nil)
+                    sel3 (g/selection-offsets buf)]
+                (find-bar/close! fb)
+                (support/check :window-find-keys-editor-focused
+                               (and focus-is-editor? (= [0 3] initial)
+                                    (= 1 h1) (= [8 11] sel1)
+                                    (= 1 h2) (= [16 19] sel2)
+                                    (= 1 h3) (= [8 11] sel3))
+                               {:focus-is-editor focus-is-editor? :initial initial
+                                :h1 h1 :sel1 sel1 :h2 h2 :sel2 sel2 :h3 h3 :sel3 sel3}))))))
