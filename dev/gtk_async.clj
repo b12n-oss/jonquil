@@ -56,8 +56,8 @@
 
 (defn await-until
   "Parks until (pred), run on the GTK thread each time, is truthy, or
-  deadline-ms has passed; checks every interval-ms. true or false, like
-  poll-until's done argument. The first check runs at once."
+  deadline-ms has passed; checks every interval-ms. Returns true or false. The first check
+  runs at once."
   [deadline-ms interval-ms pred]
   (let [t0 (System/currentTimeMillis)]
     (loop []
