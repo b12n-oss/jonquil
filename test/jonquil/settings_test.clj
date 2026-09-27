@@ -93,3 +93,31 @@
       (let [msg (settings/save-settings! a {:theme :dark})]
         (is (string? msg) "should return a string, not throw")
         (is (str/includes? msg "couldn't save") "error message should mention save failure")))))
+
+(deftest dialect-test
+  (testing "a known :dialect loads; the map has no :dialect key when the file names none"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :navy :dialect :jolt}")
+      (is (= {:theme :navy :dialect :jolt} (settings/load-settings path)))))
+  (testing "an unknown :dialect is a warning, and the theme still loads"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :navy :dialect :cobol}")
+      (let [r (settings/load-settings path)]
+        (is (= :navy (:theme r)))
+        (is (nil? (:dialect r)))
+        (is (str/includes? (:warning r) "names :dialect :cobol")))))
+  (testing "both parts bad: both warnings"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :purple :dialect :cobol}")
+      (let [w (:warning (settings/load-settings path))]
+        (is (str/includes? w "no known :theme"))
+        (is (str/includes? w "names :dialect :cobol")))))
+  (testing "saving a theme keeps a hand-set :dialect"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :light :dialect :jolt}")
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= {:theme :dark :dialect :jolt} (settings/load-settings path)))))
+  (testing "saving never invents a :dialect"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= "{:theme :dark}" (slurp path))))))
