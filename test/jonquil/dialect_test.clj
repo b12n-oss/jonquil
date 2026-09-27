@@ -1,5 +1,6 @@
 (ns jonquil.dialect-test
   (:require [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.dialect :as dialect]
@@ -136,3 +137,67 @@
     (is (= [:jolt :nrepl "/p"] (k "{:runtime :nrepl}" "/p" "/p/a.clj")))
     (is (not= (k "{:runtime :nrepl}" "/p" "/p/a.clj") (k "{:runtime :nrepl}" "/q" "/q/a.clj"))
         "another nREPL project needs its own child")))
+
+;; P1.T1: the ClojureDart profile. `with-cljd` is the profile list the
+;; window will use once P2 wires the attach evaluator in.
+(def ^:private with-cljd [dialect/jolt dialect/cljd])
+
+(deftest cljd-profile-test
+  (is (= [:cljd "ClojureDart" #{"cljd"} ["pubspec.yaml"] :attach #{:attach} "NREPL.lock" true]
+         ((juxt :id :name :extensions :project-markers :evaluator :runtimes :port-file :experimental) dialect/cljd)))
+  (testing "its sets start from Jolt's"
+    (is (set/subset? (:special-forms dialect/jolt) (:special-forms dialect/cljd)))
+    (is (= (:builtins dialect/jolt) (:builtins dialect/cljd))))
+  (testing "and add ClojureDart's own forms, none of which Jolt's sets already hold"
+    (let [added (set/difference (:special-forms dialect/cljd) (:special-forms dialect/jolt))]
+      (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
+      (is (empty? (set/intersection added (:builtins dialect/jolt))))))
+  (is (= [dialect/jolt] dialect/profiles) "P2.T4 adds cljd, with the attach evaluator"))
+
+(deftest cljd-select-test
+  (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
+    (let [s (dialect/select with-cljd (proj #{"pubspec.yaml"} nil) "/p/lib/main.cljd" nil)]
+      (is (= [:cljd :marker :attach "/p" []]
+             [(:id (:profile s)) (:source s) (:runtime s) (:project-dir s) (:warnings s)]))))
+  (testing "both markers (deps.edn and pubspec.yaml): the extension breaks the tie"
+    (let [both (proj #{"deps.edn" "pubspec.yaml"} nil)]
+      (is (= [:cljd :extension :attach] ((juxt (comp :id :profile) :source :runtime)
+                                         (dialect/select with-cljd both "/p/src/a/drive.cljd" nil))))
+      (is (= [:jolt :extension :in-process] ((juxt (comp :id :profile) :source :runtime)
+                                             (dialect/select with-cljd both "/p/dev/user.clj" nil))))
+      (is (= [:jolt :extension] ((juxt (comp :id :profile) :source)
+                                 (dialect/select with-cljd both "/p/src/a/shared.cljc" nil)))
+          ".cljc stays Jolt's")
+      (is (= [:jolt :fallback] ((juxt (comp :id :profile) :source)
+                                (dialect/select with-cljd both "/p/bb.edn" nil)))
+          "bb.edn: no extension match, so the first profile")))
+  (testing "a loose .cljd file: cljd by extension, no project"
+    (is (= [:cljd :extension nil] ((juxt (comp :id :profile) :source :project-dir)
+                                   (dialect/select with-cljd nil "/tmp/x.cljd" nil)))))
+  (testing ".jonquil.edn {:dialect :cljd} pins it for every file"
+    (is (= [:cljd :config :attach] ((juxt (comp :id :profile) :source :runtime)
+                                    (dialect/select with-cljd (proj #{"deps.edn" "pubspec.yaml"} "{:dialect :cljd}")
+                                                    "/p/dev/user.clj" nil)))))
+  (testing "any other runtime: the existing \"doesn't offer here\" warning, then :attach"
+    (doseq [rt [":nrepl" ":in-process"]]
+      (let [s (dialect/select with-cljd (proj #{"pubspec.yaml"} (str "{:dialect :cljd :runtime " rt "}"))
+                              "/p/lib/main.cljd" nil)]
+        (is (= :attach (:runtime s)) rt)
+        (is (= [(str ".jonquil.edn asks for runtime " rt ", which ClojureDart doesn't offer here; using attach")]
+               (:warnings s)) rt)))))
+
+(deftest cljd-label-test
+  (let [sel (dialect/select with-cljd (proj #{"pubspec.yaml"} nil) "/p/lib/main.cljd" nil)]
+    (is (= "ClojureDart (not running)" (dialect/label sel)))
+    (is (= "ClojureDart (not running)" (dialect/label sel nil)))
+    (is (= "ClojureDart (attached)" (dialect/label sel :attached)))
+    (is (= "ClojureDart (not running)" (dialect/label sel :not-running))))
+  (testing "Jolt's labels ignore the connection argument"
+    (is (= "Jolt" (dialect/label {:profile dialect/jolt :runtime :in-process} :attached)))
+    (is (= "Jolt (nREPL)" (dialect/label {:profile dialect/jolt :runtime :nrepl} :attached)))))
+
+(deftest cljd-selection-key-test
+  (let [k (fn [dir path] (dialect/selection-key (dialect/select with-cljd (assoc (proj #{"pubspec.yaml"} nil) :dir dir) path nil)))]
+    (is (= [:cljd :attach "/p"] (k "/p" "/p/lib/a.cljd")))
+    (is (= (k "/p" "/p/lib/a.cljd") (k "/p" "/p/dev/b.cljd")) "another file in the same app keeps the connection")
+    (is (not= (k "/p" "/p/lib/a.cljd") (k "/q" "/q/lib/a.cljd")) "another app needs its own")))
