@@ -123,12 +123,14 @@
   (doseq [w (:warnings sel)]
     (cview/append! cv :system (str "; project: " w "\n"))))
 
-(defn- apply-selection!
-  "Makes sel the window's selection. sel-ctx is {:cv :dialect-label :sel*}.
-  D2.T5 adds the evaluator swap here."
-  [{:keys [cv dialect-label sel*]} sel]
-  (reset! sel* sel)
-  (show-selection! cv dialect-label sel))
+;; apply-selection! (D2.T5) is defined further down, right after
+;; start-and-report! -- same deviation start-and-report! itself already
+;; made (see its own docstring): it calls start-and-report!, and Jolt
+;; resolves an unqualified symbol at compile time, not lazily, so it can't
+;; sit here, before that fn exists, without failing bb check with "Unable
+;; to resolve symbol: start-and-report!". Reported as a deviation; see the
+;; report. Its only caller (activate!) is later still, so moving it costs
+;; nothing.
 
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
@@ -605,6 +607,33 @@
           (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
         (finally
           (when-not (ev/evaluating? e) (set-status! status-label "Ready")))))))
+
+;; D2.T5: apply-selection! moved here (from directly after show-selection!,
+;; its prescribed spot) for the same reason start-and-report! moved above
+;; it -- it now calls start-and-report!, which Jolt resolves at compile
+;; time, not lazily. See the comment left at the old spot, and the report.
+(defn- apply-selection!
+  "Makes sel the window's selection. When it needs a different evaluator
+  (jonquil.dialect/selection-key), the old one is interrupted and stopped
+  off the GTK thread and a new one starts. sel-ctx is {:cv :status-label
+  :dialect-label :sel* :ev* :mode-fn}."
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn]} sel]
+  (let [old-sel @sel*]
+    (reset! sel* sel)
+    (show-selection! cv dialect-label sel)
+    (when (not= (dialect/selection-key old-sel) (dialect/selection-key sel))
+      (let [old @ev*
+            new (ev/make sel)]
+        (ev/set-mode! new (mode-fn))
+        (reset! ev* new)
+        (cview/append! cv :system (str "; Switched to " (dialect/label sel)
+                                       ". The previous session is gone.\n"))
+        (future
+          (try (when (ev/evaluating? old) (ev/interrupt! old))
+               (ev/stop! old)
+               (catch :default ex
+                 (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))))
+        (start-and-report! cv status-label new sel)))))
 
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (global.md: every one of
@@ -1613,7 +1642,8 @@
     ;; D1.T4: the starting selection's warnings, then re-selection whenever
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
-    (let [sel-ctx {:cv cv :dialect-label dialect-label :sel* sel*}]
+    (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
+                   :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
       (try
         (show-selection! cv dialect-label @sel*)
         (catch :default e

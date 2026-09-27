@@ -10,10 +10,23 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
-            [jonquil.nrepl.evaluator :as nrepl]))
+            [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.session]))
 
 (def fixture-core
   "(ns demo.core)\n\n(defn greet\n  \"Says hi.\"\n  [n]\n  (println \"hi\" n)\n  :hi)\n")
+
+;; D2.T5: the fixture!-built project's own {:dir :file}, stashed here so a
+;; row (row-nrepl-open-switches-evaluator, reopening it after switching
+;; away) and after-close-checks! (reading its .nrepl-port back, after
+;; main/start! has returned and -main's own local is out of scope) can
+;; both reach it without threading it through every row-fn's [ui next]
+;; signature.
+(defonce ^:private fixture* (atom nil))
+
+;; D2.T5: the pid row-nrepl-close-kills-child records right before quitting,
+;; read back by after-close-checks! once the GTK loop is gone.
+(defonce ^:private last-child-pid (atom nil))
 
 (defn fixture!
   "A throwaway project: deps.edn, .jonquil.edn {:runtime :nrepl}, a
@@ -27,7 +40,20 @@
     (spit (io/file d ".jonquil.edn") "{:runtime :nrepl}")
     (spit (io/file d ".nrepl-port") "4242\n")
     (spit f fixture-core)
-    {:dir (.getCanonicalPath d) :file (.getCanonicalPath f)}))
+    (let [result {:dir (.getCanonicalPath d) :file (.getCanonicalPath f)}]
+      (reset! fixture* result)
+      result)))
+
+(defn- loose-fixture!
+  "A file with no project markers above it and no .jonquil.edn -- so
+  dialect/select falls through to the extension alone, which picks the
+  Jolt profile's own default runtime, :in-process."
+  []
+  (let [d (io/file (System/getProperty "java.io.tmpdir") (str "jonquil-selftest-loose-" (System/nanoTime)))
+        f (io/file d "scratch.clj")]
+    (.mkdirs d)
+    (spit f "(+ 1 2)\n")
+    (.getCanonicalPath f)))
 
 (defn evaluator [ui] ((:evaluator* ui)))
 
@@ -81,6 +107,40 @@
   (shell-then ["ps" "-p" (str pid) "-o" "pid="]
               (fn [r] (f (str/includes? (str (:out r)) (str pid))))))
 
+(defn dead-then
+  "(f dead?) for pid: re-checks alive-then every 200 ms (via support/later,
+  never a fixed sleep) until it reports false or deadline-ms elapses."
+  [pid deadline-ms f]
+  (let [t0 (System/currentTimeMillis)]
+    (letfn [(step []
+              (alive-then pid
+                          (fn [alive?]
+                            (cond
+                              (not alive?) (f true)
+                              (>= (- (System/currentTimeMillis) t0) deadline-ms) (f false)
+                              :else (support/later 200 step)))))]
+      (step))))
+
+(defn own-pid-then
+  "(f pid) once with-own-child-pid confirms a non-nil pid, re-checked every
+  200 ms up to deadline-ms; (f nil) if it never does. restart-for-stop!
+  (jonquil.nrepl.evaluator) prints its own console line BEFORE it actually
+  spawns the replacement child (measured: with-own-child-pid right after
+  that text appears sometimes still finds no confirmed child), so a row
+  reading the pid AFTER a restart needs this instead of a single
+  with-own-child-pid call."
+  [ui deadline-ms f]
+  (let [t0 (System/currentTimeMillis)]
+    (letfn [(step []
+              (with-own-child-pid
+                ui
+                (fn [pid]
+                  (cond
+                    pid (f pid)
+                    (>= (- (System/currentTimeMillis) t0) deadline-ms) (f nil)
+                    :else (support/later 200 step)))))]
+      (step))))
+
 ;; --- D2.T4 rows ------------------------------------------------------------
 
 (defn row-nrepl-starts-and-reports
@@ -125,7 +185,8 @@
    (fn [t] (and (str/includes? t "hi 1") (str/includes? t "=> :hi")))
    (fn [ok? mark]
      (support/check :nrepl-run-output
-                    (and ok? (= 'demo.core (ev/prompt-ns (evaluator ui))))
+                    (and ok? (= 'demo.core (ev/prompt-ns (evaluator ui)))
+                         (instance? jonquil.nrepl.evaluator.NRepl (evaluator ui)))
                     {:ok? ok? :ns (ev/prompt-ns (evaluator ui)) :text (support/since ui mark)})
      (next))))
 
@@ -136,7 +197,9 @@
    ui "(greet 2)" 5000
    (fn [t] (and (str/includes? t "hi 2") (str/includes? t "=> :hi")))
    (fn [ok? mark]
-     (support/check :nrepl-repl-follows-run ok? {:text (support/since ui mark)})
+     (support/check :nrepl-repl-follows-run
+                    (and ok? (instance? jonquil.nrepl.evaluator.NRepl (evaluator ui)))
+                    {:text (support/since ui mark)})
      (next))))
 
 (defn row-nrepl-error-is-text
@@ -187,7 +250,8 @@
                       (support/check :nrepl-reset-clears-child
                                      (and ok1 ok2 ok3 ok4 ok5 ok6
                                           (str/includes? text1 "=> nil")
-                                          (str/includes? text2 "=> 1"))
+                                          (str/includes? text2 "=> 1")
+                                          (instance? jonquil.nrepl.evaluator.NRepl (evaluator ui)))
                                      {:text1 text1 :text2 text2})
                       (next)))))))))))))))
 
@@ -239,3 +303,224 @@
                      (and (str/includes? text "demo.core/greet") (str/includes? text "Says hi."))
                      {:text text})
       (next))))
+
+;; --- D2.T5 rows: switching runtimes on open, and the window's failure
+;; rows (Stop against an unresponsive child, a child that dies, quit with
+;; a live child) ---------------------------------------------------------
+
+(defn row-nrepl-stop-interrupts
+  "A plain interrupt (Review focus 2's easy case): the child answers, so
+  Stop ends the evaluation without ever restarting it -- the same pid
+  before and after, and `before`'s binding (set at the top of the same
+  Run) survives, unlike a restart, which would lose it."
+  [ui next]
+  (let [mark (support/out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(def before 1)\n(loop [] (recur))")
+    ((:run!* ui))
+    (support/poll-until
+     2000 20
+     (fn [] (ev/evaluating? (evaluator ui)))
+     (fn [started?]
+       (with-own-child-pid
+         ui
+         (fn [before-pid]
+           ((:stop!* ui))
+           (support/poll-until
+            5000 20
+            (fn [] (and (idle? ui) (str/includes? (support/since ui mark) "; interrupted")))
+            (fn [interrupted?]
+              (with-own-child-pid
+                ui
+                (fn [after-pid]
+                  (submit-and-wait!
+                   ui "before" 5000
+                   (fn [t] (str/includes? t "=> 1"))
+                   (fn [ok? mark2]
+                     (support/check :nrepl-stop-interrupts
+                                    (and started? interrupted? ok?
+                                         (some? before-pid) (= before-pid after-pid))
+                                    {:started started? :interrupted interrupted?
+                                     :before-pid before-pid :after-pid after-pid
+                                     :text (support/since ui mark2)})
+                     (next)))))))))))))
+
+(defn row-nrepl-stop-unresponsive-restarts
+  "Review focus 2's hard case: a SIGSTOPped child never answers interrupt,
+  so Stop falls back to killing and restarting it -- a different pid, the
+  console naming both the interrupt and the restart, and the runtime
+  working again afterward."
+  [ui next]
+  (let [mark (support/out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(loop [] (recur))")
+    ((:run!* ui))
+    (support/poll-until
+     2000 20
+     (fn [] (ev/evaluating? (evaluator ui)))
+     (fn [started?]
+       (with-own-child-pid
+         ui
+         (fn [before-pid]
+           (signal-then
+            before-pid "-STOP"
+            (fn []
+              ((:stop!* ui))
+              (support/poll-until
+               15000 20
+               (fn [] (let [t (support/since ui mark)]
+                        (and (str/includes? t "; interrupted")
+                             (str/includes? t "Stop restarted the Jolt runtime"))))
+               (fn [msgs?]
+                 (own-pid-then
+                  ui 5000
+                  (fn [after-pid]
+                    (alive-then
+                     before-pid
+                     (fn [old-alive?]
+                       (run-and-wait!
+                        ui "(+ 1 2)" 5000
+                        (fn [t] (str/includes? t "=> 3"))
+                        (fn [ok? mark2]
+                          (support/check :nrepl-stop-unresponsive-restarts
+                                         (and started? msgs? ok?
+                                              (some? before-pid) (some? after-pid)
+                                              (not= before-pid after-pid)
+                                              (false? old-alive?)
+                                              (= "Ready" (g/label-text (:status-label ui))))
+                                         {:started started? :msgs? msgs?
+                                          :before-pid before-pid :after-pid after-pid
+                                          :old-alive? old-alive? :text (support/since ui mark2)})
+                          (next)))))))))))))))))
+
+(defn row-nrepl-child-dies-mid-eval
+  "Review focus 3: a child that dies outright (SIGKILL, no Stop pressed)
+  still ends the evaluation with a sentence instead of hanging, the
+  status returns to Ready on its own, and the very next Run notices the
+  runtime is gone and starts a fresh one before evaluating."
+  [ui next]
+  (let [mark (support/out-end-offset ui)]
+    (editor/set-text! (:editor ui) "(Thread/sleep 30000)")
+    ((:run!* ui))
+    (support/poll-until
+     2000 20
+     (fn [] (ev/evaluating? (evaluator ui)))
+     (fn [started?]
+       (with-own-child-pid
+         ui
+         (fn [pid]
+           (signal-then
+            pid "-9"
+            (fn []
+              (support/poll-until
+               5000 20
+               (fn [] (and (idle? ui)
+                           (= "Ready" (g/label-text (:status-label ui)))
+                           (str/includes? (support/since ui mark)
+                                          "The Jolt runtime exited before this evaluation finished.")))
+               (fn [died?]
+                 (run-and-wait!
+                  ui "(+ 1 2)" 15000
+                  (fn [t] (and (str/includes? t "; The Jolt runtime had exited, so a new one was started.")
+                               (str/includes? t "=> 3")))
+                  (fn [ok2? mark2]
+                    (support/check :nrepl-child-dies-mid-eval
+                                   (and started? died? ok2?)
+                                   {:started started? :died? died?
+                                    :text (support/since ui mark2)})
+                    (next)))))))))))))
+
+(defn row-nrepl-open-switches-evaluator
+  "Opening a loose file (no markers, no .jonquil.edn) swaps the window off
+  the nREPL evaluator onto the in-process one and kills the old child;
+  opening the nREPL project's own fixture file again swaps back and
+  starts a fresh one."
+  [ui next]
+  (with-own-child-pid
+    ui
+    (fn [old-pid]
+      (let [mark (support/out-end-offset ui)]
+        ((:open-path! ui) (loose-fixture!))
+        (support/poll-until
+         5000 20
+         (fn [] (str/includes? (support/since ui mark)
+                               "; Switched to Jolt. The previous session is gone."))
+         (fn [switched1?]
+           (let [label1 (g/label-text (:dialect-label ui))
+                 inproc1? (instance? jonquil.session.InProcess (evaluator ui))]
+             (dead-then
+              old-pid 5000
+              (fn [dead1?]
+                (let [mark2 (support/out-end-offset ui)]
+                  ((:open-path! ui) (:file @fixture*))
+                  (support/poll-until
+                   20000 20
+                   (fn [] (str/includes? (support/since ui mark2) "; Jolt (nREPL) is running (pid "))
+                   (fn [started2?]
+                     (let [label2 (g/label-text (:dialect-label ui))]
+                       (run-and-wait!
+                        ui "(+ 1 2)" 5000
+                        (fn [t] (str/includes? t "=> 3"))
+                        (fn [ok3? mark3]
+                          (support/check :nrepl-open-switches-evaluator
+                                         (and switched1? (= "Jolt" label1) inproc1?
+                                              (some? old-pid) dead1?
+                                              started2? (= "Jolt (nREPL)" label2) ok3?)
+                                         {:switched1? switched1? :label1 label1 :inproc1? inproc1?
+                                          :old-pid old-pid :dead1? dead1? :started2? started2?
+                                          :label2 label2 :text (support/since ui mark3)})
+                          (next))))))))))))))))
+
+(defn row-nrepl-close-kills-child
+  "The deliberately LAST row: records the live child's own pid, leaves the
+  editor clean (set-text! never marks it dirty, so the real close below
+  takes close-request-fn's immediate real-quit branch, no alert), and
+  fires the exact action a Quit AppleEvent activates (window.clj's own
+  quit-action handler) -- ev/stop! then runs on the GTK thread inside
+  close-request-fn, same as the window self-test's own row-command-chord-
+  close. after-close-checks! (below), called once the GTK loop is
+  actually gone, is where this row's own pass/fail is recorded."
+  [ui next]
+  (with-own-child-pid
+    ui
+    (fn [pid]
+      (reset! last-child-pid pid)
+      (editor/set-text! (:editor ui) "")
+      ((:activate-quit-action!* ui))
+      (next))))
+
+(defn after-close-checks!
+  "Review focus 1's post-loop evidence: called by -main once main/start!
+  returns, when the GTK loop is gone and a blocking clojure.java.shell/sh
+  is fine (unlike shell-then above, which polls via g_timeout_add and
+  needs one running). Three checks, all against row-nrepl-close-kills-
+  child's own close:
+  - the child pid it recorded no longer answers ps (kill! reached it);
+  - the fixture project's .nrepl-port is back to the \"someone else\"
+    value fixture! wrote (4242\\n) -- child/kill!'s own restore;
+  - this process itself has no leftover children (pgrep -P).
+
+  Deviation from the brief (reported; see the report): the brief's own
+  first bullet reads \"ps -p <pid> prints nothing\", but measured (a
+  definitely-dead pid, still in range): bare `ps -p <pid>` always prints
+  its header line (\"PID TTY TIME CMD\") whether or not the pid is alive,
+  so that check can never fail even when the process really is gone --
+  it isn't the process's own aliveness. `ps -p <pid> -o pid=` (no header,
+  same flag alive-then above already uses) prints nothing exactly when
+  the pid is dead, measured against a pid this session spawned and
+  waited on; used here instead."
+  []
+  (let [pid @last-child-pid
+        self (.pid (java.lang.ProcessHandle/current))
+        ps (when pid (shell/sh "ps" "-p" (str pid) "-o" "pid="))
+        dir (:dir @fixture*)
+        port-file (io/file dir ".nrepl-port")
+        port-text (when (.exists port-file) (slurp port-file))
+        kids (shell/sh "pgrep" "-P" (str self))]
+    (support/check :nrepl-close-kills-child
+                   (and (some? pid) (str/blank? (str (:out ps))))
+                   {:pid pid :ps-out (:out ps)})
+    (support/check :nrepl-close-restores-port-file
+                   (= "4242\n" port-text)
+                   {:port-text port-text})
+    (support/check :nrepl-close-no-children
+                   (str/blank? (str (:out kids)))
+                   {:pgrep-out (:out kids)})))
