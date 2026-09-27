@@ -20,6 +20,7 @@
   ported unchanged in shape."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.cljd :as cljd]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
@@ -36,6 +37,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
+            [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
@@ -123,6 +125,39 @@
   (g/gtk-label-set-text dialect-label (dialect/label sel))
   (doseq [w (:warnings sel)]
     (cview/append! cv :system (str "; project: " w "\n"))))
+
+;; --- the ClojureDart attach evaluator's window state (cljd plan P2.T4) -----
+
+(defn- dialect-text
+  "The status bar's dialect label for selection sel run by evaluator e: an
+  attach evaluator's label says whether it holds a live connection."
+  [sel e]
+  (dialect/label sel (when (instance? jonquil.nrepl.attach.Attach e)
+                       (if (attach/connected? e) :attached :not-running))))
+
+(defn- watch-connection!
+  "For an attach evaluator e, keeps the dialect label in step with its
+  connection. The listener runs on whatever thread connected or lost the
+  socket, so it hands the label to the GTK thread, and it does nothing once
+  e is no longer the window's evaluator (a later switch made another)."
+  [e ev* sel* dialect-label]
+  (when (instance? jonquil.nrepl.attach.Attach e)
+    (attach/on-connection! e (fn [_]
+                               (on-gui! (fn []
+                                          (when (identical? e @ev*)
+                                            (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
+
+(defn- apply-reset-toggle!
+  "Reset on Run is insensitive, with a tooltip saying why, for an attach
+  runtime: hot reload can't unload a namespace, so every Run accumulates.
+  Every other runtime gets the checkbox back, with no tooltip. GTK thread
+  only."
+  [reset-chk sel]
+  (if (= :attach (:runtime sel))
+    (do (g/gtk-widget-set-sensitive reset-chk 0)
+        (g/gtk-widget-set-tooltip-text reset-chk "Hot reload can't unload a namespace, so every Run adds to the running app."))
+    (do (g/gtk-widget-set-sensitive reset-chk 1)
+        (g/gtk-widget-set-tooltip-text reset-chk nil))))
 
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
@@ -603,21 +638,30 @@
   console: pid, port and project, then each limitation, or why it couldn't
   start. The in-process engine has nothing to start or report."
   [cv status-label e sel]
-  (when (instance? jonquil.nrepl.evaluator.NRepl e)
-    (set-status! status-label (str "Starting " (dialect/label sel) "…"))
-    (future
-      (try
-        (if-let [problem (ev/start! e)]
-          (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
-          (do (cview/append! cv :system
-                             (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
-                                  ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
-              (doseq [l (ev/limitations e)]
-                (cview/append! cv :system (str "; Limit: " l "\n")))))
-        (catch :default ex
-          (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
-        (finally
-          (when-not (ev/evaluating? e) (set-status! status-label "Ready")))))))
+  (cond
+    (instance? jonquil.nrepl.evaluator.NRepl e)
+    (do (set-status! status-label (str "Starting " (dialect/label sel) "…"))
+        (future
+          (try
+            (if-let [problem (ev/start! e)]
+              (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
+              (do (cview/append! cv :system
+                                 (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
+                                      ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
+                  (doseq [l (ev/limitations e)]
+                    (cview/append! cv :system (str "; Limit: " l "\n")))))
+            (catch :default ex
+              (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
+            (finally
+              (when-not (ev/evaluating? e) (set-status! status-label "Ready"))))))
+
+    ;; cljd plan P2.T4: an attach evaluator connects on the first Run, so
+    ;; there's nothing to start; say it's experimental and what it can't do.
+    (instance? jonquil.nrepl.attach.Attach e)
+    (do (when (:experimental (:profile sel))
+          (cview/append! cv :system (str cljd/experimental-message "\n")))
+        (doseq [l (ev/limitations e)]
+          (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
 ;; apply-selection! sits here, after start-and-report! (above), which it
 ;; calls: Jolt resolves an unqualified symbol at compile time, not lazily,
@@ -626,7 +670,7 @@
   "Makes sel the window's selection. When it needs a different evaluator
   (jonquil.dialect/selection-key), the old one is interrupted and stopped
   off the GTK thread and a new one starts. sel-ctx is {:cv :status-label
-  :dialect-label :sel* :ev* :mode-fn}.
+  :dialect-label :sel* :ev* :mode-fn :reset-chk}.
 
   The new evaluator joins jonquil.runtime-registry as soon as it's made
   (so jonquil.main's stop-all! can never miss it, even if the window
@@ -635,15 +679,23 @@
   interrupt! and stop! on the old evaluator are guarded separately, so a
   throw from one still runs the other: each step's own throw is reported
   on the console rather than skipping the step after it and orphaning the
-  old child."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn]} sel]
+  old child.
+
+  cljd plan P2.T4: an attach evaluator's connection drives the label
+  (watch-connection!), Reset on Run follows the runtime
+  (apply-reset-toggle!), and the label is set last, from the evaluator the
+  window ends up with, so opening another file of the same app keeps
+  reading \"attached\"."
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
+    (apply-reset-toggle! reset-chk sel)
     (when (not= (dialect/selection-key old-sel) (dialect/selection-key sel))
       (let [old @ev*
             new (doto (ev/make sel) registry/register!)]
         (ev/set-mode! new (mode-fn))
+        (watch-connection! new ev* sel* dialect-label)
         (reset! ev* new)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
@@ -655,7 +707,8 @@
                (catch :default ex
                  (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))
                (finally (registry/unregister! old))))
-        (start-and-report! cv status-label new sel)))))
+        (start-and-report! cv status-label new sel)))
+    (g/gtk-label-set-text dialect-label (dialect-text sel @ev*))))
 
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (global.md: every one of
@@ -764,10 +817,15 @@
 (defn- do-repl-eval!
   "submit-repl! with the same opts run uses, minus the banner -- and the
   same warning-append bookkeeping, since submit-repl! can return the same
-  busy warning run-definitions! can."
-  [ed cv ev* status-label text]
-  (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label false) :run? false))]
-    (when warning (cview/append! cv :system warning))))
+  busy warning run-definitions! can. extra-opts is merged in last: Run
+  Selection and Run Form pass {:ns-source buffer-text}, which the attach
+  evaluator uses to switch the session into the buffer's namespace first
+  (cljd plan P2.T4); the in-process and nREPL evaluators ignore it."
+  ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
+  ([ed cv ev* status-label text extra-opts]
+   (let [warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv status-label false) :run? false)
+                                            extra-opts))]
+     (when warning (cview/append! cv :system warning)))))
 
 (defn- do-run-selection!
   "Cmd/Ctrl+E: commands/run-selection-text (P3.T1) on the editor's snapshot
@@ -776,9 +834,10 @@
   through do-repl-eval! -- the SAME evaluator path a typed REPL entry uses
   (history via ev/eval!, the busy-refusal warning, the same make-eval-opts)."
   [ed cv ev* status-label]
-  (when-let [text (commands/run-selection-text (editor/snapshot ed))]
-    (cview/echo-entry! cv text)
-    (do-repl-eval! ed cv ev* status-label text)))
+  (let [snap (editor/snapshot ed)]
+    (when-let [text (commands/run-selection-text snap)]
+      (cview/echo-entry! cv text)
+      (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
 
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
@@ -1666,9 +1725,15 @@
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
+                   :reset-chk reset-chk
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
       (try
         (show-selection! cv dialect-label @sel*)
+        ;; cljd plan P2.T4: the starting evaluator's connection, label and
+        ;; Reset on Run, as apply-selection! does for every later one.
+        (watch-connection! @ev* ev* sel* dialect-label)
+        (apply-reset-toggle! reset-chk @sel*)
+        (g/gtk-label-set-text dialect-label (dialect-text @sel* @ev*))
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       ;; P1.T2 (cljd plan): the editor paints with the selected profile's
@@ -1694,6 +1759,9 @@
                  :evaluator* (fn [] @ev*)
                  :selection* (fn [] @sel*)
                  :dialect-label dialect-label
+                 ;; cljd plan P2.T4: the Reset on Run checkbox, for rows
+                 ;; that read its sensitivity and tooltip.
+                 :reset-check reset-chk
                  :find-bar fb
                  :run!* run-fn :stop!* stop-fn
                  :open-path! (fn [p]
@@ -1814,7 +1882,7 @@
   self-test/docs-shots/smoke harness must pass its own isolated path so it
   never touches the user's real settings file (TH.T5). ui is {:editor
   :console :session :status-label :line-col-label :evaluator* :selection*
-  :dialect-label :window :find-bar :run!*
+  :dialect-label :reset-check :window :find-bar :run!*
   :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*

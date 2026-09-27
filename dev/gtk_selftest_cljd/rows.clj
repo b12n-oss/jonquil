@@ -1,0 +1,226 @@
+(ns gtk-selftest-cljd.rows
+  "Rows for the ClojureDart window: a real window on a throwaway app
+  directory whose NREPL.lock names a fake fork server running in this
+  process (dev/fake_cljd_nrepl.clj). Nothing here reads or connects to a
+  real app's NREPL.lock."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [fake-cljd-nrepl :as fake]
+            [gtk-async :refer [await-until go-row on-gtk]]
+            [gtk-selftest-window.support :as support]
+            [jonquil.cljd :as cljd]
+            [jonquil.evaluator :as ev]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
+            [jonquil.nrepl.attach :as attach]))
+
+;; Deviation (measured against a throwaway read, not run live): the
+;; comment form's closing paren sits on its own line, never on (slow)'s
+;; own line -- run-selection-text sends the caret's WHOLE line with no
+;; selection, and "  (slow))" would hand the fake server an extra,
+;; unmatched close-paren it can't read, failing row-cljd-stop-detaches
+;; before Stop ever runs.
+(def fixture-drive
+  "(ns demo.drive)\n\n(defn where [] 1)\n\n(comment\n  (where)\n  (slow)\n  )\n")
+
+(def ^:private where-answer "{:slide 21, :of 54}")
+
+;; The fixture app and its fake server, stashed so rows and
+;; after-close-checks! (which runs after main/start! returns) reach them.
+(defonce ^:private fixture* (atom nil))
+
+(defn- temp-app-dir []
+  (io/file (System/getProperty "java.io.tmpdir")
+           (str "jonquil-selftest-cljd-" (System/currentTimeMillis) "-" (random-uuid))))
+
+(defn fixture!
+  "Starts the fake server and writes an app directory for it: pubspec.yaml,
+  NREPL.lock holding the fake's port, and dev/demo/drive.cljd. {:dir :file
+  :server :lock-text}, paths canonical."
+  []
+  (let [srv (fake/start! {:answers {"(where)" where-answer} :slow {"(slow)" 5000}})
+        d (temp-app-dir)
+        f (io/file d "dev/demo/drive.cljd")
+        lock-text (str (:port srv) "\n")]
+    (.mkdirs (.getParentFile f))
+    (spit (io/file d "pubspec.yaml") "name: demo\n")
+    (spit (io/file d "NREPL.lock") lock-text)
+    (spit f fixture-drive)
+    (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f) :server srv :lock-text lock-text})))
+
+(defn evaluator [ui] ((:evaluator* ui)))
+
+(defn idle? [ui] (not (ev/evaluating? (evaluator ui))))
+
+(defn- srv [] (:server @fixture*))
+
+(defn run-and-await
+  "support/run-and-await's contract, idle read through the evaluator."
+  [ui code deadline-ms expect-fn]
+  (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                       (editor/set-text! (:editor ui) code)
+                       ((:run!* ui))
+                       m))
+        ok (await-until deadline-ms 20 #(and (idle? ui) (expect-fn (support/since ui mark))))]
+    [ok mark]))
+
+(defn run-selection-and-await
+  "Sets the editor to text, puts the caret at the start of needle, runs
+  Cmd/Ctrl+E's own fn, then parks like run-and-await. [ok mark]."
+  [ui text needle deadline-ms expect-fn]
+  (let [mark (on-gtk (let [m (support/out-end-offset ui)
+                           ed (:editor ui)]
+                       (editor/set-text! ed text)
+                       (support/place-cursor! (:buf ed) (str/index-of text needle))
+                       ((:run-selection!* ui))
+                       m))
+        ok (await-until deadline-ms 20 #(and (idle? ui) (expect-fn (support/since ui mark))))]
+    [ok mark]))
+
+(defn- label [ui] (g/label-text (:dialect-label ui)))
+
+;; --- P2.T4 rows --------------------------------------------------------------
+
+(defn row-cljd-starts-not-running
+  "The window opened drive.cljd: an attach evaluator, not connected, the
+  label says so, Reset on Run is off with its tooltip, the console says
+  it's experimental and lists the limits, and nothing has talked to the
+  server yet."
+  [ui]
+  (go-row :cljd-starts-not-running support/check
+    (let [said? (await-until 2000 20 #(str/includes? (support/since ui 0) "; Limit: Stop detaches"))]
+      (on-gtk (let [t (support/since ui 0)
+                    chk (:reset-check ui)]
+                (support/check :cljd-starts-not-running
+                               (and said?
+                                    (instance? jonquil.nrepl.attach.Attach (evaluator ui))
+                                    (= "ClojureDart (not running)" (label ui))
+                                    (zero? (g/gtk-widget-get-sensitive chk))
+                                    (= "Hot reload can't unload a namespace, so every Run adds to the running app."
+                                       (g/tooltip-text chk))
+                                    (str/includes? t cljd/experimental-message)
+                                    (not (attach/connected? (evaluator ui)))
+                                    (empty? (fake/ops-seen (srv))))
+                               {:label (label ui) :sensitive (g/gtk-widget-get-sensitive chk)
+                                :tooltip (g/tooltip-text chk) :ops (fake/ops-seen (srv))}))))))
+
+(defn row-cljd-load-prints-loaded
+  "Run is load-file: one summary line, the banner once, and the label
+  turns to attached."
+  [ui]
+  (go-row :cljd-load-prints-loaded support/check
+    (let [[ok? mark] (run-and-await ui fixture-drive 10000 #(str/includes? % "; Loaded demo.drive (2 forms)"))
+          attached? (await-until 2000 20 #(= "ClojureDart (attached)" (label ui)))
+          req (last (fake/requests (srv)))]
+      (on-gtk (let [t (support/since ui mark)]
+                (support/check :cljd-load-prints-loaded
+                               (and ok? attached?
+                                    (str/includes? t "; Connecting to the app on port ")
+                                    (str/includes? t "ClojureDart\n")
+                                    (not (str/includes? t "=> "))
+                                    (= ["load-file" (:file @fixture*)] [(get req "op") (get req "file-path")])
+                                    (= 'demo.drive (ev/prompt-ns (evaluator ui))))
+                               {:ok? ok? :attached? attached? :label (label ui) :text t :req req}))))))
+
+(defn row-cljd-run-selection-in-buffer-ns
+  "Cmd/Ctrl+E on (where) in the comment block: the session is already in
+  demo.drive after the load, so only the selection is sent."
+  [ui]
+  (go-row :cljd-run-selection-in-buffer-ns support/check
+    (let [n (count (fake/requests (srv)))
+          [ok? mark] (run-selection-and-await ui fixture-drive "(where)" 5000 #(str/includes? % (str "=> " where-answer)))
+          ;; Deviation (measured against a throwaway read, not run live):
+          ;; run-selection-text sends the caret's WHOLE line with no
+          ;; selection, so the wire carries "  (where)" (the fixture's own
+          ;; indentation), not the bare form -- str/trim each captured
+          ;; request before comparing, since the point here is that only
+          ;; (where) was sent, not its indentation.
+          sent (mapv (fn [m] (str/trim (get m "code"))) (drop n (fake/requests (srv))))]
+      (on-gtk (support/check :cljd-run-selection-in-buffer-ns
+                             (and ok? (= ["(where)"] sent))
+                             {:ok? ok? :sent sent :text (support/since ui mark)})))))
+
+(defn row-cljd-stop-detaches
+  "Stop during a slow form detaches: the console says so, the label goes
+  back to not running, and the server never got interrupt or close."
+  [ui]
+  (go-row :cljd-stop-detaches support/check
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)
+                             ed (:editor ui)]
+                         (editor/set-text! ed fixture-drive)
+                         (support/place-cursor! (:buf ed) (str/index-of fixture-drive "(slow)"))
+                         ((:run-selection!* ui))
+                         m))
+          started? (await-until 2000 20 #(not (idle? ui)))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 2000 20 #(and (idle? ui)
+                                              (str/includes? (support/since ui mark) "; Detached from the app.")
+                                              (str/includes? (support/since ui mark) "; interrupted")))
+          not-running? (await-until 2000 20 #(= "ClojureDart (not running)" (label ui)))
+          ops (fake/ops-seen (srv))]
+      (on-gtk (support/check :cljd-stop-detaches
+                             (and started? stopped? not-running? (not-any? #{"interrupt" "close"} ops))
+                             {:started started? :stopped stopped? :label (label ui) :ops ops
+                              :text (support/since ui mark)})))))
+
+(defn row-cljd-reconnects-after-detach
+  "The next Run Selection reconnects with a fresh clone and answers."
+  [ui]
+  (go-row :cljd-reconnects-after-detach support/check
+    (let [[ok? mark] (run-selection-and-await ui fixture-drive "(where)" 10000 #(str/includes? % (str "=> " where-answer)))
+          attached? (await-until 2000 20 #(= "ClojureDart (attached)" (label ui)))
+          clones (count (filter #{"clone"} (fake/ops-seen (srv))))]
+      (on-gtk (support/check :cljd-reconnects-after-detach
+                             (and ok? attached? (= 2 clones)
+                                  (str/includes? (support/since ui mark) "; Connecting to the app on port "))
+                             {:ok? ok? :clones clones :text (support/since ui mark)})))))
+
+(defn row-cljd-not-running-message
+  "Opening a file from another app with no NREPL.lock switches the
+  evaluator; Run then says the app isn't running, in the console's :system
+  style (never the error style), and nothing is written there."
+  [ui]
+  (go-row :cljd-not-running-message support/check
+    (let [d (temp-app-dir)
+          f (io/file d "lib/main.cljd")
+          _ (on-gtk (.mkdirs (.getParentFile f))
+                    (spit (io/file d "pubspec.yaml") "name: other\n")
+                    (spit f "(ns other.main)\n")
+                    ((:open-path! ui) (.getCanonicalPath f)))
+          [ok? mark] (run-and-await ui "(ns other.main)\n" 5000 #(str/includes? % cljd/not-running-message))]
+      (on-gtk (let [cv (:console ui)
+                    t (support/since ui mark)
+                    at (+ mark (or (str/index-of t cljd/not-running-message) 0))
+                    system? (g/has-tag-at? (:buf cv) at (get (:tags cv) :system))
+                    error? (g/has-tag-at? (:buf cv) at (get (:tags cv) :error))
+                    wrote? (.exists (io/file d "NREPL.lock"))]
+                (doseq [x (reverse (file-seq d))] (.delete ^java.io.File x))
+                (support/check :cljd-not-running-message
+                               (and ok? system? (not error?) (not wrote?)
+                                    (= "ClojureDart (not running)" (label ui)))
+                               {:ok? ok? :system system? :error error? :wrote wrote? :text t}))))))
+
+(defn row-cljd-close
+  "The deliberately LAST row: fires the app's quit action, the path a Quit
+  AppleEvent takes. after-close-checks! records the result once the GTK
+  loop is gone."
+  [ui]
+  (go-row :cljd-close support/check
+    (on-gtk (editor/set-text! (:editor ui) "")
+            ((:activate-quit-action!* ui)))))
+
+(defn after-close-checks!
+  "Called by -main once main/start! returns. The server never got
+  interrupt or close, from Stop or from the window closing, and the
+  fixture's NREPL.lock is byte for byte what fixture! wrote, with no
+  REPL.lock beside it. Then stops the fake server and deletes the app."
+  []
+  (let [{:keys [dir server lock-text]} @fixture*
+        lock (io/file dir "NREPL.lock")
+        ops (fake/ops-seen server)]
+    (support/check :cljd-never-interrupt-or-close (not-any? #{"interrupt" "close"} ops) {:ops ops})
+    (support/check :cljd-lock-untouched
+                   (and (.exists lock) (= lock-text (slurp lock)) (not (.exists (io/file dir "REPL.lock"))))
+                   {:lock (when (.exists lock) (slurp lock))})
+    (fake/stop! server)
+    (doseq [x (reverse (file-seq (io/file dir)))] (.delete ^java.io.File x))))

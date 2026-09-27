@@ -152,7 +152,7 @@
     (let [added (set/difference (:special-forms dialect/cljd) (:special-forms dialect/jolt))]
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
-  (is (= [dialect/jolt] dialect/profiles) "P2.T4 adds cljd, with the attach evaluator"))
+  (is (= [dialect/jolt dialect/cljd] dialect/profiles)))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"

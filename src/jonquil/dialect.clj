@@ -95,8 +95,10 @@
    :experimental true})
 
 (def profiles
-  "Every known profile. Order matters only as the last resort in select."
-  [jolt])
+  "Every known profile. Order matters only as the last resort in select:
+  Jolt first, so a file neither profile's extension claims (bb.edn in a
+  ClojureDart app) stays Jolt's."
+  [jolt cljd])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
