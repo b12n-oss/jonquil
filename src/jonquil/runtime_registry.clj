@@ -5,9 +5,13 @@
   holding a child once the process itself is about to end.
 
   window.clj adds an evaluator (jonquil.evaluator/make's result) as soon
-  as it makes one, and removes it once ev/stop! has run on it, whether
-  that's a real window close (close-request-fn) or an evaluator swap
-  (D2.T5, opening a file from another runtime, via apply-selection!).
+  as it makes one, and asks to remove it once ev/stop! has run on it,
+  whether that's a real window close (close-request-fn) or an evaluator
+  swap (D2.T5, opening a file from another runtime, via apply-selection!).
+  unregister! only honours that once the evaluator has actually settled
+  (fix-wave C1): ev/stop! (jonquil.nrepl.evaluator) can return while a
+  start is still in flight, and until that start's own teardown finishes,
+  this registry is the only thing that still knows the evaluator exists.
 
   Kept separate from jonquil.gtk.window (a GTK-free namespace) so the live
   nREPL tests below can drive it directly, the same way
@@ -25,10 +29,28 @@
   (swap! live conj ev)
   nil)
 
-(defn unregister!
-  "Removes ev from the registry. Called once ev/stop! has run on it."
+(defn- settled?
+  "True for any evaluator whose stop! can't still be mid-teardown: an
+  nREPL evaluator only once nrepl/settled? says so, anything else (no
+  child to wait for) at once."
   [ev]
-  (swap! live disj ev)
+  (if (instance? jonquil.nrepl.evaluator.NRepl ev)
+    (nrepl/settled? ev)
+    true))
+
+(defn unregister!
+  "Removes ev from the registry -- but only once it has settled (C1, the
+  fix-wave's phase-close review): called once ev/stop! has run on it,
+  whether that's a real window close (close-request-fn) or an evaluator
+  swap (apply-selection!), but ev/stop! itself never blocks on a start
+  already in flight, so at that point ev may still be tearing itself
+  down. While that's true, this is a no-op and ev stays registered, so
+  stop-all! still stops and waits on it before jonquil.main's System/exit
+  runs. Safe to call on an ev that was never registered, or twice on the
+  same ev."
+  [ev]
+  (when (settled? ev)
+    (swap! live disj ev))
   nil)
 
 (defn- wait-until-settled!

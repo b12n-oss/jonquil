@@ -223,6 +223,22 @@
       (finally
         (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
 
+(deftest no-spawn-after-stop-test
+  ;; I2 (phase-close review): start-runtime! didn't check :stopped? before
+  ;; spawning, so a queued eval! (or a direct start!) reached after stop!
+  ;; still spawned a doomed child. Counts real spawns with a redef and
+  ;; asserts eval! after stop! never triggers one, and completes instead of
+  ;; hanging.
+  (let [e (make (temp-project))
+        real-start child/start!
+        spawn-count (atom 0)]
+    (with-redefs [child/start! (fn [d root] (swap! spawn-count inc) (real-start d root))]
+      (ev/stop! e)
+      (let [[r _] (run e "(+ 1 2)" false)]
+        (is (not= :timeout r) "the eval completed, it didn't hang")
+        (is (contains? #{:error :interrupted} (:status r)) (str "no successful eval after stop!: " r)))
+      (is (zero? @spawn-count) "start-runtime! spawned nothing once :stopped? was set"))))
+
 (deftest double-stop-restarts-once-test
   (let [e (make (temp-project)) done (promise) out (atom [])
         complete-count (atom 0)]

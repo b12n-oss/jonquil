@@ -105,29 +105,36 @@
   under way when stop! ran. Holds start-lock for the whole attempt, so
   try-shutdown-runtime! (stop!'s own non-blocking teardown) can't win the
   lock while this is spawning, connecting or cloning -- it just leaves
-  the teardown to the check below instead."
+  the teardown to the check below instead.
+
+  I2 (phase-close review): checks :stopped? first, before touching
+  live?/shutdown-runtime! or spawning anything -- a restart-for-stop!
+  already off the GTK thread, a queued run-worker!, or start-and-report!'s
+  own future can each still reach this after stop! ran, and without this
+  check would spawn a child only to tear it down again right after."
   [{:keys [^ReentrantLock start-lock] :as ev}]
   (.lock start-lock)
   (try
-    (when-not (live? ev)
-      (shutdown-runtime! ev)
-      (let [ch (atom nil)]
-        (try
-          (let [c (reset! ch (child/start! (:project-dir (:selection ev)) (child/middleware-root)))
-                conn (client/connect (:port c))
-                ops (ops/op-names (client/request-sync conn {:op "describe"} request-timeout-ms))
-                sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))
-                baseline (read-string (eval-sync! conn sid "(pr-str (mapv ns-name (all-ns)))"))]
-            (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops :baseline baseline})
-            ;; stop! may have run while this was spawning/connecting/cloning:
-            ;; it can't have torn this down (try-shutdown-runtime! only wins
-            ;; the lock once this releases it), so tear it down here instead.
-            (when (:stopped? @(:state ev))
-              (shutdown-runtime! ev))
-            nil)
-          (catch Throwable e
-            (child/kill! @ch)
-            (str "Couldn't start Jolt over nREPL: " (ex-message e))))))
+    (or (when (:stopped? @(:state ev)) "This runtime was stopped.")
+        (when-not (live? ev)
+          (shutdown-runtime! ev)
+          (let [ch (atom nil)]
+            (try
+              (let [c (reset! ch (child/start! (:project-dir (:selection ev)) (child/middleware-root)))
+                    conn (client/connect (:port c))
+                    ops (ops/op-names (client/request-sync conn {:op "describe"} request-timeout-ms))
+                    sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))
+                    baseline (read-string (eval-sync! conn sid "(pr-str (mapv ns-name (all-ns)))"))]
+                (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops :baseline baseline})
+                ;; stop! may have run while this was spawning/connecting/cloning:
+                ;; it can't have torn this down (try-shutdown-runtime! only wins
+                ;; the lock once this releases it), so tear it down here instead.
+                (when (:stopped? @(:state ev))
+                  (shutdown-runtime! ev))
+                nil)
+              (catch Throwable e
+                (child/kill! @ch)
+                (str "Couldn't start Jolt over nREPL: " (ex-message e)))))))
     (finally (.unlock start-lock))))
 
 (defn- finish!

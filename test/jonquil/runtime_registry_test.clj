@@ -41,6 +41,34 @@
         (registry/unregister! e)
         (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
 
+(deftest window-close-order-during-start-leaves-no-child-test
+  ;; C1 (phase-close review): close-request-fn's own order is stop!, then
+  ;; registry/unregister! in a finally, then (later, from jonquil.main)
+  ;; registry/stop-all!. Reproduces that exact order against a start still
+  ;; mid-spawn, and asserts stop-all! doesn't return before the delayed
+  ;; start's own child has actually spawned and died -- unregister! must
+  ;; not have dropped e from the registry while it was still unsettled.
+  (let [e (make (temp-project))
+        real-start child/start!
+        captured (atom nil)]
+    (try
+      (with-redefs [child/start! (fn [d root]
+                                   (Thread/sleep 5000)
+                                   (let [c (real-start d root)]
+                                     (reset! captured c)
+                                     c))]
+        (registry/register! e)
+        (future (ev/start! e))
+        (Thread/sleep 500) ;; start-runtime! is now blocked in child/start!, holding start-lock
+        ;; The window's exact close order (close-request-fn).
+        (try (ev/stop! e) (finally (registry/unregister! e)))
+        (registry/stop-all!)
+        (is (some? @captured) "stop-all! waited long enough for the delayed start to spawn its child")
+        (is (not (child/alive? @captured)) "and for it to die, not to be left orphaned"))
+      (finally
+        (registry/unregister! e)
+        (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
+
 (deftest stop-all-only-touches-registered-evaluators-test
   (let [e (make (temp-project))
         untouched (make (temp-project))]
