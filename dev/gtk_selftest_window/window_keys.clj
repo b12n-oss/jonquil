@@ -81,7 +81,7 @@
 (defn row-zoom-in-out
   "Zooms in, waits for the editor view's natural height to settle and grow
   past the baseline, then resets and waits for it to settle back to
-  exactly the original -- each measurement via wait-stable-height, never
+  exactly the original -- each measurement via await-stable-height, never
   a synchronous read on the same tick as the change."
   [ui]
   (go-row :zoom-in-out support/check

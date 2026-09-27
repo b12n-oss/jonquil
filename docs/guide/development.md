@@ -56,12 +56,12 @@ GTK thread never parks. A go block runs on its own OS thread, the default
 which hop onto the GTK thread and park the go block until the call
 finishes; a row's body never calls GTK directly. When a row throws,
 `go-row` catches it, records a FAIL, and the run moves on to the next row.
-Every row also resets the editor and console before returning control to
-the driver, so one row's leftover state can't leak into the next. Since
-the fix wave that followed the arc-close review, every driver closes its
-window through `gtk-async/close-window-bounded!`, which asks the window to
-close and then waits, bounded, for it to actually go away, rather than
-trusting the close call by itself.
+In the window group, the driver clears the editor and the console's input
+before each row and waits for the engine to go idle, so one row's
+leftovers don't leak into the next. Every driver closes its window through
+`gtk-async/close-window-bounded!`, which asks the window to close and then
+waits a bounded time for it to go away. If it's still open, the run
+records a FAIL and exits 1 instead of hanging.
 
 **`bb smoke:binary`** is the one harness that runs outside the GTK process
 under test. It builds `./jonquil` (skip the build with `--no-build`),
