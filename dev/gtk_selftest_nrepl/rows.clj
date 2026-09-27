@@ -34,9 +34,22 @@
 (defn fixture!
   "A throwaway project: deps.edn, .jonquil.edn {:runtime :nrepl}, a
   .nrepl-port that belongs to \"someone else\" (4242), and
-  src/demo/core.clj. {:dir :file}, both canonical."
+  src/demo/core.clj. {:dir :file}, both canonical.
+
+  I2: the dir name is unique (currentTimeMillis plus a random-uuid, not
+  nanoTime, which counts from process start and can collide across
+  processes). A collision was already harmless here, since this fn
+  itself spits fresh deps.edn/.jonquil.edn/.nrepl-port/source content
+  into the dir every time it runs, never trusting anything already
+  there -- unlike dialects.clj's own open-then-run, which skips writing
+  .jonquil.edn when :config is nil and so could inherit a stale one
+  (the real bug). Given the same unique name anyway (the brief), but
+  cleanup stays out of scope: after-close-checks! reads this dir's own
+  .nrepl-port back after main/start! returns, so deleting it here isn't
+  trivially safe."
   []
-  (let [d (io/file (System/getProperty "java.io.tmpdir") (str "jonquil-selftest-nrepl-" (System/nanoTime)))
+  (let [d (io/file (System/getProperty "java.io.tmpdir")
+                   (str "jonquil-selftest-nrepl-" (System/currentTimeMillis) "-" (random-uuid)))
         f (io/file d "src/demo/core.clj")]
     (.mkdirs (.getParentFile f))
     (spit (io/file d "deps.edn") "{:paths [\"src\"]}")
@@ -50,9 +63,12 @@
 (defn- loose-fixture!
   "A file with no project markers above it and no .jonquil.edn -- so
   dialect/select falls through to the extension alone, which picks the
-  Jolt profile's own default runtime, :in-process."
+  Jolt profile's own default runtime, :in-process.
+
+  I2: unique dir name, same reasoning as fixture!'s own docstring above."
   []
-  (let [d (io/file (System/getProperty "java.io.tmpdir") (str "jonquil-selftest-loose-" (System/nanoTime)))
+  (let [d (io/file (System/getProperty "java.io.tmpdir")
+                   (str "jonquil-selftest-loose-" (System/currentTimeMillis) "-" (random-uuid)))
         f (io/file d "scratch.clj")]
     (.mkdirs d)
     (spit f "(+ 1 2)\n")
