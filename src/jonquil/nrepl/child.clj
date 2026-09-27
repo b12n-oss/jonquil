@@ -142,7 +142,8 @@
             :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
                     :dir dir :log log :root root :saved-port-file saved}
             :exited (if (str/includes? (tail log 20) "bind() failed")
-                      (recur (rest ports))
+                      (do (io/delete-file log true)
+                          (recur (rest ports)))
                       (let [msg (str "jolt nrepl-server exited: " (tail log 5))]
                         (terminate! proc)
                         (restore-port-file! {:dir dir :port port :saved-port-file saved})
