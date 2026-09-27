@@ -15,6 +15,8 @@
     jonquil.console
     jonquil.evaluator
     jonquil.session
+    jonquil.nrepl.bencode
+    jonquil.nrepl.ops
     jonquil.commands
     jonquil.help
     jonquil.gtk.ffi

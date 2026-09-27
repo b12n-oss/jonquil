@@ -39,6 +39,14 @@
     (is (= :error kind))
     (is (re-find #"boom" text))))
 
+(deftest error-text-test
+  (testing "an out-of-process runtime's text is shown as sent"
+    (is (= [:error "Error: Divide by zero\n"]
+           (console/result-line {:status :error :error-text "Error: Divide by zero"})))
+    (is (= "Error: EOF while reading" (console/error-text {:error-text "Error: EOF while reading"}))))
+  (testing "an in-process Throwable still goes through format-error"
+    (is (re-find #"^Error \[.*\]: boom$" (console/error-text {:error (ex-info "boom" {})})))))
+
 (deftest unclosed-bracket-message-test
   (is (nil? (console/unclosed-bracket-message "(+ 1 2)")))
   (is (nil? (console/unclosed-bracket-message "")))

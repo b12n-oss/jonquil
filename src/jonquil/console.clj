@@ -54,12 +54,18 @@
             nl (str/index-of text "\n" (dec must))]
         (if nl (inc nl) must)))))
 
+(defn error-text
+  "An :error result's message: :error-text when an out-of-process runtime
+  sent text, else jonquil.eval/format-error of the in-process :error."
+  [{:keys [error error-text]}]
+  (or error-text (eval/format-error error)))
+
 (defn result-line
   "[kind text] for an engine result, ready to append to the console."
-  [{:keys [status printed error]}]
+  [{:keys [status printed] :as result}]
   (case status
     :ok [:result (str "=> " printed "\n")]
-    :error [:error (str (eval/format-error error) "\n")]
+    :error [:error (str (error-text result) "\n")]
     :interrupted [:system "; interrupted\n"]))
 
 (defn unclosed-bracket-message
