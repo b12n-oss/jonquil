@@ -13,6 +13,11 @@
   ex-info with :type ::truncated."
   (:import (java.io ByteArrayOutputStream)))
 
+(def ^:private max-bytes
+  "Maximum length of a single bencode string. This is far above any real
+   nREPL message, and guards against unbounded allocation attacks."
+  (* 64 1024 1024))
+
 (defn- key-string [k]
   (cond (string? k) k
         (keyword? k) (if-let [n (namespace k)] (str n "/" (name k)) (name k))
@@ -57,13 +62,22 @@
   "Reads decimal digits (and a leading minus) up to the terminator byte t,
   consuming t. first-b is a byte already read."
   [src first-b t]
-  (loop [b first-b acc (StringBuilder.)]
+  (loop [b first-b acc (StringBuilder.) pos 0]
     (cond
-      (= b (int t)) (Long/parseLong (str acc))
-      (or (<= (int \0) b (int \9)) (= b (int \-))) (recur (next! src) (.append acc (char b)))
+      (= b (int t)) (let [s (str acc)]
+                      (if (or (empty? s) (= s "-"))
+                        (throw (ex-info "bencode: malformed integer" {:type ::malformed :text s}))
+                        (try (Long/parseLong s)
+                             (catch NumberFormatException _
+                               (throw (ex-info "bencode: malformed integer" {:type ::malformed :text s}))))))
+      (and (= b (int \-)) (zero? pos)) (recur (next! src) (.append acc (char b)) (inc pos))
+      (<= (int \0) b (int \9)) (recur (next! src) (.append acc (char b)) (inc pos))
+      (= b (int \-)) (throw (ex-info "bencode: malformed integer" {:type ::malformed :text (str acc (char b))}))
       :else (throw (ex-info (str "bencode: unexpected byte " b " in a number") {:byte b})))))
 
 (defn- read-bytes [src n]
+  (when (or (neg? n) (> n max-bytes))
+    (throw (ex-info "bencode: string length out of range" {:type ::too-large :length n})))
   (let [buf (byte-array n)]
     (dotimes [i n] (aset-byte buf i (unchecked-byte (next! src))))
     (String. buf "UTF-8")))

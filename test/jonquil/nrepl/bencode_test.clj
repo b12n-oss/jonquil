@@ -50,3 +50,21 @@
   (testing "a value larger than one read still decodes"
     (let [big (apply str (repeat 70000 "x"))]
       (is (= big (b/decode (src (s (b/encode big)))))))))
+
+(deftest too-large-length-test
+  (testing "an out-of-range string length throws ex-info with ::too-large, promptly"
+    (doseq [input ["999999999999:" "5000000000:"]]
+      (let [f (future (b/decode (src input)))
+            e (try @f (catch Exception ex ex))]
+        (is (= ::b/too-large
+               (:type (ex-data (if (instance? java.util.concurrent.ExecutionException e)
+                                 (.getCause e)
+                                 e))))
+            (str "input " input))))))
+
+(deftest malformed-integer-test
+  (testing "malformed integers throw ex-info with ::malformed"
+    (doseq [input ["i-e" "i--3e" "i1-e" "i-1-2e" "ie" "3-3:abc"]]
+      (let [e (try (b/decode (src input)) (catch Exception ex ex))]
+        (is (instance? clojure.lang.ExceptionInfo e) (str "input " input " threw " (type e)))
+        (is (= ::b/malformed (:type (ex-data e))) (str "input " input))))))
