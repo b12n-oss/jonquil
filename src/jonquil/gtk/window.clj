@@ -124,15 +124,6 @@
   (doseq [w (:warnings sel)]
     (cview/append! cv :system (str "; project: " w "\n"))))
 
-;; apply-selection! (D2.T5) is defined further down, right after
-;; start-and-report! -- same deviation start-and-report! itself already
-;; made (see its own docstring): it calls start-and-report!, and Jolt
-;; resolves an unqualified symbol at compile time, not lazily, so it can't
-;; sit here, before that fn exists, without failing bb check with "Unable
-;; to resolve symbol: start-and-report!". Reported as a deviation; see the
-;; report. Its only caller (activate!) is later still, so moving it costs
-;; nothing.
-
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
 ;; P3.T5 (parked P2 item M9): file-dialog! used to build a FRESH foreign-
@@ -603,11 +594,10 @@
       (str "~" (subs path (count home)))
       path)))
 
-;; D2.T4: moved here from directly after apply-selection! (its prescribed
-;; spot) -- it calls set-status!, defined just above, and Jolt resolves an
-;; unqualified symbol at compile time, not lazily; the brief's own
-;; placement (before set-status! exists) fails bb check with "Unable to
-;; resolve symbol: set-status!". Reported as a deviation; see the report.
+;; start-and-report! sits here, after set-status! (just above) and before
+;; apply-selection! (below), which calls it: Jolt resolves an unqualified
+;; symbol at compile time, not lazily, so a forward reference to either fn
+;; from earlier in the file fails bb check with "Unable to resolve symbol".
 (defn- start-and-report!
   "Starts an out-of-process evaluator on a future and says so on the
   console: pid, port and project, then each limitation, or why it couldn't
@@ -629,10 +619,9 @@
         (finally
           (when-not (ev/evaluating? e) (set-status! status-label "Ready")))))))
 
-;; D2.T5: apply-selection! moved here (from directly after show-selection!,
-;; its prescribed spot) for the same reason start-and-report! moved above
-;; it -- it now calls start-and-report!, which Jolt resolves at compile
-;; time, not lazily. See the comment left at the old spot, and the report.
+;; apply-selection! sits here, after start-and-report! (above), which it
+;; calls: Jolt resolves an unqualified symbol at compile time, not lazily,
+;; so it can't sit any earlier in the file, before start-and-report! exists.
 (defn- apply-selection!
   "Makes sel the window's selection. When it needs a different evaluator
   (jonquil.dialect/selection-key), the old one is interrupted and stopped
@@ -643,10 +632,10 @@
   (so jonquil.main's stop-all! can never miss it, even if the window
   closes before it ever starts); the old one leaves once it's stopped.
 
-  Fix round 2 (Important): interrupt! and stop! on the old evaluator are
-  two separately-guarded steps, not one try wrapping both -- a throwing
-  interrupt! used to skip stop! entirely and orphan the old child. Each
-  step's own throw is reported and the next step still runs."
+  interrupt! and stop! on the old evaluator are guarded separately, so a
+  throw from one still runs the other: each step's own throw is reported
+  on the console rather than skipping the step after it and orphaning the
+  old child."
   [{:keys [cv status-label dialect-label sel* ev* mode-fn]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
