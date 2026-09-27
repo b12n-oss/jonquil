@@ -61,12 +61,15 @@
   (or error-text (eval/format-error error)))
 
 (defn result-line
-  "[kind text] for an engine result, ready to append to the console."
-  [{:keys [status printed] :as result}]
+  "[kind text] for an engine result, ready to append to the console. A
+  :notice result (the attach evaluator's quiet load summary and its
+  not-running sentence) is a :system line holding its own :text."
+  [{:keys [status printed text] :as result}]
   (case status
     :ok [:result (str "=> " printed "\n")]
     :error [:error (str (error-text result) "\n")]
-    :interrupted [:system "; interrupted\n"]))
+    :interrupted [:system "; interrupted\n"]
+    :notice [:system (str text "\n")]))
 
 (defn unclosed-bracket-message
   "For a buffer with an opening bracket that is never closed, a sentence
