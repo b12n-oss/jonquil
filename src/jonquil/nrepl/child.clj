@@ -95,6 +95,34 @@
   ;; resolves the injected dep's jars.
   15000)
 
+(def term-grace-ms
+  ;; estimate: SIGTERM ran jolt's shutdown hook and exited promptly in the
+  ;; dialects spike; a stopped or wedged child gets SIGKILL after this.
+  1000)
+
+(defn- restore-port-file! [{:keys [dir port saved-port-file]}]
+  (let [f (port-file dir)]
+    (try
+      (cond
+        saved-port-file (spit f saved-port-file)
+        (and (.exists f) (= (str port) (str/trim (slurp f)))) (.delete f))
+      (catch Exception _ nil))))
+
+(defn- terminate!
+  "SIGTERM, then SIGKILL after term-grace-ms if proc is still alive (a
+  SIGSTOPped child ignores SIGTERM until continued, SIGKILL never), and
+  confirms it exited either way. Returns the exit code, or nil when it
+  was already gone. Doesn't touch the port file or the log: callers do
+  that themselves, since a failed start! keeps its log and kill! doesn't."
+  [proc]
+  (when (p/alive? proc)
+    (p/destroy proc)
+    (let [r (deref proc term-grace-ms ::alive)]
+      (if (= ::alive r)
+        (do (.destroyForcibly ^java.lang.Process (:proc proc))
+            (:exit (deref proc term-grace-ms nil)))
+        (:exit r)))))
+
 (defn start!
   "Launches the child in dir (made absolute here: a relative :dir makes
   the spawn exit 1 silently, measured) with root's middleware injected, or
@@ -115,42 +143,29 @@
                     :dir dir :log log :root root :saved-port-file saved}
             :exited (if (str/includes? (tail log 20) "bind() failed")
                       (recur (rest ports))
-                      (throw (ex-info (str "jolt nrepl-server exited: " (tail log 5)) {:log log})))
-            :timeout (do (p/destroy proc)
-                         (throw (ex-info (str "jolt nrepl-server didn't answer within "
-                                              ready-deadline-ms " ms: " (tail log 5)) {:log log})))))
+                      (let [msg (str "jolt nrepl-server exited: " (tail log 5))]
+                        (terminate! proc)
+                        (restore-port-file! {:dir dir :port port :saved-port-file saved})
+                        ;; The log is left on disk on purpose here, unlike kill!:
+                        ;; it's the only post-mortem for a start that never ran.
+                        (throw (ex-info msg {:log log}))))
+            :timeout (let [msg (str "jolt nrepl-server didn't answer within "
+                                    ready-deadline-ms " ms: " (tail log 5))]
+                       (terminate! proc)
+                       (restore-port-file! {:dir dir :port port :saved-port-file saved})
+                       (throw (ex-info msg {:log log})))))
         (throw (ex-info (str "no free port in " port-base "-" (+ port-base port-span -1)) {}))))))
 
 (defn alive? [child] (boolean (and child (p/alive? (:proc child)))))
 
-(def term-grace-ms
-  ;; estimate: SIGTERM ran jolt's shutdown hook and exited promptly in the
-  ;; dialects spike; a stopped or wedged child gets SIGKILL after this.
-  1000)
-
-(defn- restore-port-file! [{:keys [dir port saved-port-file]}]
-  (let [f (port-file dir)]
-    (try
-      (cond
-        saved-port-file (spit f saved-port-file)
-        (and (.exists f) (= (str port) (str/trim (slurp f)))) (.delete f))
-      (catch Exception _ nil))))
-
 (defn kill!
   "Ends the child: SIGTERM (jolt removes .nrepl-port on it), then SIGKILL
-  after term-grace-ms if it's still alive (a SIGSTOPped child ignores
-  SIGTERM until continued, SIGKILL never). Only the pid this namespace
+  after term-grace-ms if it's still alive. Only the pid this namespace
   spawned is signalled. Then restores the .nrepl-port it found and deletes
   the log. Returns the exit code, or nil when it was already gone."
   [{:keys [proc log] :as child}]
   (when child
-    (let [code (when (p/alive? proc)
-                 (p/destroy proc)
-                 (let [r (deref proc term-grace-ms ::alive)]
-                   (if (= ::alive r)
-                     (do (.destroyForcibly ^java.lang.Process (:proc proc))
-                         (:exit (deref proc term-grace-ms nil)))
-                     (:exit r))))]
+    (let [code (terminate! proc)]
       (restore-port-file! child)
       (try (io/delete-file log true) (catch Exception _ nil))
       code)))

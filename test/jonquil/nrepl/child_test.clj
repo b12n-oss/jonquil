@@ -6,8 +6,22 @@
             [clojure.java.shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [jolt.process :as p]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.client :as client]))
+
+(defn- force-kill!
+  "Cleanup for a test whose fix isn't in place yet: SIGTERM, then
+  SIGKILL if it's still alive after a short wait. Only touches the proc
+  this test itself captured."
+  [proc]
+  (when (and proc (p/alive? proc))
+    (p/destroy proc)
+    (when (= ::alive (deref proc 1000 ::alive))
+      (.destroyForcibly ^java.lang.Process (:proc proc)))))
+
+(defn- wait-until [pred ms]
+  (loop [n 0] (cond (pred) true (> (* n 50) ms) false :else (do (Thread/sleep 50) (recur (inc n))))))
 
 (defn temp-project
   "A throwaway project: deps.edn {:paths [\"src\"]} and src/demo/core.clj."
@@ -75,3 +89,42 @@
         c (child/start! rel nil)]
     (try (is (= dir (:dir c)))
          (finally (child/kill! c)))))
+
+(deftest start-timeout-kills-and-restores-test
+  (let [dir (temp-project)
+        _ (spit (io/file dir ".nrepl-port") "9999\n")
+        real-process p/process
+        captured (atom nil)]
+    (try
+      (with-redefs [child/started? (constantly false)
+                    child/ready-deadline-ms 500
+                    p/process (fn [& args]
+                                (let [proc (apply real-process args)]
+                                  (reset! captured proc)
+                                  proc))]
+        (is (thrown? clojure.lang.ExceptionInfo (child/start! dir nil))))
+      (let [pid (.pid ^java.lang.Process (:proc @captured))]
+        (is (wait-until #(not (.isPresent (java.lang.ProcessHandle/of pid))) 3000)
+            "the child is dead within about 3 s of the throw"))
+      (is (= "9999\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back, byte-identical")
+      (finally (force-kill! @captured)))))
+
+(deftest start-exited-restores-test
+  (let [dir (temp-project)
+        _ (spit (io/file dir ".nrepl-port") "5555\n")
+        real-process p/process
+        captured (atom nil)]
+    (try
+      (with-redefs [p/process (fn [& args]
+                                (let [proc (apply real-process args)]
+                                  (reset! captured proc)
+                                  proc))
+                    ;; Simulates an unexpected exit: the real child starts and
+                    ;; answers normally, but wait-ready is told it exited, on
+                    ;; a path that isn't the bind-failure retry.
+                    child/wait-ready (fn [_proc _log _port _deadline-ms] :exited)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"jolt nrepl-server exited"
+                              (child/start! dir nil))))
+      (is (wait-until #(not (p/alive? @captured)) 3000) "the child is dead")
+      (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back")
+      (finally (force-kill! @captured)))))
