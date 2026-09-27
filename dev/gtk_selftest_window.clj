@@ -219,16 +219,35 @@
 (def ^:private WINDOW-CLOSE-FALLBACK-DEADLINE-MS
   ;; Generous: a working chord closes within one main-loop iteration
   ;; (microseconds), so this only ever actually waits out its deadline
-  ;; when the chord is broken.
+  ;; when the chord is broken. finish (below) uses this same constant
+  ;; twice: once to wait for the chord's own close to land, and again
+  ;; (I1) as close-window-bounded!'s own deadline for the forced close
+  ;; that follows when the chord didn't work.
   2000)
+
+(defn- print-summary!
+  "SUMMARY, printed exactly once, from wherever the run actually ends."
+  []
+  (let [passed (count (filter second @support/results)) total (count @support/results)]
+    (reset! finished? true)
+    (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
   "After the last row. row-command-chord-close already tried the product's
   own close chord; this reads window-destroyed? rather than assuming it
   worked. If the chord regressed, the window is still open, and forcing
-  gtk_window_close keeps the process from hanging (non-zero, via the FAIL
-  below). It never uses await-until: once the window is gone the GTK main
-  loop has ended, and an on-gui! thunk would never run."
+  gtk_window_close (via gtk-async/close-window-bounded!) keeps the process
+  from hanging.
+
+  I1: a suppress-close? flag left stuck true by an earlier row's own throw
+  makes close-request-fn return its suppressed branch forever, so even
+  the forced gtk_window_close never actually closes the window --
+  g_application_run then never returns and -main's own thread, parked
+  inside it, never reaches its own System/exit. close-window-bounded!'s
+  on-stuck is the way out: it records a second FAIL, makes sure SUMMARY
+  has printed, and exits from this go thread. Never uses await-until:
+  once the window is gone the GTK main loop has ended, and an on-gui!
+  thunk would never run."
   [ui]
   (go (let [t0 (System/currentTimeMillis)]
         (loop []
@@ -239,10 +258,14 @@
       (when-not @window-destroyed?
         (support/check :command-chord-close-forced false
                        {:reason "window still open after the close chord; forced closed to avoid hanging the run"})
-        (on-gtk (g/gtk-window-close (:window ui))))
-      (let [passed (count (filter second @support/results)) total (count @support/results)]
-        (reset! finished? true)
-        (println (str "SUMMARY " passed " of " total " passed")))))
+        (ga/close-window-bounded!
+         (:window ui) window-destroyed? WINDOW-CLOSE-FALLBACK-DEADLINE-MS
+         (fn []
+           (support/check :command-chord-close-stuck false
+                          {:reason "window still open after the forced close too; exiting to avoid hanging the run"})
+           (print-summary!)
+           (System/exit 1))))
+      (print-summary!)))
 
 (defn -main [& _]
   (let [driver-done (a/promise-chan)]

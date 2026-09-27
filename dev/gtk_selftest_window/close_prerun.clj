@@ -79,13 +79,15 @@
     (on-gtk (let [ed (:editor ui)]
               (editor/set-text! ed "(+ 1 1)")
               (reset! (:suppress-close? ui) true)
-              ((:request-close!* ui))
-              (let [closing @(:closing? ui)
-                    dirty-after (editor/dirty? ed)]
-                (reset! (:suppress-close? ui) false)
-                (reset! (:closing? ui) false)
-                (support/check :close-clean (and (not dirty-after) closing)
-                               {:dirty-after dirty-after :closing closing}))))))
+              (try
+                ((:request-close!* ui))
+                (let [closing @(:closing? ui)
+                      dirty-after (editor/dirty? ed)]
+                  (support/check :close-clean (and (not dirty-after) closing)
+                                 {:dirty-after dirty-after :closing closing}))
+                (finally
+                  (reset! (:suppress-close? ui) false)
+                  (reset! (:closing? ui) false)))))))
 
 (defn row-close-dirty-cancel
   "Dirty editor: request-close!* shows the real GtkAlertDialog (probe 3 --
@@ -113,17 +115,19 @@
                 ;; suppress-close? so a Cancel that wrongly confirmed the close
                 ;; shows up as closing? here instead of ending the run.
                 (reset! (:suppress-close? ui) true)
-                ((:close-choice! ui) {:index 2})
-                (let [dirty-after (editor/dirty? ed)
-                      text-after (editor/editor-text ed)
-                      closing @(:closing? ui)]
-                  (reset! (:suppress-close? ui) false)
-                  (reset! (:closing? ui) false)
-                  (reset! (:alert-pending? ui) false)
-                  (support/check :close-dirty-cancel
-                                 (and dirty-before (= text-before text-after) dirty-after (not closing))
-                                 {:dirty-before dirty-before :dirty-after dirty-after
-                                  :text-before text-before :text-after text-after :closing closing})))))))
+                (try
+                  ((:close-choice! ui) {:index 2})
+                  (let [dirty-after (editor/dirty? ed)
+                        text-after (editor/editor-text ed)
+                        closing @(:closing? ui)]
+                    (support/check :close-dirty-cancel
+                                   (and dirty-before (= text-before text-after) dirty-after (not closing))
+                                   {:dirty-before dirty-before :dirty-after dirty-after
+                                    :text-before text-before :text-after text-after :closing closing}))
+                  (finally
+                    (reset! (:suppress-close? ui) false)
+                    (reset! (:closing? ui) false)
+                    (reset! (:alert-pending? ui) false))))))))
 
 (defn row-close-dirty-discard
   "As close-dirty-cancel, but {:index 1} (Don't Save): close-choice! must
@@ -143,13 +147,15 @@
               (let [dirty-before (editor/dirty? ed)]
                 ((:request-close!* ui))
                 (reset! (:suppress-close? ui) true)
-                ((:close-choice! ui) {:index 1})
-                (let [closing @(:closing? ui)]
-                  (reset! (:suppress-close? ui) false)
-                  (reset! (:closing? ui) false)
-                  (reset! (:alert-pending? ui) false)
-                  (support/check :close-dirty-discard (and dirty-before closing)
-                                 {:dirty-before dirty-before :closing closing})))))))
+                (try
+                  ((:close-choice! ui) {:index 1})
+                  (let [closing @(:closing? ui)]
+                    (support/check :close-dirty-discard (and dirty-before closing)
+                                   {:dirty-before dirty-before :closing closing}))
+                  (finally
+                    (reset! (:suppress-close? ui) false)
+                    (reset! (:closing? ui) false)
+                    (reset! (:alert-pending? ui) false))))))))
 
 (defn row-close-dirty-save
   "A remembered path (via the real :save-to! path, so close-choice!'s
@@ -172,18 +178,20 @@
               (let [dirty-before (editor/dirty? ed)]
                 ((:request-close!* ui))
                 (reset! (:suppress-close? ui) true)
-                ((:close-choice! ui) {:index 0})
-                (let [closing @(:closing? ui)
-                      saved-content (slurp tmp)
-                      dirty-after (editor/dirty? ed)]
-                  (reset! (:suppress-close? ui) false)
-                  (reset! (:closing? ui) false)
-                  (reset! (:alert-pending? ui) false)
-                  (support/check :close-dirty-save
-                                 (and dirty-before closing (not dirty-after) (= "(+ 5 5)z" saved-content))
-                                 {:dirty-before dirty-before :closing closing :dirty-after dirty-after
-                                  :saved-content saved-content})
-                  (.delete (java.io.File. ^String tmp))))))))
+                (try
+                  ((:close-choice! ui) {:index 0})
+                  (let [closing @(:closing? ui)
+                        saved-content (slurp tmp)
+                        dirty-after (editor/dirty? ed)]
+                    (support/check :close-dirty-save
+                                   (and dirty-before closing (not dirty-after) (= "(+ 5 5)z" saved-content))
+                                   {:dirty-before dirty-before :closing closing :dirty-after dirty-after
+                                    :saved-content saved-content}))
+                  (finally
+                    (reset! (:suppress-close? ui) false)
+                    (reset! (:closing? ui) false)
+                    (reset! (:alert-pending? ui) false)))
+                (.delete (java.io.File. ^String tmp)))))))
 
 (defn row-pre-run-hidden-by-error
   "(undefined-fn) would throw an unresolved-symbol error at EVAL time if
@@ -236,14 +244,16 @@
               ((:request-close!* ui))
               (let [dialogs-created (- @(:alert-dialog-count ui) count-before)]
                 (reset! (:suppress-close? ui) true)
-                ((:close-choice! ui) {:index 1})
-                (let [closing @(:closing? ui)]
-                  (reset! (:suppress-close? ui) false)
-                  (reset! (:closing? ui) false)
-                  (reset! (:alert-pending? ui) false)
-                  (support/check :close-alert-pending-guard
-                                 (and (= 1 dialogs-created) closing)
-                                 {:dialogs-created dialogs-created :closing closing})))))))
+                (try
+                  ((:close-choice! ui) {:index 1})
+                  (let [closing @(:closing? ui)]
+                    (support/check :close-alert-pending-guard
+                                   (and (= 1 dialogs-created) closing)
+                                   {:dialogs-created dialogs-created :closing closing}))
+                  (finally
+                    (reset! (:suppress-close? ui) false)
+                    (reset! (:closing? ui) false)
+                    (reset! (:alert-pending? ui) false))))))))
 
 (defn row-close-alert-routing
   "The routing half: the completion callback must route by its OWN
@@ -336,16 +346,18 @@
               (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
               (reset! (:suppress-close? ui) true)
               (let [text-before (editor/editor-text ed)]
-                ((:close-choice! ui) {:error "dismissed"})
-                (let [closing @(:closing? ui)
-                      dirty-after (editor/dirty? ed)
-                      text-after (editor/editor-text ed)]
-                  (reset! (:suppress-close? ui) false)
-                  (reset! (:closing? ui) false)
-                  (support/check :close-dismissed
-                                 (and (not closing) dirty-after (= text-before text-after))
-                                 {:closing closing :dirty-after dirty-after
-                                  :text-before text-before :text-after text-after})))))))
+                (try
+                  ((:close-choice! ui) {:error "dismissed"})
+                  (let [closing @(:closing? ui)
+                        dirty-after (editor/dirty? ed)
+                        text-after (editor/editor-text ed)]
+                    (support/check :close-dismissed
+                                   (and (not closing) dirty-after (= text-before text-after))
+                                   {:closing closing :dirty-after dirty-after
+                                    :text-before text-before :text-after text-after}))
+                  (finally
+                    (reset! (:suppress-close? ui) false)
+                    (reset! (:closing? ui) false))))))))
 
 (defn row-close-save-failed
   "#7: Save chosen ({:index 0}) with a remembered path whose save fails
@@ -367,15 +379,17 @@
                     (.delete dir)
                     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
                     (reset! (:suppress-close? ui) true)
-                    (let [text-before (editor/editor-text ed)
-                          _ ((:close-choice! ui) {:index 0})
-                          closing @(:closing? ui)
-                          dirty-after (editor/dirty? ed)
-                          text-after (editor/editor-text ed)]
-                      (reset! (:suppress-close? ui) false)
-                      (reset! (:closing? ui) false)
-                      {:mark mark :closing closing :dirty-after dirty-after
-                       :text-before text-before :text-after text-after})))
+                    (try
+                      (let [text-before (editor/editor-text ed)
+                            _ ((:close-choice! ui) {:index 0})
+                            closing @(:closing? ui)
+                            dirty-after (editor/dirty? ed)
+                            text-after (editor/editor-text ed)]
+                        {:mark mark :closing closing :dirty-after dirty-after
+                         :text-before text-before :text-after text-after})
+                      (finally
+                        (reset! (:suppress-close? ui) false)
+                        (reset! (:closing? ui) false)))))
           reported? (await-until 1000 20 #(str/includes? (support/since ui mark) "; save:"))]
       (on-gtk (support/check :close-save-failed
                              (and (not closing) dirty-after (= text-before text-after) reported?
@@ -396,16 +410,18 @@
                     (editor/set-text! ed "(+ 1 1)")
                     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
                     (reset! (:suppress-close? ui) true)
-                    (with-redefs [g/g-object-new-with-properties
-                                  (fn [& _] (throw (ex-info "forced alert build failure" {})))]
-                      ((:request-close!* ui)))
-                    (let [pending @(:alert-pending? ui)
-                          closing @(:closing? ui)
-                          dirty-after (editor/dirty? ed)]
-                      (reset! (:suppress-close? ui) false)
-                      (reset! (:closing? ui) false)
-                      (reset! (:alert-pending? ui) false)
-                      {:mark mark :pending pending :closing closing :dirty-after dirty-after})))
+                    (try
+                      (with-redefs [g/g-object-new-with-properties
+                                    (fn [& _] (throw (ex-info "forced alert build failure" {})))]
+                        ((:request-close!* ui)))
+                      (let [pending @(:alert-pending? ui)
+                            closing @(:closing? ui)
+                            dirty-after (editor/dirty? ed)]
+                        {:mark mark :pending pending :closing closing :dirty-after dirty-after})
+                      (finally
+                        (reset! (:suppress-close? ui) false)
+                        (reset! (:closing? ui) false)
+                        (reset! (:alert-pending? ui) false)))))
           reported? (await-until 1000 20 #(str/includes? (support/since ui mark) "forced alert build failure"))]
       (on-gtk (support/check :close-alert-build-throws
                              (and (not pending) (not closing) dirty-after reported?)
@@ -425,19 +441,21 @@
               (editor/set-text! ed "(+ 1 1)")
               (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
               (reset! (:suppress-close? ui) true)
-              ((:activate-quit-action!* ui))
-              (let [dialogs (- @(:alert-dialog-count ui) count-before)
-                    pending @(:alert-pending? ui)
-                    closing-dirty @(:closing? ui)
-                    text-after (editor/editor-text ed)]
-                (reset! (:alert-pending? ui) false)
-                (editor/set-text! ed "(+ 1 1)")
+              (try
                 ((:activate-quit-action!* ui))
-                (let [closing-clean @(:closing? ui)]
+                (let [dialogs (- @(:alert-dialog-count ui) count-before)
+                      pending @(:alert-pending? ui)
+                      closing-dirty @(:closing? ui)
+                      text-after (editor/editor-text ed)]
+                  (editor/set-text! ed "(+ 1 1)")
+                  ((:activate-quit-action!* ui))
+                  (let [closing-clean @(:closing? ui)]
+                    (support/check :quit-action-prompts
+                                   (and (= 1 dialogs) pending (not closing-dirty) (= "(+ 1 1)z" text-after)
+                                        closing-clean)
+                                   {:dialogs dialogs :pending pending :closing-dirty closing-dirty
+                                    :text-after text-after :closing-clean closing-clean})))
+                (finally
+                  (reset! (:alert-pending? ui) false)
                   (reset! (:suppress-close? ui) false)
-                  (reset! (:closing? ui) false)
-                  (support/check :quit-action-prompts
-                                 (and (= 1 dialogs) pending (not closing-dirty) (= "(+ 1 1)z" text-after)
-                                      closing-clean)
-                                 {:dialogs dialogs :pending pending :closing-dirty closing-dirty
-                                  :text-after text-after :closing-clean closing-clean})))))))
+                  (reset! (:closing? ui) false)))))))

@@ -11,13 +11,14 @@
   because a take there freezes the main loop (spike probe: a 300 ms <! on
   the GTK thread advanced 0 idle ticks).
 
-  Jolt only: call-gtk, await-until, settle and sh are plain fns with a <!
-  inside, which Jolt allows (fibers.md, 'Parking works through function
-  calls'). Call them only from inside a go block."
+  Jolt only: call-gtk, await-until, settle, sh and close-window-bounded!
+  are plain fns with a <! inside, which Jolt allows (fibers.md, 'Parking
+  works through function calls'). Call them only from inside a go block."
   (:require [clojure.core.async :as a :refer [<! go promise-chan put! timeout]]
             [clojure.java.shell :as shell]
             [jolt.ffi :as ffi]
-            [jonquil.gtk.callbacks :as cb]))
+            [jonquil.gtk.callbacks :as cb]
+            [jonquil.gtk.ffi :as g]))
 
 (ffi/defcfn ^:private pthread-main-np "pthread_main_np" [] :int)
 
@@ -126,3 +127,34 @@
               (record! :row-timeout false {:index i :timeout-ms per-step-ms}))
             (recur (inc i) (next steps)))))
       :done))
+
+(defn close-window-bounded!
+  "Closes window (through g/gtk-window-close, so close-request-fn's own
+  quit path runs), then polls destroyed? until it's true or deadline-ms
+  has passed. Calls (on-stuck) if the window is still alive at the
+  deadline.
+
+  I1: a stuck self-test flag (suppress-close? left true by a throw
+  between a row's set and its own reset) makes close-request-fn return
+  the suppressed branch forever, so gtk-window-close alone never ends
+  g_application_run -- the driver's own thread stays parked inside
+  main/start! and never reaches its own System/exit. on-stuck is the way
+  out: the drivers pass one that records a FAIL, makes sure SUMMARY (or
+  the harness's own summary) has printed, then calls System/exit itself,
+  from this go thread, since the GTK/main thread is the one stuck.
+
+  destroyed? is a plain atom flipped from the window's own \"destroy\"
+  signal (each driver's -main connects it). The poll reads destroyed?
+  directly, off the GTK thread, and never uses await-until: once the
+  window is gone an on-gui! thunk would never run. Call from inside a go
+  block, never on the GTK thread."
+  [window destroyed? deadline-ms on-stuck]
+  (on-gtk (g/gtk-window-close window))
+  (let [t0 (System/currentTimeMillis)]
+    (loop []
+      (when (and (not @destroyed?)
+                 (< (- (System/currentTimeMillis) t0) deadline-ms))
+        (<! (timeout 50))
+        (recur))))
+  (when-not @destroyed?
+    (on-stuck)))

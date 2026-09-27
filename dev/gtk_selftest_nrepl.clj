@@ -22,16 +22,17 @@
   once every row had run), the close row itself now fires the app's own
   \"quit\" action -- window.clj's :activate-quit-action!*, the same path a
   Quit AppleEvent takes -- so finish (below) is now a close-forced
-  FALLBACK only, the same shape as the window group's own
-  WINDOW-CLOSE-FALLBACK-DEADLINE-MS (dev/gtk_selftest_window.clj): it polls
-  window-destroyed? (a \"destroy\" signal this file connects in -main,
-  independent of window.clj's own close-request->quit wiring) and forces
-  gtk-window-close only if the real quit action somehow didn't already
-  close it, recording a FAIL if so. Nothing here needs the alert-dialog
-  path close-request-fn also has to guard, since row-nrepl-close-kills-
-  child leaves the editor clean (set-text! never marks it dirty) right
-  before quitting, so the real close always takes close-request-fn's
-  immediate real-quit branch.
+  FALLBACK only, the same shape as the window group's own finish
+  (dev/gtk_selftest_window.clj): it polls window-destroyed? (a \"destroy\"
+  signal this file connects in -main, independent of window.clj's own
+  close-request->quit wiring) and forces the close through gtk-async/
+  close-window-bounded! only if the real quit action somehow didn't
+  already close it, recording a FAIL if so, and (I1) a second FAIL plus a
+  process exit if even the forced close is stuck. Nothing here needs the
+  alert-dialog path close-request-fn also has to guard, since row-nrepl-
+  close-kills-child leaves the editor clean (set-text! never marks it
+  dirty) right before quitting, so the real close always takes close-
+  request-fn's immediate real-quit branch.
 
   after-close-checks! (rows.clj) runs after main/start! returns, i.e.
   after the GTK main loop is actually gone -- SUMMARY is printed only once
@@ -98,16 +99,35 @@
 (def ^:private CLOSE-FALLBACK-DEADLINE-MS
   ;; Generous: row-nrepl-close-kills-child's own real quit closes within
   ;; one main-loop iteration, so this only actually waits out its deadline
-  ;; when that quit path is broken.
-  10000)
+  ;; when that quit path is broken. finish (below) uses this same constant
+  ;; twice: once to wait for the quit action's own close to land, and
+  ;; again (I1) as close-window-bounded!'s own deadline for the forced
+  ;; close that follows when the quit action didn't work. M3: this was
+  ;; 2000 before the arc; AH.T1 changed it to 10000 by mistake, restored
+  ;; here.
+  2000)
+
+(defn- print-summary!
+  "SUMMARY, printed exactly once, from wherever the run actually ends."
+  []
+  (let [passed (count (filter second @support/results)) total (count @support/results)]
+    (reset! finished? true)
+    (println (str "SUMMARY " passed " of " total " passed"))))
 
 (defn- finish
   "After the last row. row-nrepl-close-kills-child (the last row) already
   fired the real quit action. Poll window-destroyed? rather than assuming
   it worked: if that regressed, the window is still open here, and
-  without this fallback nothing would ever end the run. Never uses
-  await-until: once the window is gone the GTK main loop has ended, and
-  an on-gui! thunk would never run."
+  without this fallback nothing would ever end the run.
+
+  I1: a suppress-close?-shaped stuck flag would make even the forced
+  gtk_window_close (via gtk-async/close-window-bounded!) never actually
+  close the window, so close-window-bounded!'s on-stuck is the real way
+  out: it records a second FAIL, makes sure SUMMARY has printed, and
+  exits from this go thread, since -main's own thread would otherwise
+  stay parked inside main/start! forever. Never uses await-until: once
+  the window is gone the GTK main loop has ended, and an on-gui! thunk
+  would never run."
   [ui]
   (go (let [t0 (System/currentTimeMillis)]
         (loop []
@@ -118,7 +138,13 @@
       (when-not @window-destroyed?
         (support/check :nrepl-close-forced false
                        {:reason "window still open after the quit action; forced closed to avoid hanging the run"})
-        (on-gtk (g/gtk-window-close (:window ui))))))
+        (ga/close-window-bounded!
+         (:window ui) window-destroyed? CLOSE-FALLBACK-DEADLINE-MS
+         (fn []
+           (support/check :nrepl-close-stuck false
+                          {:reason "window still open after the forced close too; exiting to avoid hanging the run"})
+           (print-summary!)
+           (System/exit 1))))))
 
 (defn -main [& _]
   (if (child/middleware-root)
@@ -145,9 +171,7 @@
       ;; the exit code reflects all of them, not just the rows.
       (a/alts!! [driver-done (timeout 5000)])
       (rows/after-close-checks!)
-      (let [passed (count (filter second @support/results)) total (count @support/results)]
-        (reset! finished? true)
-        (println (str "SUMMARY " passed " of " total " passed"))))
+      (print-summary!))
     (support/check :middleware-root-present false
                    {:reason "no jolt-lang/nrepl checkout: set JONQUIL_JOLT_NREPL or clone it to ~/dev/jolt-lang/nrepl"}))
   (when-not @finished?

@@ -47,6 +47,7 @@
             [gtk-async :as ga :refer [on-gtk await-until go-row]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
+            [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -368,7 +369,16 @@
   If cgevent never lists a second window, this scene records a PASS with
   :skipped true and says why in its detail map (the brief: \"otherwise
   skip that scene and say so\") rather than guessing which window to
-  shoot -- no docs/images/close-prompt.png is written in that case."
+  shoot -- no docs/images/close-prompt.png is written in that case.
+
+  I1: the cleanup below (dismissing the real alert, resetting
+  alert-pending?, mark-saved!) used to run only after a found alert's own
+  screenshot, so a throw from screenshot-by-id or check!, or the :skipped
+  branch itself, left the buffer dirty with alert-pending? still true --
+  -main's own end-of-scene close then met close-request-fn's dirty
+  branch, which never quits, and the process hung. The cleanup now runs
+  in a go-level finally, unconditionally, whether or not an alert was
+  ever found."
   [ui]
   (go-row :close-prompt check!
     (let [pid (own-pid)
@@ -377,19 +387,21 @@
                     (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1))
           before (await-windows pid 3000 100 seq)
           before-ids (set (map :window-id before))
-          _ (on-gtk ((:request-close!* ui)))
-          after (await-windows pid 5000 100
-                               (fn [ws] (some (fn [w] (not (before-ids (:window-id w)))) ws)))
-          alert (some (fn [w] (when-not (before-ids (:window-id w)) w)) after)]
-      (if-not alert
-        (check! :close-prompt true
-                {:skipped true
-                 :reason "cgevent windows never listed a second (alert) window for this pid"
-                 :before before :after after})
-        (let [_ (ga/settle 2)
-              {:keys [exit err]} (screenshot-by-id (image-path :close-prompt "png") (:window-id alert))]
-          (check! :close-prompt (zero? exit)
-                  {:alert-window alert :screenshot-exit exit :screenshot-err err})
+          _ (on-gtk ((:request-close!* ui)))]
+      (try
+        (let [after (await-windows pid 5000 100
+                                   (fn [ws] (some (fn [w] (not (before-ids (:window-id w)))) ws)))
+              alert (some (fn [w] (when-not (before-ids (:window-id w)) w)) after)]
+          (if-not alert
+            (check! :close-prompt true
+                    {:skipped true
+                     :reason "cgevent windows never listed a second (alert) window for this pid"
+                     :before before :after after})
+            (let [_ (ga/settle 2)
+                  {:keys [exit err]} (screenshot-by-id (image-path :close-prompt "png") (:window-id alert))]
+              (check! :close-prompt (zero? exit)
+                      {:alert-window alert :screenshot-exit exit :screenshot-err err}))))
+        (finally
           (on-gtk ((:close-choice! ui) {:index 2})
                   (reset! (:alert-pending? ui) false)
                   (editor/mark-saved! ed)))))))
@@ -514,6 +526,20 @@
   ;; GIF records for 5 s alongside them; run-scene's idle wait adds 2000 ms.
   60000)
 
+;; I1: a plain atom flip from the window's own "destroy" signal (-main,
+;; below, connects it), the same pattern dev/gtk_selftest_window.clj's own
+;; window-destroyed? uses -- safe to poll without ever touching the
+;; (possibly already-destroyed) widget pointer directly.
+(defonce ^:private window-destroyed? (atom false))
+
+(def ^:private WINDOW-CLOSE-DEADLINE-MS
+  ;; Generous: a clean scene closes within one main-loop iteration, so
+  ;; this only actually waits out its deadline when scene-close-prompt's
+  ;; own cleanup didn't run (a throw, or the skip branch) and left the
+  ;; buffer dirty or an alert pending -- which would otherwise hang this
+  ;; process forever inside g_application_run.
+  2000)
+
 (defn- run-scene
   "Resets the editor and the console's input, waits (up to 2000 ms) for the
   engine to go idle, then runs scene and parks until its channel delivers."
@@ -536,8 +562,26 @@
         (main/start!
          {:settings-path (fresh-settings-path)
           :on-ready (fn [ui]
+                      (g/g-signal-connect-data (:window ui) "destroy"
+                                               (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
+                                                            [:pointer :pointer] :void)
+                                               ffi/null ffi/null g/CONNECT-DEFAULT)
                       (go (<! (timeout 300))
                           (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))] PER-SCENE-MS check!))
                           (<! (timeout 50))
-                          (on-gtk (g/gtk-window-close (:window ui)))))})
+                          ;; I1: scene-close-prompt (or any scene) could leave
+                          ;; the buffer dirty with an alert pending if its own
+                          ;; cleanup didn't run; a plain gtk-window-close would
+                          ;; then meet close-request-fn's dirty branch, which
+                          ;; never quits, and g_application_run would never
+                          ;; return. close-window-bounded!'s on-stuck is the
+                          ;; way out: it records a FAIL and exits from this go
+                          ;; thread, since -main's own thread would otherwise
+                          ;; stay parked inside main/start! forever.
+                          (ga/close-window-bounded!
+                           (:window ui) window-destroyed? WINDOW-CLOSE-DEADLINE-MS
+                           (fn []
+                             (check! :window-close-stuck false
+                                     {:reason "window still open after the close; exiting to avoid hanging the run"})
+                             (System/exit 1)))))})
         (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))
