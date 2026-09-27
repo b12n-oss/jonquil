@@ -16,7 +16,14 @@ between them: the **Definitions** editor on top, where you write a program,
 and the **Interactions** console below, where output appears and where you
 can type expressions directly at a `> ` prompt. A status label along the
 bottom reads `Ready`, `Running…`, `Waiting for input`, or `Stopped`,
-depending on what the last Run or REPL entry is doing.
+depending on what the last Run or REPL entry is doing. Beside it, the
+dialect label says which runtime this window uses (see
+[Dialects and runtimes](#dialects-and-runtimes)).
+
+The console wraps a line that's wider than the pane onto the next row,
+so a long path or a long printed value never pushes the rest of the
+output sideways. The editor doesn't wrap: code keeps its own line breaks,
+and the pane scrolls horizontally instead.
 
 The window title names the open file, or `Untitled` when there isn't one,
 and gains a leading `* ` the moment the editor has unsaved changes.
