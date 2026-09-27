@@ -148,7 +148,15 @@
 
 (defn- send-main!
   "Sends the Run's load-file or the REPL entry's eval, feeding :out and
-  :err to on-output as they arrive. A promise of all its replies."
+  :err to on-output as they arrive. A promise of all its replies.
+
+  I4 (phase-close review): a Stop pressed after run-worker!'s last
+  stop-requested? check but before this records the request's :id used to
+  have nothing to act on and was never looked at again. Re-checks the flag
+  right after recording the id and, if it's already set, goes through
+  interrupt!'s id path once. That's safe even if a real Stop lands at the
+  same moment: interrupt!'s own CAS (see I1) only lets one caller trigger
+  the restart future per id."
   [ev code {:keys [run? path on-output]}]
   (let [{:keys [conn session]} (runtime ev)
         acc (atom [])
@@ -165,6 +173,8 @@
                                 (when-let [e (:err m)] (on-output :err e)))
                               (when (client/done? m) (deliver done @acc))))]
     (swap! (:state ev) assoc-in [:running :id] id)
+    (when (get-in @(:state ev) [:running :stop-requested?])
+      (ev/interrupt! ev))
     done))
 
 (defn- stop-requested? [ev]
@@ -202,12 +212,18 @@
 
 (defn- restart-for-stop!
   "Stop's fallback: kill the child (the running eval then completes as
-  :interrupted) and start a fresh one, saying so on the console."
+  :interrupted) and start a fresh one, saying so on the console.
+
+  I3 (phase-close review): only claims success once start-runtime! has
+  actually returned nil. A failed restart says so instead, and the next
+  evaluation still starts the runtime lazily, as it does today."
   [ev on-output]
   (shutdown-runtime! ev)
-  (when on-output
-    (on-output :system "; Stop restarted the Jolt runtime, so its definitions are gone.\n"))
-  (start-runtime! ev))
+  (if-let [problem (start-runtime! ev)]
+    (when on-output
+      (on-output :error (str "; Stop couldn't restart the Jolt runtime: " problem "\n")))
+    (when on-output
+      (on-output :system "; Stop restarted the Jolt runtime, so its definitions are gone.\n"))))
 
 (defrecord NRepl [selection state history start-lock]
   ev/Evaluator
@@ -234,18 +250,28 @@
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
-    (when-let [{:keys [id opts]} (:running @state)]
-      (swap! state assoc-in [:running :stop-requested?] true)
-      ;; No :id yet means the request hasn't gone out: run-worker! sees the
-      ;; flag and finishes as :interrupted without sending it.
-      (when id
-        ;; Only the first interrupt! for this running id sends anything or
-        ;; can restart: a CAS on :restart-triggered? per the current
-        ;; :running map, so repeated Stop presses don't each trigger their
-        ;; own restart.
-        (let [[old _] (swap-vals! state assoc-in [:running :restart-triggered?] true)]
-          (when-not (get-in old [:running :restart-triggered?])
-            (future
+    ;; I1 (phase-close review): both updates below used to be their own
+    ;; swap!/swap-vals! against a separately-read :running. A finish!
+    ;; landing between the read and either write recreated {:running
+    ;; {...}} out of nil, and eval! then refused every later Run as busy
+    ;; forever. One swap now, keyed by identity of the exact :running map
+    ;; read here: if finish! (or a new eval!) has already cleared or
+    ;; replaced it by the time this runs, the swap is a no-op instead of
+    ;; rebuilding it. The same swap does the once-per-id restart CAS, so
+    ;; repeated Stop presses for one id still trigger only one future.
+    (when-let [{:keys [id opts] :as running} (:running @state)]
+      (let [[old _] (swap-vals! state
+                                (fn [s]
+                                  (if (identical? running (:running s))
+                                    (cond-> (assoc-in s [:running :stop-requested?] true)
+                                      id (assoc-in [:running :restart-triggered?] true))
+                                    s)))]
+        ;; No :id yet means the request hasn't gone out: run-worker! sees
+        ;; the flag and finishes as :interrupted without sending it, and
+        ;; send-main! re-checks it once the id lands (I4).
+        (when (and id (identical? running (:running old)) (not (:restart-triggered? running)))
+          (future
+            (try
               (let [{:keys [conn session ops]} (runtime this)
                     answered? (and (contains? ops "interrupt")
                                    (vector? (client/request-sync conn {:op "interrupt" :session session :interrupt-id id}
@@ -255,7 +281,14 @@
                                   (cond (not (:running @state)) true
                                         (>= (* n 20) interrupt-timeout-ms) false
                                         :else (do (Thread/sleep 20) (recur (inc n))))))]
-                (when-not ended? (restart-for-stop! this (:on-output opts)))))))))
+                (when-not ended? (restart-for-stop! this (:on-output opts))))
+              ;; M5 (phase-close review): a throw here used to be stored in
+              ;; the future and lost. Report it the same way a failed
+              ;; restart is, and never let it escape.
+              (catch Throwable e
+                (when-let [on-output (:on-output opts)]
+                  (try (on-output :error (str "; Stop failed: " (ex-message e) "\n"))
+                       (catch Throwable _ nil)))))))))
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] false)

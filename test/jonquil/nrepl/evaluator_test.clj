@@ -9,6 +9,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
+            [jonquil.nrepl.client :as client]
             [jonquil.nrepl.evaluator :as nrepl]))
 
 (defn- make [dir]
@@ -259,4 +260,81 @@
         (is (= 1 (count (filter (fn [[_ s]] (str/includes? s "Stop restarted the Jolt runtime")) @out)))
             "exactly one restart line for three presses")
         (is (= 1 @complete-count) "on-complete fires once"))
+      (finally (ev/stop! e)))))
+
+(deftest stop-racing-finish-never-sticks-test
+  ;; I1 (phase-close review): interrupt! used to read :running and write
+  ;; it back in a separate step, so a finish! landing in between recreated
+  ;; :running out of nil, and eval! then refused every later Run as busy
+  ;; for good. Mirrors the reviewer's own probe (phase-review-report.md,
+  ;; probe/stuck.clj): a presser future hammers interrupt! against no
+  ;; child (so :running never gets an :id) while this thread repeatedly
+  ;; sets and clears :running, the shape finish! uses. The probe found 921
+  ;; stuck states in 200000 cycles on the pre-fix code.
+  (let [e (make (temp-project))
+        state (:state e)
+        stop? (atom false)
+        presser (future (loop [] (when-not @stop? (ev/interrupt! e) (recur))))]
+    (dotimes [_ 20000]
+      (swap! state assoc :running {:opts {}})
+      (swap! state assoc :running nil))
+    (reset! stop? true)
+    @presser
+    (is (nil? (:running @state)) "finish!'s clear always wins; interrupt! never recreates :running")
+    (is (not (ev/evaluating? e)))
+    (try
+      (is (not= nrepl/busy-warning (ev/eval! e "1" {:run? false})) "the next eval! isn't refused as busy")
+      (finally (ev/stop! e)))))
+
+(deftest stop-before-send-is-honoured-test
+  ;; I4 (phase-close review): a Stop landing after run-worker!'s own check
+  ;; but before send-main! records the request's :id used to be lost --
+  ;; interrupt! had nothing to act on yet, and nothing looked at the flag
+  ;; again once the id landed. Redefines client/request! to call
+  ;; interrupt! right after the real send goes out (send! writes and
+  ;; flushes synchronously inside request!, so the write can't be undone)
+  ;; but before send-main! records the id, exactly the gap I4 closes. Only
+  ;; the eval/load-file send is intercepted, not the interrupt op the fix
+  ;; itself goes on to send.
+  (let [dir (temp-project) e (make dir)
+        real-request client/request!]
+    (try
+      (ev/start! e)
+      (let [done (promise) out (atom [])]
+        (with-redefs [client/request! (fn [conn msg on-msg]
+                                        (let [id (real-request conn msg on-msg)]
+                                          (when (contains? #{"eval" "load-file"} (:op msg))
+                                            (ev/interrupt! e))
+                                          id))]
+          (ev/eval! e "(loop [] (recur))" {:run? false
+                                           :on-output (fn [k s] (swap! out conj [k s]))
+                                           :on-complete (fn [r] (deliver done r))})
+          (is (= :interrupted (:status (deref done 10000 :timeout))))
+          (is (= [] @out) "the loop never produced output")))
+      (finally (ev/stop! e)))))
+
+(deftest failed-restart-is-reported-test
+  ;; I3 (phase-close review): restart-for-stop! used to always print the
+  ;; success line, even when the restart failed. Forces start-runtime! to
+  ;; fail during the restart and checks the console shows the failure
+  ;; line instead of the "restarted" line.
+  (let [e (make (temp-project)) done (promise) out (atom [])]
+    (try
+      (ev/start! e)
+      (let [pid (nrepl/child-pid e)]
+        (ev/eval! e "(loop [] (recur))" {:run? false
+                                         :on-output (fn [k s] (swap! out conj [k s]))
+                                         :on-complete (fn [r] (deliver done r))})
+        (Thread/sleep 300)
+        (shell/sh "kill" "-STOP" (str pid))
+        (with-redefs [child/start! (fn [_ _] (throw (ex-info "boom" {})))]
+          (ev/interrupt! e)
+          (is (= :interrupted (:status (deref done 10000 :timeout))))
+          (is (wait-until (fn [] (some (fn [[k s]] (and (= :error k)
+                                                        (str/includes? s "couldn't restart the Jolt runtime")))
+                                       @out))
+                          5000)
+              "the console shows the failed restart")
+          (is (not (some (fn [[_ s]] (str/includes? s "Stop restarted the Jolt runtime")) @out))
+              "and not the success line")))
       (finally (ev/stop! e)))))
