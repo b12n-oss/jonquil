@@ -139,30 +139,30 @@
    (shim popovers-quickdoc/row-jump-external)
    (shim popovers-quickdoc/row-jump-none)
    (shim popovers-quickdoc/row-jump-shadowed-param)
-   (shim completion/row-completion-opens)
-   (shim completion/row-completion-single-inserts)
-   (shim completion/row-completion-no-prefix)
-   (shim completion/row-completion-navigate-commit)
-   (shim completion/row-completion-tab-commits)
-   (shim completion/row-completion-keys-reach-editor)
-   (shim completion/row-completion-closes-on-space)
-   (shim completion/row-completion-escape-while-running)
-   (shim completion/row-completion-cmd-space-nothing)
-   (shim completion/row-completion-preedit-yields)
-   (shim completion/row-completion-closes-on-focus-loss)
-   (shim completion/row-completion-closes-other-popover)
-   (shim completion/row-completion-commit-throw-consumes-key)
-   (shim completion/row-plain-return-apply-op-throw-contained)
-   (shim completion/row-repl-completion-opens)
-   (shim completion/row-repl-completion-precedence)
-   (shim completion/row-repl-history-after-close)
-   (shim completion/row-repl-completion-history-symbols)
-   (shim completion/row-repl-completion-outside-input)
-   (shim completion/row-repl-completion-cmd-space-nothing)
-   (shim completion/row-repl-completion-preedit-yields)
-   (shim completion/row-repl-completion-closes-on-focus-loss)
-   (shim completion/row-repl-completion-keys-reach-console)
-   (shim completion/row-repl-completion-closes-on-space)
+   completion/row-completion-opens
+   completion/row-completion-single-inserts
+   completion/row-completion-no-prefix
+   completion/row-completion-navigate-commit
+   completion/row-completion-tab-commits
+   completion/row-completion-keys-reach-editor
+   completion/row-completion-closes-on-space
+   completion/row-completion-escape-while-running
+   completion/row-completion-cmd-space-nothing
+   completion/row-completion-preedit-yields
+   completion/row-completion-closes-on-focus-loss
+   completion/row-completion-closes-other-popover
+   completion/row-completion-commit-throw-consumes-key
+   completion/row-plain-return-apply-op-throw-contained
+   completion/row-repl-completion-opens
+   completion/row-repl-completion-precedence
+   completion/row-repl-history-after-close
+   completion/row-repl-completion-history-symbols
+   completion/row-repl-completion-outside-input
+   completion/row-repl-completion-cmd-space-nothing
+   completion/row-repl-completion-preedit-yields
+   completion/row-repl-completion-closes-on-focus-loss
+   completion/row-repl-completion-keys-reach-console
+   completion/row-repl-completion-closes-on-space
    (shim rename-menus/row-rename-applies)
    (shim rename-menus/row-rename-skips-comments-strings)
    (shim rename-menus/row-rename-one-undo)
