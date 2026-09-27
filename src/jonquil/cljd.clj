@@ -52,10 +52,28 @@
 
 ;; --- the buffer's namespace ------------------------------------------------
 
+(defn- discard-or-quoted?
+  "True when the nearest non-whitespace text immediately before position
+  pos in text is a #_ discard or a reader prefix (' ` ~ @), so a top-level
+  (...) there reads as data, not as a candidate ns form. tokenize has no
+  token for #, ' or `, so those prefixes are otherwise invisible to
+  ns-form's scan."
+  [^String text pos]
+  (let [i (loop [i (dec (long pos))]
+            (if (and (>= i 0) (Character/isWhitespace (.charAt text i)))
+              (recur (dec i))
+              i))]
+    (and (>= i 0)
+         (let [ch (.charAt text i)]
+           (or (contains? #{\' \` \~ \@} ch)
+               (and (= \_ ch) (pos? i) (= \# (.charAt text (dec i)))))))))
+
 (defn ns-form
   "The buffer's first top-level (ns ...) form as {:name str :text str}, or
   nil when there's none, or it's never closed. Brackets inside strings and
-  comments don't count, and metadata before the name is skipped."
+  comments don't count, and metadata before the name is skipped. A
+  discarded (#_) or quoted/reader-prefixed ('/`/~/@) top-level form is
+  skipped, since it isn't the buffer's real ns form."
   [text]
   (when-not (str/blank? text)
     (let [toks (filterv (fn [[t]] (not= :comment t)) (syntax/tokenize text))
@@ -67,7 +85,8 @@
           word (fn [i] (when-let [[_ s e] (get toks i)] (subs text s e)))]
       (some (fn [i]
               (let [[t s] (nth toks i)]
-                (when (and (= :bracket t) (contains? top-opens (long s)) (= "ns" (word (inc i))))
+                (when (and (= :bracket t) (contains? top-opens (long s)) (= "ns" (word (inc i)))
+                           (not (discard-or-quoted? text (long s))))
                   (when-let [close (get matches (long s))]
                     (let [name-i (first (drop-while (fn [j] (= :metatag (first (get toks j))))
                                                     (iterate inc (+ i 2))))
@@ -134,7 +153,7 @@
   (let [st (ops/statuses msgs)
         n (count (keep :value msgs))]
     (cond
-      (and stop-requested? (or (st ops/disconnected) (st "eval-error"))) {:status :interrupted}
+      (and stop-requested? (st ops/disconnected)) {:status :interrupted}
       (st ops/disconnected) {:status :error :error-text lost-connection}
       (st "eval-error") {:status :error :error-text (str "Load stopped at form " (inc n) " of " ns-name)}
       :else {:status :notice

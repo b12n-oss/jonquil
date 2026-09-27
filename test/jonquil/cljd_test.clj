@@ -21,11 +21,18 @@
     (is (nil? (cljd/ns-form "(defn f [] 1)")))
     (is (nil? (cljd/ns-form "")))
     (is (nil? (cljd/ns-form nil)))
-    (is (nil? (cljd/ns-form "(ns a.b\n  (:require [x.y :as z])")))))
+    (is (nil? (cljd/ns-form "(ns a.b\n  (:require [x.y :as z])"))))
+  (testing "a discarded or quoted top-level ns form doesn't count"
+    (is (= "real.ns" (:name (cljd/ns-form "#_(ns old.ns)\n(ns real.ns)"))))
+    (is (= "real.ns" (:name (cljd/ns-form "`(ns fake.ns)\n(ns real.ns)"))))
+    (is (= "real.ns" (:name (cljd/ns-form "'(ns fake.ns)\n(ns real.ns)"))))))
 
 (deftest target-ns-test
   (is (= "demo.deck.drive" (:name (cljd/target-ns drive-ns-form))))
-  (is (= {:name "cljd.user" :text "(ns cljd.user)"} (cljd/target-ns "(where)"))))
+  (is (= {:name "cljd.user" :text "(ns cljd.user)"} (cljd/target-ns "(where)")))
+  (is (= {:name "cljd.user" :text "(ns cljd.user)"}
+         (cljd/target-ns "(ns a.b\n  (:require [x.y :as z])"))
+      "an unclosed ns form gives cljd.user"))
 
 (deftest parse-port-test
   (is (= 61151 (cljd/parse-port "61151\n")) "the fork writes the port and a newline")
@@ -82,4 +89,7 @@
          (cljd/load-result [{:value "nil"} {:status ["done" "jonquil-disconnected"]}] "x.y" false)))
   (is (= {:status :interrupted}
          (cljd/load-result [{:value "nil"} {:status ["done" "jonquil-disconnected"]}] "x.y" true))
-      "Stop's detach closes the socket, and that reads as a Stop"))
+      "Stop's detach closes the socket, and that reads as a Stop")
+  (is (= {:status :error :error-text "Load stopped at form 2 of x.y"}
+         (cljd/load-result [{:ns "x.y"} {:value "1"} {:err "boom"} {:status ["done" "eval-error"]}] "x.y" true))
+      "a cljd Stop never sends interrupt, so an eval-error in the load's own replies is never caused by Stop"))
