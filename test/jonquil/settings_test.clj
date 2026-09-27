@@ -121,3 +121,26 @@
     (let [path (str (temp-dir) "/settings.edn")]
       (is (nil? (settings/save-settings! path {:theme :dark})))
       (is (= "{:theme :dark}" (slurp path))))))
+
+(deftest save-keeps-dialect-when-unreadable-test
+  (testing "unreadable file: return a message and don't modify the file"
+    (let [path (str (temp-dir) "/settings.edn")
+          f (io/file path)]
+      (spit path "{:theme :navy :dialect :jolt}")
+      (.setReadable f false false)
+      (try
+        (let [msg (settings/save-settings! path {:theme :dark})]
+          (is (string? msg) "should return a string")
+          (is (str/includes? msg "couldn't read") "should mention couldn't read"))
+        (finally
+          (.setReadable f true false)))
+      (is (= "{:theme :navy :dialect :jolt}" (slurp path)) "file should be unchanged byte-for-byte")))
+  (testing "malformed EDN: overwrite and return nil"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :navy :dialect :jolt")
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= {:theme :dark} (settings/load-settings path)))))
+  (testing "missing file: create and return nil"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (is (nil? (settings/save-settings! path {:theme :dark})))
+      (is (= {:theme :dark} (settings/load-settings path))))))

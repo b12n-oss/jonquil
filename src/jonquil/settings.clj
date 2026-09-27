@@ -94,7 +94,24 @@
   (let [tmp (atom nil)]
     (try
       (let [target (resolved-target path)
-            kept (or dialect (:dialect (load-settings path)))]
+            f (io/file target)
+            kept (if dialect
+                   dialect
+                   ;; No dialect given; try to keep the existing one.
+                   ;; Distinguish IO failure (file unreadable) from parse failure.
+                   (when (.exists f)
+                     (try
+                       (let [content (slurp target)]
+                         ;; File is readable; try to parse it and extract dialect.
+                         (try
+                           (:dialect (edn/read-string content))
+                           (catch Exception _
+                             ;; Parse failed (malformed EDN); no dialect to keep.
+                             nil)))
+                       (catch Exception _
+                         ;; IO failure; file is unreadable. Signal an error.
+                         (throw (Exception.
+                                 (str "couldn't read " target " to keep its :dialect; theme not saved")))))))]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
         (spit @tmp (pr-str (cond-> {:theme theme} kept (assoc :dialect kept))))
