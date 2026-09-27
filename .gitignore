@@ -17,3 +17,8 @@
 /AGENTS.md
 /CLAUDE.md
 .DS_Store
+
+# clojure-lsp copies dependency lint configs into .clj-kondo/imports/ on every run;
+# only the jolt export (clj-kondo --lint ~/dev/jolt --dependencies --copy-configs) is kept.
+/.clj-kondo/imports/*
+!/.clj-kondo/imports/jolt-lang/
