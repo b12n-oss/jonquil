@@ -36,6 +36,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
+            [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
@@ -579,6 +580,32 @@
   [status-label text]
   (on-gui! (fn [] (g/gtk-label-set-text status-label text))))
 
+;; D2.T4: moved here from directly after apply-selection! (its prescribed
+;; spot) -- it calls set-status!, defined just above, and Jolt resolves an
+;; unqualified symbol at compile time, not lazily; the brief's own
+;; placement (before set-status! exists) fails bb check with "Unable to
+;; resolve symbol: set-status!". Reported as a deviation; see the report.
+(defn- start-and-report!
+  "Starts an out-of-process evaluator on a future and says so on the
+  console: pid, port and project, then each limitation, or why it couldn't
+  start. The in-process engine has nothing to start or report."
+  [cv status-label e sel]
+  (when (instance? jonquil.nrepl.evaluator.NRepl e)
+    (set-status! status-label (str "Starting " (dialect/label sel) "…"))
+    (future
+      (try
+        (if-let [problem (ev/start! e)]
+          (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
+          (do (cview/append! cv :system
+                             (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
+                                  ", port " (nrepl/child-port e) ") in " (:project-dir sel) ".\n"))
+              (doseq [l (ev/limitations e)]
+                (cview/append! cv :system (str "; Limit: " l "\n")))))
+        (catch :default ex
+          (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
+        (finally
+          (when-not (ev/evaluating? e) (set-status! status-label "Ready")))))))
+
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (global.md: every one of
   these runs on the eval worker thread and must only enqueue).
@@ -629,7 +656,7 @@
                     (cview/append! cv kind text))
                   (when (and is-run?
                              (= :error (:status result))
-                             (str/includes? (eval/format-error (:error result)) "EOF while reading"))
+                             (str/includes? (console/error-text result) "EOF while reading"))
                     ;; editor/editor-text calls GTK text-buffer functions, which
                     ;; is a real GTK-thread requirement, not just this project's
                     ;; own lock -- on-complete runs on the eval worker thread, so
@@ -663,10 +690,10 @@
   warning is appended, same as P2, with no banner (the busy path never
   printed one) and no status change (eval/eval-async's own busy branch
   returns its warning string without ever calling on-status-change)."
-  [ed cv ev* status-label]
+  [ed cv ev* status-label path-atom]
   (if (ev/evaluating? @ev*)
     (let [warning (ev/eval! @ev* (editor/editor-text ed)
-                            (assoc (make-eval-opts ed cv status-label true) :run? true))]
+                            (assoc (make-eval-opts ed cv status-label true) :run? true :path @path-atom))]
       (when warning (cview/append! cv :system warning)))
     (let [text (editor/editor-text ed)
           problem (commands/pre-run-problem text)]
@@ -674,7 +701,7 @@
       (if problem
         (do (cview/append! cv :error (str problem "\n"))
             (set-status! status-label "Ready"))
-        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label true) :run? true))]
+        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label true) :run? true :path @path-atom))]
           (when warning (cview/append! cv :system warning)))))))
 
 (defn- do-stop! [ev*]
@@ -1379,7 +1406,7 @@
                           :snapshot-fn (fn [] (cview/input-snapshot cv))
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
         repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
-        run-fn (fn [] (do-run! ed cv ev* status-label))
+        run-fn (fn [] (do-run! ed cv ev* status-label path))
         stop-fn (fn [] (do-stop! ev*))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
@@ -1591,6 +1618,7 @@
         (show-selection! cv dialect-label @sel*)
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
+      (start-and-report! cv status-label @ev* @sel*)
       (add-watch path ::dialect
                  (fn [_ _ old new]
                    (when (not= old new)

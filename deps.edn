@@ -33,6 +33,10 @@
   ;; those two tokens to gtk-selftest/-main as args.
   :selftest-window {:extra-paths ["dev"]
                     :main-opts ["-m" "gtk-selftest-window"]}
+  ;; D2.T4: the nREPL window rows -- a real window whose project opts into
+  ;; {:runtime :nrepl}, so a real Jolt child runs behind it.
+  :selftest-nrepl {:extra-paths ["dev"]
+                   :main-opts ["-m" "gtk-selftest-nrepl"]}
   ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
   ;; one GIF) for the guide, driving jonquil.main/start! the same way
   ;; :selftest-window does.

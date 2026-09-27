@@ -121,3 +121,18 @@
 (deftest label-test
   (is (= "Jolt" (dialect/label {:profile dialect/jolt :runtime :in-process})))
   (is (= "Jolt (nREPL)" (dialect/label {:profile dialect/jolt :runtime :nrepl}))))
+
+(deftest nrepl-runtime-is-offered-test
+  (let [s (dialect/select dialect/profiles (proj #{"deps.edn"} "{:runtime :nrepl}") "/p/src/a.clj" nil)]
+    (is (= [:jolt :nrepl "/p" []] [(:id (:profile s)) (:runtime s) (:project-dir s) (:warnings s)])))
+  (is (= "Jolt (nREPL)" (dialect/label (dialect/select dialect/profiles (proj #{} "{:runtime :nrepl}") nil nil)))))
+
+(deftest selection-key-test
+  (let [k (fn [config dir path]
+            (dialect/selection-key
+             (dialect/select dialect/profiles (when config (assoc (proj #{"deps.edn"} config) :dir dir)) path nil)))]
+    (is (= [:jolt :in-process nil] (k nil nil "/tmp/a.clj")))
+    (is (= (k nil nil "/tmp/a.clj") (k "{}" "/p" "/p/a.clj")) "in-process ignores the project")
+    (is (= [:jolt :nrepl "/p"] (k "{:runtime :nrepl}" "/p" "/p/a.clj")))
+    (is (not= (k "{:runtime :nrepl}" "/p" "/p/a.clj") (k "{:runtime :nrepl}" "/q" "/q/a.clj"))
+        "another nREPL project needs its own child")))

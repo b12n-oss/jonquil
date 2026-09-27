@@ -58,7 +58,7 @@
    ;; The evaluator a project gets when .jonquil.edn names no :runtime, and
    ;; the runtimes it may name.
    :evaluator :in-process
-   :runtimes #{:in-process}})
+   :runtimes #{:in-process :nrepl}})
 
 (def profiles
   "Every known profile. Order matters only as the last resort in select."
@@ -174,6 +174,13 @@
      :project-dir (:dir project)
      :source source
      :warnings (into (into (vec warnings) w1) w2)}))
+
+(defn selection-key
+  "What makes two selections need different evaluators: the dialect, the
+  runtime, and for an out-of-process runtime the project it runs in. Equal
+  keys keep the window's evaluator when another file opens."
+  [{:keys [profile runtime project-dir]}]
+  [(:id profile) runtime (when (not= :in-process runtime) project-dir)])
 
 (defn label
   "The status bar's dialect text: the profile's name, plus the runtime when
