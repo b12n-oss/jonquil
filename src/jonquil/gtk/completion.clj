@@ -32,9 +32,15 @@
   same reason: a stale :state must never drive a swallowed key or a
   reopened popup once the widget itself is hidden.
 
-  ns-fn (opts, at construction) is called at every lookup, not captured
-  once -- the running program's namespace can change between Runs, same
-  reasoning as window.clj's own (:prompt-ns @(:state session)) call sites.
+  ns-fn (opts, at construction) is only the default :candidates-fn/:doc-fn
+  closures' own source of the running namespace, called at every lookup
+  by them, not captured once (same reasoning as window.clj's own
+  (ev/prompt-ns @ev*) call sites) -- render!/open!/refine! call
+  :candidates-fn/:doc-fn themselves (D1.T4), never docs/candidates or
+  docs/symbol-doc directly, so window.clj can route both through
+  jonquil.evaluator instead while ns-fn keeps its old meaning for any
+  caller that still passes it.
+
   close-others! (opts) is jonquil.gtk.window's own close-popovers-fn
   (P4.T3): open!'s own multi-candidate branch calls it right before
   showing, so opening completion closes quick doc/jump's popover the same
@@ -136,8 +142,10 @@
   :ed/:ns-fn/:close-others!/:on-error/:snapshot-fn/:apply-op!/:list-box/
   :doc-label/:state (an atom, the jonquil.help open-state map, extended
   with :text for render!'s own doc-preview lookup, or nil)."
-  [view {:keys [ed ns-fn close-others! on-error position snapshot-fn apply-op!]
+  [view {:keys [ed ns-fn candidates-fn doc-fn close-others! on-error position snapshot-fn apply-op!]
          :or {position :bottom
+              candidates-fn (fn [prefix text pos extra] (docs/candidates (ns-fn) prefix text pos extra))
+              doc-fn (fn [sym text pos] (docs/symbol-doc (ns-fn) sym text pos))
               snapshot-fn (fn [] (editor/snapshot ed))
               apply-op! (fn [result] (editor/apply-op! ed result))}}]
   (let [list-box (g/gtk-list-box-new)
@@ -154,6 +162,8 @@
     (assoc pp
            :ed ed
            :ns-fn ns-fn
+           :candidates-fn candidates-fn
+           :doc-fn doc-fn
            :close-others! close-others!
            :on-error on-error
            :snapshot-fn snapshot-fn
@@ -181,7 +191,7 @@
   child when the row is wider than the label's own natural size, which is
   every row here (list-box is LIST-WIDTH wide, a candidate name is not)."
   [c st]
-  (let [{:keys [list-box doc-label ns-fn]} c
+  (let [{:keys [list-box doc-label doc-fn]} c
         text (:text st)
         pos (get-in st [:prefix-info :start])
         sym (:symbol (help/selected st))]
@@ -193,7 +203,7 @@
         (g/gtk-list-box-append list-box row-label)))
     (g/gtk-list-box-select-row list-box (g/gtk-list-box-get-row-at-index list-box (:index st)))
     (g/gtk-label-set-text doc-label
-                          (help/doc-text sym (docs/symbol-doc (ns-fn) sym text pos)))))
+                          (help/doc-text sym (doc-fn sym text pos)))))
 
 (defn close!
   "Hides c's popover (idempotent, same as jonquil.gtk.popover/hide!) and
@@ -216,8 +226,8 @@
   second way to read \"the text this popup is showing candidates for\"."
   [c snapshot]
   (when-let [p (help/prefix-at snapshot)]
-    (let [cands (docs/candidates ((:ns-fn c)) (:prefix p) (:text snapshot) (:end p)
-                                 (:extra-context snapshot))
+    (let [cands ((:candidates-fn c) (:prefix p) (:text snapshot) (:end p)
+                                    (:extra-context snapshot))
           st (help/open-state p cands)]
       (cond
         (nil? st) nil
@@ -301,8 +311,8 @@
   (when (state c)
     (let [snap ((:snapshot-fn c))]
       (if-let [p (help/prefix-at snap)]
-        (let [cands (docs/candidates ((:ns-fn c)) (:prefix p) (:text snap) (:end p)
-                                     (:extra-context snap))
+        (let [cands ((:candidates-fn c) (:prefix p) (:text snap) (:end p)
+                                        (:extra-context snap))
               st2 (help/refine @(:state c) snap cands)]
           (if st2
             (let [st2 (assoc st2 :text (:text snap))]

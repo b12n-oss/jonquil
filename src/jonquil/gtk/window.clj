@@ -21,9 +21,11 @@
             [jolt.ffi :as ffi]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
+            [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.edit :as edit]
             [jonquil.eval :as eval]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
@@ -33,7 +35,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
-            [jonquil.session :as session]
+            [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
 
@@ -94,6 +96,37 @@
    (str (when (editor/dirty? ed) "* ")
         (if-let [p @path-atom] (file-name p) "Untitled")
         " - Jonquil")))
+
+;; --- dialect and evaluator (D1.T4) ------------------------------------------
+
+(defn- select-for
+  "jonquil.dialect/select for path (nil for an unsaved window), with the
+  settings file's :dialect as the fallback. Never throws: a failure while
+  reading the project becomes a warning on the fallback selection."
+  [path settings-path]
+  (try
+    (dialect/select dialect/profiles
+                    (dialect/find-project dialect/profiles path)
+                    path
+                    (:dialect (settings/load-settings settings-path)))
+    (catch :default e
+      (update (dialect/select dialect/profiles nil nil nil) :warnings conj
+              (str "couldn't read the project: " (ex-message e))))))
+
+(defn- show-selection!
+  "Puts sel's label in the status bar and each warning on the console.
+  GTK thread only (the label); cview/append! is safe from any thread."
+  [cv dialect-label sel]
+  (g/gtk-label-set-text dialect-label (dialect/label sel))
+  (doseq [w (:warnings sel)]
+    (cview/append! cv :system (str "; project: " w "\n"))))
+
+(defn- apply-selection!
+  "Makes sel the window's selection. sel-ctx is {:cv :dialect-label :sel*}.
+  D2.T5 adds the evaluator swap here."
+  [{:keys [cv dialect-label sel*]} sel]
+  (reset! sel* sel)
+  (show-selection! cv dialect-label sel))
 
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
@@ -498,8 +531,12 @@
   already pending (alert-pending?) no longer opens a second one -- it
   still suppresses the close (returns 1), same as any other dirty-and-
   unconfirmed attempt, so the user just sees the same already-open alert
-  again instead of a confusing second window."
-  [ed cv win app path-atom confirmed-close? suppress-close? closing? popovers]
+  again instead of a confusing second window.
+
+  D1.T4: ev* is stopped (ev/stop!, guarded) right before g_application_
+  quit, in the real-quit branch only -- never in the suppress-close?
+  self-test branch, which doesn't actually quit anything."
+  [ed cv win app path-atom confirmed-close? suppress-close? closing? popovers ev*]
   (fn [_win _data]
     (if (and (editor/dirty? ed) (not @confirmed-close?))
       (do (when-not @alert-pending?
@@ -525,6 +562,12 @@
             ;; why this branch specifically, never the suppress-close?
             ;; one above.
             (do (unparent-registered-popovers! popovers)
+                (try (ev/stop! @ev*)
+                     (catch :default e
+                       ;; The window is going away, so the console can't show
+                       ;; it; the process's real stderr can.
+                       (binding [*out* *err*]
+                         (println "jonquil: stopping the runtime failed:" (ex-message e)))))
                 (g/g-application-quit app)
                 0))))))
 
@@ -597,34 +640,32 @@
 
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).
-  eval/evaluating? is checked BEFORE run-definitions! and the banner (when
-  printed) goes first, in that order, so it's never possible for the
-  program's own output to land ahead of a banner that hasn't been
-  enqueued yet. When the engine is already busy, run-definitions! returns
-  its warning string instead of starting anything, and only that line is
-  appended -- no banner.
+  ev/evaluating? is checked BEFORE ev/eval! and the banner (when printed)
+  goes first, in that order, so it's never possible for the program's own
+  output to land ahead of a banner that hasn't been enqueued yet. When the
+  engine is already busy, ev/eval! returns its warning string instead of
+  starting anything, and only that line is appended -- no banner.
 
   P3.T5: commands/pre-run-problem runs against the editor's own text, but
   ONLY when the engine is idle. When it names a bracket problem, Run
-  never reaches session/run-definitions! at all -- nothing is evaluated,
-  even a form before the broken one, so an earlier form's own unresolved-
-  symbol error can never hide the bracket message (row pre-run-hidden-by-
-  error). The banner still prints before the problem is appended as
-  :error, and the status is set to Ready.
+  never reaches ev/eval! at all -- nothing is evaluated, even a form
+  before the broken one, so an earlier form's own unresolved-symbol error
+  can never hide the bracket message (row pre-run-hidden-by-error). The
+  banner still prints before the problem is appended as :error, and the
+  status is set to Ready.
 
   Fix round 1 (Important #2): a Run while one is ALREADY running must
-  stay exactly the P2 path -- eval/evaluating? is checked FIRST, before
+  stay exactly the P2 path -- ev/evaluating? is checked FIRST, before
   the bracket check ever runs, so a second Run never sets the status to
   Ready (the first program is still running) and never appends a bracket
-  :error into the middle of its output; only session/run-definitions!'s
-  own busy-refusal warning is appended, same as P2, with no banner (the
-  busy path never printed one) and no status change (eval/eval-async's
-  own busy branch returns its warning string without ever calling
-  on-status-change)."
-  [ed cv session status-label]
-  (if (eval/evaluating? (:ctx session))
-    (let [warning (session/run-definitions! session (editor/editor-text ed)
-                                            (make-eval-opts ed cv status-label true))]
+  :error into the middle of its output; only ev/eval!'s own busy-refusal
+  warning is appended, same as P2, with no banner (the busy path never
+  printed one) and no status change (eval/eval-async's own busy branch
+  returns its warning string without ever calling on-status-change)."
+  [ed cv ev* status-label]
+  (if (ev/evaluating? @ev*)
+    (let [warning (ev/eval! @ev* (editor/editor-text ed)
+                            (assoc (make-eval-opts ed cv status-label true) :run? true))]
       (when warning (cview/append! cv :system warning)))
     (let [text (editor/editor-text ed)
           problem (commands/pre-run-problem text)]
@@ -632,11 +673,11 @@
       (if problem
         (do (cview/append! cv :error (str problem "\n"))
             (set-status! status-label "Ready"))
-        (let [warning (session/run-definitions! session text (make-eval-opts ed cv status-label true))]
+        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label true) :run? true))]
           (when warning (cview/append! cv :system warning)))))))
 
-(defn- do-stop! [session]
-  (eval/stop-eval! (:ctx session))
+(defn- do-stop! [ev*]
+  (ev/interrupt! @ev*)
   nil)
 
 ;; --- REPL: the console's on-submit, and the history adapters ---------------
@@ -645,21 +686,20 @@
   "submit-repl! with the same opts run uses, minus the banner -- and the
   same warning-append bookkeeping, since submit-repl! can return the same
   busy warning run-definitions! can."
-  [ed cv session status-label text]
-  (let [warning (session/submit-repl! session text (make-eval-opts ed cv status-label false))]
+  [ed cv ev* status-label text]
+  (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label false) :run? false))]
     (when warning (cview/append! cv :system warning))))
 
 (defn- do-run-selection!
   "Cmd/Ctrl+E: commands/run-selection-text (P3.T1) on the editor's snapshot
   is nil for a blank line, else the selection or the caret's whole line.
   When non-nil, echoes \"> text\" to the console as if typed, then goes
-  through do-repl-eval! -- the SAME session path a typed REPL entry uses
-  (history via session/submit-repl!, the busy-refusal warning, the same
-  make-eval-opts)."
-  [ed cv session status-label]
+  through do-repl-eval! -- the SAME evaluator path a typed REPL entry uses
+  (history via ev/eval!, the busy-refusal warning, the same make-eval-opts)."
+  [ed cv ev* status-label]
   (when-let [text (commands/run-selection-text (editor/snapshot ed))]
     (cview/echo-entry! cv text)
-    (do-repl-eval! ed cv session status-label text)))
+    (do-repl-eval! ed cv ev* status-label text)))
 
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
@@ -723,23 +763,24 @@
 (defn- do-quick-doc!
   "Ctrl+Q/Shift+F1 (P4.T4), the ui's own :quick-doc!*: help/target on ed's
   current snapshot; none sets status \"No symbol at the caret.\"
-  Otherwise looks up docs/symbol-doc in the session's own prompt
-  namespace and shows help/doc-text in the quick-doc popover at the
-  caret. Wrapped in try/catch, since no lookup here may throw out of a
-  key handler, even though docs/symbol-doc already catches its own
-  exceptions -- help/doc-text and syntax/format-autocomplete-doc run
-  outside that catch, and this is the editor's own key dispatch calling
-  straight through, with nothing else between it and a throw.
+  Otherwise looks up ev/lookup (D1.T4; the window's evaluator, in the
+  running program's own prompt namespace) and shows help/doc-text in the
+  quick-doc popover at the caret. Wrapped in try/catch, since no lookup
+  here may throw out of a key handler, even though ev/lookup already
+  catches its own exceptions -- help/doc-text and syntax/format-
+  autocomplete-doc run outside that catch, and this is the editor's own
+  key dispatch calling straight through, with nothing else between it
+  and a throw.
 
   P4.T5: close-popovers-fn runs right before show-doc! -- so opening quick
   doc closes completion's popover too, through the SAME registry Escape
   already uses (P4.T3), never a pairwise special case against completion
   by name."
-  [ed session status-label help-pop close-popovers-fn]
+  [ed ev* status-label help-pop close-popovers-fn]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start]} (help/target snap)]
-        (let [doc (docs/symbol-doc (:prompt-ns @(:state session)) symbol (:text snap) start)]
+        (let [doc (ev/lookup @ev* symbol (:text snap) start)]
           (close-popovers-fn help-pop)
           (help-popover/show-doc! help-pop (help/doc-text symbol doc)))
         (set-status! status-label "No symbol at the caret.")))
@@ -748,7 +789,7 @@
 
 (defn- do-jump!
   "F12/Ctrl+B (P4.T4), the ui's own :jump!*: help/jump-target on ed's
-  current snapshot, using docs/symbol-doc as the doc-info external
+  current snapshot, using ev/lookup (D1.T4) as the doc-info external
   fallback. :buffer places the cursor at :offset and scrolls it into
   view, status \"Jumped to <sym>.\"; :external shows its own doc in the
   quick-doc popover (closing every OTHER open P4 popover first, same
@@ -759,11 +800,11 @@
   own \"No symbol at the caret.\" message instead of naming a nil symbol;
   no row exercises this edge, it's just the sane completion of the two
   named cases. Same try/catch reasoning as do-quick-doc!."
-  [ed session status-label help-pop close-popovers-fn]
+  [ed ev* status-label help-pop close-popovers-fn]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start]} (help/target snap)]
-        (let [doc (docs/symbol-doc (:prompt-ns @(:state session)) symbol (:text snap) start)
+        (let [doc (ev/lookup @ev* symbol (:text snap) start)
               target (help/jump-target snap doc)]
           (cond
             (= :buffer (:kind target))
@@ -857,13 +898,13 @@
 ;; --- REPL completion (P4.T6) --------------------------------------------
 
 (defn- repl-history-context
-  "The session's REPL history entries (jonquil.eval/create-history's own
+  "The evaluator's REPL history entries (jonquil.eval/create-history's own
   :items), joined by newlines -- P4.T6's own extra-context for docs/
-  candidates' 5-arity, read straight off (:history (:ctx session)), the
-  SAME atom history-prev-fn/history-next-fn (above) read and write, never a
-  parallel copy of it."
-  [session]
-  (str/join "\n" (:items @(:history (:ctx session)))))
+  candidates' 5-arity, read straight off (ev/history @ev*), the SAME atom
+  history-prev-fn/history-next-fn (above) read and write, never a parallel
+  copy of it."
+  [ev*]
+  (str/join "\n" (:items @(ev/history @ev*))))
 
 (defn- do-repl-complete!
   "Ctrl+Space in the console, the ui's own console-facing :complete!*:
@@ -872,10 +913,10 @@
   input-snapshot (caret before input-start) does nothing, same gate the
   console's own key dispatch already applies before ever calling this.
   Same try/catch reasoning as do-complete! above."
-  [cv session repl-completion status-label]
+  [cv ev* repl-completion status-label]
   (try
     (when-let [snap (cview/input-snapshot cv)]
-      (completion/open! repl-completion (assoc snap :extra-context (repl-history-context session))))
+      (completion/open! repl-completion (assoc snap :extra-context (repl-history-context ev*))))
     (catch :default e
       (set-status! status-label (str "; complete: " (ex-message e))))))
 
@@ -1016,18 +1057,18 @@
   call time -- by then activate! has reset! it to the real cv (P2.T7's only
   forward reference; every other closure below is built after its pieces
   already exist)."
-  [ed *cv session status-label]
+  [ed *cv ev* status-label]
   (fn [{:keys [action text]}]
     (case action
-      :eval (do-repl-eval! ed @*cv session status-label text)
-      :send-stdin (eval/push-stdin! (:ctx session) text)
-      :eof (eval/push-stdin-eof! (:ctx session)))))
+      :eval (do-repl-eval! ed @*cv ev* status-label text)
+      :send-stdin (ev/send-input! @ev* text)
+      :eof (ev/send-eof! @ev*))))
 
-(defn- history-prev-fn [session]
+(defn- history-prev-fn [ev*]
   (fn [current-text]
-    (let [ctx (:ctx session)
-          [new-hist text] (eval/history-prev @(:history ctx) current-text)]
-      (reset! (:history ctx) new-hist)
+    (let [h (ev/history @ev*)
+          [new-hist text] (eval/history-prev @h current-text)]
+      (reset! h new-hist)
       text)))
 
 (defn- history-next-fn
@@ -1041,13 +1082,13 @@
   untouched. jonquil.eval's own contract is unchanged -- this is purely the
   adapter's job of telling \"nothing to move to\" apart from \"moved to an
   empty draft\"."
-  [session]
+  [ev*]
   (fn []
-    (let [ctx (:ctx session)
-          hist @(:history ctx)]
+    (let [h (ev/history @ev*)
+          hist @h]
       (when (< (:index hist) (count (:items hist)))
         (let [[new-hist text] (eval/history-next hist)]
-          (reset! (:history ctx) new-hist)
+          (reset! h new-hist)
           text)))))
 
 ;; --- window-level keys: F5, Escape, a command chord plus R/O/S/W ----------
@@ -1205,8 +1246,7 @@
 ;; --- construction ------------------------------------------------------
 
 (defn- activate! [app {:keys [file on-ready settings-path]}]
-  (let [session (session/make-session)
-        ;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
+  (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
         ;; impossible path so a save can be forced to fail without ever
         ;; touching a real filesystem race. Defaults to the real settings
@@ -1221,6 +1261,15 @@
         ;; expression sees the OUTER scope, never itself), but the shadow
         ;; made that non-obvious to a reader.
         settings-path* (atom (or settings-path (settings/settings-path)))
+        ;; D1.T4: the window's dialect and runtime (jonquil.dialect/select),
+        ;; and its one evaluator. ev* is an atom because D2.T5 swaps it when
+        ;; a file from another runtime opens; every reader derefs it at
+        ;; call time. session stays the evaluator the window started with,
+        ;; for the ui map's :session.
+        sel* (atom (select-for file @settings-path*))
+        ev* (atom (ev/make @sel*))
+        session @ev*
+        evaluating-fn (fn [] (ev/evaluating? @ev*))
         path (atom file)
         discard-warned? (atom false)
         ed (editor/make-editor)
@@ -1228,18 +1277,21 @@
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
+        ;; D1.T4: the window's dialect (and runtime, when it isn't the
+        ;; dialect's default), between the status text and Ln/Col.
+        dialect-label (g/gtk-label-new (dialect/label @sel*))
         confirmed-close? (atom false)
         ;; P3.T5 self-test hooks only -- see close-request-fn's docstring.
         suppress-close? (atom false)
         closing? (atom false)
         *cv (atom nil)
-        cv (cview/make-console-view {:on-submit (make-on-submit ed *cv session status-label)
-                                     :history-prev (history-prev-fn session)
-                                     :history-next (history-next-fn session)
+        cv (cview/make-console-view {:on-submit (make-on-submit ed *cv ev* status-label)
+                                     :history-prev (history-prev-fn ev*)
+                                     :history-next (history-next-fn ev*)
                                      ;; I2: the console reads busy/waiting state
                                      ;; straight from the engine, never a mirror.
-                                     :evaluating? (fn [] (eval/evaluating? (:ctx session)))
-                                     :waiting? (fn [] (eval/waiting-for-input? (:ctx session)))})
+                                     :evaluating? evaluating-fn
+                                     :waiting? (fn [] (ev/waiting-for-input? @ev*))})
         _ (reset! *cv cv)
         provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
@@ -1267,8 +1319,8 @@
         ;; dispatch calls (set-quick-doc-fn!/set-jump-fn! below), since ed
         ;; itself is built before session/status-label/help-pop exist.
         help-pop (help-popover/make-help-popover (:view ed))
-        quick-doc-fn (fn [] (do-quick-doc! ed session status-label help-pop close-popovers-fn))
-        jump-fn (fn [] (do-jump! ed session status-label help-pop close-popovers-fn))
+        quick-doc-fn (fn [] (do-quick-doc! ed ev* status-label help-pop close-popovers-fn))
+        jump-fn (fn [] (do-jump! ed ev* status-label help-pop close-popovers-fn))
         ;; P4.T7: the rename popover, built once on ed's view and joined
         ;; to the SAME registry (Escape/teardown, same reasoning as
         ;; help-pop above -- though autohide ON means GTK's own modal
@@ -1292,11 +1344,13 @@
         ;; the same set-status! every other lookup here uses.
         ;; Shared by both completion instances below (P4.T6): the running
         ;; program's namespace, read fresh at every lookup either way.
-        completion-ns-fn (fn [] (:prompt-ns @(:state session)))
+        completion-ns-fn (fn [] (ev/prompt-ns @ev*))
         completion (completion/make-completion
                     (:view ed)
                     {:ed ed
                      :ns-fn completion-ns-fn
+                     :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+                     :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
                      :close-others! close-popovers-fn
                      :on-error (fn [msg] (set-status! status-label msg))})
         complete-fn (fn [] (do-complete! ed completion status-label))
@@ -1316,27 +1370,28 @@
                          ;; of it, so there's no editor for this instance
                          ;; to name.
                          {:ns-fn completion-ns-fn
+                          :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+                          :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
                           :close-others! close-popovers-fn
                           :on-error (fn [msg] (set-status! status-label msg))
                           :position :top
                           :snapshot-fn (fn [] (cview/input-snapshot cv))
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
-        repl-complete-fn (fn [] (do-repl-complete! cv session repl-completion status-label))
-        run-fn (fn [] (do-run! ed cv session status-label))
-        stop-fn (fn [] (do-stop! session))
+        repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
+        run-fn (fn [] (do-run! ed cv ev* status-label))
+        stop-fn (fn [] (do-stop! ev*))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))
         close-fn (fn [] (g/gtk-window-close win))
-        run-selection-fn (fn [] (do-run-selection! ed cv session status-label))
+        run-selection-fn (fn [] (do-run-selection! ed cv ev* status-label))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
         set-theme-fn (fn [k] (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
         cycle-theme-fn (fn [] (do-cycle-theme! ed cv fb provider zoom-px theme-name code-css
-                                               settings-path* status-label
-                                               (fn [] (eval/evaluating? (:ctx session)))))
+                                               settings-path* status-label evaluating-fn))
         open-find-fn (fn [] (find-bar/open! fb :find))
         open-replace-fn (fn [] (find-bar/open! fb :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe
@@ -1367,7 +1422,7 @@
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
                                      run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
-                                     (fn [] (eval/evaluating? (:ctx session)))
+                                     evaluating-fn
                                      win fb open-find-fn open-replace-fn cycle-theme-fn
                                      close-popovers-fn status-label)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
@@ -1406,6 +1461,7 @@
     (g/gtk-box-append vbox paned)
     (g/gtk-widget-set-hexpand status-label 1)
     (g/gtk-box-append status-box status-label)
+    (g/gtk-box-append status-box dialect-label)
     (g/gtk-box-append status-box line-col-label)
     (g/gtk-box-append vbox status-box)
     (g/gtk-window-set-child win vbox)
@@ -1433,9 +1489,9 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data reset-chk "toggled"
                              (callable (fn [btn _data]
-                                         (session/set-mode! session
-                                                            (if (zero? (g/gtk-check-button-get-active btn))
-                                                              :accumulate :reset)))
+                                         (ev/set-mode! @ev*
+                                                       (if (zero? (g/gtk-check-button-get-active btn))
+                                                         :accumulate :reset)))
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
@@ -1445,7 +1501,7 @@
     (g/gtk-widget-add-controller win keyctl)
     (g/g-signal-connect-data win "close-request"
                              (callable (close-request-fn ed cv win app path confirmed-close?
-                                                         suppress-close? closing? popovers)
+                                                         suppress-close? closing? popovers ev*)
                                        [:pointer :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
@@ -1526,12 +1582,29 @@
             (cview/append! cv :system
                            "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n")))
         (catch :default _ nil)))
+    ;; D1.T4: the starting selection's warnings, then re-selection whenever
+    ;; the file's path changes (Open, Save As). reset! on path runs on the
+    ;; GTK thread, so the watch does too; it never throws into GTK.
+    (let [sel-ctx {:cv cv :dialect-label dialect-label :sel* sel*}]
+      (show-selection! cv dialect-label @sel*)
+      (add-watch path ::dialect
+                 (fn [_ _ old new]
+                   (when (not= old new)
+                     (try (apply-selection! sel-ctx (select-for new @settings-path*))
+                          (catch :default e
+                            (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))))))
     (update-title! ed win path)
     (g/gtk-window-present win)
     (editor/focus! ed)
     (when on-ready
       (on-ready {:editor ed :console cv :session session :status-label status-label :window win
                  :line-col-label line-col-label
+                 ;; D1.T4: the window's evaluator and dialect selection, read
+                 ;; live at call time (D2.T5 swaps ev*), and the dialect
+                 ;; label itself.
+                 :evaluator* (fn [] @ev*)
+                 :selection* (fn [] @sel*)
+                 :dialect-label dialect-label
                  :find-bar fb
                  :run!* run-fn :stop!* stop-fn
                  :open-path! (fn [p]
@@ -1651,7 +1724,8 @@
   :settings-path defaults to (jonquil.settings/settings-path) -- every
   self-test/docs-shots/smoke harness must pass its own isolated path so it
   never touches the user's real settings file (TH.T5). ui is {:editor
-  :console :session :status-label :line-col-label :window :find-bar :run!*
+  :console :session :status-label :line-col-label :evaluator* :selection*
+  :dialect-label :window :find-bar :run!*
   :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
@@ -1664,12 +1738,15 @@
   :alert-dialog-count :alert-pending? :alert-release!
   :register-alert-choice-for-test! :complete-alert-for-test!}; the
   self-test rows call these functions directly, exactly as the buttons and
-  keys do. :find-bar is the jonquil.gtk.find-bar map (P3.T4); rows call
-  jonquil.gtk.find-bar's own functions on it. :cycle-theme!* is what
-  Cmd/Ctrl+Shift+M runs; :settings-path* reads back the window's own
-  settings path; :load-settings!* re-runs the startup load against any
-  path; :settings-path!* is self-test-only (row-theme-save-failure-
-  reported), repointing the window's own settings path. :close-popovers!*
+  keys do. :evaluator* (D1.T4) reads back the window's current evaluator
+  (ev*'s deref, never a second one); :selection* reads back the current
+  jonquil.dialect/select result; :dialect-label is the GtkLabel those two
+  keep in sync, shown in the status bar. :find-bar is the jonquil.gtk.find-bar
+  map (P3.T4); rows call jonquil.gtk.find-bar's own functions on it.
+  :cycle-theme!* is what Cmd/Ctrl+Shift+M runs; :settings-path* reads back
+  the window's own settings path; :load-settings!* re-runs the startup load
+  against any path; :settings-path!* is self-test-only (row-theme-save-
+  failure-reported), repointing the window's own settings path. :close-popovers!*
   is what the window's own Escape clause calls (P4.T3); :register-popover!*
   joins a jonquil.gtk.popover map to this window's registry so
   :close-popovers!* knows about it -- P4.T4-T7's completion/quick-doc/

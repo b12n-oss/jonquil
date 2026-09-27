@@ -16,11 +16,12 @@
   The rows themselves live in the gtk-selftest-window.* namespaces under
   dev/gtk_selftest_window/, one per feature area (support, run-repl, files,
   find-replace, close-prerun, window-keys, themes, popovers-quickdoc,
-  completion, rename-menus). This file keeps only row-fns (the ordered
-  list every row runs in -- the last row really closes the window, so
-  order matters), the driver, and -main."
+  completion, rename-menus, dialects). This file keeps only row-fns (the
+  ordered list every row runs in -- the last row really closes the window,
+  so order matters), the driver, and -main."
   (:require [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
+            [gtk-selftest-window.dialects :as dialects]
             [gtk-selftest-window.files :as files]
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
@@ -164,6 +165,11 @@
    rename-menus/row-menu-actions
    rename-menus/row-menu-actions-console-complete
    rename-menus/row-menu-action-throw-is-contained
+   dialects/row-dialect-label-default
+   dialects/row-evaluator-is-the-session
+   dialects/row-project-config-malformed-warns
+   dialects/row-project-config-unknown-runtime-warns
+   dialects/row-project-open-keeps-evaluator
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])
