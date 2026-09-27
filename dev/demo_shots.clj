@@ -21,30 +21,32 @@
   and every scene here still only ever builds one window for its one
   scene, never rebuilding.
 
-  Timing follows dev/gtk_selftest_window.clj's own pattern verbatim (later,
-  poll-until, since, idle?, out-end-offset are small copies of that file's
-  private helpers, not a refactor of it): every wait polls a condition
-  against a deadline, never a fixed sleep. On top of that, every capture
-  waits one more short settle (two 20ms ticks) after its text condition
-  passes, so the frame has actually repainted before cgevent reads it -- a
-  settle for painting, not a sleep for correctness.
+  Every scene is a go block (gtk-async/go-row) that steps top to bottom on
+  its own thread. Timing follows dev/gtk_selftest_window.clj's own pattern:
+  every wait parks in gtk-async/await-until, a condition checked against a
+  deadline, never a fixed sleep. since, idle? and out-end-offset are small
+  copies of that file's private helpers, not a refactor of it. On top of
+  that, every capture waits one more short settle (two 20ms ticks,
+  gtk-async/settle) after its text condition passes, so the frame has
+  actually repainted before cgevent reads it -- a settle for painting, not
+  a sleep for correctness.
 
   cgevent's screenshot/record-gif both block for real wall-clock time, so
-  both run from a `future`, never the GTK thread (the lock-caller rule in
-  global.md/AGENTS.md extends to any blocking subprocess call); each one
-  hands control back to the GTK thread via jonquil.gtk.callbacks/on-gui!
-  once the subprocess exits. No keystroke is ever synthesized -- console
-  input is inserted the same way dev/gtk_selftest_window.clj's stdin/REPL
-  rows do it, via gtk_text_buffer_insert_interactive_at_cursor +
-  handle-return!."
-  (:require [clojure.core.async :refer [<! go timeout]]
+  both run on their own thread (gtk-async/sh's a/thread), never the GTK
+  thread (the lock-caller rule in global.md/AGENTS.md extends to any
+  blocking subprocess call). A scene's GTK, editor and console actions run
+  through on-gtk, one main-loop iteration at a time, and the scene's own
+  thread parks there until each one's done. No keystroke is ever
+  synthesized -- console input is inserted the same way dev/gtk_selftest_
+  window.clj's stdin/REPL rows do it, via gtk_text_buffer_insert_
+  interactive_at_cursor + handle-return!."
+  (:require [clojure.core.async :as a :refer [<! go timeout]]
             [clojure.edn :as edn]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [gtk-async :as ga :refer [on-gtk await-until go-row]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
-            [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -82,23 +84,9 @@
 (defn- demo-path [name] (str demos-dir "/" name))
 (defn- image-path [id ext] (str images-dir "/" (clojure.core/name id) "." ext))
 
-;; --- copied from dev/gtk_selftest_window.clj (small helpers; see that
-;; file's own docstring for why each wait is a deadline-bound poll) --------
-
-(defn- later [ms f]
-  (g/g-timeout-add ms (cb/callable (fn [_data] (f) 0) [:pointer] :int) ffi/null))
-
-(defn- poll-until
-  "Polls (pred?) every interval-ms via g_timeout_add until it's truthy or
-  deadline-ms elapses, then calls (done final-pred-value). Never sleeps."
-  [deadline-ms interval-ms pred? done]
-  (let [t0 (System/currentTimeMillis)]
-    (letfn [(step []
-              (cond
-                (pred?) (done true)
-                (>= (- (System/currentTimeMillis) t0) deadline-ms) (done false)
-                :else (later interval-ms step)))]
-      (step))))
+;; --- copied from dev/gtk_selftest_window.clj (small state-reading
+;; helpers; see that file's own docstring for why each is a small copy,
+;; not a refactor of it) -----------------------------------------------
 
 (defn- console-text [ui] (g/buffer-text (:buf (:console ui))))
 (defn- idle? [ui] (not (eval/evaluating? (:ctx (:session ui)))))
@@ -124,256 +112,188 @@
   [buf offset]
   (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
 
-;; --- settle: wait a couple more repaint ticks after a text condition -----
+;; --- helpers beyond gtk-async's own: the close-prompt scene's alert-
+;; window lookup and the GIF recording, both off the GTK thread ----------
 
-(defn- settle!
-  "Waits n more 20ms GTK ticks (a settle for painting, never a sleep for
-  correctness -- the text condition already passed; this only gives the
-  buffer's own repaint/scroll a couple of ticks to actually land before a
-  screenshot reads the frame) then calls done."
-  [n done]
-  (if (<= n 0)
-    (done)
-    (later 20 (fn [] (settle! (dec n) done)))))
+(defn- windows
+  "`cgevent windows --pid <pid> --edn` on its own thread (ga/sh), parsed. A
+  failed or unparseable call reads as no windows, never an exception, so a
+  poller sees it as \"not there yet\"."
+  [pid]
+  (let [{:keys [out exit]} (ga/sh "cgevent" "windows" "--pid" (str pid) "--edn")]
+    (if (zero? exit)
+      (try (edn/read-string out) (catch Exception _ []))
+      [])))
 
-;; --- captures: cgevent from a future, never the GTK thread ----------------
-
-(defn- screenshot!
-  "Runs cgevent screenshot in a future and hands the result back to the GTK
-  thread via on-gui!."
-  [path pid done]
-  (future
-    (let [r (sh/sh "cgevent" "screenshot" path "--pid" (str pid))]
-      (cb/on-gui! (fn [] (done r))))))
-
-(defn- screenshot-by-id!
-  "Like screenshot!, but by --window-id instead of --pid -- for a window
-  that isn't this process's main one (the close-prompt scene's alert)."
-  [path window-id done]
-  (future
-    (let [r (sh/sh "cgevent" "screenshot" path "--window-id" (str window-id))]
-      (cb/on-gui! (fn [] (done r))))))
-
-(defn- cgevent-windows!
-  "Runs `cgevent windows --pid <pid> --edn` in a future and hands the
-  parsed vector back to the GTK thread via on-gui! -- the same blocking-
-  subprocess-never-on-the-GTK-thread discipline as screenshot!/
-  record-gif-async!. An unparseable or failed call reads as no windows,
-  never an exception, so a poller sees it as \"not there yet\"."
-  [pid done]
-  (future
-    (let [{:keys [out exit]} (sh/sh "cgevent" "windows" "--pid" (str pid) "--edn")]
-      (cb/on-gui! (fn [] (done (if (zero? exit)
-                                 (try (edn/read-string out) (catch Exception _ []))
-                                 [])))))))
-
-(defn- poll-windows!
-  "Like poll-until, but the predicate is checked against cgevent-windows!'s
-  own result instead of an in-process condition: polls every interval-ms,
-  up to deadline-ms, calling (done final-windows) once (pred? windows) is
-  truthy or the deadline elapses. Never blocks the GTK thread -- each
-  check is its own cgevent-windows! future."
-  [pid deadline-ms interval-ms pred? done]
+(defn- await-windows
+  "Like await-until, but the condition is (pred? (windows pid)), checked
+  every interval-ms up to deadline-ms. Returns the last windows read,
+  whether or not pred? passed. Never touches the GTK thread."
+  [pid deadline-ms interval-ms pred?]
   (let [t0 (System/currentTimeMillis)]
-    (letfn [(step []
-              (cgevent-windows!
-               pid
-               (fn [windows]
-                 (cond
-                   (pred? windows) (done windows)
-                   (>= (- (System/currentTimeMillis) t0) deadline-ms) (done windows)
-                   :else (later interval-ms step)))))]
-      (step))))
+    (loop []
+      (let [ws (windows pid)]
+        (if (or (pred? ws) (>= (- (System/currentTimeMillis) t0) deadline-ms))
+          ws
+          (do (<! (timeout interval-ms)) (recur)))))))
 
-(defonce ^:private gif-done? (atom false))
-(defonce ^:private gif-result (atom nil))
+(defn- screenshot-by-id
+  "Like ga/screenshot, but by --window-id instead of --pid, for a window
+  that isn't this process's main one (the close-prompt scene's alert)."
+  [path window-id]
+  (ga/sh "cgevent" "screenshot" path "--window-id" (str window-id)))
 
-(defn- record-gif-async!
-  "Starts cgevent record-gif in a future; polls @gif-done? to find out when
-  it's finished (a deadline-bound poll, same as everything else here) rather
-  than blocking anything on the GTK thread."
+(defn- record-gif
+  "Starts cgevent record-gif on its own thread (a/thread) and returns the
+  channel that delivers its result map once the recording ends, so a scene
+  can go on driving the window meanwhile and take the result later."
   [path pid duration-secs fps width]
-  (reset! gif-done? false)
-  (reset! gif-result nil)
-  (future
-    (let [r (sh/sh "cgevent" "record-gif" "--pid" (str pid) "--duration" (str duration-secs)
-                   "-o" path "--fps" (str fps) "--width" (str width))]
-      (reset! gif-result r)
-      (reset! gif-done? true))))
+  (a/thread (sh/sh "cgevent" "record-gif" "--pid" (str pid) "--duration" (str duration-secs)
+                   "-o" path "--fps" (str fps) "--width" (str width))))
 
 ;; --- scenes ----------------------------------------------------------------
-;; Each scene is (fn [ui next] ...): drives ui, records exactly one check!,
-;; screenshots docs/images/<scene>.png, then calls (next).
+;; Each scene is (fn [ui] ch): a go-row that drives ui, records exactly one
+;; check!, screenshots docs/images/<scene>.png, and returns a channel that
+;; delivers once it's done.
 
 (defn- scene-window
   "hello.clj Run to completion: a colourful definition-pane and a Run
   result underneath."
-  [ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "hello.clj")))
-    ((:run!* ui))
-    (poll-until 5000 20
-                (fn [] (and (idle? ui)
-                            (str/includes? (since ui mark) "Hello, Jonquil!")
-                            (str/includes? (since ui mark) "=> 3")))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :window "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :window (and ok (zero? exit))
-                                                    {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
-                                            (next)))))))))
+  [ui]
+  (go-row :window check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "hello.clj")))
+                         ((:run!* ui))
+                         m))
+          ok (await-until 5000 20 #(and (idle? ui)
+                                        (str/includes? (since ui mark) "Hello, Jonquil!")
+                                        (str/includes? (since ui mark) "=> 3")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :window "png") (own-pid))]
+      (on-gtk (check! :window (and ok (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-repl
   "hello.clj Run, then a REPL entry evaluated afterward, in the same
   window."
-  [ui next]
-  (let [mark1 (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "hello.clj")))
-    ((:run!* ui))
-    (poll-until 5000 20
-                (fn [] (and (idle? ui) (str/includes? (since ui mark1) "=> 3")))
-                (fn [run-ok?]
-                  (let [cv (:console ui)
-                        mark2 (out-end-offset ui)]
-                    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(* 6 7)" -1 1)
-                    (cview/handle-return! cv false)
-                    (poll-until 3000 20
-                                (fn [] (and (idle? ui) (str/includes? (since ui mark2) "=> 42")))
-                                (fn [repl-ok?]
-                                  (settle! 2
-                                           (fn []
-                                             (screenshot! (image-path :repl "png") (own-pid)
-                                                          (fn [{:keys [exit err]}]
-                                                            (check! :repl (and run-ok? repl-ok? (zero? exit))
-                                                                    {:console (since ui mark1) :screenshot-exit exit :screenshot-err err})
-                                                            (next))))))))))))
+  [ui]
+  (go-row :repl check!
+    (let [mark1 (on-gtk (let [m (out-end-offset ui)]
+                          (editor/set-text! (:editor ui) (slurp (demo-path "hello.clj")))
+                          ((:run!* ui))
+                          m))
+          run-ok? (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark1) "=> 3")))
+          mark2 (on-gtk (let [cv (:console ui)
+                              m (out-end-offset ui)]
+                          (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(* 6 7)" -1 1)
+                          (cview/handle-return! cv false)
+                          m))
+          repl-ok? (await-until 3000 20 #(and (idle? ui) (str/includes? (since ui mark2) "=> 42")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :repl "png") (own-pid))]
+      (on-gtk (check! :repl (and run-ok? repl-ok? (zero? exit))
+                      {:console (since ui mark1) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-stdin
   "greet.clj Run: the prompt waits on read-line, then the typed answer's
   result -- both visible in the same shot."
-  [ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "greet.clj")))
-    ((:run!* ui))
-    (poll-until 3000 20
-                (fn [] ((:waiting? (:console ui))))
-                (fn [waiting?]
-                  (let [cv (:console ui)]
-                    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "Ada" -1 1)
-                    (cview/handle-return! cv false)
-                    (poll-until 3000 20
-                                (fn [] (and (idle? ui) (str/includes? (since ui mark) "=> \"Hello, Ada!\"")))
-                                (fn [ok]
-                                  (settle! 2
-                                           (fn []
-                                             (screenshot! (image-path :stdin "png") (own-pid)
-                                                          (fn [{:keys [exit err]}]
-                                                            (check! :stdin (and waiting? ok (zero? exit))
-                                                                    {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
-                                                            (next))))))))))))
+  [ui]
+  (go-row :stdin check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "greet.clj")))
+                         ((:run!* ui))
+                         m))
+          waiting? (await-until 3000 20 #((:waiting? (:console ui))))
+          _ (on-gtk (let [cv (:console ui)]
+                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "Ada" -1 1)
+                      (cview/handle-return! cv false)))
+          ok (await-until 3000 20 #(and (idle? ui) (str/includes? (since ui mark) "=> \"Hello, Ada!\"")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :stdin "png") (own-pid))]
+      (on-gtk (check! :stdin (and waiting? ok (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-stop
   "forever.clj Run, a few prints, then Stop: \"; interrupted\" in the
-  console. Also records stop.gif over the same window of time -- the GIF
-  recording runs to completion (its own future, polled via gif-done?)
-  BEFORE the still screenshot, so the two cgevent subprocesses never touch
+  console. Also records stop.gif over the same window of time -- the
+  recording starts on its own thread (record-gif's a/thread) alongside the
+  rest of the scene, and its result is taken via a 10000 ms alts! right
+  before the still screenshot, so the two cgevent subprocesses never touch
   the same window at once."
-  [ui next]
-  (let [mark (out-end-offset ui)
-        pid (own-pid)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "forever.clj")))
-    (record-gif-async! (image-path :stop "gif") pid 5 6 640)
-    (later 400
-           (fn []
-             ((:run!* ui))
-             (poll-until 3000 20
-                         (fn [] (str/includes? (since ui mark) "2\n"))
-                         (fn [printed?]
-                           (later 400
-                                  (fn []
-                                    ((:stop!* ui))
-                                    (poll-until 3000 20
-                                                (fn [] (str/includes? (since ui mark) "; interrupted"))
-                                                (fn [stopped?]
-                                                  (poll-until 10000 100 (fn [] @gif-done?)
-                                                              (fn [gif-finished?]
-                                                                (settle! 2
-                                                                         (fn []
-                                                                           (screenshot! (image-path :stop "png") pid
-                                                                                        (fn [{:keys [exit err]}]
-                                                                                          (check! :stop
-                                                                                                  (and printed? stopped? gif-finished?
-                                                                                                       (zero? (:exit @gif-result)) (zero? exit))
-                                                                                                  {:console (since ui mark) :screenshot-exit exit
-                                                                                                   :screenshot-err err :gif-result @gif-result})
-                                                                                          (next)))))))))))))))))
+  [ui]
+  (go-row :stop check!
+    (let [pid (own-pid)
+          mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "forever.clj")))
+                         m))
+          gif (record-gif (image-path :stop "gif") pid 5 6 640)
+          _ (<! (timeout 400))
+          _ (on-gtk ((:run!* ui)))
+          printed? (await-until 3000 20 #(str/includes? (since ui mark) "2\n"))
+          _ (<! (timeout 400))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 3000 20 #(str/includes? (since ui mark) "; interrupted"))
+          [gif-result port] (a/alts! [gif (timeout 10000)])
+          gif-finished? (= port gif)
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :stop "png") pid)]
+      (on-gtk (check! :stop
+                      (and printed? stopped? gif-finished?
+                           (zero? (:exit gif-result)) (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit
+                       :screenshot-err err :gif-result gif-result})))))
 
 (defn- scene-unbalanced
   "unbalanced.clj Run: the friendly never-closed-bracket message."
-  [ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "unbalanced.clj")))
-    ((:run!* ui))
-    (poll-until 3000 20
-                (fn [] (and (idle? ui) (str/includes? (since ui mark) "is never closed.")))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :unbalanced "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :unbalanced (and ok (zero? exit))
-                                                    {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
-                                            (next)))))))))
+  [ui]
+  (go-row :unbalanced check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "unbalanced.clj")))
+                         ((:run!* ui))
+                         m))
+          ok (await-until 3000 20 #(and (idle? ui) (str/includes? (since ui mark) "is never closed.")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :unbalanced "png") (own-pid))]
+      (on-gtk (check! :unbalanced (and ok (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-unicode
   "unicode.clj Run: Hangul in the definition, Hangul and emoji in the
   output."
-  [ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "unicode.clj")))
-    ((:run!* ui))
-    (poll-until 3000 20
-                (fn [] (and (idle? ui)
-                            (str/includes? (since ui mark) "👋")
-                            (str/includes? (since ui mark) "🎉")))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :unicode "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :unicode (and ok (zero? exit))
-                                                    {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
-                                            (next)))))))))
+  [ui]
+  (go-row :unicode check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "unicode.clj")))
+                         ((:run!* ui))
+                         m))
+          ok (await-until 3000 20 #(and (idle? ui)
+                                        (str/includes? (since ui mark) "👋")
+                                        (str/includes? (since ui mark) "🎉")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :unicode "png") (own-pid))]
+      (on-gtk (check! :unicode (and ok (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-run-while-running
   "An infinite loop, Run again while it's running (the busy warning), then
   Stop -- leaves the engine idle before returning control, same discipline
   as dev/gtk_selftest_window.clj's rows."
-  [ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) "(loop [] (recur))")
-    ((:run!* ui))
-    (poll-until 2000 20
-                (fn [] (eval/evaluating? (:ctx (:session ui))))
-                (fn [started?]
-                  ((:run!* ui))
-                  (poll-until 2000 20
-                              (fn [] (str/includes? (since ui mark) "already in progress"))
-                              (fn [warned?]
-                                (settle! 2
-                                         (fn []
-                                           (screenshot! (image-path :run-while-running "png") (own-pid)
-                                                        (fn [{:keys [exit err]}]
-                                                          ((:stop!* ui))
-                                                          (poll-until 3000 20
-                                                                      (fn [] (str/includes? (since ui mark) "; interrupted"))
-                                                                      (fn [stopped?]
-                                                                        (check! :run-while-running
-                                                                                (and started? warned? stopped? (zero? exit))
-                                                                                {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
-                                                                        (next)))))))))))))
+  [ui]
+  (go-row :run-while-running check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(loop [] (recur))")
+                         ((:run!* ui))
+                         m))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          _ (on-gtk ((:run!* ui)))
+          warned? (await-until 2000 20 #(str/includes? (since ui mark) "already in progress"))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :run-while-running "png") (own-pid))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 3000 20 #(str/includes? (since ui mark) "; interrupted"))]
+      (on-gtk (check! :run-while-running
+                      (and started? warned? stopped? (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-find
   "P3.T7: find.clj open, find-bar/open! (the same fn Cmd+F calls), then a
@@ -383,22 +303,18 @@
   as a typed keystroke would. \"jonquil\" (case-insensitive,
   find-text-matches) matches three places in find.clj: every match gets
   the search-match tag (#fff2a8) applied before this screenshot."
-  [ui next]
-  (let [fb (:find-bar ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "find.clj")))
-    (find-bar/open! fb :find)
-    (g/gtk-editable-set-text (:query fb) "jonquil")
-    (poll-until 3000 20
-                (fn [] (>= (count @(:matches fb)) 2))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :find "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :find (and ok (zero? exit))
-                                                    {:match-count (count @(:matches fb))
-                                                     :screenshot-exit exit :screenshot-err err})
-                                            (next)))))))))
+  [ui]
+  (go-row :find check!
+    (let [fb (:find-bar ui)
+          _ (on-gtk (editor/set-text! (:editor ui) (slurp (demo-path "find.clj")))
+                    (find-bar/open! fb :find)
+                    (g/gtk-editable-set-text (:query fb) "jonquil"))
+          ok (await-until 3000 20 #(>= (count @(:matches fb)) 2))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :find "png") (own-pid))]
+      (on-gtk (check! :find (and ok (zero? exit))
+                      {:match-count (count @(:matches fb))
+                       :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-run-selection
   "P3.T7: run-selection.clj's last line, with the caret already there
@@ -408,22 +324,19 @@
   (do-run-selection!). It echoes \"> (* 6 7)\" to the console, then
   evaluates it through the same REPL path a typed entry uses, showing
   \"=> 42\" underneath."
-  [ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "run-selection.clj")))
-    ((:run-selection!* ui))
-    (poll-until 3000 20
-                (fn [] (and (idle? ui)
-                            (str/includes? (since ui mark) "(* 6 7)")
-                            (str/includes? (since ui mark) "=> 42")))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :run-selection "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :run-selection (and ok (zero? exit))
-                                                    {:console (since ui mark) :screenshot-exit exit :screenshot-err err})
-                                            (next)))))))))
+  [ui]
+  (go-row :run-selection check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "run-selection.clj")))
+                         ((:run-selection!* ui))
+                         m))
+          ok (await-until 3000 20 #(and (idle? ui)
+                                        (str/includes? (since ui mark) "(* 6 7)")
+                                        (str/includes? (since ui mark) "=> 42")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :run-selection "png") (own-pid))]
+      (on-gtk (check! :run-selection (and ok (zero? exit))
+                      {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-close-prompt
   "P3.T7: close-prompt.clj, dirtied by one inserted character (the same
@@ -447,48 +360,39 @@
   hand so a LATER close-request isn't silently suppressed by a stale
   \"already pending\" flag -- same cleanup that row performs. editor/
   mark-saved! then clears dirty? without writing anything to disk, purely
-  so the driver's own end-of-scene gtk_window_close (run-scene!'s `next`,
-  in -main) takes the plain not-dirty path and quits for real instead of
-  popping a second, never-to-be-resolved alert that would hang this
-  process forever.
+  so the driver's own end-of-scene gtk_window_close (in -main, once this
+  scene's channel delivers) takes the plain not-dirty path and quits for
+  real instead of popping a second, never-to-be-resolved alert that would
+  hang this process forever.
 
   If cgevent never lists a second window, this scene records a PASS with
   :skipped true and says why in its detail map (the brief: \"otherwise
   skip that scene and say so\") rather than guessing which window to
   shoot -- no docs/images/close-prompt.png is written in that case."
-  [ui next]
-  (let [pid (own-pid)
-        ed (:editor ui)]
-    (editor/set-text! ed (slurp (demo-path "close-prompt.clj")))
-    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1)
-    (poll-windows!
-     pid 3000 100 seq
-     (fn [before]
-       (let [before-ids (set (map :window-id before))]
-         ((:request-close!* ui))
-         (poll-windows!
-          pid 5000 100
-          (fn [ws] (some (fn [w] (not (before-ids (:window-id w)))) ws))
-          (fn [after]
-            (let [alert (some (fn [w] (when-not (before-ids (:window-id w)) w)) after)]
-              (if-not alert
-                (do (check! :close-prompt true
-                            {:skipped true
-                             :reason "cgevent windows never listed a second (alert) window for this pid"
-                             :before before :after after})
-                    (next))
-                (settle!
-                 2
-                 (fn []
-                   (screenshot-by-id!
-                    (image-path :close-prompt "png") (:window-id alert)
-                    (fn [{:keys [exit err]}]
-                      (check! :close-prompt (zero? exit)
-                              {:alert-window alert :screenshot-exit exit :screenshot-err err})
-                      ((:close-choice! ui) {:index 2})
-                      (reset! (:alert-pending? ui) false)
-                      (editor/mark-saved! ed)
-                      (next))))))))))))))
+  [ui]
+  (go-row :close-prompt check!
+    (let [pid (own-pid)
+          ed (:editor ui)
+          _ (on-gtk (editor/set-text! ed (slurp (demo-path "close-prompt.clj")))
+                    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) " " -1 1))
+          before (await-windows pid 3000 100 seq)
+          before-ids (set (map :window-id before))
+          _ (on-gtk ((:request-close!* ui)))
+          after (await-windows pid 5000 100
+                               (fn [ws] (some (fn [w] (not (before-ids (:window-id w)))) ws)))
+          alert (some (fn [w] (when-not (before-ids (:window-id w)) w)) after)]
+      (if-not alert
+        (check! :close-prompt true
+                {:skipped true
+                 :reason "cgevent windows never listed a second (alert) window for this pid"
+                 :before before :after after})
+        (let [_ (ga/settle 2)
+              {:keys [exit err]} (screenshot-by-id (image-path :close-prompt "png") (:window-id alert))]
+          (check! :close-prompt (zero? exit)
+                  {:alert-window alert :screenshot-exit exit :screenshot-err err})
+          (on-gtk ((:close-choice! ui) {:index 2})
+                  (reset! (:alert-pending? ui) false)
+                  (editor/mark-saved! ed)))))))
 
 (defn- scene-theme
   "TH.T6: theme-sample.clj (a comment, a string, a keyword, a number, a
@@ -503,29 +407,26 @@
   properties synchronously; GTK's own repaint is still queued, not
   immediate. id is the scene id (also docs/images/<id>.png's stem via
   image-path); k is the theme keyword passed to set-theme!*."
-  [id k ui next]
-  (let [mark (out-end-offset ui)]
-    (editor/set-text! (:editor ui) (slurp (demo-path "theme-sample.clj")))
-    ((:run!* ui))
-    (poll-until 5000 20
-                (fn [] (and (idle? ui)
-                            (str/includes? (since ui mark) "Hi, Jonquil")
-                            (str/includes? (since ui mark) ":greeting")))
-                (fn [ok]
-                  ((:set-theme!* ui) k)
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path id "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! id (and ok (zero? exit))
-                                                    {:console (since ui mark) :theme k
-                                                     :screenshot-exit exit :screenshot-err err})
-                                            (next)))))))))
+  [id k ui]
+  (go-row id check!
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) (slurp (demo-path "theme-sample.clj")))
+                         ((:run!* ui))
+                         m))
+          ok (await-until 5000 20 #(and (idle? ui)
+                                        (str/includes? (since ui mark) "Hi, Jonquil")
+                                        (str/includes? (since ui mark) ":greeting")))
+          _ (on-gtk ((:set-theme!* ui) k))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path id "png") (own-pid))]
+      (on-gtk (check! id (and ok (zero? exit))
+                      {:console (since ui mark) :theme k
+                       :screenshot-exit exit :screenshot-err err})))))
 
-(defn- scene-theme-light [ui next] (scene-theme :theme-light :light ui next))
-(defn- scene-theme-dark [ui next] (scene-theme :theme-dark :dark ui next))
-(defn- scene-theme-solarized [ui next] (scene-theme :theme-solarized :solarized ui next))
-(defn- scene-theme-navy [ui next] (scene-theme :theme-navy :navy ui next))
+(defn- scene-theme-light [ui] (scene-theme :theme-light :light ui))
+(defn- scene-theme-dark [ui] (scene-theme :theme-dark :dark ui))
+(defn- scene-theme-solarized [ui] (scene-theme :theme-solarized :solarized ui))
+(defn- scene-theme-navy [ui] (scene-theme :theme-navy :navy ui))
 
 (defn- scene-completion
   "P4.T8: \"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
@@ -536,42 +437,34 @@
   its preview\". set-text! already leaves the caret at the end of the
   buffer (this file's own editor/set-text! calls elsewhere never move it
   afterward either), so no place-cursor! call is needed here."
-  [ui next]
-  (let [ed (:editor ui) c (:completion ui)]
-    (editor/set-text! ed "(ma")
-    ((:complete!* ui))
-    (poll-until 3000 20
-                (fn [] (some? (completion/state c)))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :completion "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :completion (and ok (zero? exit))
-                                                    {:opened ok :screenshot-exit exit :screenshot-err err})
-                                            (completion/close! c)
-                                            (next)))))))))
+  [ui]
+  (go-row :completion check!
+    (let [ed (:editor ui) c (:completion ui)
+          _ (on-gtk (editor/set-text! ed "(ma")
+                    ((:complete!* ui)))
+          ok (await-until 3000 20 #(some? (completion/state c)))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :completion "png") (own-pid))]
+      (on-gtk (check! :completion (and ok (zero? exit))
+                      {:opened ok :screenshot-exit exit :screenshot-err err})
+              (completion/close! c)))))
 
 (defn- scene-quick-doc
   "P4.T8: \"(map inc [1])\", caret on \"map\" (offset 2, place-cursor!),
   :quick-doc!* -- the exact fn Ctrl+Q calls (do-quick-doc!). The popover
   opens over clojure.core/map's own arglists and doc."
-  [ui next]
-  (let [ed (:editor ui) hp (:help-popover ui)]
-    (editor/set-text! ed "(map inc [1])")
-    (place-cursor! (:buf ed) 2)
-    ((:quick-doc!* ui))
-    (poll-until 3000 20
-                (fn [] (popover/open? hp))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :quick-doc "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :quick-doc (and ok (zero? exit))
-                                                    {:opened ok :screenshot-exit exit :screenshot-err err})
-                                            (popover/hide! hp)
-                                            (next)))))))))
+  [ui]
+  (go-row :quick-doc check!
+    (let [ed (:editor ui) hp (:help-popover ui)
+          _ (on-gtk (editor/set-text! ed "(map inc [1])")
+                    (place-cursor! (:buf ed) 2)
+                    ((:quick-doc!* ui)))
+          ok (await-until 3000 20 #(popover/open? hp))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :quick-doc "png") (own-pid))]
+      (on-gtk (check! :quick-doc (and ok (zero? exit))
+                      {:opened ok :screenshot-exit exit :screenshot-err err})
+              (popover/hide! hp)))))
 
 (defn- scene-rename
   "P4.T8: \"(defn greet [n] n)\\n(greet 1)\", caret on the call's own
@@ -579,48 +472,40 @@
   binary_smoke.clj's own step-rename! measures against the built binary),
   :rename!* -- the exact fn Shift+F6/F2 calls (do-rename!). The rename
   popover opens with its entry prefilled with \"greet\" and selected."
-  [ui next]
-  (let [ed (:editor ui) rp (:rename-popover ui)]
-    (editor/set-text! ed "(defn greet [n] n)\n(greet 1)")
-    (place-cursor! (:buf ed) 22)
-    ((:rename!* ui))
-    (poll-until 3000 20
-                (fn [] (popover/open? rp))
-                (fn [ok]
-                  (settle! 2
-                           (fn []
-                             (screenshot! (image-path :rename "png") (own-pid)
-                                          (fn [{:keys [exit err]}]
-                                            (check! :rename (and ok (zero? exit))
-                                                    {:opened ok :screenshot-exit exit :screenshot-err err})
-                                            (popover/hide! rp)
-                                            (next)))))))))
+  [ui]
+  (go-row :rename check!
+    (let [ed (:editor ui) rp (:rename-popover ui)
+          _ (on-gtk (editor/set-text! ed "(defn greet [n] n)\n(greet 1)")
+                    (place-cursor! (:buf ed) 22)
+                    ((:rename!* ui)))
+          ok (await-until 3000 20 #(popover/open? rp))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :rename "png") (own-pid))]
+      (on-gtk (check! :rename (and ok (zero? exit))
+                      {:opened ok :screenshot-exit exit :screenshot-err err})
+              (popover/hide! rp)))))
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
-(def ^:private shim
-  "A callback-style scene (fn [ui next] ...) as a go-style one (fn [ui] ch)."
-  (partial ga/from-callback check!))
-
 (def ^:private scenes
-  [[:window (shim scene-window)]
-   [:repl (shim scene-repl)]
-   [:stdin (shim scene-stdin)]
-   [:stop (shim scene-stop)]
-   [:unbalanced (shim scene-unbalanced)]
-   [:unicode (shim scene-unicode)]
-   [:run-while-running (shim scene-run-while-running)]
-   [:find (shim scene-find)]
-   [:run-selection (shim scene-run-selection)]
-   [:close-prompt (shim scene-close-prompt)]
-   [:theme-light (shim scene-theme-light)]
-   [:theme-dark (shim scene-theme-dark)]
-   [:theme-solarized (shim scene-theme-solarized)]
-   [:theme-navy (shim scene-theme-navy)]
-   [:completion (shim scene-completion)]
-   [:quick-doc (shim scene-quick-doc)]
-   [:rename (shim scene-rename)]])
+  [[:window scene-window]
+   [:repl scene-repl]
+   [:stdin scene-stdin]
+   [:stop scene-stop]
+   [:unbalanced scene-unbalanced]
+   [:unicode scene-unicode]
+   [:run-while-running scene-run-while-running]
+   [:find scene-find]
+   [:run-selection scene-run-selection]
+   [:close-prompt scene-close-prompt]
+   [:theme-light scene-theme-light]
+   [:theme-dark scene-theme-dark]
+   [:theme-solarized scene-theme-solarized]
+   [:theme-navy scene-theme-navy]
+   [:completion scene-completion]
+   [:quick-doc scene-quick-doc]
+   [:rename scene-rename]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
