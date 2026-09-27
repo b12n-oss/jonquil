@@ -37,9 +37,11 @@
   input is inserted the same way dev/gtk_selftest_window.clj's stdin/REPL
   rows do it, via gtk_text_buffer_insert_interactive_at_cursor +
   handle-return!."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :refer [<! go timeout]]
+            [clojure.edn :as edn]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
+            [gtk-async :as ga :refer [on-gtk await-until go-row]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
             [jonquil.gtk.callbacks :as cb]
@@ -597,32 +599,45 @@
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
+(def ^:private shim
+  "A callback-style scene (fn [ui next] ...) as a go-style one (fn [ui] ch)."
+  (partial ga/from-callback check!))
+
 (def ^:private scenes
-  [[:window scene-window]
-   [:repl scene-repl]
-   [:stdin scene-stdin]
-   [:stop scene-stop]
-   [:unbalanced scene-unbalanced]
-   [:unicode scene-unicode]
-   [:run-while-running scene-run-while-running]
-   [:find scene-find]
-   [:run-selection scene-run-selection]
-   [:close-prompt scene-close-prompt]
-   [:theme-light scene-theme-light]
-   [:theme-dark scene-theme-dark]
-   [:theme-solarized scene-theme-solarized]
-   [:theme-navy scene-theme-navy]
-   [:completion scene-completion]
-   [:quick-doc scene-quick-doc]
-   [:rename scene-rename]])
+  [[:window (shim scene-window)]
+   [:repl (shim scene-repl)]
+   [:stdin (shim scene-stdin)]
+   [:stop (shim scene-stop)]
+   [:unbalanced (shim scene-unbalanced)]
+   [:unicode (shim scene-unicode)]
+   [:run-while-running (shim scene-run-while-running)]
+   [:find (shim scene-find)]
+   [:run-selection (shim scene-run-selection)]
+   [:close-prompt (shim scene-close-prompt)]
+   [:theme-light (shim scene-theme-light)]
+   [:theme-dark (shim scene-theme-dark)]
+   [:theme-solarized (shim scene-theme-solarized)]
+   [:theme-navy (shim scene-theme-navy)]
+   [:completion (shim scene-completion)]
+   [:quick-doc (shim scene-quick-doc)]
+   [:rename (shim scene-rename)]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
-(defn- run-scene! [ui scene-fn done]
-  (editor/set-text! (:editor ui) "")
-  (cview/clear-input! (:console ui))
-  (poll-until 2000 20 (fn [] (idle? ui))
-              (fn [_idle?] (scene-fn ui done))))
+(def ^:private PER-SCENE-MS
+  ;; scene-stop's deadlines add up to 16800 ms on its failing path, and its
+  ;; GIF records for 5 s alongside them; run-scene's idle wait adds 2000 ms.
+  60000)
+
+(defn- run-scene
+  "Resets the editor and the console's input, waits (up to 2000 ms) for the
+  engine to go idle, then runs scene and parks until its channel delivers."
+  [ui scene]
+  (go-row :scene-reset check!
+    (on-gtk (editor/set-text! (:editor ui) "")
+            (cview/clear-input! (:console ui)))
+    (await-until 2000 20 #(idle? ui))
+    (<! (scene ui))))
 
 (defn -main [& args]
   (let [scene-id (some-> (first args) keyword)
@@ -636,9 +651,8 @@
         (main/start!
          {:settings-path (fresh-settings-path)
           :on-ready (fn [ui]
-                      (later 300
-                             (fn []
-                               (run-scene! ui scene-fn
-                                           (fn []
-                                             (later 50 (fn [] (g/gtk-window-close (:window ui)))))))))})
+                      (go (<! (timeout 300))
+                          (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))] PER-SCENE-MS check!))
+                          (<! (timeout 50))
+                          (on-gtk (g/gtk-window-close (:window ui)))))})
         (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))

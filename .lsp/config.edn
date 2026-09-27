@@ -35,4 +35,8 @@
 ;; working fix lives in bb.edn's `lsp-filenames`, which passes format and
 ;; clean-ns an explicit comma-separated --filenames list (src, test, and
 ;; every real dev entry) that never includes dev/smoke/fixtures.
-{:cljfmt {:split-keypairs-over-multiple-lines? false}}
+{:cljfmt {:split-keypairs-over-multiple-lines? false
+          ;; gtk-async/go-row (dev/gtk_async.clj): a row's steps indent as a
+          ;; block body, two spaces in, instead of aligning under the macro's
+          ;; first argument (measured: the default wants the body 10 columns in).
+          :extra-indents {go-row [[:block 2]]}}}

@@ -5,7 +5,9 @@
   PASS/FAIL per row and a SUMMARY line, quits, and exits 0 or 1. Rows call
   the same functions the key handlers call; no keystroke is ever
   synthesized."
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :refer [<! go timeout]]
+            [clojure.string :as str]
+            [gtk-async :as ga :refer [on-gtk]]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.console-view :as cview]
@@ -529,31 +531,37 @@
              {:handled handled :text text})
       (next))))
 
+(defn- shim
+  "A callback-style row (fn [target] (fn [next] ...)) as a go-style one,
+  (fn [target] ch), via gtk-async/from-callback."
+  [row]
+  (ga/from-callback check (fn [target next] ((row target) next))))
+
 (def ^:private row-fns
-  [row-editor-colours
-   row-editor-undo-text-only
-   row-editor-smart-enter
-   row-editor-dirty
-   row-editor-emoji-offsets
-   row-editor-preedit-guard
-   row-editor-tick-skips-unchanged
-   row-on-gui-concurrent
-   row-edit-auto-pair
-   row-edit-wrap-selection
-   row-edit-type-over
-   row-edit-backspace-pair
-   row-edit-backspace-plain
-   row-edit-tab-selection
-   row-edit-shift-tab
-   row-edit-shift-tab-unindented
-   row-edit-toggle-comment
-   row-edit-toggle-comment-forward
-   row-edit-format-all
-   row-edit-format-selection
-   row-edit-format-selection-macos-cmd-option-f
-   row-edit-format-selection-macos-cmd-option-l
-   row-edit-redo-y
-   row-edit-preedit-yields])
+  [(shim row-editor-colours)
+   (shim row-editor-undo-text-only)
+   (shim row-editor-smart-enter)
+   (shim row-editor-dirty)
+   (shim row-editor-emoji-offsets)
+   (shim row-editor-preedit-guard)
+   (shim row-editor-tick-skips-unchanged)
+   (shim row-on-gui-concurrent)
+   (shim row-edit-auto-pair)
+   (shim row-edit-wrap-selection)
+   (shim row-edit-type-over)
+   (shim row-edit-backspace-pair)
+   (shim row-edit-backspace-plain)
+   (shim row-edit-tab-selection)
+   (shim row-edit-shift-tab)
+   (shim row-edit-shift-tab-unindented)
+   (shim row-edit-toggle-comment)
+   (shim row-edit-toggle-comment-forward)
+   (shim row-edit-format-all)
+   (shim row-edit-format-selection)
+   (shim row-edit-format-selection-macos-cmd-option-f)
+   (shim row-edit-format-selection-macos-cmd-option-l)
+   (shim row-edit-redo-y)
+   (shim row-edit-preedit-yields)])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
@@ -826,26 +834,34 @@
       (next))))
 
 (def ^:private console-row-fns
-  [row-console-readonly
-   row-console-readonly-delete
-   row-console-output-above-input
-   row-console-submit
-   row-console-style-after-submit
-   row-console-unbalanced-newline
-   row-console-flood
-   row-console-unicode
-   row-console-history-multiline-caret
-   row-console-preedit-guard
-   row-console-history])
+  [(shim row-console-readonly)
+   (shim row-console-readonly-delete)
+   (shim row-console-output-above-input)
+   (shim row-console-submit)
+   (shim row-console-style-after-submit)
+   (shim row-console-unbalanced-newline)
+   (shim row-console-flood)
+   (shim row-console-unicode)
+   (shim row-console-history-multiline-caret)
+   (shim row-console-preedit-guard)
+   (shim row-console-history)])
 
 ;; --- driver ------------------------------------------------------------
 
-(defn- run-rows! [app fns]
-  (if (empty? fns)
-    (let [passed (count (filter second @results)) total (count @results)]
-      (println (str "SUMMARY " passed " of " total " passed"))
-      (later 50 (fn [] (g/g-application-quit app))))
-    ((first fns) (fn [] (run-rows! app (rest fns))))))
+(def ^:private PER-ROW-MS
+  ;; row-console-flood's own deadline is 60000 ms; nothing else waits longer
+  ;; than row-on-gui-concurrent's 10000 ms. The whole run takes about 3 s.
+  90000)
+
+(defn- run-all
+  "Runs every row strictly in order (ga/run-rows), prints SUMMARY, then
+  quits the app on the GTK thread."
+  [app steps]
+  (go (<! (ga/run-rows steps PER-ROW-MS check))
+      (let [passed (count (filter second @results)) total (count @results)]
+        (println (str "SUMMARY " passed " of " total " passed")))
+      (<! (timeout 50))
+      (on-gtk (g/g-application-quit app))))
 
 (defn- activate [app _data]
   (let [win (g/gtk-application-window-new app)
@@ -863,8 +879,9 @@
     (editor/on-dirty-changed! ed (fn [dirty] (when dirty (swap! true-fire-count inc))))
     (g/gtk-window-present win)
     (editor/focus! ed)
-    (later 300 (fn [] (run-rows! app (into (mapv (fn [f] (f ed)) row-fns)
-                                           (mapv (fn [f] (f cv)) console-row-fns)))))))
+    (go (<! (timeout 300))
+        (<! (run-all app (into (mapv (fn [row] (fn [] (row ed))) row-fns)
+                               (mapv (fn [row] (fn [] (row cv))) console-row-fns)))))))
 
 (defn -main [& _]
   (let [app (g/gtk-application-new "net.b12n.jonquil.selftest" g/APPLICATION-DEFAULT-FLAGS)]
