@@ -13,6 +13,7 @@
     jonquil.edit
     jonquil.eval
     jonquil.console
+    jonquil.evaluator
     jonquil.session
     jonquil.commands
     jonquil.help

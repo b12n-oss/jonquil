@@ -22,6 +22,7 @@
     jonquil.commands-test
     jonquil.help-test
     jonquil.dialect-test
+    jonquil.evaluator-test
     jonquil.gtk.ffi-test])
 
 (defn -main [& args]
