@@ -50,9 +50,10 @@ instead of quietly drifting from what `UPSTREAM.md` claims.
 Two reader bugs blocked the console's `(read)` outright: `(read)` from
 stdin failed on Jolt through `LineNumberingPushbackReader`, filed as
 jolt-lang/jolt#1133 (merged in PR #1134) and #1137 (merged in PR #1138,
-2026-09-25). This project's pinned Jolt build (`main`, `c9808c39`) carries
-both, which is why the getting-started requirement names that exact commit
-rather than a tagged release.
+2026-09-25). This project's pinned Jolt, v0.8.13, carries both; the fixes
+landed well before that release, back when the getting-started
+requirement still named an exact `main` commit rather than a tagged
+version.
 
 One more is filed but not blocking: `clojure.pprint/pprint` ignores a bound
 `*out*` and writes to the process's real stdout instead, so Jonquil doesn't

@@ -9,19 +9,28 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 22 namespaces, and it's the fastest way to catch a namespace
-that doesn't compile before running anything slower. `bb test` runs the full
-unit suite (106 tests, 744 assertions today), or pass namespace names to run
-a subset for the TDD loop: `bb test jonquil.edit-test`. `bb verify` is the
-pre-commit gate: clj-kondo in report mode, then the full test suite, which
-must pass.
+currently loads 30 namespaces in under half a second, and it's the fastest
+way to catch a namespace that doesn't compile before running anything
+slower. `bb test` runs the full unit suite (136 tests, 924 assertions
+today, about 4.4 s) with nothing outside the process, or pass namespace
+names to run a subset for the TDD loop: `bb test jonquil.edit-test`.
+
+`bb test:nrepl` runs a second, separate suite (28 tests, 97 assertions,
+about 31 s): every test in it spawns a real Jolt child over
+`jonquil.nrepl.child` and talks to it over a socket, so it needs the
+jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
+`bb test` never touches a child process and stays that self-contained on
+purpose, which is why the live tests are a separate task rather than a
+tag inside the same suite. `bb verify` is the pre-commit gate: clj-kondo
+in report mode, then both suites, `bb test` followed by `bb test:nrepl`,
+both of which must pass; end to end it runs in about 37 s.
 
 ## Self-test and docs: two windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens two real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens three real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
@@ -29,9 +38,16 @@ The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest_window.clj`), with its rows split by feature area under
 `dev/gtk_selftest_window/`: `support`, `run_repl`, `files`, `find_replace`,
 `close_prerun`, `window_keys`, `themes`, `popovers_quickdoc`, `completion`,
-and `rename_menus`. Every row polls a condition against a deadline instead
-of sleeping, and every row resets the editor and console before returning
-control to the driver, so one row's leftover state can't leak into the next.
+`rename_menus`, and `dialects`. The third (`dev/gtk_selftest_nrepl.clj`)
+opens against a throwaway project whose `.jonquil.edn` asks for
+`{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
+cover starting, running, Stop, help, and closing over that live
+connection; it needs the jolt-lang/nrepl checkout the same way
+`bb test:nrepl` does, and records a single failing row rather than
+opening anything if that checkout isn't there. Every row polls a
+condition against a deadline instead of sleeping, and every row resets
+the editor and console before returning control to the driver, so one
+row's leftover state can't leak into the next.
 
 **`bb smoke:binary`** is the one harness that runs outside the GTK process
 under test. It builds `./jonquil` (skip the build with `--no-build`),
@@ -73,6 +89,12 @@ nor the smoke ever reads or writes `~/.config/jonquil/settings.edn`.
 - Never synthesize keystrokes with `cgevent type` against this app: GTK's
   macOS backend reads the key code cgevent sends, not the Unicode string it
   attaches, so typed text arrives mangled.
+- **An interrupted `bb test:nrepl` or `bb gtk:selftest` run can leave a
+  Jolt child behind.** Both kill their own children on every exit path in
+  the ordinary case, but a Ctrl-C or a killed process midway through can
+  still skip that cleanup. Run `pgrep -fl "nrepl-server 79"` afterward;
+  anything it finds is a leftover from the run you just interrupted, so
+  kill only those pids, never anything already there before you started.
 
 ## Quality: lint, format, and the git hooks
 

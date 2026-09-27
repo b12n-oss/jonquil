@@ -98,18 +98,18 @@ The console reads its busy/waiting state live from the engine (`:evaluating?`/`:
 
 ### `jonquil.session` and the O1 reset rule
 
-`jonquil.session` holds one window's evaluation state: the eval context, the current mode (`:reset` or `:accumulate`), the prompt namespace, and the set of namespaces created since the last reset. Run and the REPL both call through the same `evaluate!` path into `jonquil.eval/eval-async`, so the engine itself never distinguishes them.
+`jonquil.session`'s `InProcess` record holds one window's in-process evaluation state: the eval context, the current mode (`:reset` or `:accumulate`), the prompt namespace, and the set of namespaces created since the last reset. It's the original, and still the default, implementation of the `Evaluator` protocol described below. Run and the REPL both call through the same `evaluate!` path into `jonquil.eval/eval-async`, so the engine itself never distinguishes them.
 
-The O1 spec decision is that Run resets by default: in `:reset` mode, `run-definitions!` first removes every namespace that an earlier Run or REPL entry created, except loaded libraries and `user`, then recreates a fresh `user` and evaluates into it. Unchecking the toolbar's Reset on Run checkbox flips the session to `:accumulate`, and Run stops clearing first, building on whatever earlier evaluations already defined, the same way the REPL prompt always does.
+The O1 spec decision is that Run resets by default: in `:reset` mode, `run-definitions!` first removes every namespace that an earlier Run or REPL entry created, except loaded libraries and `user`, then recreates a fresh `user` and evaluates into it. Unchecking the toolbar's Reset on Run checkbox flips the session to `:accumulate`, and Run stops clearing first, building on whatever earlier evaluations already defined, the same way the REPL prompt always does. The out-of-process nREPL runtime applies the identical rule, just over the wire: its reset form removes the same namespaces on the child instead of on this process, so Reset on Run means the same thing whichever evaluator is running underneath it.
 
 ### Self-test harnesses
 
-Two `bb` tasks drive the real GTK front end headlessly, without a human at the keyboard:
+Three `bb` tasks drive the real GTK front end headlessly, without a human at the keyboard:
 
-- `bb gtk:selftest` opens two real GTK windows in turn and runs the P2 front-end self-test rows against them, exercising the same button/key handlers a person would use rather than calling internal functions directly.
+- `bb gtk:selftest` now opens three real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection.
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
-Both poll a condition against a deadline rather than sleeping, and both hand any blocking subprocess call (screenshots, GIF recording) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
+All three poll a condition against a deadline rather than sleeping, and all three hand any blocking subprocess call (screenshots, GIF recording, the nREPL window's own child) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
 
 ### Themes
 
@@ -134,6 +134,99 @@ The three popover namespaces share `jonquil.gtk.popover` as their base. Its most
 The editor's and the console's context menus (Shift+F10, or a right click) come from `gtk_text_view_set_extra_menu`, which appends to GTK's own Cut/Copy/Paste menu rather than replacing it. `install-context-menu!` builds a `GMenu` alongside a matching `GSimpleActionGroup`, inserted on the view under the `"p4"` action-group prefix, with one action per item wired to call the exact same function its keyboard chord calls. Every action's own `"activate"` callback runs inside `try`/`catch`: an uncaught throw from a `GSimpleAction` callback kills the process outright, so this is the one place every menu item, current and future, is guarded at once.
 
 The key-dispatch wrappers carry the same guarantee down at the keyboard level. `jonquil.gtk.editor/dispatch-key!` wraps `handle-key!` in `try`/`catch`, and `jonquil.gtk.window`'s window-level key handler wraps its own `cond` the same way: either throw is reported through the status bar rather than escaping into GTK's signal emission, and the key still counts as consumed (returns 1) instead of falling through into a second, unrelated action or killing the process.
+
+## Dialects and evaluators
+
+`jonquil.dialect` holds every dialect as plain data: a profile names its
+file extensions, the `jonquil.syntax` special-forms and builtins sets it
+paints and completes against, its project markers, and which runtime keys
+it offers. `profiles` lists every known one, just `jolt` today. `find-
+project` walks up from a file to the nearest directory holding
+`.jonquil.edn` or a marker, reading and parsing the config along the way
+without ever throwing: an unreadable or malformed file becomes a warning,
+not a crash. `select` turns a project, a path, and a settings default
+into one selection: the profile, the runtime, the project directory (for
+anything other than `:in-process`), where the choice came from, and any
+warnings the window should show. `selection-key` is what a window
+compares before deciding a new file needs a new evaluator: the dialect,
+the runtime, and, when the runtime isn't `:in-process`, the project
+directory too.
+
+`jonquil.evaluator`'s `Evaluator` protocol is the seam a window is built
+against: `start!`, `stop!`, `eval!`, `interrupt!`, completion and lookup,
+history and prompt namespace, all independent of whether the code
+underneath runs in this process or somewhere else. `jonquil.session`'s
+`InProcess` record, described above, is the original implementation and
+still the one every window starts with by default. The `make` multimethod
+dispatches on a selection's `:runtime`, so requiring a new
+implementation's namespace is what registers it; `jonquil.nrepl.
+evaluator` is the second one, and the only other one so far.
+
+### `jonquil.nrepl.*`: Jolt out of process
+
+Four namespaces make up the out-of-process runtime:
+
+- `jonquil.nrepl.child` launches `jolt nrepl-server` in the project
+  directory, scanning ports `7950`-`7999` for one that binds on both the
+  loopback and the wildcard address before trusting the child's own bind
+  as the real attempt (a bare TCP connect can't rule out something else
+  already listening there). Readiness comes from a log line the child
+  itself prints once it's listening, never from the connection alone.
+  Ending a child kills only the pid this namespace spawned, in order
+  (`SIGTERM`, then `SIGKILL` if it's still alive a second later), and
+  restores whatever `.nrepl-port` held before the child started, or
+  deletes the file if nothing did.
+- `jonquil.nrepl.client` holds one socket and one reader for the whole
+  life of a child. The reader decodes every reply and dispatches it by
+  `:id` to whichever caller is waiting on it, so an interrupt and the
+  eval it's meant to stop can share one connection without two readers
+  racing each other for the same bytes.
+- `jonquil.nrepl.bencode` is the wire format underneath that: pure
+  encode and decode, with a length cap and integer validation, so a
+  broken or hostile reply can't hang the process trying to read it.
+- `jonquil.nrepl.ops` translates between nREPL's own reply shapes and
+  Jonquil's: eval results, completion candidates, doc lookups, and the
+  reset form. That form removes every namespace the child has grown
+  since it started, except loaded libraries and `user`, then recreates
+  `user`, the same rule `jonquil.session`'s reset applies locally, just
+  run as code sent over the wire instead.
+
+`jonquil.nrepl.evaluator`'s `NRepl` record ties those three together
+behind the `Evaluator` protocol: `start!` spawns and connects lazily, and
+refuses to spawn at all once `stop!` has run; `eval!` sends a `load-file`
+for Run or an `eval` for the REPL prompt; `stop!` interrupts whatever's
+pending and, failing that within about a second, kills and restarts the
+child instead. `jonquil.runtime-registry` is a fourth, GTK-free namespace
+that every evaluator a window makes joins as soon as it's made, so
+`jonquil.main` can stop every one of them, and wait for any still mid-
+start to settle, before the process exits. No child outlives Jonquil just
+because the window that started it happened to close first.
+
+### The window's evaluator
+
+Each window keeps its evaluator behind one atom, `ev*`, made from
+`jonquil.dialect/select`'s first answer for whatever path the window
+opened with. An `add-watch` on the window's own path atom re-runs `select`
+every time Open or Save As changes it, and `apply-selection!` compares the
+new selection's `selection-key` against the old one: an equal key keeps
+the running evaluator (opening a second file from the same nREPL project,
+say), and a different one swaps it, interrupting and stopping the old
+evaluator off to the side while a new one joins the registry and starts.
+
+### Plug points for a second dialect
+
+Nothing here assumes Jolt by design, but a few seams still carry Jolt's
+own shape rather than a profile's. `child/start!`'s launch args, its port
+scan, and the log text it waits for are all Jolt-specific. The console
+strings inside `NRepl` spell out "Jolt" by hand rather than reading a
+profile's name. The baseline-namespaces eval `start-runtime!` runs, and
+the reset form's `loaded-libs` call, both fail the whole start outright
+if a future dialect happens to lack either, rather than degrading
+gracefully. And the offline help fallback always resolves against Jolt's
+own `user` namespace, whichever dialect actually asked. A jank profile
+would add a `:launcher` key for `make-nrepl` to read instead of assuming
+Jolt's own child, since jank's runtime is `:nrepl` too and shouldn't need
+a second `defmethod` for the same key.
 
 ## The eval engine
 

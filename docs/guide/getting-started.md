@@ -2,12 +2,12 @@
 
 ## Requirements
 
-- **[Jolt](https://github.com/jolt-lang/jolt)**, built from `main` at
-  `c9808c39` or later: v0.8.12 plus the reader fixes from
-  jolt-lang/jolt#1134 and #1138, which `(read)` from the console needs.
-  Building Jolt from source needs a threaded Chez Scheme 10.x on `PATH`;
-  if you don't already have one, Jolt's own `make` provisions Chez 10.4.1
-  for you, so there's usually nothing to install separately.
+- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.13 or later, which
+  already carries the reader fixes from jolt-lang/jolt#1134 and #1138
+  that `(read)` from the console needs. Building Jolt from source needs a
+  threaded Chez Scheme 10.x on `PATH`; if you don't already have one,
+  Jolt's own `make` provisions Chez 10.4.1 for you, so there's usually
+  nothing to install separately.
 - **GTK4 and pango**, installed via Homebrew: `brew install gtk4`, which
   pulls in `pango` and `glib` as dependencies. Jonquil loads GTK4 and pango
   from Homebrew at startup rather than linking against them.

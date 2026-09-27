@@ -103,6 +103,10 @@ Esc only does this while something is actually running. The rest of the
 time it's left alone, so it can still reach an IME composition or GTK's
 own handling of the key.
 
+An out-of-process runtime answers Stop the same way, with one twist: see
+"Dialects and runtimes" below for when it restarts the child instead of
+interrupting it.
+
 ## Reset on Run, versus accumulate
 
 The **Reset on Run** checkbox in the toolbar starts checked. While it's
@@ -363,6 +367,96 @@ the completion handler without trouble, but an actual key press on the
 keyboard still went to the system's input-source switch as long as that
 shortcut was turned on.
 
+## Dialects and runtimes
+
+Jonquil evaluates through a dialect profile: what a language's files look
+like, how they're painted, and which evaluator runs them. There's one
+profile so far, Jolt, but selection and the evaluator seam underneath it
+are both generic. The status bar's dialect label reads `Jolt` most of the
+time, or `Jolt (nREPL)` when this window's Jolt is running out of process
+rather than inside Jonquil itself.
+
+### Choosing a dialect
+
+Jonquil picks a dialect and a runtime for each window, in this order:
+
+1. `.jonquil.edn` in the project, if it names one.
+2. A single profile marker in the project (Jolt's is `deps.edn`).
+3. The open file's extension.
+4. The `:dialect` saved in `settings.edn`.
+5. Jolt, when none of the above decides.
+
+The project is the nearest directory, at or above the open file, holding
+`.jonquil.edn` or a profile marker. A loose file with nothing like that
+above it, or an unsaved window, has no project, so only the extension and
+the settings default are left to decide.
+
+### `.jonquil.edn`
+
+A `.jonquil.edn` at the project root pins the dialect and, for Jolt,
+chooses the runtime:
+
+```clojure
+{:dialect :jolt :runtime :nrepl}
+```
+
+Both keys default independently, so either can be left out. A file that
+isn't valid EDN, or that doesn't hold a map, never blocks Jonquil from
+opening anything: the console prints a line like `; project: .jonquil.edn
+isn't valid EDN, so it is ignored`, and selection falls through to the
+next rule as though the file weren't there at all.
+
+### Running Jolt out of process
+
+`{:runtime :nrepl}` moves your program out of Jonquil's own process.
+Jonquil starts a separate `jolt nrepl-server` in the project directory and
+talks to it over a socket instead of evaluating inline. That's the whole
+point: a program that segfaults, calls `System/exit`, or otherwise takes
+Jolt down with it takes down that child, not the window running it.
+
+At start, the console reports the child's pid, its port, and which
+project directory it's running in, then lists what this particular
+runtime can't do (three of those are below). Stop still interrupts a
+running evaluation first; if the child doesn't answer within about a
+second, Stop kills and restarts it instead, and says so, rather than
+leaving you to notice your definitions vanished for no visible reason.
+Reset on Run works the same way it does in-process, clearing earlier Run
+and REPL definitions before evaluating fresh, just by sending a reset form
+over the wire instead of removing namespaces locally.
+
+Opening a file from a different project switches the whole session: the
+old evaluator is interrupted and stopped off to the side, a new one
+starts for the new project, and the console says something like
+`Switched to Jolt (nREPL). The previous session is gone.` The same switch
+happens if the new file's project asks for a different runtime, or none
+at all.
+
+Three limits are worth knowing going in. There's no stdin: a program that
+calls `read-line` or `read` gets nil or an EOF straight away. Output
+appears only once an evaluation finishes rather than as it prints
+(jolt-lang/jolt#1153), so a program that prints once a second for ten
+seconds shows nothing for those ten seconds and then everything at once.
+And jump to definition can't leave the buffer, because the wire op it
+would need for that (`info`) isn't there yet, only `lookup`, which
+carries no file or line to jump to.
+
+### The jolt-lang/nrepl checkout
+
+Interrupt and lookup both need Jonquil to inject middleware from a
+jolt-lang/nrepl checkout when it starts the child, found at
+`$JONQUIL_JOLT_NREPL`, or `~/dev/jolt-lang/nrepl` when that variable isn't
+set. Without either one in place, the child runs a vanilla nREPL server
+with neither op, so Stop always falls back to killing and restarting it,
+even on a program that would otherwise have interrupted cleanly.
+
+### `.nrepl-port`
+
+While the child runs, `jolt nrepl-server` writes its port into the
+project's `.nrepl-port`, the file any nREPL-aware editor already looks
+for. Jonquil restores whatever was there before the child started, or
+deletes the file if nothing was, once the child stops, so a project that
+already used that file for something else gets it back exactly as it was.
+
 ## Keys
 
 | Key | Where | Does |
@@ -426,3 +520,13 @@ than being surprises you'd otherwise have to rediscover:
 - Typing in a very large Definitions pane can lag: repainting the whole
   buffer measured about 29ms at 200 lines, 144ms at 1,000 lines, and 3.4
   seconds at 20,000 lines. Most programs never get close to that size.
+- An unresolved symbol evaluates to an `Unbound` var rather than an error,
+  when Jonquil is running Jolt out of process.
+- A hard kill of Jonquil (a signal it can't catch, or a crash) leaves its
+  out-of-process Jolt child running. Ordinary Quit, Cmd/Ctrl+W, and
+  closing the window all stop the child first.
+- A wedged out-of-process child can hold a completion or quick-doc lookup
+  for up to 300 ms before Jonquil falls back to its own offline answer.
+- Stop against an unresponsive out-of-process child takes about 2.2
+  seconds: a second waiting for it to answer the interrupt, a second more
+  for it to exit once killed, and a little overhead either side.
