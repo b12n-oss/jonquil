@@ -166,6 +166,21 @@
                     stable?))
                 (fn [_] (done @prev)))))
 
+(defn await-stable-height
+  "Go-style wait-stable-height: parks until widget's natural height reads
+  the same on two consecutive checks 20ms apart, or deadline-ms passes, and
+  returns the last height read. See wait-stable-height for why a single
+  synchronous read isn't enough (probe 4)."
+  [widget deadline-ms]
+  (let [prev (atom ::none)]
+    (await-until deadline-ms 20
+                 (fn []
+                   (let [cur (g/natural-height widget)
+                         stable? (= cur @prev)]
+                     (reset! prev cur)
+                     stable?)))
+    @prev))
+
 ;; --- key constants used by more than one feature area ------------------
 
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.

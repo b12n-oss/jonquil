@@ -11,8 +11,7 @@
   and console, waits for the engine to go idle, then runs one row and parks
   until the row's channel delivers, so rows run strictly in order. A row
   that doesn't finish within PER-ROW-MS is recorded as a :row-timeout FAIL
-  and the run goes on. Callback-style rows (fn [ui next]) run through
-  gtk-async/from-callback (`shim` below) until their area is converted.
+  and the run goes on.
 
   The rows themselves live in the gtk-selftest-window.* namespaces under
   dev/gtk_selftest_window/, one per feature area (support, run-repl, files,
@@ -41,10 +40,6 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.main :as main]))
 
-(def ^:private shim
-  "A callback-style row (fn [ui next] ...) as a go-style row (fn [ui] ch)."
-  (partial ga/from-callback support/check))
-
 (def ^:private row-fns
   [run-repl/row-run-output
    run-repl/row-run-while-running
@@ -56,8 +51,8 @@
    run-repl/row-fast-repl-twice
    run-repl/row-busy-hint-once
    run-repl/row-console-history-down-empty
-   (shim window-keys/row-escape-yields-when-idle)
-   (shim window-keys/row-command-chord-capslock)
+   window-keys/row-escape-yields-when-idle
+   window-keys/row-command-chord-capslock
    close-prerun/row-repl-eof-no-editor-hint
    files/row-open-refuses-dirty
    files/row-open-invalid-utf8
@@ -70,10 +65,10 @@
    run-repl/row-run-selection-line
    run-repl/row-run-selection-sel
    run-repl/row-run-selection-blank
-   (shim window-keys/row-toggle-focus)
+   window-keys/row-toggle-focus
    run-repl/row-clear-console
-   (shim console-layout/row-console-wraps-long-lines)
-   (shim window-keys/row-zoom-in-out)
+   console-layout/row-console-wraps-long-lines
+   window-keys/row-zoom-in-out
    find-replace/row-find-highlights
    find-replace/row-find-next-wraps
    find-replace/row-find-prev
@@ -174,14 +169,14 @@
    rename-menus/row-menu-actions
    rename-menus/row-menu-actions-console-complete
    rename-menus/row-menu-action-throw-is-contained
-   (shim dialects/row-dialect-label-default)
-   (shim dialects/row-evaluator-is-the-session)
-   (shim dialects/row-project-config-malformed-warns)
-   (shim dialects/row-project-config-unknown-runtime-warns)
-   (shim dialects/row-project-open-keeps-evaluator)
-   (shim window-keys/row-cursor-listener-throw-others-still-run)
-   (shim window-keys/row-window-key-throw-contained)
-   (shim window-keys/row-command-chord-close)])
+   dialects/row-dialect-label-default
+   dialects/row-evaluator-is-the-session
+   dialects/row-project-config-malformed-warns
+   dialects/row-project-config-unknown-runtime-warns
+   dialects/row-project-open-keeps-evaluator
+   window-keys/row-cursor-listener-throw-others-still-run
+   window-keys/row-window-key-throw-contained
+   window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
 

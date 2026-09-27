@@ -3,6 +3,7 @@
   toggling, zoom, and the throw-containment + close-chord rows that
   exercise handle-window-key! directly."
   (:require [clojure.string :as str]
+            [gtk-async :refer [on-gtk await-until go-row]]
             [gtk-selftest-window.support :as support]
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]
@@ -17,23 +18,21 @@
   ordinary function call with a synthetic keyval/state, not a synthesized
   OS keystroke) -- once while idle (must yield: 0) and once while a
   program runs (must Stop it: 1, and the program must actually stop)."
-  [ui next]
-  (let [idle-result ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-    (editor/set-text! (:editor ui) "(loop [] (recur))")
-    ((:run!* ui))
-    (support/poll-until 2000 20
-                        (fn [] (eval/evaluating? (:ctx (:session ui))))
-                        (fn [started?]
-                          (let [mark (support/out-end-offset ui)
-                                running-result ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
-                            (support/poll-until 3000 20
-                                                (fn [] (str/includes? (support/since ui mark) "; interrupted"))
-                                                (fn [stopped?]
-                                                  (support/check :escape-yields-when-idle
-                                                                 (and (= 0 idle-result) started? (= 1 running-result) stopped?)
-                                                                 {:idle-result idle-result :started started?
-                                                                  :running-result running-result :stopped stopped?})
-                                                  (next))))))))
+  [ui]
+  (go-row :escape-yields-when-idle support/check
+    (let [idle-result (on-gtk (let [r ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                                (editor/set-text! (:editor ui) "(loop [] (recur))")
+                                ((:run!* ui))
+                                r))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          [mark running-result] (on-gtk (let [m (support/out-end-offset ui)
+                                              r ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                                          [m r]))
+          stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
+      (support/check :escape-yields-when-idle
+                     (and (= 0 idle-result) started? (= 1 running-result) stopped?)
+                     {:idle-result idle-result :started started?
+                      :running-result running-result :stopped stopped?}))))
 
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
 ;; Shift bit set in state -- window.clj's own copy is private.
@@ -47,58 +46,52 @@
   drives the exact key-controller fn with the Caps-Lock-shaped keyval:
   it must Save (not Save As, since Shift isn't set), and the file's
   content must actually update."
-  [ui next]
-  (let [ed (:editor ui)
-        tmp (str (System/getProperty "java.io.tmpdir")
-                 "/jonquil-selftest-capslock-" (System/currentTimeMillis) ".clj")]
-    (editor/set-text! ed "(+ 1 1)")
-    ((:save-to! ui) tmp)
-    (editor/set-text! ed "(+ 2 2)")
-    (let [handled ((:handle-window-key! ui) nil KEY-S-CAPS 0 g/CONTROL-MASK nil)
-          saved-content (slurp tmp)]
-      (support/check :command-chord-capslock
-                     (and (= 1 handled) (= "(+ 2 2)" saved-content))
-                     {:handled handled :saved-content saved-content})
-      (.delete (java.io.File. ^String tmp))
-      (next))))
+  [ui]
+  (go-row :command-chord-capslock support/check
+    (on-gtk (let [ed (:editor ui)
+                  tmp (str (System/getProperty "java.io.tmpdir")
+                           "/jonquil-selftest-capslock-" (System/currentTimeMillis) ".clj")]
+              (editor/set-text! ed "(+ 1 1)")
+              ((:save-to! ui) tmp)
+              (editor/set-text! ed "(+ 2 2)")
+              (let [handled ((:handle-window-key! ui) nil KEY-S-CAPS 0 g/CONTROL-MASK nil)
+                    saved-content (slurp tmp)]
+                (support/check :command-chord-capslock
+                               (and (= 1 handled) (= "(+ 2 2)" saved-content))
+                               {:handled handled :saved-content saved-content})
+                (.delete (java.io.File. ^String tmp)))))))
 
 (defn row-toggle-focus
   "Grabs editor focus first (a real function call, not a keystroke) so the
   row starts from a known state regardless of what an earlier row left
   focused, then toggles twice: console, then back to the editor."
-  [ui next]
-  (let [ed (:editor ui) cv (:console ui) win (:window ui)]
-    (editor/focus! ed)
-    ((:toggle-focus!* ui))
-    (let [after-first (g/gtk-root-get-focus win)]
-      ((:toggle-focus!* ui))
-      (let [after-second (g/gtk-root-get-focus win)]
-        (support/check :toggle-focus
-                       (and (= after-first (:view cv)) (= after-second (:view ed)))
-                       {:after-first after-first :after-second after-second
-                        :editor-view (:view ed) :console-view (:view cv)})
-        (next)))))
+  [ui]
+  (go-row :toggle-focus support/check
+    (on-gtk (let [ed (:editor ui) cv (:console ui) win (:window ui)]
+              (editor/focus! ed)
+              ((:toggle-focus!* ui))
+              (let [after-first (g/gtk-root-get-focus win)]
+                ((:toggle-focus!* ui))
+                (let [after-second (g/gtk-root-get-focus win)]
+                  (support/check :toggle-focus
+                                 (and (= after-first (:view cv)) (= after-second (:view ed)))
+                                 {:after-first after-first :after-second after-second
+                                  :editor-view (:view ed) :console-view (:view cv)})))))))
 
 (defn row-zoom-in-out
   "Zooms in, waits for the editor view's natural height to settle and grow
   past the baseline, then resets and waits for it to settle back to
   exactly the original -- each measurement via wait-stable-height, never
   a synchronous read on the same tick as the change."
-  [ui next]
-  (let [view (:view (:editor ui))]
-    (support/wait-stable-height
-     view 2000
-     (fn [h0]
-       ((:zoom!* ui) :in)
-       (support/wait-stable-height
-        view 2000
-        (fn [h1]
-          ((:zoom!* ui) :reset)
-          (support/wait-stable-height
-           view 2000
-           (fn [h2]
-             (support/check :zoom-in-out (and (> h1 h0) (= h2 h0)) {:h0 h0 :h1 h1 :h2 h2})
-             (next)))))))))
+  [ui]
+  (go-row :zoom-in-out support/check
+    (let [view (:view (:editor ui))
+          h0 (support/await-stable-height view 2000)
+          _ (on-gtk ((:zoom!* ui) :in))
+          h1 (support/await-stable-height view 2000)
+          _ (on-gtk ((:zoom!* ui) :reset))
+          h2 (support/await-stable-height view 2000)]
+      (support/check :zoom-in-out (and (> h1 h0) (= h2 h0)) {:h0 h0 :h1 h1 :h2 h2}))))
 
 (defn row-cursor-listener-throw-others-still-run
   "Registers two on-cursor-moved! listeners: the first throws once, the
@@ -108,22 +101,22 @@
   right before it. Each listener stays registered for the rest of the
   run; the first one only ever throws this once (guarded by its own
   atom), so later rows are unaffected."
-  [ui next]
-  (let [ed (:editor ui)
-        threw-once? (atom false)
-        ran-second? (atom false)]
-    (editor/set-text! ed "(+ 1 2)")
-    (editor/on-cursor-moved!
-     ed (fn [_lc]
-          (when-not @threw-once?
-            (reset! threw-once? true)
-            (throw (ex-info "forced cursor-listener failure" {})))))
-    (editor/on-cursor-moved! ed (fn [_lc] (reset! ran-second? true)))
-    (support/place-cursor! (:buf ed) 3)
-    (support/check :cursor-listener-throw-others-still-run
-                   (and @threw-once? @ran-second?)
-                   {:threw-once @threw-once? :ran-second @ran-second?})
-    (next)))
+  [ui]
+  (go-row :cursor-listener-throw-others-still-run support/check
+    (on-gtk (let [ed (:editor ui)
+                  threw-once? (atom false)
+                  ran-second? (atom false)]
+              (editor/set-text! ed "(+ 1 2)")
+              (editor/on-cursor-moved!
+               ed (fn [_lc]
+                    (when-not @threw-once?
+                      (reset! threw-once? true)
+                      (throw (ex-info "forced cursor-listener failure" {})))))
+              (editor/on-cursor-moved! ed (fn [_lc] (reset! ran-second? true)))
+              (support/place-cursor! (:buf ed) 3)
+              (support/check :cursor-listener-throw-others-still-run
+                             (and @threw-once? @ran-second?)
+                             {:threw-once @threw-once? :ran-second @ran-second?})))))
 
 (defn row-window-key-throw-contained
   "Forces jonquil.gtk.window/do-cycle-theme! to throw for one Cmd+Shift+M,
@@ -137,17 +130,14 @@
   process before this row can even record a result (no SUMMARY, non-zero
   exit). With the guard: the process survives, the key still counts as
   consumed (1), and the status bar shows the error."
-  [ui next]
-  (let [status (:status-label ui)
-        handled (with-redefs [window/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
-                  ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))]
-    (support/poll-until 1000 20
-                        (fn [] (str/includes? (g/label-text status) "forced window-key failure"))
-                        (fn [status-ok?]
-                          (support/check :window-key-throw-contained
-                                         (and (= 1 handled) status-ok?)
-                                         {:handled handled :status (g/label-text status)})
-                          (next)))))
+  [ui]
+  (go-row :window-key-throw-contained support/check
+    (let [handled (on-gtk (with-redefs [window/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
+                            ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil)))
+          status-ok? (await-until 1000 20 #(str/includes? (g/label-text (:status-label ui)) "forced window-key failure"))]
+      (on-gtk (support/check :window-key-throw-contained
+                             (and (= 1 handled) status-ok?)
+                             {:handled handled :status (g/label-text (:status-label ui))})))))
 
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
@@ -183,17 +173,17 @@
   that's still the gates' own stderr grep -- but this makes sure the
   exact call sequence actually happens inside a real bb gtk:selftest
   run."
-  [ui next]
-  (editor/set-text! (:editor ui) "(loop [] (recur))")
-  (support/place-cursor! (:buf (:editor ui)) 2)
-  ((:quick-doc!* ui))
-  ((:run!* ui))
-  (support/poll-until 2000 20
-                      (fn [] (eval/evaluating? (:ctx (:session ui))))
-                      (fn [started?]
-                        (let [popover-was-open? (popover/open? (:help-popover ui))
-                              handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
-                          (support/check :command-chord-close
-                                         (and started? (= 1 handled) popover-was-open?)
-                                         {:started started? :handled handled :popover-was-open popover-was-open?})
-                          (next)))))
+  [ui]
+  (go-row :command-chord-close support/check
+    (on-gtk (editor/set-text! (:editor ui) "(loop [] (recur))")
+            (support/place-cursor! (:buf (:editor ui)) 2)
+            ((:quick-doc!* ui))
+            ((:run!* ui)))
+    (let [started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))]
+      ;; The close chord ends the GTK main loop, so the check is recorded in
+      ;; the same on-gtk step: no on-gtk may follow this one.
+      (on-gtk (let [popover-was-open? (popover/open? (:help-popover ui))
+                    handled ((:handle-window-key! ui) nil KEY-W 0 g/CONTROL-MASK nil)]
+                (support/check :command-chord-close
+                               (and started? (= 1 handled) popover-was-open?)
+                               {:started started? :handled handled :popover-was-open popover-was-open?}))))))
