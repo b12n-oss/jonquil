@@ -57,6 +57,7 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 ```bash
 bb check                  # require every namespace, exit 0
 bb test                   # all test namespaces; exits 1 on any failure or error
+bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
 bb test jonquil.edit-test # one namespace (the TDD loop)
 bb gtk:selftest           # real-window self-tests (opens windows; don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene

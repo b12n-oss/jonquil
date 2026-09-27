@@ -27,8 +27,13 @@
     jonquil.nrepl.ops-test
     jonquil.gtk.ffi-test])
 
+(def live-namespaces
+  ;; Tests that spawn real Jolt nREPL children and need the jolt-lang/nrepl
+  ;; checkout. Run with `bb test:nrepl`, not `bb test`.
+  '[jonquil.nrepl.child-test])
+
 (defn -main [& args]
-  (let [nss (if (seq args) (mapv symbol args) test-namespaces)]
+  (let [nss (cond (= ["--live"] args) live-namespaces (seq args) (mapv symbol args) :else test-namespaces)]
     (apply require nss)
     (let [{:keys [test pass fail error]} (apply t/run-tests nss)]
       (println (str "\nSUMMARY: " test " tests, " (+ pass fail error)

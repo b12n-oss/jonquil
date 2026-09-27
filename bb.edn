@@ -146,6 +146,7 @@
      (hdr "Verify")
      (row "check" "require every project namespace headlessly, exit 0")
      (row "test" "run the unit suite; pass namespace names to run a subset")
+     (row "test:nrepl" "live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)")
      (row "verify" "lint (report) + test (must pass) — pre-commit gate")
      (hdr "Run and build")
      (row "app:run [file]" "launch Jonquil, optionally opening a file")
@@ -176,6 +177,8 @@
 
   test  {:doc "Run tests; pass namespace names to run a subset"
          :task (apply shell "jolt" "-M:test" *command-line-args*)}
+  test:nrepl {:doc "Live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)"
+              :task (shell "jolt" "-M:test" "--live")}
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
@@ -232,7 +235,8 @@
   verify
   {:doc "Pre-commit gate: lint (report) + test (must pass)"
    :task (do (shell {:continue true} "clj-kondo" "--lint" "src" "test" "dev")
-             (shell "jolt" "-M:test"))}
+             (shell "jolt" "-M:test")
+             (shell "jolt" "-M:test" "--live"))}
 
   ;; --- quality ----------------------------------------------------------
   lint

@@ -17,6 +17,8 @@
     jonquil.session
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
+    jonquil.nrepl.client
+    jonquil.nrepl.child
     jonquil.commands
     jonquil.help
     jonquil.gtk.ffi

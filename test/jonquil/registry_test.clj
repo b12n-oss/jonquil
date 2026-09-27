@@ -25,4 +25,6 @@
   (is (= (ns-names-under "src") (set check/namespaces))))
 
 (deftest every-test-namespace-is-run
-  (is (= (ns-names-under "test") (set test-runner/test-namespaces))))
+  (is (= (ns-names-under "test")
+         (into (set test-runner/test-namespaces)
+               test-runner/live-namespaces))))
