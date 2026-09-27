@@ -937,3 +937,30 @@
 ;; prefixed "p4.<name>" (gtkwidget.h:874-876, also fixed arity, but not
 ;; needed here since the direct GActionGroup call already covers it).
 (ffi/defcfn gtk-widget-insert-action-group "gtk_widget_insert_action_group" [:pointer :string :pointer] :void)
+
+;; --- fix wave item 3 (I5): the console TextView switches from
+;; GTK_WRAP_NONE to GTK_WRAP_WORD_CHAR (phase-review-report.md's own
+;; diagnosis) so a wide line never opens a horizontal scroll range for
+;; scroll-to-end!'s xalign 0.0 to shift right into.
+;;
+;; gtk_text_view_set_wrap_mode: gtktextview.h:340-341 (gtk4 4.22.4,
+;; installed headers, /opt/homebrew/Cellar/gtk4/4.22.4/include/gtk-4.0) --
+;; void gtk_text_view_set_wrap_mode (GtkTextView*, GtkWrapMode). Fixed
+;; arity.
+(ffi/defcfn gtk-text-view-set-wrap-mode "gtk_text_view_set_wrap_mode" [:pointer :int] :void)
+;; GtkWrapMode: gtkenums.h:577-583 (NONE=0, CHAR=1, WORD=2, WORD_CHAR=3) --
+;; a different enum from PangoWrapMode above, where PANGO-WRAP-WORD-CHAR is
+;; 2: reusing that constant here would silently select GTK_WRAP_WORD
+;; instead of GTK_WRAP_WORD_CHAR.
+(def GTK-WRAP-WORD-CHAR 3)
+
+;; gtk_scrollable_get_hadjustment: gtkscrollable.h:51 -- GtkAdjustment
+;; *gtk_scrollable_get_hadjustment (GtkScrollable*). GtkTextView implements
+;; GtkScrollable directly, so the view itself is a valid argument.
+;; gtk_adjustment_get_value: gtkadjustment.h:82 -- double
+;; gtk_adjustment_get_value (GtkAdjustment*). Both fixed arity. Added for
+;; the console-wraps-long-lines self-test row: with wrapping on, the
+;; view's horizontal adjustment value must stay 0 even after a line wider
+;; than the view is appended.
+(ffi/defcfn gtk-scrollable-get-hadjustment "gtk_scrollable_get_hadjustment" [:pointer] :pointer)
+(ffi/defcfn gtk-adjustment-get-value "gtk_adjustment_get_value" [:pointer] :double)

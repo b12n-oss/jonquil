@@ -21,6 +21,7 @@
   so order matters), the driver, and -main."
   (:require [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
+            [gtk-selftest-window.console-layout :as console-layout]
             [gtk-selftest-window.dialects :as dialects]
             [gtk-selftest-window.files :as files]
             [gtk-selftest-window.find-replace :as find-replace]
@@ -64,6 +65,7 @@
    run-repl/row-run-selection-blank
    window-keys/row-toggle-focus
    run-repl/row-clear-console
+   console-layout/row-console-wraps-long-lines
    window-keys/row-zoom-in-out
    find-replace/row-find-highlights
    find-replace/row-find-next-wraps

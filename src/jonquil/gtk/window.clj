@@ -588,6 +588,21 @@
   [status-label text]
   (on-gui! (fn [] (g/gtk-label-set-text status-label text))))
 
+;; I5 fix wave item 3, cosmetic half: the start report's project path is
+;; usually somewhere under the user's home directory, and printing it in
+;; full was one more way a line could run wide enough to wrap. Shortening
+;; it to a ~-relative form doesn't fix the wrap bug (the wrap-mode change
+;; above does that for every line, not just this one) but keeps this
+;; common case tidy.
+(defn- home-relative
+  "path with a leading $HOME replaced by ~, or path unchanged when it isn't
+  under $HOME (or $HOME can't be read)."
+  [path]
+  (let [home (System/getProperty "user.home")]
+    (if (and home (str/starts-with? path (str home "/")))
+      (str "~" (subs path (count home)))
+      path)))
+
 ;; D2.T4: moved here from directly after apply-selection! (its prescribed
 ;; spot) -- it calls set-status!, defined just above, and Jolt resolves an
 ;; unqualified symbol at compile time, not lazily; the brief's own
@@ -606,7 +621,7 @@
           (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
           (do (cview/append! cv :system
                              (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
-                                  ", port " (nrepl/child-port e) ") in " (:project-dir sel) ".\n"))
+                                  ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
               (doseq [l (ev/limitations e)]
                 (cview/append! cv :system (str "; Limit: " l "\n")))))
         (catch :default ex

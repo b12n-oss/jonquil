@@ -635,6 +635,13 @@
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
     (g/gtk-text-view-set-top-margin view 4)
+    ;; I5 (phase-review-report.md): GTK_WRAP_NONE let any line wider than
+    ;; the view open a horizontal scroll range, and scroll-to-end!'s xalign
+    ;; 0.0 then scrolled right past the "> " prompt on every drain, clipping
+    ;; every later line by its width. Word-char wrap removes the range
+    ;; outright, so xalign has nothing left to move. The editor stays
+    ;; unwrapped -- code editing expects that -- so this is console-only.
+    (g/gtk-text-view-set-wrap-mode view g/GTK-WRAP-WORD-CHAR)
     (g/gtk-scrolled-window-set-child scroll view)
     (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a "> " -1)))
     (g/with-iters* buf 0 2
