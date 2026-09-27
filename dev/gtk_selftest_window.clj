@@ -106,20 +106,20 @@
    close-prerun/row-close-save-failed
    close-prerun/row-close-alert-build-throws
    close-prerun/row-quit-action-prompts
-   (shim themes/row-theme-retints-tags)
-   (shim themes/row-theme-css)
-   (shim themes/row-theme-prefer-dark)
-   (shim themes/row-theme-keeps-text-and-undo)
-   (shim themes/row-theme-keeps-find-highlight)
-   (shim themes/row-theme-and-zoom-share-css)
-   (shim themes/row-theme-applies-to-new-text)
-   (shim themes/row-theme-cycle)
-   (shim themes/row-theme-chord)
-   (shim themes/row-theme-chord-needs-shift)
-   (shim themes/row-settings-isolated)
-   (shim themes/row-settings-unreadable-warns)
-   (shim themes/row-theme-save-failure-reported)
-   (shim themes/row-theme-switch-while-running)
+   themes/row-theme-retints-tags
+   themes/row-theme-css
+   themes/row-theme-prefer-dark
+   themes/row-theme-keeps-text-and-undo
+   themes/row-theme-keeps-find-highlight
+   themes/row-theme-and-zoom-share-css
+   themes/row-theme-applies-to-new-text
+   themes/row-theme-cycle
+   themes/row-theme-chord
+   themes/row-theme-chord-needs-shift
+   themes/row-settings-isolated
+   themes/row-settings-unreadable-warns
+   themes/row-theme-save-failure-reported
+   themes/row-theme-switch-while-running
    popovers-quickdoc/row-popover-at-caret
    popovers-quickdoc/row-popover-keys-stay-with-editor
    popovers-quickdoc/row-window-shift-f6-reaches-editor
