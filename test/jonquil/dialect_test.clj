@@ -89,9 +89,14 @@
   (testing ".jonquil.edn wins over markers"
     (let [s (dialect/select two (proj #{"deps.edn"} "{:dialect :other}") "/p/a.clj" nil)]
       (is (= [:other :config :nrepl] [(:id (:profile s)) (:source s) (:runtime s)]))))
-  (testing "one marker decides"
-    (let [s (dialect/select two (proj #{"other.edn"} nil) "/p/a.clj" :jolt)]
+  (testing "one marker decides, when its profile's own extension agrees (or there's no path at all)"
+    (let [s (dialect/select two (proj #{"other.edn"} nil) "/p/a.oth" :jolt)]
+      (is (= [:other :marker] [(:id (:profile s)) (:source s)])))
+    (let [s (dialect/select two (proj #{"other.edn"} nil) nil :jolt)]
       (is (= [:other :marker] [(:id (:profile s)) (:source s)]))))
+  (testing "I2: a single marker doesn't outrank another profile's own extension"
+    (let [s (dialect/select two (proj #{"other.edn"} nil) "/p/a.clj" :jolt)]
+      (is (= [:jolt :extension] [(:id (:profile s)) (:source s)]))))
   (testing "two markers: the extension breaks the tie"
     (let [s (dialect/select two (proj #{"deps.edn" "other.edn"} nil) "/p/a.oth" nil)]
       (is (= [:other :extension] [(:id (:profile s)) (:source s)]))))
@@ -174,6 +179,16 @@
   (testing "a loose .cljd file: cljd by extension, no project"
     (is (= [:cljd :extension nil] ((juxt (comp :id :profile) :source :project-dir)
                                    (dialect/select with-cljd nil "/tmp/x.cljd" nil)))))
+  (testing "I2: a pubspec-only project's single marker (cljd) doesn't outrank a Jolt-extensioned file"
+    (let [pubspec-only (proj #{"pubspec.yaml"} nil)]
+      (is (= [:jolt :extension] ((juxt (comp :id :profile) :source)
+                                 (dialect/select with-cljd pubspec-only "/p/tool/build.clj" nil))))
+      (is (= [:jolt :fallback] ((juxt (comp :id :profile) :source)
+                                (dialect/select with-cljd pubspec-only "/p/bb.edn" nil))))
+      (is (= [:cljd :marker] ((juxt (comp :id :profile) :source)
+                              (dialect/select with-cljd pubspec-only "/p/lib/x.cljd" nil))))
+      (is (= [:cljd :marker] ((juxt (comp :id :profile) :source)
+                              (dialect/select with-cljd pubspec-only nil nil))))))
   (testing ".jonquil.edn {:dialect :cljd} pins it for every file"
     (is (= [:cljd :config :attach] ((juxt (comp :id :profile) :source :runtime)
                                     (dialect/select with-cljd (proj #{"deps.edn" "pubspec.yaml"} "{:dialect :cljd}")

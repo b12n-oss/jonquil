@@ -191,12 +191,20 @@
              [])
         markers (:markers project #{})
         hits (filterv (fn [p] (some markers (:project-markers p))) profiles)
-        pool (if (seq hits) hits profiles)
         ext (extension path)
+        marker-decides? (and (= 1 (count hits))
+                             (let [only (first hits)]
+                               (or (nil? path) (contains? (:extensions only) ext))))
+        ;; A single marker whose profile doesn't claim path's extension isn't
+        ;; a real hit after all: the pool widens back to every profile, so
+        ;; extension, settings and fallback can look past it.
+        pool (cond (> (count hits) 1) hits
+                   marker-decides? hits
+                   :else profiles)
         by-ext (first (filter (fn [p] (contains? (:extensions p) ext)) pool))
         by-default (when default (some (fn [p] (when (= default (:id p)) p)) pool))
         [p source] (cond by-config [by-config :config]
-                         (= 1 (count hits)) [(first hits) :marker]
+                         marker-decides? [(first hits) :marker]
                          by-ext [by-ext :extension]
                          by-default [by-default :settings]
                          :else [(first pool) :fallback])
