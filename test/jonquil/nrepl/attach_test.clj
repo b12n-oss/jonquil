@@ -8,7 +8,8 @@
             [jonquil.cljd :as cljd]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
-            [jonquil.nrepl.attach :as attach]))
+            [jonquil.nrepl.attach :as attach]
+            [jonquil.nrepl.client :as client]))
 
 (def drive-text
   "(ns demo.drive\n  (:require [cljd.string :as str]))\n\n(defn where [] 1)\n\n(comment\n  (where))\n\n(defonce state (atom nil))\n")
@@ -261,3 +262,66 @@
         (is (= attach/busy-warning (ev/eval! e "1" {:run? false})))
         (is (ev/evaluating? e))
         (is (= :ok (:status (deref done 5000 :timeout))))))))
+
+(deftest stop-during-connect-test
+  ;; describe answers 400ms late (well inside make's 500ms describe
+  ;; timeout), so Stop lands mid-connect! while describe is still
+  ;; pending, at a point where the connect (a full-ops server) would
+  ;; otherwise succeed: op-set will carry eval and load-file, and clone
+  ;; would answer fine.
+  (with-app {:slow-ops {"describe" 400}}
+    (fn [srv dir _]
+      (let [e (make dir) seen (atom []) done (promise)
+            clone-count (fn [] (count (filter #{"clone"} (fake/ops-seen srv))))]
+        (attach/on-connection! e (fn [c] (swap! seen conj c)))
+        (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
+        (Thread/sleep 100)
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 2000 :timeout)))
+            "Stop during connect! (waiting on describe) ends the evaluation at once")
+        (is (not (attach/connected? e))
+            "the connection connect! was building was never published")
+        (is (= [] @seen) "never notified: nothing was ever published to notify about")
+        (let [clones-before (clone-count)]
+          (is (= :ok (:status (first (run e "(+ 1 2)" {:run? false})))) "the next Run reconnects for real")
+          (is (= (inc clones-before) (clone-count))
+              "a fresh clone: the interrupted attempt left no stale connection to reuse"))))))
+
+(deftest idle-stop-detaches-test
+  (with-app {}
+    (fn [srv dir _]
+      (let [e (make dir) seen (atom [])]
+        (attach/on-connection! e (fn [c] (swap! seen conj c)))
+        (is (= :ok (:status (first (run e "1" {:run? false})))) "establish a connection")
+        (is (attach/connected? e))
+        (ev/interrupt! e)
+        (is (not (attach/connected? e)) "an idle Stop on a still-connected session detaches too")
+        (is (= [true false] @seen))
+        (is (not-any? #{"interrupt" "close"} (fake/ops-seen srv)) "never interrupt, never close")))))
+
+(deftest stale-reply-ignored-test
+  ;; A message that arrives on a connection attach.clj has already moved
+  ;; away from (a detach racing an already-buffered reply) must not
+  ;; mutate the next session's :session-ns or reach a finished
+  ;; evaluation's console. request! is private; deref'd via its Var
+  ;; below to drive the race deterministically: the fake's :slow holds
+  ;; the reply back 300ms, giving a huge margin over the 60ms wait before
+  ;; the state is swapped out from under the in-flight call.
+  (with-app {:slow {"(slow-form)" 300} :prints {"(slow-form)" "leak\n"}}
+    (fn [srv dir _]
+      (let [conn (client/connect (:port srv))
+            sid (:new-session (first (client/request-sync conn {:op "clone"} 2000)))
+            e (make dir)
+            out (atom [])]
+        (reset! (:state e) {:running nil :conn conn :session sid :ops #{"eval" "load-file"}
+                            :session-ns "cljd.user" :fresh? false})
+        (let [fut (future (#'attach/request! e {:op "eval" :code "(slow-form)"}
+                                             (fn [k s] (swap! out conj [k s]))))]
+          (Thread/sleep 60)
+          (swap! (:state e) assoc :conn ::a-different-connection :session-ns "other.ns")
+          @fut
+          (is (= "other.ns" (:session-ns @(:state e)))
+              "the stale reply's :ns \"cljd.user\" never overwrote the newer session's namespace")
+          (is (not (some #{[:out "leak\n"]} @out))
+              "the stale reply's :out never reached this finished evaluation's console"))
+        (client/close! conn)))))

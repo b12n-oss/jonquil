@@ -120,3 +120,12 @@
     (is (= ["describe"] (fake/ops-seen srv)) "the request is still logged")
     (client/close! conn)
     (fake/stop! srv)))
+
+(deftest fake-slow-ops-test
+  (let [srv (fake/start! {:slow-ops {"describe" 200}})
+        conn (client/connect (:port srv))
+        start (System/currentTimeMillis)]
+    (is (= (set fake/fork-ops) (ops/op-names (client/request-sync conn {:op "describe"} 2000))))
+    (is (<= 200 (- (System/currentTimeMillis) start)) "describe's reply is delayed by :slow-ops's ms")
+    (client/close! conn)
+    (fake/stop! srv)))

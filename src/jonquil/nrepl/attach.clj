@@ -77,12 +77,20 @@
   (when-let [dir (:project-dir selection)]
     (io/file dir (:port-file (:profile selection)))))
 
+(defn- stop-requested? [{:keys [state]}]
+  (boolean (get-in @state [:running :stop-requested?])))
+
 (defn- connect!
   "The spec's connect rules, run only when there's no live connection. nil
   once connected, else the result to finish the evaluation with (a
   :notice: a missing or broken NREPL.lock, or a port that doesn't answer
   as ClojureDart ends the Run normally). Reads NREPL.lock and never writes
-  or deletes it."
+  or deletes it.
+
+  Checked after each blocking step (describe, clone): if Stop landed
+  while waiting, the local socket is closed and nothing is published into
+  state, so the connection this attempt was building is never mistaken
+  for a live one, never notified as connected, and never probed."
   [{:keys [state timings] :as ev} on-output]
   (when-not (connected? ev)
     (let [f (port-file ev)]
@@ -94,20 +102,23 @@
           (do
             (say! on-output :system (str (cljd/connecting-message port) "\n"))
             (if-let [conn (try (client/connect port) (catch Exception _ nil))]
-              (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))
-                    op-set (if (vector? d) (ops/op-names d) #{})
-                    sid (when (and (contains? op-set "eval") (contains? op-set "load-file"))
-                          (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
-                            (when (vector? c) (some :new-session c))))]
-                (if sid
-                  (do (swap! state assoc :conn conn :session sid :ops op-set
-                             :session-ns cljd/default-ns :fresh? true)
-                      (add-watch (:open? conn) ::connection
-                                 (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
-                      (notify! ev true)
-                      nil)
-                  (do (client/close! conn)
-                      {:status :notice :text (cljd/not-cljd-message port)})))
+              (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))]
+                (if (stop-requested? ev)
+                  (do (client/close! conn) {:status :interrupted})
+                  (let [op-set (if (vector? d) (ops/op-names d) #{})
+                        sid (when (and (contains? op-set "eval") (contains? op-set "load-file"))
+                              (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
+                                (when (vector? c) (some :new-session c))))]
+                    (cond
+                      (stop-requested? ev) (do (client/close! conn) {:status :interrupted})
+                      sid (do (swap! state assoc :conn conn :session sid :ops op-set
+                                     :session-ns cljd/default-ns :fresh? true)
+                              (add-watch (:open? conn) ::connection
+                                         (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
+                              (notify! ev true)
+                              nil)
+                      :else (do (client/close! conn)
+                                {:status :notice :text (cljd/not-cljd-message port)})))))
               {:status :notice :text (cljd/refused-message port)}))
           {:status :notice :text cljd/bad-port-file-message})))))
 
@@ -120,14 +131,22 @@
 
 ;; --- one evaluation ------------------------------------------------------------
 
-(defn- stop-requested? [{:keys [state]}]
-  (boolean (get-in @state [:running :stop-requested?])))
-
 (defn- request!
   "Sends msg on the live session and waits for its done reply, with no
   timeout. Streams :out and :err to on-output as they arrive, tracks the
   session's namespace from every :ns, and says once when it has waited
-  :still-waiting-ms. The replies. Never resends anything."
+  :still-waiting-ms. Returns every reply, in order. Never resends
+  anything.
+
+  Guards against a reply that arrives after this connection is no longer
+  the live one (a detach racing an already-buffered reply): conn is the
+  connection this request was actually sent on, captured once above, so
+  once state has moved past it a late :ns can't overwrite the next
+  session's tracked namespace and a late :out/:err can't reach a
+  finished evaluation's console. The reply is still recorded and still
+  ends the wait when it carries \"done\" (that's how a detach's own
+  synthetic disconnected reply unblocks this same call), only the two
+  side effects are skipped."
   [{:keys [state timings]} msg on-output]
   (let [{:keys [conn session]} @state
         acc (atom [])
@@ -135,9 +154,10 @@
     (client/request! conn (assoc msg :session session)
                      (fn [m]
                        (swap! acc conj m)
-                       (when-let [n (:ns m)] (swap! state assoc :session-ns n))
-                       (when-let [o (:out m)] (say! on-output :out o))
-                       (when-let [e (:err m)] (say! on-output :err e))
+                       (when (identical? conn (:conn @state))
+                         (when-let [n (:ns m)] (swap! state assoc :session-ns n))
+                         (when-let [o (:out m)] (say! on-output :out o))
+                         (when-let [e (:err m)] (say! on-output :err e)))
                        (when (client/done? m) (deliver done @acc))))
     (when (= ::waiting (deref done (:still-waiting-ms timings) ::waiting))
       (say! on-output :system (str cljd/still-waiting-message "\n")))
@@ -219,11 +239,19 @@
             nil))))
   (interrupt! [this]
     ;; Stop detaches. It never sends interrupt: the app keeps whatever it
-    ;; already has, and the next evaluation reconnects.
+    ;; already has, and the next evaluation reconnects. Spec §3 has no
+    ;; "while running" qualifier, so an idle Stop on a still-connected
+    ;; session detaches too -- there's no evaluation and so no on-output
+    ;; to print the notice through, and the window doesn't show
+    ;; on-connection! anywhere yet (that's P2.T4's job), so this closes
+    ;; the socket and lets the connection watch notify listeners, without
+    ;; printing anything.
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
-      (when-let [running (:running old)]
+      (if-let [running (:running old)]
         (when-not (:stop-requested? running)
           (say! (:on-output (:opts running)) :system (str cljd/detached-message "\n"))
+          (detach! this))
+        (when (:conn old)
           (detach! this))))
     nil)
   (evaluating? [_] (some? (:running @state)))

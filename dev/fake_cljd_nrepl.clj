@@ -121,6 +121,7 @@
 (defn- handle!
   [{:keys [opts sessions log counter] :as srv} sock reply m]
   (swap! log conj (dissoc m "id"))
+  (when-let [ms (get (:slow-ops opts) (get m "op"))] (Thread/sleep (long ms)))
   (case (get m "op")
     "describe" (reply {"ops" (zipmap (:ops opts fork-ops) (repeat {})) "status" ["done"]})
     "clone" (let [sid (str "fake-session-" (swap! counter inc))]
@@ -161,7 +162,10 @@
   :drop-on  marker: that form closes the connection without an answer
   :asleep-for n: a new session's first n eval or load-file requests answer
             nil without evaluating, as a REPL that isn't awake yet does
-  :mute?    read requests but never answer any"
+  :mute?    read requests but never answer any
+  :slow-ops {op-name ms}: that op (describe, clone, ...) answers after ms,
+            to test code that waits on describe or clone (a Stop pressed
+            while connect! is still waiting)"
   ([] (start! {}))
   ([opts]
    (let [ss (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))
