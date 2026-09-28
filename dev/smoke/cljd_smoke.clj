@@ -98,6 +98,10 @@
 (def ^:private app-dir (str (System/getProperty "user.home") "/dev-apps/a-sibling-cljd-app"))
 (def ^:private drive-file (str app-dir "/dev/demo/deck/drive.cljd"))
 (def ^:private nrepl-lock (str app-dir "/NREPL.lock"))
+;; window.clj's own title format for a clean buffer, "<filename> - Jonquil"
+;; (a dirty one gets a leading "* "); this script only ever opens drive-file,
+;; so this is the one exact string title-clean? trusts.
+(def ^:private clean-window-title "drive.cljd - Jonquil")
 (def ^:private min-fork-sha "199d173d")
 
 ;; TH.T5-style isolation (binary_smoke.clj's own smoke-xdg-config-home): one
@@ -265,11 +269,24 @@
     (throw (ex-info "jonquil did not open a window" {:pid pid :deadline-ms deadline-ms}))))
 
 (defn- title-clean?
-  "True once this pid's window title no longer carries the \"* \" dirty
-  marker (editor.clj: dirty? is a live compare against the last-saved
-  text, so a full undo clears this on its own -- see the ns docstring)."
+  "True only when this pid's window title is EXACTLY clean-window-title,
+  \"drive.cljd - Jonquil\" -- not just \"doesn't start with a dirty
+  marker\". An empty or missing title (windows-edn! transiently returning
+  no window, or one with a blank :name) is UNKNOWN, not clean, and this
+  returns false for it same as a genuinely dirty title: a caller polling
+  this in a loop just tries again.
+
+  Fix round: the old version only checked `(not (str/starts-with? name
+  \"*\"))`, which a blank/missing name satisfies vacuously. A live run
+  this session recorded :help-completion-undo-clean's own :title as \"\"
+  (empty, not the real window name) -- a transient windows-edn! read that
+  the old check accepted as \"clean\", stopping step-help!'s own undo
+  loop one Cmd+Z short of a genuinely restored buffer. That leftover-
+  dirty buffer then triggered Jonquil's own real close-confirmation alert
+  in step-close!, which this script never answers -- root-caused with a
+  screenshot + a `sample` stack in the same report, not guessed."
   [pid]
-  (let [w (window-for pid)] (and w (not (str/starts-with? (or (:name w) "") "*")))))
+  (= clean-window-title (:name (window-for pid))))
 
 ;; --- cljd-specific helpers ---------------------------------------------------
 
@@ -662,56 +679,65 @@
   "Step 9. 15s, not binary_smoke.clj's usual 5s/8s bound for a plain Cmd+W
   exit: measured live this session, this window (a longer session, one
   real attach/detach/reattach cycle and several evals behind it by now)
-  took longer than 8s to exit on a CLEAN buffer (run-form-undo-clean and
-  help-completion-undo-clean both PASSing beforehand, ruling out the
-  unsaved-changes alert as the cause) -- 15s is generous headroom over
-  that, not a tight fit to it. If the buffer is dirty at this point
-  regardless (a future regression, or this bound still not being enough),
-  the fallback stays the safe one either way: force-kill this pid
-  (destroy-tree, never a keystroke that could hit the close alert's own
-  default \"Save\" button) and report :close-exits FAIL -- never a save.
+  took longer than 8s to exit on a CLEAN buffer -- 15s is generous
+  headroom over that, not a tight fit to it.
 
-  Coordinator-requested diagnostics (this run): a screenshot + OCR of THIS
-  pid's own window right before Cmd+W (close-before.png -- what has focus:
-  the find bar, a popover, completion, or the console), split into a 3s
-  checkpoint (capture-close-stuck-diagnostics!, only if still running) and
-  the remaining 12s of the same 15s total bound, with the elapsed time from
-  the Cmd+W keystroke to the real exit (or the force-kill) printed either
-  way, so a slow EXIT reads differently from this tool's own deref waiting
-  on something else."
+  Coordinator's own follow-up ruling, after root-causing a live
+  close-exits FAIL down to a leftover-dirty buffer (a screenshot showed
+  Jonquil's own real \"Save changes?\" alert; title-clean?'s old, loose
+  check had let an undo loop stop one Cmd+Z short of actually clean; full
+  chain in the report): NEVER send Cmd+W at all unless the title already
+  reads EXACTLY clean-window-title, polled for up to ~2s first. If it
+  doesn't, this FAILs :close-exits with reason \"buffer dirty before
+  close\" and force-kills this pid directly -- no Cmd+W, so Jonquil's own
+  alert never has a chance to open, and there is no keystroke anywhere
+  near its default \"Save\" button to get wrong. Only once the pre-check
+  passes does Cmd+W go out, still followed by the same diagnostics (a
+  screenshot + OCR right before it; at a 3s checkpoint if still running,
+  a full-screen screencapture, a `sample`, ps and .isAlive, all counted
+  against the same 15s total bound) and the same safe force-kill fallback
+  as before, in case something ELSE (not a leftover-dirty buffer) is slow
+  to close."
   [pid proc pre-git]
   (screenshot! pid "close-before")
   (println "[cljd-smoke] close: OCR just before Cmd+W:")
   (println (ocr-text! pid))
-  (cg-key! pid "command + w")
-  (let [t0 (System/currentTimeMillis)
-        first-wait (deref proc 3000 ::timeout)]
-    (if (not= ::timeout first-wait)
-      (let [elapsed (- (System/currentTimeMillis) t0)]
-        (println (str "[cljd-smoke] close: exited within 3s, elapsed=" elapsed "ms"))
-        (check! :close-exits (zero? (:exit first-wait)) {:exit (:exit first-wait) :elapsed-ms elapsed})
-        (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
-      (do
-        (capture-close-stuck-diagnostics! pid proc)
-        (let [;; capture-close-stuck-diagnostics! itself takes several real
-              ;; seconds (`sample` alone runs for 3s), so the remaining wait
-              ;; is whatever's left of the 15s TOTAL bound from t0, not a
-              ;; flat 12s on top of it -- otherwise the real bound quietly
-              ;; grows past 15s by however long the diagnostics took.
-              remaining-ms (max 1000 (- 15000 (- (System/currentTimeMillis) t0)))
-              second-wait (deref proc remaining-ms ::timeout)
-              elapsed (- (System/currentTimeMillis) t0)]
-          (if (not= ::timeout second-wait)
-            (do
-              (println (str "[cljd-smoke] close: exited at elapsed=" elapsed "ms (exit "
-                            (:exit second-wait) ")"))
-              (check! :close-exits (zero? (:exit second-wait)) {:exit (:exit second-wait) :elapsed-ms elapsed})
-              (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
-            (do
-              (println (str "[cljd-smoke] close: still not exited after 15000ms total "
-                            "(elapsed=" elapsed "ms) -- force-killing"))
-              (check! :close-exits false {:reason "process did not exit within 15000ms" :elapsed-ms elapsed})
-              (stop! {:proc proc :pid pid})))))))
+  (if-not (wait-for! 2000 200 (fn [] (title-clean? pid)))
+    (do
+      (println (str "[cljd-smoke] close: title never read exactly \"" clean-window-title
+                    "\" within 2s -- refusing to send Cmd+W"))
+      (check! :close-exits false {:reason "buffer dirty before close"
+                                  :title (:name (window-for pid))})
+      (stop! {:proc proc :pid pid}))
+    (do
+      (cg-key! pid "command + w")
+      (let [t0 (System/currentTimeMillis)
+            first-wait (deref proc 3000 ::timeout)]
+        (if (not= ::timeout first-wait)
+          (let [elapsed (- (System/currentTimeMillis) t0)]
+            (println (str "[cljd-smoke] close: exited within 3s, elapsed=" elapsed "ms"))
+            (check! :close-exits (zero? (:exit first-wait)) {:exit (:exit first-wait) :elapsed-ms elapsed})
+            (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
+          (do
+            (capture-close-stuck-diagnostics! pid proc)
+            (let [;; capture-close-stuck-diagnostics! itself takes several
+                  ;; real seconds (`sample` alone runs for 3s), so the
+                  ;; remaining wait is whatever's left of the 15s TOTAL
+                  ;; bound from t0, not a flat 12s on top of it.
+                  remaining-ms (max 1000 (- 15000 (- (System/currentTimeMillis) t0)))
+                  second-wait (deref proc remaining-ms ::timeout)
+                  elapsed (- (System/currentTimeMillis) t0)]
+              (if (not= ::timeout second-wait)
+                (do
+                  (println (str "[cljd-smoke] close: exited at elapsed=" elapsed "ms (exit "
+                                (:exit second-wait) ")"))
+                  (check! :close-exits (zero? (:exit second-wait)) {:exit (:exit second-wait) :elapsed-ms elapsed})
+                  (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
+                (do
+                  (println (str "[cljd-smoke] close: still not exited after 15000ms total "
+                                "(elapsed=" elapsed "ms) -- force-killing"))
+                  (check! :close-exits false {:reason "process did not exit within 15000ms" :elapsed-ms elapsed})
+                  (stop! {:proc proc :pid pid})))))))))
   (let [post-git (:out (p/shell {:out :string :err :string :continue true}
                                 "git" "-C" app-dir "status" "--short"))]
     (check! :close-git-unchanged (= pre-git post-git) {:pre pre-git :post post-git})))
