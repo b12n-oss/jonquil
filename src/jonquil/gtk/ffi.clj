@@ -501,7 +501,7 @@
 ;; Reset on Run checkbox is insensitive, with a tooltip saying why, for an
 ;; attach runtime (cljd plan P2.T4). Measured on jolt v0.8.13: a nil :string
 ;; argument reaches GTK as NULL, which clears the tooltip (get_tooltip_text
-;; then answers NULL and has-tooltip reads 0.
+;; then answers NULL and has-tooltip reads 0).
 (ffi/defcfn gtk-widget-set-sensitive "gtk_widget_set_sensitive" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-get-sensitive "gtk_widget_get_sensitive" [:pointer] :int)
 (ffi/defcfn gtk-widget-set-tooltip-text "gtk_widget_set_tooltip_text" [:pointer :string] :void)

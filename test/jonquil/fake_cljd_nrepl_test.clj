@@ -121,6 +121,29 @@
     (client/close! conn)
     (fake/stop! srv)))
 
+(deftest stop-wakes-sleepers-and-waits-for-them-test
+  ;; I3: the fake's connection threads used to outlive stop!, and through fd
+  ;; reuse could go on to answer the NEXT test's socket (measured: server A's
+  ;; woken thread served server B's requests, in 2 of 3 runs). stop! now
+  ;; wakes every :slow/:slow-ops sleeper at once and waits (bounded) for
+  ;; every connection thread to actually end before it returns, so by the
+  ;; time stop! returns there's nothing left to answer a reused socket with.
+  (let [srv (fake/start! {:slow {"(slow)" 5000}})
+        conn (client/connect (:port srv))
+        sid (:new-session (first (client/request-sync conn {:op "clone"} 2000)))
+        replies (atom [])]
+    (client/request! conn {:op "eval" :code "(slow)" :session sid} (fn [m] (swap! replies conj m)))
+    (loop [n 0] (when (and (< n 250) (not (some #{"eval"} (fake/ops-seen srv))))
+                  (Thread/sleep 10) (recur (inc n))))
+    (let [start (System/currentTimeMillis)]
+      (fake/stop! srv)
+      (is (< (- (System/currentTimeMillis) start) 2000)
+          "stop! itself returns well under the 5000ms sleep, having woken it"))
+    (is (every? realized? @(:futures srv))
+        "every connection thread has actually ended by the time stop! returns")
+    (is (not-any? :value @replies) "the slow form's own reply never arrives")
+    (client/close! conn)))
+
 (deftest fake-slow-ops-test
   (let [srv (fake/start! {:slow-ops {"describe" 200}})
         conn (client/connect (:port srv))

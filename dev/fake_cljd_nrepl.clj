@@ -68,11 +68,26 @@
 
 (defn- matches? [marker form] (and marker (str/includes? (pr-str form) marker)))
 
+(defn- live? [stop-latch closed] (not (or (realized? stop-latch) (realized? closed))))
+
+(defn- wait!
+  "Waits up to ms, waking at once (well under ms) once stop-latch or closed
+  resolves. Jolt's socket read/write don't check a :closed flag on their
+  own, so a Thread/sleep here would otherwise sleep out its full ms even
+  after stop! or drop-connections! has ended this connection."
+  [stop-latch closed ms]
+  (let [deadline (+ (System/currentTimeMillis) (long ms))]
+    (loop []
+      (when (and (< (System/currentTimeMillis) deadline) (live? stop-latch closed))
+        (Thread/sleep (min 10 (max 0 (- deadline (System/currentTimeMillis)))))
+        (recur)))))
+
 (defn- evaluate!
   "Answers one eval or load-file request, form by form. reply sends one
   message map (string keys) with the request's id. Returns :dropped when a
-  :drop-on form closed the connection."
-  [{:keys [opts sessions]} sock reply m]
+  :drop-on form closed the connection, or when stop-latch or closed
+  resolved while a :slow form was waiting."
+  [{:keys [opts sessions]} sock stop-latch closed reply m]
   (let [sid (get m "session")
         text (or (get m "file") (get m "code") "")
         fresh? (get-in @sessions [sid :fresh?])
@@ -93,7 +108,7 @@
                 (nil? fs) (reply {"status" ["done"]})
 
                 (matches? (:drop-on opts) f)
-                (do (.close ^java.net.Socket sock) :dropped)
+                (do (deliver closed true) (.close ^java.net.Socket sock) :dropped)
 
                 (= 'ns (head f))
                 (do (swap! sessions assoc-in [sid :ns] (str (second f)))
@@ -111,46 +126,60 @@
 
                 :else
                 (do (when-let [ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))]
-                      (Thread/sleep (long ms)))
-                    (when-let [printed (some (fn [[marker text]] (when (matches? marker f) text)) (:prints opts))]
-                      (reply {"out" printed}))
-                    (reply {"value" (get (:answers opts) (pr-str f) (default-value f))})
-                    (reply {"ns" (cur)})
-                    (recur (next fs)))))))))))
+                      (wait! stop-latch closed ms))
+                    (if-not (live? stop-latch closed)
+                      :dropped
+                      (do (when-let [printed (some (fn [[marker text]] (when (matches? marker f) text)) (:prints opts))]
+                            (reply {"out" printed}))
+                          (reply {"value" (get (:answers opts) (pr-str f) (default-value f))})
+                          (reply {"ns" (cur)})
+                          (recur (next fs)))))))))))))
 
 (defn- handle!
-  [{:keys [opts sessions log counter] :as srv} sock reply m]
+  "Answers one request, incrementing srv's :busy count for its duration (a
+  bounded finally, never left stuck up on a throw) so stop! can wait for
+  every in-flight reply to finish before it closes anything."
+  [{:keys [opts sessions log counter busy] :as srv} sock stop-latch closed reply m]
   (swap! log conj (dissoc m "id"))
-  (when-let [ms (get (:slow-ops opts) (get m "op"))] (Thread/sleep (long ms)))
-  (case (get m "op")
-    "describe" (reply {"ops" (zipmap (:ops opts fork-ops) (repeat {})) "status" ["done"]})
-    "clone" (let [sid (str "fake-session-" (swap! counter inc))]
-              (swap! sessions assoc sid {:ns "cljd.user" :fresh? true :served (atom 0)})
-              (reply {"new-session" sid "status" ["done"]}))
-    ("eval" "load-file") (evaluate! srv sock reply m)
-    "lookup" (reply {"status" ["done" "lookup-error"]})
-    ("interrupt" "close" "ls-sessions") (reply {"status" ["done"]})
-    (reply {"err" (str "Unknown op: " (get m "op")) "status" ["done" "unknown-op"]})))
+  (swap! busy inc)
+  (try
+    (when-let [ms (get (:slow-ops opts) (get m "op"))] (wait! stop-latch closed ms))
+    (if-not (live? stop-latch closed)
+      :dropped
+      (case (get m "op")
+        "describe" (reply {"ops" (zipmap (:ops opts fork-ops) (repeat {})) "status" ["done"]})
+        "clone" (let [sid (str "fake-session-" (swap! counter inc))]
+                  (swap! sessions assoc sid {:ns "cljd.user" :fresh? true :served (atom 0)})
+                  (reply {"new-session" sid "status" ["done"]}))
+        ("eval" "load-file") (evaluate! srv sock stop-latch closed reply m)
+        "lookup" (reply {"status" ["done" "lookup-error"]})
+        ("interrupt" "close" "ls-sessions") (reply {"status" ["done"]})
+        (reply {"err" (str "Unknown op: " (get m "op")) "status" ["done" "unknown-op"]})))
+    (finally (swap! busy dec))))
 
-(defn- serve-connection! [{:keys [opts conns] :as srv} ^java.net.Socket sock]
-  (swap! conns conj sock)
-  (let [src (bencode/byte-source (.getInputStream sock))
-        out (.getOutputStream sock)
-        lock (Object.)]
-    (try
-      (loop []
-        (let [m (bencode/decode src)]
-          (when-not (= ::bencode/eof m)
-            (let [reply (fn [kv]
-                          (when-not (:mute? opts)
-                            (locking lock
-                              (.write ^java.io.OutputStream out ^bytes (bencode/encode (assoc kv "id" (get m "id"))))
-                              (.flush ^java.io.OutputStream out))))]
-              (when-not (= :dropped (handle! srv sock reply m))
-                (recur))))))
-      (catch Throwable _ nil)
-      (finally
-        (try (.close sock) (catch Throwable _ nil))))))
+(defn- serve-connection!
+  [{:keys [opts conns stop-latch] :as srv} ^java.net.Socket sock]
+  (let [closed (promise)]
+    (swap! conns conj {:sock sock :closed closed})
+    (let [src (bencode/byte-source (.getInputStream sock))
+          out (.getOutputStream sock)
+          lock (Object.)]
+      (try
+        (loop []
+          (when (live? stop-latch closed)
+            (let [m (bencode/decode src)]
+              (when (and (not= ::bencode/eof m) (live? stop-latch closed))
+                (let [reply (fn [kv]
+                              (when (and (not (:mute? opts)) (live? stop-latch closed))
+                                (locking lock
+                                  (.write ^java.io.OutputStream out ^bytes (bencode/encode (assoc kv "id" (get m "id"))))
+                                  (.flush ^java.io.OutputStream out))))
+                      result (handle! srv sock stop-latch closed reply m)]
+                  (when (and (not= :dropped result) (live? stop-latch closed))
+                    (recur)))))))
+        (catch Throwable _ nil)
+        (finally
+          (try (.close sock) (catch Throwable _ nil)))))))
 
 (defn start!
   "Starts a fake server on a free loopback port and returns it. opts:
@@ -171,14 +200,15 @@
    (let [ss (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))
          srv {:opts opts :server ss :port (.getLocalPort ss)
               :sessions (atom {}) :log (atom []) :counter (atom 0)
-              :conns (atom []) :stopped? (atom false)}]
+              :conns (atom []) :futures (atom [])
+              :stopped? (atom false) :stop-latch (promise) :busy (atom 0)}]
      (future
        (try
          (loop []
            (let [sock (.accept ss)]
              (if @(:stopped? srv)
                (.close sock)
-               (do (future (serve-connection! srv sock))
+               (do (swap! (:futures srv) conj (future (serve-connection! srv sock)))
                    (recur)))))
          (catch Throwable _ nil)))
      srv)))
@@ -195,17 +225,44 @@
 
 (defn drop-connections!
   "Closes every client socket from the server's side, the way an app that
-  quits drops its nREPL clients."
+  quits drops its nREPL clients. Delivers each connection's :closed first,
+  so a :slow/:slow-ops wait in flight on it wakes at once instead of
+  sleeping out its full ms against a socket that's about to disappear."
   [srv]
-  (doseq [s @(:conns srv)] (try (.close ^java.net.Socket s) (catch Throwable _ nil)))
+  (doseq [{:keys [sock closed]} @(:conns srv)]
+    (deliver closed true)
+    (try (.close ^java.net.Socket sock) (catch Throwable _ nil)))
   nil)
 
+(defn- await-bounded!
+  "Waits up to ms-total for (pred) to become true, polling every 10ms."
+  [ms-total pred]
+  (let [deadline (+ (System/currentTimeMillis) (long ms-total))]
+    (loop []
+      (when (and (not (pred)) (< (System/currentTimeMillis) deadline))
+        (Thread/sleep 10)
+        (recur)))))
+
 (defn stop!
-  "Stops accepting and drops every client. Measured on Jolt v0.8.13: closing
-  a ServerSocket doesn't wake a thread blocked in accept, so this connects
-  once first to let the accept loop see the flag and end."
+  "Stops accepting and drops every client, and doesn't return until every
+  connection's own thread has actually ended (bounded), so a stale thread
+  from this server can never answer a socket a later server reuses (jolt's
+  socket read/write don't check a :closed flag on their own, so a thread
+  that outlived stop! could otherwise still read and reply on a reused
+  fd -- measured, 2 of 3 runs). Order: wake every sleeper (the latch),
+  wait for in-flight replies to finish (busy), only then close sockets, and
+  only then wait for the connection threads themselves to end. Measured on
+  Jolt v0.8.13: closing a ServerSocket doesn't wake a thread blocked in
+  accept, so this connects once first to let the accept loop see the flag
+  and end."
   [srv]
   (reset! (:stopped? srv) true)
+  (deliver (:stop-latch srv) true)
+  (await-bounded! 1000 (fn [] (zero? @(:busy srv))))
   (try (.close (java.net.Socket. "127.0.0.1" (int (:port srv)))) (catch Throwable _ nil))
   (try (.close ^java.net.ServerSocket (:server srv)) (catch Throwable _ nil))
-  (drop-connections! srv))
+  (drop-connections! srv)
+  (let [deadline (+ (System/currentTimeMillis) 1000)]
+    (doseq [fut @(:futures srv)]
+      (deref fut (max 0 (- deadline (System/currentTimeMillis))) nil)))
+  nil)

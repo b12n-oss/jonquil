@@ -222,11 +222,18 @@
             (is (= [cljd/probe-code "(println :side-effect)"] (codes srv)))))))))
 
 (deftest still-waiting-test
+  ;; M5: the 200ms still-waiting-ms threshold (make) also covers the
+  ;; fresh-session wake probe's own request, so under load a slow connect
+  ;; can print the line once for the probe and once for "(slow)" itself.
+  ;; Connecting and waking first, off the clock, means the timed run below
+  ;; only ever times the "(slow)" eval.
   (with-app {:slow {"(slow)" 500}}
     (fn [_ dir _]
-      (let [[r out] (run (make dir) "(slow)" {:run? false})]
-        (is (= :ok (:status r)) "no client-side timeout: the answer still lands")
-        (is (= 1 (count (filter #{(str cljd/still-waiting-message "\n")} (texts out :system)))))))))
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (let [[r out] (run e "(slow)" {:run? false})]
+          (is (= :ok (:status r)) "no client-side timeout: the answer still lands")
+          (is (= 1 (count (filter #{(str cljd/still-waiting-message "\n")} (texts out :system))))))))))
 
 (deftest stop-detaches-test
   (with-app {:slow {"(slow)" 3000}}
@@ -361,14 +368,17 @@
   ;; alone, while the socket stays open, isolates finish!'s own decision:
   ;; the load keeps running for real and fails on (boom) with its own
   ;; eval-error, never a disconnect, so the diagnostic is what must
-  ;; survive. The 300ms :slow delay on an earlier form is a wide,
-  ;; deterministic margin over the 100ms wait before the flag is set.
+  ;; survive. M5: a fixed 100ms wait before setting the flag can land before
+  ;; the load-file request has even been sent under load, so this polls
+  ;; fake/requests for "load-file" instead (the same technique
+  ;; stop-during-wake-probe-test uses for the probe's own code).
   (with-app {:fail-on "boom" :slow {"(slow)" 300}}
-    (fn [_ dir file]
+    (fn [srv dir file]
       (let [e (make dir) done (promise)]
         (ev/eval! e "(ns demo.drive)\n(defn a [])\n(slow)\n(boom)\n(defn c [])"
                   {:run? true :path file :on-complete (fn [r] (deliver done r))})
-        (Thread/sleep 100)
+        (loop [n 0] (when (and (< n 250) (not (some #{"load-file"} (fake/ops-seen srv))))
+                      (Thread/sleep 20) (recur (inc n))))
         (swap! (:state e) assoc-in [:running :stop-requested?] true)
         (is (= {:status :error :error-text "Load stopped at form 3 of demo.drive"}
                (deref done 2000 :timeout))
@@ -452,22 +462,18 @@
   ;; (fixed in round 2, finding 7) -- a fixed sleep here raced exactly
   ;; that and was measured to pass for the wrong reason under load.
   ;;
-  ;; Measured (isolating this file's own tests, not a full-suite
-  ;; probe): stop-during-wake-probe-test's own connection, immediately
-  ;; before this test, keeps its fake server's per-connection future
-  ;; alive up to its own :slow duration (300ms) after ev/interrupt!
-  ;; already unblocked that test's client side -- interrupt! only
-  ;; detaches the client; the fake's Thread/sleep keeps running
-  ;; server-side until it wakes and fails to write to the now-closed
-  ;; socket. Starting this test's own connection while that lingering
-  ;; future is still alive was measured to shorten THIS test's probe
-  ;; wait to under 300ms (a premature :lost, already correctly handled
-  ;; before this fix, so the test passed without ever exercising the
-  ;; :asleep fallthrough this finding is about). The settle wait below
-  ;; is comfortably over that 300ms.
+  ;; I3: this test used to need a 400ms settle here, because
+  ;; stop-during-wake-probe-test's own fake server (immediately before this
+  ;; one) left its per-connection thread alive up to its own :slow duration
+  ;; after ev/interrupt! had already unblocked that test's client side --
+  ;; interrupt! only detaches the client; the fake's own Thread/sleep kept
+  ;; running server-side regardless, until it woke and failed to write to
+  ;; the now-closed socket. fake/stop! now wakes every sleeper at once and
+  ;; waits for every connection thread to actually end before it returns,
+  ;; so the previous test's server is fully quiet by the time this one's
+  ;; with-app starts a new one: no settle needed.
   (with-app {:answers {cljd/probe-code "nil"} :slow {cljd/probe-code 400}}
     (fn [srv dir _]
-      (Thread/sleep 400)
       (let [e (make dir) done (promise)]
         (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
         (loop [n 0] (when (and (< n 250) (not (some #{cljd/probe-code} (keep (fn [m] (get m "code")) (fake/requests srv)))))
