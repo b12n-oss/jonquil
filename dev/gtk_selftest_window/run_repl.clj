@@ -417,3 +417,84 @@
                   (support/check :clear-last-menu-item
                                  (and produced? (str/includes? before "=> 8") (= "> " after))
                                  {:produced produced? :before before :after after})))))))
+
+(defn row-clear-last-run-selection-mid-run-keeps-mark
+  "Fix round 1, Important #1: Cmd+E (Run Selection) while a program is
+  STILL running must NOT move the last-entry mark -- only do-run!'s own
+  idle-only marking may, and do-run-selection!/do-run-form! now pass
+  echo-entry! a mark? flag gated on (not (ev/evaluating? @ev*)), mirroring
+  do-run!'s own busy/idle branching. Starts a printing loop (marked at the
+  banner), Runs Selection on OTHER text mid-run (echoes as before, but
+  must not re-mark), waits for MORE loop output past that echo, then
+  Shift+L: the WHOLE run's own entry -- banner, every tick, the mid-run
+  echo and its own busy warning -- must clear as one block, never cut off
+  at the Cmd+E point."
+  [ui]
+  (go-row :clear-last-run-selection-mid-run-keeps-mark support/check
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(loop [] (println :tick) (Thread/sleep 200) (recur))")
+                         ((:run!* ui))
+                         m))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          printed-once? (await-until 2000 20 #(str/includes? (support/since ui mark) ":tick"))
+          _ (on-gtk (editor/set-text! (:editor ui) "(+ 9 9)")
+                    ((:run-selection!* ui)))
+          echoed? (await-until 2000 20 #(str/includes? (support/since ui mark) "(+ 9 9)"))
+          ;; more :tick output must still arrive AFTER the mid-run echo,
+          ;; proving the loop kept running and printing normally through
+          ;; it -- both must end up inside the SAME entry as the banner.
+          printed-after-echo? (await-until 2000 20
+                                           #(let [t (support/since ui mark)
+                                                  i (str/index-of t "(+ 9 9)")]
+                                              (and i (str/includes? (subs t i) ":tick"))))
+          handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
+          cleared? (on-gtk (= "> " (support/since ui mark)))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
+      (on-gtk (support/check :clear-last-run-selection-mid-run-keeps-mark
+                             (and started? printed-once? echoed? printed-after-echo?
+                                  (= 1 handled) cleared? stopped?)
+                             {:started started? :printed-once printed-once? :echoed echoed?
+                              :printed-after-echo printed-after-echo? :handled handled
+                              :cleared cleared? :stopped stopped?})))))
+
+(defn row-clear-last-mark-lands-after-queued-tail
+  "Fix round 1, Important #2: mark-entry-start! must not read out-end
+  synchronously while a PREVIOUS entry's own output is still queued (via
+  append!) but not yet drained -- doing so would place the mark BEFORE
+  that pending tail, so a later Shift+L would delete it along with the
+  new entry. Manufactures exactly that queued-but-undrained state BY
+  CONSTRUCTION, all three calls inside ONE on-gtk step: append! OLDTAIL
+  (queues it, schedules a drain that can't possibly run yet -- still the
+  SAME synchronous call stack, and jonquil.gtk.callbacks/on-gui!'s own
+  g_idle_add citation defers every drain to a later main-loop iteration),
+  THEN mark-entry-start! (queues :mark right behind it, in the SAME
+  queue), THEN append! NEWENTRY (queues it right behind the mark) --
+  OLDTAIL is provably still undrained at the exact instant the mark
+  request is queued, since nothing between them ever returns to the main
+  loop. Doesn't also assert this from a SEPARATE on-gtk step afterward:
+  measured live, GTK's own idle processing can service more than one
+  ready g_idle_add source between two round trips this harness makes, so
+  a same-tick undrained check would be flaky, not deterministic, on
+  exactly the axis this row needs to be trustworthy on. Instead it only
+  asserts the OUTCOME, via await-until (never assumed same-tick): once
+  everything actually drains, Shift+L must find OLDTAIL surviving (the
+  PREVIOUS entry, before the mark) and NEWENTRY gone (the marked entry,
+  after it)."
+  [ui]
+  (go-row :clear-last-mark-lands-after-queued-tail support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (cview/append! cv :out "OLDTAIL\n")
+                         (cview/mark-entry-start! cv)
+                         (cview/append! cv :prompt "NEWENTRY\n")
+                         m))
+          drained? (await-until 2000 20 #(let [t (support/since ui mark)]
+                                           (and (str/includes? t "OLDTAIL")
+                                                (str/includes? t "NEWENTRY"))))
+          _ (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "typed" -1 1))
+          handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
+          final (on-gtk (support/since ui mark))]
+      (on-gtk (support/check :clear-last-mark-lands-after-queued-tail
+                             (and drained? (= 1 handled) (= "OLDTAIL\n> typed" final))
+                             {:drained drained? :handled handled :final final})))))

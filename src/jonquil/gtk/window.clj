@@ -798,10 +798,10 @@
 
   Cmd/Ctrl+Shift+L's own choke point for the banner (jonquil.gtk.console-
   view's own citation: the banner doesn't go through echo-entry!, since
-  only Run Selection/Run Form do): cview/mark-entry-start! runs right
-  before the banner itself, the same instant the banner's own offset
-  becomes out-end's current one -- never on the busy path above, which
-  prints no banner at all."
+  only Run Selection/Run Form do): cview/mark-entry-start! is queued right
+  before the banner itself is queued, so it resolves (on the console's own
+  next drain) right where the banner's own text lands -- never on the busy
+  path above, which prints no banner at all."
   [ed cv ev* status-label path-atom]
   (if (ev/evaluating? @ev*)
     (let [warning (ev/eval! @ev* (editor/editor-text ed)
@@ -860,11 +860,19 @@
   is nil for a blank line, else the selection or the caret's whole line.
   When non-nil, echoes \"> text\" to the console as if typed, then goes
   through do-repl-eval! -- the SAME evaluator path a typed REPL entry uses
-  (history via ev/eval!, the busy-refusal warning, the same make-eval-opts)."
+  (history via ev/eval!, the busy-refusal warning, the same make-eval-opts).
+
+  Fix round 1 (Important #1): echo-entry!'s mark? is (not (ev/evaluating?
+  @ev*)), read BEFORE do-repl-eval! can change it -- mirroring do-run!'s
+  own idle/busy split. While a program is ALREADY running, this still
+  echoes (do-repl-eval! then appends the usual busy-refusal warning, same
+  as before) but must NOT steal the last-entry mark from that running
+  program: a later Shift+L needs to keep clearing the WHOLE run, not stop
+  short at wherever this mid-run echo landed."
   [ed cv ev* status-label]
   (let [snap (editor/snapshot ed)]
     (when-let [text (commands/run-selection-text snap)]
-      (cview/echo-entry! cv text)
+      (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
       (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
 
 ;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
@@ -926,12 +934,17 @@
   editor's snapshot. No form at the caret sets the status \"No form at the
   caret.\" and sends nothing. Otherwise it flashes the form's range, echoes
   the form at the prompt and sends it the way Run Selection does, so an
-  attach evaluator switches to the buffer's namespace first."
+  attach evaluator switches to the buffer's namespace first.
+
+  Fix round 1 (Important #1): echo-entry!'s mark? is (not (ev/evaluating?
+  @ev*)), same idle/busy split as do-run-selection! above, and for the
+  same reason -- a mid-run Cmd+Enter must still echo and flash, but must
+  never steal the mark from a program that's still running."
   [ed cv ev* status-label flash-fns]
   (let [snap (editor/snapshot ed)]
     (if-let [{:keys [text start end]} (commands/run-form snap)]
       (do ((:flash! flash-fns) start end (:caret snap))
-          (cview/echo-entry! cv text)
+          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
           (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
       (set-status! status-label "No form at the caret."))))
 

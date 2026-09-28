@@ -157,7 +157,15 @@
 
   Also deactivates the last-entry mark (mark-entry-start!/clear-last-
   output!, below): \"there's no last entry until the next one begins\"
-  after a full Cmd+L, whatever a Shift+L right before it would have found."
+  after a full Cmd+L, whatever a Shift+L right before it would have found.
+
+  Fix round 1: this never touches the QUEUE (:queue cv), only the live
+  buffer and the flag, so a mark request still sitting there (mark-entry-
+  start!, queued, not yet drained) is untouched too -- it still takes
+  effect on its own next drain, at whatever out-end is BY THEN (i.e. after
+  this clear), correctly re-arming :last-entry-active? for whichever entry
+  that pending request actually belongs to. Nothing here needs to special-
+  case that: reset! is simply the right default until a real mark lands."
   [cv]
   (let [buf (:buf cv)
         end (mark-offset buf (:out-end cv))]
@@ -166,29 +174,27 @@
   (reset! (:last-entry-active? cv) false)
   nil)
 
-(defn mark-entry-start!
-  "Marks the console's own \"last entry start\" at out-end's CURRENT
-  offset -- the position Cmd/Ctrl+Shift+L (clear-last-output!, below)
-  later reads back as the start of the block to delete. GTK-thread only.
+(defn- set-entry-start-mark!
+  "The actual GTK move: last-entry-start to out-end's CURRENT offset, plus
+  arming :last-entry-active?. GTK-thread only.
 
-  Reading out-end's offset now, before this entry's own first character
-  has even been enqueued, is safe: out-end's own right gravity and
-  append!'s FIFO queue together guarantee that whatever lands next in the
-  queue lands at exactly this offset once drained, since nothing between
-  now and that drain can move out-end without going through this same
-  queue, behind whatever's already in it.
-
-  The three choke points that call this: commit-input! (below, a REPL
-  submit), echo-entry! (above -- Run Selection and Run Form both echo
-  through it, so one call there covers both), and jonquil.gtk.window's
-  do-run!, for the \"; --- Running Definitions ---\" banner, which doesn't
-  go through echo-entry! at all."
+  Two callers, each reading out-end at the exact moment that's correct for
+  them: commit-input! (below) calls this DIRECTLY, synchronously, since
+  its own new content (turning prompt+input into history, opening a fresh
+  prompt) is written straight to the buffer, never through append! -- by
+  the time any queued drain could run, commit-input!'s own work has
+  already moved out-end past where the mark needs to sit, so reading it
+  early, before that work happens, is the only correct offset. drain!
+  (below) calls this for a queued :mark item instead (mark-entry-start!'s
+  own citation), for echo-entry!/jonquil.gtk.window's do-run!, whose own
+  new content DOES go through append! -- there, reading out-end THEN,
+  once the drain reaches this item, is what makes it land after
+  everything queued before it and before that entry's own echo/banner."
   [cv]
   (let [buf (:buf cv)
         offset (mark-offset buf (:out-end cv))]
     (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-move-mark buf (:last-entry-start cv) a)))
-    (reset! (:last-entry-active? cv) true))
-  nil)
+    (reset! (:last-entry-active? cv) true)))
 
 (defn clear-last-output!
   "Deletes the last entry's own block -- its echo (or the Run banner),
@@ -206,8 +212,9 @@
   Allowed while a program runs, same as clear-output!: the deletion only
   ever reaches out-end's CURRENT offset, so output the program prints
   AFTER this call lands past it, unaffected. The mark is deactivated once
-  cleared (never re-armed until the next mark-entry-start!), so calling
-  this again right after finds nothing left to clear."
+  cleared (never re-armed until the next mark-entry-start! actually
+  resolves -- set-entry-start-mark!'s own citation), so calling this
+  again right after finds nothing left to clear."
   [cv]
   (let [buf (:buf cv)
         start (when @(:last-entry-active? cv) (mark-offset buf (:last-entry-start cv)))
@@ -365,7 +372,16 @@
   left to tell that apart from a legitimate entry that really does start
   at 0. A mark at or past cut survives the delete and stays valid (GTK
   slides it down by the deleted amount, same as out-end itself), so only
-  the < case needs treating as gone."
+  the < case needs treating as gone.
+
+  Fix round 1: called only from drain!, AFTER its own doseq (above) has
+  already resolved every :mark item in THIS batch via set-entry-start-
+  mark! -- so :last-entry-active?/:last-entry-start here always reflect
+  whatever this batch's own queue actually settled on, never a stale
+  value from a still-pending request. A pending mark in the queue still
+  takes effect: nothing here (or in append!/mark-entry-start!) can skip
+  or drop a queued :mark item, so it always resolves on its own next
+  drain regardless of how many trims happen before or after it."
   [cv]
   (let [buf (:buf cv)
         n (mark-offset buf (:out-end cv))]
@@ -395,13 +411,24 @@
   harmless drain. One drain handles everything queued: it coalesces, clips
   each run to MAX-OUTPUT-CHARS before inserting it (I7 -- a print-forever
   program can queue a batch far bigger than the cap between drains), then
-  trims once and scrolls once."
+  trims once and scrolls once.
+
+  Fix round 1 (Important #2): a coalesced :mark entry (mark-entry-start!'s
+  own queued request) is never inserted as text -- it resolves set-entry-
+  start-mark! right here, in order, exactly where the doseq reaches it, so
+  it lands after every chunk queued before it (already inserted, moving
+  out-end past them by this point) and before whatever's queued after it.
+  coalesce only merges CONSECUTIVE same-kind entries, so :mark never
+  merges with a :prompt/:system chunk on either side of it -- only with
+  another :mark, which resolves to the same single move either way."
   [cv]
   (reset! (:drain-scheduled? cv) false)
   (let [chunks (first (reset-vals! (:queue cv) []))]
     (when (seq chunks)
       (doseq [[kind text] (coalesce chunks)]
-        (insert-chunk! cv kind (clip-to-cap text MAX-OUTPUT-CHARS)))
+        (if (= kind :mark)
+          (set-entry-start-mark! cv)
+          (insert-chunk! cv kind (clip-to-cap text MAX-OUTPUT-CHARS))))
       (trim! cv)
       (scroll-to-end! cv))))
 
@@ -413,6 +440,39 @@
   (when (compare-and-set! (:drain-scheduled? cv) false true)
     (on-gui! (fn [] (drain! cv)))))
 
+(defn mark-entry-start!
+  "Queues a \"mark the last entry start here\" request through append!'s
+  own FIFO queue (:mark, a kind drain! above special-cases instead of
+  inserting as text), so it resolves (set-entry-start-mark!, above) only
+  once the queue actually reaches it -- landing after everything queued
+  before it (a PREVIOUS entry's own output, still undrained) and before
+  whatever this call's caller queues right after it.
+
+  Fix round 1 (Important #2): reading out-end SYNCHRONOUSLY, right here,
+  used to race a previous entry's own still-queued-but-undrained output:
+  append! only enqueues, a drain doesn't actually move out-end until it
+  runs (jonquil.gtk.callbacks/on-gui!'s own g_idle_add citation -- always
+  a LATER main-loop iteration, never this same call stack), so a
+  synchronous read here could land BEFORE that pending content, making a
+  later Shift+L delete it along with the new entry. Enqueuing instead
+  means this request's own resolution is strictly ordered after anything
+  already in the queue, by construction -- no read races anything.
+
+  The two callers: echo-entry! (below -- Run Selection and Run Form both
+  echo through it, so one call covers both) and jonquil.gtk.window's
+  do-run!, for the \"; --- Running Definitions ---\" banner, which doesn't
+  go through echo-entry! at all. Both queue their OWN new content via
+  append! too, right after this call, which is exactly what makes the
+  queued read correct for them.
+
+  commit-input! (below) does NOT call this: its own new content bypasses
+  append! entirely (set-entry-start-mark!'s own citation, above) -- a
+  queued read there would land too late, after commit-input!'s own
+  synchronous work has already moved out-end past where the mark needs to
+  sit. It calls set-entry-start-mark! directly instead."
+  [cv]
+  (append! cv :mark nil))
+
 (defn echo-entry!
   "Adds \"> text\" to the read-only output history above the prompt, in the
   :prompt style, exactly as if it had been typed and submitted -- but
@@ -422,15 +482,17 @@
   were called, even though the eval's own output arrives asynchronously
   from the eval worker thread.
 
-  Also marks the console's own \"last entry start\" (mark-entry-start!,
-  above) before enqueuing the echo text, since Run Selection and Run Form
-  both echo through here -- one call covers both. GTK-thread only because
-  of that: unlike append! alone, mark-entry-start! touches the buffer
-  directly. Both of today's callers (jonquil.gtk.window's do-run-selection!/
-  do-run-form!) already only ever run on the GTK thread, like every
-  window-level key/menu handler."
-  [cv text]
-  (mark-entry-start! cv)
+  mark? (fix round 1, Important #1) gates whether this ALSO marks the
+  console's own \"last entry start\" (mark-entry-start!, above), since
+  Run Selection and Run Form both echo through here -- one call covers
+  both. Callers pass (not (ev/evaluating? @ev*)), mirroring jonquil.gtk.
+  window's do-run! own idle/busy split: Cmd+E/Cmd+Enter while a program is
+  STILL running must echo (existing behaviour, kept unconditionally) but
+  must NOT steal the mark from that running entry -- a later Shift+L
+  needs to keep clearing the WHOLE run, output printed after the mid-run
+  echo included, not just up to where the echo landed."
+  [cv text mark?]
+  (when mark? (mark-entry-start! cv))
   (append! cv :prompt (str "> " text "\n")))
 
 ;; --- Return ----------------------------------------------------------------
@@ -445,11 +507,12 @@
   ends up before it, which is exactly backwards for a prompt that must sit
   after out-end).
 
-  Also marks the console's own \"last entry start\" (mark-entry-start!,
-  above) at prompt-start -- the REPL-submit choke point for Cmd/Ctrl+Shift+L,
-  called before anything else here moves out-end."
+  Also marks the console's own \"last entry start\" (set-entry-start-
+  mark!, called directly, not the queued mark-entry-start! -- see its own
+  citation on why) at prompt-start -- the REPL-submit choke point for
+  Cmd/Ctrl+Shift+L, called before anything else here moves out-end."
   [cv]
-  (mark-entry-start! cv)
+  (set-entry-start-mark! cv)
   (let [{:keys [buf tags readonly-tag out-end input-start]} cv
         prompt-start (mark-offset buf out-end)
         old-end (g/gtk-text-buffer-get-char-count buf)]
