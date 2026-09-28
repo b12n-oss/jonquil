@@ -125,4 +125,26 @@
     (is (= "'(comment (x))" (form-at "'(comment (x))" "(x)" 1))))
   (testing "blank text or no forms: nil"
     (is (nil? (c/run-form {:text "" :caret 0})))
-    (is (nil? (c/run-form {:text "  ; only a comment" :caret 3})))))
+    (is (nil? (c/run-form {:text "  ; only a comment" :caret 3}))))
+  (testing "a comment block nested inside another form runs the enclosing form, not drilled"
+    (is (= "(do (comment (a)))" (form-at "(do (comment (a)))" "(a)" 1))))
+  (testing "CRLF line endings don't shift offsets"
+    (let [t "(ns a.b)\r\n\r\n(defn f [x]\r\n  (inc x))\r\n"]
+      (is (= "(defn f [x]\r\n  (inc x))" (form-at t "inc"))))))
+
+;; cljd plan P3.T1 fix round 1: #_ discards its form, ^meta stays attached.
+(deftest run-form-discard-test
+  (is (nil? (c/run-form {:text "#_(a b)" :caret 3})) "a #_-discarded form isn't runnable")
+  (is (nil? (c/run-form {:text "#_(a b)" :caret 0})) "nor is the #_ marker itself")
+  (let [t "#_ #_ x y z"]
+    (is (nil? (form-at t "x" 0)) "the first of a stacked #_ #_ is discarded")
+    (is (nil? (form-at t "y" 0)) "so is the second")
+    (is (= "z" (form-at t "z" 0)) "the form after both discards still runs")))
+
+(deftest run-form-metadata-prefix-test
+  (is (= "^:private (defn f [] 1)" (form-at "^:private (defn f [] 1)" "defn")) "a ^:private prefix is part of the form")
+  (is (= "^{:doc \"x\"} (def a 1)" (form-at "^{:doc \"x\"} (def a 1)" "def a")) "so is a ^{...} map")
+  (is (= "^:a ^:b (def x 1)" (form-at "^:a ^:b (def x 1)" "def x")) "stacked metadata prefixes all attach")
+  (let [t "^:private (defn f [] 1)"
+        {:keys [text start end]} (c/run-form {:text t :caret (str/index-of t "defn")})]
+    (is (= text (subs t start end)) "the range still matches the text")))

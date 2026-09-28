@@ -36,14 +36,36 @@
   A bracketed form has :open (its opening bracket's offset) and :kids, an
   atom (symbol, keyword, number, string, character, regex) has neither.
   :start takes in any reader prefix written right before the form ('(..),
-  #{..}, @x, #?(..)). Comments are skipped, a closer that doesn't match is
-  ignored, and a form never closed is dropped along with everything in it,
-  so an unfinished buffer has nothing to run there. The tokenizer reads the
-  ? of #? (a reader conditional) as a symbol of its own, so that one is
-  dropped and its two characters count as prefix."
+  #{..}, @x, #?(..)), and a leading ^meta or ^{...} metadata form stays
+  attached the same way (it can stack: ^:a ^:b (def x 1)). A form right
+  after #_ is discarded and never appears in the tree; #_ #_ discards two.
+  Comments are skipped, a closer that doesn't match is ignored, and a form
+  never closed is dropped along with everything in it, so an unfinished
+  buffer has nothing to run there. The tokenizer reads the ? of #? (a
+  reader conditional) and the _ of #_ as a symbol of its own; the ? is
+  dropped and its two characters count as prefix, the _ is dropped and
+  marks the discard."
   [text]
   (let [cond-mark? (fn [[t s e]] (and (= :symbol t) (pos? s) (= "?" (subs text s e))
                                       (= \# (.charAt ^String text (int (dec s))))))
+        discard-mark? (fn [[t s e]] (and (= :symbol t) (pos? s) (= "_" (subs text s e))
+                                         (= \# (.charAt ^String text (int (dec s))))))
+        meta-bracket? (fn [open] (and open (pos? open) (= \^ (.charAt ^String text (int (dec open))))))
+        absorb (fn [parent {:keys [start open kind] :as form}]
+                 (cond
+                   (= kind :metatag)
+                   (update parent :meta-start (fn [ms] (or ms start)))
+
+                   (meta-bracket? open)
+                   (update parent :meta-start (fn [ms] (or ms (dec open))))
+
+                   :else
+                   (let [ms (:meta-start parent)
+                         form (cond-> form ms (assoc :start ms))
+                         parent (dissoc parent :meta-start)]
+                     (if (pos? (:discards parent 0))
+                       (update parent :discards dec)
+                       (update parent :kids conj form)))))
         toks (filterv (fn [[t :as tok]] (not (or (= :comment t) (cond-mark? tok)))) (syntax/tokenize text))
         n (count toks)
         prefixed (fn [i s]
@@ -55,9 +77,12 @@
     (loop [i 0 stack [{:kids []}]]
       (if (= i n)
         (:kids (first stack))
-        (let [[t s e] (nth toks i)
+        (let [[t s e :as tok] (nth toks i)
               ch (when (= :bracket t) (.charAt ^String text (int s)))]
           (cond
+            (discard-mark? tok)
+            (recur (inc i) (conj (pop stack) (update (peek stack) :discards (fnil inc 0))))
+
             (and ch (syntax/open->close ch))
             (recur (inc i) (conj stack {:start (prefixed i s) :open s :close-ch (syntax/open->close ch) :kids []}))
 
@@ -66,11 +91,12 @@
               (if (and (> (count stack) 1) (= ch (:close-ch top)))
                 (let [form (-> top (dissoc :close-ch) (assoc :end e))
                       stack (pop stack)]
-                  (recur (inc i) (conj (pop stack) (update (peek stack) :kids conj form))))
+                  (recur (inc i) (conj (pop stack) (absorb (peek stack) form))))
                 (recur (inc i) stack)))
 
             :else
-            (recur (inc i) (conj (pop stack) (update (peek stack) :kids conj {:start (prefixed i s) :end e})))))))))
+            (let [form (cond-> {:start (prefixed i s) :end e} (= t :metatag) (assoc :kind :metatag))]
+              (recur (inc i) (conj (pop stack) (absorb (peek stack) form))))))))))
 
 (defn- form-around
   "The form in forms (siblings in order) that holds caret: the one it is
