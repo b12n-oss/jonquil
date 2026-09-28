@@ -168,3 +168,86 @@
       (st "eval-error") {:status :error :error-text (str "Load stopped at form " (inc n) " of " ns-name)}
       :else {:status :notice
              :text (str "; Loaded " ns-name " (" n (if (= 1 n) " form)" " forms)"))})))
+
+;; --- quick doc (spec section 4) ---------------------------------------------
+
+(def no-lookup-doc
+  "No docs for ClojureDart symbols yet (the app's ClojureDart fork doesn't answer lookup)")
+
+(def not-attached-doc "Not attached; Run first")
+
+(def lookup-timeout-doc "No docs: the app didn't answer in time")
+
+(defn no-docs
+  "A doc-info map that jonquil.syntax/format-autocomplete-doc shows as sym,
+  a rule, then text. Its :status is neither :found nor :not-found, so jump
+  to definition treats it as no external definition."
+  [sym text]
+  {:status :no-docs :symbol sym :name sym :doc text})
+
+(defn doc-result
+  "Quick doc's doc-info for a lookup's replies (fork 685e56de and later
+  answer {:info {\"ns\" \"name\" \"doc\" \"arglists\" \"arglists-str\"
+  \"macro\"}}): the var's doc when found, \"No docs for sym\" for no-info,
+  and the older-fork sentence for lookup-error, unknown-op or anything
+  else."
+  [sym msgs]
+  (let [st (ops/statuses msgs)
+        info (some :info msgs)]
+    (cond
+      (st "no-info") (no-docs sym (str "No docs for " sym))
+      :else (if-let [d (ops/doc-info sym msgs)]
+              (cond-> d (= "true" (or (get info "macro") (get info :macro))) (assoc :macro? true))
+              (no-docs sym no-lookup-doc)))))
+
+;; --- offline completion (spec section 4) -------------------------------------
+
+(defn buffer-aliases
+  "The aliases the buffer's ns form declares with :as or :as-alias, in
+  order, without repeats. [] when there's no ns form."
+  [text]
+  (if-let [form (:text (ns-form text))]
+    (let [toks (filterv (fn [[t]] (not= :comment t)) (syntax/tokenize form))
+          word (fn [[_ s e]] (subs form s e))]
+      (vec (distinct
+            (keep (fn [[a b]]
+                    (when (and (= :keyword (first a)) (#{":as" ":as-alias"} (word a))
+                               (#{:symbol :special-form :builtin} (first b)))
+                      (word b)))
+                  (partition 2 1 toks)))))
+    []))
+
+(defn candidates
+  "Offline completion for a ClojureDart buffer, in jonquil.docs/candidates'
+  shape ([{:symbol :category}]): the buffer's own definitions and symbols,
+  those in extra-context (the REPL's history, a string) too, each alias of
+  the buffer's ns form followed by /, and profile's :special-forms and
+  :builtins. It never asks the in-process Jolt runtime (no ns-publics, no
+  jonquil.docs), so nothing Jolt has and ClojureDart lacks shows up.
+  Sorted the way jonquil.syntax/get-autocomplete-candidates sorts a
+  prefix: exact-case matches first, then buffer names, special forms and
+  builtins."
+  [profile prefix text _pos extra-context]
+  (let [prefix (or prefix "")
+        lower (str/lower-case prefix)
+        match? (fn [s] (str/starts-with? (str/lower-case s) lower))
+        {:keys [special-forms builtins]} profile
+        data (syntax/get-cached-or-compute-buffer-symbols (or text ""))
+        extra (when (string? extra-context) (syntax/get-cached-or-compute-buffer-symbols extra-context))
+        user (-> #{}
+                 (into (:all-tokens data)) (into (:defs data))
+                 (into (:all-tokens extra)) (into (:defs extra))
+                 (into (map (fn [a] (str a "/")) (buffer-aliases text)))
+                 (disj prefix))
+        cands (concat
+               (for [s user :when (and (match? s) (not (contains? special-forms s)) (not (contains? builtins s)))]
+                 {:symbol s :category :user})
+               (for [s special-forms :when (match? s)] {:symbol s :category :special})
+               (for [s builtins :when (and (match? s) (not (contains? special-forms s)))]
+                 {:symbol s :category :builtin}))]
+    (vec (sort-by (fn [{:keys [symbol category]}]
+                    [(if (str/starts-with? symbol prefix) 0 1)
+                     (case category :user 0 :special 1 :builtin 2 3)
+                     (str/lower-case symbol)
+                     symbol])
+                  cands))))

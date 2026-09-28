@@ -15,8 +15,10 @@
   - (in-ns ...) is refused with the fork's own sentence.
   - A form that prints (:prints) answers {:out text} before its value, as
     fork 8aaa4628 and later do.
-  - lookup answers lookup-error, as the older fork 573781a2 did, and an
-    unknown op answers unknown-op.
+  - lookup answers from :docs the way fork 685e56de and later do ({:info
+    ...}, or no-info for an unknown symbol), and lookup-error, as the
+    older fork 573781a2 did, when there's no :docs. An unknown op answers
+    unknown-op.
 
   It never evaluates anything: a form's value comes from :answers (keyed by
   the form's pr-str), else the sum for (+ numbers...), a closure string for
@@ -152,7 +154,12 @@
                   (swap! sessions assoc sid {:ns "cljd.user" :fresh? true :served (atom 0)})
                   (reply {"new-session" sid "status" ["done"]}))
         ("eval" "load-file") (evaluate! srv sock stop-latch closed reply m)
-        "lookup" (reply {"status" ["done" "lookup-error"]})
+        "lookup" (if-let [docs (:docs opts)]
+                   (do (when-let [ms (:lookup-ms opts)] (wait! stop-latch closed ms))
+                       (if-let [info (get docs (get m "sym"))]
+                         (reply {"info" info "status" ["done"]})
+                         (reply {"status" ["done" "no-info"]})))
+                   (reply {"status" ["done" "lookup-error"]}))
         ("interrupt" "close" "ls-sessions") (reply {"status" ["done"]})
         (reply {"err" (str "Unknown op: " (get m "op")) "status" ["done" "unknown-op"]})))
     (finally (swap! busy dec))))
@@ -188,6 +195,9 @@
   :slow     {marker ms}: a form whose pr-str holds marker answers after ms
   :fail-on  marker: that form fails as the fork's did, and the rest is skipped
   :prints   {marker text}: that form answers {:out text} before its value
+  :docs     {sym info}: lookup answers info (string keys), or no-info; with
+            no :docs, lookup answers lookup-error
+  :lookup-ms ms: lookup (with :docs) answers after ms
   :drop-on  marker: that form closes the connection without an answer
   :asleep-for n: a new session's first n eval or load-file requests answer
             nil without evaluating, as a REPL that isn't awake yet does

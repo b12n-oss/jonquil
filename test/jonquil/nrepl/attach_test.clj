@@ -38,7 +38,7 @@
 
 (defn- make [dir]
   (attach/make-attach {:profile dialect/cljd :runtime :attach :project-dir dir}
-                      {:describe-timeout-ms 500 :clone-timeout-ms 500 :still-waiting-ms 200}))
+                      {:describe-timeout-ms 500 :clone-timeout-ms 500 :still-waiting-ms 200 :help-timeout-ms 200}))
 
 (defn- run
   "Evaluates and waits. [result output] where output is every on-output
@@ -283,6 +283,63 @@
         (is (= attach/busy-warning (ev/eval! e "1" {:run? false})))
         (is (ev/evaluating? e))
         (is (= :ok (:status (deref done 5000 :timeout))))))))
+
+;; P4.T1: offline completion and lookup-backed quick doc.
+
+(deftest complete-is-offline-test
+  (with-app {}
+    (fn [srv dir _]
+      (let [e (make dir)
+            cands (ev/complete e "wh" drive-text 0 nil)]
+        (is (= "where" (:symbol (first cands))) "the buffer's own name first")
+        (is (some #{"when"} (map :symbol cands)))
+        (is (some #{"str/"} (map :symbol (ev/complete e "st" drive-text 0 nil))) "an alias from the ns form")
+        (is (empty? (fake/ops-seen srv)) "completion never talks to the app, or connects")))))
+
+(def ^:private where-info
+  {"ns" "demo.drive" "name" "where" "doc" "Where the deck is now." "arglists" "([])" "arglists-str" "([])"})
+
+(deftest lookup-test
+  (testing "detached: quick doc never connects on its own"
+    (with-app {:docs {"where" where-info}}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (is (= (cljd/no-docs "where" cljd/not-attached-doc) (ev/lookup e "where" drive-text 0)))
+          (is (empty? (fake/ops-seen srv)))))))
+  (testing "attached, fork 685e56de: found in the buffer's namespace, or no-info"
+    (with-app {:docs {"where" where-info}}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= {:status :found :symbol "where" :ns "demo.drive" :name "where" :arglists "([])"
+                  :doc "Where the deck is now."}
+                 (ev/lookup e "where" drive-text 0)))
+          (is (= "demo.drive" (get (last (fake/requests srv)) "ns")) "the buffer's ns, not the session's")
+          (is (= (cljd/no-docs "nope" "No docs for nope") (ev/lookup e "nope" drive-text 0)))
+          (is (= "cljd.user" (do (ev/lookup e "where" "(where)" 0) (get (last (fake/requests srv)) "ns")))
+              "text with no ns form: the session's namespace")))))
+  (testing "attached, the older fork 573781a2 (lookup-error): the older-fork sentence"
+    (with-app {}
+      (fn [_ dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= (cljd/no-docs "map" cljd/no-lookup-doc) (ev/lookup e "map" drive-text 0)))))))
+  (testing "a server that doesn't advertise lookup: the same sentence, and nothing is sent"
+    (with-app {:ops ["clone" "describe" "eval" "load-file"]}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= (cljd/no-docs "map" cljd/no-lookup-doc) (ev/lookup e "map" drive-text 0)))
+          (is (not-any? #{"lookup"} (fake/ops-seen srv)))))))
+  (testing "an app too busy to answer in time: bounded, and says so"
+    (with-app {:docs {"where" where-info} :lookup-ms 1000}
+      (fn [_ dir _]
+        (let [e (make dir)
+              _ (run e "1" {:run? false})
+              t0 (System/currentTimeMillis)
+              r (ev/lookup e "where" drive-text 0)]
+          (is (= (cljd/no-docs "where" cljd/lookup-timeout-doc) r))
+          (is (< (- (System/currentTimeMillis) t0) 900) "the help timeout, not the app's answer"))))))
 
 (deftest stop-during-connect-test
   ;; describe answers 400ms late (well inside make's 500ms describe

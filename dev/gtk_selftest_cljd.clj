@@ -25,7 +25,10 @@
    rows/row-cljd-load-prints-loaded
    rows/row-cljd-run-selection-in-buffer-ns
    rows/row-cljd-run-form-in-comment
+   rows/row-cljd-quick-doc-from-app
+   rows/row-cljd-completion-offline
    rows/row-cljd-stop-detaches
+   rows/row-cljd-quick-doc-detached
    rows/row-cljd-reconnects-after-detach
    rows/row-cljd-idle-stop-detaches
    rows/row-cljd-not-running-message

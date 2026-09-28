@@ -45,7 +45,8 @@
       (finally (client/close! conn) (fake/stop! srv)))))
 
 (deftest fake-prints-and-looks-up-test
-  (let [srv (fake/start! {:prints {"println" ":side-effect\n"}})
+  (let [srv (fake/start! {:prints {"println" ":side-effect\n"}
+                          :docs {"where" {"ns" "a.b" "name" "where" "doc" "Where the deck is."}}})
         conn (client/connect (:port srv))
         sid (:new-session (first (client/request-sync conn {:op "clone"} 2000)))]
     (try
@@ -53,9 +54,17 @@
       (is (= [{:out ":side-effect\n"} {:value ":ok"} {:ns "cljd.user"} {:status ["done"]}]
              (strip (client/request-sync conn {:op "eval" :code "(println :side-effect)" :session sid} 2000)))
           "fork 8aaa4628: out before value")
+      (is (= [{:info {"ns" "a.b" "name" "where" "doc" "Where the deck is."} :status ["done"]}]
+             (strip (client/request-sync conn {:op "lookup" :sym "where" :ns "a.b" :session sid} 2000))))
+      (is (= [{:status ["done" "no-info"]}]
+             (strip (client/request-sync conn {:op "lookup" :sym "nope" :ns "a.b" :session sid} 2000))))
+      (finally (client/close! conn) (fake/stop! srv))))
+  (let [srv (fake/start!)
+        conn (client/connect (:port srv))]
+    (try
       (is (= [{:status ["done" "lookup-error"]}]
-             (strip (client/request-sync conn {:op "lookup" :sym "map" :ns "cljd.user" :session sid} 2000)))
-          "the older fork's answer")
+             (strip (client/request-sync conn {:op "lookup" :sym "map" :ns "cljd.user"} 2000)))
+          "no :docs: the older fork's answer")
       (finally (client/close! conn) (fake/stop! srv)))))
 
 (deftest fake-drops-and-stops-test

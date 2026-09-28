@@ -41,7 +41,11 @@
    ;; The fork's own eval-timeout-ms (cljd.nrepl, 30000): after that long
    ;; the app gives up on an eval itself. Jonquil keeps waiting (no
    ;; client-side timeout) and says so once.
-   :still-waiting-ms 30000})
+   :still-waiting-ms 30000
+   ;; estimate, the nREPL evaluator's help-timeout-ms basis: quick doc asks
+   ;; lookup on the GTK thread, so a busy or wedged app can hold a key for
+   ;; at most this long.
+   :help-timeout-ms 300})
 
 (def busy-warning
   ;; jonquil.eval/eval-async's own wording, so the console reads the same.
@@ -296,10 +300,28 @@
   (prompt-ns [_] (symbol (or (:session-ns @state) cljd/default-ns)))
   ;; Reset on Run is off for cljd: hot reload can't unload a namespace.
   (set-mode! [_ _] nil)
-  ;; P4.T1 replaces these two with offline completion and lookup. Until
-  ;; then: nothing, and never Jolt's own docs.
-  (complete [_ _ _ _ _] [])
-  (lookup [_ _ _ _] nil)
+  ;; Completion is offline: the fork has no completions op (measured
+  ;; unknown-op). Never Jolt's own docs.
+  (complete [_ prefix text pos extra-context]
+    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+         (catch Throwable _ [])))
+  ;; Quick doc asks the app's lookup (fork 685e56de and later answer it) in
+  ;; the buffer's namespace, only while attached: it never connects on its
+  ;; own. Bounded by :help-timeout-ms, since it runs on the GTK thread.
+  (lookup [_ sym text _pos]
+    (try
+      (let [{:keys [conn session ops session-ns]} @state]
+        (cond
+          (not (client/open? conn)) (cljd/no-docs sym cljd/not-attached-doc)
+          (not (contains? ops "lookup")) (cljd/no-docs sym cljd/no-lookup-doc)
+          :else
+          (let [r (client/request-sync conn {:op "lookup" :sym sym :session session
+                                             :ns (or (:name (cljd/ns-form text)) session-ns cljd/default-ns)}
+                                       (:help-timeout-ms timings))]
+            (if (vector? r)
+              (cljd/doc-result sym r)
+              (cljd/no-docs sym cljd/lookup-timeout-doc)))))
+      (catch Throwable _ nil)))
   (limitations [_]
     ["Stop detaches: there's no interrupt, so the app keeps running whatever it already has."
      "No stdin. println output comes back, but is lost when the form throws."

@@ -3,7 +3,8 @@
   nrepl-poc fork (2026-09-28), with :id and :session dropped as the probes
   printed them."
   (:require [clojure.test :refer [deftest is testing]]
-            [jonquil.cljd :as cljd]))
+            [jonquil.cljd :as cljd]
+            [jonquil.dialect :as dialect]))
 
 (def drive-ns-form
   "(ns demo.deck.drive\n  \"Drive the deck.\"\n  (:require\n    [\"dart:io\" :as io]\n    [cljd.string :as str]))")
@@ -98,3 +99,44 @@
   (is (= {:status :error :error-text "Load stopped at form 2 of x.y"}
          (cljd/load-result [{:ns "x.y"} {:value "1"} {:err "boom"} {:status ["done" "eval-error"]}] "x.y" true))
       "a cljd Stop never sends interrupt, so an eval-error in the load's own replies is never caused by Stop"))
+
+(deftest doc-result-test
+  (testing "found (fork 685e56de: nREPL's stock info shape, no file or line)"
+    (is (= {:status :found :symbol "map" :ns "cljd.core" :name "map" :arglists "([f] [f coll])" :doc "Returns a lazy seq."}
+           (cljd/doc-result "map" [{:info {"ns" "cljd.core" "name" "map" "doc" "Returns a lazy seq."
+                                           "arglists" "([f] [f coll])" "arglists-str" "([f] [f coll])"}
+                                    :status ["done"]}])))
+    (is (:macro? (cljd/doc-result "when" [{:info {"ns" "cljd.core" "name" "when" "macro" "true"} :status ["done"]}]))))
+  (is (= {:status :no-docs :symbol "nope" :name "nope" :doc "No docs for nope"}
+         (cljd/doc-result "nope" [{:status ["done" "no-info"]}])))
+  (testing "lookup-error (the older fork 573781a2) and unknown-op: the older-fork sentence"
+    (is (= cljd/no-lookup-doc (:doc (cljd/doc-result "map" [{:status ["done" "lookup-error"]}]))))
+    (is (= cljd/no-lookup-doc (:doc (cljd/doc-result "map" [{:err "Unknown op: lookup" :status ["done" "unknown-op"]}]))))))
+
+(deftest buffer-aliases-test
+  (is (= ["io" "str"] (cljd/buffer-aliases drive-ns-form)))
+  (is (= ["f" "m"] (cljd/buffer-aliases "(ns a (:require [cljd.flutter :as f] [\"package:flutter/material.dart\" :as m] [x.y :as-alias f]))")))
+  (is (= [] (cljd/buffer-aliases "(defn f [])"))))
+
+(deftest candidates-test
+  (let [text (str "(ns demo.app (:require [cljd.flutter :as f] [\"dart:io\" :as io]))\n"
+                  "(defn where-now [] 1)\n(defn window-size [] 2)\n(f/widget :padding 8)\n")
+        syms (fn [prefix & [extra]] (mapv :symbol (cljd/candidates dialect/cljd prefix text 0 extra)))]
+    (testing "the buffer's own names, then ClojureDart's forms"
+      (is (= ["where-now" "window-size" "when"] (take 3 (syms "w"))) "buffer names sort first")
+      (is (some #{"widget"} (syms "w")))
+      (is (= :user (:category (first (cljd/candidates dialect/cljd "where" text 0 nil))))))
+    (testing "aliases from the ns form, and the aliased flutter forms"
+      (is (= ["f/"] (take 1 (syms "f"))))
+      (is (some #{"f/widget" "f/build" "f/$"} (syms "f/")))
+      (is (some #{"io/"} (syms "i"))))
+    (testing "cljd's own forms are special; Jolt's builtins stay builtins"
+      (let [by-sym (into {} (map (juxt :symbol :category)) (cljd/candidates dialect/cljd "" text 0 nil))]
+        (is (= :special (by-sym "await")))
+        (is (= :special (by-sym "f/widget")))
+        (is (= :builtin (by-sym "map")))))
+    (testing "the REPL history counts as extra context"
+      (is (some #{"from-history"} (syms "from" "(from-history 1)"))))
+    (testing "nothing from the in-process Jolt runtime: a clojure.core var no profile set names"
+      (is (empty? (syms "ns-publics")))
+      (is (empty? (syms "requiring-resolve"))))))

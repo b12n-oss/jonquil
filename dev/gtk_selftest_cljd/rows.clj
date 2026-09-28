@@ -12,6 +12,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.help-popover :as help-popover]
             [jonquil.nrepl.attach :as attach]))
 
 ;; Deviation (measured against a throwaway read, not run live): the
@@ -24,6 +25,11 @@
   "(ns demo.drive)\n\n(defn where [] 1)\n\n(comment\n  (where)\n  (slow)\n  )\n")
 
 (def ^:private where-answer "{:slide 21, :of 54}")
+
+(def ^:private where-info
+  ;; cljd plan P4.T1: lookup's found shape (fork 685e56de: nREPL's stock
+  ;; info, string keys, no file or line).
+  {"ns" "demo.drive" "name" "where" "doc" "Where the deck is now." "arglists" "([])" "arglists-str" "([])"})
 
 ;; The fixture app and its fake server, stashed so rows and
 ;; after-close-checks! (which runs after main/start! returns) reach them.
@@ -38,7 +44,7 @@
   NREPL.lock holding the fake's port, and dev/demo/drive.cljd. {:dir :file
   :server :lock-text}, paths canonical."
   []
-  (let [srv (fake/start! {:answers {"(where)" where-answer} :slow {"(slow)" 5000}})
+  (let [srv (fake/start! {:answers {"(where)" where-answer} :slow {"(slow)" 5000} :docs {"where" where-info}})
         d (temp-app-dir)
         f (io/file d "dev/demo/drive.cljd")
         lock-text (str (:port srv) "\n")]
@@ -160,6 +166,39 @@
                              (and ok? (= ["(let [w (where)]\n    w)"] sent))
                              {:ok? ok? :sent sent :text (support/since ui mark)})))))
 
+(defn row-cljd-quick-doc-from-app
+  "cljd plan P4.T1: attached, quick doc on where shows the app's own doc,
+  from lookup in the buffer's namespace."
+  [ui]
+  (go-row :cljd-quick-doc-from-app support/check
+    (on-gtk (let [ed (:editor ui)]
+              (editor/set-text! ed fixture-drive)
+              (support/place-cursor! (:buf ed) (inc (str/index-of fixture-drive "(where)")))
+              ((:quick-doc!* ui))
+              (let [text (help-popover/quick-doc-text (:help-popover ui))
+                    req (last (fake/requests (srv)))]
+                (support/check :cljd-quick-doc-from-app
+                               (and (str/includes? text "demo.drive/where") (str/includes? text "Where the deck is now.")
+                                    (= ["lookup" "where" "demo.drive"] [(get req "op") (get req "sym") (get req "ns")]))
+                               {:text text :req req}))))))
+
+(defn row-cljd-completion-offline
+  "cljd plan P4.T1: completion is offline. \"(wher\" commits to the
+  buffer's own where, and nothing was sent to the app for it."
+  [ui]
+  (go-row :cljd-completion-offline support/check
+    (on-gtk (let [ed (:editor ui)
+                  n (count (fake/requests (srv)))
+                  text (str fixture-drive "(wher")]
+              (editor/set-text! ed text)
+              (support/place-cursor! (:buf ed) (count text))
+              ((:complete!* ui))
+              (let [after (editor/editor-text ed)
+                    sent (drop n (fake/requests (srv)))]
+                (support/check :cljd-completion-offline
+                               (and (str/ends-with? after "(where") (empty? sent))
+                               {:tail (subs after (max 0 (- (count after) 12))) :sent sent}))))))
+
 (defn row-cljd-stop-detaches
   "Stop during a slow form detaches: the console says so, the label goes
   back to not running, and the server never got interrupt or close."
@@ -182,6 +221,23 @@
                              (and started? stopped? not-running? (not-any? #{"interrupt" "close"} ops))
                              {:started started? :stopped stopped? :label (label ui) :ops ops
                               :text (support/since ui mark)})))))
+
+(defn row-cljd-quick-doc-detached
+  "cljd plan P4.T1: detached (after the Stop above), quick doc says so and
+  doesn't connect."
+  [ui]
+  (go-row :cljd-quick-doc-detached support/check
+    (on-gtk (let [ed (:editor ui)
+                  n (count (fake/requests (srv)))]
+              (editor/set-text! ed fixture-drive)
+              (support/place-cursor! (:buf ed) (inc (str/index-of fixture-drive "(where)")))
+              ((:quick-doc!* ui))
+              (let [text (help-popover/quick-doc-text (:help-popover ui))]
+                (support/check :cljd-quick-doc-detached
+                               (and (str/includes? text cljd/not-attached-doc)
+                                    (= n (count (fake/requests (srv))))
+                                    (not (attach/connected? (evaluator ui))))
+                               {:text text}))))))
 
 (defn row-cljd-reconnects-after-detach
   "The next Run Selection reconnects with a fresh clone and answers."
