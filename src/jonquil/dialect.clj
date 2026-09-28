@@ -7,8 +7,10 @@
   Selection is per project. The project is the nearest directory at or
   above a file holding .jonquil.edn or a profile's marker. Its
   .jonquil.edn {:dialect k :runtime k} wins; otherwise a single matching
-  marker; otherwise the file's extension breaks the tie (a loose file has no
-  markers); otherwise the settings default; otherwise the first profile.
+  marker decides, but only when its profile claims the file's extension or
+  the file is untitled; otherwise the file's extension breaks the tie (a
+  loose file has no markers); otherwise the settings default; otherwise the
+  first profile.
   A malformed .jonquil.edn never throws: it becomes a warning and the rest
   of the rules decide."
   (:require [clojure.edn :as edn]

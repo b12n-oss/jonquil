@@ -14,6 +14,9 @@
          (cljd/ns-form (str ";; header (ns not.this)\n" drive-ns-form "\n\n(defn where [] 1)\n"))))
   (testing "metadata before the name is skipped"
     (is (= "a.b" (:name (cljd/ns-form "(ns ^:no-doc a.b)")))))
+  (testing "I1: ^{...} metadata before the name is skipped too, and it can stack"
+    (is (= "my.app" (:name (cljd/ns-form "(ns ^{:doc \"x\"} my.app (:require [a :as b]))"))))
+    (is (= "my.app" (:name (cljd/ns-form "(ns ^:a ^{:doc \"x\"} my.app)")))))
   (testing "only a top-level ns form counts"
     (is (nil? (cljd/ns-form "(comment (ns a.b))")))
     (is (nil? (cljd/ns-form "\"(ns a.b)\" ; (ns c.d)")))

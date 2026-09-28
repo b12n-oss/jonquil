@@ -71,10 +71,48 @@
            (or (contains? #{\' \` \~ \@} ch)
                (and (= \_ ch) (pos? i) (= \# (.charAt text (dec i)))))))))
 
+(defn- caret-before?
+  "True when the nearest non-whitespace character in text before pos is
+  ^, so the :bracket token starting at pos is a ^{...} metadata map, not
+  a bare map literal."
+  [^String text pos]
+  (let [i (loop [i (dec (long pos))]
+            (if (and (>= i 0) (Character/isWhitespace (.charAt text i)))
+              (recur (dec i))
+              i))]
+    (and (>= i 0) (= \^ (.charAt text i)))))
+
+(defn- skip-past
+  "The first toks index at or after j whose token starts past close (a
+  matched bracket's own closing position), so a ^{...} metadata map's
+  tokens -- its keys, values and closing brace -- are skipped in one
+  jump rather than one at a time."
+  [toks j close]
+  (if-let [tok (get toks j)]
+    (if (<= (long (second tok)) (long close)) (recur toks (inc j) close) j)
+    j))
+
+(defn- skip-ns-metadata
+  "toks index start-i advanced past every :metatag token and ^{...}
+  metadata map (I1: a bare ^ right before { isn't tokenized at all, so a
+  map's own :bracket token only counts as metadata when caret-before?
+  finds the ^ that introduces it) -- the prefix can stack, as in
+  ^:a ^{:doc ...} name. Returns the ns form's name token index, or an
+  out-of-range index when the metadata never ends."
+  [^String text toks matches start-i]
+  (loop [j start-i]
+    (let [[t s] (get toks j)]
+      (cond
+        (= :metatag t) (recur (inc j))
+        (and (= :bracket t) (= \{ (.charAt text (int s))) (caret-before? text (long s)) (matches (long s)))
+        (recur (skip-past toks (inc j) (matches (long s))))
+        :else j))))
+
 (defn ns-form
   "The buffer's first top-level (ns ...) form as {:name str :text str}, or
   nil when there's none, or it's never closed. Brackets inside strings and
-  comments don't count, and metadata before the name is skipped. A
+  comments don't count, and metadata before the name is skipped, including
+  a ^{...} metadata map (I1), which can stack with ^:keyword tags. A
   discarded (#_) or quoted/reader-prefixed ('/`/~/@) top-level form is
   skipped, since it isn't the buffer's real ns form."
   [text]
@@ -93,8 +131,7 @@
                 (when (and (= :bracket t) (contains? top-opens (long s)) (= "ns" (word (inc i)))
                            (not (discard-or-quoted? text (long s) comment-spans)))
                   (when-let [close (get matches (long s))]
-                    (let [name-i (first (drop-while (fn [j] (= :metatag (first (get toks j))))
-                                                    (iterate inc (+ i 2))))
+                    (let [name-i (skip-ns-metadata text toks matches (+ i 2))
                           [nt ns-start ns-end] (get toks name-i)]
                       (when (#{:symbol :special-form :builtin} nt)
                         {:name (subs text ns-start ns-end)

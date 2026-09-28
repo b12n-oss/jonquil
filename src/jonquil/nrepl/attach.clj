@@ -325,7 +325,7 @@
   (limitations [_]
     ["Stop detaches: there's no interrupt, so the app keeps running whatever it already has."
      "No stdin. println output comes back, but is lost when the form throws."
-     "Completion and quick doc don't ask the app: completion uses this buffer and ClojureDart's own forms."
+     "No server-side completion: completion uses this buffer and ClojureDart's own forms. Docs come from the fork's lookup."
      "Reset on Run isn't available: hot reload can't unload a namespace, so every Run adds to the app."
      "A load stops at the first form the app's REPL compiler rejects; the app's watcher still compiles the saved file."]))
 
