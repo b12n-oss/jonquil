@@ -24,6 +24,88 @@
               (subs text start end)))]
     (when-not (str/blank? s) s)))
 
+;; --- Run Form (cljd plan P3.T1) ---------------------------------------------
+
+(def ^:private prefix-chars
+  ;; Reader prefixes that belong to the form right after them: quote,
+  ;; syntax-quote, unquote, deref, and # (sets, fns, reader conditionals).
+  #{\' \` \~ \@ \# \?})
+
+(defn- form-tree
+  "text's forms as a tree: a vector of top-level {:start :end :open :kids}.
+  A bracketed form has :open (its opening bracket's offset) and :kids, an
+  atom (symbol, keyword, number, string, character, regex) has neither.
+  :start takes in any reader prefix written right before the form ('(..),
+  #{..}, @x, #?(..)). Comments are skipped, a closer that doesn't match is
+  ignored, and a form never closed is dropped along with everything in it,
+  so an unfinished buffer has nothing to run there. The tokenizer reads the
+  ? of #? (a reader conditional) as a symbol of its own, so that one is
+  dropped and its two characters count as prefix."
+  [text]
+  (let [cond-mark? (fn [[t s e]] (and (= :symbol t) (pos? s) (= "?" (subs text s e))
+                                      (= \# (.charAt ^String text (int (dec s))))))
+        toks (filterv (fn [[t :as tok]] (not (or (= :comment t) (cond-mark? tok)))) (syntax/tokenize text))
+        n (count toks)
+        prefixed (fn [i s]
+                   (let [floor (if (pos? i) (nth (nth toks (dec i)) 2) 0)]
+                     (loop [p s]
+                       (if (and (> p floor) (contains? prefix-chars (.charAt ^String text (int (dec p)))))
+                         (recur (dec p))
+                         p))))]
+    (loop [i 0 stack [{:kids []}]]
+      (if (= i n)
+        (:kids (first stack))
+        (let [[t s e] (nth toks i)
+              ch (when (= :bracket t) (.charAt ^String text (int s)))]
+          (cond
+            (and ch (syntax/open->close ch))
+            (recur (inc i) (conj stack {:start (prefixed i s) :open s :close-ch (syntax/open->close ch) :kids []}))
+
+            ch
+            (let [top (peek stack)]
+              (if (and (> (count stack) 1) (= ch (:close-ch top)))
+                (let [form (-> top (dissoc :close-ch) (assoc :end e))
+                      stack (pop stack)]
+                  (recur (inc i) (conj (pop stack) (update (peek stack) :kids conj form))))
+                (recur (inc i) stack)))
+
+            :else
+            (recur (inc i) (conj (pop stack) (update (peek stack) :kids conj {:start (prefixed i s) :end e})))))))))
+
+(defn- form-around
+  "The form in forms (siblings in order) that holds caret: the one it is
+  inside or at the start of, else the one it sits right after."
+  [forms caret]
+  (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
+      (first (filter (fn [{:keys [end]}] (= end caret)) forms))))
+
+(defn- comment-block?
+  "True for a (comment ...) list: an unprefixed ( whose first child is the
+  symbol comment."
+  [text {:keys [start open kids]}]
+  (let [head (first kids)]
+    (boolean (and open (= start open) (= \( (.charAt ^String text (int open)))
+                  head (nil? (:open head))
+                  (= "comment" (subs text (:start head) (:end head)))))))
+
+(defn run-form
+  "What Run Form (Cmd/Ctrl+Enter) sends, CIDER's C-c C-c: the top-level form
+  around the caret, or, when that form is a (comment ...) block, the form
+  directly inside it that holds the caret (clojure-toplevel-inside-comment-
+  form). {:text :start :end}, or nil when the caret is on no form, on the
+  comment symbol itself, or between the forms of a comment block. A caret
+  right after a form's last character still counts as that form. Brackets
+  in strings, comments and character literals don't count."
+  [{:keys [text caret]}]
+  (when-not (str/blank? text)
+    (when-let [top (form-around (form-tree text) caret)]
+      (let [form (if (comment-block? text top)
+                   (let [inner (form-around (rest (:kids top)) caret)]
+                     (when (and inner (> caret (:end (first (:kids top))))) inner))
+                   top)]
+        (when form
+          {:text (subs text (:start form) (:end form)) :start (:start form) :end (:end form)})))))
+
 (defn format-all-op
   "Re-indents the whole buffer as one edit (one undo step). nil when the
   text is already formatted."
