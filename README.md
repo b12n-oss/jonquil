@@ -79,6 +79,7 @@ bb test jonquil.edit-test # one namespace (the TDD loop)
 bb gtk:selftest           # real-window self-tests, opens four windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
+bb smoke:cljd             # drive the built binary against a running ClojureDart app (start it with bb dev:macos first)
 ```
 
 `bb info` (or `jolt info`, since jolt reads this same `bb.edn`) prints the full task list grouped by what it's for, including the quality and git-hook tasks below.

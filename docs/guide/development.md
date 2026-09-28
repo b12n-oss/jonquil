@@ -83,6 +83,32 @@ screen pixels through OCR (`cgevent ocr-inspect`) plus a per-pixel colour
 check for the theme's text and prompt colours. Every jonquil process the
 script starts is killed on every exit path, success, failure, or Ctrl-C.
 
+**`bb smoke:cljd`** drives the same built binary against a real, running
+ClojureDart app instead, so it needs one up first: `bb dev:macos` in
+`a-sibling-cljd-app`, on the `nrepl-poc` fork at `199d173d` or later. If the
+app isn't up, or the screen is locked, every step SKIPs and the task exits 0.
+One Jonquil process stays open for the whole run, since every step shares
+the same attached session. In order, it:
+
+1. opens the app's `drive.cljd` and checks the label and the experimental line
+2. runs it and waits for `Loaded demo.deck.drive`
+3. reads `(where)`
+4. sends `(next!)` once and `(prev!)` once, checking the deck moved exactly one step and came back
+5. types a two-line `let` for Run Form, then undoes it
+6. checks quick doc and completion
+7. presses Stop during a slow eval, then reconnects
+8. closes the window
+
+The `(prev!)` only goes out after a second `(where)` confirms the `(next!)`
+really moved the deck, so a `(next!)` that never landed can't leave the
+deck a step behind. The buffer only counts as clean when the window title
+reads exactly `drive.cljd - Jonquil`, and the script closes nothing that
+isn't clean. It never saves the app's file and never quits, signals or
+restarts the app. At the end it compares the app's `git status` with what
+it recorded at the start. Quitting and restarting the app stay manual
+checks, so those two steps always SKIP. If a close runs past 3 s, it saves
+a screenshot and a stack sample under `target/smoke/`.
+
 **`bb docs:shots`** self-captures every `docs/images/*.png` and the one GIF
 the guide pages embed. Rather than one shared window walking through every
 scene, it launches a fresh `jolt -M:shots <scene-id>` process per scene, so
@@ -92,16 +118,16 @@ one pass; to retake just one, run `jolt -M:shots <scene-id>` directly, the
 same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
-All three harnesses isolate the user's own settings from the app they're
+Every harness isolates the user's own settings from the app it's
 driving. The window self-tests and `docs:shots` pass a temp `:settings-path`
-into `jonquil.main/start!`, and `smoke:binary` points `XDG_CONFIG_HOME` at a
-fresh temp directory for every process it launches. Neither the self-tests
+into `jonquil.main/start!`, and both smokes point `XDG_CONFIG_HOME` at a
+fresh temp directory for every process they launch. Neither the self-tests
 nor the smoke ever reads or writes `~/.config/jonquil/settings.edn`.
 
 ### Traps
 
-- **Don't type while a self-test window has focus.** `bb gtk:selftest` and
-  `bb docs:shots` open real windows that take real keyboard focus; a stray
+- **Don't type while a self-test window has focus.** `bb gtk:selftest`,
+  `bb docs:shots` and both smokes open real windows that take real keyboard focus; a stray
   keystroke lands in the window under test and fails a row that has nothing
   to do with what was typed.
 - **A phantom second display can attach at scale 1.0**, unrelated to any

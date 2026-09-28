@@ -62,6 +62,13 @@ the same path Cmd/Ctrl+E does: it's echoed at the console prompt,
 evaluated there, and joins the REPL history. With no form at the caret,
 nothing runs and the status bar says "No form at the caret."
 
+A form you've switched off with `#_` counts as no form, so Run Form won't
+run code you've discarded (a stacked `#_ #_` discards both forms, the way
+the reader does). Metadata in front of a form travels with it:
+`^:private (defn f [] 1)` runs with its `^:private`. The flash is a real
+selection for a quarter of a second, but a key pressed during it cancels
+the flash first and puts the caret back, so it never types over the form.
+
 ## The REPL prompt, and how it differs from Run
 
 ![A Run's output followed by a REPL entry evaluated afterward, in the same console](../images/repl.png)

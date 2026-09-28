@@ -4,26 +4,19 @@
 
 Jonquil is a port of DrClojure's idea to Jolt: a Clojure IDE with a Definitions editor, an Interactions console, Run and Stop that actually stops. The design splits into layers.
 
-```
-            +---------------------------------------------+
-            |              jonquil.gtk.*  (front-end)      |
-            |  window, two TextViews, toolbar, status bar, |
-            |  key routing, tag painting, file dialogs      |
-            +------------------+--------------------------+
-                               | snapshots in, edits out
-            +------------------v--------------------------+
-            |         jonquil.session  (per-window state)  |
-            |  file, dirty flag, eval context, font size   |
-            +--+-----------+-------------+-------------+---+
-               |           |             |             |
-      +--------v--+  +-----v-----+  +----v-----+  +----v-------+
-      | jonquil.  |  | jonquil.  |  | jonquil. |  | jonquil.   |
-      | syntax +  |  | edit      |  | eval     |  | docs       |
-      | paint     |  | pure edit |  | run, in, |  | (docs and  |
-      | tokenize, |  | ops       |  | out,stop |  | completion |
-      | format    |  |           |  | history  |  | in eval ns)|
-      +-----------+  +-----------+  +----------+  +------------+
-            pure         pure        threads       pure + runtime
+```mermaid
+flowchart TD
+  gtk["jonquil.gtk.*: front-end<br/>window, two TextViews, toolbar, status bar,<br/>key routing, tag painting, file dialogs"]
+  session["jonquil.session: per-window state<br/>file, dirty flag, eval context, font size"]
+  syntax["jonquil.syntax + paint<br/>tokenize, format<br/>(pure)"]
+  edit["jonquil.edit<br/>pure edit ops<br/>(pure)"]
+  eval["jonquil.eval<br/>run, in, out, stop, history<br/>(threads)"]
+  docs["jonquil.docs<br/>docs and completion in the eval ns<br/>(pure + runtime)"]
+  gtk -- "snapshots in, edits out" --> session
+  session --> syntax
+  session --> edit
+  session --> eval
+  session --> docs
 ```
 
 Phase 3 and the Themes phase added three more pure namespaces alongside
@@ -87,9 +80,12 @@ The eval engine's callbacks (`on-output`, `on-wait-input`, `on-status-change`, `
 
 The Interactions console is one GtkTextBuffer laid out as
 
-```
-[ output history ......... ][ "> " ][ input ... ]
-^0                          ^out-end ^input-start       ^end
+```mermaid
+flowchart LR
+  hist["output history<br/>(read-only)"] --- prompt["#quot;> #quot;<br/>(read-only)"] --- input["input ..."]
+  m0(["0"]) -.-> hist
+  mout(["out-end mark<br/>right gravity"]) -.-> prompt
+  min(["input-start mark<br/>left gravity"]) -.-> input
 ```
 
 Output history and the prompt carry a read-only tag, which is what stops typing, pasting or Backspace from reaching into old output; GtkTextView's own edit path already refuses edits under that tag. `out-end` is a mark with right gravity: `append!` always inserts at it, so new output lands before the prompt and the mark tracks past it. `input-start` is a mark with left gravity: text typed at it stays after it, and output inserted earlier in the buffer pushes it forward automatically. Committing an entry (Return, when it evaluates or sends stdin) moves both marks explicitly to open a fresh `"> "` prompt after the old input, rather than relying on gravity for that step.
@@ -115,7 +111,7 @@ All three poll a condition against a deadline rather than sleeping, and all thre
 
 Applying a theme doesn't rebuild anything: each component's `apply-theme!` retints its existing tags in place, so text, undo history and highlights all survive the switch. The window then reloads its one CSS provider, the same one zoom uses, from `theme/code-css`, and sets `gtk-interface-color-scheme` on GtkSettings to `DARK` or `LIGHT` so GTK's own chrome follows along.
 
-Isolation matters here too: self-tests and `bb docs:shots` pass a temp `:settings-path`, and `bb smoke:binary` sets `XDG_CONFIG_HOME` to a temp directory, so none of the harnesses ever touches the user's real settings file.
+Isolation matters here too: self-tests and `bb docs:shots` pass a temp `:settings-path`, and `bb smoke:binary` and `bb smoke:cljd` set `XDG_CONFIG_HOME` to a temp directory, so none of the harnesses ever touches the user's real settings file.
 
 ### Help: completion, quick doc, jump and rename (P4)
 
@@ -161,6 +157,15 @@ still the one every window starts with by default. The `make` multimethod
 dispatches on a selection's `:runtime`, so requiring a new
 implementation's namespace is what registers it; `jonquil.nrepl.
 evaluator` is the second one, and `jonquil.nrepl.attach` is the third.
+
+```mermaid
+flowchart LR
+  file["opened file"] --> fp["dialect/find-project<br/>markers and .jonquil.edn"]
+  fp --> sel["dialect/select<br/>profile, runtime, project dir"]
+  sel -- ":in-process" --> inproc["jonquil.session<br/>InProcess (Jolt)"]
+  sel -- ":nrepl" --> nrepl["jonquil.nrepl.evaluator<br/>NRepl: spawns jolt nrepl-server"]
+  sel -- ":attach" --> attach["jonquil.nrepl.attach<br/>Attach: a running ClojureDart app"]
+```
 
 ### `jonquil.nrepl.*`: Jolt out of process
 
@@ -212,6 +217,29 @@ read `NREPL.lock` for a port, connect, `describe` for the ops the app
 offers, then `clone` a session. Each successful connect keeps exactly one
 session for the whole life of the connection; a fresh one is only ever
 cloned again after a detach.
+
+```mermaid
+sequenceDiagram
+  participant W as Window
+  participant A as Attach
+  participant F as NREPL.lock
+  participant App as ClojureDart app (nREPL)
+  W->>A: eval! (Run, Cmd+E or Cmd+Enter)
+  A->>F: read the port (never written)
+  A->>App: connect, then describe
+  App-->>A: ops include eval and load-file
+  A->>App: clone
+  App-->>A: new session
+  A->>App: eval (+ 1 2), Jonquil's own wake-up probe
+  App-->>A: banner (out), then value 3
+  opt Run Selection or Run Form in another namespace
+    A->>App: eval the buffer's ns form
+  end
+  A->>App: load-file (Run) or eval (selection), sent once
+  App-->>A: out, value, ns, done
+  A-->>W: one result line, and the label reads attached
+  Note over W,App: Stop closes the socket. It never sends interrupt or close.
+```
 
 Run goes through `load-file`, and its result is quiet on purpose: one
 `; Loaded <ns> (<n> forms)` line instead of a value per top-level form,
