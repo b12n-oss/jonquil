@@ -153,12 +153,69 @@
   "Deletes the output history [0, out-end), keeping the prompt and any
   typed input untouched. GTK-thread only, like clear-input!. Allowed while
   a program runs (Cmd/Ctrl+L, upstream): new output keeps arriving above
-  the prompt at out-end, which this never touches."
+  the prompt at out-end, which this never touches.
+
+  Also deactivates the last-entry mark (mark-entry-start!/clear-last-
+  output!, below): \"there's no last entry until the next one begins\"
+  after a full Cmd+L, whatever a Shift+L right before it would have found."
   [cv]
   (let [buf (:buf cv)
         end (mark-offset buf (:out-end cv))]
     (when (pos? end)
-      (g/with-iters* buf 0 end (fn [a b] (g/gtk-text-buffer-delete buf a b))))))
+      (g/with-iters* buf 0 end (fn [a b] (g/gtk-text-buffer-delete buf a b)))))
+  (reset! (:last-entry-active? cv) false)
+  nil)
+
+(defn mark-entry-start!
+  "Marks the console's own \"last entry start\" at out-end's CURRENT
+  offset -- the position Cmd/Ctrl+Shift+L (clear-last-output!, below)
+  later reads back as the start of the block to delete. GTK-thread only.
+
+  Reading out-end's offset now, before this entry's own first character
+  has even been enqueued, is safe: out-end's own right gravity and
+  append!'s FIFO queue together guarantee that whatever lands next in the
+  queue lands at exactly this offset once drained, since nothing between
+  now and that drain can move out-end without going through this same
+  queue, behind whatever's already in it.
+
+  The three choke points that call this: commit-input! (below, a REPL
+  submit), echo-entry! (above -- Run Selection and Run Form both echo
+  through it, so one call there covers both), and jonquil.gtk.window's
+  do-run!, for the \"; --- Running Definitions ---\" banner, which doesn't
+  go through echo-entry! at all."
+  [cv]
+  (let [buf (:buf cv)
+        offset (mark-offset buf (:out-end cv))]
+    (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-move-mark buf (:last-entry-start cv) a)))
+    (reset! (:last-entry-active? cv) true))
+  nil)
+
+(defn clear-last-output!
+  "Deletes the last entry's own block -- its echo (or the Run banner),
+  everything it has printed so far, and its `=> ...`/error line -- up to
+  (but not including) the live prompt: Cmd/Ctrl+Shift+L, CIDER's C-c C-o.
+  GTK-thread only, like clear-output!/clear-input!.
+
+  console/clear-last-range makes the actual [start end) decision: nil
+  (nothing to clear, no throw) when there's no active last entry -- none
+  has begun yet, a previous Shift+L already cleared it, a full Cmd+L ran
+  since (clear-output!'s own reset above), or the output-cap trimmer
+  swallowed the mark's own text (trim!'s own citation below) -- or when
+  the entry is already empty.
+
+  Allowed while a program runs, same as clear-output!: the deletion only
+  ever reaches out-end's CURRENT offset, so output the program prints
+  AFTER this call lands past it, unaffected. The mark is deactivated once
+  cleared (never re-armed until the next mark-entry-start!), so calling
+  this again right after finds nothing left to clear."
+  [cv]
+  (let [buf (:buf cv)
+        start (when @(:last-entry-active? cv) (mark-offset buf (:last-entry-start cv)))
+        end (mark-offset buf (:out-end cv))]
+    (when-let [[a b] (console/clear-last-range start end)]
+      (g/with-iters* buf a b (fn [x y] (g/gtk-text-buffer-delete buf x y)))
+      (reset! (:last-entry-active? cv) false)))
+  nil)
 
 (defn focus!
   "Grabs focus for the console view and places the cursor at the end of the
@@ -299,7 +356,16 @@
   which is exactly what a 1-character offset from `from` needs to equal
   the true cut point -- verified against the original duplicated math
   across 6 cases including the real ~589k-char flood size (see the
-  fix-wave report's Follow-up section)."
+  fix-wave report's Follow-up section).
+
+  Also deactivates the last-entry mark (mark-entry-start!/clear-last-
+  output!'s own citations) when the deletion is about to reach past it:
+  read BEFORE the delete, since gtk_text_buffer_delete repositions any
+  mark caught inside [0, cut) to offset 0, at which point there is no way
+  left to tell that apart from a legitimate entry that really does start
+  at 0. A mark at or past cut survives the delete and stays valid (GTK
+  slides it down by the deleted amount, same as out-end itself), so only
+  the < case needs treating as gone."
   [cv]
   (let [buf (:buf cv)
         n (mark-offset buf (:out-end cv))]
@@ -307,6 +373,8 @@
       (let [from (dec (- n MAX-OUTPUT-CHARS))
             tail (text-range buf from n)
             cut (+ from (console/trim-length tail MAX-OUTPUT-CHARS))]
+        (when (and @(:last-entry-active? cv) (< (mark-offset buf (:last-entry-start cv)) cut))
+          (reset! (:last-entry-active? cv) false))
         (g/with-iters* buf 0 cut (fn [a b] (g/gtk-text-buffer-delete buf a b)))))))
 
 (defn- scroll-to-end!
@@ -352,8 +420,17 @@
   queue+drain path an eval's own output uses), so Run Selection's echo and
   whatever the eval later prints land in the console in the order they
   were called, even though the eval's own output arrives asynchronously
-  from the eval worker thread. Safe from any thread, like append!."
+  from the eval worker thread.
+
+  Also marks the console's own \"last entry start\" (mark-entry-start!,
+  above) before enqueuing the echo text, since Run Selection and Run Form
+  both echo through here -- one call covers both. GTK-thread only because
+  of that: unlike append! alone, mark-entry-start! touches the buffer
+  directly. Both of today's callers (jonquil.gtk.window's do-run-selection!/
+  do-run-form!) already only ever run on the GTK thread, like every
+  window-level key/menu handler."
   [cv text]
+  (mark-entry-start! cv)
   (append! cv :prompt (str "> " text "\n")))
 
 ;; --- Return ----------------------------------------------------------------
@@ -366,8 +443,13 @@
   prompt's own recreation would put the freshly-inserted \"> \" on the wrong
   side of out-end (right gravity means text inserted AT out-end's position
   ends up before it, which is exactly backwards for a prompt that must sit
-  after out-end)."
+  after out-end).
+
+  Also marks the console's own \"last entry start\" (mark-entry-start!,
+  above) at prompt-start -- the REPL-submit choke point for Cmd/Ctrl+Shift+L,
+  called before anything else here moves out-end."
   [cv]
+  (mark-entry-start! cv)
   (let [{:keys [buf tags readonly-tag out-end input-start]} cv
         prompt-start (mark-offset buf out-end)
         old-end (g/gtk-text-buffer-get-char-count buf)]
@@ -657,6 +739,14 @@
               :out-end (create-mark! buf "jonquil-console-out-end" 0 false)
               :input-start (create-mark! buf "jonquil-console-input-start" 2 true)
               :end-mark (create-mark! buf "jonquil-console-scroll-end" 2 false)
+              ;; Cmd/Ctrl+Shift+L: left gravity, like input-start -- text
+              ;; inserted at its own position (this entry's own output,
+              ;; landing right where it sits) must end up AFTER it, so the
+              ;; mark stays fixed at the entry's start throughout its own
+              ;; lifetime. :last-entry-active? is false until mark-entry-
+              ;; start! first arms it; see that fn's own docstring.
+              :last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)
+              :last-entry-active? (atom false)
               :queue (atom [])
               :drain-scheduled? (atom false)
               :waiting? waiting?

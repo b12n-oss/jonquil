@@ -76,6 +76,11 @@
    run-form/row-run-form-nothing-at-caret
    window-keys/row-toggle-focus
    run-repl/row-clear-console
+   run-repl/row-clear-last-two-entries
+   run-repl/row-clear-last-while-running
+   run-repl/row-clear-last-twice-noop
+   run-repl/row-clear-console-key-regression
+   run-repl/row-clear-last-menu-item
    console-layout/row-console-wraps-long-lines
    window-keys/row-zoom-in-out
    find-replace/row-find-highlights
