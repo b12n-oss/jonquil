@@ -92,9 +92,14 @@
   or deletes it.
 
   Checked after each blocking step (describe, clone): if Stop landed
-  while waiting, the local socket is closed and nothing is published into
-  state, so the connection this attempt was building is never mistaken
-  for a live one, never notified as connected, and never probed."
+  while waiting, the local socket is closed and nothing is published as
+  the LIVE :conn in state, so the connection this attempt was building is
+  never mistaken for one that's fully attached, never notified as
+  connected, and never probed. M4: the raw conn is published early, as
+  :connecting, the moment it opens -- before describe or clone can block
+  -- guarded the same conditional way, so a Stop landing mid-handshake
+  has something live for detach!/interrupt! to close at once instead of
+  waiting out describe's or clone's own timeout."
   [{:keys [state timings] :as ev} on-output]
   (when-not (connected? ev)
     (let [f (port-file ev)]
@@ -106,44 +111,56 @@
           (do
             (say! on-output :system (str (cljd/connecting-message port) "\n"))
             (if-let [conn (try (client/connect port) (catch Exception _ nil))]
-              (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))]
-                (if (stop-requested? ev)
+              (let [[_ new] (swap-vals! state (fn [s] (if (get-in s [:running :stop-requested?])
+                                                        s
+                                                        (assoc s :connecting conn))))]
+                (if-not (identical? conn (:connecting new))
                   (do (client/close! conn) {:status :interrupted})
-                  (let [op-set (if (vector? d) (ops/op-names d) #{})
-                        sid (when (and (contains? op-set "eval") (contains? op-set "load-file"))
-                              (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
-                                (when (vector? c) (some :new-session c))))]
-                    (cond
-                      (stop-requested? ev) (do (client/close! conn) {:status :interrupted})
-                      sid (let [[_ new] (swap-vals! state
-                                                    (fn [s] (if (get-in s [:running :stop-requested?])
-                                                              s
-                                                              (assoc s :conn conn :session sid :ops op-set
-                                                                     :session-ns cljd/default-ns :fresh? true))))]
-                            (if (identical? conn (:conn new))
-                              (do (add-watch (:open? conn) ::connection
-                                             (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
-                                  (notify! ev true)
-                                  nil)
-                              (do (client/close! conn) {:status :interrupted})))
-                      ;; describe answered disconnected: the app quit between
-                      ;; the socket opening and the reply landing. That's a
-                      ;; refused connection, not a non-cljd server (the
-                      ;; not-cljd sentence is only for one that answers
-                      ;; describe for real, without eval and load-file).
-                      (and (vector? d) (contains? (ops/statuses d) ops/disconnected))
-                      (do (client/close! conn) {:status :notice :text (cljd/refused-message port)})
-                      :else (do (client/close! conn)
-                                {:status :notice :text (cljd/not-cljd-message port)})))))
+                  (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))]
+                    (if (stop-requested? ev)
+                      (do (client/close! conn) {:status :interrupted})
+                      (let [op-set (if (vector? d) (ops/op-names d) #{})
+                            sid (when (and (contains? op-set "eval") (contains? op-set "load-file"))
+                                  (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
+                                    (when (vector? c) (some :new-session c))))]
+                        (cond
+                          (stop-requested? ev) (do (client/close! conn) {:status :interrupted})
+                          sid (let [[_ new] (swap-vals! state
+                                                        (fn [s] (if (get-in s [:running :stop-requested?])
+                                                                  s
+                                                                  (assoc s :conn conn :session sid :ops op-set
+                                                                         :session-ns cljd/default-ns :fresh? true))))]
+                                (if (identical? conn (:conn new))
+                                  (do (add-watch (:open? conn) ::connection
+                                                 (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
+                                      (notify! ev true)
+                                      nil)
+                                  (do (client/close! conn) {:status :interrupted})))
+                          ;; describe answered disconnected: the app quit between
+                          ;; the socket opening and the reply landing. That's a
+                          ;; refused connection, not a non-cljd server (the
+                          ;; not-cljd sentence is only for one that answers
+                          ;; describe for real, without eval and load-file).
+                          (and (vector? d) (contains? (ops/statuses d) ops/disconnected))
+                          (do (client/close! conn) {:status :notice :text (cljd/refused-message port)})
+                          :else (do (client/close! conn)
+                                    {:status :notice :text (cljd/not-cljd-message port)})))))))
               {:status :notice :text (cljd/refused-message port)}))
           {:status :notice :text cljd/bad-port-file-message})))))
 
 (defn- detach!
   "Forgets the session and closes the socket: pending requests fail with
-  jonquil.nrepl.client's disconnected status. Sends nothing to the app."
+  jonquil.nrepl.client's disconnected status. Sends nothing to the app.
+  Also closes and clears :connecting (M4): connect! publishes the raw
+  socket there before describe or clone can block on it, so a Stop
+  landing mid-handshake has something live to close instead of waiting
+  out describe's or clone's own timeout. client/close! is safe to call
+  twice on the same conn (a successful connect! leaves :conn and
+  :connecting pointing at the same object until the next detach!)."
   [{:keys [state]}]
-  (let [{:keys [conn]} (first (swap-vals! state assoc :conn nil :session nil :fresh? false))]
-    (client/close! conn)))
+  (let [{:keys [conn connecting]} (first (swap-vals! state assoc :conn nil :session nil :connecting nil :fresh? false))]
+    (client/close! conn)
+    (client/close! connecting)))
 
 ;; --- one evaluation ------------------------------------------------------------
 
@@ -335,7 +352,7 @@
   ([selection] (make-attach selection {}))
   ([selection timings]
    (->Attach selection
-             (atom {:running nil :conn nil :session nil :ops #{} :session-ns nil :fresh? false})
+             (atom {:running nil :conn nil :connecting nil :session nil :ops #{} :session-ns nil :fresh? false})
              (atom (eval/create-history))
              (atom [])
              (merge default-timings timings))))

@@ -372,7 +372,26 @@
         (let [clones-before (clone-count)]
           (is (= :ok (:status (first (run e "(+ 1 2)" {:run? false})))) "the next Run reconnects for real")
           (is (= (inc clones-before) (clone-count))
-              "a fresh clone: the interrupted attempt left no stale connection to reuse"))))))
+              "a fresh clone: the interrupted attempt left no stale connection to reuse")))))
+  (testing "M4: Stop closes the in-progress connection at once, not after describe's own (slow) reply"
+    ;; describe-timeout-ms is deliberately large here (10000, well past the
+    ;; server's own 3000ms slow-ops delay), so client/request-sync's own
+    ;; internal bound can't be what ends this -- only connect! publishing
+    ;; the raw conn as :connecting, for detach! to close, can.
+    (with-app {:slow-ops {"describe" 3000}}
+      (fn [srv dir _]
+        (let [e (attach/make-attach {:profile dialect/cljd :runtime :attach :project-dir dir}
+                                    {:describe-timeout-ms 10000 :clone-timeout-ms 500
+                                     :still-waiting-ms 200 :help-timeout-ms 200})
+              done (promise)]
+          (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
+          (loop [n 0] (when (and (< n 250) (not (some #{"describe"} (fake/ops-seen srv))))
+                        (Thread/sleep 20) (recur (inc n))))
+          (let [t0 (System/currentTimeMillis)]
+            (ev/interrupt! e)
+            (is (= :interrupted (:status (deref done 2000 :timeout))))
+            (is (< (- (System/currentTimeMillis) t0) 1000)
+                "finishes within about 1s of the Stop, not describe's own 3000ms reply")))))))
 
 (deftest idle-stop-detaches-test
   (with-app {}
