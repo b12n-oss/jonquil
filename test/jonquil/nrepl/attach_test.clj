@@ -269,13 +269,22 @@
   ;; pending, at a point where the connect (a full-ops server) would
   ;; otherwise succeed: op-set will carry eval and load-file, and clone
   ;; would answer fine.
+  ;;
+  ;; Fix round 3, finding 2: a fixed (Thread/sleep 100) here can overrun
+  ;; the 400ms describe delay when a full suite is loading the machine,
+  ;; so connect! finishes (describe's own stop-check sees nothing yet)
+  ;; before Stop ever lands. Polling fake/ops-seen for "describe" (the
+  ;; same technique stop-during-wake-probe-test uses for the probe's own
+  ;; code) waits for exactly the moment connect! is waiting on it,
+  ;; regardless of how long that takes to arrive.
   (with-app {:slow-ops {"describe" 400}}
     (fn [srv dir _]
       (let [e (make dir) seen (atom []) done (promise)
             clone-count (fn [] (count (filter #{"clone"} (fake/ops-seen srv))))]
         (attach/on-connection! e (fn [c] (swap! seen conj c)))
         (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
-        (Thread/sleep 100)
+        (loop [n 0] (when (and (< n 250) (not (some #{"describe"} (fake/ops-seen srv))))
+                      (Thread/sleep 20) (recur (inc n))))
         (ev/interrupt! e)
         (is (= :interrupted (:status (deref done 2000 :timeout)))
             "Stop during connect! (waiting on describe) ends the evaluation at once")
@@ -365,3 +374,49 @@
         (ev/interrupt! e)
         (is (= {:status :interrupted} (deref done 2000 :timeout))
             "Stop during the wake probe still ends the evaluation as :interrupted")))))
+
+(deftest stop-during-asleep-probe-test
+  ;; Fix round 3, finding 1: wake!'s stop-check only covered #{:lost
+  ;; :failed}, so a Stop that lands while BOTH probes answer asleep (r
+  ;; stays :asleep after the retry is exhausted) fell through to the
+  ;; :notice not-awake-message instead of :interrupted -- reachable
+  ;; whenever the app's genuine nil reply beats a detach's synthetic
+  ;; disconnect (round 2's finding A note: cljd's own connect skill
+  ;; already documents a hot-restart REPL answering nil).
+  ;;
+  ;; :stop-requested? is set directly on state, not through
+  ;; ev/interrupt! (which always detaches too, injecting a disconnected
+  ;; status that would turn this into the already-correct :lost case
+  ;; instead). :answers makes every probe answer "nil" (the fake's
+  ;; :asleep-for path doesn't consult :slow at all, so it can't be
+  ;; delayed the same way), and :slow gives each of the two probes its
+  ;; own 400ms wait. Polling fake/requests for the first probe's own
+  ;; code (the same technique stop-during-wake-probe-test uses) before
+  ;; setting the flag guarantees connect! has already finished, so the
+  ;; flag can only be read by wake!'s own check, never connect!'s
+  ;; (fixed in round 2, finding 7) -- a fixed sleep here raced exactly
+  ;; that and was measured to pass for the wrong reason under load.
+  ;;
+  ;; Measured (isolating this file's own tests, not a full-suite
+  ;; probe): stop-during-wake-probe-test's own connection, immediately
+  ;; before this test, keeps its fake server's per-connection future
+  ;; alive up to its own :slow duration (300ms) after ev/interrupt!
+  ;; already unblocked that test's client side -- interrupt! only
+  ;; detaches the client; the fake's Thread/sleep keeps running
+  ;; server-side until it wakes and fails to write to the now-closed
+  ;; socket. Starting this test's own connection while that lingering
+  ;; future is still alive was measured to shorten THIS test's probe
+  ;; wait to under 300ms (a premature :lost, already correctly handled
+  ;; before this fix, so the test passed without ever exercising the
+  ;; :asleep fallthrough this finding is about). The settle wait below
+  ;; is comfortably over that 300ms.
+  (with-app {:answers {cljd/probe-code "nil"} :slow {cljd/probe-code 400}}
+    (fn [srv dir _]
+      (Thread/sleep 400)
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
+        (loop [n 0] (when (and (< n 250) (not (some #{cljd/probe-code} (keep (fn [m] (get m "code")) (fake/requests srv)))))
+                      (Thread/sleep 20) (recur (inc n))))
+        (swap! (:state e) assoc-in [:running :stop-requested?] true)
+        (is (= {:status :interrupted} (deref done 2000 :timeout))
+            "Stop landing during the asleep probes still ends the evaluation as :interrupted, not a not-awake notice")))))

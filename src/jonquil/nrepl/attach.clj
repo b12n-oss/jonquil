@@ -171,9 +171,12 @@
   code isn't sent. A session that stays fresh is probed again next time.
   The probe's banner out is shown; its value isn't.
 
-  A Stop that landed while the probe was in flight reads as :interrupted,
-  the same way a disconnected or eval-error status does for an eval or a
-  load (jonquil.nrepl.ops/eval-result, jonquil.cljd/load-result): finish!
+  A Stop that landed while any probe was in flight reads as :interrupted
+  -- any non-:awake outcome, not only :lost or :failed, checked ahead of
+  the asleep retry so a Stop between or after the two probes neither
+  retries again nor falls through to not-awake-message -- the same way
+  a disconnected or eval-error status does for an eval or a load
+  (jonquil.nrepl.ops/eval-result, jonquil.cljd/load-result): finish!
   no longer squashes every non-:interrupted result on Stop, so each
   failure path decides for itself."
   [{:keys [state] :as ev} on-output]
@@ -182,8 +185,8 @@
       (let [r (cljd/probe-result (request! ev {:op "eval" :code cljd/probe-code} on-output))]
         (cond
           (= :awake r) (do (swap! state assoc :fresh? false) nil)
+          (stop-requested? ev) {:status :interrupted}
           (and (= :asleep r) (> tries 1)) (recur (dec tries))
-          (and (stop-requested? ev) (#{:lost :failed} r)) {:status :interrupted}
           (= :lost r) {:status :error :error-text cljd/lost-connection}
           :else {:status :notice :text cljd/not-awake-message})))))
 
