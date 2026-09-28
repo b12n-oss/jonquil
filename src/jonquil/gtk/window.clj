@@ -1743,10 +1743,18 @@
       (add-watch path ::dialect
                  (fn [_ _ old new]
                    (when (not= old new)
+                     ;; Fix round 1 (Important): set-profile! moved into a
+                     ;; finally, so the editor's dialect follows @sel* even
+                     ;; when apply-selection! throws after its own (reset!
+                     ;; sel* sel) -- the very first thing it does -- has
+                     ;; already run. Reading @sel* here (not sel, the local
+                     ;; select-for result) is what makes that safe: it's the
+                     ;; same value apply-selection! itself just reset,
+                     ;; whether or not anything after that reset threw.
                      (try (apply-selection! sel-ctx (select-for new @settings-path*))
-                          (editor/set-profile! ed (:profile @sel*))
                           (catch :default e
-                            (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))))))
+                            (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
+                          (finally (editor/set-profile! ed (:profile @sel*))))))))
     (update-title! ed win path)
     (g/gtk-window-present win)
     (editor/focus! ed)

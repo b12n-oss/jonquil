@@ -175,6 +175,7 @@
    dialects/row-project-config-unknown-runtime-warns
    dialects/row-project-open-keeps-evaluator
    dialects/row-editor-paints-profile-sets
+   dialects/row-selection-throw-still-paints-new-profile
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])
