@@ -177,7 +177,11 @@ and Cmd/Ctrl+Y both redo.
 F6 moves focus between the Definitions editor and the Interactions
 console, so a keyboard-only user can reach the prompt without touching
 the mouse. Cmd/Ctrl+L clears the console's output history while leaving
-whatever's typed at the prompt alone. Cmd/Ctrl+= (or Cmd/Ctrl++) zooms
+whatever's typed at the prompt alone. Cmd/Ctrl+Shift+L, CIDER's C-c C-o,
+clears only the most recent entry instead: its echoed input, everything
+it printed, and its result or error line, leaving every earlier entry and
+the live prompt untouched. Pressing it again right after does nothing,
+since there's nothing left of that entry to clear. Cmd/Ctrl+= (or Cmd/Ctrl++) zooms
 in, Cmd/Ctrl+- zooms out, and Cmd/Ctrl+0 resets the zoom, and all three
 resize both panes together. The status bar tracks the editor caret as
 `Ln L, Col C`, following clicks, the arrow keys and ordinary typing.
@@ -374,8 +378,8 @@ led by Run Form, then Jump to Definition, Rename Symbol, Quick
 Documentation, and Complete, alongside Jonquil's other editing commands
 (Toggle Comment, Format All, Format Selection, Indent, Unindent, Find,
 Replace) and GTK's own Cut, Copy, and Paste. The same menu over the
-console's input line carries Complete next to GTK's own entries. Every
-item runs the exact function its key would.
+console's input line carries Complete and Clear Last Output next to
+GTK's own entries. Every item runs the exact function its key would.
 
 ### Freeing Ctrl+Space on macOS
 
@@ -582,7 +586,8 @@ fork doesn't answer lookup)".
 | Cmd/Ctrl+E | Definitions editor | Run the selection, or the current line, at the console prompt |
 | Cmd/Ctrl+Enter | Definitions editor | Run the form at the caret (in a comment block, the form inside it) |
 | F6 | anywhere in the window | Move focus between the editor and the console |
-| Cmd/Ctrl+L | Interactions console | Clear the console's output history |
+| Cmd/Ctrl+L | anywhere in the window | Clear the console's output history |
+| Cmd/Ctrl+Shift+L | anywhere in the window | Clear the last entry's output (CIDER's C-c C-o) |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
