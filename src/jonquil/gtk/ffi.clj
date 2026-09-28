@@ -495,6 +495,24 @@
 ;; and its two buttons are hidden outside :replace mode.
 (ffi/defcfn gtk-widget-set-visible "gtk_widget_set_visible" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-get-visible "gtk_widget_get_visible" [:pointer] :int)
+
+;; gtk_widget_set_sensitive / get_sensitive and set_tooltip_text /
+;; get_tooltip_text: gtkwidget.h:434-437 and 685-688 (GTK 4.22.4). The
+;; Reset on Run checkbox is insensitive, with a tooltip saying why, for an
+;; attach runtime (cljd plan P2.T4). Measured on jolt v0.8.13: a nil :string
+;; argument reaches GTK as NULL, which clears the tooltip (get_tooltip_text
+;; then answers NULL and has-tooltip reads 0).
+(ffi/defcfn gtk-widget-set-sensitive "gtk_widget_set_sensitive" [:pointer :int] :void)
+(ffi/defcfn gtk-widget-get-sensitive "gtk_widget_get_sensitive" [:pointer] :int)
+(ffi/defcfn gtk-widget-set-tooltip-text "gtk_widget_set_tooltip_text" [:pointer :string] :void)
+(ffi/defcfn gtk-widget-get-tooltip-text* "gtk_widget_get_tooltip_text" [:pointer] :pointer)
+
+(defn tooltip-text
+  "widget's tooltip text, or nil. A borrowed const char* (gtkwidget.h:688),
+  so no g_free, as label-text."
+  [widget]
+  (let [p (gtk-widget-get-tooltip-text* widget)]
+    (when-not (ffi/null? p) (ffi/ptr->string p))))
 ;; gtk_text_view_scroll_to_iter: gtktextview.h:197-202. Copied from the
 ;; store's spike.p3-ffi (probe 2): scrolls the current match into view.
 (ffi/defcfn gtk-text-view-scroll-to-iter "gtk_text_view_scroll_to_iter"

@@ -9,42 +9,52 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 30 namespaces in under half a second, and it's the fastest
+currently loads 32 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (136 tests, 924 assertions
-today, about 4.4 s) with nothing outside the process, or pass namespace
-names to run a subset for the TDD loop: `bb test jonquil.edit-test`.
+slower. `bb test` runs the full unit suite (185 tests, 1223 assertions
+today, about 27 s) with nothing outside the process, or pass namespace
+names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
+count now includes the attach evaluator's own tests, run against an
+in-process fake ClojureDart server rather than a real one, so there's
+still no child process and nothing outside the repo.
 
 `bb test:nrepl` runs a second, separate suite (28 tests, 97 assertions,
-about 31 s): every test in it spawns a real Jolt child over
+about 32 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
 `bb test` never touches a child process and stays that self-contained on
 purpose, which is why the live tests are a separate task rather than a
 tag inside the same suite. `bb verify` is the pre-commit gate: clj-kondo
 in report mode, then both suites, `bb test` followed by `bb test:nrepl`,
-both of which must pass; end to end it runs in about 37 s.
+both of which must pass; end to end it runs in about 60 s.
 
-## Self-test and docs: two windows, one binary, one camera
+## Self-test and docs: four windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens three real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens four real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 35 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 136 rows), with its rows split by
-feature area under `dev/gtk_selftest_window/`: `support`, `run_repl`,
-`files`, `find_replace`, `close_prerun`, `window_keys`, `themes`,
-`popovers_quickdoc`, `completion`, `rename_menus`, `console_layout`, and
-`dialects`. The third (`dev/gtk_selftest_nrepl.clj`, 15 rows) opens against
-a throwaway project whose `.jonquil.edn` asks for `{:runtime :nrepl}`, so a
-real Jolt child runs behind it, and its rows cover starting, running, Stop,
-help, and closing over that live connection; it needs the jolt-lang/nrepl
-checkout the same way `bb test:nrepl` does, and records a single failing
-row rather than opening anything if that checkout isn't there.
+window (`dev/gtk_selftest_window.clj`, 146 rows), with its rows split by
+feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
+`run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
+`themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
+`console_layout`, and `dialects`. The third (`dev/gtk_selftest_nrepl.clj`,
+15 rows) opens against a throwaway project whose `.jonquil.edn` asks for
+`{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
+cover starting, running, Stop, help, and closing over that live
+connection; it needs the jolt-lang/nrepl checkout the same way
+`bb test:nrepl` does, and records a single failing row rather than
+opening anything if that checkout isn't there. The fourth
+(`dev/gtk_selftest_cljd.clj`, 13 rows) opens against a throwaway
+ClojureDart app directory whose `NREPL.lock` names a fake fork server
+running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no
+fork checkout and no real app; its rows cover connecting, a quiet load,
+Run Selection and Run Form switching the session's namespace, quick doc,
+completion, and Stop's detach, over that fake connection.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in

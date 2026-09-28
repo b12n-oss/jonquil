@@ -53,6 +53,15 @@ the REPL history.
 
 ![A selection run at the console with Cmd/Ctrl+E, shown with its result](../images/run-selection.png)
 
+Press Cmd/Ctrl+Enter, or pick Run Form from the editor's right-click menu,
+to run just the form around the caret. It runs the top-level form the
+caret sits in, or, when that form is a `(comment ...)` block, the form
+inside the block that holds the caret rather than the whole block. The
+form briefly flashes so you can see exactly what ran, then goes through
+the same path Cmd/Ctrl+E does: it's echoed at the console prompt,
+evaluated there, and joins the REPL history. With no form at the caret,
+nothing runs and the status bar says "No form at the caret."
+
 ## The REPL prompt, and how it differs from Run
 
 ![A Run's output followed by a REPL entry evaluated afterward, in the same console](../images/repl.png)
@@ -354,12 +363,12 @@ reports how many occurrences changed.
 ### Right-click menus
 
 Shift+F10, or a right click over the Definitions editor, opens a menu
-with Jump to Definition, Rename Symbol, Quick Documentation, and
-Complete, alongside Jonquil's other editing commands (Toggle Comment,
-Format All, Format Selection, Indent, Unindent, Find, Replace) and GTK's
-own Cut, Copy, and Paste. The same menu over the console's input line
-carries Complete next to GTK's own entries. Every item runs the exact
-function its key would.
+led by Run Form, then Jump to Definition, Rename Symbol, Quick
+Documentation, and Complete, alongside Jonquil's other editing commands
+(Toggle Comment, Format All, Format Selection, Indent, Unindent, Find,
+Replace) and GTK's own Cut, Copy, and Paste. The same menu over the
+console's input line carries Complete next to GTK's own entries. Every
+item runs the exact function its key would.
 
 ### Freeing Ctrl+Space on macOS
 
@@ -377,11 +386,14 @@ shortcut was turned on.
 ## Dialects and runtimes
 
 Jonquil evaluates through a dialect profile: what a language's files look
-like, how they're painted, and which evaluator runs them. There's one
-profile so far, Jolt, but selection and the evaluator seam underneath it
-are both generic. The status bar's dialect label reads `Jolt` most of the
-time, or `Jolt (nREPL)` when this window's Jolt is running out of process
-rather than inside Jonquil itself.
+like, how they're painted, and which evaluator runs them. Two profiles
+exist today, Jolt and ClojureDart (experimental), and selection and the
+evaluator seam underneath both are generic enough for a third. The status
+bar's dialect label reads `Jolt` most of the time, or `Jolt (nREPL)` when
+this window's Jolt is running out of process rather than inside Jonquil
+itself. For ClojureDart it reads `ClojureDart (attached)` while Jonquil
+holds a live connection to the app, and `ClojureDart (not running)` the
+rest of the time.
 
 ### Choosing a dialect
 
@@ -397,6 +409,13 @@ The project is the nearest directory, at or above the open file, holding
 `.jonquil.edn` or a profile marker. A loose file with nothing like that
 above it, or an unsaved window, has no project, so only the extension and
 the settings default are left to decide.
+
+ClojureDart's own marker is `pubspec.yaml`. A ClojureDart app commonly
+carries a `deps.edn` too, for `bb` tasks, say, so both markers can be
+present in the same project at once: rule 2 only decides when exactly one
+marker hits, so the file's extension breaks the tie instead. `.cljd`
+opens as ClojureDart, `.clj` and `.cljc` stay Jolt's, and a file neither
+extension claims, `bb.edn` say, falls back to Jolt.
 
 ### `.jonquil.edn`
 
@@ -464,6 +483,73 @@ for. Jonquil restores whatever was there before the child started, or
 deletes the file if nothing was, once the child stops, so a project that
 already used that file for something else gets it back exactly as it was.
 
+### ClojureDart (experimental): attaching to a running app
+
+ClojureDart support is experimental. Where the out-of-process Jolt
+runtime starts and owns its own child, this dialect works the other way
+round: Jonquil attaches to a ClojureDart app you already have running,
+the way CIDER attaches to a live Clojure process. Connect, load the
+file, then evaluate forms one at a time from a `(comment ...)` block.
+Jonquil never starts the app, stops it, or sends it any signal at all.
+
+Attaching needs the app running under `bb dev:macos` (or
+`clj -M:cljd flutter`), on the `nrepl-poc` ClojureDart fork at
+`199d173d` or later. That fork writes its port to `NREPL.lock` in the
+app directory, which is how Jonquil finds it; upstream ClojureDart
+carries no nREPL server of its own, so there's nothing there for
+Jonquil to attach to.
+
+Jonquil connects the first time you Run, or on any evaluation while it
+holds no live connection, and prints "; Connecting to the app on port
+N..." while it does. A fresh session's first answer takes a few seconds
+and brings the ClojureDart banner along with it. If nothing's running
+yet, the console says so instead: "; ClojureDart app isn't running
+here. Start it with `bb dev:macos` (or `clj -M:cljd flutter`)." A port
+that refuses the connection answers "; NREPL.lock says port N, but
+nothing answers there. The app may have quit; restart it.", and a port
+that answers but isn't a ClojureDart server at all gets "; Port N isn't
+a ClojureDart nREPL server." Jonquil only ever reads `NREPL.lock`: it
+never writes to the file or deletes it.
+
+Run loads the buffer's own text, unsaved edits and all, the way
+CIDER's C-c C-k loads a file, and leaves the session sitting in the
+file's namespace afterward. Rather than a value per form, it prints one
+quiet line when it's done, "; Loaded <ns> (<n> forms)", or, if a form
+fails, "Load stopped at form <n> of <ns>" with the app's own error in
+place of it. An untitled buffer has no path for the app's error
+messages or its watcher to follow, so Run refuses first: "Save the file
+first: the app's error messages and its watcher both go by the file's
+path."
+
+Cmd/Ctrl+E and Cmd/Ctrl+Enter (Run Form) both run in the buffer's own
+namespace. Since the app's nREPL server has no `in-ns`, Jonquil
+evaluates the buffer's `ns` form first whenever the session is sitting
+somewhere else, then sends your code. A REPL entry typed at the console
+prompt runs wherever the session already happens to be.
+
+Stop detaches rather than interrupting anything: it closes the
+connection at once, even one that's still mid-handshake, and prints
+"; Detached from the app. The app wasn't touched; a change already sent
+may still land." The next evaluation reconnects with a fresh session.
+An evaluation that's still waiting past 30 seconds gets one more line,
+"; Still waiting on the app...", and after that Jonquil just keeps
+waiting: there's no timeout of its own.
+
+Reset on Run is greyed out for this dialect, with a tooltip that says
+why: "Hot reload can't unload a namespace, so every Run adds to the
+running app." Every Run builds on what's already there instead of
+clearing it first.
+
+Completion stays offline here: candidates come from the buffer's own
+definitions, the aliases its `ns` form declares, and ClojureDart's own
+special forms and built-ins, never anything the running app itself
+knows about. Quick documentation does ask the app, and answers one of
+four ways: the symbol's own docs when the app has them, "Not attached;
+Run first" with no live connection, "No docs: the app didn't answer in
+time" once its own budget runs out, or, only on a fork older than
+`199d173d`, "No docs for ClojureDart symbols yet (the app's ClojureDart
+fork doesn't answer lookup)".
+
 ## Keys
 
 | Key | Where | Does |
@@ -487,6 +573,7 @@ already used that file for something else gets it back exactly as it was.
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
 | Cmd/Ctrl+Y | anywhere in the window | Redo |
 | Cmd/Ctrl+E | Definitions editor | Run the selection, or the current line, at the console prompt |
+| Cmd/Ctrl+Enter | Definitions editor | Run the form at the caret (in a comment block, the form inside it) |
 | F6 | anywhere in the window | Move focus between the editor and the console |
 | Cmd/Ctrl+L | Interactions console | Clear the console's output history |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
@@ -537,3 +624,24 @@ than being surprises you'd otherwise have to rediscover:
 - Stop against an unresponsive out-of-process child takes about 2.2
   seconds: a second waiting for it to answer the interrupt, a second more
   for it to exit once killed, and a little overhead either side.
+- Stop against a ClojureDart app detaches instead of interrupting: the
+  app keeps whatever it already has.
+- No stdin, for the ClojureDart dialect.
+- ClojureDart needs the `nrepl-poc` fork at `199d173d` or later; upstream
+  ClojureDart carries no nREPL server to attach to.
+- `println` output arrives for ClojureDart too, but is lost once the form
+  that printed it throws.
+- Jonquil never re-sends what you actually ran against ClojureDart: only
+  its own `(+ 1 2)` wake-up probe repeats, and if the app's REPL still
+  doesn't answer it, Jonquil says so instead of sending your code.
+- No server-side completion for ClojureDart: only this buffer's own
+  symbols and ClojureDart's own forms.
+- Jump to definition for ClojureDart stays inside the buffer: the fork's
+  `lookup` carries no file or line to jump to.
+- Reset on Run isn't available for ClojureDart: hot reload can't unload a
+  namespace, so every Run adds to the app instead of replacing it.
+- A ClojureDart load stops at the first form the app's REPL compiler
+  rejects, even though the app's own watcher still compiles the saved
+  file.
+- The console prompt reads `> ` for ClojureDart the same as every other
+  runtime: it doesn't show which namespace the session is actually in.

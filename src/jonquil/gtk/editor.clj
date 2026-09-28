@@ -173,6 +173,22 @@
   (reset! (:rename-fn ed) f)
   nil)
 
+(defn set-run-form-fn!
+  "Registers f (fn [] -> nil), the ui's own :run-form!* action, to run for
+  the editor's Run Form chord (Cmd/Ctrl+Enter, cljd plan P3.T2). See
+  set-quick-doc-fn!."
+  [ed f]
+  (reset! (:run-form-fn ed) f)
+  nil)
+
+(defn set-flash-cancel-fn!
+  "Registers f (fn [] -> nil), Run Form's own flash cancel (I2 fix wave:
+  window.clj's make-flash-fn, called from handle-key! below before any
+  other key handling). See set-quick-doc-fn!."
+  [ed f]
+  (reset! (:flash-cancel-fn ed) f)
+  nil)
+
 (defn set-completion-fns!
   "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
   state] -> 0/1)}), the ui's own completion actions (P4.T5): :complete! is
@@ -190,6 +206,17 @@
   third slot here -- see jonquil.gtk.completion's own ns docstring."
   [ed fns]
   (reset! (:completion-fns ed) fns)
+  nil)
+
+(defn set-profile!
+  "Paints ed with profile's own :special-forms and :builtins (a
+  jonquil.dialect profile; nil paints with jonquil.syntax's, the Jolt
+  profile's). The repaint happens on the next 20 ms tick, the same path a
+  keystroke's repaint takes, so this is safe from the GTK thread at any
+  point, including before the view is shown."
+  [ed profile]
+  (reset! (:profile ed) profile)
+  (reset! (:dirty-at ed) 0)
   nil)
 
 (defn focus! [ed]
@@ -270,7 +297,7 @@
 (defn- repaint! [ed]
   (let [{:keys [buf tags]} ed
         text (g/buffer-text buf)
-        plan (paint/paint-plan text)
+        plan (paint/paint-plan @(:profile ed) text)
         len (count text)]
     ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
     ;; remove_all_tags -- a tag another namespace applies over the same
@@ -381,6 +408,15 @@
 (defn- alt-held? [state]
   (not (zero? (bit-and state g/ALT-MASK))))
 
+(defn- modifier-keyval?
+  "True for a modifier key's own keyval -- Shift/Control/Meta/Alt/Super/
+  Hyper, Caps Lock or Shift Lock, either side (gdkkeysyms.h 0xffe1-0xffee,
+  a contiguous block). I2: the flash-cancel guard in handle-key! below
+  must never fire on the Cmd/Ctrl/Shift/Alt press itself, only on the key
+  that follows it."
+  [keyval]
+  (<= 0xffe1 keyval 0xffee))
+
 (defn- no-command-modifiers?
   "True when none of Control, Meta or Alt is held -- the guard on row 7's
   bracket/quote/BackSpace/Tab keys, so they never shadow a command chord
@@ -480,11 +516,20 @@
   defaulting keycode to 0 -- harmless, since 0 never matches
   MAC-KEYCODE-F/MAC-KEYCODE-L. on-key (below), the real GTK callback,
   always uses the 4-arg form so alt-chord-f-or-l?'s macOS fallback has a
-  real hardware keycode to check."
+  real hardware keycode to check.
+
+  I2: before any of the cond clauses below run, a pending Run Form flash
+  is cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
+  caret and clearing the selection) unless keyval is a bare modifier
+  press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
+  would act on the flash's own selection instead of the buffer's real
+  one."
   ([ed keyval0 state] (handle-key! ed keyval0 0 state))
   ([ed keyval0 keycode state]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
          cfns @(:completion-fns ed)]
+     (when-not (modifier-keyval? keyval)
+       (when-let [f @(:flash-cancel-fn ed)] (f)))
      (cond
        @(:preedit-active? ed) 0
 
@@ -496,6 +541,15 @@
        ;; of the time. See set-completion-fns!'s docstring.
        (when-let [f (:handle-key! cfns)] (= 1 (f keyval state)))
        1
+
+       ;; cljd plan P3.T2: Cmd/Ctrl+Enter (Return or KP-Enter with a command
+       ;; chord) is Run Form. It sits ahead of plain-return?, so smart-Enter
+       ;; never sees it, and it's always consumed (1), so GtkTextView never
+       ;; inserts a newline for it either. Completion's own clause above
+       ;; ignores any key held with Control or Meta, so an open popup
+       ;; doesn't take it.
+       (and (command-chord? state) (contains? #{KEY-RETURN KEY-KP-ENTER} keyval))
+       (do (when-let [f @(:run-form-fn ed)] (f)) 1)
 
        (plain-return? keyval state)
        (if (handle-return! ed) 1 0)
@@ -642,9 +696,18 @@
             ;; P4.T7: single-slot registration for the rename chords --
             ;; see set-rename-fn!.
             :rename-fn (atom nil)
+            ;; cljd plan P3.T2: single-slot registration for Run Form --
+            ;; see set-run-form-fn!.
+            :run-form-fn (atom nil)
+            ;; I2 fix wave: single-slot registration for Run Form's flash
+            ;; cancel -- see set-flash-cancel-fn!.
+            :flash-cancel-fn (atom nil)
             ;; P4.T5: single-slot registration for completion -- see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
             :completion-fns (atom nil)
+            ;; P1.T2 (cljd plan): the dialect profile whose sets paint
+            ;; symbols -- see set-profile!. nil until the window sets it.
+            :profile (atom nil)
             ;; Single-slot registration for error reporting -- see
             ;; set-error-fn!. nil until jonquil.gtk.window wires it, so a
             ;; throw before that point is silently dropped rather than

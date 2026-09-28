@@ -3,9 +3,11 @@
   Evaluator seam, and .jonquil.edn warnings when a file opens."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [gtk-async :refer [on-gtk go-row]]
+            [gtk-async :refer [await-until on-gtk go-row]]
             [gtk-selftest-window.support :as support]
+            [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]))
 
 (defn- temp-project!
@@ -116,3 +118,80 @@
 
 (defn row-project-open-keeps-evaluator [ui]
   (open-then-run ui {:row :project-open-keeps-evaluator :config nil :expect nil}))
+
+(defn row-editor-paints-profile-sets
+  "P1.T2 (cljd plan): with the cljd profile, the editor paints f/widget
+  with the special-form tag; back on the window's own profile (Jolt's) it
+  paints plain. The row restores the window's profile before it records,
+  so later rows paint as before.
+
+  Deviation from the brief's verbatim code (reported; see the report):
+  the brief names the has-tag-at? check `special?`, a let-bound fn passed
+  to await-until by symbol and reused negated. audit_gtk_calls.clj only
+  exempts a GTK-touching call sitting INSIDE on-gtk or literally as
+  await-until's own third argument -- a fn bound earlier and passed by
+  name is walked at its OWN definition site (the let), where it isn't
+  exempt, and flags the g/has-tag-at? call inside it. Inlining the same
+  check as await-until's literal third argument, once plain and once
+  negated, keeps it exempt without changing what the row does."
+  [ui]
+  (go-row :editor-paints-profile-sets support/check
+    (let [ed (:editor ui)]
+      (on-gtk (editor/set-profile! ed dialect/cljd)
+              (editor/set-text! ed "(f/widget 1)"))
+      (let [cljd? (await-until 2000 20 (fn [] (g/has-tag-at? (:buf ed) 1 (get (:tags ed) :special-form))))
+            _ (on-gtk (editor/set-profile! ed (:profile ((:selection* ui)))))
+            plain? (await-until 2000 20 (fn [] (not (g/has-tag-at? (:buf ed) 1 (get (:tags ed) :special-form)))))]
+        (support/check :editor-paints-profile-sets (and cljd? plain?) {:cljd cljd? :plain plain?})))))
+
+(defn row-selection-throw-still-paints-new-profile
+  "Fix round 1 (Important): window.clj's add-watch ::dialect callback used
+  to call editor/set-profile! only after apply-selection! returned, in
+  the SAME try -- a throw anywhere inside apply-selection!, once past its
+  own (reset! sel* sel), skipped set-profile! outright and left the
+  editor painting whatever profile it held before the open, even though
+  @sel* had already moved to the new selection. The fix moved
+  set-profile! into a finally, so it runs from @sel* whether or not
+  apply-selection! threw.
+
+  This row forces dialect/label to throw for one open: show-selection!
+  (apply-selection!'s own second statement, right after reset! sel*
+  sel) calls it first, so the throw fires at the earliest point
+  apply-selection! can fail -- the exact shape the finding describes.
+
+  Measured, not g/gtk-label-set-text (the more obvious seam,
+  show-selection!'s OWN next call): editor/set-text! -- open-path!'s
+  first step, before it ever resets the path atom that ::dialect
+  watches -- fires the SAME editor's on-cursor-moved! listeners, and
+  window.clj's own listener calls g/gtk-label-set-text on the line/col
+  label. Redefining that var throws there first, inside open-path!'s
+  OWN try, before the watch ever fires at all -- caught by open-path!'s
+  \"; open:\" catch, never reaching apply-selection! or our fix.
+  dialect/label has no such second caller in this path: show-selection!,
+  dialect-text and start-and-report!'s status text are the only
+  callers, and none of those three run before the watch fires.
+
+  Seeding the editor with the cljd profile first (a profile the temp
+  project's own Jolt selection can never produce on its own) means only
+  a real editor/set-profile! call after the throw can put it back to
+  Jolt's; before the fix, it would have stayed cljd."
+  [ui]
+  (go-row :selection-throw-still-paints-new-profile support/check
+    (let [ed (:editor ui)
+          [file dir] (temp-project! nil)]
+      (try
+        (let [mark (on-gtk (editor/set-profile! ed dialect/cljd)
+                           (let [m (support/out-end-offset ui)]
+                             (with-redefs [dialect/label
+                                           (fn [& _] (throw (ex-info "forced dialect label failure" {})))]
+                               ((:open-path! ui) file))
+                             m))
+              warned? (await-until 1000 20 #(str/includes? (support/since ui mark) "; project: forced dialect label failure"))]
+          (on-gtk (let [warned (support/since ui mark)
+                        profile @(:profile ed)
+                        sel-profile (:profile ((:selection* ui)))]
+                    (support/check :selection-throw-still-paints-new-profile
+                                   (and warned? (identical? dialect/jolt profile) (identical? profile sel-profile))
+                                   {:warned warned :profile (:id profile) :sel-profile (:id sel-profile)}))))
+        (finally
+          (on-gtk (delete-tree! dir)))))))

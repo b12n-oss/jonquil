@@ -20,6 +20,7 @@
   ported unchanged in shape."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jonquil.cljd :as cljd]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
@@ -36,6 +37,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
+            [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
@@ -123,6 +125,39 @@
   (g/gtk-label-set-text dialect-label (dialect/label sel))
   (doseq [w (:warnings sel)]
     (cview/append! cv :system (str "; project: " w "\n"))))
+
+;; --- the ClojureDart attach evaluator's window state (cljd plan P2.T4) -----
+
+(defn- dialect-text
+  "The status bar's dialect label for selection sel run by evaluator e: an
+  attach evaluator's label says whether it holds a live connection."
+  [sel e]
+  (dialect/label sel (when (instance? jonquil.nrepl.attach.Attach e)
+                       (if (attach/connected? e) :attached :not-running))))
+
+(defn- watch-connection!
+  "For an attach evaluator e, keeps the dialect label in step with its
+  connection. The listener runs on whatever thread connected or lost the
+  socket, so it hands the label to the GTK thread, and it does nothing once
+  e is no longer the window's evaluator (a later switch made another)."
+  [e ev* sel* dialect-label]
+  (when (instance? jonquil.nrepl.attach.Attach e)
+    (attach/on-connection! e (fn [_]
+                               (on-gui! (fn []
+                                          (when (identical? e @ev*)
+                                            (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
+
+(defn- apply-reset-toggle!
+  "Reset on Run is insensitive, with a tooltip saying why, for an attach
+  runtime: hot reload can't unload a namespace, so every Run accumulates.
+  Every other runtime gets the checkbox back, with no tooltip. GTK thread
+  only."
+  [reset-chk sel]
+  (if (= :attach (:runtime sel))
+    (do (g/gtk-widget-set-sensitive reset-chk 0)
+        (g/gtk-widget-set-tooltip-text reset-chk "Hot reload can't unload a namespace, so every Run adds to the running app."))
+    (do (g/gtk-widget-set-sensitive reset-chk 1)
+        (g/gtk-widget-set-tooltip-text reset-chk nil))))
 
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
@@ -603,21 +638,30 @@
   console: pid, port and project, then each limitation, or why it couldn't
   start. The in-process engine has nothing to start or report."
   [cv status-label e sel]
-  (when (instance? jonquil.nrepl.evaluator.NRepl e)
-    (set-status! status-label (str "Starting " (dialect/label sel) "…"))
-    (future
-      (try
-        (if-let [problem (ev/start! e)]
-          (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
-          (do (cview/append! cv :system
-                             (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
-                                  ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
-              (doseq [l (ev/limitations e)]
-                (cview/append! cv :system (str "; Limit: " l "\n")))))
-        (catch :default ex
-          (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
-        (finally
-          (when-not (ev/evaluating? e) (set-status! status-label "Ready")))))))
+  (cond
+    (instance? jonquil.nrepl.evaluator.NRepl e)
+    (do (set-status! status-label (str "Starting " (dialect/label sel) "…"))
+        (future
+          (try
+            (if-let [problem (ev/start! e)]
+              (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
+              (do (cview/append! cv :system
+                                 (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
+                                      ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
+                  (doseq [l (ev/limitations e)]
+                    (cview/append! cv :system (str "; Limit: " l "\n")))))
+            (catch :default ex
+              (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
+            (finally
+              (when-not (ev/evaluating? e) (set-status! status-label "Ready"))))))
+
+    ;; cljd plan P2.T4: an attach evaluator connects on the first Run, so
+    ;; there's nothing to start; say it's experimental and what it can't do.
+    (instance? jonquil.nrepl.attach.Attach e)
+    (do (when (:experimental (:profile sel))
+          (cview/append! cv :system (str cljd/experimental-message "\n")))
+        (doseq [l (ev/limitations e)]
+          (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
 ;; apply-selection! sits here, after start-and-report! (above), which it
 ;; calls: Jolt resolves an unqualified symbol at compile time, not lazily,
@@ -626,7 +670,7 @@
   "Makes sel the window's selection. When it needs a different evaluator
   (jonquil.dialect/selection-key), the old one is interrupted and stopped
   off the GTK thread and a new one starts. sel-ctx is {:cv :status-label
-  :dialect-label :sel* :ev* :mode-fn}.
+  :dialect-label :sel* :ev* :mode-fn :reset-chk}.
 
   The new evaluator joins jonquil.runtime-registry as soon as it's made
   (so jonquil.main's stop-all! can never miss it, even if the window
@@ -635,15 +679,23 @@
   interrupt! and stop! on the old evaluator are guarded separately, so a
   throw from one still runs the other: each step's own throw is reported
   on the console rather than skipping the step after it and orphaning the
-  old child."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn]} sel]
+  old child.
+
+  cljd plan P2.T4: an attach evaluator's connection drives the label
+  (watch-connection!), Reset on Run follows the runtime
+  (apply-reset-toggle!), and the label is set last, from the evaluator the
+  window ends up with, so opening another file of the same app keeps
+  reading \"attached\"."
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
+    (apply-reset-toggle! reset-chk sel)
     (when (not= (dialect/selection-key old-sel) (dialect/selection-key sel))
       (let [old @ev*
             new (doto (ev/make sel) registry/register!)]
         (ev/set-mode! new (mode-fn))
+        (watch-connection! new ev* sel* dialect-label)
         (reset! ev* new)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
@@ -655,7 +707,8 @@
                (catch :default ex
                  (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))
                (finally (registry/unregister! old))))
-        (start-and-report! cv status-label new sel)))))
+        (start-and-report! cv status-label new sel)))
+    (g/gtk-label-set-text dialect-label (dialect-text sel @ev*))))
 
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (global.md: every one of
@@ -755,8 +808,27 @@
         (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label true) :run? true :path @path-atom))]
           (when warning (cview/append! cv :system warning)))))))
 
-(defn- do-stop! [ev*]
-  (ev/interrupt! @ev*)
+(defn- do-stop!
+  "Fix round 2, finding B: a running Stop's detached line comes from that
+  evaluation's own on-output (attach/interrupt! calls it directly). An
+  idle Stop has no evaluation and so no on-output to print through, and
+  on-connection! isn't wired to the console anywhere (watch-connection!
+  only sets the dialect label) -- spec §3 has no \"while running\"
+  qualifier, so the smallest fix is here: check, before interrupt! runs,
+  whether this is an attach evaluator that's connected and idle, and
+  print the same line cv would otherwise never see. Widening the shared
+  Evaluator protocol's interrupt! return value for one runtime's idle
+  notice would touch jonquil.session and jonquil.nrepl.evaluator too, for
+  no reason either of them needs. Checked before interrupt! runs, since
+  that's what closes the connection; connected? would read false after."
+  [ev* cv]
+  (let [e @ev*
+        idle-detach? (and (instance? jonquil.nrepl.attach.Attach e)
+                          (attach/connected? e)
+                          (not (ev/evaluating? e)))]
+    (ev/interrupt! e)
+    (when idle-detach?
+      (cview/append! cv :system (str cljd/detached-message "\n"))))
   nil)
 
 ;; --- REPL: the console's on-submit, and the history adapters ---------------
@@ -764,10 +836,15 @@
 (defn- do-repl-eval!
   "submit-repl! with the same opts run uses, minus the banner -- and the
   same warning-append bookkeeping, since submit-repl! can return the same
-  busy warning run-definitions! can."
-  [ed cv ev* status-label text]
-  (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label false) :run? false))]
-    (when warning (cview/append! cv :system warning))))
+  busy warning run-definitions! can. extra-opts is merged in last: Run
+  Selection and Run Form pass {:ns-source buffer-text}, which the attach
+  evaluator uses to switch the session into the buffer's namespace first
+  (cljd plan P2.T4); the in-process and nREPL evaluators ignore it."
+  ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
+  ([ed cv ev* status-label text extra-opts]
+   (let [warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv status-label false) :run? false)
+                                            extra-opts))]
+     (when warning (cview/append! cv :system warning)))))
 
 (defn- do-run-selection!
   "Cmd/Ctrl+E: commands/run-selection-text (P3.T1) on the editor's snapshot
@@ -776,9 +853,78 @@
   through do-repl-eval! -- the SAME evaluator path a typed REPL entry uses
   (history via ev/eval!, the busy-refusal warning, the same make-eval-opts)."
   [ed cv ev* status-label]
-  (when-let [text (commands/run-selection-text (editor/snapshot ed))]
-    (cview/echo-entry! cv text)
-    (do-repl-eval! ed cv ev* status-label text)))
+  (let [snap (editor/snapshot ed)]
+    (when-let [text (commands/run-selection-text snap)]
+      (cview/echo-entry! cv text)
+      (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
+
+;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
+
+(def ^:private FLASH-MS
+  ;; estimate: long enough to see which form ran, short enough not to be in
+  ;; the way of the next keystroke. The spec asks for a brief flash.
+  250)
+
+(defn- make-flash-fn
+  "{:flash! (fn [start end caret]) :cancel! (fn [] -> boolean)}. :flash!
+  selects start..end in ed's buffer, then FLASH-MS later puts the caret
+  back where it was, unless the selection changed meanwhile (the user
+  moved on) -- the same restore check :cancel! below uses. :cancel!
+  restores AT ONCE (I2 fix wave) instead of waiting for the timeout, for
+  editor.clj's own key dispatch to call ahead of every other key clause:
+  a printable key, Backspace or Tab landing while a flash is still
+  showing would otherwise act on the flash's own selection, since the
+  flash is a real one. Returns true when a flash was actually pending.
+
+  A second :flash! call while the first's own selection is STILL exactly
+  the live one (nothing else -- a keystroke's cancel!, a set-text!, a
+  click elsewhere -- has touched it since) carries that first call's own
+  saved caret over, rather than its own caret argument, which is really
+  just that first selection's own start (select-range's mark convention),
+  not a real caret the user left behind. Anything else touching the
+  selection since (including a whole different buffer arriving) makes
+  this call's own caret argument the right one again -- the same
+  liveness check restore! uses to decide whether to act at all.
+
+  One foreign-callable per window, reused by every flash: jonquil.gtk.
+  callbacks retains every callable for the process's life, so a fresh one
+  per flash would leak. GTK thread only."
+  [ed]
+  (let [pending (atom nil)
+        buf (:buf ed)
+        restore! (fn []
+                   (boolean
+                    (when-let [{:keys [caret sel]} (first (reset-vals! pending nil))]
+                      (when (= sel (g/selection-offsets buf))
+                        (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+                      true)))
+        restore-cb (callable (fn [_data]
+                               (try (restore!) (catch :default _ nil))
+                                ;; G_SOURCE_REMOVE: a one-shot timeout.
+                               0)
+                             [:pointer] :int)]
+    {:flash! (fn [start end caret]
+               (let [p @pending
+                     saved (if (and p (= (:sel p) (g/selection-offsets buf))) (:caret p) caret)]
+                 (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+                 (reset! pending {:caret saved :sel [start end]})
+                 (g/g-timeout-add FLASH-MS restore-cb ffi/null))
+               nil)
+     :cancel! restore!}))
+
+(defn- do-run-form!
+  "Cmd/Ctrl+Enter and the editor menu's Run Form: commands/run-form on the
+  editor's snapshot. No form at the caret sets the status \"No form at the
+  caret.\" and sends nothing. Otherwise it flashes the form's range, echoes
+  the form at the prompt and sends it the way Run Selection does, so an
+  attach evaluator switches to the buffer's namespace first."
+  [ed cv ev* status-label flash-fns]
+  (let [snap (editor/snapshot ed)]
+    (if-let [{:keys [text start end]} (commands/run-form snap)]
+      (do ((:flash! flash-fns) start end (:caret snap))
+          (cview/echo-entry! cv text)
+          (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
+      (set-status! status-label "No form at the caret."))))
 
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
@@ -1459,12 +1605,16 @@
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
         repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
         run-fn (fn [] (do-run! ed cv ev* status-label path))
-        stop-fn (fn [] (do-stop! ev*))
+        stop-fn (fn [] (do-stop! ev* cv))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))
         close-fn (fn [] (g/gtk-window-close win))
         run-selection-fn (fn [] (do-run-selection! ed cv ev* status-label))
+        ;; cljd plan P3.T2: Run Form, from Cmd/Ctrl+Enter in the editor and
+        ;; the editor menu's first item.
+        flash-fns (make-flash-fn ed)
+        run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fns))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
@@ -1482,7 +1632,8 @@
         editor-menu-group
         (install-context-menu!
          (:view ed)
-         [["Jump to Definition" "jump" jump-fn]
+         [["Run Form" "run-form" run-form-fn]
+          ["Jump to Definition" "jump" jump-fn]
           ["Rename Symbol" "rename" rename-fn]
           ["Quick Documentation" "quick-doc" quick-doc-fn]
           ["Complete" "complete" complete-fn]
@@ -1629,6 +1780,8 @@
     ;; own ns docstring).
     (register-popover-fn rename-pop)
     (editor/set-rename-fn! ed rename-fn)
+    (editor/set-run-form-fn! ed run-form-fn)
+    (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
     (g/g-signal-connect-data (:entry rename-pop) "activate"
                              (callable (fn [_entry _data]
                                          (try
@@ -1666,18 +1819,36 @@
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
+                   :reset-chk reset-chk
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
       (try
         (show-selection! cv dialect-label @sel*)
+        ;; cljd plan P2.T4: the starting evaluator's connection, label and
+        ;; Reset on Run, as apply-selection! does for every later one.
+        (watch-connection! @ev* ev* sel* dialect-label)
+        (apply-reset-toggle! reset-chk @sel*)
+        (g/gtk-label-set-text dialect-label (dialect-text @sel* @ev*))
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
+      ;; P1.T2 (cljd plan): the editor paints with the selected profile's
+      ;; own sets, here and after every re-selection below.
+      (editor/set-profile! ed (:profile @sel*))
       (start-and-report! cv status-label @ev* @sel*)
       (add-watch path ::dialect
                  (fn [_ _ old new]
                    (when (not= old new)
+                     ;; Fix round 1 (Important): set-profile! moved into a
+                     ;; finally, so the editor's dialect follows @sel* even
+                     ;; when apply-selection! throws after its own (reset!
+                     ;; sel* sel) -- the very first thing it does -- has
+                     ;; already run. Reading @sel* here (not sel, the local
+                     ;; select-for result) is what makes that safe: it's the
+                     ;; same value apply-selection! itself just reset,
+                     ;; whether or not anything after that reset threw.
                      (try (apply-selection! sel-ctx (select-for new @settings-path*))
                           (catch :default e
-                            (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))))))
+                            (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
+                          (finally (editor/set-profile! ed (:profile @sel*))))))))
     (update-title! ed win path)
     (g/gtk-window-present win)
     (editor/focus! ed)
@@ -1690,6 +1861,9 @@
                  :evaluator* (fn [] @ev*)
                  :selection* (fn [] @sel*)
                  :dialect-label dialect-label
+                 ;; cljd plan P2.T4: the Reset on Run checkbox, for rows
+                 ;; that read its sensitivity and tooltip.
+                 :reset-check reset-chk
                  :find-bar fb
                  :run!* run-fn :stop!* stop-fn
                  :open-path! (fn [p]
@@ -1699,6 +1873,9 @@
                  ;; P3.T3 self-test hooks: the exact fns the F6/Cmd+E/Cmd+L/
                  ;; zoom key chords call, so rows can drive them directly.
                  :run-selection!* run-selection-fn
+                 ;; cljd plan P3.T2: Run Form's own fn, the one Cmd/Ctrl+Enter
+                 ;; and the menu item call.
+                 :run-form!* run-form-fn
                  :toggle-focus!* toggle-focus-fn
                  :clear-console!* clear-console-fn
                  :zoom!* zoom-fn
@@ -1810,8 +1987,8 @@
   self-test/docs-shots/smoke harness must pass its own isolated path so it
   never touches the user's real settings file (TH.T5). ui is {:editor
   :console :session :status-label :line-col-label :evaluator* :selection*
-  :dialect-label :window :find-bar :run!*
-  :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
+  :dialect-label :reset-check :window :find-bar :run!*
+  :stop!* :open-path! :save-to! :run-selection!* :run-form!* :toggle-focus!*
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover

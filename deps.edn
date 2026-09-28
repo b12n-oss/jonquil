@@ -37,6 +37,11 @@
   ;; {:runtime :nrepl}, so a real Jolt child runs behind it.
   :selftest-nrepl {:extra-paths ["dev"]
                    :main-opts ["-m" "gtk-selftest-nrepl"]}
+  ;; cljd plan P2.T4: the ClojureDart window rows -- a real window on a
+  ;; throwaway app directory whose NREPL.lock names a fake fork server in
+  ;; the same process (dev/fake_cljd_nrepl.clj). No real app is involved.
+  :selftest-cljd {:extra-paths ["dev"]
+                  :main-opts ["-m" "gtk-selftest-cljd"]}
   ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
   ;; one GIF) for the guide, driving jonquil.main/start! the same way
   ;; :selftest-window does.

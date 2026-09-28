@@ -7,8 +7,10 @@
   Selection is per project. The project is the nearest directory at or
   above a file holding .jonquil.edn or a profile's marker. Its
   .jonquil.edn {:dialect k :runtime k} wins; otherwise a single matching
-  marker; otherwise the file's extension breaks the tie (a loose file has no
-  markers); otherwise the settings default; otherwise the first profile.
+  marker decides, but only when its profile claims the file's extension or
+  the file is untitled; otherwise the file's extension breaks the tie (a
+  loose file has no markers); otherwise the settings default; otherwise the
+  first profile.
   A malformed .jonquil.edn never throws: it becomes a warning and the rest
   of the rules decide."
   (:require [clojure.edn :as edn]
@@ -60,9 +62,45 @@
    :evaluator :in-process
    :runtimes #{:in-process :nrepl}})
 
+(def ^:private cljd-special-forms
+  ;; ClojureDart's own forms, added to Jolt's set for the :cljd profile.
+  ;; Read from the nrepl-poc fork (a private ClojureDart fork at
+  ;; 573781a2), 2026-09-28:
+  ;; - clj/src/cljd/compiler.cljc, `emit`'s special-form `case`: every
+  ;;   user-facing special Jolt's set lacks (the starred internals like
+  ;;   let* and case* are left out).
+  ;; - clj/src/cljd/core.cljd: the public macros clojure.core doesn't have
+  ;;   (the -map-lit/-set-lit/-vec-lit reader targets are left out).
+  ;; - clj/src/cljd/flutter.cljd: its public macros, bare and under the
+  ;;   `f` alias, because every one of a-sibling-cljd-app's 10 files that
+  ;;   requires cljd.flutter writes [cljd.flutter :as f].
+  #{"." "new" "letfn"
+    "dart/is?" "dart/await" "dart/async-barrier" "dart/run-zoned" "dart/assert" "dart/type-like"
+    "await" "quick-bench" "ensure-hash"
+    "widget" "build" "run" "$" "retriable" "with-notifier" "doto-layer" "doto-image-canvas"
+    "f/widget" "f/build" "f/run" "f/$" "f/retriable" "f/with-notifier" "f/doto-layer" "f/doto-image-canvas"})
+
+(def cljd
+  {:id :cljd
+   :name "ClojureDart"
+   ;; .cljc stays Jolt's.
+   :extensions #{"cljd"}
+   :reader-features #{:cljd}
+   :special-forms (into (:special-forms jolt) cljd-special-forms)
+   :builtins (:builtins jolt)
+   :project-markers ["pubspec.yaml"]
+   ;; Attach-only: Jonquil connects to the app's own nREPL server, found
+   ;; through :port-file in the project directory, and never starts it.
+   :evaluator :attach
+   :runtimes #{:attach}
+   :port-file "NREPL.lock"
+   :experimental true})
+
 (def profiles
-  "Every known profile. Order matters only as the last resort in select."
-  [jolt])
+  "Every known profile. Order matters only as the last resort in select:
+  Jolt first, so a file neither profile's extension claims (bb.edn in a
+  ClojureDart app) stays Jolt's."
+  [jolt cljd])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
@@ -155,12 +193,20 @@
              [])
         markers (:markers project #{})
         hits (filterv (fn [p] (some markers (:project-markers p))) profiles)
-        pool (if (seq hits) hits profiles)
         ext (extension path)
+        marker-decides? (and (= 1 (count hits))
+                             (let [only (first hits)]
+                               (or (nil? path) (contains? (:extensions only) ext))))
+        ;; A single marker whose profile doesn't claim path's extension isn't
+        ;; a real hit after all: the pool widens back to every profile, so
+        ;; extension, settings and fallback can look past it.
+        pool (cond (> (count hits) 1) hits
+                   marker-decides? hits
+                   :else profiles)
         by-ext (first (filter (fn [p] (contains? (:extensions p) ext)) pool))
         by-default (when default (some (fn [p] (when (= default (:id p)) p)) pool))
         [p source] (cond by-config [by-config :config]
-                         (= 1 (count hits)) [(first hits) :marker]
+                         marker-decides? [(first hits) :marker]
                          by-ext [by-ext :extension]
                          by-default [by-default :settings]
                          :else [(first pool) :fallback])
@@ -184,8 +230,12 @@
 
 (defn label
   "The status bar's dialect text: the profile's name, plus the runtime when
-  it isn't the profile's default evaluator."
-  [{:keys [profile runtime]}]
-  (if (= runtime (:evaluator profile))
-    (:name profile)
-    (str (:name profile) " (" (runtime-name runtime) ")")))
+  it isn't the profile's default evaluator. An attach runtime always says
+  whether it's connected: connection is :attached while the evaluator
+  holds a live connection, anything else reads as not running."
+  ([selection] (label selection nil))
+  ([{:keys [profile runtime]} connection]
+   (cond
+     (= :attach runtime) (str (:name profile) (if (= :attached connection) " (attached)" " (not running)"))
+     (= runtime (:evaluator profile)) (:name profile)
+     :else (str (:name profile) " (" (runtime-name runtime) ")"))))

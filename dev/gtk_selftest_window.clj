@@ -14,11 +14,11 @@
   and the run goes on.
 
   The rows themselves live in the gtk-selftest-window.* namespaces under
-  dev/gtk_selftest_window/, one per feature area (support, run-repl, files,
-  find-replace, close-prerun, window-keys, themes, popovers-quickdoc,
-  completion, rename-menus, dialects). This file keeps only row-fns (the
-  ordered list every row runs in -- the last row really closes the window,
-  so order matters), the driver, and -main."
+  dev/gtk_selftest_window/, one per feature area (support, run-form,
+  run-repl, files, find-replace, close-prerun, window-keys, themes,
+  popovers-quickdoc, completion, rename-menus, dialects). This file keeps
+  only row-fns (the ordered list every row runs in -- the last row really
+  closes the window, so order matters), the driver, and -main."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-async :as ga :refer [on-gtk await-until go-row]]
             [gtk-selftest-window.close-prerun :as close-prerun]
@@ -29,6 +29,7 @@
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.rename-menus :as rename-menus]
+            [gtk-selftest-window.run-form :as run-form]
             [gtk-selftest-window.run-repl :as run-repl]
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.themes :as themes]
@@ -65,6 +66,14 @@
    run-repl/row-run-selection-line
    run-repl/row-run-selection-sel
    run-repl/row-run-selection-blank
+   run-form/row-run-form-top-level
+   run-form/row-run-form-in-comment
+   run-form/row-run-form-flashes
+   run-form/row-run-form-key-cancels-flash
+   run-form/row-run-form-flash-overlap
+   run-form/row-run-form-key-before-smart-enter
+   run-form/row-run-form-menu-item
+   run-form/row-run-form-nothing-at-caret
    window-keys/row-toggle-focus
    run-repl/row-clear-console
    console-layout/row-console-wraps-long-lines
@@ -174,6 +183,8 @@
    dialects/row-project-config-malformed-warns
    dialects/row-project-config-unknown-runtime-warns
    dialects/row-project-open-keeps-evaluator
+   dialects/row-editor-paints-profile-sets
+   dialects/row-selection-throw-still-paints-new-profile
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])

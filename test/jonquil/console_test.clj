@@ -35,6 +35,7 @@
 (deftest result-line-test
   (is (= [:result "=> 3\n"] (console/result-line {:status :ok :printed "3"})))
   (is (= [:system "; interrupted\n"] (console/result-line {:status :interrupted})))
+  (is (= [:system "; Loaded a.b (2 forms)\n"] (console/result-line {:status :notice :text "; Loaded a.b (2 forms)"})))
   (let [[kind text] (console/result-line {:status :error :error (ex-info "boom" {})})]
     (is (= :error kind))
     (is (re-find #"boom" text))))

@@ -17,9 +17,11 @@
     jonquil.session
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
+    jonquil.cljd
     jonquil.nrepl.client
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
+    jonquil.nrepl.attach
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help
