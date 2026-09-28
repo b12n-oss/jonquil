@@ -152,6 +152,7 @@
      (row "app:run [file]" "launch Jonquil, optionally opening a file")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
+     (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
      (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
      (row "docs:shots" "self-capture docs/images/*.png (+ one GIF), one process per scene")
@@ -228,6 +229,9 @@
   smoke:binary
   {:doc "P2.T10: automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
    :task (apply shell "bb" "dev/smoke/binary_smoke.clj" *command-line-args*)}
+  smoke:cljd
+  {:doc "P4.T3 automated: smokes the ClojureDart attach dialect against your running a-sibling-cljd-app app (bb dev:macos) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
+   :task (apply shell "bb" "dev/smoke/cljd_smoke.clj" *command-line-args*)}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
    :task (let [dir (or (System/getenv "DRCLOJURE_DIR")
