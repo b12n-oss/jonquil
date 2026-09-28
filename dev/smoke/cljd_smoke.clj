@@ -602,6 +602,62 @@
     (screenshot! pid "step6-stop-reconnect")
     (check! :stop-reconnects (and ok (some? (parse-where last))) {:console last})))
 
+(defn- capture-close-stuck-diagnostics!
+  "Coordinator-requested (controller probes: Jonquil's own close finished in
+  ~0.3s eight times, live, so a slow close here would be something about
+  THIS run, not Jonquil in general): a full-SCREEN screenshot (screencapture
+  -x, not the pid-scoped screenshot! helper -- a stray dialog, find bar or
+  popover can be its own top-level window, invisible to a --pid capture), a
+  `sample <pid> 3` of the main thread's stack while it's stuck, and a ps
+  snapshot plus the Process handle's own .isAlive. Never throws: a
+  diagnostic that fails to capture must not itself fail the step -- this
+  runs only after the process has ALREADY missed the first checkpoint, so
+  losing a diagnostic here must not also lose the eventual close-exits
+  result.
+
+  Root cause, found live with these diagnostics (2026-09-28 run, see the
+  report): close-stuck.png shows a real, native \"Save changes to
+  drive.cljd before closing?\" alert (Save / Don't Save / Cancel) sitting
+  in front of the editor -- Jonquil's own close-request-fn, doing exactly
+  what it does for any dirty buffer (the SAME alert binary_smoke.clj's own
+  close-with-unsaved step already exercises for the Jolt dialect). The
+  sample confirms the process is otherwise completely idle: the main
+  thread's entire stack is inside AppKit/HIToolbox/CoreFoundation's own
+  event-loop wait (_BlockUntilNextEventMatchingListInMode -> mach_msg),
+  i.e. genuinely blocked on the NEXT UI EVENT, not stuck in any Jonquil
+  code, not deadlocked, not computing -- every other thread is similarly
+  parked on its own semaphore/select/condvar. So the process not exiting
+  isn't Jonquil being slow at all; it's this tool waiting on a dialog it
+  never answers, because the buffer was ALREADY dirty (\"* drive.cljd -
+  Jonquil\", visible in the close-before capture taken moments earlier)
+  by the time Cmd+W ran. `title-clean?` can't tell a genuinely clean
+  title from a momentarily EMPTY one read off `windows --edn` (both
+  satisfy `(not (str/starts-with? \"\" \"*\"))`) -- this run's own
+  `:help-completion-undo-clean` result recorded `:title \"\"`, a strong
+  match for exactly that gap letting step-help!'s own undo loop stop
+  early, one Cmd+Z short of clean. Named here, not fixed: the
+  coordinator's own instructions for this dispatch were diagnose and
+  report, not touch `src/` or `title-clean?`."
+  [pid proc]
+  (let [alive? (p/alive? proc)
+        ps-out (try (:out (p/shell {:out :string :err :string :continue true}
+                                   "ps" "-o" "pid,stat,etime,command" "-p" (str pid)))
+                    (catch Exception e (str "ps failed: " (ex-message e))))]
+    (println "[cljd-smoke] close: still running 3s after Cmd+W -- capturing diagnostics")
+    (println "[cljd-smoke] close: Process .isAlive =" alive?)
+    (println "[cljd-smoke] close: ps -o pid,stat,etime,command -p" pid)
+    (println ps-out)
+    (try (p/shell {:continue true} "screencapture" "-x" (str out-dir "/close-stuck.png"))
+         (catch Exception e (println "[cljd-smoke] close: screencapture -x failed:" (ex-message e))))
+    (println "[cljd-smoke] close: sampling pid" pid "for 3s...")
+    (try
+      (let [{:keys [out err]} (p/shell {:out :string :err :string :continue true}
+                                       "sample" (str pid) "3")]
+        (spit (str out-dir "/close-sample.txt") (str out "\n" err)))
+      (catch Exception e
+        (spit (str out-dir "/close-sample.txt") (str "sample failed: " (ex-message e)))))
+    {:alive-at-3s alive? :ps ps-out}))
+
 (defn- step-close!
   "Step 9. 15s, not binary_smoke.clj's usual 5s/8s bound for a plain Cmd+W
   exit: measured live this session, this window (a longer session, one
@@ -613,15 +669,49 @@
   regardless (a future regression, or this bound still not being enough),
   the fallback stays the safe one either way: force-kill this pid
   (destroy-tree, never a keystroke that could hit the close alert's own
-  default \"Save\" button) and report :close-exits FAIL -- never a save."
+  default \"Save\" button) and report :close-exits FAIL -- never a save.
+
+  Coordinator-requested diagnostics (this run): a screenshot + OCR of THIS
+  pid's own window right before Cmd+W (close-before.png -- what has focus:
+  the find bar, a popover, completion, or the console), split into a 3s
+  checkpoint (capture-close-stuck-diagnostics!, only if still running) and
+  the remaining 12s of the same 15s total bound, with the elapsed time from
+  the Cmd+W keystroke to the real exit (or the force-kill) printed either
+  way, so a slow EXIT reads differently from this tool's own deref waiting
+  on something else."
   [pid proc pre-git]
+  (screenshot! pid "close-before")
+  (println "[cljd-smoke] close: OCR just before Cmd+W:")
+  (println (ocr-text! pid))
   (cg-key! pid "command + w")
-  (let [exit (deref proc 15000 ::timeout)]
-    (if (= ::timeout exit)
-      (do (check! :close-exits false {:reason "process did not exit within 15000ms"})
-          (stop! {:proc proc :pid pid}))
-      (do (check! :close-exits (zero? (:exit exit)) {:exit (:exit exit)})
-          (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))
+  (let [t0 (System/currentTimeMillis)
+        first-wait (deref proc 3000 ::timeout)]
+    (if (not= ::timeout first-wait)
+      (let [elapsed (- (System/currentTimeMillis) t0)]
+        (println (str "[cljd-smoke] close: exited within 3s, elapsed=" elapsed "ms"))
+        (check! :close-exits (zero? (:exit first-wait)) {:exit (:exit first-wait) :elapsed-ms elapsed})
+        (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
+      (do
+        (capture-close-stuck-diagnostics! pid proc)
+        (let [;; capture-close-stuck-diagnostics! itself takes several real
+              ;; seconds (`sample` alone runs for 3s), so the remaining wait
+              ;; is whatever's left of the 15s TOTAL bound from t0, not a
+              ;; flat 12s on top of it -- otherwise the real bound quietly
+              ;; grows past 15s by however long the diagnostics took.
+              remaining-ms (max 1000 (- 15000 (- (System/currentTimeMillis) t0)))
+              second-wait (deref proc remaining-ms ::timeout)
+              elapsed (- (System/currentTimeMillis) t0)]
+          (if (not= ::timeout second-wait)
+            (do
+              (println (str "[cljd-smoke] close: exited at elapsed=" elapsed "ms (exit "
+                            (:exit second-wait) ")"))
+              (check! :close-exits (zero? (:exit second-wait)) {:exit (:exit second-wait) :elapsed-ms elapsed})
+              (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
+            (do
+              (println (str "[cljd-smoke] close: still not exited after 15000ms total "
+                            "(elapsed=" elapsed "ms) -- force-killing"))
+              (check! :close-exits false {:reason "process did not exit within 15000ms" :elapsed-ms elapsed})
+              (stop! {:proc proc :pid pid})))))))
   (let [post-git (:out (p/shell {:out :string :err :string :continue true}
                                 "git" "-C" app-dir "status" "--short"))]
     (check! :close-git-unchanged (= pre-git post-git) {:pre pre-git :post post-git})))
