@@ -808,8 +808,27 @@
         (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label true) :run? true :path @path-atom))]
           (when warning (cview/append! cv :system warning)))))))
 
-(defn- do-stop! [ev*]
-  (ev/interrupt! @ev*)
+(defn- do-stop!
+  "Fix round 2, finding B: a running Stop's detached line comes from that
+  evaluation's own on-output (attach/interrupt! calls it directly). An
+  idle Stop has no evaluation and so no on-output to print through, and
+  on-connection! isn't wired to the console anywhere (watch-connection!
+  only sets the dialect label) -- spec §3 has no \"while running\"
+  qualifier, so the smallest fix is here: check, before interrupt! runs,
+  whether this is an attach evaluator that's connected and idle, and
+  print the same line cv would otherwise never see. Widening the shared
+  Evaluator protocol's interrupt! return value for one runtime's idle
+  notice would touch jonquil.session and jonquil.nrepl.evaluator too, for
+  no reason either of them needs. Checked before interrupt! runs, since
+  that's what closes the connection; connected? would read false after."
+  [ev* cv]
+  (let [e @ev*
+        idle-detach? (and (instance? jonquil.nrepl.attach.Attach e)
+                          (attach/connected? e)
+                          (not (ev/evaluating? e)))]
+    (ev/interrupt! e)
+    (when idle-detach?
+      (cview/append! cv :system (str cljd/detached-message "\n"))))
   nil)
 
 ;; --- REPL: the console's on-submit, and the history adapters ---------------
@@ -1518,7 +1537,7 @@
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
         repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
         run-fn (fn [] (do-run! ed cv ev* status-label path))
-        stop-fn (fn [] (do-stop! ev*))
+        stop-fn (fn [] (do-stop! ev* cv))
         open-fn (fn [] (do-open! ed cv win path discard-warned?))
         save-fn (fn [] (do-save! ed cv win path))
         save-as-fn (fn [] (do-save-as! ed cv win path))

@@ -26,6 +26,7 @@
    rows/row-cljd-run-selection-in-buffer-ns
    rows/row-cljd-stop-detaches
    rows/row-cljd-reconnects-after-detach
+   rows/row-cljd-idle-stop-detaches
    rows/row-cljd-not-running-message
    rows/row-cljd-close])
 

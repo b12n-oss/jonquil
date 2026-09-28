@@ -325,3 +325,43 @@
           (is (not (some #{[:out "leak\n"]} @out))
               "the stale reply's :out never reached this finished evaluation's console"))
         (client/close! conn)))))
+
+(deftest load-error-survives-stop-test
+  ;; Fix round 2, finding A: finish! used to squash EVERY non-:interrupted
+  ;; result to :interrupted whenever stop-requested? was true, which
+  ;; masked load-result's own "Load stopped at form N" diagnostic end to
+  ;; end. :stop-requested? is set directly on state, not through
+  ;; ev/interrupt! (which always detaches too, closing the socket and
+  ;; injecting a disconnected status into this SAME in-flight load-file
+  ;; request -- a different, already-correct case: load-result already
+  ;; reads a genuine disconnect+Stop as :interrupted). Setting the flag
+  ;; alone, while the socket stays open, isolates finish!'s own decision:
+  ;; the load keeps running for real and fails on (boom) with its own
+  ;; eval-error, never a disconnect, so the diagnostic is what must
+  ;; survive. The 300ms :slow delay on an earlier form is a wide,
+  ;; deterministic margin over the 100ms wait before the flag is set.
+  (with-app {:fail-on "boom" :slow {"(slow)" 300}}
+    (fn [_ dir file]
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "(ns demo.drive)\n(defn a [])\n(slow)\n(boom)\n(defn c [])"
+                  {:run? true :path file :on-complete (fn [r] (deliver done r))})
+        (Thread/sleep 100)
+        (swap! (:state e) assoc-in [:running :stop-requested?] true)
+        (is (= {:status :error :error-text "Load stopped at form 3 of demo.drive"}
+               (deref done 2000 :timeout))
+            "the load's own diagnostic reaches on-complete even though Stop was requested mid-load")))))
+
+(deftest stop-during-wake-probe-test
+  ;; Stop pressed while the fresh-session wake probe is in flight still
+  ;; reads as :interrupted -- a regression guard for wake!'s own new
+  ;; stop-check (finding A), now that finish! no longer squashes this
+  ;; for it.
+  (with-app {:slow {cljd/probe-code 300}}
+    (fn [srv dir _]
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
+        (loop [n 0] (when (and (< n 250) (not (some #{cljd/probe-code} (keep (fn [m] (get m "code")) (fake/requests srv)))))
+                      (Thread/sleep 20) (recur (inc n))))
+        (ev/interrupt! e)
+        (is (= {:status :interrupted} (deref done 2000 :timeout))
+            "Stop during the wake probe still ends the evaluation as :interrupted")))))

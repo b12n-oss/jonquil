@@ -169,7 +169,13 @@
   (a REPL that isn't awake yet). nil once the app answers 3 (the session is
   then no longer fresh), else the result to finish with, and the user's
   code isn't sent. A session that stays fresh is probed again next time.
-  The probe's banner out is shown; its value isn't."
+  The probe's banner out is shown; its value isn't.
+
+  A Stop that landed while the probe was in flight reads as :interrupted,
+  the same way a disconnected or eval-error status does for an eval or a
+  load (jonquil.nrepl.ops/eval-result, jonquil.cljd/load-result): finish!
+  no longer squashes every non-:interrupted result on Stop, so each
+  failure path decides for itself."
   [{:keys [state] :as ev} on-output]
   (when (:fresh? @state)
     (loop [tries 2]
@@ -177,19 +183,23 @@
         (cond
           (= :awake r) (do (swap! state assoc :fresh? false) nil)
           (and (= :asleep r) (> tries 1)) (recur (dec tries))
+          (and (stop-requested? ev) (#{:lost :failed} r)) {:status :interrupted}
           (= :lost r) {:status :error :error-text cljd/lost-connection}
           :else {:status :notice :text cljd/not-awake-message})))))
 
 (defn- finish!
   "Ends the running evaluation: idle first, then on-complete, as
-  jonquil.eval does. A Stop that landed first reads as :interrupted."
-  [{:keys [state] :as ev} {:keys [on-status-change on-complete]} result]
-  (let [result (if (and (stop-requested? ev) (not= :interrupted (:status result)))
-                 {:status :interrupted}
-                 result)]
-    (swap! state assoc :running nil)
-    (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
-    (try (when on-complete (on-complete result)) (catch Throwable _ nil))))
+  jonquil.eval does. result is already fully resolved by the caller (the
+  early-exit branches hardcode :interrupted, wake! and cljd/load-result
+  decide it themselves for their own failure paths, and cljd/eval-result
+  goes through jonquil.nrepl.ops/eval-result) -- finish! doesn't
+  second-guess it, since a blanket Stop-implies-:interrupted squash here
+  once masked load-result's own \"Load stopped at form N\" diagnostic
+  end to end."
+  [{:keys [state]} {:keys [on-status-change on-complete]} result]
+  (swap! state assoc :running nil)
+  (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
+  (try (when on-complete (on-complete result)) (catch Throwable _ nil)))
 
 (defn- run-worker!
   [ev code {:keys [run? path ns-source on-output on-status-change] :as opts}]

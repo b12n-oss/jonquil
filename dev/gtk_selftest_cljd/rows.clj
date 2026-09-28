@@ -175,6 +175,24 @@
                                   (str/includes? (support/since ui mark) "; Connecting to the app on port "))
                              {:ok? ok? :clones clones :text (support/since ui mark)})))))
 
+(defn row-cljd-idle-stop-detaches
+  "Fix round 2, finding B: Stop pressed while connected but idle (nothing
+  running) also detaches and prints the same detached line a running
+  Stop's on-output prints -- exactly once -- and the label goes back to
+  not running."
+  [ui]
+  (go-row :cljd-idle-stop-detaches support/check
+    (let [attached? (await-until 2000 20 #(= "ClojureDart (attached)" (label ui)))
+          mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk ((:stop!* ui)))
+          not-running? (await-until 2000 20 #(= "ClojureDart (not running)" (label ui)))
+          text (on-gtk (support/since ui mark))
+          detached-count (count (re-seq #"; Detached from the app\." text))]
+      (on-gtk (support/check :cljd-idle-stop-detaches
+                             (and attached? not-running? (= 1 detached-count))
+                             {:attached? attached? :not-running? not-running?
+                              :count detached-count :text text})))))
+
 (defn row-cljd-not-running-message
   "Opening a file from another app with no NREPL.lock switches the
   evaluator; Run then says the app isn't running, in the console's :system
