@@ -866,28 +866,51 @@
   250)
 
 (defn- make-flash-fn
-  "A fn [start end caret] that selects start..end in ed's buffer, then
-  FLASH-MS later puts the caret back at caret, unless the selection changed
-  meanwhile (the user moved on). One foreign-callable per window, reused by
-  every flash: jonquil.gtk.callbacks retains every callable for the
-  process's life, so a fresh one per flash would leak. GTK thread only."
+  "{:flash! (fn [start end caret]) :cancel! (fn [] -> boolean)}. :flash!
+  selects start..end in ed's buffer, then FLASH-MS later puts the caret
+  back where it was, unless the selection changed meanwhile (the user
+  moved on) -- the same restore check :cancel! below uses. :cancel!
+  restores AT ONCE (I2 fix wave) instead of waiting for the timeout, for
+  editor.clj's own key dispatch to call ahead of every other key clause:
+  a printable key, Backspace or Tab landing while a flash is still
+  showing would otherwise act on the flash's own selection, since the
+  flash is a real one. Returns true when a flash was actually pending.
+
+  A second :flash! call while the first's own selection is STILL exactly
+  the live one (nothing else -- a keystroke's cancel!, a set-text!, a
+  click elsewhere -- has touched it since) carries that first call's own
+  saved caret over, rather than its own caret argument, which is really
+  just that first selection's own start (select-range's mark convention),
+  not a real caret the user left behind. Anything else touching the
+  selection since (including a whole different buffer arriving) makes
+  this call's own caret argument the right one again -- the same
+  liveness check restore! uses to decide whether to act at all.
+
+  One foreign-callable per window, reused by every flash: jonquil.gtk.
+  callbacks retains every callable for the process's life, so a fresh one
+  per flash would leak. GTK thread only."
   [ed]
   (let [pending (atom nil)
         buf (:buf ed)
-        restore (callable (fn [_data]
-                            (try
-                              (when-let [{:keys [caret sel]} (first (reset-vals! pending nil))]
-                                (when (= sel (g/selection-offsets buf))
-                                  (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
-                              (catch :default _ nil))
-                             ;; G_SOURCE_REMOVE: a one-shot timeout.
-                            0)
-                          [:pointer] :int)]
-    (fn [start end caret]
-      (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
-      (reset! pending {:caret caret :sel [start end]})
-      (g/g-timeout-add FLASH-MS restore ffi/null)
-      nil)))
+        restore! (fn []
+                   (boolean
+                    (when-let [{:keys [caret sel]} (first (reset-vals! pending nil))]
+                      (when (= sel (g/selection-offsets buf))
+                        (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+                      true)))
+        restore-cb (callable (fn [_data]
+                               (try (restore!) (catch :default _ nil))
+                                ;; G_SOURCE_REMOVE: a one-shot timeout.
+                               0)
+                             [:pointer] :int)]
+    {:flash! (fn [start end caret]
+               (let [p @pending
+                     saved (if (and p (= (:sel p) (g/selection-offsets buf))) (:caret p) caret)]
+                 (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+                 (reset! pending {:caret saved :sel [start end]})
+                 (g/g-timeout-add FLASH-MS restore-cb ffi/null))
+               nil)
+     :cancel! restore!}))
 
 (defn- do-run-form!
   "Cmd/Ctrl+Enter and the editor menu's Run Form: commands/run-form on the
@@ -895,10 +918,10 @@
   caret.\" and sends nothing. Otherwise it flashes the form's range, echoes
   the form at the prompt and sends it the way Run Selection does, so an
   attach evaluator switches to the buffer's namespace first."
-  [ed cv ev* status-label flash-fn]
+  [ed cv ev* status-label flash-fns]
   (let [snap (editor/snapshot ed)]
     (if-let [{:keys [text start end]} (commands/run-form snap)]
-      (do (flash-fn start end (:caret snap))
+      (do ((:flash! flash-fns) start end (:caret snap))
           (cview/echo-entry! cv text)
           (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
       (set-status! status-label "No form at the caret."))))
@@ -1590,8 +1613,8 @@
         run-selection-fn (fn [] (do-run-selection! ed cv ev* status-label))
         ;; cljd plan P3.T2: Run Form, from Cmd/Ctrl+Enter in the editor and
         ;; the editor menu's first item.
-        flash-fn (make-flash-fn ed)
-        run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fn))
+        flash-fns (make-flash-fn ed)
+        run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fns))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
@@ -1758,6 +1781,7 @@
     (register-popover-fn rename-pop)
     (editor/set-rename-fn! ed rename-fn)
     (editor/set-run-form-fn! ed run-form-fn)
+    (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
     (g/g-signal-connect-data (:entry rename-pop) "activate"
                              (callable (fn [_entry _data]
                                          (try

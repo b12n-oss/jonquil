@@ -181,6 +181,14 @@
   (reset! (:run-form-fn ed) f)
   nil)
 
+(defn set-flash-cancel-fn!
+  "Registers f (fn [] -> nil), Run Form's own flash cancel (I2 fix wave:
+  window.clj's make-flash-fn, called from handle-key! below before any
+  other key handling). See set-quick-doc-fn!."
+  [ed f]
+  (reset! (:flash-cancel-fn ed) f)
+  nil)
+
 (defn set-completion-fns!
   "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
   state] -> 0/1)}), the ui's own completion actions (P4.T5): :complete! is
@@ -400,6 +408,15 @@
 (defn- alt-held? [state]
   (not (zero? (bit-and state g/ALT-MASK))))
 
+(defn- modifier-keyval?
+  "True for a modifier key's own keyval -- Shift/Control/Meta/Alt/Super/
+  Hyper, Caps Lock or Shift Lock, either side (gdkkeysyms.h 0xffe1-0xffee,
+  a contiguous block). I2: the flash-cancel guard in handle-key! below
+  must never fire on the Cmd/Ctrl/Shift/Alt press itself, only on the key
+  that follows it."
+  [keyval]
+  (<= 0xffe1 keyval 0xffee))
+
 (defn- no-command-modifiers?
   "True when none of Control, Meta or Alt is held -- the guard on row 7's
   bracket/quote/BackSpace/Tab keys, so they never shadow a command chord
@@ -499,11 +516,20 @@
   defaulting keycode to 0 -- harmless, since 0 never matches
   MAC-KEYCODE-F/MAC-KEYCODE-L. on-key (below), the real GTK callback,
   always uses the 4-arg form so alt-chord-f-or-l?'s macOS fallback has a
-  real hardware keycode to check."
+  real hardware keycode to check.
+
+  I2: before any of the cond clauses below run, a pending Run Form flash
+  is cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
+  caret and clearing the selection) unless keyval is a bare modifier
+  press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
+  would act on the flash's own selection instead of the buffer's real
+  one."
   ([ed keyval0 state] (handle-key! ed keyval0 0 state))
   ([ed keyval0 keycode state]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
          cfns @(:completion-fns ed)]
+     (when-not (modifier-keyval? keyval)
+       (when-let [f @(:flash-cancel-fn ed)] (f)))
      (cond
        @(:preedit-active? ed) 0
 
@@ -673,6 +699,9 @@
             ;; cljd plan P3.T2: single-slot registration for Run Form --
             ;; see set-run-form-fn!.
             :run-form-fn (atom nil)
+            ;; I2 fix wave: single-slot registration for Run Form's flash
+            ;; cancel -- see set-flash-cancel-fn!.
+            :flash-cancel-fn (atom nil)
             ;; P4.T5: single-slot registration for completion -- see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
             :completion-fns (atom nil)

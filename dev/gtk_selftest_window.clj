@@ -69,6 +69,8 @@
    run-form/row-run-form-top-level
    run-form/row-run-form-in-comment
    run-form/row-run-form-flashes
+   run-form/row-run-form-key-cancels-flash
+   run-form/row-run-form-flash-overlap
    run-form/row-run-form-key-before-smart-enter
    run-form/row-run-form-menu-item
    run-form/row-run-form-nothing-at-caret
