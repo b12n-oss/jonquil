@@ -24,6 +24,7 @@
   [rows/row-cljd-starts-not-running
    rows/row-cljd-load-prints-loaded
    rows/row-cljd-run-selection-in-buffer-ns
+   rows/row-cljd-run-form-in-comment
    rows/row-cljd-stop-detaches
    rows/row-cljd-reconnects-after-detach
    rows/row-cljd-idle-stop-detaches

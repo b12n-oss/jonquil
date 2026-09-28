@@ -173,6 +173,14 @@
   (reset! (:rename-fn ed) f)
   nil)
 
+(defn set-run-form-fn!
+  "Registers f (fn [] -> nil), the ui's own :run-form!* action, to run for
+  the editor's Run Form chord (Cmd/Ctrl+Enter, cljd plan P3.T2). See
+  set-quick-doc-fn!."
+  [ed f]
+  (reset! (:run-form-fn ed) f)
+  nil)
+
 (defn set-completion-fns!
   "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
   state] -> 0/1)}), the ui's own completion actions (P4.T5): :complete! is
@@ -508,6 +516,15 @@
        (when-let [f (:handle-key! cfns)] (= 1 (f keyval state)))
        1
 
+       ;; cljd plan P3.T2: Cmd/Ctrl+Enter (Return or KP-Enter with a command
+       ;; chord) is Run Form. It sits ahead of plain-return?, so smart-Enter
+       ;; never sees it, and it's always consumed (1), so GtkTextView never
+       ;; inserts a newline for it either. Completion's own clause above
+       ;; ignores any key held with Control or Meta, so an open popup
+       ;; doesn't take it.
+       (and (command-chord? state) (contains? #{KEY-RETURN KEY-KP-ENTER} keyval))
+       (do (when-let [f @(:run-form-fn ed)] (f)) 1)
+
        (plain-return? keyval state)
        (if (handle-return! ed) 1 0)
 
@@ -653,6 +670,9 @@
             ;; P4.T7: single-slot registration for the rename chords --
             ;; see set-rename-fn!.
             :rename-fn (atom nil)
+            ;; cljd plan P3.T2: single-slot registration for Run Form --
+            ;; see set-run-form-fn!.
+            :run-form-fn (atom nil)
             ;; P4.T5: single-slot registration for completion -- see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
             :completion-fns (atom nil)

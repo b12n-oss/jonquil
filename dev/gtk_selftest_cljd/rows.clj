@@ -140,6 +140,26 @@
                              (and ok? (= ["(where)"] sent))
                              {:ok? ok? :sent sent :text (support/since ui mark)})))))
 
+(defn row-cljd-run-form-in-comment
+  "cljd plan P3.T2: Cmd/Ctrl+Enter's fn on a multi-line form inside a
+  comment block sends exactly that form, in the buffer's namespace (the
+  session is already there, so nothing else is sent)."
+  [ui]
+  (go-row :cljd-run-form-in-comment support/check
+    (let [text (str fixture-drive "\n(comment\n  (let [w (where)]\n    w))\n")
+          n (count (fake/requests (srv)))
+          mark (on-gtk (let [m (support/out-end-offset ui)
+                             ed (:editor ui)]
+                         (editor/set-text! ed text)
+                         (support/place-cursor! (:buf ed) (str/index-of text "w))"))
+                         ((:run-form!* ui))
+                         m))
+          ok? (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> :ok")))
+          sent (mapv (fn [m] (get m "code")) (drop n (fake/requests (srv))))]
+      (on-gtk (support/check :cljd-run-form-in-comment
+                             (and ok? (= ["(let [w (where)]\n    w)"] sent))
+                             {:ok? ok? :sent sent :text (support/since ui mark)})))))
+
 (defn row-cljd-stop-detaches
   "Stop during a slow form detaches: the console says so, the label goes
   back to not running, and the server never got interrupt or close."

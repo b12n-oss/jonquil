@@ -858,6 +858,51 @@
       (cview/echo-entry! cv text)
       (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
 
+;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
+
+(def ^:private FLASH-MS
+  ;; estimate: long enough to see which form ran, short enough not to be in
+  ;; the way of the next keystroke. The spec asks for a brief flash.
+  250)
+
+(defn- make-flash-fn
+  "A fn [start end caret] that selects start..end in ed's buffer, then
+  FLASH-MS later puts the caret back at caret, unless the selection changed
+  meanwhile (the user moved on). One foreign-callable per window, reused by
+  every flash: jonquil.gtk.callbacks retains every callable for the
+  process's life, so a fresh one per flash would leak. GTK thread only."
+  [ed]
+  (let [pending (atom nil)
+        buf (:buf ed)
+        restore (callable (fn [_data]
+                            (try
+                              (when-let [{:keys [caret sel]} (first (reset-vals! pending nil))]
+                                (when (= sel (g/selection-offsets buf))
+                                  (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
+                              (catch :default _ nil))
+                             ;; G_SOURCE_REMOVE: a one-shot timeout.
+                            0)
+                          [:pointer] :int)]
+    (fn [start end caret]
+      (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+      (reset! pending {:caret caret :sel [start end]})
+      (g/g-timeout-add FLASH-MS restore ffi/null)
+      nil)))
+
+(defn- do-run-form!
+  "Cmd/Ctrl+Enter and the editor menu's Run Form: commands/run-form on the
+  editor's snapshot. No form at the caret sets the status \"No form at the
+  caret.\" and sends nothing. Otherwise it flashes the form's range, echoes
+  the form at the prompt and sends it the way Run Selection does, so an
+  attach evaluator switches to the buffer's namespace first."
+  [ed cv ev* status-label flash-fn]
+  (let [snap (editor/snapshot ed)]
+    (if-let [{:keys [text start end]} (commands/run-form snap)]
+      (do (flash-fn start end (:caret snap))
+          (cview/echo-entry! cv text)
+          (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
+      (set-status! status-label "No form at the caret."))))
+
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
 (defn- do-toggle-focus!
@@ -1543,6 +1588,10 @@
         save-as-fn (fn [] (do-save-as! ed cv win path))
         close-fn (fn [] (g/gtk-window-close win))
         run-selection-fn (fn [] (do-run-selection! ed cv ev* status-label))
+        ;; cljd plan P3.T2: Run Form, from Cmd/Ctrl+Enter in the editor and
+        ;; the editor menu's first item.
+        flash-fn (make-flash-fn ed)
+        run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fn))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
@@ -1560,7 +1609,8 @@
         editor-menu-group
         (install-context-menu!
          (:view ed)
-         [["Jump to Definition" "jump" jump-fn]
+         [["Run Form" "run-form" run-form-fn]
+          ["Jump to Definition" "jump" jump-fn]
           ["Rename Symbol" "rename" rename-fn]
           ["Quick Documentation" "quick-doc" quick-doc-fn]
           ["Complete" "complete" complete-fn]
@@ -1707,6 +1757,7 @@
     ;; own ns docstring).
     (register-popover-fn rename-pop)
     (editor/set-rename-fn! ed rename-fn)
+    (editor/set-run-form-fn! ed run-form-fn)
     (g/g-signal-connect-data (:entry rename-pop) "activate"
                              (callable (fn [_entry _data]
                                          (try
@@ -1798,6 +1849,9 @@
                  ;; P3.T3 self-test hooks: the exact fns the F6/Cmd+E/Cmd+L/
                  ;; zoom key chords call, so rows can drive them directly.
                  :run-selection!* run-selection-fn
+                 ;; cljd plan P3.T2: Run Form's own fn, the one Cmd/Ctrl+Enter
+                 ;; and the menu item call.
+                 :run-form!* run-form-fn
                  :toggle-focus!* toggle-focus-fn
                  :clear-console!* clear-console-fn
                  :zoom!* zoom-fn
@@ -1910,7 +1964,7 @@
   never touches the user's real settings file (TH.T5). ui is {:editor
   :console :session :status-label :line-col-label :evaluator* :selection*
   :dialect-label :reset-check :window :find-bar :run!*
-  :stop!* :open-path! :save-to! :run-selection!* :toggle-focus!*
+  :stop!* :open-path! :save-to! :run-selection!* :run-form!* :toggle-focus!*
   :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
