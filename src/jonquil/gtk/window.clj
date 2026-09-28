@@ -77,10 +77,11 @@
   (not (zero? (bit-and state g/SHIFT-MASK))))
 
 (defn- alt-held?
-  "Guards Cmd/Ctrl+L (clear console) from also matching editor.clj's
-  Cmd/Ctrl+Alt+L (format current line): the window-level key controller
-  runs in the capture phase, before the editor's own, so without this
-  guard Cmd+Alt+L would be swallowed here and never reach it."
+  "Guards Cmd/Ctrl+L (clear console) and Cmd/Ctrl+Shift+L (clear last
+  output) from also matching editor.clj's Cmd/Ctrl+Alt+L (format current
+  line): the window-level key controller runs in the capture phase,
+  before the editor's own, so without this guard Cmd+Alt+L would be
+  swallowed here and never reach it."
   [state]
   (not (zero? (bit-and state g/ALT-MASK))))
 
@@ -793,7 +794,14 @@
   :error into the middle of its output; only ev/eval!'s own busy-refusal
   warning is appended, same as P2, with no banner (the busy path never
   printed one) and no status change (eval/eval-async's own busy branch
-  returns its warning string without ever calling on-status-change)."
+  returns its warning string without ever calling on-status-change).
+
+  Cmd/Ctrl+Shift+L's own choke point for the banner (jonquil.gtk.console-
+  view's own citation: the banner doesn't go through echo-entry!, since
+  only Run Selection/Run Form do): cview/mark-entry-start! is queued right
+  before the banner itself is queued, so it resolves (on the console's own
+  next drain) right where the banner's own text lands -- never on the busy
+  path above, which prints no banner at all."
   [ed cv ev* status-label path-atom]
   (if (ev/evaluating? @ev*)
     (let [warning (ev/eval! @ev* (editor/editor-text ed)
@@ -801,6 +809,7 @@
       (when warning (cview/append! cv :system warning)))
     (let [text (editor/editor-text ed)
           problem (commands/pre-run-problem text)]
+      (cview/mark-entry-start! cv)
       (cview/append! cv :system "; --- Running Definitions ---\n")
       (if problem
         (do (cview/append! cv :error (str problem "\n"))
@@ -851,11 +860,19 @@
   is nil for a blank line, else the selection or the caret's whole line.
   When non-nil, echoes \"> text\" to the console as if typed, then goes
   through do-repl-eval! -- the SAME evaluator path a typed REPL entry uses
-  (history via ev/eval!, the busy-refusal warning, the same make-eval-opts)."
+  (history via ev/eval!, the busy-refusal warning, the same make-eval-opts).
+
+  Fix round 1 (Important #1): echo-entry!'s mark? is (not (ev/evaluating?
+  @ev*)), read BEFORE do-repl-eval! can change it -- mirroring do-run!'s
+  own idle/busy split. While a program is ALREADY running, this still
+  echoes (do-repl-eval! then appends the usual busy-refusal warning, same
+  as before) but must NOT steal the last-entry mark from that running
+  program: a later Shift+L needs to keep clearing the WHOLE run, not stop
+  short at wherever this mid-run echo landed."
   [ed cv ev* status-label]
   (let [snap (editor/snapshot ed)]
     (when-let [text (commands/run-selection-text snap)]
-      (cview/echo-entry! cv text)
+      (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
       (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
 
 ;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
@@ -917,12 +934,17 @@
   editor's snapshot. No form at the caret sets the status \"No form at the
   caret.\" and sends nothing. Otherwise it flashes the form's range, echoes
   the form at the prompt and sends it the way Run Selection does, so an
-  attach evaluator switches to the buffer's namespace first."
+  attach evaluator switches to the buffer's namespace first.
+
+  Fix round 1 (Important #1): echo-entry!'s mark? is (not (ev/evaluating?
+  @ev*)), same idle/busy split as do-run-selection! above, and for the
+  same reason -- a mid-run Cmd+Enter must still echo and flash, but must
+  never steal the mark from a program that's still running."
   [ed cv ev* status-label flash-fns]
   (let [snap (editor/snapshot ed)]
     (if-let [{:keys [text start end]} (commands/run-form snap)]
       (do ((:flash! flash-fns) start end (:caret snap))
-          (cview/echo-entry! cv text)
+          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
           (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
       (set-status! status-label "No form at the caret."))))
 
@@ -943,6 +965,14 @@
 
 (defn- do-clear-console! [cv]
   (cview/clear-output! cv))
+
+(defn- do-clear-last-output!
+  "Cmd/Ctrl+Shift+L (CIDER's C-c C-o): clears only the most recent
+  entry's own block. cview/clear-last-output! does the actual work; this
+  is only the window's own dispatch fn, same shape as do-clear-console!
+  just above."
+  [cv]
+  (cview/clear-last-output! cv))
 
 ;; --- popovers (P4.T3): a registry so Escape can close whichever P4
 ;; popover happens to be open -------------------------------------------
@@ -1374,17 +1404,25 @@
     returns 1 without touching evaluating? at all, so closing a popover
     during a run never also Stops the program.
 
+  Clear Last Output (Cmd/Ctrl+Shift+L, CIDER's C-c C-o): its own clause
+  sits directly ABOVE the plain Cmd/Ctrl+L clause, since that one doesn't
+  itself exclude Shift -- cond takes the first match, so putting the
+  Shift-qualified clause first is what keeps plain Cmd/Ctrl+L (no Shift)
+  clearing everything, exactly as before; the old clause needed no change
+  of its own.
+
   Fix wave item 1 (I2, parked item a): the whole handler runs inside
   try/catch, the same containment editor/dispatch-key! gives the editor's
   own key path. A throw from any clause below -- run-fn, do-zoom!/do-
-  cycle-theme!/do-toggle-focus!/do-clear-console!/do-run-selection!
-  included -- is reported through set-status! and the key still counts as
-  consumed (1), instead of escaping into GTK's own signal emission and
-  killing the process. The find bar's own handle-key!/handle-nav-key! stay
-  unwrapped on their own account -- this only contains a throw because
-  they happen to be called from inside this same function."
+  cycle-theme!/do-toggle-focus!/do-clear-console!/do-clear-last-output!/
+  do-run-selection! included -- is reported through set-status! and the
+  key still counts as consumed (1), instead of escaping into GTK's own
+  signal emission and killing the process. The find bar's own handle-key!/
+  handle-nav-key! stay unwrapped on their own account -- this only
+  contains a throw because they happen to be called from inside this same
+  function."
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
-   run-selection-fn toggle-focus-fn clear-console-fn zoom-fn evaluating?
+   run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
    win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
    status-label]
   (fn [_ctl keyval0 _keycode state _data]
@@ -1407,6 +1445,10 @@
           (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
           (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
           (and (command-chord? state) (= keyval KEY-E)) (do (run-selection-fn) 1)
+          ;; Cmd/Ctrl+Shift+L, ahead of plain Cmd/Ctrl+L below -- see this
+          ;; docstring's own citation.
+          (and (command-chord? state) (not (alt-held? state)) (shift-held? state) (= keyval KEY-L))
+          (do (clear-last-fn) 1)
           (and (command-chord? state) (not (alt-held? state)) (= keyval KEY-L)) (do (clear-console-fn) 1)
           (and (command-chord? state) (not (alt-held? state)) (not (shift-held? state)) (= keyval KEY-F))
           (do (open-find-fn) 1)
@@ -1617,6 +1659,7 @@
         run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fns))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
+        clear-last-fn (fn [] (do-clear-last-output! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
         set-theme-fn (fn [k] (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
@@ -1646,13 +1689,14 @@
           ["Replace" "replace" open-replace-fn]]
          (fn [msg] (set-status! status-label msg)))
         console-menu-group
-        (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]]
+        (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]
+                                           ["Clear Last Output" "clear-last-output" clear-last-fn]]
                                (fn [msg] (set-status! status-label msg)))
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action editor-menu-group name ffi/null))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
         window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
-                                     run-selection-fn toggle-focus-fn clear-console-fn zoom-fn
+                                     run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn
                                      evaluating-fn
                                      win fb open-find-fn open-replace-fn cycle-theme-fn
                                      close-popovers-fn status-label)
@@ -1878,6 +1922,10 @@
                  :run-form!* run-form-fn
                  :toggle-focus!* toggle-focus-fn
                  :clear-console!* clear-console-fn
+                 ;; Cmd/Ctrl+Shift+L's own fn, the one that clears only the
+                 ;; last entry's block -- same self-test-hook shape as
+                 ;; :clear-console!* just above.
+                 :clear-last-output!* clear-last-fn
                  :zoom!* zoom-fn
                  ;; TH.T4 self-test hooks: applies a theme (never saves --
                  ;; TH.T5's job), reads back the active theme name, and
@@ -1989,7 +2037,7 @@
   :console :session :status-label :line-col-label :evaluator* :selection*
   :dialect-label :reset-check :window :find-bar :run!*
   :stop!* :open-path! :save-to! :run-selection!* :run-form!* :toggle-focus!*
-  :clear-console!* :zoom!* :set-theme!* :theme-name* :code-css*
+  :clear-console!* :clear-last-output!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :rename!* :rename-to!* :rename-popover

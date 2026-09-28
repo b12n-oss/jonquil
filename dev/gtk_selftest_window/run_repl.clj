@@ -278,3 +278,223 @@
                 (support/check :clear-console
                                (and produced? (= "> abc" text) (= "abc" input))
                                {:produced produced? :text text :input input}))))))
+
+;; gtk-keys.md's shared table -- window.clj's own copy is private.
+(def ^:private KEY-L 0x06c)
+
+(defn row-clear-last-two-entries
+  "Cmd/Ctrl+Shift+L (CIDER's C-c C-o, brief Test 1): two REPL entries
+  submitted in turn, then the chord removes only the SECOND entry's own
+  echo+output. console-view's mark-entry-start! re-marks at each
+  commit-input!, so the mark always points at whichever entry is actually
+  last -- the first entry's own prompt+result stay untouched, the fresh
+  prompt stays, and text typed but not yet submitted survives the clear,
+  exactly like Cmd+L's own clear-output! leaves it."
+  [ui]
+  (go-row :clear-last-two-entries support/check
+    (let [cv (:console ui)
+          mark1 (on-gtk (let [m (support/out-end-offset ui)]
+                          (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 1)" -1 1)
+                          (cview/handle-return! cv false)
+                          m))
+          produced1? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark1) "=> 2")))
+          before-second (on-gtk (support/console-text ui))
+          mark2 (on-gtk (let [m (support/out-end-offset ui)]
+                          (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 2 2)" -1 1)
+                          (cview/handle-return! cv false)
+                          m))
+          produced2? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark2) "=> 4")))]
+      (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "typed" -1 1)
+              (let [handled ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil)
+                    text (support/console-text ui)
+                    input (cview/input-text cv)]
+                (support/check :clear-last-two-entries
+                               (and produced1? produced2? (= 1 handled)
+                                    (= text (str before-second "typed"))
+                                    (= "typed" input))
+                               {:produced1 produced1? :produced2 produced2? :handled handled
+                                :before-second before-second :text text :input input}))))))
+
+(defn row-clear-last-while-running
+  "Cmd/Ctrl+Shift+L while a program is STILL printing (brief Test 2): the
+  chord clears what it has printed SO FAR -- everything since the Run
+  banner, which is exactly where window.clj's do-run! marks the entry's
+  own start -- without needing the program to finish, and output the
+  program prints AFTER the clear keeps landing normally, since clear-last-
+  output! only ever deletes up to out-end's offset AT THE TIME of the key."
+  [ui]
+  (go-row :clear-last-while-running support/check
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(loop [] (println :tick) (Thread/sleep 200) (recur))")
+                         ((:run!* ui))
+                         m))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          printed-once? (await-until 2000 20 #(str/includes? (support/since ui mark) ":tick"))
+          handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
+          ;; mark sits at the run banner's own start (do-run!'s own
+          ;; mark-entry-start! reads out-end at that same instant), so a
+          ;; full clear leaves exactly the live "> " prompt from mark
+          ;; onward -- not "", which since-mark never reads once ANY
+          ;; prompt exists past mark.
+          cleared? (on-gtk (= "> " (support/since ui mark)))
+          printed-after? (await-until 2000 20 #(str/includes? (support/since ui mark) ":tick"))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
+      (on-gtk (support/check :clear-last-while-running
+                             (and started? printed-once? (= 1 handled) cleared? printed-after? stopped?)
+                             {:started started? :printed-once printed-once? :handled handled
+                              :cleared cleared? :printed-after printed-after? :stopped stopped?})))))
+
+(defn row-clear-last-twice-noop
+  "A second Shift+L immediately after the first (brief Test 3): clear-
+  last-output! deactivates the mark on the first clear, and nothing has
+  begun a NEW entry since, so the second press finds nothing left to
+  clear -- the buffer must come out byte-for-byte identical to what the
+  first clear already left, and the key still counts as handled (1),
+  never falling through to insert an L."
+  [ui]
+  (go-row :clear-last-twice-noop support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 3 3)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          produced? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "=> 6")))]
+      (on-gtk (let [handled1 ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil)
+                    text-after-first (support/console-text ui)
+                    handled2 ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil)
+                    text-after-second (support/console-text ui)]
+                (support/check :clear-last-twice-noop
+                               (and produced? (= 1 handled1) (= 1 handled2)
+                                    (= text-after-first text-after-second))
+                               {:produced produced? :handled1 handled1 :handled2 handled2
+                                :text-after-first text-after-first :text-after-second text-after-second}))))))
+
+(defn row-clear-console-key-regression
+  "Regression check (brief Test 4): with the new Shift-qualified clause
+  now sitting ahead of it in on-window-key's cond, plain Cmd/Ctrl+L (no
+  Shift) must still clear the WHOLE output history, exactly as before.
+  Driven through the real key-controller fn (:handle-window-key!), not
+  the raw :clear-console!* hook row-clear-console above already covers,
+  so a regression in the cond ORDERING itself (not just in do-clear-
+  console!) would be caught here."
+  [ui]
+  (go-row :clear-console-key-regression support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 5 5)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          produced? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "=> 10")))]
+      (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "abc" -1 1)
+              (let [handled ((:handle-window-key! ui) nil KEY-L 0 g/CONTROL-MASK nil)
+                    text (support/console-text ui)
+                    input (cview/input-text cv)]
+                (support/check :clear-console-key-regression
+                               (and produced? (= 1 handled) (= "> abc" text) (= "abc" input))
+                               {:produced produced? :handled handled :text text :input input}))))))
+
+(defn row-clear-last-menu-item
+  "The console's right-click 'Clear Last Output' item does exactly what
+  the key does (brief Test 5) -- fired through :repl-activate-menu-
+  action!* (install-context-menu!'s own unprefixed action-name
+  activation), the same seam rename-menus.clj's own row-menu-actions-
+  console-complete already exercises for the console's Complete item."
+  [ui]
+  (go-row :clear-last-menu-item support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 4 4)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          produced? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "=> 8")))]
+      (on-gtk (let [before (support/since ui mark)]
+                ((:repl-activate-menu-action!* ui) "clear-last-output")
+                ;; mark sits at the entry's own start (commit-input!'s own
+                ;; mark-entry-start!), so a clear leaves exactly the live
+                ;; "> " prompt from mark onward, not "".
+                (let [after (support/since ui mark)]
+                  (support/check :clear-last-menu-item
+                                 (and produced? (str/includes? before "=> 8") (= "> " after))
+                                 {:produced produced? :before before :after after})))))))
+
+(defn row-clear-last-run-selection-mid-run-keeps-mark
+  "Fix round 1, Important #1: Cmd+E (Run Selection) while a program is
+  STILL running must NOT move the last-entry mark -- only do-run!'s own
+  idle-only marking may, and do-run-selection!/do-run-form! now pass
+  echo-entry! a mark? flag gated on (not (ev/evaluating? @ev*)), mirroring
+  do-run!'s own busy/idle branching. Starts a printing loop (marked at the
+  banner), Runs Selection on OTHER text mid-run (echoes as before, but
+  must not re-mark), waits for MORE loop output past that echo, then
+  Shift+L: the WHOLE run's own entry -- banner, every tick, the mid-run
+  echo and its own busy warning -- must clear as one block, never cut off
+  at the Cmd+E point."
+  [ui]
+  (go-row :clear-last-run-selection-mid-run-keeps-mark support/check
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(loop [] (println :tick) (Thread/sleep 200) (recur))")
+                         ((:run!* ui))
+                         m))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          printed-once? (await-until 2000 20 #(str/includes? (support/since ui mark) ":tick"))
+          _ (on-gtk (editor/set-text! (:editor ui) "(+ 9 9)")
+                    ((:run-selection!* ui)))
+          echoed? (await-until 2000 20 #(str/includes? (support/since ui mark) "(+ 9 9)"))
+          ;; more :tick output must still arrive AFTER the mid-run echo,
+          ;; proving the loop kept running and printing normally through
+          ;; it -- both must end up inside the SAME entry as the banner.
+          printed-after-echo? (await-until 2000 20
+                                           #(let [t (support/since ui mark)
+                                                  i (str/index-of t "(+ 9 9)")]
+                                              (and i (str/includes? (subs t i) ":tick"))))
+          handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
+          cleared? (on-gtk (= "> " (support/since ui mark)))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
+      (on-gtk (support/check :clear-last-run-selection-mid-run-keeps-mark
+                             (and started? printed-once? echoed? printed-after-echo?
+                                  (= 1 handled) cleared? stopped?)
+                             {:started started? :printed-once printed-once? :echoed echoed?
+                              :printed-after-echo printed-after-echo? :handled handled
+                              :cleared cleared? :stopped stopped?})))))
+
+(defn row-clear-last-mark-lands-after-queued-tail
+  "Fix round 1, Important #2: mark-entry-start! must not read out-end
+  synchronously while a PREVIOUS entry's own output is still queued (via
+  append!) but not yet drained -- doing so would place the mark BEFORE
+  that pending tail, so a later Shift+L would delete it along with the
+  new entry. Manufactures exactly that queued-but-undrained state BY
+  CONSTRUCTION, all three calls inside ONE on-gtk step: append! OLDTAIL
+  (queues it, schedules a drain that can't possibly run yet -- still the
+  SAME synchronous call stack, and jonquil.gtk.callbacks/on-gui!'s own
+  g_idle_add citation defers every drain to a later main-loop iteration),
+  THEN mark-entry-start! (queues :mark right behind it, in the SAME
+  queue), THEN append! NEWENTRY (queues it right behind the mark) --
+  OLDTAIL is provably still undrained at the exact instant the mark
+  request is queued, since nothing between them ever returns to the main
+  loop. Doesn't also assert this from a SEPARATE on-gtk step afterward:
+  measured live, GTK's own idle processing can service more than one
+  ready g_idle_add source between two round trips this harness makes, so
+  a same-tick undrained check would be flaky, not deterministic, on
+  exactly the axis this row needs to be trustworthy on. Instead it only
+  asserts the OUTCOME, via await-until (never assumed same-tick): once
+  everything actually drains, Shift+L must find OLDTAIL surviving (the
+  PREVIOUS entry, before the mark) and NEWENTRY gone (the marked entry,
+  after it)."
+  [ui]
+  (go-row :clear-last-mark-lands-after-queued-tail support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (cview/append! cv :out "OLDTAIL\n")
+                         (cview/mark-entry-start! cv)
+                         (cview/append! cv :prompt "NEWENTRY\n")
+                         m))
+          drained? (await-until 2000 20 #(let [t (support/since ui mark)]
+                                           (and (str/includes? t "OLDTAIL")
+                                                (str/includes? t "NEWENTRY"))))
+          _ (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "typed" -1 1))
+          handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
+          final (on-gtk (support/since ui mark))]
+      (on-gtk (support/check :clear-last-mark-lands-after-queued-tail
+                             (and drained? (= 1 handled) (= "OLDTAIL\n> typed" final))
+                             {:drained drained? :handled handled :final final})))))

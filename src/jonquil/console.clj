@@ -54,6 +54,19 @@
             nl (str/index-of text "\n" (dec must))]
         (if nl (inc nl) must)))))
 
+(defn clear-last-range
+  "The [start end) span Cmd/Ctrl+Shift+L (CIDER's C-c C-o) should delete
+  from the console buffer -- start is the last-entry-start mark's offset,
+  or nil when there's no active one (none has begun yet, a previous
+  Shift+L already cleared it, a full Cmd+L ran since, or the output-cap
+  trimmer swallowed the mark's own text -- jonquil.gtk.console-view's own
+  callers decide which). end is out-end's current offset. nil (nothing to
+  clear) for a nil start, or when start is already at or past end -- the
+  entry has nothing left in it, so there's no span to delete."
+  [start end]
+  (when (and start (< start end))
+    [start end]))
+
 (defn error-text
   "An :error result's message: :error-text when an out-of-process runtime
   sent text, else jonquil.eval/format-error of the in-process :error."

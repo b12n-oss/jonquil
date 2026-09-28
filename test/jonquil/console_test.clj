@@ -58,6 +58,16 @@
   (testing "a stray closer alone is not an unclosed opener"
     (is (nil? (console/unclosed-bracket-message "(+ 1 2))")))))
 
+(deftest clear-last-range-test
+  (testing "no active last-entry mark: nothing to clear"
+    (is (nil? (console/clear-last-range nil 42))))
+  (testing "the entry's already empty (a previous clear caught it up to out-end)"
+    (is (nil? (console/clear-last-range 10 10))))
+  (testing "a mark somehow past out-end (defensive, shouldn't happen live)"
+    (is (nil? (console/clear-last-range 12 10))))
+  (testing "a real span to delete"
+    (is (= [3 10] (console/clear-last-range 3 10)))))
+
 (deftest styles-cover-every-kind-test
   (is (= #{:out :err :prompt :result :error :system} (set (keys console/styles))))
   (is (= [:out :err :prompt :result :error :system] (vec (keys console/styles)))
