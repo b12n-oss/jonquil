@@ -67,7 +67,10 @@
     (is (not (attach/connected? e)) "nothing connects until an evaluation needs it")
     (is (nil? (ev/start! e)))
     (is (= 'cljd.user (ev/prompt-ns e)))
-    (is (= 5 (count (ev/limitations e))))))
+    (is (= 5 (count (ev/limitations e))))
+    (testing "M1: println output comes back (fork 8aaa4628); it's lost only when the form throws"
+      (is (some #(str/includes? % "println") (ev/limitations e)))
+      (is (not-any? #(str/includes? % "doesn't come back") (ev/limitations e))))))
 
 (deftest connect-rules-test
   (testing "no NREPL.lock: the not-running notice, and nothing written"
@@ -106,7 +109,18 @@
   (testing "a listener that never answers describe: not ClojureDart, bounded by the describe timeout"
     (with-app {:mute? true}
       (fn [srv dir _]
-        (is (= {:status :notice :text (cljd/not-cljd-message (:port srv))} (first (run (make dir) "1" {:run? false}))))))))
+        (is (= {:status :notice :text (cljd/not-cljd-message (:port srv))} (first (run (make dir) "1" {:run? false})))))))
+  (testing "M2: the app quits mid-connect (describe answers disconnected): the refused sentence, not not-cljd"
+    (with-app {:slow-ops {"describe" 300}}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (future
+            (loop [n 0] (when (and (< n 250) (not (some #{"describe"} (fake/ops-seen srv))))
+                          (Thread/sleep 20) (recur (inc n))))
+            (fake/drop-connections! srv))
+          (is (= {:status :notice :text (cljd/refused-message (:port srv))}
+                 (first (run e "1" {:run? false}))))
+          (is (not (attach/connected? e))))))))
 
 (deftest load-run-test
   (with-app {}
@@ -374,6 +388,47 @@
         (ev/interrupt! e)
         (is (= {:status :interrupted} (deref done 2000 :timeout))
             "Stop during the wake probe still ends the evaluation as :interrupted")))))
+
+(deftest stop-before-ns-switch-test
+  ;; I1: a Stop that lands between the wake probe and the next request
+  ;; (here, the ns-switch eval Run Selection sends first) used to crash
+  ;; instead of ending as :interrupted: request! was called after detach!
+  ;; had already set :conn nil, so client/request! swapped on (:counter
+  ;; nil) -- "Error: nil where a clojure.lang.IAtom is required". with-redefs
+  ;; on cljd/probe-result calls ev/interrupt! (which detaches) and then
+  ;; delegates to the real probe-result, landing Stop at exactly that gap.
+  (with-app {}
+    (fn [srv dir _]
+      (let [e (make dir) orig cljd/probe-result]
+        (with-redefs [cljd/probe-result (fn [msgs] (ev/interrupt! e) (orig msgs))]
+          (let [[r _out] (run e "(where)" {:run? false :ns-source "(ns other.place)\n(defn g [] 2)"})]
+            (is (= {:status :interrupted} r))
+            (is (not-any? #{"(ns other.place)" "(where)"}
+                          (keep (fn [m] (get m "code")) (fake/requests srv)))
+                "no user code, and no ns-switch, is ever sent")))))))
+
+(deftest stale-publish-race-test
+  ;; I4: Stop can land in the gap between connect!'s (stop-requested? ev)
+  ;; check (guarding whether the fresh clone gets published) and the
+  ;; swap! that actually publishes it. with-redefs on the private
+  ;; stop-requested? makes the race deterministic: its SECOND call (the
+  ;; one guarding the publish) sets the real flag directly on state, as a
+  ;; genuine Stop landing right there would, but still answers false
+  ;; itself -- so connect! reaches the publish believing Stop hasn't
+  ;; landed, with the real flag already set underneath it. The fix reads
+  ;; the flag from the state map inside the same swap!, not through this
+  ;; (now-stale) function result, so it still catches the race.
+  (with-app {}
+    (fn [_srv dir _]
+      (let [e (make dir) calls (atom 0)]
+        (with-redefs [attach/stop-requested? (fn [ev]
+                                               (let [n (swap! calls inc)]
+                                                 (when (= 2 n)
+                                                   (swap! (:state ev) assoc-in [:running :stop-requested?] true))
+                                                 false))]
+          (let [[r _out] (run e "1" {:run? false})]
+            (is (= {:status :interrupted} r))))
+        (is (not (attach/connected? e)) "the connection connect! was building was never published")))))
 
 (deftest stop-during-asleep-probe-test
   ;; Fix round 3, finding 1: wake!'s stop-check only covered #{:lost

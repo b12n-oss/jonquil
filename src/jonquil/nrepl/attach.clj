@@ -111,12 +111,24 @@
                                 (when (vector? c) (some :new-session c))))]
                     (cond
                       (stop-requested? ev) (do (client/close! conn) {:status :interrupted})
-                      sid (do (swap! state assoc :conn conn :session sid :ops op-set
-                                     :session-ns cljd/default-ns :fresh? true)
-                              (add-watch (:open? conn) ::connection
-                                         (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
-                              (notify! ev true)
-                              nil)
+                      sid (let [[_ new] (swap-vals! state
+                                                    (fn [s] (if (get-in s [:running :stop-requested?])
+                                                              s
+                                                              (assoc s :conn conn :session sid :ops op-set
+                                                                     :session-ns cljd/default-ns :fresh? true))))]
+                            (if (identical? conn (:conn new))
+                              (do (add-watch (:open? conn) ::connection
+                                             (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
+                                  (notify! ev true)
+                                  nil)
+                              (do (client/close! conn) {:status :interrupted})))
+                      ;; describe answered disconnected: the app quit between
+                      ;; the socket opening and the reply landing. That's a
+                      ;; refused connection, not a non-cljd server (the
+                      ;; not-cljd sentence is only for one that answers
+                      ;; describe for real, without eval and load-file).
+                      (and (vector? d) (contains? (ops/statuses d) ops/disconnected))
+                      (do (client/close! conn) {:status :notice :text (cljd/refused-message port)})
                       :else (do (client/close! conn)
                                 {:status :notice :text (cljd/not-cljd-message port)})))))
               {:status :notice :text (cljd/refused-message port)}))
@@ -146,22 +158,31 @@
   finished evaluation's console. The reply is still recorded and still
   ends the wait when it carries \"done\" (that's how a detach's own
   synthetic disconnected reply unblocks this same call), only the two
-  side effects are skipped."
+  side effects are skipped.
+
+  A Stop that lands between the wake probe and this call (or between two
+  calls in the same evaluation, the ns-switch then the user's code) has
+  already detached: :conn is nil. Sending on a nil or closed conn would
+  crash client/request! (it swaps on (:counter nil)), so this returns the
+  same synthetic disconnected reply a mid-request detach produces,
+  without ever calling send!."
   [{:keys [state timings]} msg on-output]
-  (let [{:keys [conn session]} @state
-        acc (atom [])
-        done (promise)]
-    (client/request! conn (assoc msg :session session)
-                     (fn [m]
-                       (swap! acc conj m)
-                       (when (identical? conn (:conn @state))
-                         (when-let [n (:ns m)] (swap! state assoc :session-ns n))
-                         (when-let [o (:out m)] (say! on-output :out o))
-                         (when-let [e (:err m)] (say! on-output :err e)))
-                       (when (client/done? m) (deliver done @acc))))
-    (when (= ::waiting (deref done (:still-waiting-ms timings) ::waiting))
-      (say! on-output :system (str cljd/still-waiting-message "\n")))
-    @done))
+  (let [{:keys [conn session]} @state]
+    (if-not (client/open? conn)
+      [{:status ["done" ops/disconnected]}]
+      (let [acc (atom [])
+            done (promise)]
+        (client/request! conn (assoc msg :session session)
+                         (fn [m]
+                           (swap! acc conj m)
+                           (when (identical? conn (:conn @state))
+                             (when-let [n (:ns m)] (swap! state assoc :session-ns n))
+                             (when-let [o (:out m)] (say! on-output :out o))
+                             (when-let [e (:err m)] (say! on-output :err e)))
+                           (when (client/done? m) (deliver done @acc))))
+        (when (= ::waiting (deref done (:still-waiting-ms timings) ::waiting))
+          (say! on-output :system (str cljd/still-waiting-message "\n")))
+        @done))))
 
 (defn- wake!
   "A fresh session's first requests are Jonquil's own probe (cljd/probe-code),
@@ -212,7 +233,7 @@
       (finish! ev opts {:status :error :error-text cljd/save-first-message})
       (if-let [problem (or (connect! ev on-output) (wake! ev on-output))]
         (finish! ev opts problem)
-        (let [target (when (and (not run?) ns-source) (cljd/target-ns ns-source))
+        (let [target (when (and (not run?) ns-source (not (stop-requested? ev))) (cljd/target-ns ns-source))
               switch (when (and target (not= (:name target) (:session-ns @(:state ev))))
                        (cljd/eval-result (request! ev {:op "eval" :code (:text target)} on-output)
                                          (stop-requested? ev)))]
@@ -281,7 +302,7 @@
   (lookup [_ _ _ _] nil)
   (limitations [_]
     ["Stop detaches: there's no interrupt, so the app keeps running whatever it already has."
-     "No stdin, and println output inside the app doesn't come back."
+     "No stdin. println output comes back, but is lost when the form throws."
      "Completion and quick doc don't ask the app: completion uses this buffer and ClojureDart's own forms."
      "Reset on Run isn't available: hot reload can't unload a namespace, so every Run adds to the app."
      "A load stops at the first form the app's REPL compiler rejects; the app's watcher still compiles the saved file."]))

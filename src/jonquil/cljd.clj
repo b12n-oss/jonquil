@@ -57,13 +57,16 @@
   pos in text is a #_ discard or a reader prefix (' ` ~ @), so a top-level
   (...) there reads as data, not as a candidate ns form. tokenize has no
   token for #, ' or `, so those prefixes are otherwise invisible to
-  ns-form's scan."
-  [^String text pos]
+  ns-form's scan. comment-spans are the buffer's [start end) comment
+  token ranges: a prefix character that only appears at the end of a
+  header comment (\";; see 'README'\") isn't a real prefix."
+  [^String text pos comment-spans]
   (let [i (loop [i (dec (long pos))]
             (if (and (>= i 0) (Character/isWhitespace (.charAt text i)))
               (recur (dec i))
               i))]
     (and (>= i 0)
+         (not (some (fn [[s e]] (and (<= s i) (< i e))) comment-spans))
          (let [ch (.charAt text i)]
            (or (contains? #{\' \` \~ \@} ch)
                (and (= \_ ch) (pos? i) (= \# (.charAt text (dec i)))))))))
@@ -76,7 +79,9 @@
   skipped, since it isn't the buffer's real ns form."
   [text]
   (when-not (str/blank? text)
-    (let [toks (filterv (fn [[t]] (not= :comment t)) (syntax/tokenize text))
+    (let [raw-toks (syntax/tokenize text)
+          comment-spans (keep (fn [[t s e]] (when (= :comment t) [s e])) raw-toks)
+          toks (filterv (fn [[t]] (not= :comment t)) raw-toks)
           {:keys [matches bracket-tokens]} (syntax/compute-brackets text)
           top-opens (into #{} (keep (fn [[s _ depth kind]]
                                       (when (and (= :open kind) (zero? depth) (= \( (.charAt ^String text (int s))))
@@ -86,7 +91,7 @@
       (some (fn [i]
               (let [[t s] (nth toks i)]
                 (when (and (= :bracket t) (contains? top-opens (long s)) (= "ns" (word (inc i)))
-                           (not (discard-or-quoted? text (long s))))
+                           (not (discard-or-quoted? text (long s) comment-spans)))
                   (when-let [close (get matches (long s))]
                     (let [name-i (first (drop-while (fn [j] (= :metatag (first (get toks j))))
                                                     (iterate inc (+ i 2))))
@@ -136,12 +141,17 @@
       :else :failed)))
 
 (defn eval-result
-  "jonquil.eval's result shape for an eval's replies: ops/eval-result, except
-  that a lost connection (without Stop) reads as the app's own sentence."
+  "jonquil.eval's result shape for an eval's replies, mirroring load-result:
+  Stop plus a lost connection reads as :interrupted; a lost connection
+  alone reads as the app's own sentence; otherwise ops/eval-result decides,
+  never told Stop was requested. A cljd Stop never sends interrupt, so an
+  eval-error in the app's own replies is never caused by Stop."
   [msgs stop-requested?]
-  (if (and ((ops/statuses msgs) ops/disconnected) (not stop-requested?))
-    {:status :error :error-text lost-connection}
-    (ops/eval-result msgs stop-requested?)))
+  (let [st (ops/statuses msgs)]
+    (cond
+      (and stop-requested? (st ops/disconnected)) {:status :interrupted}
+      (st ops/disconnected) {:status :error :error-text lost-connection}
+      :else (ops/eval-result msgs false))))
 
 (defn load-result
   "A load-file's replies as one result, quiet: a :notice line on success

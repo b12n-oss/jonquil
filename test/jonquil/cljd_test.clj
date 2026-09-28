@@ -25,7 +25,10 @@
   (testing "a discarded or quoted top-level ns form doesn't count"
     (is (= "real.ns" (:name (cljd/ns-form "#_(ns old.ns)\n(ns real.ns)"))))
     (is (= "real.ns" (:name (cljd/ns-form "`(ns fake.ns)\n(ns real.ns)"))))
-    (is (= "real.ns" (:name (cljd/ns-form "'(ns fake.ns)\n(ns real.ns)"))))))
+    (is (= "real.ns" (:name (cljd/ns-form "'(ns fake.ns)\n(ns real.ns)")))))
+  (testing "I6: a header comment ending in a prefix character isn't a prefix"
+    (is (= "foo.bar" (:name (cljd/ns-form ";; see 'README'\n(ns foo.bar)\n"))))
+    (is (= "foo.bar" (:name (cljd/ns-form ";; count @\n(ns foo.bar)"))))))
 
 (deftest target-ns-test
   (is (= "demo.deck.drive" (:name (cljd/target-ns drive-ns-form))))
@@ -61,7 +64,9 @@
   (is (= :interrupted (:status (cljd/eval-result [{:status ["done" "jonquil-disconnected"]}] true))))
   (is (= "Error: Unhandled exception:"
          (:error-text (cljd/eval-result [{:err "Unhandled exception:\nException: boom\n#0      Eval ()\n"}
-                                         {:ns "cljd.user"} {:status ["done" "eval-error"]}] false)))))
+                                         {:ns "cljd.user"} {:status ["done" "eval-error"]}] false))))
+  (testing "I5: a cljd Stop never interrupts, so an eval-error is always the app's own"
+    (is (= :error (:status (cljd/eval-result [{:err "boom"} {:status ["done" "eval-error"]}] true))))))
 
 (def ^:private drive-load
   ;; probe_drive.out's load-file replies, cut to three forms.
