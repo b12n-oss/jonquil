@@ -175,16 +175,16 @@ Cmd/Ctrl+Z undoes more generally; Cmd/Ctrl+Shift+Z, GTK's own binding,
 and Cmd/Ctrl+Y both redo.
 
 F6 moves focus between the Definitions editor and the Interactions
-console, so a keyboard-only user can reach the prompt without touching
-the mouse. Cmd/Ctrl+L clears the console's output history while leaving
+console, so a keyboard-only user can reach the prompt without touching the
+mouse. Cmd/Ctrl+L clears the console's output history while leaving
 whatever's typed at the prompt alone. Cmd/Ctrl+Shift+L, CIDER's C-c C-o,
-clears only the most recent entry instead: its echoed input, everything
-it printed, and its result or error line, leaving every earlier entry and
-the live prompt untouched. Pressing it again right after does nothing,
-since there's nothing left of that entry to clear. Cmd/Ctrl+= (or Cmd/Ctrl++) zooms
-in, Cmd/Ctrl+- zooms out, and Cmd/Ctrl+0 resets the zoom, and all three
-resize both panes together. The status bar tracks the editor caret as
-`Ln L, Col C`, following clicks, the arrow keys and ordinary typing.
+clears only the most recent entry instead: its echoed input, everything it
+printed, and its result or error line, leaving every earlier entry and the
+live prompt untouched. Pressing it again right after does nothing, since
+there's nothing left of that entry to clear. Cmd/Ctrl+= (or Cmd/Ctrl++)
+zooms in, Cmd/Ctrl+- zooms out, and Cmd/Ctrl+0 resets the zoom, and all
+three resize both panes together. The status bar tracks the editor caret
+as `Ln L, Col C`, following clicks, the arrow keys and ordinary typing.
 
 ## Find and replace
 
