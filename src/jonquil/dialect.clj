@@ -94,12 +94,30 @@
    :evaluator :attach
    :runtimes #{:attach}
    :port-file "NREPL.lock"
-   :experimental true})
+   :experimental true
+   :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
+
+(def clj
+  {:id :clj
+   :name "Clojure (JVM)"
+   :extensions #{"clj" "cljc"}
+   :reader-features #{:clj}
+   :special-forms (:special-forms jolt)
+   :builtins (:builtins jolt)
+   ;; No markers: only .jonquil.edn {:dialect :clj} selects it.
+   :project-markers []
+   :evaluator :attach
+   :runtimes #{:attach}
+   :port-file ".nrepl-port"
+   :reset-tooltip "This is your own JVM, so Jonquil doesn't unload namespaces in it."})
 
 (def profiles
   "Every known profile. Order matters only as the last resort in select:
   Jolt first, so a file neither profile's extension claims (bb.edn in a
-  ClojureDart app) stays Jolt's."
+  ClojureDart app) stays Jolt's.
+
+  clj joins this list in P2.T4, once the window requires jonquil.nrepl.jvm
+  and can reach make-attached :clj (ruling 3)."
   [jolt cljd])
 
 (defn profile

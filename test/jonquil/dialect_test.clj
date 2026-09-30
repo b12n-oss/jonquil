@@ -18,6 +18,23 @@
     (spit f text)
     (.getPath f)))
 
+(defn- temp-project
+  "Writes files ({relative-path text}) into a fresh temp dir and returns its
+  canonical path."
+  [files]
+  (let [dir (temp-dir)]
+    (doseq [[rel text] files] (write! dir rel text))
+    dir))
+
+(defn- delete-recursively!
+  "Deletes f, and everything under it when it's a directory. Used only to
+  clean up temp-project's own dirs so this suite doesn't add to the
+  ROADMAP's temp-dir leak (D1/D2)."
+  [f]
+  (when (.isDirectory f)
+    (doseq [child (.listFiles f)] (delete-recursively! child)))
+  (.delete f))
+
 ;; A second, jank-shaped profile, so the tie-break rules have something to
 ;; break a tie against. Test data only: D1 ships one profile.
 (def ^:private other
@@ -216,3 +233,47 @@
     (is (= [:cljd :attach "/p"] (k "/p" "/p/lib/a.cljd")))
     (is (= (k "/p" "/p/lib/a.cljd") (k "/p" "/p/dev/b.cljd")) "another file in the same app keeps the connection")
     (is (not= (k "/p" "/p/lib/a.cljd") (k "/q" "/q/lib/a.cljd")) "another app needs its own")))
+
+;; P1.T2: the :clj (JVM Clojure) profile. Not yet in dialect/profiles
+;; (ruling 3); joins it in P2.T4, once the window can reach
+;; make-attached :clj.
+(def ^:private all3 [dialect/jolt dialect/cljd dialect/clj])
+
+(deftest clj-profile-test
+  (is (= :clj (:id dialect/clj)))
+  (is (= "Clojure (JVM)" (:name dialect/clj)))
+  (is (= #{"clj" "cljc"} (:extensions dialect/clj)))
+  (is (= [] (:project-markers dialect/clj)))
+  (is (= :attach (:evaluator dialect/clj)))
+  (is (= #{:attach} (:runtimes dialect/clj)))
+  (is (= ".nrepl-port" (:port-file dialect/clj)))
+  (is (= "This is your own JVM, so Jonquil doesn't unload namespaces in it." (:reset-tooltip dialect/clj)))
+  (is (= "Hot reload can't unload a namespace, so every Run adds to the running app." (:reset-tooltip dialect/cljd)))
+  (is (not-any? #{dialect/clj} dialect/profiles) "ruling 3: joins profiles in P2.T4"))
+
+(deftest clj-selection-test
+  (let [src "(ns demo.core)\n"
+        proj1 (temp-project {"deps.edn" "{}" ".jonquil.edn" "{:dialect :clj}" "src/demo/core.clj" src})
+        proj2 (temp-project {"deps.edn" "{}" "src/demo/core.clj" src})
+        core-path (str proj1 "/src/demo/core.clj")
+        core-path2 (str proj2 "/src/demo/core.clj")]
+    (try
+      (testing ".jonquil.edn {:dialect :clj} selects :clj, runtime :attach"
+        (let [sel (dialect/select all3 (dialect/find-project all3 core-path) core-path nil)]
+          (is (= :clj (:id (:profile sel))))
+          (is (= :attach (:runtime sel)))
+          (is (= :config (:source sel)))))
+      (testing "the same project without .jonquil.edn stays Jolt"
+        (is (= :jolt (:id (:profile (dialect/select all3 (dialect/find-project all3 core-path2) core-path2 nil))))))
+      (testing "a settings default of :clj doesn't take a .clj file from Jolt"
+        (is (= :jolt (:id (:profile (dialect/select all3 (dialect/find-project all3 core-path2) core-path2 :clj))))))
+      (testing "an untitled buffer with a settings default of :clj lands in :clj, with no project dir"
+        (let [sel (dialect/select all3 nil nil :clj)]
+          (is (= :clj (:id (:profile sel))))
+          (is (nil? (:project-dir sel)))))
+      (testing "the label"
+        (is (= "Clojure (JVM) (not running)" (dialect/label {:profile dialect/clj :runtime :attach} nil)))
+        (is (= "Clojure (JVM) (attached)" (dialect/label {:profile dialect/clj :runtime :attach} :attached))))
+      (finally
+        (delete-recursively! (io/file proj1))
+        (delete-recursively! (io/file proj2))))))

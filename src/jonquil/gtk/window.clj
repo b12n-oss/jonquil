@@ -38,6 +38,7 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
             [jonquil.nrepl.attach :as attach]
+            [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
@@ -133,8 +134,8 @@
   "The status bar's dialect label for selection sel run by evaluator e: an
   attach evaluator's label says whether it holds a live connection."
   [sel e]
-  (dialect/label sel (when (instance? jonquil.nrepl.attach.Attach e)
-                       (if (attach/connected? e) :attached :not-running))))
+  (dialect/label sel (when (satisfies? connection/Attached e)
+                       (if (connection/connected? e) :attached :not-running))))
 
 (defn- watch-connection!
   "For an attach evaluator e, keeps the dialect label in step with its
@@ -142,21 +143,20 @@
   socket, so it hands the label to the GTK thread, and it does nothing once
   e is no longer the window's evaluator (a later switch made another)."
   [e ev* sel* dialect-label]
-  (when (instance? jonquil.nrepl.attach.Attach e)
-    (attach/on-connection! e (fn [_]
-                               (on-gui! (fn []
-                                          (when (identical? e @ev*)
-                                            (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
+  (when (satisfies? connection/Attached e)
+    (connection/on-connection! e (fn [_]
+                                   (on-gui! (fn []
+                                              (when (identical? e @ev*)
+                                                (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
 
 (defn- apply-reset-toggle!
   "Reset on Run is insensitive, with a tooltip saying why, for an attach
-  runtime: hot reload can't unload a namespace, so every Run accumulates.
-  Every other runtime gets the checkbox back, with no tooltip. GTK thread
-  only."
+  runtime: the profile's own :reset-tooltip says why. Every other runtime
+  gets the checkbox back, with no tooltip. GTK thread only."
   [reset-chk sel]
   (if (= :attach (:runtime sel))
     (do (g/gtk-widget-set-sensitive reset-chk 0)
-        (g/gtk-widget-set-tooltip-text reset-chk "Hot reload can't unload a namespace, so every Run adds to the running app."))
+        (g/gtk-widget-set-tooltip-text reset-chk (:reset-tooltip (:profile sel))))
     (do (g/gtk-widget-set-sensitive reset-chk 1)
         (g/gtk-widget-set-tooltip-text reset-chk nil))))
 
