@@ -63,7 +63,7 @@
     so doc was never sent)."))
 
 (defprotocol Inspector
-  "P1.T3: inspecting the value an evaluator's last :ok result produced,
+  "Inspecting the value an evaluator's last :ok result produced,
   through jonquil.inspect.view's lifted ops. op and args are
   jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
   :def), except :start takes {:rows :cols} (the evaluator supplies the
