@@ -87,12 +87,48 @@
   [snapshot]
   (:symbol (target snapshot)))
 
+(defn location-line
+  "\"Defined in <file>[:line]\" for the quick-doc footer of a definition
+  outside the buffer (ruling 13: keyed on :location, never on :file
+  alone). nil for a nil file. A jar:file:/any/path/NAME.jar!/entry URL is
+  shortened to NAME.jar!/entry; any other string is used as is."
+  [file line]
+  (when file
+    (let [jar-idx (str/index-of file ".jar!/")
+          short (if jar-idx
+                  (let [seg-start (if-let [slash (str/last-index-of file "/" jar-idx)] (inc slash) 0)]
+                    (subs file seg-start))
+                  file)]
+      (str "Defined in " short (when line (str ":" line))))))
+
+(defn full-doc-status
+  "The status-bar sentence for a jonquil.evaluator/full-doc result
+  (P3.T2, ruling 11's second press), or nil for :ok -- the caller shows
+  the text and clears the status itself then."
+  [sym result]
+  (case (:status result)
+    :no-op "This server has no full-doc op."
+    :timeout (str "Full docs for " sym " timed out.")
+    :not-attached "No docs: Jonquil isn't attached to the server yet. Run something first."
+    ;; The same sentence as jonquil.clj/not-loaded-doc, built here instead
+    ;; of calling it -- this namespace must not require jonquil.clj --
+    ;; from the result's own :ns (the buffer's namespace,
+    ;; jonquil.nrepl.jvm/resolve-lookup!'s ns1).
+    :not-loaded (str "No docs: " (:ns result) " isn't loaded in the server yet. Run the file first.")
+    :not-found (str "No full docs: the server doesn't know " sym ".")
+    :ok nil))
+
 (defn doc-text
   "The quick-doc text for a jonquil.docs/symbol-doc result, using upstream's
-  formatter; a nil result reads as not found."
+  formatter; a nil result reads as not found. Appends \"\\n\\n\" plus
+  :location when doc-info has one (ruling 13: help/doc-text never reads
+  :file on its own)."
   [sym doc-info]
-  (syntax/format-autocomplete-doc (or doc-info {:status :not-found :symbol sym})
-                                  {:symbol sym}))
+  (let [text (syntax/format-autocomplete-doc (or doc-info {:status :not-found :symbol sym})
+                                             {:symbol sym})]
+    (if-let [location (:location doc-info)]
+      (str text "\n\n" location)
+      text)))
 
 ;; --- jump to definition: scope-aware local search --------------------------
 ;;

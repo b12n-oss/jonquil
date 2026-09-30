@@ -42,6 +42,12 @@
   ;; the same process (dev/fake_cljd_nrepl.clj). No real app is involved.
   :selftest-cljd {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-cljd"]}
+  ;; clj plan P2.T4: the JVM Clojure window rows -- a real window on a
+  ;; throwaway JVM project directory whose .nrepl-port names a fake nREPL
+  ;; server in the same process (dev/fake_jvm_nrepl.clj). No real JVM
+  ;; server is involved.
+  :selftest-clj {:extra-paths ["dev"]
+                 :main-opts ["-m" "gtk-selftest-clj"]}
   ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
   ;; one GIF) for the guide, driving jonquil.main/start! the same way
   ;; :selftest-window does.

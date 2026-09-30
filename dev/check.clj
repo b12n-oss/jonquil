@@ -18,10 +18,13 @@
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
     jonquil.cljd
+    jonquil.clj
     jonquil.nrepl.client
+    jonquil.nrepl.connection
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach
+    jonquil.nrepl.jvm
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help

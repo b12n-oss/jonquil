@@ -9,31 +9,36 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 32 namespaces in under half a second, and it's the fastest
+currently loads 35 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (189 tests, 1233 assertions
-today, about 10 s) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (246 tests, 1482 assertions
+today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
-count now includes the attach evaluator's own tests, run against an
-in-process fake ClojureDart server rather than a real one, so there's
+count now includes both attach evaluators' own tests, run against an
+in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo.
 
 `bb test:nrepl` runs a second, separate suite (28 tests, 97 assertions,
 about 32 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
-`bb test` never touches a child process and stays that self-contained on
-purpose, which is why the live tests are a separate task rather than a
-tag inside the same suite. `bb verify` is the pre-commit gate: clj-kondo
-in report mode, then both suites, `bb test` followed by `bb test:nrepl`,
-both of which must pass; end to end it runs in about 40 s.
+`bb test:clj` runs a third, separate suite (9 tests, 24 assertions)
+against a real `clojure -M:serve`, started fresh for the suite by
+`dev/clj_server.clj` (mirroring `jonquil.nrepl.child`'s shape for a Jolt
+child, but for the real JVM CLI): it needs Java 17+ and the `clojure` CLI,
+and the network on a first run that hasn't cached clojure-cli.repl-server
+yet. `bb test` never touches a child process or a real server and stays
+that self-contained on purpose, which is why the live suites are separate
+tasks rather than tags inside the same one. `bb verify` is the pre-commit
+gate: clj-kondo in report mode, then `bb test` followed by `bb
+test:nrepl`, both of which must pass.
 
-## Self-test and docs: four windows, one binary, one camera
+## Self-test and docs: five windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens four real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens five real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
@@ -54,7 +59,17 @@ ClojureDart app directory whose `NREPL.lock` names a fake fork server
 running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no
 fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
-completion, and Stop's detach, over that fake connection.
+completion, and Stop's detach, over that fake connection. The fifth
+(`dev/gtk_selftest_clj.clj`, 10 rows, plus two checks after the window
+closes) opens against a throwaway JVM Clojure project whose
+`.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
+fake JVM nREPL server running in this same process
+(`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its
+rows cover connecting and Run moving the prompt, a selection against a
+namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting
+after the server restarts, quick doc, jump to an external definition,
+full docs and its Escape, and a close that never sends the server a
+`close` op.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
@@ -145,6 +160,11 @@ nor the smoke ever reads or writes `~/.config/jonquil/settings.edn`.
   still skip that cleanup. Run `pgrep -fl "nrepl-server 79"` afterward;
   anything it finds is a leftover from the run you just interrupted, so
   kill only those pids, never anything already there before you started.
+- **An interrupted `bb test:clj` can leave a JVM behind.** Its fixture
+  sends SIGTERM to the server it started on every ordinary exit path, but
+  a Ctrl-C midway can skip that. Run `pgrep -fl clojure-cli.repl.server`
+  afterward, and kill only a pid that run started, never a server of your
+  own.
 
 ## Quality: lint, format, and the git hooks
 

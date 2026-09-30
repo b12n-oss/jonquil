@@ -15,7 +15,15 @@
   it's open, so make-rename-popover connects a SECOND \"closed\" handler
   (jonquil.gtk.popover/make-popover already connects its own, to keep
   :open? in sync -- see that namespace's docstring) that gives focus back
-  to view once rename closes, whatever closed it."
+  to view once rename closes, whatever closed it.
+
+  P3.T2 adds the full-doc popover: a SECOND quick-doc-shaped popover
+  (make-full-doc-popover), for jonquil.gtk.window's do-quick-doc! to show
+  in on a second press over the SAME target (ruling 11) -- an evaluator's
+  jonquil.evaluator/FullDoc, backed by the server's own doc op, answers
+  more than quick doc's summary. show-full-doc! raises its max content
+  height (60% of the window's own height) before popping it up, since
+  unlike the quick-doc popover it can't size itself once at construction."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
@@ -65,6 +73,39 @@
   doesn't set."
   [hp]
   (g/label-text (:label hp)))
+
+;; --- full doc (P3.T2, ruling 10) ---------------------------------------------
+
+(defn make-full-doc-popover
+  "Builds the full-doc popover: a SECOND popover, built once per editor
+  the same way make-help-popover above builds the quick-doc one (same
+  DOC-WIDTH, autohide off, position :bottom), for jonquil.gtk.window's
+  do-quick-doc! to show a second quick-doc press's full documentation in
+  (ruling 11). Its own map also keeps :scroll, unlike make-help-popover's
+  -- show-full-doc! below raises this popover's max content height at
+  every show (ruling 10: 60% of the window's own height, computed by the
+  caller), something the quick-doc popover never needs to do."
+  [view]
+  (let [{:keys [label scroll]} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
+        pp (popover/make-popover view {:autohide? false :position :bottom})]
+    (popover/set-child! pp scroll)
+    (assoc pp :label label :scroll scroll)))
+
+(defn show-full-doc!
+  "Raises fp's max content height (gtk_scrolled_window_set_max_content_
+  height) to max-height, sets its label to text, then pops it up at
+  view's caret (popover/show-at-caret!) -- same shape as show-doc! above,
+  with the height set first since it changes on every show (ruling 10)."
+  [fp text max-height]
+  (g/gtk-scrolled-window-set-max-content-height (:scroll fp) max-height)
+  (g/gtk-label-set-text (:label fp) text)
+  (popover/show-at-caret! fp)
+  nil)
+
+(defn full-doc-text
+  "fp's label text -- for rows, same contract as quick-doc-text above."
+  [fp]
+  (g/label-text (:label fp)))
 
 ;; --- rename (P4.T7) ---------------------------------------------------------
 

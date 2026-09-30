@@ -12,9 +12,11 @@ flowchart TD
   edit["jonquil.edit<br/>pure edit ops<br/>(pure)"]
   eval["jonquil.eval<br/>run, in, out, stop, history<br/>(threads)"]
   docs["jonquil.docs<br/>docs and completion in the eval ns<br/>(pure + runtime)"]
+  connection["jonquil.nrepl.connection<br/>Attached protocol: cljd + clj's shared attach lifecycle"]
   gtk -- "snapshots in, edits out" --> edit
   gtk -- "paint plans" --> syntax
   gtk -- "Run, Stop, the REPL" --> session
+  gtk -- "attach dialects: satisfies? Attached" --> connection
   session --> eval
   session --> docs
 ```
@@ -107,7 +109,7 @@ The O1 spec decision is that Run resets by default: in `:reset` mode, `run-defin
 
 Three `bb` tasks drive the real GTK front end headlessly, without a human at the keyboard:
 
-- `bb gtk:selftest` now opens four real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection. The fourth (cljd plan P2.T4) opens a window against a throwaway ClojureDart app directory whose `NREPL.lock` names a fake fork server running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no fork checkout and no real app; its rows cover connecting, a quiet load, Run Selection and Run Form switching the session's namespace, quick doc, completion, and Stop's detach, all over that fake connection.
+- `bb gtk:selftest` now opens five real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection. The fourth (cljd plan P2.T4) opens a window against a throwaway ClojureDart app directory whose `NREPL.lock` names a fake fork server running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no fork checkout and no real app; its rows cover connecting, a quiet load, Run Selection and Run Form switching the session's namespace, quick doc, completion, and Stop's detach, all over that fake connection. The fifth (clj plan P2.T4) opens a window against a throwaway JVM Clojure project whose `.nrepl-port` names a fake JVM nREPL server running in this same process (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its rows cover connecting, Run moving the prompt, a selection against a namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting after the server restarts, quick doc, jump to an external definition, full docs and its Escape, and a close that never sends the server a `close` op.
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
 All three poll a condition against a deadline rather than sleeping, and all three hand any blocking subprocess call (screenshots, GIF recording, the nREPL window's own child) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
@@ -141,7 +143,8 @@ The key-dispatch wrappers carry the same guarantee down at the keyboard level. `
 `jonquil.dialect` holds every dialect as plain data: a profile names its
 file extensions, the `jonquil.syntax` special-forms and builtins sets it
 paints and completes against, its project markers, and which runtime keys
-it offers. `profiles` lists every known one, `jolt` and `cljd` today.
+it offers. `profiles` lists every known one, `jolt`, `cljd` and `clj`
+today.
 `find-project` walks up from a file to the nearest directory holding
 `.jonquil.edn` or a marker, reading and parsing the config along the way
 without ever throwing: an unreadable or malformed file becomes a warning,
@@ -161,7 +164,12 @@ underneath runs in this process or somewhere else. `jonquil.session`'s
 still the one every window starts with by default. The `make` multimethod
 dispatches on a selection's `:runtime`, so requiring a new
 implementation's namespace is what registers it; `jonquil.nrepl.
-evaluator` is the second one, and `jonquil.nrepl.attach` is the third.
+evaluator` is the second one, and every `:attach` runtime is the third:
+`ev/make :attach` forwards to `jonquil.nrepl.connection`'s own
+`make-attached` multimethod, dispatched a second time on the selection's
+profile id, so `jonquil.nrepl.attach` (`:cljd`) and `jonquil.nrepl.jvm`
+(`:clj`) each register their own method rather than sharing one `:attach`
+implementation.
 
 ```mermaid
 flowchart LR
@@ -169,7 +177,9 @@ flowchart LR
   fp --> sel["dialect/select<br/>profile, runtime, project dir"]
   sel -- ":in-process" --> inproc["jonquil.session<br/>InProcess (Jolt)"]
   sel -- ":nrepl" --> nrepl["jonquil.nrepl.evaluator<br/>NRepl: spawns jolt nrepl-server"]
-  sel -- ":attach" --> attach["jonquil.nrepl.attach<br/>Attach: a running ClojureDart app"]
+  sel -- ":attach" --> ma["jonquil.nrepl.connection<br/>make-attached, by profile id"]
+  ma -- ":cljd" --> attach["jonquil.nrepl.attach<br/>Attach: a running ClojureDart app"]
+  ma -- ":clj" --> jvm["jonquil.nrepl.jvm<br/>Jvm: your own nREPL server"]
 ```
 
 ### `jonquil.nrepl.*`: Jolt out of process
@@ -214,6 +224,25 @@ that every evaluator a window makes joins as soon as it's made, so
 `jonquil.main` can stop every one of them, and wait for any still mid-
 start to settle, before the process exits. No child outlives Jonquil just
 because the window that started it happened to close first.
+
+### jonquil.nrepl.connection: the shared attach lifecycle
+
+`jonquil.nrepl.connection` holds what every attach evaluator needs and
+none of them change: the `Attached` protocol (`connected?`,
+`on-connection!`), `connect!`, `detach!`, `request!`, and
+`stop-requested?`, plus the `make-attached` multimethod shown in the
+diagram above. It was split out of `jonquil.nrepl.attach` without
+changing any behaviour, so ClojureDart's own attach tests and self-test
+rows still pass unchanged against it. A dialect's own namespace supplies
+a connect policy (its console sentences, and what `:on-connect` adds to
+`:state`) and the pieces that stay dialect-specific: `jonquil.nrepl.
+attach` keeps the wake-up probe and the run worker for ClojureDart's own
+fork, and `jonquil.nrepl.jvm` (below) keeps the JVM's own run worker,
+Stop and help logic. `jonquil.gtk.window` checks `(satisfies?
+connection/Attached e)` in place of an `instance?` test on any one
+dialect's record, both for the status-bar label (`dialect/label`'s
+`:attached`/not-running text) and for printing an attach evaluator's
+`limitations` once it connects.
 
 ### jonquil.nrepl.attach: ClojureDart, attached
 
@@ -280,10 +309,58 @@ own verdict, and a load's one-line summary, all as plain functions over
 text and reply vectors, with no socket and no GTK anywhere in the
 namespace.
 
-The `Evaluator` protocol itself doesn't change for any of this: attach
-implements the same `start!`, `stop!`, `eval!`, `interrupt!`, completion
-and lookup, history and prompt-namespace surface the in-process and
-out-of-process runtimes already do.
+### jonquil.nrepl.jvm: JVM Clojure, attached
+
+`jonquil.nrepl.jvm`'s `Jvm` record is the third attach evaluator, built
+on the same `jonquil.nrepl.connection` as ClojureDart's, for a project
+whose own `.jonquil.edn` says `{:dialect :clj}`. Where ClojureDart's
+server ignores a request's `:ns`, a JVM server honours it, so Run
+Selection and Run Form send it explicitly instead of switching the
+session's namespace first, and Jonquil never sends a buffer's `ns` form
+on its own: a namespace the server hasn't loaded yet gets the not-loaded
+sentence and nothing else is sent. Run itself stays a plain `load-file`
+with no `:ns` at all, the way any nREPL client's load-file works, and a
+successful Run moves the prompt to the buffer's own namespace afterward.
+
+Unlike ClojureDart, this server supports `interrupt` and `stdin`. Stop
+marks the running evaluation and, when the server advertises `interrupt`,
+sends it and gives the server up to `:interrupt-timeout-ms` (1 s) to
+actually end it before Jonquil gives up and detaches instead, printing
+`clj/interrupt-failed-message`; without the op, or when it doesn't take
+in time, Jonquil detaches the same way. stdin sends a line through the
+live session and never closes it: nREPL 1.7.0 fails an empty `stdin` op
+with a `ClassCastException` rather than answering EOF, so `send-eof!` is
+a no-op (`clj/limitations`, P0.1 in the arc's own spike).
+
+`complete` merges the server's own completions into the offline
+candidates, and `lookup` is backed by the server's own `lookup` op, with
+a `Defined in <file>:<line>` line (`jonquil.help/location-line`) for a
+definition outside the buffer: the server's `lookup` reply carries `file`
+and `line` for on-disk code and jar entries alike, unlike ClojureDart's
+fork. Both `lookup` and `full-doc` (the `FullDoc` protocol, opened by a
+second quick-doc press) resolve their `:ns` through a shared
+`resolve-lookup!`: the buffer's own namespace first, falling back once to
+the prompt namespace when the server hasn't loaded it, and a not-loaded
+result, never a silent "not found" or a hung full-doc request, when
+neither answers without an error. `full-doc` runs in a future rather than
+on the GTK thread, since it's asked for on demand rather than on every
+keystroke: it's backed by clojure-cli.repl's own `doc` op, whose first
+call downloads the ClojureDocs export into the server's own config
+directory, so `:full-doc-timeout-ms` leaves room for several seconds
+there, well past `:help-timeout-ms`'s 300 ms budget for `lookup` and
+`complete` on the GTK thread.
+
+`jonquil.clj` is this evaluator's pure half, the same split `jonquil.cljd`
+draws for ClojureDart: the console's own sentences, the buffer's `ns`
+form, the connect policy, and the reply decisions (`eval-result`,
+`ns-not-found?`, `prompt-after-run`, `need-input?`), all as plain
+functions over text and reply vectors, with no socket and no GTK
+anywhere in the namespace.
+
+The `Evaluator` protocol itself doesn't change for any of this: both
+attach evaluators implement the same `start!`, `stop!`, `eval!`,
+`interrupt!`, completion and lookup, history and prompt-namespace
+surface the in-process and out-of-process runtimes already do.
 
 ### The window's evaluator
 
@@ -308,15 +385,16 @@ whole buffer as `:ns-source` in their eval options, which only the
 attach evaluator reads, to decide whether it needs to switch namespaces
 first.
 
-### Plug points for a second dialect
+### Plug points for more dialects
 
-A second dialect exists now, ClojureDart, and it already proves out two
-of these seams. `jonquil.paint/paint-plan` takes the active profile as
-an argument, so highlighting and completion both draw on each profile's
-own `:special-forms` and `:builtins` rather than Jolt's alone, and a
-profile's `:port-file` is the whole seam a generic "attach to any
-nREPL" runtime would need: `jonquil.dialect/cljd` names `NREPL.lock`, a
-future profile would just name its own.
+Two more dialects exist now, ClojureDart and JVM Clojure, and they prove
+out two of these seams. `jonquil.paint/paint-plan` takes the active
+profile as an argument, so highlighting and completion both draw on each
+profile's own `:special-forms` and `:builtins` rather than Jolt's alone.
+A profile's `:port-file` is most of what an attach runtime needs:
+`jonquil.dialect/cljd` names `NREPL.lock` and `jonquil.dialect/clj`
+names `.nrepl-port`, while `jonquil.nrepl.connection` holds the connect,
+describe, clone and detach lifecycle both share.
 
 A few seams still carry Jolt's own shape rather than a profile's,
 though. `child/start!`'s launch args, its port scan, and the log text it

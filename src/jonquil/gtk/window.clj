@@ -38,7 +38,9 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
             [jonquil.nrepl.attach :as attach]
+            [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.jvm]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
@@ -133,8 +135,8 @@
   "The status bar's dialect label for selection sel run by evaluator e: an
   attach evaluator's label says whether it holds a live connection."
   [sel e]
-  (dialect/label sel (when (instance? jonquil.nrepl.attach.Attach e)
-                       (if (attach/connected? e) :attached :not-running))))
+  (dialect/label sel (when (satisfies? connection/Attached e)
+                       (if (connection/connected? e) :attached :not-running))))
 
 (defn- watch-connection!
   "For an attach evaluator e, keeps the dialect label in step with its
@@ -142,21 +144,20 @@
   socket, so it hands the label to the GTK thread, and it does nothing once
   e is no longer the window's evaluator (a later switch made another)."
   [e ev* sel* dialect-label]
-  (when (instance? jonquil.nrepl.attach.Attach e)
-    (attach/on-connection! e (fn [_]
-                               (on-gui! (fn []
-                                          (when (identical? e @ev*)
-                                            (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
+  (when (satisfies? connection/Attached e)
+    (connection/on-connection! e (fn [_]
+                                   (on-gui! (fn []
+                                              (when (identical? e @ev*)
+                                                (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
 
 (defn- apply-reset-toggle!
   "Reset on Run is insensitive, with a tooltip saying why, for an attach
-  runtime: hot reload can't unload a namespace, so every Run accumulates.
-  Every other runtime gets the checkbox back, with no tooltip. GTK thread
-  only."
+  runtime: the profile's own :reset-tooltip says why. Every other runtime
+  gets the checkbox back, with no tooltip. GTK thread only."
   [reset-chk sel]
   (if (= :attach (:runtime sel))
     (do (g/gtk-widget-set-sensitive reset-chk 0)
-        (g/gtk-widget-set-tooltip-text reset-chk "Hot reload can't unload a namespace, so every Run adds to the running app."))
+        (g/gtk-widget-set-tooltip-text reset-chk (:reset-tooltip (:profile sel))))
     (do (g/gtk-widget-set-sensitive reset-chk 1)
         (g/gtk-widget-set-tooltip-text reset-chk nil))))
 
@@ -658,7 +659,11 @@
 
     ;; cljd plan P2.T4: an attach evaluator connects on the first Run, so
     ;; there's nothing to start; say it's experimental and what it can't do.
-    (instance? jonquil.nrepl.attach.Attach e)
+    ;; clj plan P2.T4: satisfies? connection/Attached, not an instance? on
+    ;; any one dialect's record, so a :clj window prints its own limits too
+    ;; -- the experimental line stays gated on the profile's own flag,
+    ;; which only cljd sets.
+    (satisfies? connection/Attached e)
     (do (when (:experimental (:profile sel))
           (cview/append! cv :system (str cljd/experimental-message "\n")))
         (doseq [l (ev/limitations e)]
@@ -1030,14 +1035,61 @@
   P4.T5: close-popovers-fn runs right before show-doc! -- so opening quick
   doc closes completion's popover too, through the SAME registry Escape
   already uses (P4.T3), never a pairwise special case against completion
-  by name."
-  [ed ev* status-label help-pop close-popovers-fn]
+  by name.
+
+  P3.T2 (ruling 11): a press on the SAME target (last-shown's own
+  {:symbol :start}, set below whenever this shows something) while the
+  quick-doc popover is STILL open, for an evaluator that satisfies
+  ev/FullDoc, asks the server for full documentation instead of
+  re-showing the same quick-doc text: the status says Loading, and
+  ev/full-doc's on-result -- a worker thread, per its own docstring -- is
+  handed to on-gui! whole, so every GTK/editor call inside it runs safely
+  on the GTK thread, wrapped in its own try/catch that sets the status on
+  a throw. A stale result (help/target on a FRESH snapshot no longer
+  matches the target that was loading -- the caret moved on to something
+  else while the request was in flight) is dropped: nothing is shown for
+  it. Otherwise this closes every OTHER open popover (close-popovers-fn
+  full-doc-pop, never full-doc-pop itself, so it's never hidden and
+  reshown within the same frame) and shows the text at 60% of the
+  window's own height (gtk-widget-get-height), then clears the status
+  back to Ready -- or, a non-:ok result, sets it from help/full-doc-
+  status. Every other press, and every evaluator without FullDoc (cljd,
+  in-process), takes the ordinary re-show path below unchanged, which
+  also records the freshly shown target in last-shown."
+  [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win]
   (try
     (let [snap (editor/snapshot ed)]
-      (if-let [{:keys [symbol start]} (help/target snap)]
-        (let [doc (ev/lookup @ev* symbol (:text snap) start)]
-          (close-popovers-fn help-pop)
-          (help-popover/show-doc! help-pop (help/doc-text symbol doc)))
+      (if-let [{:keys [symbol start] :as target} (help/target snap)]
+        (let [id (select-keys target [:symbol :start])]
+          (if (and (popover/open? help-pop) (= id @last-shown) (satisfies? ev/FullDoc @ev*))
+            (do (set-status! status-label (str "Loading full docs for " symbol "..."))
+                (ev/full-doc @ev* symbol (:text snap)
+                             (fn [result]
+                               (on-gui!
+                                (fn []
+                                  (try
+                                    (cond
+                                      ;; The caret moved to another symbol while the
+                                      ;; server answered: drop the text, but don't
+                                      ;; leave "Loading full docs..." behind.
+                                      (not= id (select-keys (help/target (editor/snapshot ed)) [:symbol :start]))
+                                      (set-status! status-label "Ready")
+
+                                      (= :ok (:status result))
+                                      (do (close-popovers-fn full-doc-pop)
+                                          (help-popover/show-full-doc!
+                                           full-doc-pop (:text result)
+                                           (int (* 0.6 (g/gtk-widget-get-height win))))
+                                          (set-status! status-label "Ready"))
+
+                                      :else
+                                      (set-status! status-label (help/full-doc-status symbol result)))
+                                    (catch :default e
+                                      (set-status! status-label (str "; full doc: " (ex-message e))))))))))
+            (let [doc (ev/lookup @ev* symbol (:text snap) start)]
+              (reset! last-shown id)
+              (close-popovers-fn help-pop)
+              (help-popover/show-doc! help-pop (help/doc-text symbol doc)))))
         (set-status! status-label "No symbol at the caret.")))
     (catch :default e
       (set-status! status-label (str "; quick doc: " (ex-message e))))))
@@ -1587,7 +1639,13 @@
         ;; dispatch calls (set-quick-doc-fn!/set-jump-fn! below), since ed
         ;; itself is built before session/status-label/help-pop exist.
         help-pop (help-popover/make-help-popover (:view ed))
-        quick-doc-fn (fn [] (do-quick-doc! ed ev* status-label help-pop close-popovers-fn))
+        ;; P3.T2 (ruling 11): the target {:symbol :start} quick-doc-fn last
+        ;; showed, and the full-doc popover a second press over that SAME
+        ;; target shows in -- a second popover built the same way, joined
+        ;; to the same registry below.
+        last-shown (atom nil)
+        full-doc-pop (help-popover/make-full-doc-popover (:view ed))
+        quick-doc-fn (fn [] (do-quick-doc! ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win))
         jump-fn (fn [] (do-jump! ed ev* status-label help-pop close-popovers-fn))
         ;; P4.T7: the rename popover, built once on ed's view and joined
         ;; to the SAME registry (Escape/teardown, same reasoning as
@@ -1808,10 +1866,21 @@
     ;; or focus leaving the editor -- both beyond Escape, which the
     ;; registry above already covers.
     (register-popover-fn help-pop)
+    ;; P3.T2: joins the same registry (Escape/teardown close it, same as
+    ;; every other P4 popover) -- do-quick-doc! is the only thing that
+    ;; ever SHOWS it (ruling 10/11); a caret move or focus loss also
+    ;; closes it, same as help-pop below.
+    (register-popover-fn full-doc-pop)
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    ;; The full-doc popover closes on the same two events as the quick-doc
+    ;; popover above -- it's a second, wider popover left open over the
+    ;; editor with no other close hook of its own besides Escape and
+    ;; do-quick-doc!'s own re-show path.
+    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
+    (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
     ;; P4.T7: joins the SAME popover registry, wires the editor's own
     ;; Shift+F6/F2 chords to rename-fn, and wires the popover's own entry
     ;; "activate" signal (a real Enter keypress in a focused GtkEntry,
@@ -1963,6 +2032,11 @@
                  :quick-doc!* quick-doc-fn
                  :jump!* jump-fn
                  :help-popover help-pop
+                 ;; P3.T2: the full-doc popover a second quick-doc press
+                 ;; over the same target shows in (ruling 11) -- rows read
+                 ;; it back via jonquil.gtk.popover/open? and help-popover/
+                 ;; full-doc-text, same as :help-popover above.
+                 :full-doc-popover full-doc-pop
                  ;; P4.T7: the ui's own rename actions -- rename!* is the
                  ;; exact fn editor.clj's own Shift+F6/F2 clauses call
                  ;; (set-rename-fn!, above); rename-to!* is the exact fn
@@ -2040,6 +2114,7 @@
   :clear-console!* :clear-last-output!* :zoom!* :set-theme!* :theme-name* :code-css*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
+  :full-doc-popover
   :rename!* :rename-to!* :rename-popover
   :activate-menu-action!* :repl-activate-menu-action!*
   :complete!* :completion
@@ -2065,6 +2140,10 @@
   own Ctrl+Q/Shift+F1/F12/Ctrl+B key clauses call; :help-popover is the
   jonquil.gtk.help-popover map those two actions show doc text in --
   jonquil.gtk.popover/open? and help-popover/quick-doc-text read it back.
+  :full-doc-popover (P3.T2) is the SECOND jonquil.gtk.help-popover map a
+  repeated quick-doc press over the same target shows full documentation
+  in (ruling 11) -- jonquil.gtk.popover/open? and help-popover/full-doc-
+  text read it back the same way.
   :rename!*/:rename-to!* (P4.T7) are exactly what the editor's own
   Shift+F6/F2 clauses and the rename popover's own entry \"activate\"
   signal call; :rename-popover is the jonquil.gtk.help-popover map those

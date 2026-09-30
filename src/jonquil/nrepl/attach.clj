@@ -22,13 +22,19 @@
 
   Every callback rule in jonquil.evaluator applies: on-output fires from the
   connection's reader thread and this evaluation's worker future,
-  on-status-change and on-complete from the worker."
+  on-status-change and on-complete from the worker.
+
+  The connection lifecycle itself (connect!, detach!, request!, and the
+  Attached protocol) lives in jonquil.nrepl.connection, shared with a
+  later JVM attach evaluator: this namespace supplies the :cljd policy and
+  the pieces that stay dialect-specific (the wake-up probe, the run
+  worker, and the record)."
   (:require [clojure.java.io :as io]
             [jonquil.cljd :as cljd]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.ops :as ops]))
+            [jonquil.nrepl.connection :as connection]))
 
 (def default-timings
   {;; estimate: describe answered in 3 ms in the C0 spike; this bounds a
@@ -51,159 +57,47 @@
   ;; jonquil.eval/eval-async's own wording, so the console reads the same.
   "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n")
 
-(defn- say! [on-output kind text]
-  (when on-output
-    (try (on-output kind text) (catch Throwable _ nil))))
-
-;; --- the connection ----------------------------------------------------------
-
 (defn connected?
   "True while this evaluator holds a live connection to the app."
   [ev]
-  (client/open? (:conn @(:state ev))))
+  (connection/connected? ev))
 
 (defn on-connection!
   "Registers (f connected?), called from any thread whenever this
   evaluator connects or loses its connection (Stop's detach, the app
   quitting, stop!). The window's status-bar label listens here."
   [ev f]
-  (swap! (:listeners ev) conj f)
-  nil)
-
-(defn- notify! [ev connected]
-  (doseq [f @(:listeners ev)]
-    (try (f connected) (catch Throwable _ nil))))
-
-(defn- port-file
-  "The profile's :port-file in the selection's project directory, or nil
-  when the window's file has no project."
-  [{:keys [selection]}]
-  (when-let [dir (:project-dir selection)]
-    (io/file dir (:port-file (:profile selection)))))
-
-(defn- stop-requested? [{:keys [state]}]
-  (boolean (get-in @state [:running :stop-requested?])))
-
-(defn- connect!
-  "The spec's connect rules, run only when there's no live connection. nil
-  once connected, else the result to finish the evaluation with (a
-  :notice: a missing or broken NREPL.lock, or a port that doesn't answer
-  as ClojureDart ends the Run normally). Reads NREPL.lock and never writes
-  or deletes it.
-
-  Checked after each blocking step (describe, clone): if Stop landed
-  while waiting, the local socket is closed and nothing is published as
-  the LIVE :conn in state, so the connection this attempt was building is
-  never mistaken for one that's fully attached, never notified as
-  connected, and never probed. M4: the raw conn is published early, as
-  :connecting, the moment it opens -- before describe or clone can block
-  -- guarded the same conditional way, so a Stop landing mid-handshake
-  has something live for detach!/interrupt! to close at once instead of
-  waiting out describe's or clone's own timeout."
-  [{:keys [state timings] :as ev} on-output]
-  (when-not (connected? ev)
-    (let [f (port-file ev)]
-      (cond
-        (nil? f) {:status :notice :text cljd/no-project-message}
-        (not (.exists ^java.io.File f)) {:status :notice :text cljd/not-running-message}
-        :else
-        (if-let [port (cljd/parse-port (try (slurp f) (catch Exception _ nil)))]
-          (do
-            (say! on-output :system (str (cljd/connecting-message port) "\n"))
-            (if-let [conn (try (client/connect port) (catch Exception _ nil))]
-              (let [[_ new] (swap-vals! state (fn [s] (if (get-in s [:running :stop-requested?])
-                                                        s
-                                                        (assoc s :connecting conn))))]
-                (if-not (identical? conn (:connecting new))
-                  (do (client/close! conn) {:status :interrupted})
-                  (let [d (client/request-sync conn {:op "describe"} (:describe-timeout-ms timings))]
-                    (if (stop-requested? ev)
-                      (do (client/close! conn) {:status :interrupted})
-                      (let [op-set (if (vector? d) (ops/op-names d) #{})
-                            sid (when (and (contains? op-set "eval") (contains? op-set "load-file"))
-                                  (let [c (client/request-sync conn {:op "clone"} (:clone-timeout-ms timings))]
-                                    (when (vector? c) (some :new-session c))))]
-                        (cond
-                          (stop-requested? ev) (do (client/close! conn) {:status :interrupted})
-                          sid (let [[_ new] (swap-vals! state
-                                                        (fn [s] (if (get-in s [:running :stop-requested?])
-                                                                  s
-                                                                  (assoc s :conn conn :session sid :ops op-set
-                                                                         :session-ns cljd/default-ns :fresh? true))))]
-                                (if (identical? conn (:conn new))
-                                  (do (add-watch (:open? conn) ::connection
-                                                 (fn [_ _ was now] (when (and was (not now)) (notify! ev false))))
-                                      (notify! ev true)
-                                      nil)
-                                  (do (client/close! conn) {:status :interrupted})))
-                          ;; describe answered disconnected: the app quit between
-                          ;; the socket opening and the reply landing. That's a
-                          ;; refused connection, not a non-cljd server (the
-                          ;; not-cljd sentence is only for one that answers
-                          ;; describe for real, without eval and load-file).
-                          (and (vector? d) (contains? (ops/statuses d) ops/disconnected))
-                          (do (client/close! conn) {:status :notice :text (cljd/refused-message port)})
-                          :else (do (client/close! conn)
-                                    {:status :notice :text (cljd/not-cljd-message port)})))))))
-              {:status :notice :text (cljd/refused-message port)}))
-          {:status :notice :text cljd/bad-port-file-message})))))
-
-(defn- detach!
-  "Forgets the session and closes the socket: pending requests fail with
-  jonquil.nrepl.client's disconnected status. Sends nothing to the app.
-  Also closes and clears :connecting (M4): connect! publishes the raw
-  socket there before describe or clone can block on it, so a Stop
-  landing mid-handshake has something live to close instead of waiting
-  out describe's or clone's own timeout. client/close! is safe to call
-  twice on the same conn (a successful connect! leaves :conn and
-  :connecting pointing at the same object until the next detach!)."
-  [{:keys [state]}]
-  (let [{:keys [conn connecting]} (first (swap-vals! state assoc :conn nil :session nil :connecting nil :fresh? false))]
-    (client/close! conn)
-    (client/close! connecting)))
+  (connection/on-connection! ev f))
 
 ;; --- one evaluation ------------------------------------------------------------
 
+(defn- stop-requested?
+  "Delegates to connection/stop-requested?, kept local so wake! and
+  run-worker!'s own calls stay unqualified, and so a test's with-redefs
+  on this var (reached via connection/connect!'s :stop-requested? policy
+  key below) can intercept every guard connect! checks, not only the
+  in-swap reads of state connect! makes directly."
+  [ev]
+  (connection/stop-requested? ev))
+
+(def ^:private cljd-policy
+  ;; Passed to connection/connect!: the cljd sentences (ruling 6: a
+  ;; message is a string or a fn of the port or project dir), the
+  ;; session state a successful connect starts with, and stop-requested?
+  ;; wrapped in a fn so it's read through attach.clj's own var at call
+  ;; time (a with-redefs on the var itself wouldn't reach a value already
+  ;; captured into this map).
+  {:messages {:no-project cljd/no-project-message :not-running cljd/not-running-message
+              :bad-port-file cljd/bad-port-file-message :refused cljd/refused-message
+              :not-server cljd/not-cljd-message :connecting cljd/connecting-message}
+   :on-connect {:session-ns cljd/default-ns :fresh? true}
+   :stop-requested? (fn [ev] (stop-requested? ev))})
+
 (defn- request!
-  "Sends msg on the live session and waits for its done reply, with no
-  timeout. Streams :out and :err to on-output as they arrive, tracks the
-  session's namespace from every :ns, and says once when it has waited
-  :still-waiting-ms. Returns every reply, in order. Never resends
-  anything.
-
-  Guards against a reply that arrives after this connection is no longer
-  the live one (a detach racing an already-buffered reply): conn is the
-  connection this request was actually sent on, captured once above, so
-  once state has moved past it a late :ns can't overwrite the next
-  session's tracked namespace and a late :out/:err can't reach a
-  finished evaluation's console. The reply is still recorded and still
-  ends the wait when it carries \"done\" (that's how a detach's own
-  synthetic disconnected reply unblocks this same call), only the two
-  side effects are skipped.
-
-  A Stop that lands between the wake probe and this call (or between two
-  calls in the same evaluation, the ns-switch then the user's code) has
-  already detached: :conn is nil. Sending on a nil or closed conn would
-  crash client/request! (it swaps on (:counter nil)), so this returns the
-  same synthetic disconnected reply a mid-request detach produces,
-  without ever calling send!."
-  [{:keys [state timings]} msg on-output]
-  (let [{:keys [conn session]} @state]
-    (if-not (client/open? conn)
-      [{:status ["done" ops/disconnected]}]
-      (let [acc (atom [])
-            done (promise)]
-        (client/request! conn (assoc msg :session session)
-                         (fn [m]
-                           (swap! acc conj m)
-                           (when (identical? conn (:conn @state))
-                             (when-let [n (:ns m)] (swap! state assoc :session-ns n))
-                             (when-let [o (:out m)] (say! on-output :out o))
-                             (when-let [e (:err m)] (say! on-output :err e)))
-                           (when (client/done? m) (deliver done @acc))))
-        (when (= ::waiting (deref done (:still-waiting-ms timings) ::waiting))
-          (say! on-output :system (str cljd/still-waiting-message "\n")))
-        @done))))
+  "attach's calls go through connection/request!, cljd's still-waiting
+  sentence and no on-message hook."
+  [ev msg on-output]
+  (connection/request! ev msg {:on-output on-output :still-waiting cljd/still-waiting-message}))
 
 (defn- wake!
   "A fresh session's first requests are Jonquil's own probe (cljd/probe-code),
@@ -252,7 +146,7 @@
     (when on-status-change (on-status-change :running))
     (if (and run? (nil? path))
       (finish! ev opts {:status :error :error-text cljd/save-first-message})
-      (if-let [problem (or (connect! ev on-output) (wake! ev on-output))]
+      (if-let [problem (or (connection/connect! ev on-output cljd-policy) (wake! ev on-output))]
         (finish! ev opts problem)
         (let [target (when (and (not run?) ns-source (not (stop-requested? ev))) (cljd/target-ns ns-source))
               switch (when (and target (not= (:name target) (:session-ns @(:state ev))))
@@ -283,7 +177,7 @@
     ;; Window close, app quit, or a switch to another evaluator: close this
     ;; socket and nothing else.
     (swap! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))
-    (detach! this)
+    (connection/detach! this)
     nil)
   (eval! [this code opts]
     (when-not (:run? opts) (swap! history eval/history-add code))
@@ -304,10 +198,10 @@
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
       (if-let [running (:running old)]
         (when-not (:stop-requested? running)
-          (say! (:on-output (:opts running)) :system (str cljd/detached-message "\n"))
-          (detach! this))
+          (connection/say! (:on-output (:opts running)) :system (str cljd/detached-message "\n"))
+          (connection/detach! this))
         (when (:conn old)
-          (detach! this))))
+          (connection/detach! this))))
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] false)
@@ -344,7 +238,11 @@
      "No stdin. println output comes back, but is lost when the form throws."
      "No server-side completion: completion uses this buffer and ClojureDart's own forms. Docs come from the fork's lookup."
      "Reset on Run isn't available: hot reload can't unload a namespace, so every Run adds to the app."
-     "A load stops at the first form the app's REPL compiler rejects; the app's watcher still compiles the saved file."]))
+     "A load stops at the first form the app's REPL compiler rejects; the app's watcher still compiles the saved file."])
+
+  connection/Attached
+  (connected? [this] (connection/live? this))
+  (on-connection! [this f] (connection/add-listener! this f)))
 
 (defn make-attach
   "A not yet connected attach evaluator for a jonquil.dialect/select result.
@@ -357,4 +255,4 @@
              (atom [])
              (merge default-timings timings))))
 
-(defmethod ev/make :attach [selection] (make-attach selection))
+(defmethod connection/make-attached :cljd [selection] (make-attach selection))

@@ -27,4 +27,4 @@
 (deftest every-test-namespace-is-run
   (is (= (ns-names-under "test")
          (into (set test-runner/test-namespaces)
-               test-runner/live-namespaces))))
+               (concat test-runner/live-namespaces test-runner/live-clj-namespaces)))))

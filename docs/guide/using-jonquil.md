@@ -428,6 +428,15 @@ marker hits, so the file's extension breaks the tie instead. `.cljd`
 opens as ClojureDart, `.clj` and `.cljc` stay Jolt's, and a file neither
 extension claims, `bb.edn` say, falls back to Jolt.
 
+JVM Clojure has no marker of its own: its `.clj` and `.cljc` extensions,
+and the `deps.edn` a JVM project usually has too, both already belong to
+Jolt. So only rule 1 ever picks it inside a project, by naming
+`{:dialect :clj}` in that project's own `.jonquil.edn`. Rule 4's settings
+default can still choose JVM Clojure, but only for a loose or unsaved
+file with no project at all; inside a project, a marker-less default like
+this one is skipped, and selection falls through to whichever rule comes
+next.
+
 ### `.jonquil.edn`
 
 A `.jonquil.edn` at the project root pins the dialect and, for Jolt,
@@ -442,6 +451,10 @@ isn't valid EDN, or that doesn't hold a map, never blocks Jonquil from
 opening anything: the console prints a line like `; project: .jonquil.edn
 isn't valid EDN, so it is ignored`, and selection falls through to the
 next rule as though the file weren't there at all.
+
+`{:dialect :clj}` is the only way to reach JVM Clojure: a project with
+just that one line in its `.jonquil.edn` attaches to its own nREPL server
+instead of running under Jolt (see below).
 
 ### Running Jolt out of process
 
@@ -561,6 +574,90 @@ time" once its own budget runs out, or, only on a fork older than
 `199d173d`, "No docs for ClojureDart symbols yet (the app's ClojureDart
 fork doesn't answer lookup)".
 
+### JVM Clojure: attaching to your own nREPL server
+
+JVM Clojure attaches the same way ClojureDart does: Jonquil never starts
+anything, only connects to a server you already have running. Start one
+yourself, most simply `clojure -M:serve` from
+[clojure-cli.repl](https://github.com/clojure/clojure-cli.repl)'s own
+`:serve` alias, or any nREPL server that writes its port to `.nrepl-port`
+in the project directory. Then add `{:dialect :clj}` to that project's
+`.jonquil.edn` and open a `.clj` or `.cljc` file under it; nothing else
+picks this dialect (see [Choosing a dialect](#choosing-a-dialect) above).
+
+Jonquil connects the first time you Run, or on any evaluation while it
+holds no live connection, printing "; Connecting to the nREPL server on
+port N..." while it does. If nothing's listening yet, the console says
+so instead: "; No nREPL server here. Start one in `<dir>` with
+`clojure -M:serve` (clojure-cli.repl), or any nREPL server that writes
+`.nrepl-port`." A stale `.nrepl-port` naming a port nothing answers gets
+"; .nrepl-port says port N, but nothing answers there. The server may
+have stopped.", and a port that answers but isn't nREPL at all gets
+"; Port N isn't an nREPL server Jonquil can use." Jonquil only ever
+reads `.nrepl-port`: since it never started the server that owns the
+file, it never writes to it or deletes it either.
+
+Run sends the whole Definitions pane as a `load-file`, without naming a
+namespace itself: the file's own `ns` form is what decides where the
+server evaluates it, the same as any nREPL client's load-file. A
+successful Run then moves the prompt to that namespace afterward. A REPL
+entry typed at the prompt evaluates in the prompt's own current
+namespace, and the prompt moves again if the reply itself names a
+different one, after an `in-ns` call, say.
+
+Cmd/Ctrl+E and Cmd/Ctrl+Enter (Run Form) both evaluate in the buffer's
+own namespace instead, sent explicitly alongside the code rather than by
+switching the session there first: Jonquil never sends a buffer's `ns`
+form on its own. When the server hasn't loaded that namespace yet,
+typically because the file hasn't been Run, the console says so instead
+of guessing: "; demo.core isn't loaded in the server yet. Run the file
+first." Running the file first, so the server actually knows the
+namespace, clears it.
+
+Stop sends the server's own `interrupt` and waits up to a second for the
+evaluation to actually end. When it does, the result reads
+`; interrupted`, the same as every other runtime. When it doesn't,
+Jonquil falls back the way ClojureDart's Stop always works: "; The
+server didn't stop the evaluation, so Jonquil detached. It may still be
+running." The next evaluation reconnects with a fresh session. Switching
+to a different file, or closing the window, while an evaluation is
+running sends the same interrupt first, best effort.
+
+`read-line` and other stdin reads work the way they do everywhere else
+in Jonquil: type at the prompt while the status bar reads "Waiting for
+input", and the line goes straight to the program. One thing doesn't
+carry over: Cmd/Ctrl+D can't send end-of-input here, because an empty
+`stdin` op fails on nREPL 1.7.0 rather than answering EOF, so a waiting
+read just keeps waiting for an actual line.
+
+Completion and quick documentation both ask the server, not just this
+buffer. Ctrl+Space merges the server's own candidates in with the
+offline ones, and Ctrl+Q or Shift+F1 shows a symbol's real docstring and
+arglists, wherever it's actually defined. A definition outside the
+buffer ends with a `Defined in` line naming the file and line number
+instead of jumping there, `Defined in clojure-1.12.5.jar!/clojure/core.clj:2748`
+for something inside a jar, or a plain path and line for project code.
+Before the buffer's own namespace has been loaded, quick doc and
+completion still answer for names the prompt's own namespace already
+knows, `clojure.core` functions before the file's first Run, say;
+anything only the buffer's (not yet loaded) namespace would resolve
+says so instead of guessing: "No docs: demo.core isn't loaded in the
+server yet. Run the file first."
+
+Press Ctrl+Q or Shift+F1 a second time on the same popover, and Jonquil
+asks the server for full documentation instead of the short quick-doc
+text: clojure-cli.repl's own `doc` op, which returns ClojureDocs' full
+entry, examples included, for a symbol that has one. The status bar
+reads "Loading full docs for X..." while it waits, off the GTK thread,
+so typing elsewhere isn't blocked. The very first full-doc request
+downloads ClojureDocs' whole export, a few megabytes, into the server's
+own config directory, which can take several seconds; every later
+request, in that session or a later one, answers in milliseconds once
+the server already has it. Full docs are only ever fetched for a symbol
+quick doc already found, so pressing it twice on a name Jonquil couldn't
+resolve tells you so again in the status bar, rather than asking the
+server for a doc it already knows nothing useful about.
+
 ## Keys
 
 | Key | Where | Does |
@@ -605,6 +702,7 @@ fork doesn't answer lookup)".
 | Cmd/Ctrl+D | console prompt, while waiting on input | Send end-of-input |
 | Ctrl+Space | Definitions editor, console input | Open or commit completion |
 | Ctrl+Q or Shift+F1 | Definitions editor | Quick documentation |
+| Ctrl+Q or Shift+F1, pressed again on the same popover | Definitions editor | Full documentation (JVM Clojure only) |
 | F12 or Ctrl+B | Definitions editor | Jump to definition |
 | Shift+F6 or F2 | Definitions editor | Rename |
 | Shift+F10 or right click | Definitions editor, console input | Open the context menu |
@@ -658,3 +756,14 @@ than being surprises you'd otherwise have to rediscover:
   file.
 - The console prompt reads `> ` for ClojureDart the same as every other
   runtime: it doesn't show which namespace the session is actually in.
+- JVM Clojure attaches to a server you started, and never starts or stops
+  the JVM itself.
+- Reset on Run isn't available for JVM Clojure either: it's your own JVM,
+  so Jonquil doesn't unload namespaces in it.
+- No EOF for JVM Clojure's stdin: an empty stdin fails on nREPL 1.7.0, so
+  a waiting `read-line` just keeps waiting for an actual line.
+- Jump outside the buffer, for JVM Clojure, shows where a definition is
+  in the quick-doc popover's `Defined in` line, but doesn't open the file
+  there.
+- Output JVM Clojure prints from a thread other than the one an
+  evaluation ran on, after that evaluation finishes, isn't shown.

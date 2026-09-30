@@ -94,13 +94,31 @@
    :evaluator :attach
    :runtimes #{:attach}
    :port-file "NREPL.lock"
-   :experimental true})
+   :experimental true
+   :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
+
+(def clj
+  {:id :clj
+   :name "Clojure (JVM)"
+   :extensions #{"clj" "cljc"}
+   :reader-features #{:clj}
+   :special-forms (:special-forms jolt)
+   :builtins (:builtins jolt)
+   ;; No markers: only .jonquil.edn {:dialect :clj} selects it.
+   :project-markers []
+   :evaluator :attach
+   :runtimes #{:attach}
+   :port-file ".nrepl-port"
+   :reset-tooltip "This is your own JVM, so Jonquil doesn't unload namespaces in it."})
 
 (def profiles
   "Every known profile. Order matters only as the last resort in select:
   Jolt first, so a file neither profile's extension claims (bb.edn in a
-  ClojureDart app) stays Jolt's."
-  [jolt cljd])
+  ClojureDart app) stays Jolt's.
+
+  clj joined this list in P2.T4, once the window required jonquil.nrepl.jvm
+  and could reach make-attached :clj (ruling 3)."
+  [jolt cljd clj])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
@@ -182,7 +200,9 @@
   the file's path or nil; default is the settings :dialect or nil.
   Returns {:profile p :runtime k :project-dir dir-or-nil :source k
   :warnings [str]}, :source one of :config :marker :extension :settings
-  :fallback."
+  :fallback. A settings default naming a marker-less profile (in practice
+  :clj) only wins when there's no project; inside one, it's skipped and
+  selection falls through to :fallback (I2)."
   [profiles project path default]
   (let [{:keys [dialect runtime warnings]} (if project
                                              (parse-config (:config project) (:config-error project))
@@ -204,7 +224,13 @@
                    marker-decides? hits
                    :else profiles)
         by-ext (first (filter (fn [p] (contains? (:extensions p) ext)) pool))
-        by-default (when default (some (fn [p] (when (= default (:id p)) p)) pool))
+        ;; I2: a settings default naming a marker-less profile (:clj is the
+        ;; only one today) is a real hit only for a file with no project (in
+        ;; practice an untitled buffer, spec section 1). Inside a project, a
+        ;; marker-less default is ignored and selection falls through to
+        ;; :fallback, same as if no default were set at all.
+        by-default (when-let [d (when default (some (fn [p] (when (= default (:id p)) p)) pool))]
+                     (when (or (nil? project) (seq (:project-markers d))) d))
         [p source] (cond by-config [by-config :config]
                          marker-decides? [(first hits) :marker]
                          by-ext [by-ext :extension]
