@@ -11,6 +11,7 @@
   (is (= "; Connecting to the nREPL server on port 7..." (clj/connecting-message 7)))
   (is (= "; demo.core isn't loaded in the server yet. Run the file first." (clj/not-loaded-message "demo.core")))
   (is (= "No docs: demo.core isn't loaded in the server yet. Run the file first." (clj/not-loaded-doc "demo.core")))
+  (is (= "Nothing to inspect yet: Jonquil isn't attached to the server. Run something first." clj/inspect-not-attached))
   (is (= "; The server didn't stop the evaluation, so Jonquil detached. It may still be running." clj/interrupt-failed-message))
   (is (= "Lost the connection to the nREPL server." clj/lost-connection))
   (is (= ["Jonquil attaches to a server you started: it never starts or stops the JVM."
@@ -21,7 +22,7 @@
          clj/limitations)))
 
 (deftest policy-test
-  (is (= {:session-ns nil} (:on-connect clj/connect-policy)))
+  (is (= {:session-ns nil :inspect-registered? false} (:on-connect clj/connect-policy)))
   (is (= clj/no-project-message (get-in clj/connect-policy [:messages :no-project])))
   (is (= (clj/refused-message 9) ((get-in clj/connect-policy [:messages :refused]) 9))))
 
