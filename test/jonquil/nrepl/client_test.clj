@@ -45,3 +45,20 @@
           (is (instance? java.net.ConnectException e))
           (is (< (- (System/currentTimeMillis) t0) 1000)
               "a refused port fails at once, never waiting out the timeout"))))))
+
+(defn- open-fd-count
+  "This process's own open descriptor count, via /dev/fd (works inside
+  Jolt, measured). A regression guard: a failed connect must never leave
+  the socket it opened behind."
+  []
+  (count (.list (java.io.File. "/dev/fd"))))
+
+(deftest connect-failure-closes-its-socket-test
+  (let [dead (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))
+        port (.getLocalPort dead)]
+    (.close dead)
+    (let [before (open-fd-count)]
+      (dotimes [_ 50]
+        (try (client/connect port 2000) (catch Throwable _ nil)))
+      (is (= before (open-fd-count))
+          "50 failed connects leave the open-descriptor count unchanged"))))

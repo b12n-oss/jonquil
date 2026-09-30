@@ -64,11 +64,17 @@
   java.io.IOException when nothing listens there, and
   java.net.SocketTimeoutException (a java.io.IOException) when the
   connect itself doesn't finish within connect-timeout-ms (default
-  default-connect-timeout-ms, overridable with the 2-arity)."
+  default-connect-timeout-ms, overridable with the 2-arity). A failed
+  connect always closes the socket it opened before rethrowing, whatever
+  it throws."
   ([port] (connect port default-connect-timeout-ms))
   ([port connect-timeout-ms]
    (let [sock (java.net.Socket.)]
-     (.connect sock (java.net.InetSocketAddress. "127.0.0.1" (int port)) (int connect-timeout-ms))
+     (try
+       (.connect sock (java.net.InetSocketAddress. "127.0.0.1" (int port)) (int connect-timeout-ms))
+       (catch Throwable e
+         (try (.close sock) (catch Throwable _ nil))
+         (throw e)))
      (let [conn {:socket sock
                  :out (.getOutputStream sock)
                  :src (bencode/byte-source (.getInputStream sock))
