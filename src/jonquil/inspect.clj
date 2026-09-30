@@ -27,54 +27,35 @@
 (defn key-step
   "Handle a key press. Returns {:state s :request r} where r is nil when there's no request."
   [state key]
-  (let [{:keys [view selected]} state]
-    (if (leaf? view)
-      (case key
-        (:in :down :up :page-down :page-up) {:state state :request nil}
-        :out {:state (assoc state :pending :cursor) :request [:out]}
-        :meta {:state (assoc state :pending :cursor) :request [:meta {:cursor selected}]}
-        :table {:state (assoc state :pending :keep) :request [:table]}
-        {:state state :request nil})
-      (let [{:keys [start total entries]} view
-            n-entries (count entries)
-            last-visible-idx (dec n-entries)
-            at-last-page? (= (+ start n-entries) total)]
+  (let [{:keys [view selected]} state
+        {:keys [start total entries]} view
+        n-entries (count entries)
+        none {:state state :request nil}]
+    (case key
+      ;; Available on every view, a leaf included (a leaf can carry metadata).
+      :out {:state (assoc state :pending :cursor) :request [:out]}
+      :meta {:state (assoc state :pending :cursor) :request [:meta {:cursor selected}]}
+      :table {:state (assoc state :pending :keep) :request [:table]}
+      ;; Row keys: nothing to move over on a leaf or an empty collection.
+      (if (or (leaf? view) (zero? n-entries))
+        none
         (case key
           :down
-          (if (< selected last-visible-idx)
-            {:state (assoc state :selected (inc selected)) :request nil}
-            (if at-last-page?
-              {:state state :request nil}
-              {:state (assoc state :pending :first) :request [:page {:delta 1}]}))
+          (cond
+            (< selected (dec n-entries)) {:state (assoc state :selected (inc selected)) :request nil}
+            (< (+ start n-entries) total) {:state (assoc state :pending :first) :request [:page {:delta 1}]}
+            :else none)
 
           :up
-          (if (> selected 0)
-            {:state (assoc state :selected (dec selected)) :request nil}
-            (if (zero? start)
-              {:state state :request nil}
-              {:state (assoc state :pending :last) :request [:page {:delta -1}]}))
+          (cond
+            (pos? selected) {:state (assoc state :selected (dec selected)) :request nil}
+            (pos? start) {:state (assoc state :pending :last) :request [:page {:delta -1}]}
+            :else none)
 
-          :page-down
-          {:state (assoc state :pending :first) :request [:page {:delta 1}]}
-
-          :page-up
-          {:state (assoc state :pending :first) :request [:page {:delta -1}]}
-
-          :in
-          (if (pos? n-entries)
-            {:state state :request [:in {:idx (+ start selected)}]}
-            {:state state :request nil})
-
-          :out
-          {:state (assoc state :pending :cursor) :request [:out]}
-
-          :meta
-          {:state (assoc state :pending :cursor) :request [:meta {:cursor selected}]}
-
-          :table
-          {:state (assoc state :pending :keep) :request [:table]}
-
-          {:state state :request nil})))))
+          :page-down {:state (assoc state :pending :first) :request [:page {:delta 1}]}
+          :page-up {:state (assoc state :pending :first) :request [:page {:delta -1}]}
+          :in {:state state :request [:in {:idx (+ start selected)}]}
+          none)))))
 
 (defn on-reply
   "Apply a server reply to the state. reply is a view map, or {:error s :lost? t}."
