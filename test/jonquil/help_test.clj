@@ -138,6 +138,8 @@
          (help/full-doc-status "map" {:status :not-attached})))
   (is (= "No docs: demo.never isn't loaded in the server yet. Run the file first."
          (help/full-doc-status "map" {:status :not-loaded :ns "demo.never"})))
+  (is (= "No full docs: the server doesn't know map."
+         (help/full-doc-status "map" {:status :not-found})))
   (is (nil? (help/full-doc-status "map" {:status :ok :text "x"}))))
 
 (deftest rename-problem-test

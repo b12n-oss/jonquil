@@ -56,9 +56,11 @@
     leaks a JVM-specific rule into the window. on-result is called
     exactly once, from any thread (at once on the caller's for
     :not-attached and :no-op), with {:status :ok :text t},
-    {:status :no-op}, {:status :timeout}, {:status :not-attached} or
+    {:status :no-op}, {:status :timeout}, {:status :not-attached},
     {:status :not-loaded :ns ns-name} (neither the buffer's own namespace
-    nor the prompt namespace resolved, so doc was never sent)."))
+    nor the prompt namespace resolved, so doc was never sent) or
+    {:status :not-found} (the namespace answered but doesn't know sym,
+    so doc was never sent)."))
 
 (defmulti make
   "A new, not yet started evaluator for a jonquil.dialect/select result,

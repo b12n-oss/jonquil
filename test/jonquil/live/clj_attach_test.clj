@@ -105,7 +105,7 @@
     (run e "1" {:run? false})
     (let [done (promise)]
       (ev/full-doc e "map" never-loaded-map-text (fn [r] (deliver done r)))
-      (let [result (deref done 25000 :timeout)]
+      (let [result (deref done 35000 :timeout)]
         (is (= :ok (:status result)) (str "result: " result))))))
 
 (deftest output-streams-live

@@ -43,8 +43,9 @@
   "No docs: the server didn't answer in time.")
 
 (defn not-loaded-doc
-  "No docs: ns-name isn't loaded yet (I1/I2's fallback sentence, jvm.clj's
-  lookup and full-doc)."
+  "No docs: ns-name isn't loaded yet. jonquil.nrepl.jvm's lookup and
+  full-doc say this when neither the buffer's namespace nor the prompt's
+  can answer."
   [ns-name]
   (str "No docs: " ns-name " isn't loaded in the server yet. Run the file first."))
 

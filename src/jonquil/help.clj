@@ -115,6 +115,7 @@
     ;; from the result's own :ns (the buffer's namespace,
     ;; jonquil.nrepl.jvm/resolve-lookup!'s ns1).
     :not-loaded (str "No docs: " (:ns result) " isn't loaded in the server yet. Run the file first.")
+    :not-found (str "No full docs: the server doesn't know " sym ".")
     :ok nil))
 
 (defn doc-text

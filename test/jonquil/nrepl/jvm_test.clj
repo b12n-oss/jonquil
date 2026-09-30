@@ -548,6 +548,11 @@
   reused by the :clj self-test rows for the same fixture symbol."
   "demo.core/greet\n([who])\nSays hello.\n\n== examples")
 
+(def ^:private greet-docs
+  ;; lookup's own info for greet: full-doc only sends doc for a symbol the
+  ;; lookup found.
+  {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello." "arglists-str" "([who])"}})
+
 (defn- full-doc-sync
   "Calls ev/full-doc and waits up to timeout-ms for its on-result, once.
   :timeout when it never fires."
@@ -567,7 +572,7 @@
           (is (= {:status :not-attached} (full-doc-sync e "greet" fixture-core-text 2000)))
           (is (empty? (fake/ops-seen srv)))))))
   (testing "connected, after a Run: the fake's own full-docs text, and the request carried the buffer's own ns"
-    (with-project {:full-docs {"greet" full-doc-greet-text}}
+    (with-project {:docs greet-docs :full-docs {"greet" full-doc-greet-text}}
       (fn [srv dir file]
         (let [e (make dir)]
           (run e fixture-core-text {:run? true :path file})
@@ -575,7 +580,7 @@
                  (full-doc-sync e "greet" fixture-core-text 2000)))
           (is (= "demo.core" (get (last (filter #(= "doc" (get % "op")) (fake/requests srv))) "ns")))))))
   (testing "a timeout (the server's own doc-ms outlasts full-doc-timeout-ms): :timeout, well within doc-ms"
-    (with-project {:doc-ms 1000}
+    (with-project {:docs greet-docs :doc-ms 1000}
       (fn [_srv dir _]
         (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir}
                               {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
@@ -590,6 +595,13 @@
         (let [e (make dir)]
           (run e "1" {:run? false})
           (is (= {:status :no-op} (full-doc-sync e "greet" "1" 2000)))
+          (is (not-any? #{"doc"} (fake/ops-seen srv)))))))
+  (testing "a symbol the namespace doesn't know: :not-found, and doc is never sent"
+    (with-project {:full-docs {"nope" "never sent"}}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= {:status :not-found} (full-doc-sync e "nope" "1" 2000)))
           (is (not-any? #{"doc"} (fake/ops-seen srv))))))))
 
 (deftest lookup-not-loaded-test
@@ -629,7 +641,8 @@
 (deftest full-doc-disconnect-test
   ;; A disconnect while doc is outstanding (the fake's own :doc-ms delay)
   ;; gives :not-attached, never :ok with a blank/nil text.
-  (with-project {:doc-ms 3000}
+  (with-project {:docs {"map" {"ns" "clojure.core" "name" "map" "doc" "Returns a lazy sequence."}}
+                 :doc-ms 3000}
     (fn [srv dir _]
       (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir}
                             {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200

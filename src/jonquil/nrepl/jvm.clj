@@ -215,6 +215,9 @@
   answered without error and actually named sym.
   {:status :not-loaded :ns1 ns1}: every ns tried either errored or found
   nothing, or there was no distinct ns to retry with.
+  {:status :not-attached}: the connection dropped during either lookup
+  (the client's own synthetic disconnected reply), checked before any
+  error or not-found reading of that reply.
   {:status :timeout}: a bounded request never answered."
   [conn session sym text prompt-ns timeout-ms]
   (let [ns1 (clj/help-ns text prompt-ns)
@@ -222,6 +225,7 @@
         r1 (lookup! ns1)]
     (cond
       (not (vector? r1)) {:status :timeout}
+      ((ops/statuses r1) ops/disconnected) {:status :not-attached}
       (not (ns-errored? r1)) {:status :ok :ns ns1 :reply r1}
       :else
       (let [ns2 (str prompt-ns)]
@@ -230,6 +234,7 @@
           (let [r2 (lookup! ns2)]
             (cond
               (not (vector? r2)) {:status :timeout}
+              ((ops/statuses r2) ops/disconnected) {:status :not-attached}
               (and (not (ns-errored? r2)) (ops/doc-info sym r2)) {:status :retried :ns ns2 :reply r2}
               :else {:status :not-loaded :ns1 ns1})))))))
 
@@ -399,6 +404,7 @@
           (let [res (resolve-lookup! conn session sym text prompt-ns (:help-timeout-ms timings))]
             (case (:status res)
               :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
+              :not-attached (cljd/no-docs sym clj/not-attached-doc)
               :not-loaded (cljd/no-docs sym (clj/not-loaded-doc (:ns1 res)))
               ;; :ok or :retried: resolve-lookup! already confirmed a
               ;; retry's own reply names sym, so found only ever returns
@@ -422,8 +428,10 @@
   ;; lookup uses (resolve-lookup!, bounded by :help-timeout-ms, same as a
   ;; real lookup) to find an :ns to trust: the buffer's own namespace when
   ;; the server answers there at all, else the prompt namespace when it
-  ;; actually names sym. doc is sent only with that :ns; neither
-  ;; resolving reports :not-loaded instead of ever sending doc.
+  ;; actually names sym. doc is sent only with that :ns, and only when
+  ;; the lookup there found sym; neither resolving reports :not-loaded,
+  ;; and a namespace that doesn't know sym reports :not-found, without
+  ;; ever sending doc.
   ;;
   ;; A reply carrying the client's own disconnected status
   ;; (ops/disconnected, the synthetic reply a lost connection gets) is
@@ -441,15 +449,21 @@
               (let [res (resolve-lookup! conn session sym text prompt-ns (:help-timeout-ms timings))]
                 (case (:status res)
                   :timeout (on-result {:status :timeout})
+                  :not-attached (on-result {:status :not-attached})
                   :not-loaded (on-result {:status :not-loaded :ns (:ns1 res)})
-                  (let [r (client/request-sync conn {:op "doc" :sym sym :session session :ns (:ns res)}
-                                               (:full-doc-timeout-ms timings))]
-                    (on-result
-                     (cond
-                       (not (vector? r)) {:status :timeout}
-                       ((ops/statuses r) ops/disconnected) {:status :not-attached}
-                       :else (let [text (some :doc r)]
-                               (if (str/blank? text) {:status :timeout} {:status :ok :text text})))))))
+                  ;; The namespace answered, but it doesn't know sym. doc
+                  ;; would hang the server for a symbol it can't resolve
+                  ;; (an unknown alias like nope/zip), so it's never sent.
+                  (if-not (ops/doc-info sym (:reply res))
+                    (on-result {:status :not-found})
+                    (let [r (client/request-sync conn {:op "doc" :sym sym :session session :ns (:ns res)}
+                                                 (:full-doc-timeout-ms timings))]
+                      (on-result
+                       (cond
+                         (not (vector? r)) {:status :timeout}
+                         ((ops/statuses r) ops/disconnected) {:status :not-attached}
+                         :else (let [text (some :doc r)]
+                                 (if (str/blank? text) {:status :timeout} {:status :ok :text text}))))))))
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))
     nil)
