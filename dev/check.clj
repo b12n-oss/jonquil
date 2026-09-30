@@ -19,6 +19,7 @@
     jonquil.nrepl.ops
     jonquil.cljd
     jonquil.nrepl.client
+    jonquil.nrepl.connection
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach
