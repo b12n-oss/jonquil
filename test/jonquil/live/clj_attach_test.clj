@@ -95,13 +95,13 @@
   ;; server warming up its own doc machinery, not this fix wave's own
   ;; resolution (two lookup requests, each bounded by :help-timeout-ms,
   ;; which answer in low milliseconds every time -- see
-  ;; lookup-not-loaded-live above). So this evaluator raises its own
-  ;; :full-doc-timeout-ms well past that measured range and asserts the
+  ;; lookup-not-loaded-live above). The first doc call downloads the
+  ;; ClojureDocs export into this run's fresh CLJ_CONFIG, so this uses the
+  ;; default :full-doc-timeout-ms, which allows for that, and asserts the
   ;; functional outcome: full-doc resolves via the prompt ns to a real
   ;; :ok, never :not-loaded, rather than racing a tight deadline against
   ;; server-side warm-up latency this fix wave doesn't control.
-  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)}
-                        {:full-doc-timeout-ms 20000})]
+  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)})]
     (run e "1" {:run? false})
     (let [done (promise)]
       (ev/full-doc e "map" never-loaded-map-text (fn [r] (deliver done r)))

@@ -75,10 +75,12 @@
    ;; GTK thread, so a busy or wedged server can hold a key for at most
    ;; this long.
    :help-timeout-ms 300
-   ;; estimate: the full-doc popover (P3.T2) can afford to wait longer than
-   ;; a quick-doc lookup, since it's asked for on demand, not on every
-   ;; keystroke.
-   :full-doc-timeout-ms 10000})
+   ;; estimate: the full-doc popover waits off the GTK thread, with a
+   ;; Loading line in the status bar. clojure-cli.repl's first doc call
+   ;; downloads the ClojureDocs export (about 3.7 MB) into the server's
+   ;; config dir, measured at 3.6 s to over 12 s, so this leaves room for
+   ;; that one slow call. Later calls answer in milliseconds.
+   :full-doc-timeout-ms 30000})
 
 (def busy-warning
   ;; jonquil.eval/eval-async's own wording, so the console reads the same.
