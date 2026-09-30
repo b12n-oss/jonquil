@@ -35,8 +35,10 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.help :as help]
+            [jonquil.inspect :as inspect]
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
@@ -68,6 +70,9 @@
 (def ^:private KEY-H 0x068)
 ;; TH.T5 addition (gdkkeysyms.h:459, GDK_KEY_m).
 (def ^:private KEY-M 0x06d)
+;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_i), same lowercase-ascii
+;; convention as every other single-letter chord above.
+(def ^:private KEY-I 0x069)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -959,6 +964,125 @@
           (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
       (set-status! status-label "No form at the caret."))))
 
+;; --- inspector panel (P2.T2) -------------------------------------------
+
+(def ^:private PANEL-WIDTH
+  ;; estimate: the brief's own number, matched against jonquil.gtk.
+  ;; inspector-pane/WIDTH-REQUEST (360) plus room for the paned's handle.
+  420)
+
+(defn- close-inspector-panel!
+  "Hides pane's root and focuses the editor (Decisions: closing hides the
+  pane's root and focuses the editor -- the pane keeps its state, so the
+  next open replaces it). Used both as the pane's own on-close (its Close
+  button, or Escape while the rows view itself has focus) and the
+  window-level Escape clause (ruling 8, below)."
+  [pane ed]
+  (g/gtk-widget-set-visible (:root pane) 0)
+  (editor/focus! ed))
+
+(defn- show-inspector-panel!
+  "Makes pane's root visible. The FIRST time (root was hidden), also sizes
+  h-paned so the panel claims about PANEL-WIDTH of the window (Decisions:
+  \"On open, when the pane was hidden, set the position to the window
+  width minus 420 (estimate).\") -- a later open, while it's already
+  showing, leaves the split exactly where the person put it. GTK-thread
+  only."
+  [win h-paned pane]
+  (when (zero? (g/gtk-widget-get-visible (:root pane)))
+    (g/gtk-widget-set-visible (:root pane) 1)
+    (g/gtk-paned-set-position h-paned (- (g/gtk-widget-get-width win) PANEL-WIDTH))))
+
+(defn- try-inspect!
+  "Ruling 9: the window sends at most one inspect! at a time. Runs f
+  (which must send exactly one ev/inspect! request, through an on-view
+  that eventually flips inspecting? back to false) only when no request
+  is already pending, atomically flipping inspecting? true first -- a key
+  or button press while one is pending is dropped here, with nothing
+  queued for after it."
+  [inspecting? f]
+  (when (compare-and-set! inspecting? false true)
+    (f)))
+
+(defn- on-inspect-view!
+  "on-view's own body, already handed to on-gui! by its caller (Decisions):
+  swap! inspector-state with jonquil.inspect/on-reply -- or, the first
+  time (inspector-state nil, since inspect-last!/inspect-form! reset it
+  right before sending :start), jonquil.inspect/open, which a :start
+  reply's own on-reply application would reduce to anyway. A reply with
+  :defd also prints \"; Defined <defd>\" on the console as a system line.
+  inspecting? is cleared FIRST, so the pane's own next key/click (or
+  another inspect-last!/inspect-form!) is never dropped on account of a
+  request that has, in fact, already finished."
+  [pane inspector-state inspecting? cv status-label reply]
+  (try
+    (reset! inspecting? false)
+    (let [state (swap! inspector-state
+                       (fn [s] (if s (inspect/on-reply s reply) (inspect/open reply))))]
+      (inspector-pane/show-state! pane state)
+      (when-let [defd (:defd reply)]
+        (cview/append! cv :system (str "; Defined " defd "\n"))))
+    (catch :default e
+      (set-status! status-label (str "; inspect: " (ex-message e))))))
+
+(defn- inspect-last!
+  "Cmd/Ctrl+I and the menu's \"Inspect Last Result\" (Decisions): ruling 6's
+  availability check puts the unavailable sentence in the status bar and
+  stops; otherwise shows/sizes the panel, drops any earlier session's own
+  state (so on-view opens fresh rather than continuing an old browse), and
+  sends :start with the pane's own measured size -- guarded by ruling 9,
+  so a second press while the first :start is still in flight does
+  nothing."
+  [ev* win h-paned pane inspector-state inspecting? inspector-last-args on-view status-label]
+  (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
+    (set-status! status-label inspect/unavailable-message)
+    (try-inspect!
+     inspecting?
+     (fn []
+       (show-inspector-panel! win h-paned pane)
+       (reset! inspector-state nil)
+       (let [measured (inspector-pane/measure pane)]
+         (reset! inspector-last-args measured)
+         (ev/inspect! @ev* :start measured on-view))))))
+
+(defn- inspect-form!
+  "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\" (Decisions): the same
+  availability check as inspect-last!, then commands/run-form on the
+  editor's snapshot -- \"No form at the caret.\" for no form, the exact
+  wording do-run-form! uses. Otherwise flashes, echoes and evaluates the
+  form exactly as do-run-form! does, but builds its OWN opts map (never
+  passing a second :on-complete through do-repl-eval!'s extra-opts, which
+  would just replace the window's own): after make-eval-opts' own
+  completion handling runs, an :ok result calls inspect-last! through
+  on-gui! -- :on-complete runs on the eval worker thread (global.md: must
+  only enqueue), and inspect-last! reaches GTK.
+
+  Ruling 9: a press while an inspect! request is already pending does
+  nothing at all, not even the eval -- the same drop inspect-last!/
+  on-request/on-def give a key or button in that window."
+  [ed cv ev* status-label flash-fns inspecting? inspect-last-fn]
+  (cond
+    (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
+    (set-status! status-label inspect/unavailable-message)
+
+    @inspecting? nil
+
+    :else
+    (let [snap (editor/snapshot ed)]
+      (if-let [{:keys [text start end]} (commands/run-form snap)]
+        (let [base-opts (make-eval-opts ed cv status-label false)
+              opts (assoc base-opts
+                          :on-complete
+                          (fn [result]
+                            ((:on-complete base-opts) result)
+                            (when (= :ok (:status result))
+                              (on-gui! inspect-last-fn))))]
+          ((:flash! flash-fns) start end (:caret snap))
+          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+          (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap)))]
+            (when warning (cview/append! cv :system warning))))
+        (set-status! status-label "No form at the caret.")))))
+
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
 (defn- do-toggle-focus!
@@ -1462,6 +1586,14 @@
     returns 1 without touching evaluating? at all, so closing a popover
     during a run never also Stops the program.
 
+  P2.T2 (ruling 8): a further clause, after the popover one above and
+  still ahead of the evaluating? Stop clause -- when the inspector
+  panel's own rows view has focus, Escape closes the panel and focuses
+  the editor, without touching evaluating? at all, same reasoning as the
+  popover clause just above it. Cmd/Ctrl+Shift+I (inspect-form-fn) is
+  checked ahead of plain Cmd/Ctrl+I (inspect-last-fn), the same
+  Shift-first ordering Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
+
   Clear Last Output (Cmd/Ctrl+Shift+L, CIDER's C-c C-o): its own clause
   sits directly ABOVE the plain Cmd/Ctrl+L clause, since that one doesn't
   itself exclude Shift -- cond takes the first match, so putting the
@@ -1482,6 +1614,7 @@
   [run-fn stop-fn open-fn save-fn save-as-fn close-fn
    run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
    win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
+   inspect-last-fn inspect-form-fn pane close-inspector-fn
    status-label]
   (fn [_ctl keyval0 _keycode state _data]
     (try
@@ -1491,6 +1624,10 @@
           (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
           (find-bar/handle-key! fb keyval0 state)
           (and (= keyval KEY-ESCAPE) (close-popovers-fn)) 1
+          ;; P2.T2 (ruling 8): the inspector panel closes on Escape, after
+          ;; every other popover above and before Stop below.
+          (and (= keyval KEY-ESCAPE) (inspector-pane/focused? pane win))
+          (do (close-inspector-fn) 1)
           (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
           (= keyval KEY-ESCAPE) 0
           ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
@@ -1515,6 +1652,11 @@
           (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
           (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
           (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
+          ;; P2.T2: Cmd/Ctrl+Shift+I (inspect-form-fn) ahead of plain
+          ;; Cmd/Ctrl+I (inspect-last-fn), same Shift-first ordering
+          ;; Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
+          (and (command-chord? state) (shift-held? state) (= keyval KEY-I)) (do (inspect-form-fn) 1)
+          (and (command-chord? state) (= keyval KEY-I)) (do (inspect-last-fn) 1)
           :else 0))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
@@ -1721,6 +1863,43 @@
         ;; the editor menu's first item.
         flash-fns (make-flash-fn ed)
         run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fns))
+        ;; P2.T2: the inspector panel. h-paned is the new horizontal split
+        ;; (editor+console keep their existing vertical paned as its start
+        ;; child; the pane's own :root becomes its end child, wired below
+        ;; once both exist). *pane is a forward reference the on-view/
+        ;; on-request/on-def/on-close closures below close over -- pane
+        ;; itself doesn't exist until make-pane returns, the same
+        ;; atom-indirection *cv gives make-on-submit above.
+        h-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
+        inspector-state (atom nil)
+        inspecting? (atom false)
+        ;; Self-test hook only (:inspector-last-args*): the args of the
+        ;; last inspect! request this window actually sent, so a row can
+        ;; compare a :start's own :cols against the pane's own measure.
+        inspector-last-args (atom nil)
+        *pane (atom nil)
+        on-view (fn [reply]
+                  (on-gui! (fn [] (on-inspect-view! @*pane inspector-state inspecting? cv status-label reply))))
+        on-inspector-request
+        (fn [[op args]]
+          (try-inspect! inspecting?
+                        (fn [] (reset! inspector-last-args args) (ev/inspect! @ev* op args on-view))))
+        on-inspector-def
+        (fn [name]
+          (try-inspect! inspecting?
+                        (fn []
+                          (let [args {:name name}]
+                            (reset! inspector-last-args args)
+                            (ev/inspect! @ev* :def args on-view)))))
+        on-inspector-close (fn [] (close-inspector-panel! @*pane ed))
+        pane (inspector-pane/make-pane {:on-request on-inspector-request
+                                        :on-close on-inspector-close
+                                        :on-def on-inspector-def})
+        _ (reset! *pane pane)
+        inspect-last-fn (fn [] (inspect-last! ev* win h-paned pane inspector-state inspecting?
+                                              inspector-last-args on-view status-label))
+        inspect-form-fn (fn [] (inspect-form! ed cv ev* status-label flash-fns inspecting? inspect-last-fn))
+        close-inspector-fn (fn [] (close-inspector-panel! pane ed))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         clear-last-fn (fn [] (do-clear-last-output! cv))
@@ -1743,6 +1922,8 @@
           ["Jump to Definition" "jump" jump-fn]
           ["Rename Symbol" "rename" rename-fn]
           ["Quick Documentation" "quick-doc" quick-doc-fn]
+          ["Inspect Last Result" "inspect-last" inspect-last-fn]
+          ["Inspect Form" "inspect-form" inspect-form-fn]
           ["Complete" "complete" complete-fn]
           ["Toggle Comment" "toggle-comment" (fn [] (editor/do-toggle-comment! ed))]
           ["Format All" "format-all" (fn [] (editor/do-format-all! ed))]
@@ -1763,7 +1944,9 @@
                                      run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn
                                      evaluating-fn
                                      win fb open-find-fn open-replace-fn cycle-theme-fn
-                                     close-popovers-fn status-label)
+                                     close-popovers-fn
+                                     inspect-last-fn inspect-form-fn pane close-inspector-fn
+                                     status-label)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -1798,8 +1981,19 @@
     (g/gtk-paned-set-start-child paned editor-pane)
     (g/gtk-paned-set-end-child paned (:scroll cv))
     (g/gtk-paned-set-position paned 430)
+    ;; P2.T2: the editor/console paned becomes h-paned's start child; the
+    ;; inspector panel is its end child, hidden until the first open
+    ;; (show-inspector-panel!), and kept at a fixed width when the window
+    ;; resizes (never grows/shrinks with it, never squeezed below its own
+    ;; WIDTH-REQUEST).
+    (g/gtk-widget-set-vexpand h-paned 1)
+    (g/gtk-paned-set-start-child h-paned paned)
+    (g/gtk-paned-set-end-child h-paned (:root pane))
+    (g/gtk-paned-set-resize-end-child h-paned 0)
+    (g/gtk-paned-set-shrink-end-child h-paned 0)
+    (g/gtk-widget-set-visible (:root pane) 0)
     (g/gtk-box-append vbox toolbar)
-    (g/gtk-box-append vbox paned)
+    (g/gtk-box-append vbox h-paned)
     (g/gtk-widget-set-hexpand status-label 1)
     (g/gtk-box-append status-box status-label)
     (g/gtk-box-append status-box dialect-label)
@@ -2077,6 +2271,21 @@
                  ;; reasoning as :complete!*/:completion above.
                  :repl-complete!* repl-complete-fn
                  :repl-completion repl-completion
+                 ;; P2.T2: the inspector panel map (P2.T1's make-pane
+                 ;; return, including its own :on-def -- rows drive the
+                 ;; def prompt through it directly), the window's own
+                 ;; Cmd/Ctrl+I and Cmd/Ctrl+Shift+I actions (also what the
+                 ;; two new editor-menu items call), a reader for the
+                 ;; window's own inspector-state atom, and a self-test-only
+                 ;; hook naming the args of the last inspect! request this
+                 ;; window actually sent (ruling 9's own :inspector-last-
+                 ;; args* -- row-inspect-cols-match compares a :start's own
+                 ;; :cols against the pane's own measure).
+                 :inspector pane
+                 :inspect-last!* inspect-last-fn
+                 :inspect-form!* inspect-form-fn
+                 :inspector-state* (fn [] @inspector-state)
+                 :inspector-last-args* (fn [] @inspector-last-args)
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -2126,6 +2335,7 @@
   :rename!* :rename-to!* :rename-popover
   :activate-menu-action!* :repl-activate-menu-action!*
   :complete!* :completion
+  :inspector :inspect-last!* :inspect-form!* :inspector-state* :inspector-last-args*
   :handle-window-key! :simulate-open-result! :simulate-save-result!
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
@@ -2162,7 +2372,14 @@
   install-context-menu!'s own docstring describes. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
-  and jonquil.gtk.completion/state read it back."
+  and jonquil.gtk.completion/state read it back.
+  :inspector (P2.T2) is the jonquil.gtk.inspector-pane map (P2.T1); rows
+  drive its own key/click handling directly, and its :on-def is exactly
+  what the def prompt's entry calls. :inspect-last!*/:inspect-form!* are
+  exactly what Cmd/Ctrl+I and Cmd/Ctrl+Shift+I (and the editor menu's two
+  new items) call; :inspector-state* reads back the window's own
+  inspector-state atom; :inspector-last-args* is self-test-only, naming
+  the args of the last inspect! request this window actually sent."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one
