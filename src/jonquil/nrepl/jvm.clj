@@ -213,20 +213,31 @@
                     session (:session @state)
                     id (get-in @state [:running :id])]
                 (if (contains? ops "interrupt")
-                  (future
-                    (try
-                      (client/send! conn {:op "interrupt" :session session :interrupt-id id})
-                      (loop [n 0]
-                        (cond
-                          ;; This evaluation has ended, or a newer one has
-                          ;; already taken :running (Important 1): either
-                          ;; way, this future is no longer relevant.
-                          (not (identical? token (get-in @state [:running :token]))) nil
-                          (>= (* n 20) (:interrupt-timeout-ms timings))
-                          (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
-                              (connection/detach! this))
-                          :else (do (Thread/sleep 20) (recur (inc n)))))
-                      (catch Throwable _ nil)))
+                  (do
+                    ;; The send and the fallback clock are separate futures,
+                    ;; so a peer that stops reading (send! blocked on a full
+                    ;; buffer) still gets the interrupt-failed detach on
+                    ;; time. The send is skipped once this evaluation has
+                    ;; ended, since a nil :interrupt-id would interrupt
+                    ;; whatever runs next in the session.
+                    (future
+                      (try
+                        (when (identical? token (get-in @state [:running :token]))
+                          (client/send! conn {:op "interrupt" :session session :interrupt-id id}))
+                        (catch Throwable _ nil)))
+                    (future
+                      (try
+                        (loop [n 0]
+                          (cond
+                            ;; This evaluation has ended, or a newer one has
+                            ;; already taken :running (Important 1): either
+                            ;; way, this future is no longer relevant.
+                            (not (identical? token (get-in @state [:running :token]))) nil
+                            (>= (* n 20) (:interrupt-timeout-ms timings))
+                            (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
+                                (connection/detach! this))
+                            :else (do (Thread/sleep 20) (recur (inc n)))))
+                        (catch Throwable _ nil))))
                   (do
                     (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
                     (connection/detach! this))))))))
