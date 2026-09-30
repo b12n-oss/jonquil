@@ -44,6 +44,14 @@
     (is (nil? (ops/doc-info "nope" [{:status ["done"]}])))
     (is (nil? (ops/doc-info "zork" [{:status ["done" "unknown-op"]}])))))
 
+(deftest doc-info-file-line-test
+  (let [r [{:info {"ns" "demo.core" "name" "greet" "doc" "Says hello." "arglists-str" "([who])"
+                   "file" "/p/src/demo/core.clj" "line" 4}
+            :status ["done"]}]]
+    (is (= "/p/src/demo/core.clj" (:file (ops/doc-info "greet" r))))
+    (is (= 4 (:line (ops/doc-info "greet" r)))))
+  (is (nil? (ops/doc-info "nope" [{:info [] :status ["done"]}]))))
+
 (deftest eval-result-test
   (is (= {:status :ok :printed "3" :ns 'user}
          (ops/eval-result [{:ns "user" :status ["done"] :value "3"}] false)))

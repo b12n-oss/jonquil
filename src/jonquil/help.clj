@@ -87,12 +87,31 @@
   [snapshot]
   (:symbol (target snapshot)))
 
+(defn location-line
+  "\"Defined in <file>[:line]\" for the quick-doc footer of a definition
+  outside the buffer (ruling 13: keyed on :location, never on :file
+  alone). nil for a nil file. A jar:file:/any/path/NAME.jar!/entry URL is
+  shortened to NAME.jar!/entry; any other string is used as is."
+  [file line]
+  (when file
+    (let [jar-idx (str/index-of file ".jar!/")
+          short (if jar-idx
+                  (let [seg-start (if-let [slash (str/last-index-of file "/" jar-idx)] (inc slash) 0)]
+                    (subs file seg-start))
+                  file)]
+      (str "Defined in " short (when line (str ":" line))))))
+
 (defn doc-text
   "The quick-doc text for a jonquil.docs/symbol-doc result, using upstream's
-  formatter; a nil result reads as not found."
+  formatter; a nil result reads as not found. Appends \"\\n\\n\" plus
+  :location when doc-info has one (ruling 13: help/doc-text never reads
+  :file on its own)."
   [sym doc-info]
-  (syntax/format-autocomplete-doc (or doc-info {:status :not-found :symbol sym})
-                                  {:symbol sym}))
+  (let [text (syntax/format-autocomplete-doc (or doc-info {:status :not-found :symbol sym})
+                                             {:symbol sym})]
+    (if-let [location (:location doc-info)]
+      (str text "\n\n" location)
+      text)))
 
 ;; --- jump to definition: scope-aware local search --------------------------
 ;;

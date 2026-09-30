@@ -33,6 +33,15 @@
 (def interrupt-failed-message
   "; The server didn't stop the evaluation, so Jonquil detached. It may still be running.")
 
+(def not-attached-doc
+  "No docs: Jonquil isn't attached to the server yet. Run something first.")
+
+(def no-lookup-doc
+  "No docs: this server has no lookup op.")
+
+(def lookup-timeout-doc
+  "No docs: the server didn't answer in time.")
+
 (def lost-connection
   "Lost the connection to the nREPL server.")
 
@@ -60,6 +69,12 @@
   "The buffer's ns form's name string, or nil when there's no ns form."
   [text]
   (:name (cljd/ns-form text)))
+
+(defn help-ns
+  "The :ns a completions or lookup request is sent with: the buffer's own
+  ns form name, else the prompt namespace's name."
+  [text prompt-ns]
+  (or (buffer-ns text) (str prompt-ns)))
 
 ;; --- replies ---
 

@@ -261,7 +261,8 @@
           (reply {"completions" (mapv (fn [[c n]] {"candidate" c "ns" n "type" "function"}) rows)
                   "status" ["done"]}))
         "lookup"
-        (reply {"info" (get (:docs opts) (get m "sym") []) "status" ["done"]})
+        (do (when-let [ms (:lookup-ms opts)] (wait! stop-latch closed ms))
+            (reply {"info" (get (:docs opts) (get m "sym") []) "status" ["done"]}))
         "doc"
         (do (wait! stop-latch closed (:doc-ms opts 0))
             (reply {"doc" (get (:full-docs opts) (get m "sym") (str "No doc for " (get m "sym")))
@@ -311,6 +312,7 @@
              (string-keyed maps), or [] for an unknown prefix
   :docs      {sym info}: lookup answers {\"info\" info}, or {\"info\" []}
              for an unknown symbol
+  :lookup-ms ms: lookup answers after this delay (as the cljd fake's)
   :full-docs {sym text}: doc answers text, or \"No doc for \" + sym
   :doc-ms    ms: doc answers after this delay (default 0)
   :loaded    extra namespace name strings considered loaded from the

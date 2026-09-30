@@ -5,7 +5,8 @@
   nested maps as decoded (string keys). Three completion shapes exist
   (dialects spike): vanilla jolt {candidate ns}, jolt with
   nrepl.middleware {candidate type}, jank {candidate type ns}; fields are
-  read by keyword or string. lookup never carries :file or :line."
+  read by keyword or string. jolt-lang/nrepl's lookup carries no file or
+  line; a JVM server's does."
   (:require [clojure.string :as str]
             [jonquil.syntax :as syntax]))
 
@@ -53,17 +54,20 @@
 (defn doc-info
   "A jonquil.docs/symbol-doc-shaped map from a lookup reply, or nil when
   the reply names nothing (an unknown symbol, a special form, or a server
-  without lookup: {:status [\"done\" \"unknown-op\"]})."
+  without lookup: {:status [\"done\" \"unknown-op\"]}). :file and :line
+  pass through when the reply carries them, else neither key is added."
   [sym msgs]
   (let [m (some (fn [m] (when (or (:info m) (field m :name)) m)) msgs)
         info (or (:info m) m)]
     (when (and m (field info :name))
-      {:status :found
-       :symbol sym
-       :ns (field info :ns)
-       :name (field info :name)
-       :arglists (or (field info :arglists-str) (field info :arglists))
-       :doc (field info :doc)})))
+      (cond-> {:status :found
+               :symbol sym
+               :ns (field info :ns)
+               :name (field info :name)
+               :arglists (or (field info :arglists-str) (field info :arglists))
+               :doc (field info :doc)}
+        (field info :file) (assoc :file (field info :file))
+        (field info :line) (assoc :line (field info :line))))))
 
 (defn- first-line [s]
   (first (str/split-lines (str/trim (str s)))))

@@ -1,5 +1,6 @@
 (ns jonquil.help-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.help :as help]))
 
 (defn- snap
@@ -116,6 +117,19 @@
 (deftest doc-text-test
   (is (re-find #"No documentation found" (help/doc-text "zzz" nil)))
   (is (re-find #"clojure.core/map" (help/doc-text "map" {:status :found :ns "clojure.core" :name "map" :arglists "([f coll])" :doc "Returns a lazy sequence."}))))
+
+(deftest location-line-test
+  (is (= "Defined in /p/src/demo/core.clj:4" (help/location-line "/p/src/demo/core.clj" 4)))
+  (is (= "Defined in clojure-1.12.5.jar!/clojure/core.clj:2748"
+         (help/location-line "jar:file:/Users/x/.m2/repository/org/clojure/clojure/1.12.5/clojure-1.12.5.jar!/clojure/core.clj" 2748)))
+  (is (= "Defined in /p/a.clj" (help/location-line "/p/a.clj" nil)))
+  (is (nil? (help/location-line nil 4))))
+
+(deftest doc-text-location-test
+  (let [d {:status :found :symbol "greet" :ns "demo.core" :name "greet" :arglists "([who])" :doc "Says hello."}]
+    (is (str/ends-with? (help/doc-text "greet" (assoc d :location "Defined in /p/core.clj:4")) "\n\nDefined in /p/core.clj:4"))
+    (is (= (help/doc-text "greet" d) (help/doc-text "greet" (assoc d :file "unknown" :line 3)))
+        "ruling 13: :file alone adds nothing")))
 
 (deftest rename-problem-test
   (let [s (snap "(defn greet [n] n)\n(greet 1)" 8)]

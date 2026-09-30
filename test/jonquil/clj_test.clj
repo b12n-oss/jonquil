@@ -29,6 +29,10 @@
   (is (nil? (clj/buffer-ns "(defn f [])")))
   (is (nil? (clj/buffer-ns "(ns demo.core"))))
 
+(deftest help-ns-test
+  (is (= "demo.core" (clj/help-ns "(ns demo.core)\n(greet 1)" 'user)))
+  (is (= "user" (clj/help-ns "(greet 1)" 'user))))
+
 (deftest ns-not-found-test
   (is (clj/ns-not-found? [{:ns "demo.core" :status ["namespace-not-found" "done" "error"]}]))
   (is (not (clj/ns-not-found? [{:ns "user" :value "3"} {:status ["done"]}]))))

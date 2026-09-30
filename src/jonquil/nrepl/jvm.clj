@@ -29,16 +29,21 @@
   Attached protocol) lives in jonquil.nrepl.connection, shared with
   jonquil.nrepl.attach: this namespace supplies the :clj policy (in
   jonquil.clj) and the pieces that stay dialect-specific (the run worker
-  and the record). complete and lookup are this task's P2 versions --
-  offline completion only, no docs -- P3.T1 replaces lookup with one
-  backed by the server's own lookup and doc ops."
+  and the record). complete merges the server's own completions into the
+  offline candidates; lookup is backed by the server's own lookup op,
+  with a Defined in <file>:<line> line (jonquil.help/location-line) for a
+  definition outside the buffer (ruling 13). Neither ever connects on its
+  own: both run on the GTK thread and simply fall back to offline
+  candidates or a no-docs result when there's no live connection."
   (:require [clojure.java.io :as io]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.help :as help]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.connection :as connection]))
+            [jonquil.nrepl.connection :as connection]
+            [jonquil.nrepl.ops :as ops]))
 
 (def default-timings
   {;; estimate: attach's own describe/clone timeouts, measured against a
@@ -297,14 +302,45 @@
   (prompt-ns [_] (:prompt-ns @state))
   ;; Reset on Run is off for :clj: this is the user's own JVM.
   (set-mode! [_ _] nil)
-  ;; P2 version: offline only, the same buffer/profile-based completion as
-  ;; cljd. P3.T1 merges in the server's own completions.
+  ;; Offline candidates are the same buffer/profile-based completion as
+  ;; cljd; when connected and the server advertises "completions", its
+  ;; names are merged in too, bounded by :help-timeout-ms since this runs
+  ;; on the GTK thread. Any throw, a timeout or no connection falls back
+  ;; to offline alone. Never docs/candidates, which would list Jolt-
+  ;; process namespaces instead of the attached server's own.
   (complete [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
-         (catch Throwable _ [])))
-  ;; P2 version: no docs yet. P3.T1 replaces this with one backed by the
-  ;; server's lookup and doc ops.
-  (lookup [_ _ _ _] nil)
+    (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+                       (catch Throwable _ []))]
+      (try
+        (let [{:keys [conn session ops prompt-ns]} @state]
+          (if (and (client/open? conn) (contains? ops "completions"))
+            (let [r (client/request-sync conn {:op "completions" :prefix prefix
+                                               :ns (clj/help-ns text prompt-ns)
+                                               :session session}
+                                         (:help-timeout-ms timings))]
+              (if (vector? r)
+                (ops/merge-candidates prefix offline (ops/candidates r))
+                offline))
+            offline))
+        (catch Throwable _ offline))))
+  ;; Backed by the server's own lookup op, never connecting on its own.
+  ;; :file is turned into a Defined in ... line (ruling 13); help/doc-text
+  ;; never reads :file, only :location.
+  (lookup [_ sym text _pos]
+    (try
+      (let [{:keys [conn session ops prompt-ns]} @state]
+        (cond
+          (not (client/open? conn)) (cljd/no-docs sym clj/not-attached-doc)
+          (not (contains? ops "lookup")) (cljd/no-docs sym clj/no-lookup-doc)
+          :else
+          (let [r (client/request-sync conn {:op "lookup" :sym sym :session session
+                                             :ns (clj/help-ns text prompt-ns)}
+                                       (:help-timeout-ms timings))]
+            (if (vector? r)
+              (when-let [d (ops/doc-info sym r)]
+                (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d)))))
+              (cljd/no-docs sym clj/lookup-timeout-doc)))))
+      (catch Throwable _ nil)))
   (limitations [_] clj/limitations)
 
   connection/Attached

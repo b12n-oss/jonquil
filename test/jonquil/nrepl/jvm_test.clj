@@ -6,6 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [fake-jvm-nrepl :as fake]
             [jonquil.clj :as clj]
+            [jonquil.cljd :as cljd]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.connection :as connection]
@@ -484,4 +485,61 @@
         (is (nil? (ev/set-mode! e :reset)))
         (run e fixture-core-text {:run? true :path file})
         (is (= ["describe" "clone" "load-file"] (fake/ops-seen srv)) "no reset form is sent")))))
+
+(deftest complete-test
+  (with-project {:completions {"gre" [["greet" "demo.core"]]}}
+    (fn [srv dir file]
+      (let [e (make dir) text "(gre" pos (count text)]
+        (testing "not connected: offline candidates only, and the fake never sees a completions request"
+          (is (= (cljd/candidates dialect/clj "gre" text pos nil) (ev/complete e "gre" text pos nil)))
+          (is (not (connection/connected? e)))
+          (is (not-any? #{"completions"} (fake/ops-seen srv))))
+        (run e fixture-core-text {:run? true :path file})
+        (let [cands (ev/complete e "gre" text pos nil)]
+          (testing "after a Run, the server's own candidates are merged in"
+            (is (some #(= {:symbol "greet" :category :user} %) cands)))
+          (testing "the request carried the buffer's own ns"
+            (is (= "demo.core" (get (last (filter #(= "completions" (get % "op")) (fake/requests srv))) "ns"))))
+          (testing "no candidate's :symbol starts with jolt. (never docs/candidates)"
+            (is (not-any? #(str/starts-with? (:symbol %) "jolt.") cands))))))))
+
+(deftest lookup-test
+  (testing "not connected"
+    (with-project {}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (is (= (cljd/no-docs "greet" clj/not-attached-doc) (ev/lookup e "greet" fixture-core-text 0)))))))
+  (testing "connected: found, with a Defined in line for the definition outside the buffer, and nil for an unknown symbol"
+    ;; :docs' own "file" has to be the temp project's real canonical
+    ;; src/demo/core.clj path, which with-project can't provide (it starts
+    ;; the fake, whose opts fix the :docs table, before the temp project
+    ;; and its path exist). So this builds the same two pieces (temp-project,
+    ;; then fake/start!) in the other order, using the same helpers.
+    (let [[dir file] (temp-project nil)]
+      (try
+        (let [srv (fake/start! {:docs {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello."
+                                                "arglists-str" "([who])" "file" file "line" 4}}})]
+          (spit (io/file dir ".nrepl-port") (str (:port srv)))
+          (try
+            (let [e (make dir)]
+              (run e fixture-core-text {:run? true :path file})
+              (let [d (ev/lookup e "greet" fixture-core-text 0)]
+                (is (= :found (:status d)))
+                (is (= "demo.core" (:ns d)))
+                (is (= (str "Defined in " file ":4") (:location d))))
+              (is (nil? (ev/lookup e "nope" fixture-core-text 0))))
+            (finally (fake/stop! srv))))
+        (finally (delete-tree! dir)))))
+  (testing "a timeout (a non-vector reply) gives the timeout sentence"
+    (with-project {:docs {"greet" {"ns" "demo.core" "name" "greet"}} :lookup-ms 1000}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= (cljd/no-docs "greet" clj/lookup-timeout-doc) (ev/lookup e "greet" fixture-core-text 0)))))))
+  (testing "no lookup op: the no-lookup sentence"
+    (with-project {:ops (vec (remove #{"lookup"} fake/jvm-ops))}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= (cljd/no-docs "greet" clj/no-lookup-doc) (ev/lookup e "greet" fixture-core-text 0))))))))
 
