@@ -182,10 +182,12 @@ Four namespaces make up the out-of-process runtime:
   restores whatever `.nrepl-port` held before the child started, or
   deletes the file if nothing did.
 - `jonquil.nrepl.client` holds one socket and one reader for the whole
-  life of a child. The reader decodes every reply and dispatches it by
-  `:id` to whichever caller is waiting on it, so an interrupt and the
-  eval it's meant to stop can share one connection without two readers
-  racing each other for the same bytes.
+  life of a child. Its `connect` bounds the socket connect itself to 5
+  seconds by default, so a port that never answers fails with an
+  exception instead of waiting on the OS. The reader decodes every reply
+  and dispatches it by `:id` to whichever caller is waiting on it, so an
+  interrupt and the eval it's meant to stop can share one connection
+  without two readers racing each other for the same bytes.
 - `jonquil.nrepl.bencode` is the wire format underneath that: pure
   encode and decode, with a length cap and integer validation, so a
   broken or hostile reply can't hang the process trying to read it.

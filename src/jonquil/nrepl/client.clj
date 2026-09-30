@@ -52,19 +52,31 @@
     (catch Throwable _ nil))
   (fail-pending! conn))
 
+(def default-connect-timeout-ms
+  ;; A bare TCP connect to loopback answers in well under a millisecond
+  ;; when something is listening; this only bounds the case where nothing
+  ;; ever will, so waiting on the OS's own retransmission timeout (tens of
+  ;; seconds) doesn't wedge a caller.
+  5000)
+
 (defn connect
   "Connects to 127.0.0.1:port and starts the reader. Throws
-  java.io.IOException when nothing listens there."
-  [port]
-  (let [sock (java.net.Socket. "127.0.0.1" (int port))
-        conn {:socket sock
-              :out (.getOutputStream sock)
-              :src (bencode/byte-source (.getInputStream sock))
-              :lock (Object.)
-              :pending (atom {})
-              :open? (atom true)
-              :counter (atom 0)}]
-    (assoc conn :reader (future (read-loop conn)))))
+  java.io.IOException when nothing listens there, and
+  java.net.SocketTimeoutException (a java.io.IOException) when the
+  connect itself doesn't finish within connect-timeout-ms (default
+  default-connect-timeout-ms, overridable with the 2-arity)."
+  ([port] (connect port default-connect-timeout-ms))
+  ([port connect-timeout-ms]
+   (let [sock (java.net.Socket.)]
+     (.connect sock (java.net.InetSocketAddress. "127.0.0.1" (int port)) (int connect-timeout-ms))
+     (let [conn {:socket sock
+                 :out (.getOutputStream sock)
+                 :src (bencode/byte-source (.getInputStream sock))
+                 :lock (Object.)
+                 :pending (atom {})
+                 :open? (atom true)
+                 :counter (atom 0)}]
+       (assoc conn :reader (future (read-loop conn)))))))
 
 (defn open? [conn] (boolean (and conn @(:open? conn))))
 

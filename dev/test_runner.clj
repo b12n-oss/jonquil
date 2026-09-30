@@ -24,6 +24,7 @@
     jonquil.dialect-test
     jonquil.evaluator-test
     jonquil.nrepl.bencode-test
+    jonquil.nrepl.client-test
     jonquil.nrepl.ops-test
     jonquil.cljd-test
     jonquil.fake-cljd-nrepl-test
