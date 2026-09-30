@@ -30,6 +30,7 @@
     jonquil.cljd-test
     jonquil.clj-test
     jonquil.fake-cljd-nrepl-test
+    jonquil.fake-jvm-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.gtk.ffi-test])
 
