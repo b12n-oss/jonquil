@@ -101,6 +101,38 @@
       (is (empty? @replies) "the eval is still pending 300 ms after an ignored interrupt")
       (finally (client/close! conn) (fake/stop! srv)))))
 
+(deftest eval-future-guards-a-bad-read-test
+  ;; malformed code (unbalanced "(+ 1") answers an error plus done instead
+  ;; of throwing inside the eval future; stop! (in finally, below) must
+  ;; return without rethrowing whatever the future would otherwise have
+  ;; captured.
+  (let [srv (fake/start!)
+        conn (client/connect (:port srv))
+        sid (clone! conn)]
+    (try
+      (is (= [{:err "EOF while reading\n"}
+              {:ex fake/fail-ex-class :root-ex fake/fail-ex-class :status ["eval-error"]}
+              {:status ["done"]}]
+             (strip (client/request-sync conn {:op "eval" :code "(+ 1" :session sid} 2000))))
+      (finally (client/close! conn) (fake/stop! srv)))))
+
+(deftest interrupt-with-no-delay-test
+  ;; interrupt sent immediately after eval, no Thread/sleep at all, so it
+  ;; can beat the eval future to registering its own :interrupt promise --
+  ;; still ends up ["done" "interrupted"], never a full 5000 ms wait.
+  (let [srv (fake/start! {:slow {"(slow)" 5000}})
+        conn (client/connect (:port srv))
+        sid (clone! conn)
+        got-reply (promise)
+        replies (atom [])]
+    (try
+      (client/request! conn {:op "eval" :code "(slow)" :session sid}
+                       (fn [m] (swap! replies conj m) (deliver got-reply true)))
+      (is (= [{:status ["done"]}] (strip (client/request-sync conn {:op "interrupt" :session sid} 2000))))
+      (is (true? (deref got-reply 2000 :timeout)))
+      (is (= [{:status ["done" "interrupted"]}] (strip @replies)))
+      (finally (client/close! conn) (fake/stop! srv)))))
+
 (deftest help-ops-test
   ;; completions, lookup found / {"info" []}, doc text and the "No doc for" default
   (let [srv (fake/start! {:completions {"fo" [["foo" "user"] ["foobar" "user"]]}

@@ -104,89 +104,123 @@
 
 (defn- evaluate!
   "Answers one eval or load-file request, form by form. reply sends one
-  message map (string keys) with the request's id."
+  message map (string keys) with the request's id. A throw anywhere in
+  here (e.g. read-forms on malformed/incomplete code) answers the
+  request with the same eval-error shape :fail-on uses, instead of
+  escaping this request's own future -- stop!'s cleanup deref would
+  otherwise rethrow it and abort the wait for every future after it.
+
+  An interrupt or stdin op can arrive on the connection's own thread
+  before this future has reached the point where it registers its
+  session's :interrupt/:stdin promise (handle! dispatches the future and
+  returns at once). handle! records that early arrival at
+  :pending-interrupt/:pending-stdin instead of dropping it; every
+  registration point here atomically installs its promise AND consumes
+  any such pending flag in the same swap!, so the two can never race
+  past each other and lose the signal."
   [{:keys [opts sessions loaded]} stop-latch closed reply m]
-  (let [sid (get m "session")
-        op (get m "op")
-        eval? (= "eval" op)
-        text (or (get m "code") (get m "file") "")
-        req-ns (get m "ns")
-        sess-ns (get-in @sessions [sid :ns] "user")]
-    (if (and eval? req-ns (not (contains? @loaded req-ns)))
-      (reply {"ns" req-ns "status" ["namespace-not-found" "done" "error"]})
-      (let [forms (read-forms text)
-            start-ns (or req-ns sess-ns)]
-        (loop [fs (seq forms) current start-ns last-value nil]
-          (cond
-            (nil? fs)
-            (if eval?
-              (reply {"status" ["done"]})
-              (do (reply {"value" last-value}) (reply {"status" ["done"]})))
+  (try
+    (let [sid (get m "session")
+          op (get m "op")
+          eval? (= "eval" op)
+          text (or (get m "code") (get m "file") "")
+          req-ns (get m "ns")
+          sess-ns (get-in @sessions [sid :ns] "user")]
+      (if (and eval? req-ns (not (contains? @loaded req-ns)))
+        (reply {"ns" req-ns "status" ["namespace-not-found" "done" "error"]})
+        (let [forms (read-forms text)
+              start-ns (or req-ns sess-ns)]
+          (loop [fs (seq forms) current start-ns last-value nil]
+            (cond
+              (nil? fs)
+              (if eval?
+                (reply {"status" ["done"]})
+                (do (reply {"value" last-value}) (reply {"status" ["done"]})))
 
-            (matches? (:fail-on opts) (first fs))
-            (do (reply {"err" fail-err})
-                (reply {"ex" fail-ex-class "root-ex" fail-ex-class "status" ["eval-error"]})
-                (reply {"status" ["done"]}))
+              (matches? (:fail-on opts) (first fs))
+              (do (reply {"err" fail-err})
+                  (reply {"ex" fail-ex-class "root-ex" fail-ex-class "status" ["eval-error"]})
+                  (reply {"status" ["done"]}))
 
-            (and eval? (= 'read-line (head (first fs))))
-            (let [stdin-p (promise) interrupt-p (promise)]
-              (reply {"status" ["need-input"]})
-              (swap! sessions assoc-in [sid :stdin] stdin-p)
-              (swap! sessions assoc-in [sid :interrupt] interrupt-p)
-              (let [outcome (wait-for! stop-latch closed interrupt-p stdin-p 10000)]
-                (swap! sessions update sid dissoc :stdin :interrupt)
+              (and eval? (= 'read-line (head (first fs))))
+              (let [stdin-p (promise)
+                    interrupt-p (promise)]
+                (reply {"status" ["need-input"]})
+                (let [[old] (swap-vals! sessions update sid
+                                        (fn [s] (-> s (assoc :stdin stdin-p :interrupt interrupt-p)
+                                                    (dissoc :pending-stdin :pending-interrupt))))
+                      prior (get old sid)]
+                  (when-let [early (:pending-stdin prior)] (deliver stdin-p early))
+                  (when (:pending-interrupt prior) (deliver interrupt-p true)))
+                (let [outcome (wait-for! stop-latch closed interrupt-p stdin-p 10000)]
+                  (swap! sessions update sid dissoc :stdin :interrupt)
+                  (cond
+                    (= :stopped outcome) :dropped
+                    (= :interrupted outcome) (reply {"status" ["done" "interrupted"]})
+                    :else
+                    (let [line (str/replace (or @stdin-p "") #"\n$" "")]
+                      (reply {"ns" current "value" (pr-str line)})
+                      (recur (next fs) current last-value)))))
+
+              :else
+              (let [f (first fs)
+                    ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))
+                    wait-outcome
+                    (when ms
+                      (if (:ignore-interrupt? opts)
+                        (do (wait! stop-latch closed ms) (if (live? stop-latch closed) :elapsed :stopped))
+                        (let [ip (promise)
+                              [old] (swap-vals! sessions update sid
+                                                (fn [s] (-> s (assoc :interrupt ip) (dissoc :pending-interrupt))))]
+                          (when (:pending-interrupt (get old sid)) (deliver ip true))
+                          (let [o (wait-for! stop-latch closed ip nil ms)]
+                            (swap! sessions update sid dissoc :interrupt)
+                            o))))]
                 (cond
-                  (= :stopped outcome) :dropped
-                  (= :interrupted outcome) (reply {"status" ["done" "interrupted"]})
+                  (= :stopped wait-outcome) :dropped
+                  (= :interrupted wait-outcome) (reply {"status" ["done" "interrupted"]})
                   :else
-                  (let [line (str/replace (or @stdin-p "") #"\n$" "")]
-                    (reply {"ns" current "value" (pr-str line)})
-                    (recur (next fs) current last-value)))))
-
-            :else
-            (let [f (first fs)
-                  ms (some (fn [[marker ms]] (when (matches? marker f) ms)) (:slow opts))
-                  wait-outcome
-                  (when ms
-                    (if (:ignore-interrupt? opts)
-                      (do (wait! stop-latch closed ms) (if (live? stop-latch closed) :elapsed :stopped))
-                      (let [ip (promise)]
-                        (swap! sessions assoc-in [sid :interrupt] ip)
-                        (let [o (wait-for! stop-latch closed ip nil ms)]
-                          (swap! sessions update sid dissoc :interrupt)
-                          o))))]
-              (cond
-                (= :stopped wait-outcome) :dropped
-                (= :interrupted wait-outcome) (reply {"status" ["done" "interrupted"]})
-                :else
-                (let [printed (some (fn [[marker text]] (when (matches? marker f) text)) (:prints opts))
-                      _ (when printed (reply {"out" printed}))
-                      in-ns-form? (= 'in-ns (head f))
-                      ns-form? (= 'ns (head f))
-                      new-current (cond
-                                    in-ns-form?
-                                    (let [target (str (second (second f)))]
-                                      (swap! loaded conj target)
-                                      (when eval? (swap! sessions assoc-in [sid :ns] target))
-                                      target)
-                                    ns-form?
-                                    (let [target (str (second f))]
-                                      (swap! loaded conj target)
-                                      target)
-                                    :else current)
-                      v (get (:answers opts) (pr-str f) (default-value new-current f))]
-                  (if eval?
-                    (do (reply {"ns" new-current "value" v})
-                        (recur (next fs) new-current last-value))
-                    (recur (next fs) new-current v)))))))))))
+                  (let [printed (some (fn [[marker text]] (when (matches? marker f) text)) (:prints opts))
+                        _ (when printed (reply {"out" printed}))
+                        in-ns-form? (= 'in-ns (head f))
+                        ns-form? (= 'ns (head f))
+                        new-current (cond
+                                      in-ns-form?
+                                      (let [target (str (second (second f)))]
+                                        (swap! loaded conj target)
+                                        (when eval? (swap! sessions assoc-in [sid :ns] target))
+                                        target)
+                                      ns-form?
+                                      (let [target (str (second f))]
+                                        (swap! loaded conj target)
+                                        target)
+                                      :else current)
+                        v (get (:answers opts) (pr-str f) (default-value new-current f))]
+                    (if eval?
+                      (do (reply {"ns" new-current "value" v})
+                          (recur (next fs) new-current last-value))
+                      (recur (next fs) new-current v))))))))))
+    (catch Throwable e
+      (reply {"err" (str (ex-message e) "\n")})
+      (reply {"ex" fail-ex-class "root-ex" fail-ex-class "status" ["eval-error"]})
+      (reply {"status" ["done"]}))))
 
 (defn- handle!
   "Answers one request, incrementing srv's :busy count for its duration (a
-  bounded finally, never left stuck up on a throw) so stop! can wait for
-  every in-flight reply to finish before it closes anything. eval and
-  load-file run on their own future (tracked in srv's :futures, the same
-  one stop! already waits on) so a slow one never blocks this connection's
-  own reading thread from seeing a later interrupt or stdin op."
+  bounded finally, never left stuck up on a throw). :busy only covers
+  this synchronous call, though: eval and load-file dispatch onto their
+  own future (tracked in srv's :futures, the same one stop! already
+  waits on) and handle! returns almost at once, so a slow eval is NOT
+  reflected in :busy -- stop!'s own :futures deref loop is what actually
+  waits for one to finish. Dispatching that way is what lets this
+  connection's own reading thread go on to see a later interrupt or
+  stdin op for the same in-flight eval instead of blocking behind it.
+
+  interrupt/stdin arriving before that future has registered its
+  session's own promise are recorded at :pending-interrupt/:pending-stdin
+  (atomically: either an existing promise gets the delivery, or the
+  pending flag gets set, never both) instead of being silently dropped;
+  evaluate!'s own registration points consume them."
   [{:keys [opts sessions log counter busy futures] :as srv} _sock stop-latch closed reply m]
   (swap! log conj (dissoc m "id"))
   (swap! busy inc)
@@ -199,14 +233,23 @@
                   (swap! sessions assoc sid {:ns "user"})
                   (reply {"new-session" sid "status" ["done"]}))
         ("eval" "load-file")
-        (swap! futures conj (future (evaluate! srv stop-latch closed reply m)))
-        "interrupt"
         (let [sid (get m "session")]
-          (when-let [p (get-in @sessions [sid :interrupt])] (deliver p true))
+          ;; a stray pending flag from an EARLIER, already-finished request
+          ;; on this session must never bleed into this new one.
+          (swap! sessions update sid dissoc :pending-interrupt :pending-stdin)
+          (swap! futures conj (future (evaluate! srv stop-latch closed reply m))))
+        "interrupt"
+        (let [sid (get m "session")
+              [old] (swap-vals! sessions update sid
+                                (fn [s] (if (:interrupt s) s (assoc s :pending-interrupt true))))]
+          (when-let [p (:interrupt (get old sid))] (deliver p true))
           (reply {"status" ["done"]}))
         "stdin"
-        (let [sid (get m "session")]
-          (when-let [p (get-in @sessions [sid :stdin])] (deliver p (get m "stdin")))
+        (let [sid (get m "session")
+              text (get m "stdin")
+              [old] (swap-vals! sessions update sid
+                                (fn [s] (if (:stdin s) s (assoc s :pending-stdin text))))]
+          (when-let [p (:stdin (get old sid))] (deliver p text))
           (reply {"status" ["done"]}))
         "completions"
         (let [rows (get (:completions opts) (get m "prefix"))]
