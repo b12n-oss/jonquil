@@ -589,9 +589,9 @@
       (on-gtk (let [text (g/buffer-text (:buf cv))
                     input (cview/input-text cv)
                     late-at (str/index-of text "late\n")
-                    prompt-at (str/index-of text "> abc")]
+                    prompt-at (str/index-of text "user=> abc")]
                 (check :console-output-above-input
-                       (and ok (str/ends-with? text "> abc")
+                       (and ok (str/ends-with? text "user=> abc")
                             (some? late-at) (some? prompt-at) (< late-at prompt-at)
                             (= "abc" input))
                        {:text text :input input :late-at late-at :prompt-at prompt-at}))))))
@@ -613,7 +613,7 @@
                           (= {:action :eval :text "(+ 1 2)"} (last @console-submits))
                           history-readonly
                           (= "" input-after)
-                          (str/ends-with? text "> "))
+                          (str/ends-with? text "\nuser=> "))
                      {:return got :last-submit (last @console-submits)
                       :history-readonly history-readonly :submitted-at submitted-at
                       :input-after input-after :text text})))))
@@ -621,7 +621,7 @@
 (defn- row-console-style-after-submit
   "P2.T9 round-1 fix: once a REPL entry is committed, out-end sits exactly
   on the boundary between the just-committed prompt+input span and the
-  fresh \"> \" prompt right after it -- both tagged :prompt, no untagged
+  fresh \"user=> \" prompt right after it -- both tagged :prompt, no untagged
   character between them. GtkTextBuffer treats inserting text at such a
   boundary as inside one continuous :prompt span and extends it onto the
   new text; insert-chunk! used to only ADD its kind's own tag on top via
@@ -720,7 +720,7 @@
               (let [input (cview/input-text cv)
                     buf (:buf cv)
                     text (g/buffer-text buf)
-                    prompt-at (str/index-of text "> ")
+                    prompt-at (str/last-index-of text "user=> ")
                     it (ffi/alloc g/ITER-BYTES)
                     refused (try
                               (g/gtk-text-buffer-get-iter-at-offset buf it prompt-at)
@@ -771,6 +771,38 @@
                      (and (= 0 return-got) (false? history-got) (= "(+ 1 2)" input))
                      {:return-got return-got :history-got history-got :input input})))))
 
+(defn- row-console-set-prompt-keeps-selection
+  "set-prompt! runs whenever an evaluation or a connection change moves the
+  namespace, so it can land while someone has part of their input
+  selected. The rewrite keeps that selection, shifted by the prompt's new
+  length, and keeps the typed text and the read-only prompt."
+  [cv]
+  (go-row :console-set-prompt-keeps-selection check
+    (on-gtk (let [buf (:buf cv)]
+              (cview/clear-input! cv)
+              (g/gtk-text-buffer-insert-interactive-at-cursor buf "abcdef" -1 1)
+              (let [at (mark-offset buf (:input-start cv))]
+                ;; "bcd", selected right to left: the caret sits at its start
+                (g/with-iters* buf (+ at 4) (+ at 1)
+                  (fn [a b] (g/gtk-text-buffer-select-range buf b a))))
+              (cview/set-prompt! cv "demo.sel")
+              (let [at (mark-offset buf (:input-start cv))
+                    text (g/buffer-text buf)
+                    sel (g/selection-offsets buf)
+                    caret (g/cursor-offset buf)
+                    input (cview/input-text cv)
+                    prompt-readonly (g/has-tag-at? buf (dec at) (:readonly-tag cv))]
+                (cview/set-prompt! cv "user")
+                (cview/clear-input! cv)
+                (check :console-set-prompt-keeps-selection
+                       (and (str/ends-with? text "demo.sel=> abcdef")
+                            (= "abcdef" input)
+                            (= [(+ at 1) (+ at 4)] sel)
+                            (= (+ at 1) caret)
+                            prompt-readonly)
+                       {:tail (subs text (max 0 (- (count text) 40))) :input input :at at :sel sel :caret caret
+                        :prompt-readonly prompt-readonly}))))))
+
 (def ^:private console-row-fns
   [row-console-readonly
    row-console-readonly-delete
@@ -781,6 +813,7 @@
    row-console-flood
    row-console-unicode
    row-console-history-multiline-caret
+   row-console-set-prompt-keeps-selection
    row-console-preedit-guard
    row-console-history])
 

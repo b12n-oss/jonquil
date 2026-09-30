@@ -243,10 +243,12 @@
   move is explicit (gtk_text_buffer_move_mark), mirroring commit-input!'s
   own discipline -- out-end and input-start are repositioned to their
   exact post-edit offsets rather than trusted to survive the delete+
-  insert via gravity. The caret is likewise explicitly replaced at its
-  old offset within the input (shifted by the prompt's new length) when
-  it sat at or after the old input-start; a caret that was somewhere in
-  the read-only region isn't this function's concern and is left alone.
+  insert via gravity. The caret and the selection's other end are put
+  back explicitly too, each shifted by the prompt's change in length, so
+  a selection inside the input survives with its direction: the rewrite
+  can land at any moment (an evaluation finishing, a connection
+  dropping), not only on Return. That runs only when one of them sat in
+  the input; one in the read-only history is left where GTK put it.
 
   The rewritten span is left read-only and tagged :prompt, same as
   commit-input!'s own fresh prompt -- remove-all-tags first strips any
@@ -260,8 +262,13 @@
       (let [start (mark-offset buf out-end)
             old-end (mark-offset buf input-start)
             caret (g/cursor-offset buf)
-            caret-in-input? (>= caret old-end)
-            caret-shift (- caret old-end)]
+            [sel-a sel-b] (g/selection-offsets buf)
+            bound (if (= caret sel-a) sel-b sel-a)
+            delta (- (count new-text) (- old-end start))
+            remap (fn [o] (cond (>= o old-end) (+ o delta)
+                                (>= o start) start
+                                :else o))
+            in-input? (or (>= caret old-end) (>= bound old-end))]
         (g/with-iters* buf start old-end (fn [a b] (g/gtk-text-buffer-delete buf a b)))
         (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a new-text -1)))
         (let [end (+ start (count new-text))]
@@ -272,9 +279,9 @@
               (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
           (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-move-mark buf out-end a)))
           (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-move-mark buf input-start a)))
-          (when caret-in-input?
-            (g/with-iters* buf (+ end caret-shift) (+ end caret-shift)
-              (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
+          (when in-input?
+            (g/with-iters* buf (remap caret) (remap bound)
+              (fn [a b] (g/gtk-text-buffer-select-range buf a b)))))
         (reset! prompt-text new-text))))
   nil)
 
