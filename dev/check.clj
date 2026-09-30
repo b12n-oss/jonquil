@@ -15,6 +15,7 @@
     jonquil.console
     jonquil.evaluator
     jonquil.session
+    jonquil.inspect.view
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
     jonquil.cljd

@@ -33,7 +33,8 @@
     jonquil.fake-jvm-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.nrepl.jvm-test
-    jonquil.gtk.ffi-test])
+    jonquil.gtk.ffi-test
+    jonquil.inspect.view-test])
 
 (def live-namespaces
   ;; Tests that spawn real Jolt nREPL children and need the jolt-lang/nrepl
