@@ -12,9 +12,9 @@ flowchart TD
   edit["jonquil.edit<br/>pure edit ops<br/>(pure)"]
   eval["jonquil.eval<br/>run, in, out, stop, history<br/>(threads)"]
   docs["jonquil.docs<br/>docs and completion in the eval ns<br/>(pure + runtime)"]
-  gtk -- "snapshots in, edits out" --> session
-  session --> syntax
-  session --> edit
+  gtk -- "snapshots in, edits out" --> edit
+  gtk -- "paint plans" --> syntax
+  gtk -- "Run, Stop, the REPL" --> session
   session --> eval
   session --> docs
 ```
@@ -32,6 +32,11 @@ these:
 
 P4 added a fourth: `jonquil.help`, the decisions behind completion, quick
 doc, jump to definition and rename, covered in its own section below.
+
+`jonquil.console` is the console's own pure half: what Return does with
+the text at the prompt, how much old output to trim, how a result is
+shown, where the last entry starts for Clear Last Output, and a friendlier
+message for an unclosed bracket. `jonquil.core` holds only the app's name.
 
 The front-end and the core use plain data to communicate. When the user edits, the GTK TextBuffer sends a snapshot to the core:
 
@@ -184,7 +189,8 @@ Four namespaces make up the out-of-process runtime:
 - `jonquil.nrepl.client` holds one socket and one reader for the whole
   life of a child. Its `connect` bounds the socket connect itself to 5
   seconds by default, so a port that never answers fails with an
-  exception instead of waiting on the OS. The reader decodes every reply
+  exception instead of waiting on the OS, and a connect that fails
+  closes its socket before the exception reaches the caller. The reader decodes every reply
   and dispatches it by `:id` to whichever caller is waiting on it, so an
   interrupt and the eval it's meant to stop can share one connection
   without two readers racing each other for the same bytes.

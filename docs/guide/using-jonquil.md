@@ -583,9 +583,10 @@ fork doesn't answer lookup)".
 | Cmd/Ctrl+Z | anywhere in the window | Undo |
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
 | Cmd/Ctrl+Y | anywhere in the window | Redo |
-| Cmd/Ctrl+E | Definitions editor | Run the selection, or the current line, at the console prompt |
+| Cmd/Ctrl+E | anywhere in the window | Run the editor's selection, or its current line, at the console prompt |
 | Cmd/Ctrl+Enter | Definitions editor | Run the form at the caret (in a comment block, the form inside it) |
 | F6 | anywhere in the window | Move focus between the editor and the console |
+| Escape | Definitions editor, console input | Close an open completion, quick doc or rename popover (before it would Stop) |
 | Cmd/Ctrl+L | anywhere in the window | Clear the console's output history |
 | Cmd/Ctrl+Shift+L | anywhere in the window | Clear the last entry's output (CIDER's C-c C-o) |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |

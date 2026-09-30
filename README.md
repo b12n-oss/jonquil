@@ -56,7 +56,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-28, 185 tests pass (1223 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-30, 189 tests pass (1233 assertions).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
