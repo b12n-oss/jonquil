@@ -254,9 +254,11 @@
 (deftest clj-selection-test
   (let [src "(ns demo.core)\n"
         proj1 (temp-project {"deps.edn" "{}" ".jonquil.edn" "{:dialect :clj}" "src/demo/core.clj" src})
-        proj2 (temp-project {"deps.edn" "{}" "src/demo/core.clj" src})
+        proj2 (temp-project {"deps.edn" "{}" "bb.edn" "{}" "src/demo/core.clj" src})
         core-path (str proj1 "/src/demo/core.clj")
-        core-path2 (str proj2 "/src/demo/core.clj")]
+        core-path2 (str proj2 "/src/demo/core.clj")
+        deps-path2 (str proj2 "/deps.edn")
+        bb-path2 (str proj2 "/bb.edn")]
     (try
       (testing ".jonquil.edn {:dialect :clj} selects :clj, runtime :attach"
         (let [sel (dialect/select all3 (dialect/find-project all3 core-path) core-path nil)]
@@ -267,10 +269,23 @@
         (is (= :jolt (:id (:profile (dialect/select all3 (dialect/find-project all3 core-path2) core-path2 nil))))))
       (testing "a settings default of :clj doesn't take a .clj file from Jolt"
         (is (= :jolt (:id (:profile (dialect/select all3 (dialect/find-project all3 core-path2) core-path2 :clj))))))
+      (testing "I2: a settings default of :clj doesn't take deps.edn or bb.edn from Jolt inside a deps.edn project"
+        (let [sel-deps (dialect/select all3 (dialect/find-project all3 deps-path2) deps-path2 :clj)
+              sel-bb (dialect/select all3 (dialect/find-project all3 bb-path2) bb-path2 :clj)]
+          (is (= [:jolt :fallback] [(:id (:profile sel-deps)) (:source sel-deps)]))
+          (is (= [:jolt :fallback] [(:id (:profile sel-bb)) (:source sel-bb)]))))
+      (testing "I2: a loose file with no project still gets the settings default of :clj"
+        (let [sel (dialect/select all3 nil "/tmp/x.txt" :clj)]
+          (is (= :clj (:id (:profile sel))))
+          (is (= :settings (:source sel)))
+          (is (nil? (:project-dir sel)))))
       (testing "an untitled buffer with a settings default of :clj lands in :clj, with no project dir"
         (let [sel (dialect/select all3 nil nil :clj)]
           (is (= :clj (:id (:profile sel))))
           (is (nil? (:project-dir sel)))))
+      (testing "I2: a settings default naming a profile with its own markers (:cljd) is unaffected inside a project"
+        (let [sel (dialect/select all3 (proj #{} nil) "/p/README" :cljd)]
+          (is (= [:cljd :settings] [(:id (:profile sel)) (:source sel)]))))
       (testing "the label"
         (is (= "Clojure (JVM) (not running)" (dialect/label {:profile dialect/clj :runtime :attach} nil)))
         (is (= "Clojure (JVM) (attached)" (dialect/label {:profile dialect/clj :runtime :attach} :attached))))

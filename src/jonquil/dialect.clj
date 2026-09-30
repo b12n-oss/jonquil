@@ -200,7 +200,9 @@
   the file's path or nil; default is the settings :dialect or nil.
   Returns {:profile p :runtime k :project-dir dir-or-nil :source k
   :warnings [str]}, :source one of :config :marker :extension :settings
-  :fallback."
+  :fallback. A settings default naming a marker-less profile (in practice
+  :clj) only wins when there's no project; inside one, it's skipped and
+  selection falls through to :fallback (I2)."
   [profiles project path default]
   (let [{:keys [dialect runtime warnings]} (if project
                                              (parse-config (:config project) (:config-error project))
@@ -222,7 +224,13 @@
                    marker-decides? hits
                    :else profiles)
         by-ext (first (filter (fn [p] (contains? (:extensions p) ext)) pool))
-        by-default (when default (some (fn [p] (when (= default (:id p)) p)) pool))
+        ;; I2: a settings default naming a marker-less profile (:clj is the
+        ;; only one today) is a real hit only for a file with no project (in
+        ;; practice an untitled buffer, spec section 1). Inside a project, a
+        ;; marker-less default is ignored and selection falls through to
+        ;; :fallback, same as if no default were set at all.
+        by-default (when-let [d (when default (some (fn [p] (when (= default (:id p)) p)) pool))]
+                     (when (or (nil? project) (seq (:project-markers d))) d))
         [p source] (cond by-config [by-config :config]
                          marker-decides? [(first hits) :marker]
                          by-ext [by-ext :extension]
