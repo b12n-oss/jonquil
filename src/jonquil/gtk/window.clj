@@ -1906,28 +1906,17 @@
                         (fn []
                           (let [args {:name name}]
                             (reset! inspector-last-args args)
-                            ;; Minor: :pending :keep, so on-reply's default
-                            ;; (row 0) doesn't reset the selection a
-                            ;; successful def leaves the view on (the spec's
-                            ;; own "the panel stays on the same view").
-                            ;; :selected is copied in from the pane's own
-                            ;; CURRENT display too: a plain local Up/Down
-                            ;; move (no round trip) only ever updates the
-                            ;; pane's own :state atom, never this window's
-                            ;; inspector-state (on-inspector-request forwards
-                            ;; a key-step request straight to ev/inspect!
-                            ;; without touching it either), so :keep's own
-                            ;; (min selected last-row) would otherwise read
-                            ;; whatever :selected inspector-state was last
-                            ;; given by a round trip, not the row actually
-                            ;; highlighted on screen.
-                            (swap! inspector-state assoc
-                                   :pending :keep :selected (:selected @(:state @*pane)))
+                            ;; :pending :keep, so on-reply's default (row 0)
+                            ;; doesn't reset the selection: the spec's "the
+                            ;; panel stays on the same view". The pane shares
+                            ;; this atom, so :selected is the row on screen.
+                            (swap! inspector-state assoc :pending :keep)
                             (ev/inspect! @ev* :def args on-view)))))
         on-inspector-close (fn [] (close-inspector-panel! @*pane ed))
         pane (inspector-pane/make-pane {:on-request on-inspector-request
                                         :on-close on-inspector-close
-                                        :on-def on-inspector-def})
+                                        :on-def on-inspector-def
+                                        :state inspector-state})
         _ (reset! *pane pane)
         inspect-last-fn (fn [] (inspect-last! ev* win h-paned pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))

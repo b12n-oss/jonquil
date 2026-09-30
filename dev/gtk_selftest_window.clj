@@ -202,6 +202,7 @@
    inspector/row-inspect-last-after-repl
    inspector/row-inspect-in-out
    inspector/row-inspect-page-edge
+   inspector/row-inspect-reselect
    inspector/row-inspect-table-meta
    inspector/row-inspect-def
    inspector/row-inspect-def-keeps-selection

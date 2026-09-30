@@ -332,7 +332,7 @@
   armed?, :on-request/:on-close/:on-def) show-state!/measure/focus!/
   focused? and this namespace's own button/key/click handlers read
   back."
-  [{:keys [on-request on-close on-def]}]
+  [{:keys [on-request on-close on-def] :as opts}]
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
         header (g/gtk-label-new "")
         info (g/gtk-label-new "")
@@ -363,7 +363,10 @@
         ;; so note-clear-cb, below, can close over the SAME atoms before
         ;; pane itself exists -- one callable for the pane's whole
         ;; lifetime (make-flash-fn's own pattern), never one per note.
-        state (atom nil)
+        ;; The caller may pass its own atom (:state in opts), so the window
+        ;; and the pane hold ONE pane state: a local move and a reply's
+        ;; :pending then always act on the same map.
+        state (or (:state opts) (atom nil))
         note-clear-deadline (atom 0)
         note-clear-armed? (atom false)
         note-clear-cb

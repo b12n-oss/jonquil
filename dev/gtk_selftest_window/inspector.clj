@@ -346,6 +346,49 @@
                                :rows rows :start2-0 start2-0 :start2-1 start2-1
                                :one-page one-page?})))))))))
 
+(def ^:private KEY-UP 0xff52)
+
+(defn- line-offset
+  "The character offset where line n of the rows view starts."
+  [pane n]
+  (let [lines (str/split-lines (g/buffer-text (:buf pane)))]
+    (reduce + (map #(inc (count %)) (take n lines)))))
+
+(defn- selected-line?
+  [pane n]
+  (g/has-tag-at? (:buf pane) (line-offset pane n) (:selected-tag pane)))
+
+(defn row-inspect-reselect
+  "The window and the pane share one state, so a reply lands on the row
+  the key step asked for. Continues from row-inspect-page-edge's panel (a
+  later page of a long vector, row 0 selected): Up goes back a page and
+  selects that page's LAST row. Then a fresh [10 20 30 40]: Down, Down,
+  Return goes in on row 2, and Left comes back out with row 2 selected,
+  not row 0 (review focus 2 and 3)."
+  [ui]
+  (go-row :row-inspect-reselect support/check
+    (let [pane (:inspector ui)
+          start-before (on-gtk (footer-start pane))
+          _ (on-gtk (inspector-pane/dispatch-key! pane KEY-UP))
+          paged-back? (await-until 2000 20 #(< (footer-start pane) start-before))
+          n-lines (on-gtk (count (str/split-lines (g/buffer-text (:buf pane)))))
+          last-selected? (on-gtk (selected-line? pane (dec n-lines)))
+          [submitted? _] (submit-repl! ui "[10 20 30 40]" 3000)]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 2000 20 #(str/includes? (g/label-text (:info pane)) "4 items"))]
+        (on-gtk (inspector-pane/dispatch-key! pane KEY-DOWN)
+                (inspector-pane/dispatch-key! pane KEY-DOWN)
+                (inspector-pane/dispatch-key! pane KEY-RETURN))
+        (let [in? (await-until 2000 20 #(str/includes? (g/label-text (:header pane)) "/ 2"))]
+          (on-gtk (inspector-pane/dispatch-key! pane KEY-LEFT))
+          (let [out? (await-until 2000 20 #(= "*1" (g/label-text (:header pane))))
+                row2? (on-gtk (selected-line? pane 2))]
+            (on-gtk
+             (support/check :row-inspect-reselect
+                            (and paged-back? last-selected? submitted? opened? in? out? row2?)
+                            {:paged-back paged-back? :last-selected last-selected? :n-lines n-lines
+                             :submitted submitted? :opened opened? :in in? :out out? :row2 row2?}))))))))
+
 (defn row-inspect-table-meta
   "A REPL entry [{:id 1 :name \"a\"} {:id 2 :name \"b\"}] opens as a table
   (both children are maps with the same keys, table-keys' own uniform-maps?
