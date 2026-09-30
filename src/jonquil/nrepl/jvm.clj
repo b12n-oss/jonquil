@@ -68,6 +68,28 @@
   ;; jonquil.eval/eval-async's own wording, so the console reads the same.
   "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n")
 
+(defn- stop-requested?
+  "Delegates to connection/stop-requested?, kept local (mirroring
+  jonquil.nrepl.attach's identical need) so run-worker!'s own calls, and
+  this dialect's connect policy below, stay unqualified and read through
+  this namespace's own var at call time. A qualified cross-namespace
+  reference (client/request-sync called from inside connection.clj,
+  connection/connect! called from inside this namespace) is direct-linked
+  and a with-redefs on it can't see calls made from inside that other
+  function; only a var reached through the CALLING namespace's own
+  unqualified reference is interceptable that way (measured against this
+  Jolt build)."
+  [ev]
+  (connection/stop-requested? ev))
+
+(def ^:private connect-policy
+  ;; clj/connect-policy plus a :stop-requested? override (ruling: connect!
+  ;; defaults to its own connection/stop-requested? otherwise), so a
+  ;; test's with-redefs on this namespace's stop-requested? var reaches
+  ;; every guard connect! checks, not only the calls run-worker! makes
+  ;; directly.
+  (assoc clj/connect-policy :stop-requested? (fn [ev] (stop-requested? ev))))
+
 (defn- finish!
   "Ends the running evaluation: clears :running and :waiting? (a Stop or a
   detach mid-read must never leave the console believing input is still
@@ -106,38 +128,44 @@
   [{:keys [state] :as ev} code {:keys [run? path ns-source on-output on-wait-input on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
-    (if-let [problem (connection/connect! ev on-output clj/connect-policy)]
+    (if-let [problem (connection/connect! ev on-output connect-policy)]
       (finish! ev opts problem)
-      (let [watch (stdin-watch state on-wait-input)
-            do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
-                                                               :still-waiting nil
-                                                               :on-message watch}))]
-        (if run?
-          ;; Run: load-file, never told an :ns (the fixture's own ns form
-          ;; decides what the server evaluates it in). A successful Run
-          ;; moves the prompt namespace to the buffer's own (ruling 4).
-          (let [f (when path (io/file path))
-                msgs (do-request! {:op "load-file" :file code
-                                   :file-path (if f (.getAbsolutePath f) "untitled.clj")
-                                   :file-name (if f (.getName f) "untitled.clj")})
-                result (clj/eval-result msgs (connection/stop-requested? ev))]
-            (when (= :ok (:status result))
-              (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
-            (finish! ev opts result))
-          ;; REPL line (no ns-source): eval in the prompt namespace, and a
-          ;; successful reply's own :ns moves the prompt. Selection/Form
-          ;; (ns-source present): eval in the buffer's own namespace, or
-          ;; the prompt namespace when the buffer has none; the prompt
-          ;; never moves for these (rule 3: never the buffer's ns form
-          ;; itself, only named as :ns).
-          (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
-                msgs (do-request! {:op "eval" :code code :ns ns})]
-            (if (clj/ns-not-found? msgs)
-              (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
-              (let [result (clj/eval-result msgs (connection/stop-requested? ev))]
-                (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
-                  (swap! state assoc :prompt-ns (:ns result)))
-                (finish! ev opts result)))))))
+      (if (stop-requested? ev)
+        ;; Stop landed after connect! published a live session but before
+        ;; either request went out: finish at once, mirroring attach.clj's
+        ;; own worker guard, and send nothing. The connection itself is
+        ;; fine (connect! already succeeded), so this doesn't detach.
+        (finish! ev opts {:status :interrupted})
+        (let [watch (stdin-watch state on-wait-input)
+              do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
+                                                                 :still-waiting nil
+                                                                 :on-message watch}))]
+          (if run?
+            ;; Run: load-file, never told an :ns (the fixture's own ns form
+            ;; decides what the server evaluates it in). A successful Run
+            ;; moves the prompt namespace to the buffer's own (ruling 4).
+            (let [f (when path (io/file path))
+                  msgs (do-request! {:op "load-file" :file code
+                                     :file-path (if f (.getAbsolutePath f) "untitled.clj")
+                                     :file-name (if f (.getName f) "untitled.clj")})
+                  result (clj/eval-result msgs (stop-requested? ev))]
+              (when (= :ok (:status result))
+                (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
+              (finish! ev opts result))
+            ;; REPL line (no ns-source): eval in the prompt namespace, and a
+            ;; successful reply's own :ns moves the prompt. Selection/Form
+            ;; (ns-source present): eval in the buffer's own namespace, or
+            ;; the prompt namespace when the buffer has none; the prompt
+            ;; never moves for these (rule 3: never the buffer's ns form
+            ;; itself, only named as :ns).
+            (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
+                  msgs (do-request! {:op "eval" :code code :ns ns})]
+              (if (clj/ns-not-found? msgs)
+                (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
+                (let [result (clj/eval-result msgs (stop-requested? ev))]
+                  (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
+                    (swap! state assoc :prompt-ns (:ns result)))
+                  (finish! ev opts result))))))))
     (catch Throwable e
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
 
@@ -152,46 +180,77 @@
     nil)
   (eval! [this code opts]
     (when-not (:run? opts) (swap! history eval/history-add code))
-    (let [[old _] (swap-vals! state (fn [s] (if (:running s) s (assoc s :running {:opts opts}))))]
+    ;; A fresh, unique token per evaluation (Important 1): interrupt!'s
+    ;; failed-interrupt future keys its exit test on this identity, not on
+    ;; :running being non-nil, so it can never mistake a later evaluation
+    ;; for the one it was started to watch.
+    (let [[old _] (swap-vals! state (fn [s] (if (:running s) s (assoc s :running {:opts opts :token (Object.)}))))]
       (if (:running old)
         busy-warning
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
-    ;; Runs on the GTK thread: everything here either reads/writes an atom
-    ;; or fires a socket write, then hands the wait to a future.
+    ;; Runs on the GTK thread and must not block (Important 3): every
+    ;; socket write (the interrupt op itself) moves inside a future, and
+    ;; this only ever reads/writes atoms, fires a future, or calls
+    ;; detach! (a socket close plus the fail-pending handlers).
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
       (when-let [running (:running old)]
-        (let [on-output (:on-output (:opts running))
-              {:keys [conn session ops]} @state]
-          (if (contains? ops "interrupt")
-            (do
-              (client/send! conn {:op "interrupt" :session session
-                                  :interrupt-id (get-in @state [:running :id])})
-              (future
-                (try
-                  (loop [n 0]
-                    (cond
-                      (nil? (:running @state)) nil
-                      (>= (* n 20) (:interrupt-timeout-ms timings))
-                      (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
-                          (connection/detach! this))
-                      :else (do (Thread/sleep 20) (recur (inc n)))))
-                  (catch Throwable _ nil))))
-            (do
-              (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
-              (connection/detach! this))))))
-    nil)
+        ;; Minor 1: a second Stop for the same evaluation does nothing --
+        ;; the first Stop's future (or immediate detach) already owns it.
+        (when-not (:stop-requested? running)
+          (let [on-output (:on-output (:opts running))
+                token (:token running)
+                conn (:conn @state)]
+            (if-not (client/open? conn)
+              ;; Minor 2: connect! hasn't published a live :conn yet (still
+              ;; connecting, or never got that far). :ops may be stale from
+              ;; an earlier connection and can't be trusted here, so this
+              ;; ignores it: detach! at once closes :connecting too, with
+              ;; no sentence and no interrupt op sent.
+              (connection/detach! this)
+              (let [ops (:ops @state)
+                    session (:session @state)
+                    id (get-in @state [:running :id])]
+                (if (contains? ops "interrupt")
+                  (future
+                    (try
+                      (client/send! conn {:op "interrupt" :session session :interrupt-id id})
+                      (loop [n 0]
+                        (cond
+                          ;; This evaluation has ended, or a newer one has
+                          ;; already taken :running (Important 1): either
+                          ;; way, this future is no longer relevant.
+                          (not (identical? token (get-in @state [:running :token]))) nil
+                          (>= (* n 20) (:interrupt-timeout-ms timings))
+                          (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
+                              (connection/detach! this))
+                          :else (do (Thread/sleep 20) (recur (inc n)))))
+                      (catch Throwable _ nil)))
+                  (do
+                    (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
+                    (connection/detach! this))))))))
+      nil))
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (:waiting? @state)))
   (send-input! [_ text]
-    (let [{:keys [conn session running]} @state
-          on-wait-input (:on-wait-input (:opts running))]
+    ;; The stdin op's own socket write moves into a future (Important 3),
+    ;; same as interrupt!'s. :waiting? clears synchronously so
+    ;; waiting-for-input? reflects the send at once; on-wait-input false
+    ;; only fires when it was really waiting AND :running is still the
+    ;; same evaluation (Minor 3), both read from the one swap-vals! that
+    ;; does the clearing.
+    (let [[old _] (swap-vals! state assoc :waiting? false)
+          {:keys [conn session running]} old
+          token (:token running)]
       (when (client/open? conn)
-        (client/request! conn {:op "stdin" :stdin (clj/stdin-line (str text)) :session session}
-                         (fn [_] nil)))
-      (swap! state assoc :waiting? false)
-      (call-wait-input! on-wait-input false))
+        (future
+          (try
+            (client/request! conn {:op "stdin" :stdin (clj/stdin-line (str text)) :session session}
+                             (fn [_] nil))
+            (catch Throwable _ nil))))
+      (when (and (:waiting? old) (some? token) (identical? token (get-in @state [:running :token])))
+        (call-wait-input! (:on-wait-input (:opts running)) false)))
     nil)
   ;; P0.1: an empty stdin fails on nREPL 1.7.0, so there's no clean EOF to
   ;; send. A read just keeps waiting.

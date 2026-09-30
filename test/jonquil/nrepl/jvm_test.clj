@@ -214,12 +214,16 @@
         (ev/eval! e "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
         (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
         (Thread/sleep 100)
-        (let [start (System/nanoTime)]
+        (let [expected-id (get-in @(:state e) [:running :id])
+              start (System/nanoTime)]
           (is (= :interrupted (:status (do (ev/interrupt! e) (deref done 1000 :timeout)))))
-          (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "interrupted well under 1000 ms"))
-        (let [req (last (filter #(= "interrupt" (get % "op")) (fake/requests srv)))]
-          (is (some? req) "an interrupt was sent")
-          (is (some? (get req "interrupt-id")) "carrying the running request's id"))
+          (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "interrupted well under 1000 ms")
+          (let [req (last (filter #(= "interrupt" (get % "op")) (fake/requests srv)))]
+            (is (some? req) "an interrupt was sent")
+            ;; fake/requests dissoc's the wire "id" (handle!'s own log strips
+            ;; it), so this compares against the id Jonquil itself tracked
+            ;; for the running request -- the same value interrupt! reads.
+            (is (= expected-id (get req "interrupt-id")) "carrying the running request's own id")))
         (is (= {:status :ok :printed "3" :ns 'user} (:result (run e "(+ 1 2)" {:run? false})))
             "the next eval answers on the same connection")
         (is (= 1 (count (filter #{"clone"} (fake/ops-seen srv)))) "no reconnect")))))
@@ -233,10 +237,9 @@
                               :on-complete (fn [r] (deliver done r))})
         (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
         (ev/interrupt! e)
-        (wait-until! (fn [] (some #{[:system (str clj/interrupt-failed-message "\n")]} @out)))
+        (is (= :interrupted (:status (deref done 2000 :timeout))) "one on-complete, :interrupted")
         (is (= [:system (str clj/interrupt-failed-message "\n")] (last @out)))
         (is (not (connection/connected? e)) "the failed interrupt detaches")
-        (wait-until! (fn [] (not (ev/evaluating? e))))
         (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))))
         (is (= 2 (count (filter #{"clone"} (fake/ops-seen srv))))
             "the next eval reconnects with a fresh clone")))))
@@ -254,6 +257,104 @@
         (is (not (connection/connected? e)))
         (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "interrupt is never sent without the op")
         (is (= :interrupted (:status (deref done 2000 :timeout))))))))
+
+(deftest stop-during-connect-test
+  ;; The fake has no :slow-ops (ruling 9: only handle!/evaluate!/the
+  ;; options differ from the cljd fake, and slow-ops isn't one of them).
+  ;; :mute? true never answers anything, so connect!'s own describe
+  ;; request sits pending -- a real, timing-based window (no with-redefs:
+  ;; this codebase's cross-namespace calls are direct-linked, so a
+  ;; with-redefs on connection.clj's own client/request-sync or
+  ;; connect! call never reaches code compiled inside those functions;
+  ;; measured against this Jolt build with a throwaway probe script) in
+  ;; which connect! has already published the raw socket at :connecting
+  ;; (M4) but :conn is still nil. This exercises Minor 2: interrupt!
+  ;; detaches at once, with no sentence and no interrupt op (a fresh
+  ;; evaluator's :ops is still #{}).
+  (with-project {:mute? true}
+    (fn [srv dir _]
+      (let [e (make dir) done (promise) out (atom [])]
+        (ev/eval! e "1" {:run? false
+                         :on-output (fn [k s] (swap! out conj [k s]))
+                         :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #{"describe"} (fake/ops-seen srv))))
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 2000 :timeout))) "one on-complete, :interrupted")
+        (is (not (connection/connected? e)))
+        (is (not-any? #{[:system (str clj/interrupt-failed-message "\n")]} @out)
+            "no sentence: nothing was ever sent to interrupt")
+        (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "and no interrupt op is sent")))))
+
+(deftest stop-before-request-test
+  ;; Important 2: Stop lands after connect! has already published a live
+  ;; session, but before the worker sends the eval or load-file request.
+  ;; jvm.clj routes every stop-requested? check (including the one its
+  ;; connect policy hands to connection/connect!) through its own local
+  ;; var so a with-redefs reached through THIS namespace's own alias can
+  ;; see it -- the same reason jonquil.nrepl.attach keeps a private
+  ;; stop-requested? wrapper of its own. This redefines it to flip the
+  ;; REAL flag on state (so the worker's own post-connect check, called
+  ;; through the very same var, reads a genuine stop) only once connect!
+  ;; itself has already asked and gotten false at least twice (describe,
+  ;; then the pre-publish clone check) -- i.e. only after a real success,
+  ;; never during the handshake.
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir) done (promise) calls (atom 0)]
+        (with-redefs [jvm/stop-requested? (fn [ev2]
+                                            (let [n (swap! calls inc)]
+                                              (if (< n 3)
+                                                false
+                                                (do (swap! (:state ev2) assoc-in [:running :stop-requested?] true)
+                                                    true))))]
+          (ev/eval! e "1" {:run? false :on-complete (fn [r] (deliver done r))})
+          (is (= :interrupted (:status (deref done 2000 :timeout))) "one on-complete, :interrupted"))
+        (is (not-any? #{"eval"} (fake/ops-seen srv)) "no request is ever sent")
+        (is (connection/connected? e) "the connection itself is fine; only this eval was cancelled")))))
+
+(deftest double-stop-test
+  ;; Minor 1: a second interrupt! call for the same evaluation does
+  ;; nothing -- one interrupt op, one poller future, one sentence at most.
+  (with-project {:slow {"(slow)" 5000} :ignore-interrupt? true}
+    (fn [srv dir _]
+      (let [e (make dir) out (atom []) done (promise)]
+        (ev/eval! e "(slow)" {:run? false
+                              :on-output (fn [k s] (swap! out conj [k s]))
+                              :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
+        (ev/interrupt! e)
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 2000 :timeout))) "one on-complete, :interrupted")
+        (is (= 1 (count (filter #{[:system (str clj/interrupt-failed-message "\n")]} @out)))
+            "one sentence at most")
+        (is (= 1 (count (filter #{"interrupt"} (fake/ops-seen srv)))) "only one interrupt sent")))))
+
+(deftest interrupt-future-tracks-its-own-eval-test
+  ;; Important 1 regression guard: A's failed-interrupt future must not
+  ;; detach a later evaluation's connection. A ends (via a real,
+  ;; successful interrupt) well inside its own poller's interrupt-timeout
+  ;; window; B claims :running with a fresh token before that window
+  ;; closes and is still running when A's poller would have timed out.
+  (with-project {:slow {"(a)" 5000 "(b)" 500}}
+    (fn [srv dir _]
+      (let [e (make dir) out (atom []) done-a (promise) done-b (promise)]
+        (ev/eval! e "(a)" {:run? false
+                           :on-output (fn [k s] (swap! out conj [k s]))
+                           :on-complete (fn [r] (deliver done-a r))})
+        (wait-until! (fn [] (some #{"(a)"} (keep #(get % "code") (fake/requests srv)))))
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done-a 2000 :timeout))) "A stops via the real interrupt op")
+        (ev/eval! e "(b)" {:run? false :on-complete (fn [r] (deliver done-b r))})
+        (wait-until! (fn [] (some #{"(b)"} (keep #(get % "code") (fake/requests srv)))))
+        ;; A's poller is still counting toward its own interrupt-timeout-ms
+        ;; deadline (measured from when interrupt! was called for A); B is
+        ;; now the running evaluation and is still in flight (500ms) when
+        ;; that deadline arrives.
+        (is (= {:status :ok :printed ":ok" :ns 'user} (deref done-b 2000 :timeout))
+            "B finishes normally: A's stale poller must not detach its connection")
+        (is (not-any? #{[:system (str clj/interrupt-failed-message "\n")]} @out)
+            "A's poller saw B's token, not its own, and stayed quiet")
+        (is (connection/connected? e))))))
 
 (deftest idle-stop-test
   (with-project {}
