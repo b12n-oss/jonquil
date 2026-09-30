@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 38 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (279 tests, 1613 assertions
+slower. `bb test` runs the full unit suite (280 tests, 1617 assertions
 today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -42,12 +42,13 @@ others can't.
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
-(`dev/gtk_selftest.clj`, 35 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 170 rows), with its rows split by
+(`dev/gtk_selftest.clj`, 36 rows); the second covers the full application
+window (`dev/gtk_selftest_window.clj`, 175 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
-`console_layout`, `dialects`, and `inspector` (the panel widget in
+`console_layout`, `dialects`, `prompt` (the namespace prompt following a
+REPL line, a Run and a slow evaluation), and `inspector` (the panel widget in
 isolation, then the real window's own panel: opening, in/out, paging
 across a page edge, table/meta toggles, def, Run Form, and Escape). The
 third (`dev/gtk_selftest_nrepl.clj`,
@@ -64,14 +65,14 @@ fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, Stop's detach, and the inspector's unavailable sentence, over
 that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 16 rows, plus two checks after the window
+(`dev/gtk_selftest_clj.clj`, 17 rows, plus two checks after the window
 closes) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
 (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its
 rows cover connecting and Run moving the prompt, a selection against a
 namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting
-after the server restarts, quick doc, jump to an external definition,
+after the server restarts and the prompt going back to `user`, quick doc, jump to an external definition,
 full docs and its Escape, the inspector before and after a Run, in and
 out, a lost connection and reconnecting while idle, Reset on Run's tick
 through a switch to a Jolt file and back, and a close that never sends

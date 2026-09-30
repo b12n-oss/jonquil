@@ -14,7 +14,7 @@ Across the top sits a toolbar: **Run (F5)**, **Stop (Esc)**, **Open…**,
 a vertical split holds two panes you can resize by dragging the divider
 between them: the **Definitions** editor on top, where you write a program,
 and the **Interactions** console below, where output appears and where you
-can type expressions directly at a `> ` prompt. A status label along the
+can type expressions directly at a `user=> ` prompt. A status label along the
 bottom reads `Ready`, `Running…`, `Waiting for input`, or `Stopped`,
 depending on what the last Run or REPL entry is doing. Beside it, the
 dialect label says which runtime this window uses (see
@@ -73,8 +73,12 @@ the flash first and puts the caret back, so it never types over the form.
 
 ![A Run's output followed by a REPL entry evaluated afterward, in the same console](../images/repl.png)
 
-The `> ` prompt at the bottom of the console takes one expression at a
-time. Type something and press Return, and the result appears the same
+The prompt at the bottom of the console takes one expression at a time.
+It names the namespace your entry will evaluate in, the way `clj` does, so a
+new window reads `user=> `. It follows that namespace as it moves: an
+`(ns demo.core)` typed at the prompt, or a Run of a buffer that starts with
+one, turns it into `demo.core=> `, and whatever you've typed behind it
+stays put. Type something and press Return, and the result appears the same
 way a Run's result does, `=> `-prefixed. Where Run always evaluates the
 whole Definitions pane, and by default clears out whatever earlier
 evaluations defined first, a REPL entry evaluates only what you typed, and
@@ -866,8 +870,6 @@ than being surprises you'd otherwise have to rediscover:
 - A ClojureDart load stops at the first form the app's REPL compiler
   rejects, even though the app's own watcher still compiles the saved
   file.
-- The console prompt reads `> ` for ClojureDart the same as every other
-  runtime: it doesn't show which namespace the session is actually in.
 - JVM Clojure attaches to a server you started, and never starts or stops
   the JVM itself.
 - Reset on Run isn't available for JVM Clojure either: it's your own JVM,
