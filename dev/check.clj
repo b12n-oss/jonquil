@@ -34,6 +34,7 @@
     jonquil.gtk.callbacks
     jonquil.gtk.popover
     jonquil.gtk.help-popover
+    jonquil.gtk.inspector-pane
     jonquil.gtk.editor
     jonquil.gtk.completion
     jonquil.gtk.find-bar
