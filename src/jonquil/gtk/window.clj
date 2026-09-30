@@ -1868,12 +1868,19 @@
     (register-popover-fn help-pop)
     ;; P3.T2: joins the same registry (Escape/teardown close it, same as
     ;; every other P4 popover) -- do-quick-doc! is the only thing that
-    ;; ever shows it or closes it otherwise (ruling 10/11).
+    ;; ever SHOWS it (ruling 10/11); a caret move or focus loss also
+    ;; closes it, same as help-pop below.
     (register-popover-fn full-doc-pop)
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    ;; The full-doc popover closes on the same two events as the quick-doc
+    ;; popover above -- it's a second, wider popover left open over the
+    ;; editor with no other close hook of its own besides Escape and
+    ;; do-quick-doc!'s own re-show path.
+    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
+    (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
     ;; P4.T7: joins the SAME popover registry, wires the editor's own
     ;; Shift+F6/F2 chords to rename-fn, and wires the popover's own entry
     ;; "activate" signal (a real Enter keypress in a focused GtkEntry,
