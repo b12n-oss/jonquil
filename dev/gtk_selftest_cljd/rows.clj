@@ -13,6 +13,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.inspect :as inspect]
             [jonquil.nrepl.attach :as attach]))
 
 ;; Deviation (measured against a throwaway read, not run live): the
@@ -295,6 +296,24 @@
                                (and ok? system? (not error?) (not wrote?)
                                     (= "ClojureDart (not running)" (label ui)))
                                {:ok? ok? :system system? :error error? :wrote wrote? :text t}))))))
+
+(defn row-cljd-inspect-unavailable
+  "cljd's attach evaluator never extends jonquil.evaluator/Inspector at
+  all (jonquil.nrepl.attach.Attach has no such protocol impl), so ruling
+  6's availability check in inspect-last! fails before building any
+  request: the status bar gets the unavailable sentence and the pane's
+  root stays hidden."
+  [ui]
+  (go-row :cljd-inspect-unavailable support/check
+    (let [pane (:inspector ui)]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [shown? (await-until 2000 20
+                                #(= inspect/unavailable-message (g/label-text (:status-label ui))))]
+        (on-gtk
+         (support/check :cljd-inspect-unavailable
+                        (and shown? (zero? (g/gtk-widget-get-visible (:root pane))))
+                        {:shown shown? :status (g/label-text (:status-label ui))
+                         :visible (g/gtk-widget-get-visible (:root pane))}))))))
 
 (defn row-cljd-close
   "The deliberately LAST row: fires the app's quit action, the path a Quit

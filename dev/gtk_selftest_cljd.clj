@@ -32,6 +32,7 @@
    rows/row-cljd-reconnects-after-detach
    rows/row-cljd-idle-stop-detaches
    rows/row-cljd-not-running-message
+   rows/row-cljd-inspect-unavailable
    rows/row-cljd-close])
 
 (def ^:private PER-ROW-MS

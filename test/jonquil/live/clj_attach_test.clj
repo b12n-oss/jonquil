@@ -161,6 +161,59 @@
     (is (= {:status :ok :printed "\"typed\"" :ns 'user} (deref done 2000 :timeout)))
     (is (false? (ev/waiting-for-input? e)))))
 
+(deftest inspect-after-first-run-live
+  ;; review focus 1: Cmd/Ctrl+I right after the first Run of a JVM file
+  ;; must never show nil -- register-inspect!'s own connect-time eval of
+  ;; nil registers the session before the Run's own load-file runs. A
+  ;; fresh jvm/make-jvm (not the shared `make` helper above, though it
+  ;; does the same thing) makes the ordering explicit: this evaluator's
+  ;; connection has sent nothing else before the Run. :inspect-timeout-ms
+  ;; is widened past the 5000 ms default: inspect-start's own datafy/
+  ;; pprint path is untested against the real server before this task,
+  ;; and full-doc-not-loaded-live's own comment measured a real first-call
+  ;; warm-up elsewhere in this same server process.
+  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)}
+                        {:inspect-timeout-ms 20000})
+        file (.getCanonicalPath (io/file (:dir *srv*) "src/demo/core.clj"))
+        {:keys [result]} (run e clj-server/fixture-core-text {:run? true :path file})
+        done (promise)]
+    (is (= :ok (:status result)))
+    (ev/inspect! e :start {:rows 10 :cols 40} (fn [v] (deliver done v)))
+    (let [view (deref done 20000 :timeout)]
+      (is (nil? (:error view)) (str "view: " view))
+      (is (not= "nil" (:info view)) (str "view: " view)))))
+
+(deftest inspect-in-out-def-live
+  ;; A REPL map, in on :a, then :def while STILL on that frame --
+  ;; jonquil.inspect.view/def-as interns (:value (peek stack)), the
+  ;; CURRENT top-of-stack value, so :def has to run before :out or it
+  ;; would intern the whole map instead of [1 2] and the closing eval
+  ;; below would fail. (Verified against def-as's own body, not the
+  ;; brief's plain comma order, which lists :out ahead of :def.)
+  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)}
+                        {:inspect-timeout-ms 20000})
+        {:keys [result]} (run e "{:a [1 2]}" {:run? false})]
+    (is (= :ok (:status result)))
+    (let [start-p (promise)]
+      (ev/inspect! e :start {:rows 10 :cols 40} (fn [v] (deliver start-p v)))
+      (let [view (deref start-p 20000 :timeout)]
+        (is (nil? (:error view)) (str "start: " view))))
+    (let [in-p (promise)]
+      (ev/inspect! e :in {:idx 0} (fn [v] (deliver in-p v)))
+      (let [view (deref in-p 5000 :timeout)]
+        (is (= "*1 / :a" (:path view)) (str "in: " view))))
+    (let [def-p (promise)]
+      (ev/inspect! e :def {:name "picked"} (fn [v] (deliver def-p v)))
+      (let [view (deref def-p 5000 :timeout)]
+        (is (= "#'user/picked" (:defd view)) (str "def: " view))))
+    (let [out-p (promise)]
+      (ev/inspect! e :out {} (fn [v] (deliver out-p v)))
+      (let [view (deref out-p 5000 :timeout)]
+        (is (= "*1" (:path view)) (str "out: " view))))
+    (let [{:keys [result]} (run e "picked" {:run? false})]
+      (is (= :ok (:status result)))
+      (is (= "[1 2]" (:printed result))))))
+
 (deftest server-stopped-leaves-no-port-file-live
   (let [srv (clj-server/start!)]
     (clj-server/stop! srv)
