@@ -42,6 +42,21 @@
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
 
+(defprotocol FullDoc
+  "P3.T2: full documentation beyond quick doc's own summary, for a second
+  quick-doc press on the same target (jonquil.gtk.window's do-quick-doc!,
+  ruling 11). Only jonquil.nrepl.jvm's evaluator implements this today
+  (backed by the server's own \"doc\" op); every caller checks (satisfies?
+  FullDoc ev) first, and an evaluator that doesn't implement it never sees
+  a second-press request at all."
+  (full-doc [ev sym text on-result]
+    "Asks for sym's full documentation. text is the buffer's current
+    text, never a namespace symbol -- jonquil.nrepl.jvm derives its own
+    help-namespace from it (jonquil.clj/help-ns), so this protocol never
+    leaks a JVM-specific rule into the window. on-result is called
+    exactly once, from a worker thread, with {:status :ok :text t},
+    {:status :no-op}, {:status :timeout} or {:status :not-attached}."))
+
 (defmulti make
   "A new, not yet started evaluator for a jonquil.dialect/select result,
   dispatched on its :runtime. Each implementation's namespace adds its

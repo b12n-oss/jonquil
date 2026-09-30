@@ -543,3 +543,52 @@
           (run e "1" {:run? false})
           (is (= (cljd/no-docs "greet" clj/no-lookup-doc) (ev/lookup e "greet" fixture-core-text 0))))))))
 
+(def full-doc-greet-text
+  "The fake's own :full-docs answer for greet -- P3.T2's step 5 text,
+  reused by the :clj self-test rows for the same fixture symbol."
+  "demo.core/greet\n([who])\nSays hello.\n\n== examples")
+
+(defn- full-doc-sync
+  "Calls ev/full-doc and waits up to timeout-ms for its on-result, once.
+  :timeout when it never fires."
+  [e sym text timeout-ms]
+  (let [done (promise)]
+    (ev/full-doc e sym text (fn [r] (deliver done r)))
+    (deref done timeout-ms :timeout)))
+
+(deftest full-doc-test
+  (testing "the Jvm evaluator satisfies FullDoc"
+    (with-project {}
+      (fn [_srv dir _] (is (satisfies? ev/FullDoc (make dir))))))
+  (testing "not connected: :not-attached at once, nothing sent"
+    (with-project {:full-docs {"greet" full-doc-greet-text}}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (is (= {:status :not-attached} (full-doc-sync e "greet" fixture-core-text 2000)))
+          (is (empty? (fake/ops-seen srv)))))))
+  (testing "connected, after a Run: the fake's own full-docs text, and the request carried the buffer's own ns"
+    (with-project {:full-docs {"greet" full-doc-greet-text}}
+      (fn [srv dir file]
+        (let [e (make dir)]
+          (run e fixture-core-text {:run? true :path file})
+          (is (= {:status :ok :text full-doc-greet-text}
+                 (full-doc-sync e "greet" fixture-core-text 2000)))
+          (is (= "demo.core" (get (last (filter #(= "doc" (get % "op")) (fake/requests srv))) "ns")))))))
+  (testing "a timeout (the server's own doc-ms outlasts full-doc-timeout-ms): :timeout, well within doc-ms"
+    (with-project {:doc-ms 1000}
+      (fn [_srv dir _]
+        (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir}
+                              {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
+                               :help-timeout-ms 200 :full-doc-timeout-ms 200})
+              start (System/nanoTime)]
+          (run e "1" {:run? false})
+          (is (= {:status :timeout} (full-doc-sync e "greet" "1" 1000)))
+          (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "well under doc-ms's own 1000 ms")))))
+  (testing "no doc op: :no-op, nothing sent"
+    (with-project {:ops (vec (remove #{"doc"} fake/jvm-ops))}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= {:status :no-op} (full-doc-sync e "greet" "1" 2000)))
+          (is (not-any? #{"doc"} (fake/ops-seen srv))))))))
+

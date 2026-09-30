@@ -13,7 +13,9 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
-            [jonquil.gtk.ffi :as g]))
+            [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.popover :as popover]))
 
 (def fixture-core-text
   ;; The spike fixture's exact text (.superpowers/sdd/clj/fixture-core.clj):
@@ -37,6 +39,12 @@
 ;; after-close-checks! (which runs after main/start! returns) reach them.
 (defonce ^:private fixture* (atom nil))
 
+;; P3.T2 step 5: the fake's own :full-docs answer for greet, referenced by
+;; row-clj-full-doc below -- the same text test/jonquil/nrepl/jvm_test.clj's
+;; own full-doc-greet-text embeds.
+(def full-doc-greet-text
+  "demo.core/greet\n([who])\nSays hello.\n\n== examples")
+
 (defn- temp-project-dir []
   (io/file (System/getProperty "java.io.tmpdir")
            (str "jonquil-selftest-clj-" (System/currentTimeMillis) "-" (random-uuid))))
@@ -45,18 +53,33 @@
   "Starts the fake server and writes a JVM project directory for it:
   deps.edn, .jonquil.edn {:dialect :clj}, src/demo/core.clj (the spike
   fixture's text), and .nrepl-port holding the fake's port. {:dir :file
-  :server :lock-text}, paths canonical."
+  :server :lock-text}, paths canonical.
+
+  P3.T2: the project directory and its src/demo/core.clj are written
+  BEFORE the fake starts, so greet's own :docs entry can point :file at
+  this SAME file's real canonical path (mirroring jvm_test.clj's own
+  lookup-test comment on the same ordering need); map's own :docs entry
+  is a fixed jar path, ruling 13's own jar-shortening shape."
   []
-  (let [srv (fake/start! {:slow {"(slow)" 5000} :completions {"gre" [["greet" "demo.core"]]}})
-        d (temp-project-dir)
-        f (io/file d "src/demo/core.clj")
-        lock-text (str (:port srv) "\n")]
+  (let [d (temp-project-dir)
+        f (io/file d "src/demo/core.clj")]
     (.mkdirs (.getParentFile f))
     (spit (io/file d "deps.edn") "{}\n")
     (spit (io/file d ".jonquil.edn") "{:dialect :clj}\n")
     (spit f fixture-core-text)
-    (spit (io/file d ".nrepl-port") lock-text)
-    (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f) :server srv :lock-text lock-text})))
+    (let [srv (fake/start!
+               {:slow {"(slow)" 5000}
+                :completions {"gre" [["greet" "demo.core"]]}
+                :docs {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello."
+                                "arglists-str" "([who])" "file" (.getCanonicalPath f) "line" 4}
+                       "map" {"ns" "clojure.core" "name" "map"
+                              "doc" "Returns a lazy sequence of the results of applying f."
+                              "arglists-str" "([f] [f coll] [f c1 c2] [f c1 c2 c3] [f c1 c2 c3 & colls])"
+                              "file" "jar:file:/x/clojure-1.12.5.jar!/clojure/core.clj" "line" 2748}}
+                :full-docs {"greet" full-doc-greet-text}})
+          lock-text (str (:port srv) "\n")]
+      (spit (io/file d ".nrepl-port") lock-text)
+      (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f) :server srv :lock-text lock-text}))))
 
 (defn evaluator [ui] ((:evaluator* ui)))
 
@@ -192,6 +215,87 @@
       (on-gtk (support/check :clj-reconnects-after-restart
                              (and not-running? ok attached?)
                              {:not-running not-running? :ok ok :attached attached? :text (support/since ui mark)})))))
+
+;; --- P3.T2 rows: quick doc, jump, and full doc on a second press -----------
+
+(defn row-clj-quick-doc
+  "Ctrl+Q on greet in (greet \"x\"), with the evaluator already attached
+  (an earlier row's own Run): ev/lookup answers from the fake's own :docs
+  table, and the quick-doc popover shows demo.core/greet's own short doc."
+  [ui]
+  (go-row :clj-quick-doc support/check
+    (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
+              (editor/set-text! ed "(greet \"x\")")
+              (support/place-cursor! (:buf ed) 2)
+              ((:quick-doc!* ui))
+              (let [text (help-popover/quick-doc-text hp)]
+                (support/check :clj-quick-doc
+                               (and (popover/open? hp)
+                                    (str/includes? text "demo.core/greet")
+                                    (str/includes? text "Says hello."))
+                               {:open (popover/open? hp) :text text})
+                (popover/hide! hp))))))
+
+(defn row-clj-jump-external
+  "F12 on map in (map inc [1]): jump-target finds no definition in the
+  buffer, so it falls to the :external case and shows the SAME quick-doc
+  popover -- ev/lookup's own Defined in line (ruling 13, P3.T1) ends with
+  the fake's own jar path and line."
+  [ui]
+  (go-row :clj-jump-external support/check
+    (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
+              (editor/set-text! ed "(map inc [1])")
+              (support/place-cursor! (:buf ed) 2)
+              ((:jump!* ui))
+              (let [text (help-popover/quick-doc-text hp)]
+                (support/check :clj-jump-external
+                               (and (popover/open? hp)
+                                    (str/ends-with? text "Defined in clojure-1.12.5.jar!/clojure/core.clj:2748"))
+                               {:open (popover/open? hp) :text text})
+                (popover/hide! hp))))))
+
+(defn row-clj-full-doc
+  "Quick doc twice on greet (ruling 11): the second press is a repeat on
+  the SAME target while the popover is still open, so it asks the fake's
+  own doc op instead of re-showing the same text. Within 2000 ms
+  full-doc-text holds the fake's own :full-docs answer, the quick-doc
+  popover has closed, and the status no longer says Loading."
+  [ui]
+  (go-row :clj-full-doc support/check
+    (let [hp (:help-popover ui) fp (:full-doc-popover ui)]
+      (on-gtk (let [ed (:editor ui)]
+                (editor/set-text! ed "(greet \"x\")")
+                (support/place-cursor! (:buf ed) 2)
+                ((:quick-doc!* ui))
+                ((:quick-doc!* ui))))
+      (let [ok (await-until 2000 20
+                            #(and (= full-doc-greet-text (help-popover/full-doc-text fp))
+                                  (not (popover/open? hp))
+                                  (not (str/includes? (g/label-text (:status-label ui)) "Loading"))))]
+        (on-gtk (support/check :clj-full-doc ok
+                               {:ok ok :text (help-popover/full-doc-text fp)
+                                :hp-open (popover/open? hp)
+                                :status (g/label-text (:status-label ui))})
+                (popover/hide! fp))))))
+
+(defn row-clj-full-doc-escape
+  "With the full-doc popover open (the same double quick-doc press as
+  row-clj-full-doc), Escape closes it -- window.clj's own popover
+  registry (:close-popovers!*), the same path P4.T3's own escape row
+  uses."
+  [ui]
+  (go-row :clj-full-doc-escape support/check
+    (let [fp (:full-doc-popover ui)]
+      (on-gtk (let [ed (:editor ui)]
+                (editor/set-text! ed "(greet \"x\")")
+                (support/place-cursor! (:buf ed) 2)
+                ((:quick-doc!* ui))
+                ((:quick-doc!* ui))))
+      (let [opened? (await-until 2000 20 #(popover/open? fp))]
+        (on-gtk (let [handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)]
+                  (support/check :clj-full-doc-escape
+                                 (and opened? (= 1 handled) (not (popover/open? fp)))
+                                 {:opened opened? :handled handled :open (popover/open? fp)})))))))
 
 (defn row-clj-close
   "The deliberately LAST row: fires the app's quit action, the path a Quit

@@ -34,7 +34,11 @@
   with a Defined in <file>:<line> line (jonquil.help/location-line) for a
   definition outside the buffer (ruling 13). Neither ever connects on its
   own: both run on the GTK thread and simply fall back to offline
-  candidates or a no-docs result when there's no live connection."
+  candidates or a no-docs result when there's no live connection.
+  full-doc (P3.T2, the jonquil.evaluator/FullDoc protocol) is backed by
+  the server's own doc op instead, for the window's second quick-doc
+  press (ruling 11): unlike lookup/complete it runs in a future, since
+  it's asked for on demand rather than on every keystroke."
   (:require [clojure.java.io :as io]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
@@ -342,6 +346,34 @@
               (cljd/no-docs sym clj/lookup-timeout-doc)))))
       (catch Throwable _ nil)))
   (limitations [_] clj/limitations)
+
+  ev/FullDoc
+  ;; P3.T2: backed by the server's own "doc" op, in a future (never on the
+  ;; GTK thread, unlike lookup/complete above -- ruling: full doc is asked
+  ;; for on demand, not on every keystroke, so it can afford to wait
+  ;; longer, per :full-doc-timeout-ms's own estimate). Not connected or no
+  ;; "doc" op answer at once, on the calling thread; on-result is called
+  ;; exactly once either way. Everything is caught: a throw anywhere
+  ;; (including inside the future) reports :timeout, never an escaping
+  ;; exception into a key handler or a future nobody's watching.
+  (full-doc [_ sym text on-result]
+    (try
+      (let [{:keys [conn session ops prompt-ns]} @state]
+        (cond
+          (not (client/open? conn)) (on-result {:status :not-attached})
+          (not (contains? ops "doc")) (on-result {:status :no-op})
+          :else
+          (future
+            (try
+              (let [r (client/request-sync conn {:op "doc" :sym sym :session session
+                                                 :ns (clj/help-ns text prompt-ns)}
+                                           (:full-doc-timeout-ms timings))]
+                (on-result (if (vector? r)
+                             {:status :ok :text (some :doc r)}
+                             {:status :timeout})))
+              (catch Throwable _ (on-result {:status :timeout}))))))
+      (catch Throwable _ (on-result {:status :timeout})))
+    nil)
 
   connection/Attached
   (connected? [this] (connection/live? this))

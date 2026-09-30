@@ -27,6 +27,10 @@
    rows/row-clj-stop-interrupts
    rows/row-clj-stdin
    rows/row-clj-reconnects-after-restart
+   rows/row-clj-quick-doc
+   rows/row-clj-jump-external
+   rows/row-clj-full-doc
+   rows/row-clj-full-doc-escape
    rows/row-clj-close])
 
 (def ^:private PER-ROW-MS

@@ -101,6 +101,17 @@
                   file)]
       (str "Defined in " short (when line (str ":" line))))))
 
+(defn full-doc-status
+  "The status-bar sentence for a jonquil.evaluator/full-doc result
+  (P3.T2, ruling 11's second press), or nil for :ok -- the caller shows
+  the text and clears the status itself then."
+  [sym result]
+  (case (:status result)
+    :no-op "This server has no full-doc op."
+    :timeout (str "Full docs for " sym " timed out.")
+    :not-attached "No docs: Jonquil isn't attached to the server yet. Run something first."
+    :ok nil))
+
 (defn doc-text
   "The quick-doc text for a jonquil.docs/symbol-doc result, using upstream's
   formatter; a nil result reads as not found. Appends \"\\n\\n\" plus

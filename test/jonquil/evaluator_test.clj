@@ -5,6 +5,13 @@
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.evaluator :as ev]
+            ;; Bare, unaliased (jonquil.nrepl.connection-test's own
+            ;; convention): loaded only for its :cljd defmethod on
+            ;; connection/make-attached, transitively registering
+            ;; connection.clj's own :attach defmethod on ev/make too --
+            ;; full-doc-protocol-test's second assertion needs both to
+            ;; dispatch at all.
+            [jonquil.nrepl.attach]
             [jonquil.session :as session]))
 
 (defn- run [e code run?]
@@ -63,6 +70,10 @@
     (is (ev/waiting-for-input? e))
     (ev/send-input! e "typed")
     (is (= "typed" (:value (deref done 3000 :timeout))))))
+
+(deftest full-doc-protocol-test
+  (is (not (satisfies? ev/FullDoc (ev/make {:runtime :in-process}))))
+  (is (not (satisfies? ev/FullDoc (ev/make {:profile jonquil.dialect/cljd :runtime :attach :project-dir "/nowhere"})))))
 
 (deftest help-matches-docs-test
   (let [e (fresh)]

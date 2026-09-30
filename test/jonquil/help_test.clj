@@ -131,6 +131,13 @@
     (is (= (help/doc-text "greet" d) (help/doc-text "greet" (assoc d :file "unknown" :line 3)))
         "ruling 13: :file alone adds nothing")))
 
+(deftest full-doc-status-test
+  (is (= "This server has no full-doc op." (help/full-doc-status "map" {:status :no-op})))
+  (is (= "Full docs for map timed out." (help/full-doc-status "map" {:status :timeout})))
+  (is (= "No docs: Jonquil isn't attached to the server yet. Run something first."
+         (help/full-doc-status "map" {:status :not-attached})))
+  (is (nil? (help/full-doc-status "map" {:status :ok :text "x"}))))
+
 (deftest rename-problem-test
   (let [s (snap "(defn greet [n] n)\n(greet 1)" 8)]
     (is (nil? (help/rename-problem s "hello")))
