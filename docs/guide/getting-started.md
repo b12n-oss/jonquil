@@ -2,9 +2,10 @@
 
 ## Requirements
 
-- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.13 or later, which
-  already carries the reader fixes from jolt-lang/jolt#1134 and #1138
-  that `(read)` from the console needs. Building Jolt from source needs a
+- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.15 or later. It
+  carries the reader fixes from jolt-lang/jolt#1134 and #1138 that
+  `(read)` from the console needs, and the closed-socket fix from
+  jolt-lang/jolt#1183 that the ClojureDart attach connection relies on. Building Jolt from source needs a
   threaded Chez Scheme 10.x on `PATH`; if you don't already have one,
   Jolt's own `make` provisions Chez 10.4.1 for you, so there's usually
   nothing to install separately.

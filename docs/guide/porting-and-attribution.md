@@ -50,7 +50,7 @@ instead of quietly drifting from what `UPSTREAM.md` claims.
 Two reader bugs blocked the console's `(read)` outright: `(read)` from
 stdin failed on Jolt through `LineNumberingPushbackReader`, filed as
 jolt-lang/jolt#1133 (merged in PR #1134) and #1137 (merged in PR #1138,
-2026-09-25). This project's pinned Jolt, v0.8.13, carries both; the fixes
+2026-09-25). This project's pinned Jolt, v0.8.15, carries both; the fixes
 landed well before that release, back when the getting-started
 requirement still named an exact `main` commit rather than a tagged
 version.

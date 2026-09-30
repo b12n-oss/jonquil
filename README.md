@@ -29,7 +29,7 @@ Ctrl+Space completes as you type, with a documentation preview beside the candid
 
 ## Requirements
 
-- [Jolt](https://github.com/jolt-lang/jolt) v0.8.13 or later, which already carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs
+- [Jolt](https://github.com/jolt-lang/jolt) v0.8.15 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, and the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on
 - GTK4 and pango, installed via Homebrew
 - A [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) checkout, only for the out-of-process nREPL runtime and `bb test:nrepl`: set `$JONQUIL_JOLT_NREPL` to it, or place it at `~/dev/jolt-lang/nrepl`
 - The `nrepl-poc` ClojureDart fork at `199d173d` or later, only for the ClojureDart dialect: upstream ClojureDart has no nREPL server for Jonquil to attach to
