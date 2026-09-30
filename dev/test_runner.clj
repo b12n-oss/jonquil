@@ -28,6 +28,7 @@
     jonquil.nrepl.connection-test
     jonquil.nrepl.ops-test
     jonquil.cljd-test
+    jonquil.clj-test
     jonquil.fake-cljd-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.gtk.ffi-test])

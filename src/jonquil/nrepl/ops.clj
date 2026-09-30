@@ -73,25 +73,28 @@
   :ok|:error|:interrupted} plus :printed (the server's printed value) for
   :ok, :error-text for :error, and :ns (a symbol) when a reply names one.
   stop-requested? turns an error or a lost connection into :interrupted,
-  as Stop does in-process."
-  [msgs stop-requested?]
-  (let [st (statuses msgs)
-        ns-str (some :ns (reverse msgs))
-        r (cond
-            (or (st "interrupted") (and stop-requested? (or (st disconnected) (st "eval-error"))))
-            {:status :interrupted}
+  as Stop does in-process. lost-text is the error message when the
+  connection is lost."
+  ([msgs stop-requested?]
+   (eval-result msgs stop-requested? "The Jolt runtime exited before this evaluation finished."))
+  ([msgs stop-requested? lost-text]
+   (let [st (statuses msgs)
+         ns-str (some :ns (reverse msgs))
+         r (cond
+             (or (st "interrupted") (and stop-requested? (or (st disconnected) (st "eval-error"))))
+             {:status :interrupted}
 
-            (st disconnected)
-            {:status :error :error-text "The Jolt runtime exited before this evaluation finished."}
+             (st disconnected)
+             {:status :error :error-text lost-text}
 
-            (st "eval-error")
-            {:status :error
-             :error-text (str "Error: " (first-line (or (some :ex msgs)
-                                                        (apply str (keep :err msgs)))))}
+             (st "eval-error")
+             {:status :error
+              :error-text (str "Error: " (first-line (or (some :ex msgs)
+                                                         (apply str (keep :err msgs)))))}
 
-            :else
-            {:status :ok :printed (or (last (keep :value msgs)) "nil")})]
-    (cond-> r ns-str (assoc :ns (symbol ns-str)))))
+             :else
+             {:status :ok :printed (or (last (keep :value msgs)) "nil")})]
+     (cond-> r ns-str (assoc :ns (symbol ns-str))))))
 
 (defn reset-code
   "Code for the child that removes every namespace not in baseline (the

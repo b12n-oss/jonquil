@@ -79,3 +79,8 @@
   (is (not (ops/reads-stdin? "(read-string \"1\")")))
   (is (not (ops/reads-stdin? "; (read-line)\n\"read-line\" :read-line")))
   (is (not (ops/reads-stdin? nil))))
+
+(deftest eval-result-lost-text-test
+  (is (= "The Jolt runtime exited before this evaluation finished."
+         (:error-text (ops/eval-result [{:status ["done" "jonquil-disconnected"]}] false))))
+  (is (= "Gone." (:error-text (ops/eval-result [{:status ["done" "jonquil-disconnected"]}] false "Gone.")))))
