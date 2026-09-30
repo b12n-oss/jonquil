@@ -549,7 +549,7 @@
                     before (g/buffer-text buf)
                     input-start-at (mark-offset buf (:input-start cv))
                     ;; the space just before input-start is the second
-                    ;; char of the prompt's "> " -- still read-only.
+                    ;; char of the prompt's "user=> " -- still read-only.
                     prompt-space-at (dec input-start-at)
                     delete-at (fn [pos]
                                 (let [i1 (ffi/alloc g/ITER-BYTES)
@@ -697,7 +697,7 @@
                (finally (reset! active? false)))]
       (on-gtk (let [gaps (map - (rest @samples) @samples)
                     max-gap (if (seq gaps) (apply max gaps) 0)
-                    out-chars (- (count (g/buffer-text (:buf cv))) 2)]
+                    out-chars (- (count (g/buffer-text (:buf cv))) (count @(:prompt-text cv)))]
                 ;; I7: drain! no longer inserts a whole oversized batch
                 ;; before trimming, and trim! measures out-end's own
                 ;; offset instead of copying the output region just to

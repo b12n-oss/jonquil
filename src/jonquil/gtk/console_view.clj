@@ -64,6 +64,12 @@
   10 chars per line, roughly 20k to 40k lines of scrollback)."
   200000)
 
+(def default-prompt
+  "The console's prompt before any evaluator sets it otherwise: `user=> `,
+  clj style. set-prompt! (below) replaces it with `(str ns-name \"=> \")`
+  once an evaluator reports its session's namespace."
+  "user=> ")
+
 ;; --- low-level buffer/mark helpers ---------------------------------------
 
 (defn- mark-offset
@@ -222,6 +228,54 @@
     (when-let [[a b] (console/clear-last-range start end)]
       (g/with-iters* buf a b (fn [x y] (g/gtk-text-buffer-delete buf x y)))
       (reset! (:last-entry-active? cv) false)))
+  nil)
+
+(defn set-prompt!
+  "Rewrites the live prompt -- the region between out-end and input-start
+  -- to (str ns-name \"=> \"), clj style. GTK-thread only. A no-op when
+  that text already matches the current prompt (:prompt-text cv), so a
+  caller that fires on every evaluation doesn't churn the buffer when the
+  namespace hasn't changed.
+
+  Keeps the typed input and the caret: this only ever touches the prompt
+  span itself, never anything at or after the old input-start, so input
+  text already on the buffer is never deleted or re-inserted. Every mark
+  move is explicit (gtk_text_buffer_move_mark), mirroring commit-input!'s
+  own discipline -- out-end and input-start are repositioned to their
+  exact post-edit offsets rather than trusted to survive the delete+
+  insert via gravity. The caret is likewise explicitly replaced at its
+  old offset within the input (shifted by the prompt's new length) when
+  it sat at or after the old input-start; a caret that was somewhere in
+  the read-only region isn't this function's concern and is left alone.
+
+  The rewritten span is left read-only and tagged :prompt, same as
+  commit-input!'s own fresh prompt -- remove-all-tags first strips any
+  tag the new text might otherwise inherit from a continuous run on
+  either side of the edit point (insert-chunk!'s own citation on why that
+  can happen at a tag boundary)."
+  [cv ns-name]
+  (let [{:keys [buf tags readonly-tag out-end input-start prompt-text]} cv
+        new-text (str ns-name "=> ")]
+    (when (not= new-text @prompt-text)
+      (let [start (mark-offset buf out-end)
+            old-end (mark-offset buf input-start)
+            caret (g/cursor-offset buf)
+            caret-in-input? (>= caret old-end)
+            caret-shift (- caret old-end)]
+        (g/with-iters* buf start old-end (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+        (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a new-text -1)))
+        (let [end (+ start (count new-text))]
+          (g/with-iters* buf start end
+            (fn [a b]
+              (g/gtk-text-buffer-remove-all-tags buf a b)
+              (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
+              (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
+          (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-move-mark buf out-end a)))
+          (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-move-mark buf input-start a)))
+          (when caret-in-input?
+            (g/with-iters* buf (+ end caret-shift) (+ end caret-shift)
+              (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
+        (reset! prompt-text new-text))))
   nil)
 
 (defn focus!
@@ -474,13 +528,13 @@
   (append! cv :mark nil))
 
 (defn echo-entry!
-  "Adds \"> text\" to the read-only output history above the prompt, in the
-  :prompt style, exactly as if it had been typed and submitted -- but
-  leaves the current input untouched. Goes through append! (the same
-  queue+drain path an eval's own output uses), so Run Selection's echo and
-  whatever the eval later prints land in the console in the order they
-  were called, even though the eval's own output arrives asynchronously
-  from the eval worker thread.
+  "Adds \"<current prompt>text\" to the read-only output history above the
+  prompt, in the :prompt style, exactly as if it had been typed and
+  submitted -- but leaves the current input untouched. Goes through
+  append! (the same queue+drain path an eval's own output uses), so Run
+  Selection's echo and whatever the eval later prints land in the console
+  in the order they were called, even though the eval's own output
+  arrives asynchronously from the eval worker thread.
 
   mark? (fix round 1, Important #1) gates whether this ALSO marks the
   console's own \"last entry start\" (mark-entry-start!, above), since
@@ -493,7 +547,7 @@
   echo included, not just up to where the echo landed."
   [cv text mark?]
   (when mark? (mark-entry-start! cv))
-  (append! cv :prompt (str "> " text "\n")))
+  (append! cv :prompt (str @(:prompt-text cv) text "\n")))
 
 ;; --- Return ----------------------------------------------------------------
 
@@ -502,10 +556,13 @@
   read-only history and open a fresh prompt at the end. Every mark move
   here is explicit (gtk_text_buffer_move_mark), not gravity: gravity only
   needs to govern append! and ordinary typing, and relying on it for the
-  prompt's own recreation would put the freshly-inserted \"> \" on the wrong
-  side of out-end (right gravity means text inserted AT out-end's position
-  ends up before it, which is exactly backwards for a prompt that must sit
-  after out-end).
+  prompt's own recreation would put the freshly-inserted prompt text on
+  the wrong side of out-end (right gravity means text inserted AT out-
+  end's position ends up before it, which is exactly backwards for a
+  prompt that must sit after out-end). The fresh prompt's length is read
+  from cv's own :prompt-text (set-prompt!'s value), never a fixed 2 --
+  set-prompt! itself never runs mid-commit, so this always sees the
+  prompt as it stood when the entry was submitted.
 
   Also marks the console's own \"last entry start\" (set-entry-start-
   mark!, called directly, not the queued mark-entry-start! -- see its own
@@ -513,7 +570,9 @@
   Cmd/Ctrl+Shift+L, called before anything else here moves out-end."
   [cv]
   (set-entry-start-mark! cv)
-  (let [{:keys [buf tags readonly-tag out-end input-start]} cv
+  (let [{:keys [buf tags readonly-tag out-end input-start prompt-text]} cv
+        prompt @prompt-text
+        prompt-len (count prompt)
         prompt-start (mark-offset buf out-end)
         old-end (g/gtk-text-buffer-get-char-count buf)]
     (g/with-iters* buf old-end old-end (fn [a _] (g/gtk-text-buffer-insert buf a "\n" -1)))
@@ -523,16 +582,16 @@
         (fn [a b]
           (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
           (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
-      ;; 3: a fresh "> " at the end, out-end moved to just before it
-      (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-insert buf a "> " -1)))
+      ;; 3: a fresh prompt at the end, out-end moved to just before it
+      (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-insert buf a prompt -1)))
       (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-move-mark buf out-end a)))
-      (g/with-iters* buf end (+ end 2)
+      (g/with-iters* buf end (+ end prompt-len)
         (fn [a b]
           (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
           (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
-      (g/with-iters* buf (+ end 2) (+ end 2)
+      (g/with-iters* buf (+ end prompt-len) (+ end prompt-len)
         (fn [a _] (g/gtk-text-buffer-move-mark buf input-start a)))
-      (g/with-iters* buf (+ end 2) (+ end 2)
+      (g/with-iters* buf (+ end prompt-len) (+ end prompt-len)
         (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))))
 
 (defn handle-return!
@@ -752,7 +811,8 @@
 (defn make-console-view
   "Builds the console: an editable, monospace GtkTextView with an 8px left /
   4px top margin (global.md), inside a GtkScrolledWindow, starting as a bare
-  \"> \" prompt with an empty input after it.
+  default-prompt (`user=> `) with an empty input after it. set-prompt!
+  (below) rewrites it once an evaluator reports its session's namespace.
 
   on-submit receives {:action :eval|:send-stdin|:eof :text s}. history-prev
   is (fn [current-input] -> string|nil); history-next is (fn [] ->
@@ -782,26 +842,28 @@
     (g/gtk-text-view-set-top-margin view 4)
     ;; I5 (phase-review-report.md): GTK_WRAP_NONE let any line wider than
     ;; the view open a horizontal scroll range, and scroll-to-end!'s xalign
-    ;; 0.0 then scrolled right past the "> " prompt on every drain, clipping
+    ;; 0.0 then scrolled right past the prompt on every drain, clipping
     ;; every later line by its width. Word-char wrap removes the range
     ;; outright, so xalign has nothing left to move. The editor stays
     ;; unwrapped -- code editing expects that -- so this is console-only.
     (g/gtk-text-view-set-wrap-mode view g/GTK-WRAP-WORD-CHAR)
     (g/gtk-scrolled-window-set-child scroll view)
-    (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a "> " -1)))
-    (g/with-iters* buf 0 2
+    (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a default-prompt -1)))
+    (g/with-iters* buf 0 (count default-prompt)
       (fn [a b]
         (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
         (g/gtk-text-buffer-apply-tag buf (get tags :prompt) a b)))
-    (g/with-iters* buf 2 2 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+    (g/with-iters* buf (count default-prompt) (count default-prompt)
+      (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
     (let [cv {:view view
               :buf buf
               :scroll scroll
               :tags tags
               :readonly-tag readonly-tag
+              :prompt-text (atom default-prompt)
               :out-end (create-mark! buf "jonquil-console-out-end" 0 false)
-              :input-start (create-mark! buf "jonquil-console-input-start" 2 true)
-              :end-mark (create-mark! buf "jonquil-console-scroll-end" 2 false)
+              :input-start (create-mark! buf "jonquil-console-input-start" (count default-prompt) true)
+              :end-mark (create-mark! buf "jonquil-console-scroll-end" (count default-prompt) false)
               ;; Cmd/Ctrl+Shift+L: left gravity, like input-start -- text
               ;; inserted at its own position (this entry's own output,
               ;; landing right where it sits) must end up AFTER it, so the

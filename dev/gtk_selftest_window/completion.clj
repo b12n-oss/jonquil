@@ -513,8 +513,8 @@
 
 (defn row-repl-completion-outside-input
   "Caret placed at offset 0 -- always before input-start (input-snapshot's
-  own docstring: input-start starts at 2, right after the initial \"> \"
-  prompt, and only ever moves further right as output/prompt accumulate)
+  own docstring: input-start starts right after the initial
+  \"user=> \" prompt, and only ever moves further right as output/prompt accumulate)
   -- Ctrl+Space through the SAME cview/handle-key! dispatch: returns 0 and
   opens nothing, input and output both untouched. Restores focus (cview/
   focus!, back to the end of the input) before returning, the same way
