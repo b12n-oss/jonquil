@@ -49,3 +49,24 @@
   (is (= {:path "*1" :info "Long" :header "" :leaf "3"}
          (inspect/parse-view "{:path \"*1\" :info \"Long\" :header \"\" :leaf \"3\"}")))
   (is (= "The server's view couldn't be read." (:note (inspect/parse-view "{:path")))))
+
+(deftest reply-edges-test
+  (let [s (inspect/open (page-view 0 3 3))
+        noted (inspect/on-reply s (assoc (page-view 0 3 3) :note "not tabular" :defd "#'user/x"))]
+    (testing "a later reply drops the earlier note and def message"
+      (let [next (inspect/on-reply noted (page-view 0 3 3))]
+        (is (nil? (:note next)))
+        (is (nil? (:defd next)))))
+    (testing "an empty collection or a leaf never selects row -1"
+      (is (= 0 (:selected (inspect/on-reply (assoc s :pending :last) (page-view 0 0 0)))))
+      (is (= 0 (:selected (inspect/on-reply (assoc s :pending :cursor)
+                                            {:path "*1" :info "String" :header "" :leaf "\"x\"" :cursor 3})))))
+    (testing "in on an empty collection sends nothing"
+      (is (nil? (:request (inspect/key-step (inspect/open (page-view 0 0 0)) :in)))))
+    (testing "page up selects the first row, as page down does"
+      (is (= [:page {:delta -1}] (:request (inspect/key-step (inspect/open (page-view 10 10 25)) :page-up))))
+      (is (= :first (:pending (:state (inspect/key-step (inspect/open (page-view 10 10 25)) :page-up))))))
+    (testing "a blank or non-map view is unreadable"
+      (is (= "The server's view couldn't be read." (:note (inspect/parse-view ""))))
+      (is (= "The server's view couldn't be read." (:note (inspect/parse-view nil))))
+      (is (= "The server's view couldn't be read." (:note (inspect/parse-view "42")))))))

@@ -10,10 +10,9 @@
   "Parse a server view string to a map. A blank or unreadable string gives
    {:path \"\" :info \"\" :header \"\" :note \"The server's view couldn't be read.\"}."
   [s]
-  (try
-    (edn/read-string s)
-    (catch Exception _
-      {:path "" :info "" :header "" :note "The server's view couldn't be read."})))
+  (let [unreadable {:path "" :info "" :header "" :note "The server's view couldn't be read."}
+        v (try (edn/read-string (or s "")) (catch Exception _ nil))]
+    (if (map? v) v unreadable)))
 
 (defn open
   "Create initial pane state from a view."
@@ -59,10 +58,12 @@
           {:state (assoc state :pending :first) :request [:page {:delta 1}]}
 
           :page-up
-          {:state (assoc state :pending :last) :request [:page {:delta -1}]}
+          {:state (assoc state :pending :first) :request [:page {:delta -1}]}
 
           :in
-          {:state state :request [:in {:idx (+ start selected)}]}
+          (if (pos? n-entries)
+            {:state state :request [:in {:idx (+ start selected)}]}
+            {:state state :request nil})
 
           :out
           {:state (assoc state :pending :cursor) :request [:out]}
@@ -84,14 +85,17 @@
         disabled? (assoc :disabled? true)))
     (let [{:keys [selected pending]} state
           {:keys [entries cursor]} reply
-          n-entries (count entries)
+          last-row (max 0 (dec (count entries)))
           new-selected (case pending
                          :first 0
-                         :last (dec n-entries)
-                         :cursor (min (or cursor 0) (dec n-entries))
-                         :keep (min selected (dec n-entries))
+                         :last last-row
+                         :cursor (min (max 0 (or cursor 0)) last-row)
+                         :keep (min selected last-row)
                          0)]
-      (cond-> (assoc state :view reply :selected new-selected :pending nil)
+      ;; A new view drops the previous reply's note and def message.
+      (cond-> (-> state
+                  (dissoc :note :defd)
+                  (assoc :view reply :selected new-selected :pending nil))
         (:note reply) (assoc :note (:note reply))
         (:defd reply) (assoc :defd (:defd reply))))))
 
