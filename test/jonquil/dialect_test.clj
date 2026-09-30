@@ -174,7 +174,7 @@
     (let [added (set/difference (:special-forms dialect/cljd) (:special-forms dialect/jolt))]
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
-  (is (= [dialect/jolt dialect/cljd] dialect/profiles)))
+  (is (= [dialect/jolt dialect/cljd dialect/clj] dialect/profiles) "clj joins profiles in P2.T4"))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
@@ -249,7 +249,7 @@
   (is (= ".nrepl-port" (:port-file dialect/clj)))
   (is (= "This is your own JVM, so Jonquil doesn't unload namespaces in it." (:reset-tooltip dialect/clj)))
   (is (= "Hot reload can't unload a namespace, so every Run adds to the running app." (:reset-tooltip dialect/cljd)))
-  (is (not-any? #{dialect/clj} dialect/profiles) "ruling 3: joins profiles in P2.T4"))
+  (is (some #{dialect/clj} dialect/profiles) "ruling 3: joins profiles in P2.T4"))
 
 (deftest clj-selection-test
   (let [src "(ns demo.core)\n"

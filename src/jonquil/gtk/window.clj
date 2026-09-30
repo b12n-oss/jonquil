@@ -40,6 +40,7 @@
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.jvm]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
@@ -658,7 +659,11 @@
 
     ;; cljd plan P2.T4: an attach evaluator connects on the first Run, so
     ;; there's nothing to start; say it's experimental and what it can't do.
-    (instance? jonquil.nrepl.attach.Attach e)
+    ;; clj plan P2.T4: satisfies? connection/Attached, not an instance? on
+    ;; any one dialect's record, so a :clj window prints its own limits too
+    ;; -- the experimental line stays gated on the profile's own flag,
+    ;; which only cljd sets.
+    (satisfies? connection/Attached e)
     (do (when (:experimental (:profile sel))
           (cview/append! cv :system (str cljd/experimental-message "\n")))
         (doseq [l (ev/limitations e)]

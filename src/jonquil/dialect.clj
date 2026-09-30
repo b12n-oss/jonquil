@@ -116,9 +116,9 @@
   Jolt first, so a file neither profile's extension claims (bb.edn in a
   ClojureDart app) stays Jolt's.
 
-  clj joins this list in P2.T4, once the window requires jonquil.nrepl.jvm
-  and can reach make-attached :clj (ruling 3)."
-  [jolt cljd])
+  clj joined this list in P2.T4, once the window required jonquil.nrepl.jvm
+  and could reach make-attached :clj (ruling 3)."
+  [jolt cljd clj])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
