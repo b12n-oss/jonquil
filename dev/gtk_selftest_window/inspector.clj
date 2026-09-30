@@ -369,7 +369,11 @@
   (go-row :row-inspect-reselect support/check
     (let [pane (:inspector ui)
           start-before (on-gtk (footer-start pane))
-          _ (on-gtk (inspector-pane/dispatch-key! pane KEY-UP))
+          ;; Up asks for the previous page (its last row); Left in the SAME
+          ;; step is dropped (Up's request is still in flight) and must not
+          ;; rewrite Up's :pending.
+          _ (on-gtk (inspector-pane/dispatch-key! pane KEY-UP)
+                    (inspector-pane/dispatch-key! pane KEY-LEFT))
           paged-back? (await-until 2000 20 #(< (footer-start pane) start-before))
           n-lines (on-gtk (count (str/split-lines (g/buffer-text (:buf pane)))))
           last-selected? (on-gtk (selected-line? pane (dec n-lines)))

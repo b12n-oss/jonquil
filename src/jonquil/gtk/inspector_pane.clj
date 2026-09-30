@@ -142,15 +142,17 @@
 ;; --- stepping: key-step/click-step, always shown at once ------------------
 
 (defn- apply-step!
-  "Runs one jonquil.inspect/key-step from state, shows its own :state at
-  once (a local move repaints immediately; a pending request's state is
-  usually unchanged, so this is a harmless no-op repaint until the reply
-  lands), then forwards :request (if any) to pane's on-request."
+  "Runs one jonquil.inspect/key-step from state. A local move is shown at
+  once. A step with a request is forwarded to pane's on-request, and its
+  :state (the :pending rule the reply will follow) is committed only when
+  on-request reports the request was sent: a step dropped because another
+  request is in flight must not rewrite that request's :pending."
   [pane state key]
-  (let [result (inspect/key-step state key)]
-    (show-state! pane (:state result))
-    (when-let [request (:request result)]
-      ((:on-request pane) request))))
+  (let [{step-state :state request :request} (inspect/key-step state key)]
+    (if request
+      (when ((:on-request pane) request)
+        (show-state! pane step-state))
+      (show-state! pane step-state))))
 
 (defn- step!
   [pane key]

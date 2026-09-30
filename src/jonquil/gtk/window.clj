@@ -1055,11 +1055,20 @@
        (show-inspector-panel! win h-paned pane)
        (inspector-pane/focus! pane)
        (reset! inspector-state nil)
-       (inspector-pane/measure-when-ready!
-        pane
-        (fn [measured]
-          (reset! inspector-last-args measured)
-          (ev/inspect! @ev* :start measured on-view)))))))
+       ;; The evaluator current at the press, not whatever @ev* holds once
+       ;; the rows view is allocated: a file switch in between would hand
+       ;; :start to an evaluator without Inspector. A throw on this deferred
+       ;; path releases the in-flight flag, or the inspector would stay dead.
+       (let [e @ev*]
+         (inspector-pane/measure-when-ready!
+          pane
+          (fn [measured]
+            (try
+              (reset! inspector-last-args measured)
+              (ev/inspect! e :start measured on-view)
+              (catch :default ex
+                (reset! inspecting? false)
+                (throw ex))))))))))
 
 (defn- inspect-form!
   "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\" (Decisions): the same
@@ -1898,8 +1907,11 @@
                   (on-gui! (fn [] (on-inspect-view! @*pane inspector-state inspecting? cv status-label reply))))
         on-inspector-request
         (fn [[op args]]
-          (try-inspect! inspecting?
-                        (fn [] (reset! inspector-last-args args) (ev/inspect! @ev* op args on-view))))
+          ;; Returns true only when the request was actually sent, so the
+          ;; pane commits a key step's :pending/:selected only then.
+          (boolean
+           (try-inspect! inspecting?
+                         (fn [] (reset! inspector-last-args args) (ev/inspect! @ev* op args on-view) true))))
         on-inspector-def
         (fn [name]
           (try-inspect! inspecting?
