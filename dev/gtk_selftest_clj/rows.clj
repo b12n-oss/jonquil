@@ -119,7 +119,7 @@
 
 (defn row-clj-starts-not-running
   "The window opened src/demo/core.clj: the label says the JVM isn't
-  running yet, Reset on Run is off with its own tooltip (:clj is the
+  running yet, Reset on Run is unticked and off with its own tooltip (:clj is the
   user's own JVM), and nothing has talked to the server yet."
   [ui]
   (go-row :clj-starts-not-running support/check
@@ -127,9 +127,11 @@
               (support/check :clj-starts-not-running
                              (and (= "Clojure (JVM) (not running)" (label ui))
                                   (zero? (g/gtk-widget-get-sensitive chk))
+                                  (zero? (g/gtk-check-button-get-active chk))
                                   (= (:reset-tooltip dialect/clj) (g/tooltip-text chk))
                                   (empty? (fake/ops-seen (srv))))
                              {:label (label ui) :sensitive (g/gtk-widget-get-sensitive chk)
+                              :active (g/gtk-check-button-get-active chk)
                               :tooltip (g/tooltip-text chk) :ops (fake/ops-seen (srv))})))))
 
 (defn row-clj-run-moves-prompt
@@ -297,6 +299,46 @@
                   (support/check :clj-full-doc-escape
                                  (and opened? (= 1 handled) (not (popover/open? fp)))
                                  {:opened opened? :handled handled :open (popover/open? fp)})))))))
+
+(defn row-clj-reset-tick-round-trip
+  "Reset on Run's tick through a switch to Jolt and back. The window
+  starts attached, so the box is unticked and off. Opening a plain Jolt
+  file puts the default tick back up and turns it on. Unticked there, it
+  stays unticked through the JVM file and back again. Ticked, the JVM file
+  takes it down once more. Every open is synchronous (the path watch runs
+  apply-selection! on the GTK thread), so one on-gtk reads each state. The
+  row ends back on the JVM file, which row-clj-close and after-close-checks!
+  expect: that evaluator never connects, so the fake still sees no close."
+  [ui]
+  (go-row :clj-reset-tick-round-trip support/check
+    (let [d (temp-project-dir)
+          plain (io/file d "src/demo/plain.clj")]
+      (.mkdirs (.getParentFile plain))
+      (spit (io/file d "deps.edn") "{}\n")
+      (spit plain "(+ 1 2)\n")
+      (try
+        (on-gtk
+         (let [chk (:reset-check ui)
+               clj-file (:file @fixture*)
+               plain-file (.getCanonicalPath plain)
+               state (fn [] [(g/gtk-check-button-get-active chk) (g/gtk-widget-get-sensitive chk)])
+               start (state)
+               _ ((:open-path! ui) plain-file)
+               jolt1 (state)
+               _ (g/gtk-check-button-set-active chk 0)
+               _ ((:open-path! ui) clj-file)
+               clj2 (state)
+               _ ((:open-path! ui) plain-file)
+               jolt2 (state)
+               _ (g/gtk-check-button-set-active chk 1)
+               _ ((:open-path! ui) clj-file)
+               end (state)
+               seen [start jolt1 clj2 jolt2 end]]
+           (support/check :clj-reset-tick-round-trip
+                          (= [[0 0] [1 1] [0 0] [0 1] [0 0]] seen)
+                          {:seen seen :label (label ui)})))
+        (finally
+          (on-gtk (doseq [f (reverse (file-seq d))] (.delete ^java.io.File f))))))))
 
 (defn row-clj-close
   "The deliberately LAST row: fires the app's quit action, the path a Quit

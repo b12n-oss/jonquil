@@ -31,6 +31,7 @@
    rows/row-clj-jump-external
    rows/row-clj-full-doc
    rows/row-clj-full-doc-escape
+   rows/row-clj-reset-tick-round-trip
    rows/row-clj-close])
 
 (def ^:private PER-ROW-MS

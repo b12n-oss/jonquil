@@ -254,6 +254,23 @@
   [{:keys [profile runtime project-dir]}]
   [(:id profile) runtime (when (not= :in-process runtime) project-dir)])
 
+(defn reset-toggle
+  "How the Reset on Run checkbox looks for selection sel. state is the
+  window's own memory of the tick, {} or {:saved active?}, and active? is
+  the box's current tick. An attach runtime can't reset (the JVM or app is
+  the user's own), so its box is unticked, disabled, and carries the
+  profile's :reset-tooltip; the tick it took down goes into :saved, so a
+  later switch back to a runtime that can reset puts it up again. A
+  switch from one attach runtime to another keeps the first saved tick.
+  Returns {:state s :active? b :sensitive? b :tooltip s-or-nil}."
+  [state sel active?]
+  (if (= :attach (:runtime sel))
+    {:state (if (contains? state :saved) state {:saved active?})
+     :active? false :sensitive? false :tooltip (:reset-tooltip (:profile sel))}
+    {:state {}
+     :active? (if (contains? state :saved) (:saved state) active?)
+     :sensitive? true :tooltip nil}))
+
 (defn label
   "The status bar's dialect text: the profile's name, plus the runtime when
   it isn't the profile's default evaluator. An attach runtime always says

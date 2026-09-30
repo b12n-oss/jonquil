@@ -292,3 +292,23 @@
       (finally
         (delete-recursively! (io/file proj1))
         (delete-recursively! (io/file proj2))))))
+
+(deftest reset-toggle-test
+  (let [jolt-sel {:profile dialect/jolt :runtime :in-process}
+        cljd-sel {:profile dialect/cljd :runtime :attach}
+        clj-sel {:profile dialect/clj :runtime :attach}]
+    (testing "an attach runtime unticks and disables it, and keeps the tick it took down"
+      (is (= {:state {:saved true} :active? false :sensitive? false :tooltip (:reset-tooltip dialect/clj)}
+             (dialect/reset-toggle {} clj-sel true))))
+    (testing "back to Jolt puts the kept tick back up, either way"
+      (is (= {:state {} :active? true :sensitive? true :tooltip nil}
+             (dialect/reset-toggle {:saved true} jolt-sel false)))
+      (is (= {:state {} :active? false :sensitive? true :tooltip nil}
+             (dialect/reset-toggle {:saved false} jolt-sel false))))
+    (testing "attach to attach keeps the first saved tick, not the unticked box"
+      (is (= {:saved true}
+             (:state (dialect/reset-toggle {:saved true} cljd-sel false))))
+      (is (= (:reset-tooltip dialect/cljd) (:tooltip (dialect/reset-toggle {:saved true} cljd-sel false)))))
+    (testing "Jolt to Jolt leaves the box as the person set it"
+      (is (= {:state {} :active? false :sensitive? true :tooltip nil}
+             (dialect/reset-toggle {} jolt-sel false))))))

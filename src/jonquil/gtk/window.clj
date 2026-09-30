@@ -151,15 +151,21 @@
                                                 (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
 
 (defn- apply-reset-toggle!
-  "Reset on Run is insensitive, with a tooltip saying why, for an attach
-  runtime: the profile's own :reset-tooltip says why. Every other runtime
-  gets the checkbox back, with no tooltip. GTK thread only."
-  [reset-chk sel]
-  (if (= :attach (:runtime sel))
-    (do (g/gtk-widget-set-sensitive reset-chk 0)
-        (g/gtk-widget-set-tooltip-text reset-chk (:reset-tooltip (:profile sel))))
-    (do (g/gtk-widget-set-sensitive reset-chk 1)
-        (g/gtk-widget-set-tooltip-text reset-chk nil))))
+  "Reset on Run as dialect/reset-toggle decides for sel: unticked and
+  insensitive, with the profile's own :reset-tooltip, for an attach
+  runtime, and the person's own tick back, with no tooltip, for every
+  other runtime. reset-state is the window's atom holding the tick an
+  attach runtime took down. Setting the tick fires the box's toggled
+  handler, which only calls set-mode! on the current evaluator: a no-op
+  on an attach one, and harmless on the evaluator a switch is about to
+  replace. GTK thread only."
+  [reset-chk reset-state sel]
+  (let [{:keys [state active? sensitive? tooltip]}
+        (dialect/reset-toggle @reset-state sel (not (zero? (g/gtk-check-button-get-active reset-chk))))]
+    (reset! reset-state state)
+    (g/gtk-check-button-set-active reset-chk (if active? 1 0))
+    (g/gtk-widget-set-sensitive reset-chk (if sensitive? 1 0))
+    (g/gtk-widget-set-tooltip-text reset-chk tooltip)))
 
 ;; --- file dialogs, ported from the S2/S4 spike's spike.window/file-dialog! --
 
@@ -676,7 +682,7 @@
   "Makes sel the window's selection. When it needs a different evaluator
   (jonquil.dialect/selection-key), the old one is interrupted and stopped
   off the GTK thread and a new one starts. sel-ctx is {:cv :status-label
-  :dialect-label :sel* :ev* :mode-fn :reset-chk}.
+  :dialect-label :sel* :ev* :mode-fn :reset-chk :reset-state}.
 
   The new evaluator joins jonquil.runtime-registry as soon as it's made
   (so jonquil.main's stop-all! can never miss it, even if the window
@@ -692,11 +698,11 @@
   (apply-reset-toggle!), and the label is set last, from the evaluator the
   window ends up with, so opening another file of the same app keeps
   reading \"attached\"."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk]} sel]
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
-    (apply-reset-toggle! reset-chk sel)
+    (apply-reset-toggle! reset-chk reset-state sel)
     (when (not= (dialect/selection-key old-sel) (dialect/selection-key sel))
       (let [old @ev*
             new (doto (ev/make sel) registry/register!)]
@@ -1764,6 +1770,8 @@
         open-btn (g/gtk-button-new-with-label "Open…")
         save-btn (g/gtk-button-new-with-label "Save…")
         reset-chk (g/gtk-check-button-new-with-label "Reset on Run")
+        ;; The tick an attach runtime took down (dialect/reset-toggle).
+        reset-state (atom {})
         ;; P3.T5: the status bar becomes a horizontal box -- the P2 label
         ;; on the left (hexpand, so it claims the box's spare width) and
         ;; the new Ln/Col label on the right.
@@ -1932,14 +1940,14 @@
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
-                   :reset-chk reset-chk
+                   :reset-chk reset-chk :reset-state reset-state
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
       (try
         (show-selection! cv dialect-label @sel*)
         ;; cljd plan P2.T4: the starting evaluator's connection, label and
         ;; Reset on Run, as apply-selection! does for every later one.
         (watch-connection! @ev* ev* sel* dialect-label)
-        (apply-reset-toggle! reset-chk @sel*)
+        (apply-reset-toggle! reset-chk reset-state @sel*)
         (g/gtk-label-set-text dialect-label (dialect-text @sel* @ev*))
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))

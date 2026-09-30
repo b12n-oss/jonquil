@@ -89,7 +89,7 @@
 
 (defn row-cljd-starts-not-running
   "The window opened drive.cljd: an attach evaluator, not connected, the
-  label says so, Reset on Run is off with its tooltip, the console says
+  label says so, Reset on Run is unticked and off with its tooltip, the console says
   it's experimental and lists the limits, and nothing has talked to the
   server yet."
   [ui]
@@ -102,12 +102,14 @@
                                     (instance? jonquil.nrepl.attach.Attach (evaluator ui))
                                     (= "ClojureDart (not running)" (label ui))
                                     (zero? (g/gtk-widget-get-sensitive chk))
+                                    (zero? (g/gtk-check-button-get-active chk))
                                     (= "Hot reload can't unload a namespace, so every Run adds to the running app."
                                        (g/tooltip-text chk))
                                     (str/includes? t cljd/experimental-message)
                                     (not (attach/connected? (evaluator ui)))
                                     (empty? (fake/ops-seen (srv))))
                                {:label (label ui) :sensitive (g/gtk-widget-get-sensitive chk)
+                                :active (g/gtk-check-button-get-active chk)
                                 :tooltip (g/tooltip-text chk) :ops (fake/ops-seen (srv))}))))))
 
 (defn row-cljd-load-prints-loaded
