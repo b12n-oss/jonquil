@@ -378,7 +378,8 @@ reports how many occurrences changed.
 
 Shift+F10, or a right click over the Definitions editor, opens a menu
 led by Run Form, then Jump to Definition, Rename Symbol, Quick
-Documentation, and Complete, alongside Jonquil's other editing commands
+Documentation, Inspect Last Result, Inspect Form, and Complete, alongside
+Jonquil's other editing commands
 (Toggle Comment, Format All, Format Selection, Indent, Unindent, Find,
 Replace) and GTK's own Cut, Copy, and Paste. The same menu over the
 console's input line carries Complete and Clear Last Output next to
@@ -396,6 +397,76 @@ a Ctrl+Space routed straight to Jonquil's own process by its pid reached
 the completion handler without trouble, but an actual key press on the
 keyboard still went to the system's input-source switch as long as that
 shortcut was turned on.
+
+## Inspecting values
+
+Cmd/Ctrl+I opens the inspector panel on the last result, the value the
+console itself would call `*1`. Cmd/Ctrl+Shift+I evaluates the form at
+the caret first, the same form Run Form would, and opens the panel on
+whatever it returns. Both are also on the Definitions editor's right-click
+menu, as Inspect Last Result and Inspect Form. The panel takes focus the
+moment it opens, so every key below reaches it directly: nothing you type
+next lands in the editor until you close the panel again.
+
+![The inspector panel open on a map, with a vector of same-shaped maps rendered as a table](../images/inspector.png)
+
+The panel sits on the right, in its own pane: a path at the top (`*1`, or
+a level down, `*1 / :speakers`), a line naming the value's type and size,
+a small toolbar (Back, Meta, Table, Def, Close), the rows themselves, and
+a footer. A collection's rows read `label · preview`, one per entry, or,
+when every entry is a map and they all share the same keys, one row per
+entry in a table instead, a column per key. A leaf value, a string or a
+number, shows its own printed form in place of rows.
+
+Up and Down move the selection. Return or Right goes in a level, onto
+whatever's selected; Left or Backspace comes back out, landing on the row
+you went in from. Page Up and Page Down page through a long collection,
+and so does Down past the last visible row, or Up from the first row on
+a page that isn't the first, landing on the new page's first or last row
+in turn. `m` shows or hides the current value's metadata, and `v`
+switches a table between its table and its plain list form. `d` opens a
+small prompt: type a name and press Return to define that var from the
+current value. Escape there closes only the prompt, leaving the panel
+behind it untouched, and never Stops a program that happens to be
+running. A successful def prints `; Defined #'ns/name` on the console and
+leaves the panel exactly where it was, the same row still selected.
+Escape anywhere else in the panel closes it and hands focus back to the
+editor.
+
+The footer names where you are and what the keys do, something like
+`11-20 of 25 · ↑↓ move · ⏎ in · ← out · d def · m meta · v table`. An
+empty collection reads `0 of 0` rather than a range it doesn't have. A
+note from the last action, `no metadata`, `not tabular`, or an error,
+shows there too for a few seconds and then clears on its own.
+
+In-process Jolt supports this outright. JVM Clojure does too, once its
+own server offers clojure-cli.repl's inspector. ClojureDart and Jolt
+running out of process don't, in this version: Cmd/Ctrl+I there puts a
+short sentence in the status bar instead of opening anything. Opening a
+file whose dialect or runtime differs from the one the panel opened
+against hides the panel; Cmd/Ctrl+I on the new file opens a fresh one.
+
+On the JVM, before your first Run, Cmd/Ctrl+I says "Nothing to inspect
+yet: Jonquil isn't attached to the server. Run something first." After a
+Run, the first Cmd/Ctrl+I already shows that Run's own value: Jonquil
+registers with the server's inspector the moment it connects, invisibly,
+so there's no extra step to remember. If the server dies, whether the
+panel is open or a request of its own is still on the way, the footer
+reads "Lost the connection to the nREPL server." and every action stays
+disabled until you reopen the panel. Only one request is in flight at a
+time either way, so a key pressed while one is still out does nothing at
+all, rather than queuing up behind it.
+
+![The inspector panel against a real JVM Clojure server, after Run and a REPL entry](../images/clj-inspector.png)
+
+The panel measures its own size, in rows and character columns, the
+moment it opens; resizing the window changes that only the next time you
+open it with Cmd/Ctrl+I, never while it's already showing. On the JVM,
+the server keeps exactly one inspector view per connection, so it's
+whichever client's action landed there last, Jonquil's own or another
+tool attached to the same server. Either runtime caps a collection at
+1000 entries: past that, the info line reads `1000+ items` instead of a
+count, and paging still works over everything up to the cap.
 
 ## Dialects and runtimes
 
@@ -737,6 +808,16 @@ server for a doc it already knows nothing useful about.
 | F12 or Ctrl+B | Definitions editor | Jump to definition |
 | Shift+F6 or F2 | Definitions editor | Rename |
 | Shift+F10 or right click | Definitions editor, console input | Open the context menu |
+| Cmd/Ctrl+I | anywhere in the window | Inspect the last result |
+| Cmd/Ctrl+Shift+I | anywhere in the window | Inspect the form at the caret |
+| Up/Down | inspector panel | Move the selection |
+| Return or Right | inspector panel | Go in on the selected row |
+| Left or Backspace | inspector panel | Go out a level |
+| Page Up/Page Down | inspector panel | Page |
+| m | inspector panel | Toggle metadata |
+| v | inspector panel | Toggle between the table and the list |
+| d | inspector panel | Open the def prompt |
+| Escape | inspector panel | Close the panel and focus the editor |
 
 ## Known limits
 
@@ -804,3 +885,17 @@ than being surprises you'd otherwise have to rediscover:
   `; interrupted`, but the loop keeps running in your JVM. A sleep,
   blocking I/O and `read-line` do stop. Jonquil never kills the JVM, so
   the way out is to restart the server yourself.
+- The inspector panel never refreshes itself: a later evaluation leaves
+  it showing whatever it had until you open it again.
+- A collection in the inspector panel shows at most 1000 entries.
+- On JVM Clojure, the server keeps one inspector view per connection. If
+  another client inspects on the same server, it replaces Jonquil's own
+  view, and Jonquil's next move in the panel continues from whatever
+  that other client left.
+- In-process, the value the inspector opens on is Jonquil's own record of
+  the last result, not a `*1` binding in the program's namespace: typing
+  `*1` at the prompt still doesn't resolve to anything.
+- Resizing the inspector panel doesn't reflow the rows already on
+  screen; the new width only takes effect the next time you open it.
+- No inspector for ClojureDart or for Jolt running out of process, in
+  this version.

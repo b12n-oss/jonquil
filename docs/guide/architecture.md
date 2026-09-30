@@ -35,6 +35,12 @@ these:
 P4 added a fourth: `jonquil.help`, the decisions behind completion, quick
 doc, jump to definition and rename, covered in its own section below.
 
+This arc added two more: `jonquil.inspect.view`, the inspector's view
+code lifted from clojure-cli.repl (`UPSTREAM.md` carries the provenance
+row), and `jonquil.inspect`, the panel's own pane state and its key-to-op
+decisions. Both are covered in their own section below, alongside the
+`Inspector` protocol.
+
 `jonquil.console` is the console's own pure half: what Return does with
 the text at the prompt, how much old output to trim, how a result is
 shown, where the last entry starts for Clear Last Output, and a friendlier
@@ -78,6 +84,8 @@ P4 added three more, all built on a shared popover base:
 - `jonquil.gtk.popover`: a caret-anchored `GtkPopover`, shared by completion, quick doc and rename.
 - `jonquil.gtk.help-popover`: the quick-doc popover and the rename popover, both built on `jonquil.gtk.popover`.
 - `jonquil.gtk.completion`: the completion popover, one instance per view (the editor and the console's input line), also built on `jonquil.gtk.popover`.
+
+This arc added one more, outside that popover base: `jonquil.gtk.inspector-pane`, the inspector panel widget, covered in its own section below.
 
 ### `on-gui!` and the worker-to-GTK-thread path
 
@@ -361,6 +369,62 @@ The `Evaluator` protocol itself doesn't change for any of this: both
 attach evaluators implement the same `start!`, `stop!`, `eval!`,
 `interrupt!`, completion and lookup, history and prompt-namespace
 surface the in-process and out-of-process runtimes already do.
+
+### The inspector: `Inspector`, `jonquil.inspect` and `jonquil.inspect.view`
+
+`jonquil.evaluator` carries a second, optional protocol alongside
+`Evaluator` itself: `Inspector`, with `inspect!` (an op, its args, and an
+`on-view` callback called exactly once, off the GTK thread) and
+`inspectable?`. `jonquil.gtk.window` checks `(satisfies? ev/Inspector e)`
+the same way it checks `Attached`, so a Jolt out-of-process evaluator or a
+ClojureDart one, neither of which implements it, gets the unavailable
+sentence instead of a thrown error.
+
+```mermaid
+flowchart LR
+  ev["jonquil.evaluator<br/>Inspector protocol<br/>inspect!, inspectable?"]
+  view["jonquil.inspect.view<br/>lifted from clojure-cli.repl<br/>(pure)"]
+  inspect["jonquil.inspect<br/>pane state, key to op<br/>(pure)"]
+  pane["jonquil.gtk.inspector-pane<br/>the panel widget"]
+  session["jonquil.session<br/>InProcess"]
+  jvm["jonquil.nrepl.jvm<br/>Jvm"]
+  fake["dev/fake_jvm_nrepl.clj<br/>test double"]
+  win["jonquil.gtk.window"]
+  session -- "implements" --> ev
+  jvm -- "implements" --> ev
+  session -- "uses" --> view
+  fake -- "uses" --> view
+  win -- "uses" --> inspect
+  win -- "uses" --> pane
+```
+
+`jonquil.inspect.view` is the lifted half: `entries`, `preview`, `render`,
+the stack operations (`in`, `out`, `page`, `toggle-meta`, `toggle-table`,
+`def-as`), and `run-op`, the one function Jonquil added of its own, which
+turns any of those into the current view plus a `:note` on a throw.
+Every function takes a view map and returns one; nothing here owns a
+global atom the way clojure-cli.repl's own server does. `jonquil.
+session`'s `InProcess` record calls `run-op` directly, keeping its own
+`:inspect-view` atom and the last `:ok` result's value, with `inspect!`
+running both in a future. `dev/fake_jvm_nrepl.clj`, the in-process stand-in
+`bb test` and the window self-test drive against, answers the real
+server's `inspect-*` ops by calling that same `run-op`, so the view logic
+under test is identical to what `bb test:clj` later exercises for real.
+`jonquil.nrepl.jvm`'s `Jvm` record never touches `jonquil.inspect.view` at
+all: its own `inspect!` sends the matching wire op (`inspect-request`'s
+mapping) to the real server and parses the `:view` string back with
+`jonquil.inspect/parse-view`, so the view code it draws on lives on the
+server, not in this process.
+
+`jonquil.inspect` is the panel's own half, shared by both evaluators: the
+current view, the selected row, a `:pending` marker naming what a reply
+should select once it lands, and `key-step`, which turns a keypress into
+either a local move (shown at once) or a request `jonquil.gtk.window`
+forwards through `inspect!`. `jonquil.gtk.inspector-pane` renders
+whatever state `jonquil.inspect` hands it and never talks to `jonquil.
+inspect.view` or a runtime itself; `jonquil.gtk.window` owns the actual
+round trip, the one-request-at-a-time guard, and the first-open size
+measurement, folding every reply back through `jonquil.inspect/on-reply`.
 
 ### The window's evaluator
 
