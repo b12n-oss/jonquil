@@ -133,6 +133,13 @@ one pass; to retake just one, run `jolt -M:shots <scene-id>` directly, the
 same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
+The three JVM Clojure scenes (`clj-attach`, `clj-quick-doc` and
+`clj-full-doc`) run against a real `clojure -M:serve`, started through
+`dev/clj_server.clj` in a temp project the same way `bb test:clj` starts
+one, and stopped once the window closes. So they need Java 17+ and the
+`clojure` CLI, and `clj-full-doc`'s first run waits while the server
+downloads the ClojureDocs export into its temp config directory.
+
 Every harness isolates the user's own settings from the app it's
 driving. The window self-tests and `docs:shots` pass a temp `:settings-path`
 into `jonquil.main/start!`, and both smokes point `XDG_CONFIG_HOME` at a

@@ -585,6 +585,29 @@ in the project directory. Then add `{:dialect :clj}` to that project's
 `.jonquil.edn` and open a `.clj` or `.cljc` file under it; nothing else
 picks this dialect (see [Choosing a dialect](#choosing-a-dialect) above).
 
+If the project doesn't have a server alias yet, this is the one Jonquil's
+own `bb test:clj` uses. It needs Java 17 or later and the `clojure` CLI:
+
+```clojure
+;; deps.edn
+{:paths ["src"]
+ :aliases {:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version "0.1.0"}}
+                   :main-opts ["-m" "clojure-cli.repl.server"]}}}
+```
+
+```clojure
+;; .jonquil.edn
+{:dialect :clj}
+```
+
+Run `clojure -M:serve` in the project directory and wait for
+`nREPL server listening on port N`, then open a source file in Jonquil
+and press Run. Stopping the server with Ctrl+C removes its
+`.nrepl-port`, and the status bar drops back to `(not running)`; start it
+again and the next Run reconnects.
+
+![A JVM Clojure window after Run: the console connects to the server, loads the file, then answers two REPL entries in its namespace](../images/clj-attach.png)
+
 Jonquil connects the first time you Run, or on any evaluation while it
 holds no live connection, printing "; Connecting to the nREPL server on
 port N..." while it does. If nothing's listening yet, the console says
@@ -644,6 +667,8 @@ anything only the buffer's (not yet loaded) namespace would resolve
 says so instead of guessing: "No docs: demo.core isn't loaded in the
 server yet. Run the file first."
 
+![Quick doc on clojure.core's map in a JVM Clojure window, ending with a Defined in line inside the Clojure jar](../images/clj-quick-doc.png)
+
 Press Ctrl+Q or Shift+F1 a second time on the same popover, and Jonquil
 asks the server for full documentation instead of the short quick-doc
 text: clojure-cli.repl's own `doc` op, which returns ClojureDocs' full
@@ -657,6 +682,8 @@ the server already has it. Full docs are only ever fetched for a symbol
 quick doc already found, so pressing it twice on a name Jonquil couldn't
 resolve tells you so again in the status bar, rather than asking the
 server for a doc it already knows nothing useful about.
+
+![Full documentation for map after a second quick-doc press, with ClojureDocs' examples](../images/clj-full-doc.png)
 
 ## Keys
 
@@ -767,3 +794,9 @@ than being surprises you'd otherwise have to rediscover:
   there.
 - Output JVM Clojure prints from a thread other than the one an
   evaluation ran on, after that evaluation finishes, isn't shown.
+- Stop can't end a JVM Clojure loop that never checks for interruption,
+  such as `(loop [] (recur))`, on nREPL 1.7 with JDK 20 or later. The
+  server answers that it was interrupted and the console prints
+  `; interrupted`, but the loop keeps running in your JVM. A sleep,
+  blocking I/O and `read-line` do stop. Jonquil never kills the JVM, so
+  the way out is to restart the server yourself.
