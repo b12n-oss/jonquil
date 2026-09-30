@@ -49,11 +49,13 @@
                   (g/gtk-window-set-child win (:root pane))
                   (g/gtk-window-present win)
                   {:win win :pane pane}))]
-    (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:view pane))))
-    (let [result (f pane)]
-      (on-gtk (g/gtk-widget-unparent (:popover (:def-popover pane)))
-              (g/gtk-window-close win))
-      result)))
+    (try
+      (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:view pane))))
+      (f pane)
+      ;; A row that throws still tears its transient window down.
+      (finally
+        (on-gtk (g/gtk-widget-unparent (:popover (:def-popover pane)))
+                (g/gtk-window-close win))))))
 
 (defn- noop-opts []
   {:on-request (fn [_] nil) :on-close (fn [] nil) :on-def (fn [_] nil)})

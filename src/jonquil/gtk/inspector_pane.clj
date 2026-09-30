@@ -371,7 +371,10 @@
     ;; "closed" handler, mirroring help-popover/make-rename-popover, to
     ;; give keyboard focus back to the rows view whichever way it closed.
     (g/g-signal-connect-data (:popover def-popover) "closed"
-                             (callable (fn [_pop _data] (g/gtk-widget-grab-focus view) nil)
+                             (callable (fn [_pop _data]
+                                         (try (g/gtk-widget-grab-focus view)
+                                              (catch :default _ nil))
+                                         nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data def-entry "activate"
