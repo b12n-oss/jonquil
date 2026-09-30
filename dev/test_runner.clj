@@ -42,8 +42,18 @@
     jonquil.nrepl.evaluator-test
     jonquil.runtime-registry-test])
 
+(def live-clj-namespaces
+  ;; The :clj dialect's live suite: starts a real clojure -M:serve nREPL
+  ;; server (dev/clj_server.clj) instead of a Jolt child. Run with `bb
+  ;; test:clj`, not `bb test` or `bb test:nrepl` (ruling 12): needs Java
+  ;; 17+, the clojure CLI and, on a first run, the network.
+  '[jonquil.live.clj-attach-test])
+
 (defn -main [& args]
-  (let [nss (cond (= ["--live"] args) live-namespaces (seq args) (mapv symbol args) :else test-namespaces)]
+  (let [nss (cond (= ["--live"] args) live-namespaces
+                  (= ["--live-clj"] args) live-clj-namespaces
+                  (seq args) (mapv symbol args)
+                  :else test-namespaces)]
     (apply require nss)
     (let [{:keys [test pass fail error]} (apply t/run-tests nss)]
       (println (str "\nSUMMARY: " test " tests, " (+ pass fail error)
