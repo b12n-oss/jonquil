@@ -4,7 +4,7 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing, themes, help and dialects work, now including ClojureDart (experimental), attached to a running app**
+**Status: alpha, the window, editing, themes, help and dialects work, now including ClojureDart (experimental) and JVM Clojure, each attached to a running server**
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
@@ -17,9 +17,12 @@ out of process means a program that crashes or wedges Jolt itself takes
 down a separate child, not Jonquil, and Stop, Reset on Run and help all
 work the same way across either choice. ClojureDart is here too now,
 experimental: rather than starting anything, Jonquil attaches to a
-ClojureDart app you already have running, over its own nREPL server. A
-short list of limits for each runtime is in
-[Using Jonquil](docs/guide/using-jonquil.md).
+ClojureDart app you already have running, over its own nREPL server.
+JVM Clojure attaches the same way, to a project's own nREPL server, once
+its `.jonquil.edn` says `{:dialect :clj}`: start a server with
+`clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil
+connects the first time you Run. A short list of limits for each runtime
+is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
@@ -33,6 +36,7 @@ Ctrl+Space completes as you type, with a documentation preview beside the candid
 - GTK4 and pango, installed via Homebrew
 - A [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) checkout, only for the out-of-process nREPL runtime and `bb test:nrepl`: set `$JONQUIL_JOLT_NREPL` to it, or place it at `~/dev/jolt-lang/nrepl`
 - The `nrepl-poc` ClojureDart fork at `199d173d` or later, only for the ClojureDart dialect: upstream ClojureDart has no nREPL server for Jonquil to attach to
+- Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
 
 ## Running
 
@@ -56,7 +60,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-30, 189 tests pass (1233 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-09-30, 246 tests pass (1482 assertions).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
@@ -68,6 +72,7 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.
 - `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
 - `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `bb test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
+- `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
 
 ## Commands
 
@@ -75,8 +80,9 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 bb check                  # require every namespace, exit 0
 bb test                   # all test namespaces; exits 1 on any failure or error
 bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
+bb test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
 bb test jonquil.edit-test # one namespace (the TDD loop)
-bb gtk:selftest           # real-window self-tests, opens four windows (don't type while it runs)
+bb gtk:selftest           # real-window self-tests, opens five windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
 bb smoke:cljd             # drive the built binary against a running ClojureDart app (start it with bb dev:macos first)
