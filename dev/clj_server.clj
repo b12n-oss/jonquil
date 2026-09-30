@@ -23,10 +23,10 @@
   "{:paths [\"src\"] :aliases {:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version \"0.1.0\"}} :main-opts [\"-m\" \"clojure-cli.repl.server\"]}}}\n")
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (.superpowers/sdd/clj/fixture-core.clj):
-  ;; demo.core with greet, a private secret returning :private-ok, and
-  ;; nested. Embedded rather than read at run time: the planning store is
-  ;; gitignored scratch, so tests can't depend on it.
+  ;; The spike fixture's exact text (its own gitignored planning-store
+  ;; file): demo.core with greet, a private secret returning :private-ok,
+  ;; and nested. Embedded rather than read at run time: the planning
+  ;; store is gitignored scratch, so tests can't depend on it.
   (str "(ns demo.core\n"
        "  \"A fixture namespace for the clj-attach spike.\")\n"
        "\n"

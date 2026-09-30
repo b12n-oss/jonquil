@@ -18,11 +18,12 @@
             [jonquil.gtk.popover :as popover]))
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (.superpowers/sdd/clj/fixture-core.clj):
-  ;; demo.core with greet, a private secret returning :private-ok, and
-  ;; nested. Embedded rather than read at run time: the planning store is
-  ;; gitignored scratch, so this harness can't depend on it. The same text
-  ;; test/jonquil/nrepl/jvm_test.clj's own fixture-core-text embeds.
+  ;; The spike fixture's exact text (its own gitignored planning-store
+  ;; file): demo.core with greet, a private secret returning :private-ok,
+  ;; and nested. Embedded rather than read at run time: the planning
+  ;; store is gitignored scratch, so this harness can't depend on it. The
+  ;; same text test/jonquil/nrepl/jvm_test.clj's own fixture-core-text
+  ;; embeds.
   (str "(ns demo.core\n"
        "  \"A fixture namespace for the clj-attach spike.\")\n"
        "\n"
