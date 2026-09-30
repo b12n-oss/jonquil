@@ -9,9 +9,9 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 35 namespaces in under half a second, and it's the fastest
+currently loads 38 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (247 tests, 1488 assertions
+slower. `bb test` runs the full unit suite (279 tests, 1613 assertions
 today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -43,24 +43,28 @@ front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 35 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 153 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 170 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
-`console_layout`, and `dialects`. The third (`dev/gtk_selftest_nrepl.clj`,
+`console_layout`, `dialects`, and `inspector` (the panel widget in
+isolation, then the real window's own panel: opening, in/out, paging
+across a page edge, table/meta toggles, def, Run Form, and Escape). The
+third (`dev/gtk_selftest_nrepl.clj`,
 13 rows, plus two checks after the window closes) opens against a throwaway project whose `.jonquil.edn` asks for
 `{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
 cover starting, running, Stop, help, and closing over that live
 connection; it needs the jolt-lang/nrepl checkout the same way
 `bb test:nrepl` does, and records a single failing row rather than
 opening anything if that checkout isn't there. The fourth
-(`dev/gtk_selftest_cljd.clj`, 12 rows, plus one check after the window closes) opens against a throwaway
+(`dev/gtk_selftest_cljd.clj`, 13 rows, plus one check after the window closes) opens against a throwaway
 ClojureDart app directory whose `NREPL.lock` names a fake fork server
 running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no
 fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
-completion, and Stop's detach, over that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 11 rows, plus two checks after the window
+completion, Stop's detach, and the inspector's unavailable sentence, over
+that fake connection. The fifth
+(`dev/gtk_selftest_clj.clj`, 16 rows, plus two checks after the window
 closes) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
@@ -68,8 +72,10 @@ fake JVM nREPL server running in this same process
 rows cover connecting and Run moving the prompt, a selection against a
 namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting
 after the server restarts, quick doc, jump to an external definition,
-full docs and its Escape, Reset on Run's tick through a switch to a Jolt
-file and back, and a close that never sends the server a `close` op.
+full docs and its Escape, the inspector before and after a Run, in and
+out, a lost connection and reconnecting while idle, Reset on Run's tick
+through a switch to a Jolt file and back, and a close that never sends
+the server a `close` op.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
@@ -133,12 +139,14 @@ one pass; to retake just one, run `jolt -M:shots <scene-id>` directly, the
 same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
-The three JVM Clojure scenes (`clj-attach`, `clj-quick-doc` and
-`clj-full-doc`) run against a real `clojure -M:serve`, started through
+The four JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`
+and `clj-inspector`) run against a real `clojure -M:serve`, started through
 `dev/clj_server.clj` in a temp project the same way `bb test:clj` starts
 one, and stopped once the window closes. So they need Java 17+ and the
 `clojure` CLI, and `clj-full-doc`'s first run waits while the server
-downloads the ClojureDocs export into its temp config directory.
+downloads the ClojureDocs export into its temp config directory. The
+`inspector` scene (in-process Jolt) needs none of that: a REPL entry,
+Cmd/Ctrl+I, then in on one of its rows so the panel's table view shows.
 
 Every harness isolates the user's own settings from the app it's
 driving. The window self-tests and `docs:shots` pass a temp `:settings-path`

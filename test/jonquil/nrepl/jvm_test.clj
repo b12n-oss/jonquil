@@ -9,6 +9,7 @@
             [jonquil.cljd :as cljd]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
+            [jonquil.inspect :as inspect]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.jvm :as jvm]))
 
@@ -191,7 +192,8 @@
       (let [e (make dir)
             {:keys [result]} (run e "(secret)" {:run? false :ns-source "(ns demo.core)\n(secret)"})]
         (is (= {:status :notice :text (clj/not-loaded-message "demo.core")} result))
-        (is (= 1 (count (filter #{"eval"} (fake/ops-seen srv)))) "exactly one eval request was sent")
+        (is (= ["nil" "(secret)"] (keep #(when (= "eval" (get % "op")) (get % "code")) (fake/requests srv)))
+            "the connect-time registration's nil, then exactly one eval: the selection's own")
         (is (not-any? #(str/includes? (or (get % "code") "") "(ns ") (fake/requests srv))
             "the buffer's own ns form is never sent")))))
 
@@ -484,7 +486,24 @@
       (let [e (make dir)]
         (is (nil? (ev/set-mode! e :reset)))
         (run e fixture-core-text {:run? true :path file})
-        (is (= ["describe" "clone" "load-file"] (fake/ops-seen srv)) "no reset form is sent")))))
+        (is (= ["describe" "clone" "eval" "load-file"] (fake/ops-seen srv))
+            "no reset form is sent")
+        (is (= ["nil"] (keep #(when (= "eval" (get % "op")) (get % "code")) (fake/requests srv)))
+            "the one eval is the connect-time registration's nil, never a reset form")))))
+
+(deftest stop-during-registration-test
+  ;; A Stop that lands during the connect-time registration round trip
+  ;; finishes :interrupted and sends nothing else: the user's own request
+  ;; never goes out.
+  (with-project {:slow {"nil" 1000}}
+    (fn [srv dir _]
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "(+ 1 2)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #(= "nil" (get % "code")) (fake/requests srv))))
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 3000 :timeout))))
+        (is (not-any? #(= "(+ 1 2)" (get % "code")) (fake/requests srv))
+            "the user's request never went out")))))
 
 (deftest complete-test
   (with-project {:completions {"gre" [["greet" "demo.core"]]}}
@@ -653,4 +672,172 @@
         (wait-until! (fn [] (some #{"doc"} (fake/ops-seen srv))))
         (fake/drop-connections! srv)
         (is (= {:status :not-attached} (deref done 2000 :timeout)))))))
+
+(defn- inspect-sync
+  "Calls ev/inspect! and waits up to timeout-ms for its on-view, once.
+  :timeout when it never fires."
+  [e op args timeout-ms]
+  (let [done (promise)]
+    (ev/inspect! e op args (fn [v] (deliver done v)))
+    (deref done timeout-ms :timeout)))
+
+(defn- on-view-once!
+  "Calls ev/inspect! e op args, waits up to 2000ms for on-view's first
+  call, then waits another 200ms and returns the total number of times
+  on-view fired (inspect-on-view-once-test's own count-calls-then-wait
+  check). mid-flight, when given, runs right after inspect! is dispatched
+  -- a chance to fake/drop-connections! etc. before the first reply
+  lands."
+  ([e op args] (on-view-once! e op args nil))
+  ([e op args mid-flight]
+   (let [calls (atom 0) first-call (promise)]
+     (ev/inspect! e op args (fn [v] (swap! calls inc) (deliver first-call v)))
+     (when mid-flight (mid-flight))
+     (deref first-call 2000 :timeout)
+     (Thread/sleep 200)
+     @calls)))
+
+(deftest registration-test
+  ;; Review focus 1: after a Run on a fresh connection, the fake saw an eval of "nil"
+  ;; before the load-file, and inspect! :start shows the Run's value, not nil.
+  (with-project {}
+    (fn [srv dir file]
+      (let [e (make dir)]
+        (run e fixture-core-text {:run? true :path file})
+        (is (= ["describe" "clone" "eval" "load-file"] (fake/ops-seen srv)))
+        (is (= "nil" (get (nth (fake/requests srv) 2) "code")) "the registration eval's own code")
+        (let [v (inspect-sync e :start {:rows 10 :cols 40} 2000)]
+          (is (not= "nil" (:leaf v)))
+          (is (str/includes? (:leaf v) "nested")))))))
+
+(deftest registration-only-with-the-op-test
+  ;; :ops without "inspect-start": no extra eval is sent (fake/requests has only the load-file).
+  (with-project {:ops (vec (remove #{"inspect-start"} fake/jvm-ops))}
+    (fn [srv dir file]
+      (let [e (make dir)]
+        (run e fixture-core-text {:run? true :path file})
+        (is (= ["describe" "clone" "load-file"] (fake/ops-seen srv)))))))
+
+(deftest inspect-ops-test
+  ;; after a REPL eval of {:a [1 2]}: :start, :in {:idx 0} (path "*1 / :a"), :out (:cursor 0),
+  ;; :page {:delta 1}, :meta {:cursor 0} (note "no metadata"), :table (:alt-view flips: spec probe 1
+  ;; showed {:a [1 2 ...]} rendering as a table, so it toggles rather than answering "not tabular"),
+  ;; :def {:name "x"} (:defd "#'user/x"); each request carried :session and the right op name.
+  (with-project {:answers {"{:a [1 2]}" "{:a [1 2]}"}}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (run e "{:a [1 2]}" {:run? false})
+        (let [v (inspect-sync e :start {:rows 10 :cols 40} 2000)]
+          (is (= "*1" (:path v)))
+          (is (= "PersistentArrayMap · 1 items" (:info v)))
+          (is (= "list" (:alt-view v))))
+        (let [v (inspect-sync e :in {:idx 0} 2000)]
+          (is (= "*1 / :a" (:path v))))
+        (let [v (inspect-sync e :out {} 2000)]
+          (is (= 0 (:cursor v))))
+        (is (not (contains? (inspect-sync e :page {:delta 1} 2000) :error)))
+        (let [v (inspect-sync e :meta {:cursor 0} 2000)]
+          (is (= "no metadata" (:note v))))
+        (let [v (inspect-sync e :table {} 2000)]
+          (is (= "table" (:alt-view v))))
+        (let [v (inspect-sync e :def {:name "x"} 2000)]
+          (is (= "#'user/x" (:defd v))))
+        (let [reqs (filter #(str/starts-with? (or (get % "op") "") "inspect-") (fake/requests srv))]
+          (is (= ["inspect-start" "inspect-in" "inspect-out" "inspect-page" "inspect-toggle-meta"
+                  "inspect-toggle-table" "inspect-def"]
+                 (map #(get % "op") reqs)))
+          (is (every? #(some? (get % "session")) reqs)))))))
+
+(deftest inspect-not-attached-test
+  ;; before any evaluation: {:error clj/inspect-not-attached}, nothing sent
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (is (= {:error clj/inspect-not-attached} (inspect-sync e :start {:rows 10 :cols 40} 2000)))
+        (is (empty? (fake/ops-seen srv)))))))
+
+(deftest inspect-unavailable-test
+  ;; :ops without inspect-start: {:error inspect/unavailable-message}; inspectable? false once connected
+  (with-project {:ops (vec (remove #{"inspect-start"} fake/jvm-ops))}
+    (fn [_srv dir _]
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (is (false? (ev/inspectable? e)))
+        (is (= {:error inspect/unavailable-message} (inspect-sync e :start {:rows 10 :cols 40} 2000)))))))
+
+(deftest inspect-timeout-test
+  ;; fake :inspect-ms 1000 with :inspect-timeout-ms 200 -> {:error inspect/timeout-message} in < 1000 ms
+  (with-project {:inspect-ms 1000}
+    (fn [_srv dir _]
+      (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir}
+                            {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
+                             :help-timeout-ms 200 :full-doc-timeout-ms 500 :inspect-timeout-ms 200})
+            start (System/nanoTime)]
+        (run e "1" {:run? false})
+        (is (= {:error inspect/timeout-message} (inspect-sync e :start {:rows 10 :cols 40} 2000)))
+        (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "well under the fake's own 1000 ms :inspect-ms")))))
+
+(deftest inspect-lost-connection-test
+  ;; review focus 5: fake/drop-connections! while :inspect-ms delays -> {:error clj/lost-connection :lost? true}
+  (with-project {:inspect-ms 1000}
+    (fn [srv dir _]
+      (let [e (make dir)
+            done (promise)]
+        (run e "1" {:run? false})
+        (ev/inspect! e :start {:rows 10 :cols 40} (fn [v] (deliver done v)))
+        (wait-until! (fn [] (some #{"inspect-start"} (fake/ops-seen srv))))
+        (fake/drop-connections! srv)
+        (is (= {:error clj/lost-connection :lost? true} (deref done 2000 :timeout)))))))
+
+(deftest inspect-lost-connection-idle-test
+  ;; I2: the connection drops while the panel is IDLE (nothing in flight),
+  ;; not mid round-trip like inspect-lost-connection-test above. :conn is
+  ;; non-nil but closed (connect! never nils it back out on a passive
+  ;; drop -- only detach!/a fresh connect! does), so this must answer
+  ;; clj/lost-connection, never clj/inspect-not-attached.
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (fake/drop-connections! srv)
+        (wait-until! (fn [] (not (connection/connected? e))))
+        (is (= {:error clj/lost-connection :lost? true}
+               (inspect-sync e :start {:rows 10 :cols 40} 2000)))))))
+
+(deftest inspect-on-view-once-test
+  ;; on-view is called exactly once on each path above (count calls; wait 200 ms after the first)
+  (testing "not attached"
+    (with-project {}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (is (= 1 (on-view-once! e :start {:rows 10 :cols 40})))))))
+  (testing "unavailable"
+    (with-project {:ops (vec (remove #{"inspect-start"} fake/jvm-ops))}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= 1 (on-view-once! e :start {:rows 10 :cols 40})))))))
+  (testing "a successful op"
+    (with-project {}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= 1 (on-view-once! e :start {:rows 10 :cols 40})))))))
+  (testing "a timeout"
+    (with-project {:inspect-ms 400}
+      (fn [_srv dir _]
+        (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir}
+                              {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
+                               :help-timeout-ms 200 :full-doc-timeout-ms 500 :inspect-timeout-ms 100})]
+          (run e "1" {:run? false})
+          (is (= 1 (on-view-once! e :start {:rows 10 :cols 40})))))))
+  (testing "a lost connection"
+    (with-project {:inspect-ms 1000}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= 1 (on-view-once! e :start {:rows 10 :cols 40}
+                                  (fn []
+                                    (wait-until! (fn [] (some #{"inspect-start"} (fake/ops-seen srv))))
+                                    (fake/drop-connections! srv))))))))))
 

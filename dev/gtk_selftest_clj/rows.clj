@@ -15,7 +15,16 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]))
+
+;; This file's own private copies (gdkkeysyms.h, GTK 4.22.4 installed
+;; headers), same convention as every sibling gtk-selftest-*.rows key
+;; table -- jonquil.gtk.inspector-pane's own KEY-RETURN/KEY-LEFT are
+;; private to that namespace.
+(def ^:private KEY-RETURN 0xff0d)
+(def ^:private KEY-LEFT 0xff51)
+(def ^:private KEY-M 0x06d)
 
 (def fixture-core-text
   ;; The spike fixture's exact text (its own gitignored planning-store
@@ -77,7 +86,16 @@
                               "doc" "Returns a lazy sequence of the results of applying f."
                               "arglists-str" "([f] [f coll] [f c1 c2] [f c1 c2 c3] [f c1 c2 c3 & colls])"
                               "file" "jar:file:/x/clojure-1.12.5.jar!/clojure/core.clj" "line" 2748}}
-                :full-docs {"greet" full-doc-greet-text}})
+                :full-docs {"greet" full-doc-greet-text}
+                ;; P3.T2: row-clj-inspect-in-out's own REPL entry, a
+                ;; single-key map so :in always lands on idx 0 with no
+                ;; ambiguity. row-clj-inspect-lost-connection's own delay:
+                ;; every inspect-* op waits this long before answering, so
+                ;; dropping connections right after an in-step's own
+                ;; request is logged (fake/ops-seen) still finds it
+                ;; genuinely pending -- review focus 5's own path.
+                :answers {"(pick)" "{:k 42}"}
+                :inspect-ms 300})
           lock-text (str (:port srv) "\n")]
       (spit (io/file d ".nrepl-port") lock-text)
       (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f) :server srv :lock-text lock-text}))))
@@ -133,6 +151,24 @@
                              {:label (label ui) :sensitive (g/gtk-widget-get-sensitive chk)
                               :active (g/gtk-check-button-get-active chk)
                               :tooltip (g/tooltip-text chk) :ops (fake/ops-seen (srv))})))))
+
+(defn row-clj-inspect-before-run
+  "I1 scenario A: Cmd/Ctrl+I before any Run. inspectable? is true (:ops
+  is still empty, ruling 5), so the panel opens and :start's own reply
+  is {:error clj/inspect-not-attached} -- a fresh, nil-state :error
+  reply (jonquil.inspect/open) must show that sentence in the footer,
+  not throw computing position text from a view with no :start."
+  [ui]
+  (go-row :clj-inspect-before-run support/check
+    (let [pane (:inspector ui)]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [shown? (await-until 2000 20
+                                #(str/includes? (g/label-text (:footer pane)) clj/inspect-not-attached))]
+        (on-gtk
+         (support/check :clj-inspect-before-run
+                        (and (pos? (g/gtk-widget-get-visible (:root pane))) shown?)
+                        {:shown shown? :footer (g/label-text (:footer pane))
+                         :visible (g/gtk-widget-get-visible (:root pane))}))))))
 
 (defn row-clj-run-moves-prompt
   "Run is load-file over the fixture: the console shows the value line,
@@ -299,6 +335,129 @@
                   (support/check :clj-full-doc-escape
                                  (and opened? (= 1 handled) (not (popover/open? fp)))
                                  {:opened opened? :handled handled :open (popover/open? fp)})))))))
+
+;; --- P3.T2 rows: the inspector over the JVM attach evaluator ---------------
+
+(defn row-clj-inspect-after-run
+  "Run on the fixture, then :inspect-last!* (review focus 1): within
+  3000 ms the panel shows the Run's own value. load-file answers only
+  the LAST form's own value, the def's own printed var string
+  \"#'demo.core/nested\" -- MEASURED (jolt run, not recalled):
+  edn/read-string can't parse a #' literal (\"No dispatch macro for:
+  '\"), so fake-jvm-nrepl's own read-printed-value keeps it as the
+  plain STRING, and jonquil.inspect.view/start's own datafy is a no-op
+  on a string -- entries answers nil for it (no map/set/sequential/
+  List), so this renders as a LEAF, :info \"String\" (type-name's own
+  class name), never \"Var\": the brief's own guess didn't hold, this
+  is what's actually measured."
+  [ui]
+  (go-row :clj-inspect-after-run support/check
+    (let [pane (:inspector ui)
+          [ok? mark] (run-and-await ui fixture-core-text 10000 #(str/includes? % "=> #'demo.core/nested"))]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 3000 20
+                                 #(and (pos? (g/gtk-widget-get-visible (:root pane)))
+                                       (= "*1" (g/label-text (:header pane)))))]
+        (on-gtk
+         (let [header (g/label-text (:header pane))
+               info (g/label-text (:info pane))
+               text (g/buffer-text (:buf pane))]
+           (support/check :clj-inspect-after-run
+                          (and ok? opened? (= "*1" header) (= "String" info)
+                               (= "\"#'demo.core/nested\"" text))
+                          {:ok ok? :opened opened? :header header :info info :text text
+                           :console (support/since ui mark)})))))))
+
+(defn row-clj-inspect-in-out
+  "A REPL entry the fake answers as a map (fixture!'s own :answers,
+  \"(pick)\" -> \"{:k 42}\"): open (a single-entry map, so :in's own idx
+  0 is unambiguous -- the row \":k · 42\"), in lands on the leaf 42, out
+  comes back to *1 with the row reselected."
+  [ui]
+  (go-row :clj-inspect-in-out support/check
+    (let [cv (:console ui) pane (:inspector ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(pick)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          submitted? (await-until 3000 20
+                                  #(and (idle? ui) (str/includes? (support/since ui mark) "=> {:k 42}")))]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 3000 20
+                                 #(and (= "*1" (g/label-text (:header pane)))
+                                       (str/includes? (g/label-text (:info pane)) "1 items")))
+            h-in (on-gtk (inspector-pane/dispatch-key! pane KEY-RETURN))
+            in? (await-until 2000 20 #(str/includes? (g/label-text (:header pane)) "/ :k"))
+            h-out (on-gtk (inspector-pane/dispatch-key! pane KEY-LEFT))
+            out? (await-until 2000 20 #(= "*1" (g/label-text (:header pane))))]
+        (on-gtk
+         (let [tag0? (g/has-tag-at? (:buf pane) 0 (:selected-tag pane))]
+           (support/check :clj-inspect-in-out
+                          (and submitted? opened? (= 1 h-in) in? (= 1 h-out) out? tag0?)
+                          {:submitted submitted? :opened opened? :h-in h-in :in in?
+                           :h-out h-out :out out? :tag0 tag0? :text (support/since ui mark)})))))))
+
+(defn row-clj-inspect-lost-connection
+  "Review focus 5: the server dies while the panel is open. Continues
+  from row-clj-inspect-in-out's own pane (back on *1, still the
+  one-entry {:k 42} view): an in-step (Return) is sent, confirmed on
+  the wire (fake/ops-seen sees \"inspect-in\" -- fixture!'s own
+  :inspect-ms 300 leaves it genuinely pending), then the server drops
+  every connection while that reply is still owed -- jonquil.nrepl.
+  client's own open? flips only once ITS reader thread notices the
+  close, so the request already went out and the reply itself reports
+  the drop (P3.T1 inspect-lost-connection-test's own path). Within
+  3000 ms the footer names jonquil.clj/lost-connection and the toolbar
+  buttons go insensitive."
+  [ui]
+  (go-row :clj-inspect-lost-connection support/check
+    (let [pane (:inspector ui)
+          n (count (fake/ops-seen (srv)))
+          h (on-gtk (inspector-pane/dispatch-key! pane KEY-RETURN))
+          sent? (await-until 2000 20 #(some #{"inspect-in"} (drop n (fake/ops-seen (srv)))))
+          _ (fake/drop-connections! (srv))
+          shown? (await-until 3000 20 #(str/includes? (g/label-text (:footer pane)) clj/lost-connection))]
+      (on-gtk
+       (let [footer (g/label-text (:footer pane))
+             sensitive (mapv g/gtk-widget-get-sensitive
+                             [(:back-btn pane) (:meta-btn pane) (:table-btn pane) (:def-btn pane)])]
+         (support/check :clj-inspect-lost-connection
+                        (and (= 1 h) sent? shown? (every? zero? sensitive))
+                        {:h h :sent sent? :shown shown? :footer footer :sensitive sensitive}))))))
+
+(defn row-clj-inspect-lost-idle
+  "I2: the server dies while the panel is IDLE (nothing in flight),
+  unlike row-clj-inspect-lost-connection above, which drops mid round-
+  trip. Picks up from that row's own dead connection: a plain REPL
+  entry reconnects (mirroring row-clj-reconnects-after-restart), a
+  fresh :inspect-last!* opens a live, enabled view, then the connection
+  drops again with nothing pending. The next key must answer
+  jonquil.clj/lost-connection, never clj/inspect-not-attached (jvm.clj's
+  inspect! distinguishes a never-attached :conn, nil, from one that was
+  open and dropped, non-nil but closed)."
+  [ui]
+  (go-row :clj-inspect-lost-idle support/check
+    (let [cv (:console ui)
+          pane (:inspector ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          reconnected? (await-until 5000 20
+                                    #(and (idle? ui) (str/includes? (support/since ui mark) "=> 3")))]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 2000 20 #(pos? (g/gtk-widget-get-visible (:root pane))))
+            _ (fake/drop-connections! (srv))
+            not-running? (await-until 2000 20 #(= "Clojure (JVM) (not running)" (label ui)))
+            h (on-gtk (inspector-pane/dispatch-key! pane KEY-M))
+            shown? (await-until 2000 20 #(str/includes? (g/label-text (:footer pane)) clj/lost-connection))]
+        (on-gtk
+         (let [footer (g/label-text (:footer pane))]
+           (support/check :clj-inspect-lost-idle
+                          (and reconnected? opened? not-running? (= 1 h) shown?
+                               (not (str/includes? footer clj/inspect-not-attached)))
+                          {:reconnected reconnected? :opened opened? :not-running not-running?
+                           :h h :shown shown? :footer footer})))))))
 
 (defn row-clj-reset-tick-round-trip
   "Reset on Run's tick through a switch to Jolt and back. The window

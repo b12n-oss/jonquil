@@ -62,9 +62,38 @@ Jolt itself rather than something Jonquil can work around locally, and it
 was still true as of `v0.8.12-30-gc9808c39` when last re-checked, on
 2026-09-25.
 
+## The clojure-cli.repl lift: the inspector's view code
+
+The inspector panel's own rendering logic is a second lift, this time from
+[clojure-cli.repl](https://github.com/clojure/clojure-cli.repl), pinned at
+`775e858`. Its terminal inspector keeps the pure half of the work, the
+functions that turn a value into a path, a type line, and a page of rows
+or a table, in one file: `server/src/clojure_cli/repl/inspect.clj`.
+`src/jonquil/inspect/view.clj` lifts that file outright, with its three
+`nrepl.*` requires dropped along with the nREPL middleware they served.
+
+The one shape change the lift needed: upstream's functions all close over
+one shared, global `(def view (atom nil))`, since a single terminal
+inspector serves every client of one server. Jonquil's window keeps one
+pane per window instead, so every lifted function now takes that view map
+as an argument and returns the next one, rather than reading and swapping
+the atom itself; the two places that used to read a session's own
+bindings (`start`'s `*1`, `def-as`'s `*ns*`) take that value straight from
+their caller in place of the session lookup. Every other line inside the
+lifted functions is unchanged from upstream. `UPSTREAM.md` carries the
+exact delta, function by function; `run-op`, added at the end of the
+file, is Jonquil's own: the dispatcher that turns a throw into the
+current view plus a note, the way upstream's own nREPL middleware did for
+its wire replies.
+
+clojure-cli.repl ships under EPL-1.0, the same licence DrClojure uses, so
+the lift needs no separate licensing text of its own: `UPSTREAM.md`'s
+table already names the one file it covers.
+
 ## Licence
 
-Jonquil ports and adapts DrClojure by Kim Taegyoon, distributed under the
-Eclipse Public License 1.0 (see `LICENSE` and `NOTICE` in the repository
-root). Code lifted from DrClojure keeps its original copyright, and
-`UPSTREAM.md`'s table says exactly which files that covers.
+Jonquil ports and adapts DrClojure by Kim Taegyoon and clojure-cli.repl's
+inspector, both distributed under the Eclipse Public License 1.0 (see
+`LICENSE` and `NOTICE` in the repository root). Code lifted from either
+keeps its original copyright, and `UPSTREAM.md`'s table says exactly
+which files that covers.

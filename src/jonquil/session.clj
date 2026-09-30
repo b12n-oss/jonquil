@@ -10,7 +10,8 @@
   (:require [clojure.set :as set]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
-            [jonquil.evaluator :as ev]))
+            [jonquil.evaluator :as ev]
+            [jonquil.inspect.view :as view]))
 
 (declare run-definitions! submit-repl! set-mode!)
 
@@ -36,13 +37,29 @@
     (docs/candidates (:prompt-ns @state) prefix text pos extra-context))
   (lookup [_ sym text pos]
     (docs/symbol-doc (:prompt-ns @state) sym text pos))
-  (limitations [_] []))
+  (limitations [_] [])
+  ev/Inspector
+  (inspect! [_ op args on-view]
+    (future
+      (try
+        (let [args' (case op
+                      :start (assoc args :value (:last-value @state))
+                      :def (assoc args :target-ns (the-ns (:prompt-ns @state)))
+                      args)]
+          (try (on-view (view/run-op (:inspect-view @state) op args'))
+               (catch Throwable _)))
+        (catch Throwable e
+          (try (on-view {:error (or (ex-message e) (str (class e)))})
+               (catch Throwable _)))))
+    nil)
+  (inspectable? [_] true))
 
 (defn make-session
   "A session in reset mode with the prompt in `user`."
   []
   (->InProcess (eval/make-eval-context)
-               (atom {:mode :reset :prompt-ns 'user :created #{}})))
+               (atom {:mode :reset :prompt-ns 'user :created #{}
+                      :inspect-view (atom nil)})))
 
 (defmethod ev/make :in-process [_] (make-session))
 
@@ -80,10 +97,11 @@
                             (fn [result]
                               (swap! state
                                      (fn [s]
-                                       (-> s
-                                           (update :created into
-                                                   (namespaces-created before (ns-names) (loaded-libs)))
-                                           (assoc :prompt-ns (:ns result)))))
+                                       (cond-> (-> s
+                                                   (update :created into
+                                                           (namespaces-created before (ns-names) (loaded-libs)))
+                                                   (assoc :prompt-ns (:ns result)))
+                                         (= :ok (:status result)) (assoc :last-value (:value result)))))
                               (when user-complete (user-complete result)))))))
 
 (defn run-definitions!

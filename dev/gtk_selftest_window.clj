@@ -27,6 +27,7 @@
             [gtk-selftest-window.dialects :as dialects]
             [gtk-selftest-window.files :as files]
             [gtk-selftest-window.find-replace :as find-replace]
+            [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.rename-menus :as rename-menus]
             [gtk-selftest-window.run-form :as run-form]
@@ -192,6 +193,23 @@
    dialects/row-project-open-keeps-evaluator
    dialects/row-editor-paints-profile-sets
    dialects/row-selection-throw-still-paints-new-profile
+   inspector/row-pane-renders-view
+   inspector/row-pane-keys-step
+   inspector/row-pane-leaf
+   inspector/row-pane-measure
+   inspector/row-pane-note-clears
+   inspector/row-inspect-focus-after-open
+   inspector/row-inspect-last-after-repl
+   inspector/row-inspect-in-out
+   inspector/row-inspect-page-edge
+   inspector/row-inspect-reselect
+   inspector/row-inspect-table-meta
+   inspector/row-inspect-def
+   inspector/row-inspect-def-keeps-selection
+   inspector/row-inspect-form
+   inspector/row-inspect-escape
+   inspector/row-inspect-cols-match
+   inspector/row-inspect-def-prompt-escape-safe
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])

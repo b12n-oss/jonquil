@@ -18,6 +18,12 @@
 (def APPLICATION-DEFAULT-FLAGS 0)
 (def CONNECT-DEFAULT 0)
 (def GTK-PHASE-CAPTURE 1)          ; GtkPropagationPhase
+;; P2.T1: gtkenums.h:1036-1039 (GTK 4.22.4, installed headers) -- the rows
+;; view's own key controller runs in the BUBBLE phase (unlike every
+;; window/editor/console key controller so far, all CAPTURE), since the
+;; brief wants it to see keys only after nothing upstream already claimed
+;; them.
+(def GTK-PHASE-BUBBLE 2)           ; GtkPropagationPhase
 (def G-TYPE-STRING (* 16 4))       ; fundamental GType: 16 << 2
 (def STYLE-PROVIDER-PRIORITY-APPLICATION 600)
 
@@ -91,6 +97,13 @@
 (ffi/defcfn gtk-widget-set-valign "gtk_widget_set_valign" [:pointer :int] :void)
 ;; GtkAlign: gtkenums.h (FILL=0, START=1, END=2, CENTER=3).
 (def ALIGN-START 1)
+
+;; P2.T1: gtklabel.h:95 -- void gtk_label_set_ellipsize (GtkLabel*,
+;; PangoEllipsizeMode). Fixed arity. The inspector pane's header label
+;; ellipsizes a long :path at its own START, per PangoEllipsizeMode
+;; (pango/pango-layout.h:99-116: NONE=0, START=1, MIDDLE=2, END=3).
+(ffi/defcfn gtk-label-set-ellipsize "gtk_label_set_ellipsize" [:pointer :int] :void)
+(def PANGO-ELLIPSIZE-START 1)
 
 ;; --- text view / buffer ------------------------------------------------------
 (ffi/defcfn gtk-text-view-new "gtk_text_view_new" [] :pointer)
@@ -869,6 +882,12 @@
 ;; GtkTextWindowType: gtktextview.h:57-58 (WIDGET=1, TEXT=2, per the enum's
 ;; leading comment block at line 45).
 (def TEXT-WINDOW-TEXT 2)
+;; P2.T1: the inspector pane's double-click handler goes the OTHER
+;; direction from caret-window-rect above -- a GtkGestureClick's own event
+;; coordinates are in the rows view's WIDGET window (gtkgestureclick.c's
+;; own doc comment: "in widget allocation coordinates"), translated to
+;; buffer coordinates via gtk-text-view-window-to-buffer-coords, below.
+(def TEXT-WINDOW-WIDGET 1)
 
 (defn caret-window-rect
   "The insert mark's rectangle in view's TEXT-window coordinates (P4 probe
@@ -982,3 +1001,56 @@
 ;; than the view is appended.
 (ffi/defcfn gtk-scrollable-get-hadjustment "gtk_scrollable_get_hadjustment" [:pointer] :pointer)
 (ffi/defcfn gtk-adjustment-get-value "gtk_adjustment_get_value" [:pointer] :double)
+
+;; --- P2.T1: the inspector pane -------------------------------------------
+;; Header lines re-verified directly against /opt/homebrew/include (gtk4
+;; 4.22.4, pango as installed by homebrew), the same citation style as the
+;; P4 section above.
+;;
+;; gtkwidget.h:648-649 -- PangoLayout *gtk_widget_create_pango_layout
+;; (GtkWidget*, const char *text). Fixed arity. measure (below) uses this
+;; to lay out a fixed 10-char string and read its own pixel size back, the
+;; only way to get a real character cell size out of a GtkTextView (which
+;; has no "char width" property of its own).
+(ffi/defcfn gtk-widget-create-pango-layout "gtk_widget_create_pango_layout" [:pointer :string] :pointer)
+;; pango/pango-layout.h:343-346 -- void pango_layout_get_pixel_size
+;; (PangoLayout*, int *width, int *height). Fixed arity.
+(ffi/defcfn pango-layout-get-pixel-size "pango_layout_get_pixel_size" [:pointer :pointer :pointer] :void)
+
+;; gtkgestureclick.h:44 -- GtkGesture *gtk_gesture_click_new (void). Fixed
+;; arity. Its own "pressed" signal (gtkgestureclick.c's g_signal_new, this
+;; task's own live read of the source: (GtkGestureClick*, gint n_press,
+;; gdouble x, gdouble y, gpointer) -> void) is wired directly by
+;; jonquil.gtk.inspector-pane, no binding needed for a signal.
+(ffi/defcfn gtk-gesture-click-new "gtk_gesture_click_new" [] :pointer)
+
+;; gtktextview.h:275-280 -- void gtk_text_view_window_to_buffer_coords
+;; (GtkTextView*, GtkTextWindowType, int window_x, int window_y, int
+;; *buffer_x, int *buffer_y). The inverse of the already-bound
+;; gtk-text-view-buffer-to-window-coords above. Fixed arity.
+(ffi/defcfn gtk-text-view-window-to-buffer-coords "gtk_text_view_window_to_buffer_coords"
+  [:pointer :int :int :int :pointer :pointer] :void)
+;; gtktextview.h:245-248 -- gboolean gtk_text_view_get_iter_at_location
+;; (GtkTextView*, GtkTextIter*, int x, int y). Fixed arity; the gboolean
+;; return (whether x,y actually falls inside the buffer) is read as :int,
+;; same convention as gtk-text-buffer-insert-interactive-at-cursor above.
+(ffi/defcfn gtk-text-view-get-iter-at-location "gtk_text_view_get_iter_at_location"
+  [:pointer :pointer :int :int] :int)
+
+;; gtkpaned.h:69-71 / 75-77 -- void gtk_paned_set_resize_end_child
+;; (GtkPaned*, gboolean) / void gtk_paned_set_shrink_end_child (GtkPaned*,
+;; gboolean). Both fixed arity; jonquil.gtk.ffi already binds
+;; gtk-paned-new/set-start-child/set-end-child/set-position but not
+;; these -- for whichever caller wants the inspector pane's own end of a
+;; paned split to keep a fixed width instead of growing/shrinking with the
+;; window (P2.T1's brief lists both explicitly; neither is called from
+;; this file itself).
+(ffi/defcfn gtk-paned-set-resize-end-child "gtk_paned_set_resize_end_child" [:pointer :int] :void)
+(ffi/defcfn gtk-paned-set-shrink-end-child "gtk_paned_set_shrink_end_child" [:pointer :int] :void)
+
+;; gtkwindow.h:94 -- GtkWidget *gtk_window_new (void). Fixed arity, no
+;; GtkApplication argument (unlike the already-bound
+;; gtk-application-window-new) -- the self-test harness's own transient
+;; top-level for measuring the inspector pane's real allocated size
+;; outside the main Jonquil window.
+(ffi/defcfn gtk-window-new "gtk_window_new" [] :pointer)

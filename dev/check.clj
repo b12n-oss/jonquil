@@ -15,6 +15,8 @@
     jonquil.console
     jonquil.evaluator
     jonquil.session
+    jonquil.inspect.view
+    jonquil.inspect
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
     jonquil.cljd
@@ -32,6 +34,7 @@
     jonquil.gtk.callbacks
     jonquil.gtk.popover
     jonquil.gtk.help-popover
+    jonquil.gtk.inspector-pane
     jonquil.gtk.editor
     jonquil.gtk.completion
     jonquil.gtk.find-bar

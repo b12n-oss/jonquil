@@ -34,3 +34,28 @@ To stay current with upstream developments:
 3. Bump `UPSTREAM_PIN` to the new commit SHA in the same commit that lands the port.
 
 This keeps Jonquil's provenance transparent and drift visible.
+
+# Upstream: clojure-cli.repl
+
+**Repository:** https://github.com/clojure/clojure-cli.repl  
+**Pinned commit:** `775e858`  
+**Local checkout:** `~/dev/b12n-oss/clojure--clojure-cli.repl`  
+**Licence:** EPL-1.0
+
+## Lifted code
+
+Jonquil ports the inspector's view code: the pure functions that turn a value into the panel's rows, paths and table cells, with the nREPL middleware wiring left behind.
+
+| Jonquil file | Upstream source | How |
+|---|---|---|
+| `src/jonquil/inspect/view.clj` | `server/src/clojure_cli/repl/inspect.clj` | Lifted |
+
+## Code deltas from upstream
+
+- The ns becomes `jonquil.inspect.view`; the `:require` list drops the three `nrepl.*` requires (`nrepl.middleware`, `nrepl.misc`, `nrepl.transport`), which existed only to wire the nREPL middleware.
+- The global `(def view (atom nil))` is gone. Every lifted function (`render`, `respond`, `start`, `toggle-table`, `in`, `out`, `page`, `toggle-meta`, `def-as`) takes `view` as its first argument instead and passes it on at every internal call; the atom is now owned by the caller.
+- `sessions`, `remember-session`, `session-binding`, `op-fns`, `middleware` and the `set-descriptor!` call are gone along with the nREPL glue they served.
+- `start`'s signature becomes `[view value rows cols]`, with the frame `{:label "*1" :value (datafy value)}` in place of upstream's `(session-binding session-id #'clojure.core/*1)` lookup.
+- `def-as`'s signature becomes `[view target-ns var-name]`; `target-ns` is passed in directly in place of upstream's `(session-binding session-id #'clojure.core/*ns*)` lookup.
+- Every other line inside the lifted functions is unchanged from upstream.
+- Jonquil adds one function of its own, `run-op`, at the end of the file: a dispatch over the lifted ops that turns a throw into the current view plus `:note`, the way the server's `middleware` answered errors.

@@ -2,7 +2,8 @@
   "The fake JVM nREPL server answers the way clojure-cli.repl / nREPL 1.7.0
   was measured to (the spike's own measured reply shapes), so the :clj
   evaluator's and self-test's tests rest on the right shapes."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is]]
             [fake-jvm-nrepl :as fake]
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.ops :as ops]))
@@ -154,4 +155,22 @@
              (strip (client/request-sync conn {:op "doc" :sym "where"} 2000))))
       (is (= [{:doc "No doc for nope" :status ["done"]}]
              (strip (client/request-sync conn {:op "doc" :sym "nope"} 2000))))
+      (finally (client/close! conn) (fake/stop! srv)))))
+
+(deftest inspect-registration-test
+  ;; spec probe 1: load-file as a session's first request leaves it unregistered
+  ;; -> inspect-start sees nil; any eval registers it.
+  (let [srv (fake/start! {:answers {"{:a 1}" "{:a 1}"}})
+        conn (client/connect (:port srv))
+        sid (clone! conn)]
+    (try
+      (client/request-sync conn {:op "load-file" :file "1" :file-path "/p/demo/core.clj"
+                                 :file-name "core.clj" :session sid} 2000)
+      (let [r1 (client/request-sync conn {:op "inspect-start" :rows 10 :cols 40 :session sid} 2000)
+            v1 (edn/read-string (some :view r1))]
+        (is (= "nil" (:leaf v1)) "load-file alone never registers the session"))
+      (client/request-sync conn {:op "eval" :code "{:a 1}" :session sid} 2000)
+      (let [r2 (client/request-sync conn {:op "inspect-start" :rows 10 :cols 40 :session sid} 2000)
+            v2 (edn/read-string (some :view r2))]
+        (is (= "PersistentArrayMap · 1 items" (:info v2))))
       (finally (client/close! conn) (fake/stop! srv)))))

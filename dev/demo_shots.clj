@@ -57,6 +57,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.main :as main]))
 
@@ -501,8 +502,50 @@
                       {:opened ok :screenshot-exit exit :screenshot-err err})
               (popover/hide! rp)))))
 
+;; This file's own private copies (gdkkeysyms.h, GTK 4.22.4 installed
+;; headers), same convention as dev/gtk_selftest_window/inspector.clj's own
+;; local key table -- jonquil.gtk.inspector-pane's own KEY-DOWN/KEY-RETURN
+;; are private to that namespace.
+(def ^:private KEY-DOWN 0xff54)
+(def ^:private KEY-RETURN 0xff0d)
+
+(defn- scene-inspector
+  "P4.T1: a REPL entry with a 3-key map (a string, a long vector and a
+  vector of two same-shaped maps), Cmd/Ctrl+I opens on it, then Down twice
+  and Return goes in on :speakers (the map's third, last-defined key, so
+  its insertion order -- PersistentArrayMap keeps it for this few keys --
+  puts it at row 2), landing on a vector of two uniform maps: jonquil.
+  inspect.view/table-keys' own uniform check passes, so this level renders
+  as a table, not list-row's plain text -- the panel's table header is
+  what this screenshot is actually for."
+  [ui]
+  (go-row :inspector check!
+    (let [pane (:inspector ui)
+          mark (on-gtk (let [m (out-end-offset ui)
+                             cv (:console ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor
+                          (:buf cv)
+                          "{:talk \"Jonquil\" :slides (vec (range 40)) :speakers [{:name \"a\" :role \"host\"} {:name \"b\" :role \"guest\"}]}"
+                          -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          entered? (await-until 3000 20 #(and (idle? ui) (str/includes? (since ui mark) "=>")))
+          _ (on-gtk ((:inspect-last!* ui)))
+          opened? (await-until 2000 20
+                               #(and (pos? (g/gtk-widget-get-visible (:root pane)))
+                                     (= "*1" (g/label-text (:header pane)))))
+          _ (on-gtk (inspector-pane/dispatch-key! pane KEY-DOWN)
+                    (inspector-pane/dispatch-key! pane KEY-DOWN)
+                    (inspector-pane/dispatch-key! pane KEY-RETURN))
+          in? (await-until 2000 20 #(str/includes? (g/label-text (:header pane)) "/ :speakers"))
+          table-shown? (await-until 2000 20 #(pos? (g/gtk-widget-get-visible (:table-header pane))))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :inspector "png") (own-pid))]
+      (on-gtk (check! :inspector (and entered? opened? in? table-shown? (zero? exit))
+                      {:header (g/label-text (:header pane)) :screenshot-exit exit :screenshot-err err})))))
+
 ;; --- JVM Clojure scenes ----------------------------------------------------
-;; These three run against a REAL clojure -M:serve (clojure-cli.repl), which
+;; These four run against a REAL clojure -M:serve (clojure-cli.repl), which
 ;; -main starts through dev/clj_server.clj before the window opens, in a
 ;; temp project with .jonquil.edn {:dialect :clj}, and stops after the
 ;; window closes. They need Java 17+ and the clojure CLI, the same as
@@ -601,7 +644,29 @@
                        :screenshot-exit exit :screenshot-err err})
               (popover/hide! fp)))))
 
-(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc})
+(defn- scene-clj-inspector
+  "P4.T1: Run attaches to the server and loads the demo text, then a REPL
+  entry of the SAME 3-key map scene-inspector uses, then Cmd/Ctrl+I opens
+  the panel against the real server -- the JVM's own inspect-* ops, not
+  jonquil.inspect.view running locally."
+  [ui]
+  (go-row :clj-inspector check!
+    (let [pane (:inspector ui)
+          run-ok? (<! (clj-run-demo! ui clj-demo-text))
+          m (on-gtk (clj-enter! ui "{:talk \"Jonquil\" :slides (vec (range 40)) :speakers [{:name \"a\" :role \"host\"} {:name \"b\" :role \"guest\"}]}"))
+          entered? (await-until 5000 20 #(and (clj-idle? ui) (str/includes? (since ui m) "=>")))
+          _ (on-gtk ((:inspect-last!* ui)))
+          opened? (await-until 5000 20
+                               #(and (pos? (g/gtk-widget-get-visible (:root pane)))
+                                     (= "*1" (g/label-text (:header pane)))
+                                     (str/includes? (g/label-text (:info pane)) "3 items")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :clj-inspector "png") (own-pid))]
+      (on-gtk (check! :clj-inspector (and run-ok? entered? opened? (zero? exit))
+                      {:header (g/label-text (:header pane)) :info (g/label-text (:info pane))
+                       :screenshot-exit exit :screenshot-err err})))))
+
+(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
@@ -624,9 +689,11 @@
    [:completion scene-completion]
    [:quick-doc scene-quick-doc]
    [:rename scene-rename]
+   [:inspector scene-inspector]
    [:clj-attach scene-clj-attach]
    [:clj-quick-doc scene-clj-quick-doc]
-   [:clj-full-doc scene-clj-full-doc]])
+   [:clj-full-doc scene-clj-full-doc]
+   [:clj-inspector scene-clj-inspector]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 

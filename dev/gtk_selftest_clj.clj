@@ -22,6 +22,7 @@
 
 (def ^:private row-fns
   [rows/row-clj-starts-not-running
+   rows/row-clj-inspect-before-run
    rows/row-clj-run-moves-prompt
    rows/row-clj-selection-not-loaded
    rows/row-clj-stop-interrupts
@@ -31,6 +32,10 @@
    rows/row-clj-jump-external
    rows/row-clj-full-doc
    rows/row-clj-full-doc-escape
+   rows/row-clj-inspect-after-run
+   rows/row-clj-inspect-in-out
+   rows/row-clj-inspect-lost-connection
+   rows/row-clj-inspect-lost-idle
    rows/row-clj-reset-tick-round-trip
    rows/row-clj-close])
 

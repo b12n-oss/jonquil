@@ -36,6 +36,9 @@
 (def not-attached-doc
   "No docs: Jonquil isn't attached to the server yet. Run something first.")
 
+(def inspect-not-attached
+  "Nothing to inspect yet: Jonquil isn't attached to the server. Run something first.")
+
 (def no-lookup-doc
   "No docs: this server has no lookup op.")
 
@@ -68,7 +71,11 @@
               :refused refused-message
               :not-server not-server-message
               :connecting connecting-message}
-   :on-connect {:session-ns nil}})
+   ;; :inspect-registered? (ruling 4): whether the connect-time eval of
+   ;; nil has been sent on this connection's session yet, so a fresh
+   ;; connect always resets it to false and a later reconnect registers
+   ;; again.
+   :on-connect {:session-ns nil :inspect-registered? false}})
 
 ;; --- the buffer's namespace ---
 

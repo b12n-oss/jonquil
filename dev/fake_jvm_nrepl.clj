@@ -34,8 +34,21 @@
   \"#'ns/name\" for def/defn/defn-, else \"nil\" for in-ns/ns, else \":ok\".
 
   Every message it receives is kept, so a test can assert which ops a
-  client sent."
-  (:require [clojure.string :as str]
+  client sent.
+
+  inspect-start, inspect-in, inspect-out, inspect-page, inspect-toggle-meta
+  and inspect-toggle-table run jonquil.inspect.view/run-op against one view
+  per server (mirroring the real server's own single global atom).
+  inspect-def never interns (the fake never evaluates Clojure): it answers
+  the current view plus :defd instead. A session is registered -- so
+  inspect-start sees its *1, not nil -- only once an eval op for it has
+  been received; load-file alone leaves it unregistered (the spike's own
+  measured probe 1 behaviour). *1 itself is the last eval/load-file value
+  the fake produced, read back with edn/read-string when it parses cleanly,
+  else kept as the printed string."
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
+            [jonquil.inspect.view :as view]
             [jonquil.nrepl.bencode :as bencode]))
 
 (def jvm-ops
@@ -89,7 +102,18 @@
     (and (= '+ (head form)) (every? number? (rest form))) (str (apply + (rest form)))
     (#{'def 'defn 'defn-} (head form)) (str "#'" current "/" (second form))
     (#{'in-ns 'ns} (head form)) "nil"
+    ;; A literal nil answers nil, as a real REPL does (the JVM evaluator's
+    ;; connect-time inspect registration evaluates exactly this).
+    (nil? form) "nil"
     :else ":ok"))
+
+(defn- read-printed-value
+  "s (a session's last eval/load-file printed value, or nil) read back
+  with edn/read-string, or s itself when it doesn't parse as edn (a var
+  literal like \"#'user/x\", or anything else the edn reader rejects). nil
+  reads as nil (edn/read-string's own nil/empty-string case)."
+  [s]
+  (try (edn/read-string s) (catch Exception _ s)))
 
 (defn- wait-for!
   "Waits up to ms, waking early on: the server stopping (:stopped), the
@@ -122,8 +146,11 @@
   :pending-interrupt/:pending-stdin instead of dropping it; every
   registration point here atomically installs its promise AND consumes
   any such pending flag in the same swap!, so the two can never race
-  past each other and lose the signal."
-  [{:keys [opts sessions loaded]} stop-latch closed reply m]
+  past each other and lose the signal.
+
+  last-values keeps this session's own *1 (the last value this request
+  produced, eval or load-file alike), read at inspect-start time."
+  [{:keys [opts sessions loaded last-values]} stop-latch closed reply m]
   (try
     (let [sid (get m "session")
           op (get m "op")
@@ -138,9 +165,11 @@
           (loop [fs (seq forms) current start-ns last-value nil]
             (cond
               (nil? fs)
-              (if eval?
-                (reply {"status" ["done"]})
-                (do (reply {"value" last-value}) (reply {"status" ["done"]})))
+              (do
+                (swap! last-values assoc sid last-value)
+                (if eval?
+                  (reply {"status" ["done"]})
+                  (do (reply {"value" last-value}) (reply {"status" ["done"]}))))
 
               (matches? (:fail-on opts) (first fs))
               (do (reply {"err" fail-err})
@@ -203,7 +232,7 @@
                         v (get (:answers opts) (pr-str f) (default-value new-current f))]
                     (if eval?
                       (do (reply {"ns" new-current "value" v})
-                          (recur (next fs) new-current last-value))
+                          (recur (next fs) new-current v))
                       (recur (next fs) new-current v))))))))))
     (catch Throwable e
       ;; The error replies can throw too, when the client closed the
@@ -230,8 +259,13 @@
   session's own promise are recorded at :pending-interrupt/:pending-stdin
   (atomically: either an existing promise gets the delivery, or the
   pending flag gets set, never both) instead of being silently dropped;
-  evaluate!'s own registration points consume them."
-  [{:keys [opts sessions log counter busy futures loaded] :as srv} _sock stop-latch closed reply m]
+  evaluate!'s own registration points consume them.
+
+  registered, view and last-values back the inspect-* ops: registered
+  gains a session id only for an \"eval\" op (never \"load-file\"), view is
+  the one per-server inspector view state (mirroring the real server's own
+  single global atom), and last-values is that session's *1."
+  [{:keys [opts sessions log counter busy futures loaded registered view last-values] :as srv} _sock stop-latch closed reply m]
   (swap! log conj (dissoc m "id"))
   (swap! busy inc)
   (try
@@ -247,6 +281,9 @@
           ;; a stray pending flag from an EARLIER, already-finished request
           ;; on this session must never bleed into this new one.
           (swap! sessions update sid dissoc :pending-interrupt :pending-stdin)
+          ;; inspect-start only sees a session's *1 once it's registered
+          ;; this way (spike probe 1): load-file alone never registers it.
+          (when (= "eval" (get m "op")) (swap! registered conj sid))
           (swap! futures conj (future (evaluate! srv stop-latch closed reply m))))
         "interrupt"
         (let [sid (get m "session")
@@ -288,6 +325,36 @@
             (wait! stop-latch closed (:doc-ms opts 0))
             (reply {"doc" (get (:full-docs opts) (get m "sym") (str "No doc for " (get m "sym")))
                     "status" ["done"]})))
+        "inspect-start"
+        (let [sid (get m "session")]
+          (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+          (let [value (when (contains? @registered sid) (read-printed-value (get @last-values sid)))]
+            (reply {"view" (pr-str (view/run-op view :start {:value value :rows (get m "rows") :cols (get m "cols")}))
+                    "status" ["done"]})))
+        "inspect-in"
+        (do (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+            (reply {"view" (pr-str (view/run-op view :in {:idx (get m "idx")})) "status" ["done"]}))
+        "inspect-out"
+        (do (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+            (reply {"view" (pr-str (view/run-op view :out {})) "status" ["done"]}))
+        "inspect-page"
+        (do (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+            (reply {"view" (pr-str (view/run-op view :page {:delta (get m "delta")})) "status" ["done"]}))
+        "inspect-toggle-meta"
+        (do (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+            (reply {"view" (pr-str (view/run-op view :meta {:cursor (get m "cursor")})) "status" ["done"]}))
+        "inspect-toggle-table"
+        (do (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+            (reply {"view" (pr-str (view/run-op view :table {})) "status" ["done"]}))
+        ;; inspect-def never interns (the fake never evaluates Clojure):
+        ;; the current view plus :defd, naming the session's own ns (as
+        ;; the real server would intern in its *ns*).
+        "inspect-def"
+        (let [sid (get m "session")
+              ns (get-in @sessions [sid :ns] "user")]
+          (when-let [ms (:inspect-ms opts)] (wait! stop-latch closed ms))
+          (reply {"view" (pr-str (view/respond view {:defd (str "#'" ns "/" (get m "name"))}))
+                  "status" ["done"]}))
         ("close" "ls-sessions" "auto-require") (reply {"status" ["done"]})
         (reply {"status" ["done" "unknown-op"]})))
     (finally (swap! busy dec))))
@@ -340,6 +407,8 @@
   :doc-ms    ms: doc answers after this delay (default 0), a loaded ns only
   :loaded    extra namespace name strings considered loaded from the
              start, alongside \"user\"
+  :inspect-ms ms: any inspect-* op answers after this delay (as :doc-ms
+             delays doc)
   :mute?     read requests but never answer any"
   ([] (start! {}))
   ([opts]
@@ -348,7 +417,8 @@
               :sessions (atom {}) :log (atom []) :counter (atom 0)
               :conns (atom []) :futures (atom [])
               :stopped? (atom false) :stop-latch (promise) :busy (atom 0)
-              :loaded (atom (into #{"user"} (:loaded opts)))}]
+              :loaded (atom (into #{"user"} (:loaded opts)))
+              :view (atom nil) :registered (atom #{}) :last-values (atom {})}]
      (future
        (try
          (loop []

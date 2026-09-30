@@ -52,6 +52,7 @@
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.help :as help]
+            [jonquil.inspect :as inspect]
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.ops :as ops]))
@@ -80,7 +81,10 @@
    ;; downloads the ClojureDocs export (about 3.7 MB) into the server's
    ;; config dir, measured at 3.6 s to over 12 s, so this leaves room for
    ;; that one slow call. Later calls answer in milliseconds.
-   :full-doc-timeout-ms 30000})
+   :full-doc-timeout-ms 30000
+   ;; estimate: the describe timeout's own basis. inspect! runs off the
+   ;; GTK thread already (in a future), so this only bounds one request.
+   :inspect-timeout-ms 5000})
 
 (def busy-warning
   ;; jonquil.eval/eval-async's own wording, so the console reads the same.
@@ -142,6 +146,24 @@
       (do (swap! state assoc :waiting? false)
           (call-wait-input! on-wait-input false)))))
 
+(defn- register-inspect!
+  "Ruling 4: right after a successful connect!, once the server has
+  advertised inspect-start and this connection hasn't registered yet,
+  sends one eval of nil on the session so a first Cmd/Ctrl+I after a Run
+  doesn't show nil (spec probe 1: inspect-start only sees a session's *1
+  once an eval, not merely a load-file, has run on it). Sent straight
+  through client/request-sync on the conn, never connection/request!, so
+  this streams nothing to the console and never moves :prompt-ns or
+  :session-ns. Whatever the reply -- a failure only means the first
+  inspect may show nil -- :inspect-registered? is set so this never
+  resends on the same connection; connect!'s own :on-connect resets it to
+  false on every fresh connect."
+  [{:keys [state timings]}]
+  (let [{:keys [conn session ops]} @state]
+    (when (and (contains? ops "inspect-start") (not (:inspect-registered? @state)))
+      (client/request-sync conn {:op "eval" :code "nil" :session session} (:describe-timeout-ms timings))
+      (swap! state assoc :inspect-registered? true))))
+
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? path ns-source on-output on-wait-input on-status-change] :as opts}]
   (try
@@ -154,36 +176,42 @@
         ;; own worker guard, and send nothing. The connection itself is
         ;; fine (connect! already succeeded), so this doesn't detach.
         (finish! ev opts {:status :interrupted})
-        (let [watch (stdin-watch state on-wait-input)
-              do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
-                                                                 :still-waiting nil
-                                                                 :on-message watch}))]
-          (if run?
-            ;; Run: load-file, never told an :ns (the fixture's own ns form
-            ;; decides what the server evaluates it in). A successful Run
-            ;; moves the prompt namespace to the buffer's own (ruling 4).
-            (let [f (when path (io/file path))
-                  msgs (do-request! {:op "load-file" :file code
-                                     :file-path (if f (.getAbsolutePath f) "untitled.clj")
-                                     :file-name (if f (.getName f) "untitled.clj")})
-                  result (clj/eval-result msgs (stop-requested? ev))]
-              (when (= :ok (:status result))
-                (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
-              (finish! ev opts result))
-            ;; REPL line (no ns-source): eval in the prompt namespace, and a
-            ;; successful reply's own :ns moves the prompt. Selection/Form
-            ;; (ns-source present): eval in the buffer's own namespace, or
-            ;; the prompt namespace when the buffer has none; the prompt
-            ;; never moves for these (rule 3: never the buffer's ns form
-            ;; itself, only named as :ns).
-            (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
-                  msgs (do-request! {:op "eval" :code code :ns ns})]
-              (if (clj/ns-not-found? msgs)
-                (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
-                (let [result (clj/eval-result msgs (stop-requested? ev))]
-                  (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
-                    (swap! state assoc :prompt-ns (:ns result)))
-                  (finish! ev opts result))))))))
+        (do
+          (register-inspect! ev)
+          ;; The registration is a round trip of its own, so a Stop can land
+          ;; during it: check again before the user's request goes out.
+          (if (stop-requested? ev)
+            (finish! ev opts {:status :interrupted})
+            (let [watch (stdin-watch state on-wait-input)
+                  do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
+                                                                     :still-waiting nil
+                                                                     :on-message watch}))]
+              (if run?
+              ;; Run: load-file, never told an :ns (the fixture's own ns form
+              ;; decides what the server evaluates it in). A successful Run
+              ;; moves the prompt namespace to the buffer's own (ruling 4).
+                (let [f (when path (io/file path))
+                      msgs (do-request! {:op "load-file" :file code
+                                         :file-path (if f (.getAbsolutePath f) "untitled.clj")
+                                         :file-name (if f (.getName f) "untitled.clj")})
+                      result (clj/eval-result msgs (stop-requested? ev))]
+                  (when (= :ok (:status result))
+                    (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
+                  (finish! ev opts result))
+              ;; REPL line (no ns-source): eval in the prompt namespace, and a
+              ;; successful reply's own :ns moves the prompt. Selection/Form
+              ;; (ns-source present): eval in the buffer's own namespace, or
+              ;; the prompt namespace when the buffer has none; the prompt
+              ;; never moves for these (rule 3: never the buffer's ns form
+              ;; itself, only named as :ns).
+                (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
+                      msgs (do-request! {:op "eval" :code code :ns ns})]
+                  (if (clj/ns-not-found? msgs)
+                    (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
+                    (let [result (clj/eval-result msgs (stop-requested? ev))]
+                      (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
+                        (swap! state assoc :prompt-ns (:ns result)))
+                      (finish! ev opts result))))))))))
     (catch Throwable e
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
 
@@ -237,6 +265,20 @@
               ((ops/statuses r2) ops/disconnected) {:status :not-attached}
               (and (not (ns-errored? r2)) (ops/doc-info sym r2)) {:status :retried :ns ns2 :reply r2}
               :else {:status :not-loaded :ns1 ns1})))))))
+
+(defn- inspect-request
+  "The wire op mapping for a jonquil.evaluator/Inspector call (decisions):
+  op/args to the server's own inspect-* op and its own keys, before
+  :session is merged in."
+  [op args]
+  (case op
+    :start {:op "inspect-start" :rows (:rows args) :cols (:cols args)}
+    :in {:op "inspect-in" :idx (:idx args)}
+    :out {:op "inspect-out"}
+    :page {:op "inspect-page" :delta (:delta args)}
+    :meta {:op "inspect-toggle-meta" :cursor (:cursor args)}
+    :table {:op "inspect-toggle-table"}
+    :def {:op "inspect-def" :name (:name args)}))
 
 (defrecord Jvm [selection state history listeners timings]
   ev/Evaluator
@@ -467,6 +509,47 @@
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))
     nil)
+
+  ev/Inspector
+  ;; P3.T1: backed by the server's own inspect-* ops (inspect-request's own
+  ;; mapping), off the GTK thread in a future, on-view called exactly once
+  ;; and everything caught -- the same pattern jonquil.session's InProcess
+  ;; uses. Every request carries :session.
+  (inspect! [_ op args on-view]
+    (future
+      (try
+        (let [result
+              (let [{:keys [conn session ops]} @state]
+                (cond
+                  ;; I2: a nil :conn is "never attached" (inspect-not-
+                  ;; attached, "Run something first"); a non-nil :conn
+                  ;; that's no longer open was attached and dropped (the
+                  ;; connection's own reader thread flips client/open? to
+                  ;; false on EOF, but leaves :conn in place until the
+                  ;; NEXT connect! or an explicit detach!) -- that case
+                  ;; is clj/lost-connection, same sentence and :lost? true
+                  ;; the in-flight-request drop below already answers.
+                  (nil? conn) {:error clj/inspect-not-attached}
+                  (not (client/open? conn)) {:error clj/lost-connection :lost? true}
+                  (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
+                  :else
+                  (let [r (client/request-sync conn (assoc (inspect-request op args) :session session)
+                                               (:inspect-timeout-ms timings))]
+                    (cond
+                      (not (vector? r)) {:error inspect/timeout-message}
+                      ((ops/statuses r) ops/disconnected) {:error clj/lost-connection :lost? true}
+                      :else (inspect/parse-view (some :view r))))))]
+          (try (on-view result)
+               (catch Throwable _)))
+        (catch Throwable e
+          (try (on-view {:error (or (ex-message e) (str (class e)))})
+               (catch Throwable _)))))
+    nil)
+  ;; Ruling 5: true before connecting at all (:ops still empty -- inspect!
+  ;; then answers not-attached, not unavailable), or once the server has
+  ;; advertised inspect-start.
+  (inspectable? [_]
+    (let [ops (:ops @state)] (or (empty? ops) (contains? ops "inspect-start"))))
 
   connection/Attached
   (connected? [this] (connection/live? this))
