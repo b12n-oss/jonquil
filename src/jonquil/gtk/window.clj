@@ -991,7 +991,7 @@
   [win h-paned pane]
   (when (zero? (g/gtk-widget-get-visible (:root pane)))
     (g/gtk-widget-set-visible (:root pane) 1)
-    (g/gtk-paned-set-position h-paned (- (g/gtk-widget-get-width win) PANEL-WIDTH))))
+    (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH)))))
 
 (defn- try-inspect!
   "Ruling 9: the window sends at most one inspect! at a time. Runs f
@@ -999,10 +999,15 @@
   that eventually flips inspecting? back to false) only when no request
   is already pending, atomically flipping inspecting? true first -- a key
   or button press while one is pending is dropped here, with nothing
-  queued for after it."
+  queued for after it. A throw from f before its request goes out (the
+  panel's show or measure, say) resets the flag before rethrowing, so one
+  failure can't leave the inspector dead for the rest of the session."
   [inspecting? f]
   (when (compare-and-set! inspecting? false true)
-    (f)))
+    (try (f)
+         (catch :default e
+           (reset! inspecting? false)
+           (throw e)))))
 
 (defn- on-inspect-view!
   "on-view's own body, already handed to on-gui! by its caller (Decisions):
