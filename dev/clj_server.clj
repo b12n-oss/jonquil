@@ -89,13 +89,17 @@
             (:exit (deref proc term-grace-ms nil)))
         (:exit r)))))
 
+(defn- delete-tree! [dir]
+  (doseq [f (reverse (file-seq (io/file dir)))] (.delete ^java.io.File f)))
+
 (defn start!
   "Launches clojure -M:serve in a fresh temp project (deps.edn with the
   :serve alias, src/demo/core.clj holding the spike fixture) with
   CLJ_CONFIG pointing at a second temp dir. Waits for the server's own
   readiness line and reads the port from it. Returns {:proc :pid :port
   :dir :config-dir :log}. Throws ex-info with the log's tail when the
-  server exits early or never becomes ready."
+  server exits early or never becomes ready, after ending the process and
+  deleting both temp dirs (the log is kept for the tail's full text)."
   []
   (let [uid (str (System/nanoTime) "-" (random-uuid))
         tmp (System/getProperty "java.io.tmpdir")
@@ -116,14 +120,16 @@
       (case state
         :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port (port-from-log log)
                 :dir dir-path :config-dir config-path :log log}
-        :exited (throw (ex-info (str "clojure -M:serve exited: " (tail log 20)) {:log log}))
-        :timeout (do (terminate! proc)
-                     (throw (ex-info (str "clojure -M:serve didn't answer within " ready-deadline-ms
-                                          " ms: " (tail log 20))
-                                     {:log log})))))))
-
-(defn- delete-tree! [dir]
-  (doseq [f (reverse (file-seq (io/file dir)))] (.delete ^java.io.File f)))
+        (let [msg (if (= :exited state)
+                    (str "clojure -M:serve exited: " (tail log 20))
+                    (str "clojure -M:serve didn't answer within " ready-deadline-ms " ms: " (tail log 20)))]
+          ;; No server to hand back, so nothing else will clean up: end the
+          ;; process, then delete both temp dirs. The log stays, since the
+          ;; exception names it.
+          (terminate! proc)
+          (delete-tree! dir-path)
+          (delete-tree! config-path)
+          (throw (ex-info msg {:log log})))))))
 
 (defn stop!
   "Ends the server this namespace started (only the pid at (:proc srv),
