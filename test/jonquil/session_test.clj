@@ -100,3 +100,11 @@
     (is (= "boom" (:note (deref p 2000 :timeout))))
     (Thread/sleep 100)
     (is (= 1 @calls))))
+
+(deftest inspect-outer-catch-test
+  ;; A def whose prompt namespace no longer exists fails before run-op: the
+  ;; outer catch answers {:error ...} with a non-nil message, exactly once.
+  (let [s (session/make-session)]
+    (swap! (:state s) assoc :prompt-ns 'jonquil.no-such-ns-for-inspect)
+    (let [r (inspect-sync s :def {:name "x"})]
+      (is (string? (:error r))))))

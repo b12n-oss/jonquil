@@ -49,7 +49,7 @@
           (try (on-view (view/run-op (:inspect-view @state) op args'))
                (catch Throwable _)))
         (catch Throwable e
-          (try (on-view {:error (ex-message e)})
+          (try (on-view {:error (or (ex-message e) (str (class e)))})
                (catch Throwable _)))))
     nil)
   (inspectable? [_] true))
