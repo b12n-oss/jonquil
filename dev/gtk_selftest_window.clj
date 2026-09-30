@@ -198,14 +198,17 @@
    inspector/row-pane-leaf
    inspector/row-pane-measure
    inspector/row-pane-note-clears
+   inspector/row-inspect-focus-after-open
    inspector/row-inspect-last-after-repl
    inspector/row-inspect-in-out
    inspector/row-inspect-page-edge
    inspector/row-inspect-table-meta
    inspector/row-inspect-def
+   inspector/row-inspect-def-keeps-selection
    inspector/row-inspect-form
    inspector/row-inspect-escape
    inspector/row-inspect-cols-match
+   inspector/row-inspect-def-prompt-escape-safe
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])

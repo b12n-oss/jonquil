@@ -686,8 +686,11 @@
 (defn- apply-selection!
   "Makes sel the window's selection. When it needs a different evaluator
   (jonquil.dialect/selection-key), the old one is interrupted and stopped
-  off the GTK thread and a new one starts. sel-ctx is {:cv :status-label
-  :dialect-label :sel* :ev* :mode-fn :reset-chk :reset-state}.
+  off the GTK thread and a new one starts, and the inspector panel (if
+  showing) hides and drops its own state (minor: the panel's old view
+  would otherwise call ev/inspect! on an evaluator that may not even
+  implement it). sel-ctx is {:cv :status-label :dialect-label :sel* :ev*
+  :mode-fn :reset-chk :reset-state :pane :inspector-state}.
 
   The new evaluator joins jonquil.runtime-registry as soon as it's made
   (so jonquil.main's stop-all! can never miss it, even if the window
@@ -703,7 +706,7 @@
   (apply-reset-toggle!), and the label is set last, from the evaluator the
   window ends up with, so opening another file of the same app keeps
   reading \"attached\"."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state]} sel]
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state pane inspector-state]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
@@ -714,6 +717,8 @@
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label)
         (reset! ev* new)
+        (g/gtk-widget-set-visible (:root pane) 0)
+        (reset! inspector-state nil)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
         (future
@@ -1033,11 +1038,14 @@
 (defn- inspect-last!
   "Cmd/Ctrl+I and the menu's \"Inspect Last Result\" (Decisions): ruling 6's
   availability check puts the unavailable sentence in the status bar and
-  stops; otherwise shows/sizes the panel, drops any earlier session's own
-  state (so on-view opens fresh rather than continuing an old browse), and
-  sends :start with the pane's own measured size -- guarded by ruling 9,
-  so a second press while the first :start is still in flight does
-  nothing."
+  stops; otherwise shows/sizes the panel, moves focus to its rows view
+  (I3: so Return/Escape/arrows go to the panel, not the editor, without
+  an extra click), drops any earlier session's own state (so on-view
+  opens fresh rather than continuing an old browse), and sends :start
+  with the pane's own measured size once its rows view is actually
+  allocated (I4: the first open in a window would otherwise measure
+  before GTK's own layout pass ever ran) -- guarded by ruling 9, so a
+  second press while the first :start is still in flight does nothing."
   [ev* win h-paned pane inspector-state inspecting? inspector-last-args on-view status-label]
   (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
     (set-status! status-label inspect/unavailable-message)
@@ -1045,10 +1053,13 @@
      inspecting?
      (fn []
        (show-inspector-panel! win h-paned pane)
+       (inspector-pane/focus! pane)
        (reset! inspector-state nil)
-       (let [measured (inspector-pane/measure pane)]
-         (reset! inspector-last-args measured)
-         (ev/inspect! @ev* :start measured on-view))))))
+       (inspector-pane/measure-when-ready!
+        pane
+        (fn [measured]
+          (reset! inspector-last-args measured)
+          (ev/inspect! @ev* :start measured on-view)))))))
 
 (defn- inspect-form!
   "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\" (Decisions): the same
@@ -1895,6 +1906,23 @@
                         (fn []
                           (let [args {:name name}]
                             (reset! inspector-last-args args)
+                            ;; Minor: :pending :keep, so on-reply's default
+                            ;; (row 0) doesn't reset the selection a
+                            ;; successful def leaves the view on (the spec's
+                            ;; own "the panel stays on the same view").
+                            ;; :selected is copied in from the pane's own
+                            ;; CURRENT display too: a plain local Up/Down
+                            ;; move (no round trip) only ever updates the
+                            ;; pane's own :state atom, never this window's
+                            ;; inspector-state (on-inspector-request forwards
+                            ;; a key-step request straight to ev/inspect!
+                            ;; without touching it either), so :keep's own
+                            ;; (min selected last-row) would otherwise read
+                            ;; whatever :selected inspector-state was last
+                            ;; given by a round trip, not the row actually
+                            ;; highlighted on screen.
+                            (swap! inspector-state assoc
+                                   :pending :keep :selected (:selected @(:state @*pane)))
                             (ev/inspect! @ev* :def args on-view)))))
         on-inspector-close (fn [] (close-inspector-panel! @*pane ed))
         pane (inspector-pane/make-pane {:on-request on-inspector-request
@@ -2099,6 +2127,12 @@
     ;; change the editor could observe -- is what closes it (popover.clj's
     ;; own ns docstring).
     (register-popover-fn rename-pop)
+    ;; I5: joins the SAME registry, so Escape closes the def prompt
+    ;; before it can fall through to Stop (ruling 8) -- the window's own
+    ;; capture controller does see keys from an autohide popover (probe
+    ;; 4, jonquil.gtk.popover's own ns docstring), the same reasoning
+    ;; that already applies to rename-pop just above.
+    (register-popover-fn (:def-popover pane))
     (editor/set-rename-fn! ed rename-fn)
     (editor/set-run-form-fn! ed run-form-fn)
     (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
@@ -2139,7 +2173,7 @@
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
-                   :reset-chk reset-chk :reset-state reset-state
+                   :reset-chk reset-chk :reset-state reset-state :pane pane :inspector-state inspector-state
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
       (try
         (show-selection! cv dialect-label @sel*)

@@ -44,11 +44,49 @@
       (is (= "Lost the connection to the nREPL server." (:note e))))))
 
 (deftest footer-and-parse-test
-  (is (= "11-20 of 25" (inspect/footer (inspect/open (page-view 10 10 25)))))
-  (is (= "" (inspect/footer (inspect/open {:path "*1" :info "String" :header "" :leaf "\"x\""}))))
+  (is (= "11-20 of 25 · ↑↓ move · ⏎ in · ← out · d def · m meta · v table"
+         (inspect/footer (inspect/open (page-view 10 10 25)))))
+  (is (= "← out · d def · m meta · v table"
+         (inspect/footer (inspect/open {:path "*1" :info "String" :header "" :leaf "\"x\""}))))
   (is (= {:path "*1" :info "Long" :header "" :leaf "3"}
          (inspect/parse-view "{:path \"*1\" :info \"Long\" :header \"\" :leaf \"3\"}")))
   (is (= "The server's view couldn't be read." (:note (inspect/parse-view "{:path")))))
+
+(deftest footer-empty-collection-test
+  ;; Minor: an empty collection's own start=0/total=0/entries=[] used to
+  ;; read "1-0 of 0" ((inc start) with nothing subtracted back out) --
+  ;; "0 of 0" instead.
+  (is (= "0 of 0 · ↑↓ move · ⏎ in · ← out · d def · m meta · v table"
+         (inspect/footer (inspect/open (page-view 0 0 0))))))
+
+(deftest footer-and-open-on-error-test
+  (testing "footer never throws on a view with no :start (I1)"
+    (is (= "" (inspect/footer (inspect/open {:error "x"}))))
+    (is (= "" (inspect/footer (inspect/open (inspect/parse-view "")))))
+    (is (= "" (inspect/footer (inspect/on-reply (inspect/open (page-view 0 3 3))
+                                                (inspect/parse-view "junk{"))))))
+  (testing "a first, nil-state :error reply opens onto an empty view with the message in :note"
+    (let [s (inspect/open {:error "Nothing to inspect yet: Jonquil isn't attached to the server. Run something first."})]
+      (is (= "Nothing to inspect yet: Jonquil isn't attached to the server. Run something first." (:note s)))
+      (is (not (:disabled? s)))
+      (is (= "" (inspect/footer s)))))
+  (testing "a :lost? true error also disables the actions"
+    (let [s (inspect/open {:error "Lost the connection to the nREPL server." :lost? true})]
+      (is (:disabled? s))
+      (is (= "Lost the connection to the nREPL server." (:note s))))))
+
+(deftest disabled-suppresses-requests-test
+  ;; Minor: key-step used to ignore :disabled?, so Return/m/v/Left/paging
+  ;; kept sending requests a lost connection can't answer.
+  (let [s (assoc (inspect/open (page-view 10 10 25)) :selected 3 :disabled? true)]
+    (is (nil? (:request (inspect/key-step s :in))))
+    (is (nil? (:request (inspect/key-step s :meta))))
+    (is (nil? (:request (inspect/key-step s :table))))
+    (is (nil? (:request (inspect/key-step s :out))))
+    (is (nil? (:request (inspect/key-step s :page-down))))
+    (is (nil? (:request (inspect/key-step s :page-up))))
+    (is (= s (:state (inspect/key-step s :down))) "no local move either, while disabled")
+    (is (= s (:state (inspect/key-step s :up))))))
 
 (deftest reply-edges-test
   (let [s (inspect/open (page-view 0 3 3))

@@ -88,7 +88,8 @@
                tag1? (g/has-tag-at? (:buf pane) line1-start (:selected-tag pane))]
            (support/check :pane-renders-view
                           (and (= "*1" header) (= "3 items" info)
-                               (= 3 (count lines)) (= "1-3 of 3" footer)
+                               (= 3 (count lines))
+                               (= "1-3 of 3 · ↑↓ move · ⏎ in · ← out · d def · m meta · v table" footer)
                                tag0? (not tag1?))
                           {:header header :info info :lines lines :footer footer
                            :tag0 tag0? :tag1 tag1?})))))))
@@ -123,7 +124,8 @@
                              :h-escape h-escape :closed @closed?}))))))))
 
 (defn row-pane-leaf
-  "A leaf view shows the leaf text verbatim and an empty footer."
+  "A leaf view shows the leaf text verbatim, and its footer is only the
+  hints after out (nothing to move over or go into)."
   [_ui]
   (go-row :row-pane-leaf support/check
     (with-pane (noop-opts)
@@ -133,7 +135,8 @@
          (let [text (g/buffer-text (:buf pane))
                footer (g/label-text (:footer pane))]
            (support/check :pane-leaf
-                          (and (= "\"hello\"" text) (= "" footer))
+                          (and (= "\"hello\"" text)
+                               (= "← out · d def · m meta · v table" footer))
                           {:text text :footer footer})))))))
 
 (defn row-pane-measure
@@ -195,6 +198,45 @@
   read back off pane's live footer label."
   [pane]
   (dec (Integer/parseInt (first (str/split (g/label-text (:footer pane)) #"-")))))
+
+(defn row-inspect-focus-after-open
+  "I3 + I4, on the panel's FIRST open in this real window (every P2.T1
+  row above builds its own throwaway pane -- :ui's own pane has never
+  been shown before this row runs): inspect-last! grabs the rows view's
+  own focus, so Return goes into the panel instead of inserting a
+  newline in the editor's own buffer (I3); and the :start it sends
+  carries the SAME :cols/:rows a measure taken right after opening gives,
+  not the zero-floor measure an unallocated view would give (I4:
+  show-inspector-panel! used to measure in the very callback that first
+  makes the root visible, before GTK's own layout pass had ever run).
+  A self-contained REPL entry: every later P2.T2 row's own
+  :inspect-last!* resets inspector-state to nil before its own :start
+  anyway, so this row's own :in step below can't leak into what
+  row-inspect-last-after-repl and row-inspect-in-out expect next."
+  [ui]
+  (go-row :row-inspect-focus-after-open support/check
+    (let [pane (:inspector ui) win (:window ui) ed (:editor ui)
+          [submitted? _] (submit-repl! ui "[1 2 3]" 3000)]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 2000 20
+                                 #(and (pos? (g/gtk-widget-get-visible (:root pane)))
+                                       (= "*1" (g/label-text (:header pane)))))
+            focused? (await-until 2000 20 #(inspector-pane/focused? pane win))
+            sent (on-gtk ((:inspector-last-args* ui)))
+            measured (on-gtk (inspector-pane/measure pane))
+            before (on-gtk (editor/editor-text ed))
+            h (on-gtk (inspector-pane/dispatch-key! pane KEY-RETURN))
+            after (on-gtk (editor/editor-text ed))
+            ;; Let the async :in round trip settle before the next row's
+            ;; own :inspect-last!* -- ruling 9 drops a fresh :start while
+            ;; one request is still pending.
+            settled? (await-until 2000 20 #(str/includes? (g/label-text (:header pane)) "/"))]
+        (on-gtk
+         (support/check :row-inspect-focus-after-open
+                        (and submitted? opened? focused? (= 1 h) (= before after) settled?
+                             (= (:cols sent) (:cols measured)) (= (:rows sent) (:rows measured)))
+                        {:submitted submitted? :opened opened? :focused focused? :settled settled?
+                         :h h :before before :after after :sent sent :measured measured}))))))
 
 (defn row-inspect-last-after-repl
   "A REPL entry {:a [1 2 {:b 3}]}, then :inspect-last!*: within 2000 ms the
@@ -389,6 +431,51 @@
                                :submitted2 submitted2?
                                :answer-console (support/since ui mark2)})))))))))
 
+(defn row-inspect-def-keeps-selection
+  "Minor: on-inspector-def sets :pending :keep before sending :def, so a
+  successful def leaves the selected row exactly where it was instead
+  of resetting to 0 (inspect.clj's on-reply default). A fresh REPL
+  entry with three rows, Down once to select row 1, d + a name: the
+  view is unchanged (still three rows) and row 1, not row 0, keeps the
+  selected tag afterward.
+
+  A flat 3-entry MAP, not a vector: row-inspect-form's own opened? check
+  right after this row looks for a PersistentVector of 3 items
+  (jonquil.gtk.window's own comment on row-inspect-page-edge/row-
+  inspect-table-meta names this staleness trap -- \"this fresh reply
+  landed\" vs. \"still showing the last value\" -- and a 3-item vector
+  left here would satisfy that check on the OLD reply, before its own
+  real one lands). PersistentArrayMap never collides with it."
+  [ui]
+  (go-row :row-inspect-def-keeps-selection support/check
+    (let [pane (:inspector ui)
+          [submitted? _] (submit-repl! ui "{:a 1 :b 2 :c 3}" 3000)]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 2000 20
+                                 #(and (= "*1" (g/label-text (:header pane)))
+                                       (str/includes? (g/label-text (:info pane))
+                                                      "PersistentArrayMap · 3 items")))]
+        (on-gtk (inspector-pane/dispatch-key! pane KEY-DOWN))
+        (let [lines (on-gtk (str/split-lines (g/buffer-text (:buf pane))))
+              line1-start (inc (count (first lines)))
+              tag1-before? (on-gtk (g/has-tag-at? (:buf pane) line1-start (:selected-tag pane)))
+              mark (on-gtk (support/out-end-offset ui))
+              dp (:def-popover pane)]
+          (on-gtk (inspector-pane/dispatch-key! pane KEY-D)
+                  (g/gtk-editable-set-text (:entry dp) "row-def-demo")
+                  (let [name (str/trim (or (g/editable-text (:entry dp)) ""))]
+                    (popover/hide! dp)
+                    (when (seq name) ((:on-def pane) name))))
+          (let [defined? (await-until 2000 20
+                                      #(str/includes? (support/since ui mark) "; Defined #'user/row-def-demo"))]
+            (on-gtk
+             (let [tag1-after? (g/has-tag-at? (:buf pane) line1-start (:selected-tag pane))
+                   tag0-after? (g/has-tag-at? (:buf pane) 0 (:selected-tag pane))]
+               (support/check :row-inspect-def-keeps-selection
+                              (and submitted? opened? tag1-before? defined? tag1-after? (not tag0-after?))
+                              {:submitted submitted? :opened opened? :tag1-before tag1-before?
+                               :defined defined? :tag1-after tag1-after? :tag0-after tag0-after?})))))))))
+
 (defn row-inspect-form
   "Editor text (vec (range 3)) with the caret inside, :inspect-form!*:
   do-run-form!'s own flash+echo+eval, and an :ok result opens the inspector
@@ -439,3 +526,49 @@
            (support/check :row-inspect-cols-match
                           (and opened? (= sent-cols measured-cols))
                           {:sent-cols sent-cols :measured-cols measured-cols})))))))
+
+(defn row-inspect-def-prompt-escape-safe
+  "I5: the def prompt joins the window's own close-popovers registry, so
+  Escape closes it before it can fall through to Stop (ruling 8),
+  instead of Stopping a running program the way an unregistered popover
+  did. A program running ((Thread/sleep 5000) via Run), the def prompt
+  open (continuing from row-inspect-cols-match's own open panel):
+  Escape must close the prompt and leave the program running, then Stop
+  ends it cleanly."
+  [ui]
+  (go-row :row-inspect-def-prompt-escape-safe support/check
+    (let [pane (:inspector ui) cv (:console ui) dp (:def-popover pane)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(Thread/sleep 5000)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          running? (await-until 2000 20 #(not (support/idle? ui)))]
+      (on-gtk (inspector-pane/dispatch-key! pane KEY-D))
+      (let [prompt-open? (await-until 2000 20 #(popover/open? dp))
+            handled (on-gtk ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil))
+            prompt-closed? (await-until 2000 20 #(not (popover/open? dp)))
+            still-running? (not (support/idle? ui))]
+        (on-gtk ((:stop!* ui)))
+        (let [stopped? (await-until 3000 20 #(support/idle? ui))]
+          (support/check :row-inspect-def-prompt-escape-safe
+                         (and running? prompt-open? (= 1 handled) prompt-closed?
+                              still-running? stopped?)
+                         {:running running? :prompt-open prompt-open? :handled handled
+                          :prompt-closed prompt-closed? :still-running still-running?
+                          :stopped stopped? :text (support/since ui mark)}))))))
+
+;; The "ev* swap hides the panel" minor (apply-selection!, window.clj) has
+;; no row here: apply-selection!'s evaluator-swap branch always builds a
+;; BRAND NEW evaluator via (ev/make sel), even when the newly selected
+;; profile is Jolt in-process again -- there's no way back to the exact
+;; instance the window started with. gtk-selftest-window.support/idle?
+;; (and so every row anywhere in this whole suite that calls it) reads
+;; (:ctx (:session ui)), a FIXED reference to THAT original instance
+;; captured once at window construction, never updated after a swap. A
+;; row here that opened a different dialect's file and then "restored"
+;; the default one would leave every later row's own idle?/support/check
+;; reading a session nothing runs against any more -- measured: it broke
+;; window-keys/row-command-chord-close's own started? check two groups
+;; later. The fix itself (window.clj's apply-selection!, two lines: hide
+;; the root, reset inspector-state to nil) is verified by reading, not by
+;; a row in this shared harness.

@@ -76,25 +76,25 @@
   (g/gtk-label-set-text (:footer pane) (str "; " msg))
   nil)
 
-(defn- schedule-note-clear!
-  "Arms a one-shot g_timeout_add that drops state's own :note/:defd from
-  the footer after NOTE-CLEAR-MS -- but only while pane's current state is
-  STILL exactly this same state (identical?, a plain reference check: each
-  show-state! call is handed a distinct map, so a later show-state! -- a
-  fresh reply, a local move, another note -- makes this a no-op instead of
-  wiping something newer)."
-  [pane state]
-  (g/g-timeout-add
-   NOTE-CLEAR-MS
-   (callable (fn [_data]
-               (try
-                 (when (identical? state @(:state pane))
-                   (swap! (:state pane) dissoc :note :defd)
-                   (set-footer-text! pane @(:state pane)))
-                 (catch :default e (report-error! pane (ex-message e))))
-               0) ;; G_SOURCE_REMOVE: never repeats
-             [:pointer] :int)
-   ffi/null)
+(def ^:private NOTE-POLL-MS
+  ;; estimate: frequent enough that a note's clear lands close to its own
+  ;; NOTE-CLEAR-MS deadline, far enough apart not to spin the main loop.
+  100)
+
+(defn- arm-note-clear!
+  "Pushes pane's own note-clear deadline NOTE-CLEAR-MS out from now, and
+  arms its single repeating note-clear-cb (built once in make-pane, per
+  jonquil.gtk.window/make-flash-fn's own pattern -- jonquil.gtk.callbacks
+  retains every callable for the process's life, so a fresh one per note
+  would leak) if it isn't already running. The callback itself (below)
+  polls the shared deadline, so a LATER note/def pushing it out can't
+  have an EARLIER one's own already-armed timer clear it early -- the
+  bug a fresh callable per note, each checking identical? against a
+  single shared target, would have had."
+  [pane]
+  (reset! (:note-clear-deadline pane) (+ (System/nanoTime) (* NOTE-CLEAR-MS 1000000)))
+  (when (compare-and-set! (:note-clear-armed? pane) false true)
+    (g/g-timeout-add NOTE-POLL-MS (:note-clear-cb pane) ffi/null))
   nil)
 
 (defn- mark-selected!
@@ -136,7 +136,7 @@
   (reset! (:state pane) state)
   (render! pane state)
   (when (or (:note state) (:defd state))
-    (schedule-note-clear! pane state))
+    (arm-note-clear! pane))
   nil)
 
 ;; --- stepping: key-step/click-step, always shown at once ------------------
@@ -251,6 +251,55 @@
          :rows (max 5 (quot view-height line-height))})
       (finally (ffi/free out) (g/g-object-unref layout)))))
 
+(def ^:private ALLOCATE-WAIT-MS
+  ;; I4's own cap: long enough for GTK's own layout pass to run, short
+  ;; enough that a stuck layout doesn't leave the first open waiting
+  ;; forever.
+  1000)
+
+(def ^:private ALLOCATE-POLL-MS
+  ;; estimate: frequent enough to catch the layout pass promptly.
+  16)
+
+(defn allocated?
+  "True once the rows view has a real, positive width and height -- a
+  layout pass has run over it. GTK-thread only."
+  [pane]
+  (let [view (:view pane)]
+    (and (pos? (g/gtk-widget-get-width view)) (pos? (g/gtk-widget-get-height view)))))
+
+(defn measure-when-ready!
+  "Calls (f (measure pane)) once the rows view is allocated, or after
+  ALLOCATE-WAIT-MS, whichever comes first (I4): the first open in a
+  window makes the root visible and would otherwise measure in that
+  SAME callback, before GTK's own layout pass has ever run over it, so
+  gtk-widget-get-width/height read 0 and measure's own floors
+  (:cols 20 :rows 5) apply. Already allocated (every open after the
+  first): calls f at once, synchronously. Otherwise polls with a
+  repeating g_timeout_add -- GTK-thread only, never parks -- and falls
+  back to measure's own floors once the cap is reached, so f is always
+  called exactly once either way (ruling 9: the caller's in-flight flag
+  is released through f's own request, on every path, including this
+  fallback)."
+  [pane f]
+  (if (allocated? pane)
+    (f (measure pane))
+    (let [start (System/nanoTime)]
+      (g/g-timeout-add
+       ALLOCATE-POLL-MS
+       (callable (fn [_data]
+                   (try
+                     (if (or (allocated? pane)
+                             (>= (/ (- (System/nanoTime) start) 1e6) ALLOCATE-WAIT-MS))
+                       (do (f (measure pane)) 0) ;; G_SOURCE_REMOVE
+                       1) ;; G_SOURCE_CONTINUE
+                     (catch :default e
+                       (report-error! pane (ex-message e))
+                       0)))
+                 [:pointer] :int)
+       ffi/null)))
+  nil)
+
 (defn focus!
   [pane]
   (g/gtk-widget-grab-focus (:view pane))
@@ -278,10 +327,11 @@
   the returned map's :state atom.
 
   Returns {:root :view :buf :header :info :table-header :footer
-  :def-popover :state (atom nil) :size (atom nil)} plus internal
-  bookkeeping (:back-btn etc, :selected-tag, :on-request/:on-close/
-  :on-def) show-state!/measure/focus!/focused? and this namespace's own
-  button/key/click handlers read back."
+  :def-popover :state (atom nil)} plus internal bookkeeping (:back-btn
+  etc, :selected-tag, :note-clear-cb/:note-clear-deadline/:note-clear-
+  armed?, :on-request/:on-close/:on-def) show-state!/measure/focus!/
+  focused? and this namespace's own button/key/click handlers read
+  back."
   [{:keys [on-request on-close on-def]}]
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
         header (g/gtk-label-new "")
@@ -308,10 +358,35 @@
         def-popover (popover/make-popover view {:autohide? true :position :bottom})
         keyctl (g/gtk-event-controller-key-new)
         click (g/gtk-gesture-click-new)
+        ;; state/note-clear-deadline/armed? are hoisted out of the pane
+        ;; map literal (rather than built as `(atom nil)` inline there)
+        ;; so note-clear-cb, below, can close over the SAME atoms before
+        ;; pane itself exists -- one callable for the pane's whole
+        ;; lifetime (make-flash-fn's own pattern), never one per note.
+        state (atom nil)
+        note-clear-deadline (atom 0)
+        note-clear-armed? (atom false)
+        note-clear-cb
+        (callable (fn [_data]
+                    (try
+                      (if (>= (System/nanoTime) @note-clear-deadline)
+                        (do (reset! note-clear-armed? false)
+                            (swap! state dissoc :note :defd)
+                            (g/gtk-label-set-text footer (footer-text @state))
+                            0) ;; G_SOURCE_REMOVE
+                        1) ;; G_SOURCE_CONTINUE: the deadline moved out
+                      (catch :default e
+                        (reset! note-clear-armed? false)
+                        (g/gtk-label-set-text footer (str "; " (ex-message e)))
+                        0)))
+                  [:pointer] :int)
         pane {:root root :view view :buf buf :header header :info info
               :table-header table-header :footer footer
               :def-popover (assoc def-popover :entry def-entry)
-              :state (atom nil) :size (atom nil)
+              :state state
+              :note-clear-cb note-clear-cb
+              :note-clear-deadline note-clear-deadline
+              :note-clear-armed? note-clear-armed?
               :selected-tag selected-tag
               :back-btn back-btn :meta-btn meta-btn :table-btn table-btn
               :def-btn def-btn :close-btn close-btn

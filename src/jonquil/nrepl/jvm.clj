@@ -521,7 +521,16 @@
         (let [result
               (let [{:keys [conn session ops]} @state]
                 (cond
-                  (not (client/open? conn)) {:error clj/inspect-not-attached}
+                  ;; I2: a nil :conn is "never attached" (inspect-not-
+                  ;; attached, "Run something first"); a non-nil :conn
+                  ;; that's no longer open was attached and dropped (the
+                  ;; connection's own reader thread flips client/open? to
+                  ;; false on EOF, but leaves :conn in place until the
+                  ;; NEXT connect! or an explicit detach!) -- that case
+                  ;; is clj/lost-connection, same sentence and :lost? true
+                  ;; the in-flight-request drop below already answers.
+                  (nil? conn) {:error clj/inspect-not-attached}
+                  (not (client/open? conn)) {:error clj/lost-connection :lost? true}
                   (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
                   :else
                   (let [r (client/request-sync conn (assoc (inspect-request op args) :session session)

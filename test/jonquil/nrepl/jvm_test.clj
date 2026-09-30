@@ -789,6 +789,21 @@
         (fake/drop-connections! srv)
         (is (= {:error clj/lost-connection :lost? true} (deref done 2000 :timeout)))))))
 
+(deftest inspect-lost-connection-idle-test
+  ;; I2: the connection drops while the panel is IDLE (nothing in flight),
+  ;; not mid round-trip like inspect-lost-connection-test above. :conn is
+  ;; non-nil but closed (connect! never nils it back out on a passive
+  ;; drop -- only detach!/a fresh connect! does), so this must answer
+  ;; clj/lost-connection, never clj/inspect-not-attached.
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (fake/drop-connections! srv)
+        (wait-until! (fn [] (not (connection/connected? e))))
+        (is (= {:error clj/lost-connection :lost? true}
+               (inspect-sync e :start {:rows 10 :cols 40} 2000)))))))
+
 (deftest inspect-on-view-once-test
   ;; on-view is called exactly once on each path above (count calls; wait 200 ms after the first)
   (testing "not attached"

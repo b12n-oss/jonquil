@@ -24,6 +24,7 @@
 ;; private to that namespace.
 (def ^:private KEY-RETURN 0xff0d)
 (def ^:private KEY-LEFT 0xff51)
+(def ^:private KEY-M 0x06d)
 
 (def fixture-core-text
   ;; The spike fixture's exact text (its own gitignored planning-store
@@ -150,6 +151,24 @@
                              {:label (label ui) :sensitive (g/gtk-widget-get-sensitive chk)
                               :active (g/gtk-check-button-get-active chk)
                               :tooltip (g/tooltip-text chk) :ops (fake/ops-seen (srv))})))))
+
+(defn row-clj-inspect-before-run
+  "I1 scenario A: Cmd/Ctrl+I before any Run. inspectable? is true (:ops
+  is still empty, ruling 5), so the panel opens and :start's own reply
+  is {:error clj/inspect-not-attached} -- a fresh, nil-state :error
+  reply (jonquil.inspect/open) must show that sentence in the footer,
+  not throw computing position text from a view with no :start."
+  [ui]
+  (go-row :clj-inspect-before-run support/check
+    (let [pane (:inspector ui)]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [shown? (await-until 2000 20
+                                #(str/includes? (g/label-text (:footer pane)) clj/inspect-not-attached))]
+        (on-gtk
+         (support/check :clj-inspect-before-run
+                        (and (pos? (g/gtk-widget-get-visible (:root pane))) shown?)
+                        {:shown shown? :footer (g/label-text (:footer pane))
+                         :visible (g/gtk-widget-get-visible (:root pane))}))))))
 
 (defn row-clj-run-moves-prompt
   "Run is load-file over the fixture: the console shows the value line,
@@ -405,6 +424,40 @@
          (support/check :clj-inspect-lost-connection
                         (and (= 1 h) sent? shown? (every? zero? sensitive))
                         {:h h :sent sent? :shown shown? :footer footer :sensitive sensitive}))))))
+
+(defn row-clj-inspect-lost-idle
+  "I2: the server dies while the panel is IDLE (nothing in flight),
+  unlike row-clj-inspect-lost-connection above, which drops mid round-
+  trip. Picks up from that row's own dead connection: a plain REPL
+  entry reconnects (mirroring row-clj-reconnects-after-restart), a
+  fresh :inspect-last!* opens a live, enabled view, then the connection
+  drops again with nothing pending. The next key must answer
+  jonquil.clj/lost-connection, never clj/inspect-not-attached (jvm.clj's
+  inspect! distinguishes a never-attached :conn, nil, from one that was
+  open and dropped, non-nil but closed)."
+  [ui]
+  (go-row :clj-inspect-lost-idle support/check
+    (let [cv (:console ui)
+          pane (:inspector ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          reconnected? (await-until 5000 20
+                                    #(and (idle? ui) (str/includes? (support/since ui mark) "=> 3")))]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 2000 20 #(pos? (g/gtk-widget-get-visible (:root pane))))
+            _ (fake/drop-connections! (srv))
+            not-running? (await-until 2000 20 #(= "Clojure (JVM) (not running)" (label ui)))
+            h (on-gtk (inspector-pane/dispatch-key! pane KEY-M))
+            shown? (await-until 2000 20 #(str/includes? (g/label-text (:footer pane)) clj/lost-connection))]
+        (on-gtk
+         (let [footer (g/label-text (:footer pane))]
+           (support/check :clj-inspect-lost-idle
+                          (and reconnected? opened? not-running? (= 1 h) shown?
+                               (not (str/includes? footer clj/inspect-not-attached)))
+                          {:reconnected reconnected? :opened opened? :not-running not-running?
+                           :h h :shown shown? :footer footer})))))))
 
 (defn row-clj-reset-tick-round-trip
   "Reset on Run's tick through a switch to Jolt and back. The window
