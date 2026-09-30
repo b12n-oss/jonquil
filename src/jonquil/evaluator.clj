@@ -62,6 +62,21 @@
     {:status :not-found} (the namespace answered but doesn't know sym,
     so doc was never sent)."))
 
+(defprotocol Inspector
+  "P1.T3: inspecting the value an evaluator's last :ok result produced,
+  through jonquil.inspect.view's lifted ops. op and args are
+  jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
+  :def), except :start takes {:rows :cols} (the evaluator supplies the
+  value) and :def takes {:name} (the evaluator supplies the target
+  namespace). on-view is called exactly once, from any thread, with a
+  view map (jonquil.inspect.view/run-op's shape) or {:error s} (plus
+  :lost? true when the connection that would have answered it is gone),
+  and never throws out."
+  (inspect! [ev op args on-view]
+    "Runs one inspector op off the caller's thread.")
+  (inspectable? [ev]
+    "true when this evaluator can currently answer inspect! requests."))
+
 (defmulti make
   "A new, not yet started evaluator for a jonquil.dialect/select result,
   dispatched on its :runtime. Each implementation's namespace adds its

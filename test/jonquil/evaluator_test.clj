@@ -75,6 +75,11 @@
   (is (not (satisfies? ev/FullDoc (ev/make {:runtime :in-process}))))
   (is (not (satisfies? ev/FullDoc (ev/make {:profile jonquil.dialect/cljd :runtime :attach :project-dir "/nowhere"})))))
 
+(deftest inspector-protocol-test
+  (is (satisfies? ev/Inspector (ev/make {:runtime :in-process})))
+  (is (true? (ev/inspectable? (ev/make {:runtime :in-process}))))
+  (is (not (satisfies? ev/Inspector (ev/make {:profile jonquil.dialect/cljd :runtime :attach :project-dir "/nowhere"})))))
+
 (deftest help-matches-docs-test
   (let [e (fresh)]
     (run e "(defn helped \"Helps.\" [x] x)" true)

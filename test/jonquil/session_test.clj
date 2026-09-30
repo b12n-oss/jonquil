@@ -1,11 +1,20 @@
 (ns jonquil.session-test
   (:require [clojure.test :refer [deftest is testing]]
+            [jonquil.evaluator :as ev]
             [jonquil.session :as session]))
 
 (defn- run [f s code]
   (let [done (promise)]
     (f s code {:on-complete (fn [r] (deliver done r))})
     (deref done 5000 :timeout)))
+
+(defn- run-sync [s code] (run session/run-definitions! s code))
+(defn- repl-sync [s code] (run session/submit-repl! s code))
+
+(defn- inspect-sync [s op args]
+  (let [p (promise)]
+    (ev/inspect! s op args (fn [r] (deliver p r)))
+    (deref p 2000 :timeout)))
 
 (deftest namespaces-created-test
   (is (= #{'b} (session/namespaces-created ['a] ['a 'b 'lib] ['lib])))
@@ -61,3 +70,33 @@
       (let [r (deref done 3000 :timeout)]
         (is (= :ok (:status r)))
         (is (= 1 (:value r)))))))
+
+(deftest last-value-test
+  (let [s (session/make-session)]
+    (run-sync s "{:a [1 2]}")
+    (is (= "PersistentArrayMap · 1 items" (:info (inspect-sync s :start {:rows 10 :cols 40}))))
+    (repl-sync s "(throw (ex-info \"no\" {}))")
+    (is (= "PersistentArrayMap · 1 items" (:info (inspect-sync s :start {:rows 10 :cols 40})))
+        "an error leaves the last value")
+    (repl-sync s "[7 8 9]")
+    (is (= "*1 / 1" (:path (do (inspect-sync s :start {:rows 10 :cols 40})
+                               (inspect-sync s :in {:idx 1})))))))
+
+(deftest inspect-def-test
+  (let [s (session/make-session)]
+    (repl-sync s "(ns scratch.inspect)")
+    (repl-sync s "{:k 42}")
+    (inspect-sync s :start {:rows 10 :cols 40})
+    (inspect-sync s :in {:idx 0})
+    (is (= "#'scratch.inspect/answer" (:defd (inspect-sync s :def {:name "answer"}))))
+    (is (= 42 @(ns-resolve 'scratch.inspect 'answer)))))
+
+(deftest inspect-throw-test
+  ;; Review focus 4: a value whose datafy throws answers with a :note, and
+  ;; on-view still fires exactly once.
+  (let [s (session/make-session) calls (atom 0) p (promise)]
+    (repl-sync s "(reify clojure.core.protocols/Datafiable (datafy [_] (throw (ex-info \"boom\" {}))))")
+    (ev/inspect! s :start {:rows 10 :cols 40} (fn [r] (swap! calls inc) (deliver p r)))
+    (is (= "boom" (:note (deref p 2000 :timeout))))
+    (Thread/sleep 100)
+    (is (= 1 @calls))))
