@@ -85,24 +85,6 @@
     (try (f srv dir file)
          (finally (fake/stop! srv) (delete-tree! dir)))))
 
-(defn- stop-tolerating-reply-race!
-  "fake/stop! for a server whose evaluate! future may have raced its own
-  reply-after-interrupt write against this test's own client-side detach!
-  (stop! closes the socket almost at once after a successful send, per
-  I1's own ruling). The fake's per-connection :closed promise (fake_jvm_
-  nrepl.clj:270) is only ever realized by drop-connections!, never by
-  serve-connection!'s own EOF-triggered exit, so a reply landing after
-  THAT exit can throw Socket closed; evaluate!'s own catch clause then
-  tries to reply the error and throws the same way, escaping its future
-  uncaught (measured: 100% reproducible against interrupt-then-stop-test
-  and stop-alone-while-running-test). fake/stop!'s own cleanup deref
-  would otherwise rethrow that here. This is a diagnosed, benign race in
-  the shared fake harness, not a jvm.clj bug -- the assertions each
-  caller runs before this already prove Jonquil's own client-side
-  behaviour."
-  [srv]
-  (try (fake/stop! srv) (catch Throwable _ nil)))
-
 (defn- wait-until!
   "Polls (pred) every 20ms, up to ~5s, for a background worker to reach a
   point a test needs to synchronize on (a request landing at the fake, or
@@ -285,12 +267,9 @@
   ;; socket) rather than a real reply from the fake, so it can resolve
   ;; before the fake has actually logged the op it already received on
   ;; the wire; wait-until! gives that a moment to catch up instead of
-  ;; asserting against it synchronously. Not with-project: its own
-  ;; fake/stop! cleanup needs stop-tolerating-reply-race! here (see that
-  ;; fn's docstring).
-  (let [srv (fake/start! {:slow {"(slow)" 5000}})
-        [dir _] (temp-project (str (:port srv)))]
-    (try
+  ;; asserting against it synchronously.
+  (with-project {:slow {"(slow)" 5000}}
+    (fn [srv dir _]
       (let [e (make dir) done (promise)]
         (ev/eval! e "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
         (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
@@ -300,17 +279,12 @@
         (wait-until! (fn [] (some #{"interrupt"} (fake/ops-seen srv))))
         (is (some #{"interrupt"} (fake/ops-seen srv)))
         (wait-until! (fn [] (not (connection/connected? e))))
-        (is (not (connection/connected? e))))
-      (finally
-        (stop-tolerating-reply-race! srv)
-        (delete-tree! dir)))))
+        (is (not (connection/connected? e)))))))
 
 (deftest stop-alone-while-running-test
-  ;; Not with-project: see interrupt-then-stop-test's own comment and
-  ;; stop-tolerating-reply-race!'s docstring.
-  (let [srv (fake/start! {:slow {"(slow)" 5000}})
-        [dir _] (temp-project (str (:port srv)))]
-    (try
+  ;; See interrupt-then-stop-test's comment.
+  (with-project {:slow {"(slow)" 5000}}
+    (fn [srv dir _]
       (let [e (make dir) done (promise)]
         (ev/eval! e "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
         (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
@@ -319,10 +293,7 @@
         (wait-until! (fn [] (some #{"interrupt"} (fake/ops-seen srv))))
         (is (some #{"interrupt"} (fake/ops-seen srv)))
         (wait-until! (fn [] (not (connection/connected? e))))
-        (is (not (connection/connected? e))))
-      (finally
-        (stop-tolerating-reply-race! srv)
-        (delete-tree! dir)))))
+        (is (not (connection/connected? e)))))))
 
 (deftest stop-while-idle-test
   (with-project {}

@@ -201,9 +201,14 @@
                           (recur (next fs) new-current last-value))
                       (recur (next fs) new-current v))))))))))
     (catch Throwable e
-      (reply {"err" (str (ex-message e) "\n")})
-      (reply {"ex" fail-ex-class "root-ex" fail-ex-class "status" ["eval-error"]})
-      (reply {"status" ["done"]}))))
+      ;; The error replies can throw too, when the client closed the
+      ;; socket while a reply was in flight (its Stop detaching at once).
+      ;; Nobody is listening then, so there's nothing left to answer.
+      (try
+        (reply {"err" (str (ex-message e) "\n")})
+        (reply {"ex" fail-ex-class "root-ex" fail-ex-class "status" ["eval-error"]})
+        (reply {"status" ["done"]})
+        (catch Throwable _ nil)))))
 
 (defn- handle!
   "Answers one request, incrementing srv's :busy count for its duration (a
