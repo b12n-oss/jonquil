@@ -385,15 +385,16 @@ whole buffer as `:ns-source` in their eval options, which only the
 attach evaluator reads, to decide whether it needs to switch namespaces
 first.
 
-### Plug points for a second dialect
+### Plug points for more dialects
 
-A second dialect exists now, ClojureDart, and it already proves out two
-of these seams. `jonquil.paint/paint-plan` takes the active profile as
-an argument, so highlighting and completion both draw on each profile's
-own `:special-forms` and `:builtins` rather than Jolt's alone, and a
-profile's `:port-file` is the whole seam a generic "attach to any
-nREPL" runtime would need: `jonquil.dialect/cljd` names `NREPL.lock`, a
-future profile would just name its own.
+Two more dialects exist now, ClojureDart and JVM Clojure, and they prove
+out two of these seams. `jonquil.paint/paint-plan` takes the active
+profile as an argument, so highlighting and completion both draw on each
+profile's own `:special-forms` and `:builtins` rather than Jolt's alone.
+A profile's `:port-file` is most of what an attach runtime needs:
+`jonquil.dialect/cljd` names `NREPL.lock` and `jonquil.dialect/clj`
+names `.nrepl-port`, while `jonquil.nrepl.connection` holds the connect,
+describe, clone and detach lifecycle both share.
 
 A few seams still carry Jolt's own shape rather than a profile's,
 though. `child/start!`'s launch args, its port scan, and the log text it

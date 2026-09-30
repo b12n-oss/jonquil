@@ -160,6 +160,11 @@ nor the smoke ever reads or writes `~/.config/jonquil/settings.edn`.
   still skip that cleanup. Run `pgrep -fl "nrepl-server 79"` afterward;
   anything it finds is a leftover from the run you just interrupted, so
   kill only those pids, never anything already there before you started.
+- **An interrupted `bb test:clj` can leave a JVM behind.** Its fixture
+  sends SIGTERM to the server it started on every ordinary exit path, but
+  a Ctrl-C midway can skip that. Run `pgrep -fl clojure-cli.repl.server`
+  afterward, and kill only a pid that run started, never a server of your
+  own.
 
 ## Quality: lint, format, and the git hooks
 
