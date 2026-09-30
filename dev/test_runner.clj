@@ -32,6 +32,7 @@
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
     jonquil.nrepl.attach-test
+    jonquil.nrepl.jvm-test
     jonquil.gtk.ffi-test])
 
 (def live-namespaces
