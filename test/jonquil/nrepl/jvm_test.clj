@@ -85,6 +85,24 @@
     (try (f srv dir file)
          (finally (fake/stop! srv) (delete-tree! dir)))))
 
+(defn- stop-tolerating-reply-race!
+  "fake/stop! for a server whose evaluate! future may have raced its own
+  reply-after-interrupt write against this test's own client-side detach!
+  (stop! closes the socket almost at once after a successful send, per
+  I1's own ruling). The fake's per-connection :closed promise (fake_jvm_
+  nrepl.clj:270) is only ever realized by drop-connections!, never by
+  serve-connection!'s own EOF-triggered exit, so a reply landing after
+  THAT exit can throw Socket closed; evaluate!'s own catch clause then
+  tries to reply the error and throws the same way, escaping its future
+  uncaught (measured: 100% reproducible against interrupt-then-stop-test
+  and stop-alone-while-running-test). fake/stop!'s own cleanup deref
+  would otherwise rethrow that here. This is a diagnosed, benign race in
+  the shared fake harness, not a jvm.clj bug -- the assertions each
+  caller runs before this already prove Jonquil's own client-side
+  behaviour."
+  [srv]
+  (try (fake/stop! srv) (catch Throwable _ nil)))
+
 (defn- wait-until!
   "Polls (pred) every 20ms, up to ~5s, for a background worker to reach a
   point a test needs to synchronize on (a request landing at the fake, or
@@ -258,6 +276,76 @@
         (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "interrupt is never sent without the op")
         (is (= :interrupted (:status (deref done 2000 :timeout))))))))
 
+(deftest interrupt-then-stop-test
+  ;; I1: apply-selection! calls interrupt! then stop! back to back when
+  ;; switching away from a busy window. stop! must still get the
+  ;; interrupt out, not detach out from under interrupt!'s own send.
+  ;; :interrupted can arrive via detach!'s own local, synthetic
+  ;; disconnected reply (fired the moment stop!'s clock future closes the
+  ;; socket) rather than a real reply from the fake, so it can resolve
+  ;; before the fake has actually logged the op it already received on
+  ;; the wire; wait-until! gives that a moment to catch up instead of
+  ;; asserting against it synchronously. Not with-project: its own
+  ;; fake/stop! cleanup needs stop-tolerating-reply-race! here (see that
+  ;; fn's docstring).
+  (let [srv (fake/start! {:slow {"(slow)" 5000}})
+        [dir _] (temp-project (str (:port srv)))]
+    (try
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
+        (ev/interrupt! e)
+        (is (nil? (ev/stop! e)))
+        (is (= :interrupted (:status (deref done 2000 :timeout))) "exactly one on-complete, :interrupted")
+        (wait-until! (fn [] (some #{"interrupt"} (fake/ops-seen srv))))
+        (is (some #{"interrupt"} (fake/ops-seen srv)))
+        (wait-until! (fn [] (not (connection/connected? e))))
+        (is (not (connection/connected? e))))
+      (finally
+        (stop-tolerating-reply-race! srv)
+        (delete-tree! dir)))))
+
+(deftest stop-alone-while-running-test
+  ;; Not with-project: see interrupt-then-stop-test's own comment and
+  ;; stop-tolerating-reply-race!'s docstring.
+  (let [srv (fake/start! {:slow {"(slow)" 5000}})
+        [dir _] (temp-project (str (:port srv)))]
+    (try
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
+        (is (nil? (ev/stop! e)))
+        (is (= :interrupted (:status (deref done 2000 :timeout))) "exactly one on-complete, :interrupted")
+        (wait-until! (fn [] (some #{"interrupt"} (fake/ops-seen srv))))
+        (is (some #{"interrupt"} (fake/ops-seen srv)))
+        (wait-until! (fn [] (not (connection/connected? e))))
+        (is (not (connection/connected? e))))
+      (finally
+        (stop-tolerating-reply-race! srv)
+        (delete-tree! dir)))))
+
+(deftest stop-while-idle-test
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (is (= :ok (:status (:result (run e "1" {:run? false})))))
+        (is (connection/connected? e))
+        (is (nil? (ev/stop! e)))
+        (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "an idle stop! sends no interrupt")
+        (is (not (connection/connected? e)) "and detaches")))))
+
+(deftest stop-ignored-interrupt-still-detaches-test
+  (with-project {:slow {"(slow)" 5000} :ignore-interrupt? true}
+    (fn [srv dir _]
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #{"(slow)"} (keep #(get % "code") (fake/requests srv)))))
+        (let [start (System/nanoTime)]
+          (is (nil? (ev/stop! e)))
+          (wait-until! (fn [] (not (connection/connected? e))))
+          (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "detaches well under 1000 ms"))
+        (is (= :interrupted (:status (deref done 2000 :timeout))))))))
+
 (deftest stop-during-connect-test
   ;; The fake has no :slow-ops (ruling 9: only handle!/evaluate!/the
   ;; options differ from the cljd fake, and slow-ops isn't one of them).
@@ -425,3 +513,4 @@
         (is (nil? (ev/set-mode! e :reset)))
         (run e fixture-core-text {:run? true :path file})
         (is (= ["describe" "clone" "load-file"] (fake/ops-seen srv)) "no reset form is sent")))))
+

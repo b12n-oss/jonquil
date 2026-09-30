@@ -175,8 +175,35 @@
   ;; connection: nothing to start.
   (start! [_] nil)
   (stop! [this]
-    (swap! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))
-    (connection/detach! this)
+    ;; I1: apply-selection! calls interrupt! then stop! back to back when
+    ;; switching away from a busy window. The old stop! detached at once,
+    ;; on the calling thread, before interrupt!'s own send future had a
+    ;; chance to run, so the interrupt never reached the server. This
+    ;; keys the decision on :running and an open conn, not on
+    ;; :stop-requested? being newly set here, so it still sends even when
+    ;; interrupt! already marked the stop -- a duplicate interrupt op for
+    ;; the same id is harmless, and interrupt!'s own send future firing
+    ;; too is fine. conn, session and id are read from old, the atomic
+    ;; pre-swap snapshot, so a later state change (a new evaluation,
+    ;; started only once this one's :running clears) can't hide them from
+    ;; this send.
+    (let [[old] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))
+          conn (:conn old)]
+      (if (and (:running old) (client/open? conn) (contains? (:ops old) "interrupt"))
+        (let [session (:session old)
+              id (get-in old [:running :id])
+              sent (promise)]
+          (future
+            (try
+              (client/send! conn {:op "interrupt" :session session :interrupt-id id})
+              (catch Throwable _ nil)
+              (finally (deliver sent true))))
+          (future
+            (try
+              (deref sent (:interrupt-timeout-ms timings) ::timeout)
+              (connection/detach! this)
+              (catch Throwable _ nil))))
+        (connection/detach! this)))
     nil)
   (eval! [this code opts]
     (when-not (:run? opts) (swap! history eval/history-add code))
