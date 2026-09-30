@@ -1068,14 +1068,22 @@
                                (on-gui!
                                 (fn []
                                   (try
-                                    (when (= id (select-keys (help/target (editor/snapshot ed)) [:symbol :start]))
-                                      (if (= :ok (:status result))
-                                        (do (close-popovers-fn full-doc-pop)
-                                            (help-popover/show-full-doc!
-                                             full-doc-pop (:text result)
-                                             (int (* 0.6 (g/gtk-widget-get-height win))))
-                                            (set-status! status-label "Ready"))
-                                        (set-status! status-label (help/full-doc-status symbol result))))
+                                    (cond
+                                      ;; The caret moved to another symbol while the
+                                      ;; server answered: drop the text, but don't
+                                      ;; leave "Loading full docs..." behind.
+                                      (not= id (select-keys (help/target (editor/snapshot ed)) [:symbol :start]))
+                                      (set-status! status-label "Ready")
+
+                                      (= :ok (:status result))
+                                      (do (close-popovers-fn full-doc-pop)
+                                          (help-popover/show-full-doc!
+                                           full-doc-pop (:text result)
+                                           (int (* 0.6 (g/gtk-widget-get-height win))))
+                                          (set-status! status-label "Ready"))
+
+                                      :else
+                                      (set-status! status-label (help/full-doc-status symbol result)))
                                     (catch :default e
                                       (set-status! status-label (str "; full doc: " (ex-message e))))))))))
             (let [doc (ev/lookup @ev* symbol (:text snap) start)]

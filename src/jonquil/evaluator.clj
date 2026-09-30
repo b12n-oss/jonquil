@@ -54,7 +54,8 @@
     text, never a namespace symbol -- jonquil.nrepl.jvm derives its own
     help-namespace from it (jonquil.clj/help-ns), so this protocol never
     leaks a JVM-specific rule into the window. on-result is called
-    exactly once, from a worker thread, with {:status :ok :text t},
+    exactly once, from any thread (at once on the caller's for
+    :not-attached and :no-op), with {:status :ok :text t},
     {:status :no-op}, {:status :timeout} or {:status :not-attached}."))
 
 (defmulti make
