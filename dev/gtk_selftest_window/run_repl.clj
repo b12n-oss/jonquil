@@ -207,7 +207,7 @@
 
 (defn row-run-selection-line
   "Caret on line 2, no selection: commands/run-selection-text (P3.T1) sends
-  the whole line. Asserts BOTH the echoed \"> (inc 41)\" (console-view/
+  the whole line. Asserts BOTH the echoed \"user=> (inc 41)\" (console-view/
   echo-entry!) and the real result \"=> 42\", so a path that evaluates
   without echoing (or echoes without evaluating) still fails."
   [ui]
@@ -220,7 +220,7 @@
                          ((:run-selection!* ui))
                          m))
           ok (await-until 3000 20 #(let [t (support/since ui mark)]
-                                     (and (str/includes? t "> (inc 41)") (str/includes? t "=> 42"))))]
+                                     (and (str/includes? t "user=> (inc 41)") (str/includes? t "=> 42"))))]
       (on-gtk (support/check :run-selection-line ok {:console (support/since ui mark)})))))
 
 (defn row-run-selection-sel

@@ -126,7 +126,9 @@
                                (and ok? attached?
                                     (str/includes? t "; Connecting to the app on port ")
                                     (str/includes? t "ClojureDart\n")
-                                    (not (str/includes? t "=> "))
+                                    ;; no value line; the live prompt
+                                    ;; (demo.drive=> ) also holds "=> "
+                                    (not-any? #(str/starts-with? % "=> ") (str/split-lines t))
                                     (= ["load-file" (:file @fixture*)] [(get req "op") (get req "file-path")])
                                     (= 'demo.drive (ev/prompt-ns (evaluator ui))))
                                {:ok? ok? :attached? attached? :label (label ui) :text t :req req}))))))

@@ -143,17 +143,31 @@
   (dialect/label sel (when (satisfies? connection/Attached e)
                        (if (connection/connected? e) :attached :not-running))))
 
+(defn- refresh-prompt!
+  "Makes the console's prompt read the window's evaluator's own namespace
+  (`user=> `, `demo.core=> `). Safe from any thread: the rewrite goes
+  through on-gui!, and a throw from prompt-ns or set-prompt! lands on the
+  console instead of reaching GTK."
+  [cv ev*]
+  (on-gui! (fn []
+             (try (cview/set-prompt! cv (str (or (ev/prompt-ns @ev*) 'user)))
+                  (catch :default e
+                    (cview/append! cv :error (str "; prompt: " (ex-message e) "\n")))))))
+
 (defn- watch-connection!
-  "For an attach evaluator e, keeps the dialect label in step with its
-  connection. The listener runs on whatever thread connected or lost the
-  socket, so it hands the label to the GTK thread, and it does nothing once
-  e is no longer the window's evaluator (a later switch made another)."
-  [e ev* sel* dialect-label]
+  "For an attach evaluator e, keeps the dialect label and the console's
+  prompt in step with its connection (a new connection is a fresh session,
+  back in its default namespace). The listener runs on whatever thread
+  connected or lost the socket, so it hands both to the GTK thread, and it
+  does nothing once e is no longer the window's evaluator (a later switch
+  made another)."
+  [e ev* sel* dialect-label cv]
   (when (satisfies? connection/Attached e)
     (connection/on-connection! e (fn [_]
                                    (on-gui! (fn []
                                               (when (identical? e @ev*)
-                                                (g/gtk-label-set-text dialect-label (dialect-text @sel* e)))))))))
+                                                (g/gtk-label-set-text dialect-label (dialect-text @sel* e))
+                                                (refresh-prompt! cv ev*))))))))
 
 (defn- apply-reset-toggle!
   "Reset on Run as dialect/reset-toggle decides for sel: unticked and
@@ -715,7 +729,7 @@
       (let [old @ev*
             new (doto (ev/make sel) registry/register!)]
         (ev/set-mode! new (mode-fn))
-        (watch-connection! new ev* sel* dialect-label)
+        (watch-connection! new ev* sel* dialect-label cv)
         (reset! ev* new)
         (g/gtk-widget-set-visible (:root pane) 0)
         (reset! inspector-state nil)
@@ -730,7 +744,8 @@
                  (cview/append! cv :error (str "; switch: " (ex-message ex) "\n")))
                (finally (registry/unregister! old))))
         (start-and-report! cv status-label new sel)))
-    (g/gtk-label-set-text dialect-label (dialect-text sel @ev*))))
+    (g/gtk-label-set-text dialect-label (dialect-text sel @ev*))
+    (refresh-prompt! cv ev*)))
 
 (defn- make-eval-opts
   "The opts run-definitions!/submit-repl! share (global.md: every one of
@@ -753,8 +768,12 @@
   unbalanced string argument to a nested load-string, since a genuinely
   unbalanced top-level REPL entry never reaches :eval at all per
   console/input-action) has nothing to do with whatever the Definitions
-  pane currently holds, and must not name it as the culprit."
-  [ed cv status-label is-run?]
+  pane currently holds, and must not name it as the culprit.
+
+  :on-complete also refreshes the console's prompt from ev*, since the
+  evaluation may have moved the session's namespace; every evaluator
+  updates its prompt-ns before it calls on-complete."
+  [ed cv ev* status-label is-run?]
   {:on-output (fn [kind s] (cview/append! cv kind s))
    :on-wait-input (fn [waiting?]
                     (set-status! status-label (if waiting? "Waiting for input" "Running…")))
@@ -778,6 +797,7 @@
                   (docs/clear-doc-cache!)
                   (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
+                  (refresh-prompt! cv ev*)
                   (let [[kind text] (console/result-line result)]
                     (cview/append! cv kind text))
                   (when (and is-run?
@@ -826,7 +846,7 @@
   [ed cv ev* status-label path-atom]
   (if (ev/evaluating? @ev*)
     (let [warning (ev/eval! @ev* (editor/editor-text ed)
-                            (assoc (make-eval-opts ed cv status-label true) :run? true :path @path-atom))]
+                            (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom))]
       (when warning (cview/append! cv :system warning)))
     (let [text (editor/editor-text ed)
           problem (commands/pre-run-problem text)]
@@ -835,7 +855,7 @@
       (if problem
         (do (cview/append! cv :error (str problem "\n"))
             (set-status! status-label "Ready"))
-        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv status-label true) :run? true :path @path-atom))]
+        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom))]
           (when warning (cview/append! cv :system warning)))))))
 
 (defn- do-stop!
@@ -872,7 +892,7 @@
   (cljd plan P2.T4); the in-process and nREPL evaluators ignore it."
   ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
   ([ed cv ev* status-label text extra-opts]
-   (let [warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv status-label false) :run? false)
+   (let [warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
                                             extra-opts))]
      (when warning (cview/append! cv :system warning)))))
 
@@ -1095,7 +1115,7 @@
     :else
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [text start end]} (commands/run-form snap)]
-        (let [base-opts (make-eval-opts ed cv status-label false)
+        (let [base-opts (make-eval-opts ed cv ev* status-label false)
               opts (assoc base-opts
                           :on-complete
                           (fn [result]
@@ -2180,9 +2200,10 @@
         (show-selection! cv dialect-label @sel*)
         ;; cljd plan P2.T4: the starting evaluator's connection, label and
         ;; Reset on Run, as apply-selection! does for every later one.
-        (watch-connection! @ev* ev* sel* dialect-label)
+        (watch-connection! @ev* ev* sel* dialect-label cv)
         (apply-reset-toggle! reset-chk reset-state @sel*)
         (g/gtk-label-set-text dialect-label (dialect-text @sel* @ev*))
+        (refresh-prompt! cv ev*)
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       ;; P1.T2 (cljd plan): the editor paints with the selected profile's

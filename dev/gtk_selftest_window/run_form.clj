@@ -153,10 +153,10 @@
   says why.
 
   Fix round (audit/measured): since is always non-empty -- it includes the
-  live \"> \" prompt -- so \"nothing echoed\" is asserted against a
+  live \"user=> \" prompt -- so \"nothing echoed\" is asserted against a
   BASELINE captured right before the action, the same pattern
   run-repl/row-run-selection-blank uses, never a literal
-  (not (str/includes? t \"> \")), which can never pass."
+  (not (str/includes? t \"user=> \")), which can never pass."
   [ui]
   (go-row :run-form-nothing-at-caret support/check
     (let [[mark baseline] (on-gtk (let [m (support/out-end-offset ui)

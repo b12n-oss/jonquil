@@ -327,7 +327,7 @@
   (editor/set-text! leaves the caret at the end, the same fact
   binary_smoke.clj's own step-run-selection! measured live and depends
   on), run via :run-selection!* -- the exact fn Cmd+E calls
-  (do-run-selection!). It echoes \"> (* 6 7)\" to the console, then
+  (do-run-selection!). It echoes \"user=> (* 6 7)\" to the console, then
   evaluates it through the same REPL path a typed entry uses, showing
   \"=> 42\" underneath."
   [ui]
@@ -579,14 +579,15 @@
 
 (defn- clj-run-demo!
   "Sets the demo text, Runs it, and waits for the load's value line. The
-  first Run also connects."
+  first Run also connects. The value line is matched at a line start,
+  since the live prompt (user=> ) holds \"=> \" before the Run even starts."
   [ui text]
   (go
     (let [mark (on-gtk (let [m (out-end-offset ui)]
                          (editor/set-text! (:editor ui) text)
                          ((:run!* ui))
                          m))]
-      (await-until 20000 20 #(and (clj-idle? ui) (str/includes? (since ui mark) "=> "))))))
+      (await-until 20000 20 #(and (clj-idle? ui) (str/includes? (since ui mark) "\n=> "))))))
 
 (defn- scene-clj-attach
   "Run attaches to the server and loads the buffer, then two REPL entries
