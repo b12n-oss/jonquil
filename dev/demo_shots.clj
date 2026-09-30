@@ -40,19 +40,23 @@
   synthesized -- console input is inserted the same way dev/gtk_selftest_
   window.clj's stdin/REPL rows do it, via gtk_text_buffer_insert_
   interactive_at_cursor + handle-return!."
-  (:require [clojure.core.async :as a :refer [<! go timeout]]
+  (:require [clj-server]
+            [clojure.core.async :as a :refer [<! go timeout]]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [gtk-async :as ga :refer [on-gtk await-until go-row]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]
             [jonquil.main :as main]))
 
@@ -497,6 +501,108 @@
                       {:opened ok :screenshot-exit exit :screenshot-err err})
               (popover/hide! rp)))))
 
+;; --- JVM Clojure scenes ----------------------------------------------------
+;; These three run against a REAL clojure -M:serve (clojure-cli.repl), which
+;; -main starts through dev/clj_server.clj before the window opens, in a
+;; temp project with .jonquil.edn {:dialect :clj}, and stops after the
+;; window closes. They need Java 17+ and the clojure CLI, the same as
+;; bb test:clj. Each scene sets its own buffer text (set-text! never marks
+;; the buffer dirty, so the window still closes without a prompt), and
+;; Run loads that text into the server.
+
+(def ^:private clj-demo-text
+  "(ns demo.core
+  \"A small namespace to try Jonquil's JVM attach on.\")
+
+(defn greet
+  \"Says hello to someone.\"
+  [who]
+  (str \"Hello, \" who \"!\"))
+
+(defn shout [s] (.toUpperCase s))
+")
+
+(defn- clj-evaluator [ui] ((:evaluator* ui)))
+(defn- clj-idle? [ui] (not (ev/evaluating? (clj-evaluator ui))))
+
+(defn- clj-enter!
+  "Types code at the console prompt and presses Return, the same way
+  scene-repl does, and returns the console offset before it."
+  [ui code]
+  (let [cv (:console ui) m (out-end-offset ui)]
+    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) code -1 1)
+    (cview/handle-return! cv false)
+    m))
+
+(defn- clj-run-demo!
+  "Sets the demo text, Runs it, and waits for the load's value line. The
+  first Run also connects."
+  [ui text]
+  (go
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) text)
+                         ((:run!* ui))
+                         m))]
+      (await-until 20000 20 #(and (clj-idle? ui) (str/includes? (since ui mark) "=> "))))))
+
+(defn- scene-clj-attach
+  "Run attaches to the server and loads the buffer, then two REPL entries
+  run in the buffer's namespace: one returns a value, one prints first."
+  [ui]
+  (go-row :clj-attach check!
+    (let [run-ok? (<! (clj-run-demo! ui clj-demo-text))
+          m1 (on-gtk (clj-enter! ui "(greet \"Jonquil\")"))
+          ok1 (await-until 5000 20 #(and (clj-idle? ui) (str/includes? (since ui m1) "=> \"Hello, Jonquil!\"")))
+          m2 (on-gtk (clj-enter! ui "(do (println \"working...\") (shout \"done\"))"))
+          ok2 (await-until 5000 20 #(and (clj-idle? ui) (str/includes? (since ui m2) "=> \"DONE\"")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :clj-attach "png") (own-pid))]
+      (on-gtk (check! :clj-attach (and run-ok? ok1 ok2 (zero? exit))
+                      {:console (console-text ui) :screenshot-exit exit :screenshot-err err})))))
+
+(defn- scene-clj-quick-doc
+  "After a Run, quick doc on clojure.core's map: the server's own docs,
+  ending with the Defined in line for a definition inside a jar."
+  [ui]
+  (go-row :clj-quick-doc check!
+    (let [text (str clj-demo-text "\n(map shout [\"a\" \"b\"])\n")
+          run-ok? (<! (clj-run-demo! ui text))
+          hp (:help-popover ui)
+          _ (on-gtk (place-cursor! (:buf (:editor ui)) (+ 2 (str/index-of text "(map ")))
+                    ((:quick-doc!* ui)))
+          ok (await-until 5000 20 #(and (popover/open? hp)
+                                        (str/includes? (help-popover/quick-doc-text hp) "Defined in")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :clj-quick-doc "png") (own-pid))]
+      (on-gtk (check! :clj-quick-doc (and run-ok? ok (zero? exit))
+                      {:text (help-popover/quick-doc-text hp) :screenshot-exit exit :screenshot-err err})
+              (popover/hide! hp)))))
+
+(defn- scene-clj-full-doc
+  "Quick doc on map, then quick doc again: the server's doc op answers with
+  ClojureDocs' full entry, examples included. The first request downloads
+  the ClojureDocs export into the server's own temp config dir, so this
+  waits up to 40 s for it."
+  [ui]
+  (go-row :clj-full-doc check!
+    (let [text (str clj-demo-text "\n(map shout [\"a\" \"b\"])\n")
+          run-ok? (<! (clj-run-demo! ui text))
+          hp (:help-popover ui) fp (:full-doc-popover ui)
+          _ (on-gtk (place-cursor! (:buf (:editor ui)) (+ 2 (str/index-of text "(map ")))
+                    ((:quick-doc!* ui)))
+          quick-ok (await-until 5000 20 #(popover/open? hp))
+          _ (on-gtk ((:quick-doc!* ui)))
+          ok (await-until 40000 50 #(and (popover/open? fp)
+                                         (str/includes? (help-popover/full-doc-text fp) "clojure.core/map")))
+          _ (ga/settle 4)
+          {:keys [exit err]} (ga/screenshot (image-path :clj-full-doc "png") (own-pid))]
+      (on-gtk (check! :clj-full-doc (and run-ok? quick-ok ok (zero? exit))
+                      {:text (some-> (help-popover/full-doc-text fp) (subs 0 (min 200 (count (help-popover/full-doc-text fp)))))
+                       :screenshot-exit exit :screenshot-err err})
+              (popover/hide! fp)))))
+
+(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc})
+
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
@@ -517,7 +623,10 @@
    [:theme-navy scene-theme-navy]
    [:completion scene-completion]
    [:quick-doc scene-quick-doc]
-   [:rename scene-rename]])
+   [:rename scene-rename]
+   [:clj-attach scene-clj-attach]
+   [:clj-quick-doc scene-clj-quick-doc]
+   [:clj-full-doc scene-clj-full-doc]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
@@ -542,12 +651,15 @@
 
 (defn- run-scene
   "Resets the editor and the console's input, waits (up to 2000 ms) for the
-  engine to go idle, then runs scene and parks until its channel delivers."
+  window's evaluator to go idle, then runs scene and parks until its
+  channel delivers."
   [ui scene]
   (go-row :scene-reset check!
     (on-gtk (editor/set-text! (:editor ui) "")
             (cview/clear-input! (:console ui)))
-    (await-until 2000 20 #(idle? ui))
+    ;; The window's own evaluator, not the in-process session: a JVM
+    ;; scene's window has no in-process session to ask.
+    (await-until 2000 20 #(clj-idle? ui))
     (<! (scene ui))))
 
 (defn -main [& args]
@@ -558,17 +670,22 @@
                (str/join ", " (map (fn [[id _]] (name id)) scenes)))
           (log "got:" (pr-str (first args)))
           (System/exit 1))
-      (do
-        (main/start!
-         {:settings-path (fresh-settings-path)
-          :on-ready (fn [ui]
-                      (g/g-signal-connect-data (:window ui) "destroy"
-                                               (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
-                                                            [:pointer :pointer] :void)
-                                               ffi/null ffi/null g/CONNECT-DEFAULT)
-                      (go (<! (timeout 300))
-                          (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))] PER-SCENE-MS check!))
-                          (<! (timeout 50))
+      (let [srv (when (clj-scenes scene-id)
+                  (let [srv (clj-server/start!)]
+                    (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
+                    srv))]
+        (try
+          (main/start!
+           {:file (when srv (str (:dir srv) "/src/demo/core.clj"))
+            :settings-path (fresh-settings-path)
+            :on-ready (fn [ui]
+                        (g/g-signal-connect-data (:window ui) "destroy"
+                                                 (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
+                                                              [:pointer :pointer] :void)
+                                                 ffi/null ffi/null g/CONNECT-DEFAULT)
+                        (go (<! (timeout 300))
+                            (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))] PER-SCENE-MS check!))
+                            (<! (timeout 50))
                           ;; I1: scene-close-prompt (or any scene) could leave
                           ;; the buffer dirty with an alert pending if its own
                           ;; cleanup didn't run; a plain gtk-window-close would
@@ -578,10 +695,12 @@
                           ;; way out: it records a FAIL and exits from this go
                           ;; thread, since -main's own thread would otherwise
                           ;; stay parked inside main/start! forever.
-                          (ga/close-window-bounded!
-                           (:window ui) window-destroyed? WINDOW-CLOSE-DEADLINE-MS
-                           (fn []
-                             (check! :window-close-stuck false
-                                     {:reason "window still open after the close; exiting to avoid hanging the run"})
-                             (System/exit 1)))))})
+                            (ga/close-window-bounded!
+                             (:window ui) window-destroyed? WINDOW-CLOSE-DEADLINE-MS
+                             (fn []
+                               (check! :window-close-stuck false
+                                       {:reason "window still open after the close; exiting to avoid hanging the run"})
+                               (clj-server/stop! srv)
+                               (System/exit 1)))))})
+          (finally (clj-server/stop! srv)))
         (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))
