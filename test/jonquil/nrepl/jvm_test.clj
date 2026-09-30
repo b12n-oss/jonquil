@@ -192,8 +192,8 @@
       (let [e (make dir)
             {:keys [result]} (run e "(secret)" {:run? false :ns-source "(ns demo.core)\n(secret)"})]
         (is (= {:status :notice :text (clj/not-loaded-message "demo.core")} result))
-        (is (= 2 (count (filter #{"eval"} (fake/ops-seen srv))))
-            "the connect-time registration eval, plus exactly one eval request for the selection")
+        (is (= ["nil" "(secret)"] (keep #(when (= "eval" (get % "op")) (get % "code")) (fake/requests srv)))
+            "the connect-time registration's nil, then exactly one eval: the selection's own")
         (is (not-any? #(str/includes? (or (get % "code") "") "(ns ") (fake/requests srv))
             "the buffer's own ns form is never sent")))))
 
@@ -487,7 +487,23 @@
         (is (nil? (ev/set-mode! e :reset)))
         (run e fixture-core-text {:run? true :path file})
         (is (= ["describe" "clone" "eval" "load-file"] (fake/ops-seen srv))
-            "no reset form is sent (the eval is P3.T1's own connect-time inspect registration)")))))
+            "no reset form is sent")
+        (is (= ["nil"] (keep #(when (= "eval" (get % "op")) (get % "code")) (fake/requests srv)))
+            "the one eval is the connect-time registration's nil, never a reset form")))))
+
+(deftest stop-during-registration-test
+  ;; A Stop that lands during the connect-time registration round trip
+  ;; finishes :interrupted and sends nothing else: the user's own request
+  ;; never goes out.
+  (with-project {:slow {"nil" 1000}}
+    (fn [srv dir _]
+      (let [e (make dir) done (promise)]
+        (ev/eval! e "(+ 1 2)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #(= "nil" (get % "code")) (fake/requests srv))))
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 3000 :timeout))))
+        (is (not-any? #(= "(+ 1 2)" (get % "code")) (fake/requests srv))
+            "the user's request never went out")))))
 
 (deftest complete-test
   (with-project {:completions {"gre" [["greet" "demo.core"]]}}

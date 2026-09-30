@@ -178,36 +178,40 @@
         (finish! ev opts {:status :interrupted})
         (do
           (register-inspect! ev)
-          (let [watch (stdin-watch state on-wait-input)
-                do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
-                                                                   :still-waiting nil
-                                                                   :on-message watch}))]
-            (if run?
+          ;; The registration is a round trip of its own, so a Stop can land
+          ;; during it: check again before the user's request goes out.
+          (if (stop-requested? ev)
+            (finish! ev opts {:status :interrupted})
+            (let [watch (stdin-watch state on-wait-input)
+                  do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
+                                                                     :still-waiting nil
+                                                                     :on-message watch}))]
+              (if run?
               ;; Run: load-file, never told an :ns (the fixture's own ns form
               ;; decides what the server evaluates it in). A successful Run
               ;; moves the prompt namespace to the buffer's own (ruling 4).
-              (let [f (when path (io/file path))
-                    msgs (do-request! {:op "load-file" :file code
-                                       :file-path (if f (.getAbsolutePath f) "untitled.clj")
-                                       :file-name (if f (.getName f) "untitled.clj")})
-                    result (clj/eval-result msgs (stop-requested? ev))]
-                (when (= :ok (:status result))
-                  (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
-                (finish! ev opts result))
+                (let [f (when path (io/file path))
+                      msgs (do-request! {:op "load-file" :file code
+                                         :file-path (if f (.getAbsolutePath f) "untitled.clj")
+                                         :file-name (if f (.getName f) "untitled.clj")})
+                      result (clj/eval-result msgs (stop-requested? ev))]
+                  (when (= :ok (:status result))
+                    (swap! state assoc :prompt-ns (clj/prompt-after-run code result (:prompt-ns @state))))
+                  (finish! ev opts result))
               ;; REPL line (no ns-source): eval in the prompt namespace, and a
               ;; successful reply's own :ns moves the prompt. Selection/Form
               ;; (ns-source present): eval in the buffer's own namespace, or
               ;; the prompt namespace when the buffer has none; the prompt
               ;; never moves for these (rule 3: never the buffer's ns form
               ;; itself, only named as :ns).
-              (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
-                    msgs (do-request! {:op "eval" :code code :ns ns})]
-                (if (clj/ns-not-found? msgs)
-                  (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
-                  (let [result (clj/eval-result msgs (stop-requested? ev))]
-                    (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
-                      (swap! state assoc :prompt-ns (:ns result)))
-                    (finish! ev opts result)))))))))
+                (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
+                      msgs (do-request! {:op "eval" :code code :ns ns})]
+                  (if (clj/ns-not-found? msgs)
+                    (finish! ev opts {:status :notice :text (clj/not-loaded-message ns)})
+                    (let [result (clj/eval-result msgs (stop-requested? ev))]
+                      (when (and (nil? ns-source) (= :ok (:status result)) (:ns result))
+                        (swap! state assoc :prompt-ns (:ns result)))
+                      (finish! ev opts result))))))))))
     (catch Throwable e
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
 

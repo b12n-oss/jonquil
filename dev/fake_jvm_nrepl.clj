@@ -102,6 +102,9 @@
     (and (= '+ (head form)) (every? number? (rest form))) (str (apply + (rest form)))
     (#{'def 'defn 'defn-} (head form)) (str "#'" current "/" (second form))
     (#{'in-ns 'ns} (head form)) "nil"
+    ;; A literal nil answers nil, as a real REPL does (the JVM evaluator's
+    ;; connect-time inspect registration evaluates exactly this).
+    (nil? form) "nil"
     :else ":ok"))
 
 (defn- read-printed-value
