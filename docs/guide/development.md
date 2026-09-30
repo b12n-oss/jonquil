@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 35 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (246 tests, 1482 assertions
+slower. `bb test` runs the full unit suite (247 tests, 1488 assertions
 today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -60,7 +60,7 @@ running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no
 fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, and Stop's detach, over that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 10 rows, plus two checks after the window
+(`dev/gtk_selftest_clj.clj`, 11 rows, plus two checks after the window
 closes) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
@@ -68,8 +68,8 @@ fake JVM nREPL server running in this same process
 rows cover connecting and Run moving the prompt, a selection against a
 namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting
 after the server restarts, quick doc, jump to an external definition,
-full docs and its Escape, and a close that never sends the server a
-`close` op.
+full docs and its Escape, Reset on Run's tick through a switch to a Jolt
+file and back, and a close that never sends the server a `close` op.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in

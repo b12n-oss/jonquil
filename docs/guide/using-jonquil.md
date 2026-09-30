@@ -137,7 +137,10 @@ checked, each Run first removes every namespace that earlier Runs or REPL
 entries created (libraries you've required stay loaded, since `require`
 won't bring them back), then evaluates the Definitions pane fresh. Uncheck
 it, and Run stops clearing first: later Runs build on whatever earlier
-ones already defined, the same way the REPL prompt always does.
+ones already defined, the same way the REPL prompt always does. In a
+ClojureDart or JVM Clojure window the box shows unticked and greyed out,
+since Jonquil can't clear namespaces out of an app or a JVM it doesn't
+own; switch back to a Jolt file and your own setting returns.
 
 `docs/demos/reset.clj` walks through the difference with a small,
 self-contained experiment: run it once with the box checked, delete a
@@ -559,10 +562,11 @@ An evaluation that's still waiting past 30 seconds gets one more line,
 "; Still waiting on the app...", and after that Jonquil just keeps
 waiting: there's no timeout of its own.
 
-Reset on Run is greyed out for this dialect, with a tooltip that says
-why: "Hot reload can't unload a namespace, so every Run adds to the
-running app." Every Run builds on what's already there instead of
-clearing it first.
+Reset on Run is unticked and greyed out for this dialect, with a tooltip
+that says why: "Hot reload can't unload a namespace, so every Run adds to
+the running app." Every Run builds on what's already there instead of
+clearing it first. Your own tick isn't lost: open a Jolt file in the same
+window and the box comes back the way you left it.
 
 Completion stays offline here: candidates come from the buffer's own
 definitions, the aliases its `ns` form declares, and ClojureDart's own
