@@ -38,8 +38,15 @@
   full-doc (P3.T2, the jonquil.evaluator/FullDoc protocol) is backed by
   the server's own doc op instead, for the window's second quick-doc
   press (ruling 11): unlike lookup/complete it runs in a future, since
-  it's asked for on demand rather than on every keystroke."
+  it's asked for on demand rather than on every keystroke.
+
+  Both lookup and full-doc resolve their own :ns through the shared
+  resolve-lookup!: the buffer's own namespace first, falling back once to
+  the prompt namespace when the server hasn't loaded it yet, and a
+  not-loaded result (never a silent \"not found\" or a hung full-doc
+  request) when neither answers without an error."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.eval :as eval]
@@ -178,13 +185,59 @@
     (catch Throwable e
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
 
+(defn- ns-errored?
+  "True when a lookup reply's own statuses carry lookup-error or error --
+  the real server's own shape for an unloaded ns."
+  [r]
+  (let [st (ops/statuses r)]
+    (boolean (or (st "lookup-error") (st "error")))))
+
+(defn- resolve-lookup!
+  "Both lookup and full-doc's shared resolution: sends a lookup for sym,
+  first with ns1 (clj/help-ns's own value: the buffer's own namespace
+  form, else the prompt namespace). ns1 answering without an error
+  (ns-errored?) resolves at once, even when it finds no info -- that's
+  lookup's own long-standing plain-not-found case, unaffected.
+  Only when ns1 errors does this retry once with (str prompt-ns) (unless
+  that's the same ns already tried), and the retry counts as resolved
+  only when it BOTH answers without error AND actually names sym
+  (ops/doc-info): a namespace that merely doesn't error but knows nothing
+  about sym is no more useful than ns1's own failure, and full-doc must
+  never send doc against a namespace that was never really where sym
+  lives. Each request is bounded by timeout-ms, so this never costs more
+  than two of them (600 ms worst case with :help-timeout-ms's own
+  default).
+
+  {:status :ok :ns ns1 :reply r1}: ns1 answered without error.
+  {:status :retried :ns ns2 :reply r2}: ns1 errored, but ns2 both
+  answered without error and actually named sym.
+  {:status :not-loaded :ns1 ns1}: every ns tried either errored or found
+  nothing, or there was no distinct ns to retry with.
+  {:status :timeout}: a bounded request never answered."
+  [conn session sym text prompt-ns timeout-ms]
+  (let [ns1 (clj/help-ns text prompt-ns)
+        lookup! (fn [ns] (client/request-sync conn {:op "lookup" :sym sym :ns ns :session session} timeout-ms))
+        r1 (lookup! ns1)]
+    (cond
+      (not (vector? r1)) {:status :timeout}
+      (not (ns-errored? r1)) {:status :ok :ns ns1 :reply r1}
+      :else
+      (let [ns2 (str prompt-ns)]
+        (if (= ns1 ns2)
+          {:status :not-loaded :ns1 ns1}
+          (let [r2 (lookup! ns2)]
+            (cond
+              (not (vector? r2)) {:status :timeout}
+              (and (not (ns-errored? r2)) (ops/doc-info sym r2)) {:status :retried :ns ns2 :reply r2}
+              :else {:status :not-loaded :ns1 ns1})))))))
+
 (defrecord Jvm [selection state history listeners timings]
   ev/Evaluator
   ;; Connecting happens on demand, when an evaluation finds no live
   ;; connection: nothing to start.
   (start! [_] nil)
   (stop! [this]
-    ;; I1: apply-selection! calls interrupt! then stop! back to back when
+    ;; apply-selection! calls interrupt! then stop! back to back when
     ;; switching away from a busy window. The old stop! detached at once,
     ;; on the calling thread, before interrupt!'s own send future had a
     ;; chance to run, so the interrupt never reached the server. This
@@ -216,30 +269,30 @@
     nil)
   (eval! [this code opts]
     (when-not (:run? opts) (swap! history eval/history-add code))
-    ;; A fresh, unique token per evaluation (Important 1): interrupt!'s
-    ;; failed-interrupt future keys its exit test on this identity, not on
-    ;; :running being non-nil, so it can never mistake a later evaluation
-    ;; for the one it was started to watch.
+    ;; A fresh, unique token per evaluation: interrupt!'s failed-interrupt
+    ;; future keys its exit test on this identity, not on :running being
+    ;; non-nil, so it can never mistake a later evaluation for the one it
+    ;; was started to watch.
     (let [[old _] (swap-vals! state (fn [s] (if (:running s) s (assoc s :running {:opts opts :token (Object.)}))))]
       (if (:running old)
         busy-warning
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
-    ;; Runs on the GTK thread and must not block (Important 3): every
-    ;; socket write (the interrupt op itself) moves inside a future, and
-    ;; this only ever reads/writes atoms, fires a future, or calls
-    ;; detach! (a socket close plus the fail-pending handlers).
+    ;; Runs on the GTK thread and must not block: every socket write (the
+    ;; interrupt op itself) moves inside a future, and this only ever
+    ;; reads/writes atoms, fires a future, or calls detach! (a socket
+    ;; close plus the fail-pending handlers).
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
       (when-let [running (:running old)]
-        ;; Minor 1: a second Stop for the same evaluation does nothing --
+        ;; A second Stop for the same evaluation does nothing --
         ;; the first Stop's future (or immediate detach) already owns it.
         (when-not (:stop-requested? running)
           (let [on-output (:on-output (:opts running))
                 token (:token running)
                 conn (:conn @state)]
             (if-not (client/open? conn)
-              ;; Minor 2: connect! hasn't published a live :conn yet (still
+              ;; connect! hasn't published a live :conn yet (still
               ;; connecting, or never got that far). :ops may be stale from
               ;; an earlier connection and can't be trusted here, so this
               ;; ignores it: detach! at once closes :connecting too, with
@@ -265,9 +318,9 @@
                       (try
                         (loop [n 0]
                           (cond
-                            ;; This evaluation has ended, or a newer one has
-                            ;; already taken :running (Important 1): either
-                            ;; way, this future is no longer relevant.
+                            ;; This evaluation has ended, or a newer one
+                            ;; has already taken :running: either way,
+                            ;; this future is no longer relevant.
                             (not (identical? token (get-in @state [:running :token]))) nil
                             (>= (* n 20) (:interrupt-timeout-ms timings))
                             (do (connection/say! on-output :system (str clj/interrupt-failed-message "\n"))
@@ -281,12 +334,11 @@
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (:waiting? @state)))
   (send-input! [_ text]
-    ;; The stdin op's own socket write moves into a future (Important 3),
-    ;; same as interrupt!'s. :waiting? clears synchronously so
-    ;; waiting-for-input? reflects the send at once; on-wait-input false
-    ;; only fires when it was really waiting AND :running is still the
-    ;; same evaluation (Minor 3), both read from the one swap-vals! that
-    ;; does the clearing.
+    ;; The stdin op's own socket write moves into a future, same as
+    ;; interrupt!'s. :waiting? clears synchronously so waiting-for-input?
+    ;; reflects the send at once; on-wait-input false only fires when it
+    ;; was really waiting AND :running is still the same evaluation, both
+    ;; read from the one swap-vals! that does the clearing.
     (let [[old _] (swap-vals! state assoc :waiting? false)
           {:keys [conn session running]} old
           token (:token running)]
@@ -329,21 +381,27 @@
         (catch Throwable _ offline))))
   ;; Backed by the server's own lookup op, never connecting on its own.
   ;; :file is turned into a Defined in ... line (ruling 13); help/doc-text
-  ;; never reads :file, only :location.
+  ;; never reads :file, only :location. A buffer namespace the server
+  ;; hasn't loaded yet errors instead of answering info (resolve-lookup!'s
+  ;; own ns1), so this falls back to the prompt namespace once before
+  ;; giving up as not-loaded.
   (lookup [_ sym text _pos]
     (try
-      (let [{:keys [conn session ops prompt-ns]} @state]
+      (let [{:keys [conn session ops prompt-ns]} @state
+            found (fn [r] (when-let [d (ops/doc-info sym r)]
+                            (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d))))))]
         (cond
           (not (client/open? conn)) (cljd/no-docs sym clj/not-attached-doc)
           (not (contains? ops "lookup")) (cljd/no-docs sym clj/no-lookup-doc)
           :else
-          (let [r (client/request-sync conn {:op "lookup" :sym sym :session session
-                                             :ns (clj/help-ns text prompt-ns)}
-                                       (:help-timeout-ms timings))]
-            (if (vector? r)
-              (when-let [d (ops/doc-info sym r)]
-                (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d)))))
-              (cljd/no-docs sym clj/lookup-timeout-doc)))))
+          (let [res (resolve-lookup! conn session sym text prompt-ns (:help-timeout-ms timings))]
+            (case (:status res)
+              :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
+              :not-loaded (cljd/no-docs sym (clj/not-loaded-doc (:ns1 res)))
+              ;; :ok or :retried: resolve-lookup! already confirmed a
+              ;; retry's own reply names sym, so found only ever returns
+              ;; nil here for :ok's plain not-found (as today).
+              (found (:reply res))))))
       (catch Throwable _ nil)))
   (limitations [_] clj/limitations)
 
@@ -356,6 +414,19 @@
   ;; exactly once either way. Everything is caught: a throw anywhere
   ;; (including inside the future) reports :timeout, never an escaping
   ;; exception into a key handler or a future nobody's watching.
+  ;;
+  ;; doc throws server-side (and never answers at all) for a namespace
+  ;; the server hasn't loaded, so this first runs the SAME resolution
+  ;; lookup uses (resolve-lookup!, bounded by :help-timeout-ms, same as a
+  ;; real lookup) to find an :ns to trust: the buffer's own namespace when
+  ;; the server answers there at all, else the prompt namespace when it
+  ;; actually names sym. doc is sent only with that :ns; neither
+  ;; resolving reports :not-loaded instead of ever sending doc.
+  ;;
+  ;; A reply carrying the client's own disconnected status
+  ;; (ops/disconnected, the synthetic reply a lost connection gets) is
+  ;; :not-attached, never :ok -- and :ok requires actual, non-blank doc
+  ;; text, since a vector reply with none is as good as no reply at all.
   (full-doc [_ sym text on-result]
     (try
       (let [{:keys [conn session ops prompt-ns]} @state]
@@ -365,12 +436,18 @@
           :else
           (future
             (try
-              (let [r (client/request-sync conn {:op "doc" :sym sym :session session
-                                                 :ns (clj/help-ns text prompt-ns)}
-                                           (:full-doc-timeout-ms timings))]
-                (on-result (if (vector? r)
-                             {:status :ok :text (some :doc r)}
-                             {:status :timeout})))
+              (let [res (resolve-lookup! conn session sym text prompt-ns (:help-timeout-ms timings))]
+                (case (:status res)
+                  :timeout (on-result {:status :timeout})
+                  :not-loaded (on-result {:status :not-loaded :ns (:ns1 res)})
+                  (let [r (client/request-sync conn {:op "doc" :sym sym :session session :ns (:ns res)}
+                                               (:full-doc-timeout-ms timings))]
+                    (on-result
+                     (cond
+                       (not (vector? r)) {:status :timeout}
+                       ((ops/statuses r) ops/disconnected) {:status :not-attached}
+                       :else (let [text (some :doc r)]
+                               (if (str/blank? text) {:status :timeout} {:status :ok :text text})))))))
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))
     nil)

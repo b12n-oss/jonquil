@@ -1,8 +1,8 @@
 (ns fake-jvm-nrepl
   "A fake JVM nREPL server for jonquil.nrepl.jvm's tests and the :clj
   self-test window. It imitates clojure-cli.repl 0.1.0 / nREPL 1.7.0's
-  replies as measured (P0/P1 of the clj-dialect arc, see
-  .superpowers/sdd/clj/reply-shapes.md):
+  replies as measured (P0/P1 of the clj-dialect arc, the spike's own
+  measured reply shapes):
 
   - describe advertises jvm-ops; clone answers a fresh session (ns
     \"user\").
@@ -23,6 +23,11 @@
     matching :prints answers {\"out\" text} before its value.
   - (read-line) answers need-input, then waits for its session's stdin
     op (or an interrupt), same as a slow form.
+  - lookup and doc resolve \"ns\" (falling back to the session's own ns,
+    same as eval) against :loaded the same way eval does. lookup under an
+    unloaded ns answers a lookup-error (the real server's own measured
+    shape); doc under an unloaded ns sends no reply at all, since the
+    real server's own doc op throws there and never answers (measured).
 
   It never evaluates anything: a form's value comes from :answers (keyed
   by the form's pr-str), else the sum for (+ numbers...), else
@@ -226,7 +231,7 @@
   (atomically: either an existing promise gets the delivery, or the
   pending flag gets set, never both) instead of being silently dropped;
   evaluate!'s own registration points consume them."
-  [{:keys [opts sessions log counter busy futures] :as srv} _sock stop-latch closed reply m]
+  [{:keys [opts sessions log counter busy futures loaded] :as srv} _sock stop-latch closed reply m]
   (swap! log conj (dissoc m "id"))
   (swap! busy inc)
   (try
@@ -261,12 +266,28 @@
           (reply {"completions" (mapv (fn [[c n]] {"candidate" c "ns" n "type" "function"}) rows)
                   "status" ["done"]}))
         "lookup"
-        (do (when-let [ms (:lookup-ms opts)] (wait! stop-latch closed ms))
-            (reply {"info" (get (:docs opts) (get m "sym") []) "status" ["done"]}))
+        (let [req-ns (get m "ns")
+              sid (get m "session")
+              sess-ns (get-in @sessions [sid :ns] "user")
+              ns (or req-ns sess-ns)]
+          (when-let [ms (:lookup-ms opts)] (wait! stop-latch closed ms))
+          (if (contains? @loaded ns)
+            (reply {"info" (get (:docs opts) (get m "sym") []) "status" ["done"]})
+            (reply {"message" (str "No namespace: " ns " found")
+                    "status" ["done" "error" "lookup-error"]})))
         "doc"
-        (do (wait! stop-latch closed (:doc-ms opts 0))
+        (let [req-ns (get m "ns")
+              sid (get m "session")
+              sess-ns (get-in @sessions [sid :ns] "user")
+              ns (or req-ns sess-ns)]
+          ;; The real server's own doc op calls the-ns and throws when ns
+          ;; isn't loaded, and never answers at all (measured, the spike's
+          ;; probe output) -- so this sends nothing for that case either,
+          ;; instead of the plain "No doc for ..." fallback below.
+          (when (contains? @loaded ns)
+            (wait! stop-latch closed (:doc-ms opts 0))
             (reply {"doc" (get (:full-docs opts) (get m "sym") (str "No doc for " (get m "sym")))
-                    "status" ["done"]}))
+                    "status" ["done"]})))
         ("close" "ls-sessions" "auto-require") (reply {"status" ["done"]})
         (reply {"status" ["done" "unknown-op"]})))
     (finally (swap! busy dec))))
@@ -310,11 +331,13 @@
              value
   :completions {prefix [[candidate ns] ...]}: completions answers these
              (string-keyed maps), or [] for an unknown prefix
-  :docs      {sym info}: lookup answers {\"info\" info}, or {\"info\" []}
-             for an unknown symbol
+  :docs      {sym info}: lookup under a LOADED \"ns\" answers {\"info\"
+             info}, or {\"info\" []} for an unknown symbol; an unloaded
+             \"ns\" answers a lookup-error instead, whatever :docs holds
   :lookup-ms ms: lookup answers after this delay (as the cljd fake's)
-  :full-docs {sym text}: doc answers text, or \"No doc for \" + sym
-  :doc-ms    ms: doc answers after this delay (default 0)
+  :full-docs {sym text}: doc under a LOADED \"ns\" answers text, or
+             \"No doc for \" + sym; an unloaded \"ns\" gets no reply at all
+  :doc-ms    ms: doc answers after this delay (default 0), a loaded ns only
   :loaded    extra namespace name strings considered loaded from the
              start, alongside \"user\"
   :mute?     read requests but never answer any"

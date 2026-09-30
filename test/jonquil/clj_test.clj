@@ -10,6 +10,7 @@
   (is (= "; Port 7 isn't an nREPL server Jonquil can use." (clj/not-server-message 7)))
   (is (= "; Connecting to the nREPL server on port 7..." (clj/connecting-message 7)))
   (is (= "; demo.core isn't loaded in the server yet. Run the file first." (clj/not-loaded-message "demo.core")))
+  (is (= "No docs: demo.core isn't loaded in the server yet. Run the file first." (clj/not-loaded-doc "demo.core")))
   (is (= "; The server didn't stop the evaluation, so Jonquil detached. It may still be running." clj/interrupt-failed-message))
   (is (= "Lost the connection to the nREPL server." clj/lost-connection))
   (is (= ["Jonquil attaches to a server you started: it never starts or stops the JVM."

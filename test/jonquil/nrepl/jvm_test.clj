@@ -13,10 +13,10 @@
             [jonquil.nrepl.jvm :as jvm]))
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (.superpowers/sdd/clj/fixture-core.clj):
-  ;; demo.core with greet, a private secret returning :private-ok, and
-  ;; nested. Embedded rather than read at test time: the planning store is
-  ;; gitignored scratch, so tests can't depend on it.
+  ;; The spike fixture's exact text (its own gitignored planning-store
+  ;; file): demo.core with greet, a private secret returning :private-ok,
+  ;; and nested. Embedded rather than read at test time: the planning
+  ;; store is gitignored scratch, so tests can't depend on it.
   (str "(ns demo.core\n"
        "  \"A fixture namespace for the clj-attach spike.\")\n"
        "\n"
@@ -260,7 +260,7 @@
         (is (= :interrupted (:status (deref done 2000 :timeout))))))))
 
 (deftest interrupt-then-stop-test
-  ;; I1: apply-selection! calls interrupt! then stop! back to back when
+  ;; apply-selection! calls interrupt! then stop! back to back when
   ;; switching away from a busy window. stop! must still get the
   ;; interrupt out, not detach out from under interrupt!'s own send.
   ;; :interrupted can arrive via detach!'s own local, synthetic
@@ -328,7 +328,7 @@
   ;; connect! call never reaches code compiled inside those functions;
   ;; measured against this Jolt build with a throwaway probe script) in
   ;; which connect! has already published the raw socket at :connecting
-  ;; (M4) but :conn is still nil. This exercises Minor 2: interrupt!
+  ;; but :conn is still nil. This exercises interrupt!'s own guard: it
   ;; detaches at once, with no sentence and no interrupt op (a fresh
   ;; evaluator's :ops is still #{}).
   (with-project {:mute? true}
@@ -346,8 +346,8 @@
         (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "and no interrupt op is sent")))))
 
 (deftest stop-before-request-test
-  ;; Important 2: Stop lands after connect! has already published a live
-  ;; session, but before the worker sends the eval or load-file request.
+  ;; Stop lands after connect! has already published a live session, but
+  ;; before the worker sends the eval or load-file request.
   ;; jvm.clj routes every stop-requested? check (including the one its
   ;; connect policy hands to connection/connect!) through its own local
   ;; var so a with-redefs reached through THIS namespace's own alias can
@@ -373,8 +373,8 @@
         (is (connection/connected? e) "the connection itself is fine; only this eval was cancelled")))))
 
 (deftest double-stop-test
-  ;; Minor 1: a second interrupt! call for the same evaluation does
-  ;; nothing -- one interrupt op, one poller future, one sentence at most.
+  ;; A second interrupt! call for the same evaluation does nothing -- one
+  ;; interrupt op, one poller future, one sentence at most.
   (with-project {:slow {"(slow)" 5000} :ignore-interrupt? true}
     (fn [srv dir _]
       (let [e (make dir) out (atom []) done (promise)]
@@ -390,8 +390,8 @@
         (is (= 1 (count (filter #{"interrupt"} (fake/ops-seen srv)))) "only one interrupt sent")))))
 
 (deftest interrupt-future-tracks-its-own-eval-test
-  ;; Important 1 regression guard: A's failed-interrupt future must not
-  ;; detach a later evaluation's connection. A ends (via a real,
+  ;; Regression guard: A's failed-interrupt future must not detach a
+  ;; later evaluation's connection. A ends (via a real,
   ;; successful interrupt) well inside its own poller's interrupt-timeout
   ;; window; B claims :running with a fresh token before that window
   ;; closes and is still running when A's poller would have timed out.
@@ -591,4 +591,53 @@
           (run e "1" {:run? false})
           (is (= {:status :no-op} (full-doc-sync e "greet" "1" 2000)))
           (is (not-any? #{"doc"} (fake/ops-seen srv))))))))
+
+(deftest lookup-not-loaded-test
+  ;; Before Run: the buffer's own ns (demo.never) never loaded on the
+  ;; server, so lookup falls back once to the prompt ns (user, always
+  ;; loaded). A symbol the fallback resolves still answers with its docs;
+  ;; one it doesn't gives the not-loaded no-docs, naming the buffer's own
+  ;; namespace, never "user".
+  (with-project {:docs {"map" {"ns" "clojure.core" "name" "map" "doc" "Returns a lazy sequence."
+                               "arglists-str" "([f] [f coll])"}}}
+    (fn [_srv dir _]
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (testing "a symbol the prompt ns resolves: the doc, via the fallback"
+          (let [d (ev/lookup e "map" "(ns demo.never)\n(map inc [1])" 0)]
+            (is (= :found (:status d)))
+            (is (= "clojure.core" (:ns d)))))
+        (testing "a symbol the prompt ns doesn't resolve: the not-loaded no-docs"
+          (is (= (cljd/no-docs "secret" (clj/not-loaded-doc "demo.never"))
+                 (ev/lookup e "secret" "(ns demo.never)\n(secret)" 0))))))))
+
+(deftest full-doc-not-loaded-test
+  ;; Before Run: neither the buffer's own ns (demo.never) nor the prompt
+  ;; ns (user, loaded but knowing nothing about map here) resolves, so
+  ;; this reports :not-loaded quickly -- well under :full-doc-timeout-ms
+  ;; -- and never sends doc at all.
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (let [start (System/nanoTime)
+              result (full-doc-sync e "map" "(ns demo.never)\n(map inc [1])" 1000)]
+          (is (= {:status :not-loaded :ns "demo.never"} result))
+          (is (< (/ (- (System/nanoTime) start) 1e6) 450.0) "well under :full-doc-timeout-ms (500)")
+          (is (not-any? #{"doc"} (fake/ops-seen srv))))))))
+
+(deftest full-doc-disconnect-test
+  ;; A disconnect while doc is outstanding (the fake's own :doc-ms delay)
+  ;; gives :not-attached, never :ok with a blank/nil text.
+  (with-project {:doc-ms 3000}
+    (fn [srv dir _]
+      (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir}
+                            {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
+                             :help-timeout-ms 200 :full-doc-timeout-ms 5000})
+            done (promise)]
+        (run e "1" {:run? false})
+        (ev/full-doc e "map" "1" (fn [r] (deliver done r)))
+        (wait-until! (fn [] (some #{"doc"} (fake/ops-seen srv))))
+        (fake/drop-connections! srv)
+        (is (= {:status :not-attached} (deref done 2000 :timeout)))))))
 

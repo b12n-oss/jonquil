@@ -74,6 +74,40 @@
         {:keys [result]} (run e "(+ 1 2)" {:run? false :ns-source "(ns demo.never)\n(+ 1 2)"})]
     (is (= {:status :notice :text (clj/not-loaded-message "demo.never")} result))))
 
+(def never-loaded-map-text
+  ;; demo.never is never Run by any test in this namespace, so lookup and
+  ;; full-doc's own buffer-ns attempt always errors here and both fall
+  ;; back to the prompt namespace (user), where clojure.core/map resolves.
+  "(ns demo.never)\n(map inc [1])")
+
+(deftest lookup-not-loaded-live
+  (let [e (make)]
+    (run e "1" {:run? false})
+    (let [d (ev/lookup e "map" never-loaded-map-text 0)]
+      (is (= :found (:status d)))
+      (is (= "clojure.core" (:ns d))))))
+
+(deftest full-doc-not-loaded-live
+  ;; MEASURED (not the prescribed 2000 ms): the real server's own doc op
+  ;; has widely variable latency on its first few calls in a fresh JVM --
+  ;; measured single doc requests here took 3.8 s, 7.0 s and over 10 s
+  ;; (once even a 12 s wait), regardless of which ns answered. That's the
+  ;; server warming up its own doc machinery, not this fix wave's own
+  ;; resolution (two lookup requests, each bounded by :help-timeout-ms,
+  ;; which answer in low milliseconds every time -- see
+  ;; lookup-not-loaded-live above). So this evaluator raises its own
+  ;; :full-doc-timeout-ms well past that measured range and asserts the
+  ;; functional outcome: full-doc resolves via the prompt ns to a real
+  ;; :ok, never :not-loaded, rather than racing a tight deadline against
+  ;; server-side warm-up latency this fix wave doesn't control.
+  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)}
+                        {:full-doc-timeout-ms 20000})]
+    (run e "1" {:run? false})
+    (let [done (promise)]
+      (ev/full-doc e "map" never-loaded-map-text (fn [r] (deliver done r)))
+      (let [result (deref done 25000 :timeout)]
+        (is (= :ok (:status result)) (str "result: " result))))))
+
 (deftest output-streams-live
   (let [e (make)
         events (atom [])

@@ -110,6 +110,11 @@
     :no-op "This server has no full-doc op."
     :timeout (str "Full docs for " sym " timed out.")
     :not-attached "No docs: Jonquil isn't attached to the server yet. Run something first."
+    ;; The same sentence as jonquil.clj/not-loaded-doc, built here instead
+    ;; of calling it -- this namespace must not require jonquil.clj --
+    ;; from the result's own :ns (the buffer's namespace,
+    ;; jonquil.nrepl.jvm/resolve-lookup!'s ns1).
+    :not-loaded (str "No docs: " (:ns result) " isn't loaded in the server yet. Run the file first.")
     :ok nil))
 
 (defn doc-text

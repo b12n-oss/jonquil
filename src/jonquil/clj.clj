@@ -42,6 +42,12 @@
 (def lookup-timeout-doc
   "No docs: the server didn't answer in time.")
 
+(defn not-loaded-doc
+  "No docs: ns-name isn't loaded yet (I1/I2's fallback sentence, jvm.clj's
+  lookup and full-doc)."
+  [ns-name]
+  (str "No docs: " ns-name " isn't loaded in the server yet. Run the file first."))
+
 (def lost-connection
   "Lost the connection to the nREPL server.")
 
