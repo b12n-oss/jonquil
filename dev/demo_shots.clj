@@ -666,7 +666,53 @@
                       {:header (g/label-text (:header pane)) :info (g/label-text (:info pane))
                        :screenshot-exit exit :screenshot-err err})))))
 
-(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector})
+(defn- scroll-caret-into-view!
+  "MEASURED live (this scene, clj-source): the source panel's first
+  scroll-to-mark after loading a brand-new file (place-caret! in
+  jonquil.gtk.source-pane) can settle on a vadjustment short of its target
+  -- the text view hasn't validated the new buffer's real line heights yet
+  -- and never self-corrects on its own; jumping to clojure.string/join
+  (line 180 of 377) left the view parked with the caret 1684px below the
+  bottom of a 575px-tall viewport, showing clojure.string/replace instead.
+  Re-issuing the SAME production call (gtk_text_view_scroll_to_mark, 0.0
+  within-margin, aligned, yalign 0.3) a little later lets GTK recompute
+  against now-validated heights and converges within a few frames. This
+  polls g/caret-window-rect, reissuing every 50ms up to deadline-ms, until
+  the caret's own rectangle actually falls inside the view's allocated
+  height. A scene-local workaround, not a jonquil.gtk.source-pane.clj
+  change -- that's a real fix for a follow-up task, not this one."
+  [ed deadline-ms]
+  (go
+    (loop [elapsed 0]
+      (on-gtk (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 1 0.0 0.3))
+      (<! (timeout 50))
+      (let [[_ y _ h] (on-gtk (g/caret-window-rect (:view ed)))
+            view-h (on-gtk (g/gtk-widget-get-height (:view ed)))]
+        (cond
+          (and (>= y 0) (<= (+ y h) view-h)) true
+          (>= elapsed deadline-ms) false
+          :else (recur (+ elapsed 50)))))))
+
+(defn- scene-clj-source
+  "After a Run, F12 on clojure.string/join: the source panel opens the real
+  clojure/string.clj from the Clojure jar, read-only, on join's line."
+  [ui]
+  (go-row :clj-source check!
+    (let [text (str clj-demo-text "\n(clojure.string/join \", \" [\"a\" \"b\"])\n")
+          run-ok? (<! (clj-run-demo! ui text))
+          _ (on-gtk (place-cursor! (:buf (:editor ui)) (+ 1 (str/index-of text "join")))
+                    ((:jump!* ui)))
+          sp (:source-pane ui)
+          ok (await-until 10000 20 #(and (pos? (g/gtk-widget-get-visible (:root sp)))
+                                         (str/starts-with? (g/label-text (:header sp)) "string.clj in clojure-")
+                                         (:done? @(:paint (:editor sp)))))
+          scrolled? (<! (scroll-caret-into-view! (:editor sp) 2000))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :clj-source "png") (own-pid))]
+      (on-gtk (check! :clj-source (and run-ok? ok scrolled? (zero? exit))
+                      {:header (g/label-text (:header sp)) :screenshot-exit exit :screenshot-err err})))))
+
+(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
@@ -693,7 +739,8 @@
    [:clj-attach scene-clj-attach]
    [:clj-quick-doc scene-clj-quick-doc]
    [:clj-full-doc scene-clj-full-doc]
-   [:clj-inspector scene-clj-inspector]])
+   [:clj-inspector scene-clj-inspector]
+   [:clj-source scene-clj-source]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 

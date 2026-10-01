@@ -359,9 +359,22 @@ it into view, when Jonquil can find one in the buffer. It checks the
 nearest enclosing local binding first (a function parameter, a `let`, or
 anything else that can shadow a name), then a top-level `def`, `defn`, or
 similar form anywhere in the file. When neither turns up but the symbol
-still resolves to something outside the buffer, jump shows that var's
-documentation in the quick-doc popup instead of moving the caret. When
-nothing matches at all, the status bar says so.
+resolves to a definition in another file, which JVM Clojure's server can
+tell Jonquil, that file opens in a read-only source panel on the right,
+with the caret on the definition. In other runtimes, which don't say
+where a definition lives, jump shows the var's documentation in the
+quick-doc popup instead. When nothing matches at all, the status bar
+says so.
+
+Inside the source panel, F12 or Ctrl+B follows a definition again, in
+the same file or into another, and Cmd/Ctrl+[ goes back. Escape closes
+the panel, and Cmd/Ctrl+I swaps it for the inspector. Library code from
+a jar, and any file outside your project, is read-only. A file in your
+project has an **Open in window** button (Cmd/Ctrl+Shift+O while the panel
+has focus) that loads it into the window for editing, asking first if
+the current buffer has unsaved changes.
+
+![F12 on clojure.string/join in a JVM Clojure window: the source panel shows string.clj from the Clojure jar, read-only, on join's definition](../images/clj-source.png)
 
 ### Rename
 
@@ -737,7 +750,7 @@ buffer. Ctrl+Space merges the server's own candidates in with the
 offline ones, and Ctrl+Q or Shift+F1 shows a symbol's real docstring and
 arglists, wherever it's actually defined. A definition outside the
 buffer ends with a `Defined in` line naming the file and line number
-instead of jumping there, `Defined in clojure-1.12.5.jar!/clojure/core.clj:2748`
+and F12 opens it in the source panel (see Jump to definition), `Defined in clojure-1.12.5.jar!/clojure/core.clj:2748`
 for something inside a jar, or a plain path and line for project code.
 Before the buffer's own namespace has been loaded, quick doc and
 completion still answer for names the prompt's own namespace already
@@ -822,6 +835,9 @@ server for a doc it already knows nothing useful about.
 | v | inspector panel | Toggle between the table and the list |
 | d | inspector panel | Open the def prompt |
 | Escape | inspector panel | Close the panel and focus the editor |
+| Cmd/Ctrl+[ | Source panel | Back to where the panel was |
+| Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in the window |
+| Escape | Source panel | Close the panel |
 
 ## Known limits
 
@@ -876,9 +892,6 @@ than being surprises you'd otherwise have to rediscover:
   so Jonquil doesn't unload namespaces in it.
 - No EOF for JVM Clojure's stdin: an empty stdin fails on nREPL 1.7.0, so
   a waiting `read-line` just keeps waiting for an actual line.
-- Jump outside the buffer, for JVM Clojure, shows where a definition is
-  in the quick-doc popover's `Defined in` line, but doesn't open the file
-  there.
 - Output JVM Clojure prints from a thread other than the one an
   evaluation ran on, after that evaluation finishes, isn't shown.
 - Stop can't end a JVM Clojure loop that never checks for interruption,
