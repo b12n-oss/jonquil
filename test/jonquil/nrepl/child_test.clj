@@ -45,11 +45,17 @@
 (deftest middleware-root-test
   (is (some? (child/middleware-root)) "these tests need the jolt-lang/nrepl checkout (JONQUIL_JOLT_NREPL or ~/dev/jolt-lang/nrepl)"))
 
+(defn- hold-free-port
+  "A ServerSocket the OS bound to a free port on addr, so no test names a
+  fixed port that a just-exited child might still hold."
+  [addr]
+  (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName addr)))
+
 (deftest port-free-test
-  (with-open [_ (java.net.ServerSocket. 7990 1 (java.net.InetAddress/getByName "0.0.0.0"))]
-    (is (not (child/port-free? 7990)) "held on the wildcard address"))
-  (with-open [_ (java.net.ServerSocket. 7991 1 (java.net.InetAddress/getByName "127.0.0.1"))]
-    (is (not (child/port-free? 7991)) "held on loopback")))
+  (with-open [ss (hold-free-port "0.0.0.0")]
+    (is (not (child/port-free? (.getLocalPort ss))) "held on the wildcard address"))
+  (with-open [ss (hold-free-port "127.0.0.1")]
+    (is (not (child/port-free? (.getLocalPort ss))) "held on loopback")))
 
 (deftest start-answers-and-kill-cleans-up-test
   (let [dir (temp-project)
@@ -75,13 +81,18 @@
     (is (not (.exists (io/file (:dir c) ".nrepl-port"))) "no stale port file")))
 
 (deftest a-failed-bind-moves-to-the-next-port-test
-  (let [held (java.net.ServerSocket. child/port-base 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+  ;; The scan starts at a port this test holds (one the OS picked, never
+  ;; the real 7950), so the first bind always fails.
+  (let [held (hold-free-port "127.0.0.1")
+        base (.getLocalPort held)]
     (try
       ;; Pretend the scan's probe missed the holder, so the child's own bind
       ;; is the one that fails.
-      (with-redefs [child/port-free? (constantly true)]
+      (with-redefs [child/port-free? (constantly true)
+                    child/port-base base]
         (let [c (child/start! (temp-project) nil)]
-          (try (is (= (inc child/port-base) (:port c)))
+          (try (is (< base (:port c) (+ base child/port-span))
+                   "the child moved past the held port, inside the scan's span")
                (finally (child/kill! c)))))
       (finally (.close held)))))
 
