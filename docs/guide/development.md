@@ -42,12 +42,14 @@ others can't.
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
-(`dev/gtk_selftest.clj`, 36 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 175 rows), with its rows split by
+(`dev/gtk_selftest.clj`, 37 rows); the second covers the full application
+window (`dev/gtk_selftest_window.clj`, 186 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
-`console_layout`, `dialects`, `prompt` (the namespace prompt following a
+`console_layout`, `dialects`, `contained` (a forced throw in each find-bar,
+toolbar and file-dialog handler is reported and the app carries on),
+`prompt` (the namespace prompt following a
 REPL line, a Run and a slow evaluation), and `inspector` (the panel widget in
 isolation, then the real window's own panel: opening, in/out, paging
 across a page edge, table/meta toggles, def, Run Form, and Escape). The
