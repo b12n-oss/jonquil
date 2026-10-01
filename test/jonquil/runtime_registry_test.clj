@@ -2,13 +2,16 @@
   "stop-all! is jonquil.main's own guard against the process-exit path
   orphaning a child: a start still mid-spawn when it runs must still be
   torn down, and stop-all! must not return before that's actually true."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
             [jonquil.nrepl.evaluator :as nrepl]
-            [jonquil.runtime-registry :as registry]))
+            [jonquil.runtime-registry :as registry]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (defn- make [dir]
   (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir}))

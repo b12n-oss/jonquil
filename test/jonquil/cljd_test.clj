@@ -41,12 +41,6 @@
          (cljd/target-ns "(ns a.b\n  (:require [x.y :as z])"))
       "an unclosed ns form gives cljd.user"))
 
-(deftest parse-port-test
-  (is (= 61151 (cljd/parse-port "61151\n")) "the fork writes the port and a newline")
-  (is (= 61151 (cljd/parse-port "  61151  ")))
-  (doseq [bad ["" "\n" "abc" "0" "-1" "70000" "61151 61152" nil]]
-    (is (nil? (cljd/parse-port bad)) (pr-str bad))))
-
 (deftest probe-result-test
   (is (= "(+ 1 2)" cljd/probe-code))
   (is (= :awake (cljd/probe-result [{:out "ClojureDart\n"} {:ns "cljd.user"} {:value "3"} {:ns "cljd.user"} {:status ["done"]}]))

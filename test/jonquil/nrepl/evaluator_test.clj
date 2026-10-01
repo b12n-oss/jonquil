@@ -4,13 +4,16 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.evaluator :as nrepl]))
+            [jonquil.nrepl.evaluator :as nrepl]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (defn- make [dir]
   (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir}))

@@ -5,10 +5,13 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is use-fixtures]]
             [jolt.process :as p]
             [jonquil.nrepl.child :as child]
-            [jonquil.nrepl.client :as client]))
+            [jonquil.nrepl.client :as client]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (defn- force-kill!
   "Cleanup for a test whose fix isn't in place yet: SIGTERM, then
@@ -26,7 +29,7 @@
 (defn temp-project
   "A throwaway project: deps.edn {:paths [\"src\"]} and src/demo/core.clj."
   []
-  (let [d (io/file (System/getProperty "java.io.tmpdir") (str "jonquil-nrepl-test-" (System/nanoTime)))]
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-"))]
     (.mkdirs (io/file d "src/demo"))
     (spit (io/file d "deps.edn") "{:paths [\"src\"]}")
     (spit (io/file d "src/demo/core.clj") "(ns demo.core)\n\n(defn twice\n  \"Doubles x.\"\n  [x]\n  (* 2 x))\n")
@@ -42,11 +45,17 @@
 (deftest middleware-root-test
   (is (some? (child/middleware-root)) "these tests need the jolt-lang/nrepl checkout (JONQUIL_JOLT_NREPL or ~/dev/jolt-lang/nrepl)"))
 
+(defn- hold-free-port
+  "A ServerSocket the OS bound to a free port on addr, so no test names a
+  fixed port that a just-exited child might still hold."
+  [addr]
+  (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName addr)))
+
 (deftest port-free-test
-  (with-open [_ (java.net.ServerSocket. 7990 1 (java.net.InetAddress/getByName "0.0.0.0"))]
-    (is (not (child/port-free? 7990)) "held on the wildcard address"))
-  (with-open [_ (java.net.ServerSocket. 7991 1 (java.net.InetAddress/getByName "127.0.0.1"))]
-    (is (not (child/port-free? 7991)) "held on loopback")))
+  (with-open [ss (hold-free-port "0.0.0.0")]
+    (is (not (child/port-free? (.getLocalPort ss))) "held on the wildcard address"))
+  (with-open [ss (hold-free-port "127.0.0.1")]
+    (is (not (child/port-free? (.getLocalPort ss))) "held on loopback")))
 
 (deftest start-answers-and-kill-cleans-up-test
   (let [dir (temp-project)
@@ -72,13 +81,18 @@
     (is (not (.exists (io/file (:dir c) ".nrepl-port"))) "no stale port file")))
 
 (deftest a-failed-bind-moves-to-the-next-port-test
-  (let [held (java.net.ServerSocket. child/port-base 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+  ;; The scan starts at a port this test holds (one the OS picked, never
+  ;; the real 7950), so the first bind always fails.
+  (let [held (hold-free-port "127.0.0.1")
+        base (.getLocalPort held)]
     (try
       ;; Pretend the scan's probe missed the holder, so the child's own bind
       ;; is the one that fails.
-      (with-redefs [child/port-free? (constantly true)]
+      (with-redefs [child/port-free? (constantly true)
+                    child/port-base base]
         (let [c (child/start! (temp-project) nil)]
-          (try (is (= (inc child/port-base) (:port c)))
+          (try (is (< base (:port c) (+ base child/port-span))
+                   "the child moved past the held port, inside the scan's span")
                (finally (child/kill! c)))))
       (finally (.close held)))))
 
@@ -94,7 +108,8 @@
   (let [dir (temp-project)
         _ (spit (io/file dir ".nrepl-port") "9999\n")
         real-process p/process
-        captured (atom nil)]
+        captured (atom nil)
+        log (atom nil)]
     (try
       (with-redefs [child/started? (constantly false)
                     child/ready-deadline-ms 500
@@ -102,18 +117,23 @@
                                 (let [proc (apply real-process args)]
                                   (reset! captured proc)
                                   proc))]
-        (is (thrown? clojure.lang.ExceptionInfo (child/start! dir nil))))
+        (let [ex (try (child/start! dir nil) nil (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex) "start! throws")
+          (reset! log (:log (ex-data ex)))))
+      (is (and @log (.exists (io/file @log))) "the log stays as the post-mortem")
       (let [pid (.pid ^java.lang.Process (:proc @captured))]
         (is (wait-until #(not (.isPresent (java.lang.ProcessHandle/of pid))) 3000)
             "the child is dead within about 3 s of the throw"))
       (is (= "9999\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back, byte-identical")
-      (finally (force-kill! @captured)))))
+      (finally (force-kill! @captured)
+               (when @log (io/delete-file @log true))))))
 
 (deftest start-exited-restores-test
   (let [dir (temp-project)
         _ (spit (io/file dir ".nrepl-port") "5555\n")
         real-process p/process
-        captured (atom nil)]
+        captured (atom nil)
+        log (atom nil)]
     (try
       (with-redefs [p/process (fn [& args]
                                 (let [proc (apply real-process args)]
@@ -123,8 +143,14 @@
                     ;; answers normally, but wait-ready is told it exited, on
                     ;; a path that isn't the bind-failure retry.
                     child/wait-ready (fn [_proc _log _port _deadline-ms] :exited)]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"jolt nrepl-server exited"
-                              (child/start! dir nil))))
+        (let [ex (try (child/start! dir nil) nil (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex) "start! throws")
+          (is (str/includes? (str (ex-message ex)) "jolt nrepl-server exited"))
+          ;; The log name only: wait-ready answers :exited before the
+          ;; child has even opened it, so the file can appear after this
+          ;; throw. It's deleted in the finally, once the child is dead.
+          (reset! log (:log (ex-data ex)))))
       (is (wait-until #(not (p/alive? @captured)) 3000) "the child is dead")
       (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back")
-      (finally (force-kill! @captured)))))
+      (finally (force-kill! @captured)
+               (when @log (io/delete-file @log true))))))

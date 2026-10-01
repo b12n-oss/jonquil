@@ -59,7 +59,8 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
-            [jonquil.main :as main]))
+            [jonquil.main :as main]
+            [temp-dirs]))
 
 (def ^:private images-dir "docs/images")
 (def ^:private demos-dir "docs/demos")
@@ -71,9 +72,7 @@
   $XDG_CONFIG_HOME/jonquil. No file exists there yet, so activate!'s
   startup load defaults to :light -- every scene starts in :light."
   []
-  (str (System/getProperty "java.io.tmpdir")
-       "/jonquil-demoshots-settings-" (System/currentTimeMillis) "-" (System/nanoTime)
-       "/settings.edn"))
+  (str (temp-dirs/temp-dir! "jonquil-demoshots-settings-") "/settings.edn"))
 
 (defonce results (atom []))
 
@@ -771,4 +770,5 @@
                                (clj-server/stop! srv)
                                (System/exit 1)))))})
           (finally (clj-server/stop! srv)))
+        (temp-dirs/delete-made!)
         (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))

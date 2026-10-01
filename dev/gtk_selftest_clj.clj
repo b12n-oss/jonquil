@@ -18,7 +18,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.main :as main]))
+            [jonquil.main :as main]
+            [temp-dirs]))
 
 (def ^:private row-fns
   [rows/row-clj-starts-not-running
@@ -93,6 +94,7 @@
            (support/check :clj-close-stuck false
                           {:reason "window still open after the forced close too; exiting to avoid hanging the run"})
            (print-summary!)
+           (temp-dirs/delete-made!)
            (System/exit 1))))))
 
 (defn -main [& _]
@@ -117,4 +119,5 @@
   (when-not @finished?
     (binding [*out* *err*]
       (println "[gtk-selftest-clj] run ended before the last row; no SUMMARY, exiting 1")))
+  (temp-dirs/delete-made!)
   (System/exit (if (and @finished? (seq @support/results) (every? second @support/results)) 0 1)))

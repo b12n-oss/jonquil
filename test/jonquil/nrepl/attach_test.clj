@@ -3,13 +3,16 @@
   Every test owns its temp project and its fake server, and stops both."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [fake-cljd-nrepl :as fake]
             [jonquil.cljd :as cljd]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.attach :as attach]
-            [jonquil.nrepl.client :as client]))
+            [jonquil.nrepl.client :as client]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (def drive-text
   "(ns demo.drive\n  (:require [cljd.string :as str]))\n\n(defn where [] 1)\n\n(comment\n  (where))\n\n(defonce state (atom nil))\n")
@@ -18,16 +21,13 @@
   "A throwaway app directory: pubspec.yaml, dev/demo/drive.cljd, and an
   NREPL.lock holding port-text (none when nil). [dir file]."
   [port-text]
-  (let [d (io/file (System/getProperty "java.io.tmpdir") (str "jonquil-attach-test-" (System/currentTimeMillis) "-" (random-uuid)))
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-attach-test-"))
         f (io/file d "dev/demo/drive.cljd")]
     (.mkdirs (.getParentFile f))
     (spit (io/file d "pubspec.yaml") "name: demo\n")
     (spit f drive-text)
     (when port-text (spit (io/file d "NREPL.lock") port-text))
     [(.getCanonicalPath d) (.getCanonicalPath f)]))
-
-(defn- delete-tree! [dir]
-  (doseq [f (reverse (file-seq (io/file dir)))] (.delete ^java.io.File f)))
 
 (defn- lock-state
   "NREPL.lock's bytes and mtime, and whether a REPL.lock exists: the files
@@ -59,7 +59,7 @@
   (let [srv (fake/start! opts)
         [dir file] (temp-app (str (:port srv) "\n"))]
     (try (f srv dir file)
-         (finally (fake/stop! srv) (delete-tree! dir)))))
+         (finally (fake/stop! srv) (temp-dirs/delete-tree! dir)))))
 
 (deftest make-dispatches-on-runtime-test
   (let [e (ev/make {:profile dialect/cljd :runtime :attach :project-dir "/nowhere"})]
@@ -80,7 +80,7 @@
         (is (= {:status :notice :text cljd/not-running-message} (first (run e drive-text {:run? true :path file}))))
         (is (not (attach/connected? e)))
         (is (= [nil 0 false] (lock-state dir)))
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing "no project at all"
     (let [e (attach/make-attach {:profile dialect/cljd :runtime :attach :project-dir nil})]
       (is (= {:status :notice :text cljd/no-project-message} (first (run e "1" {:run? false}))))))
@@ -89,7 +89,7 @@
       (try
         (is (= {:status :notice :text cljd/bad-port-file-message} (first (run e "1" {:run? false}))))
         (is (= before (lock-state dir)))
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing "a port nothing answers: the refused notice, after the connecting line"
     (let [dead (doto (fake/start!) fake/stop!)
           [dir _] (temp-app (str (:port dead) "\n")) e (make dir) before (lock-state dir)
@@ -98,7 +98,7 @@
         (is (= {:status :notice :text (cljd/refused-message (:port dead))} r))
         (is (= [(str (cljd/connecting-message (:port dead)) "\n")] (texts out :system)))
         (is (= before (lock-state dir)) "the stale file is never deleted or rewritten")
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing "a server without eval and load-file: not ClojureDart, and no code is sent"
     (with-app {:ops ["describe" "clone"]}
       (fn [srv dir _]
