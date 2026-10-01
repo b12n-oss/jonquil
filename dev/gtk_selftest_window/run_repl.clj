@@ -207,7 +207,7 @@
 
 (defn row-run-selection-line
   "Caret on line 2, no selection: commands/run-selection-text (P3.T1) sends
-  the whole line. Asserts BOTH the echoed \"> (inc 41)\" (console-view/
+  the whole line. Asserts BOTH the echoed \"user=> (inc 41)\" (console-view/
   echo-entry!) and the real result \"=> 42\", so a path that evaluates
   without echoing (or echoes without evaluating) still fails."
   [ui]
@@ -220,7 +220,7 @@
                          ((:run-selection!* ui))
                          m))
           ok (await-until 3000 20 #(let [t (support/since ui mark)]
-                                     (and (str/includes? t "> (inc 41)") (str/includes? t "=> 42"))))]
+                                     (and (str/includes? t "user=> (inc 41)") (str/includes? t "=> 42"))))]
       (on-gtk (support/check :run-selection-line ok {:console (support/since ui mark)})))))
 
 (defn row-run-selection-sel
@@ -239,7 +239,7 @@
       (on-gtk (support/check :run-selection-sel ok {:console (support/since ui mark)})))))
 
 (defn row-run-selection-blank [ui]
-  ;; since is always non-empty (it includes the live "> " prompt and any
+  ;; since is always non-empty (it includes the live "user=> " prompt and any
   ;; typed input), so "nothing appended" is asserted against a BASELINE
   ;; captured right before the action, not literal "".
   (go-row :run-selection-blank support/check
@@ -276,7 +276,7 @@
               (let [text (support/console-text ui)
                     input (cview/input-text cv)]
                 (support/check :clear-console
-                               (and produced? (= "> abc" text) (= "abc" input))
+                               (and produced? (= "user=> abc" text) (= "abc" input))
                                {:produced produced? :text text :input input}))))))
 
 ;; gtk-keys.md's shared table -- window.clj's own copy is private.
@@ -333,10 +333,10 @@
           handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
           ;; mark sits at the run banner's own start (do-run!'s own
           ;; mark-entry-start! reads out-end at that same instant), so a
-          ;; full clear leaves exactly the live "> " prompt from mark
+          ;; full clear leaves exactly the live "user=> " prompt from mark
           ;; onward -- not "", which since-mark never reads once ANY
           ;; prompt exists past mark.
-          cleared? (on-gtk (= "> " (support/since ui mark)))
+          cleared? (on-gtk (= "user=> " (support/since ui mark)))
           printed-after? (await-until 2000 20 #(str/includes? (support/since ui mark) ":tick"))
           _ (on-gtk ((:stop!* ui)))
           stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
@@ -391,7 +391,7 @@
                     text (support/console-text ui)
                     input (cview/input-text cv)]
                 (support/check :clear-console-key-regression
-                               (and produced? (= 1 handled) (= "> abc" text) (= "abc" input))
+                               (and produced? (= 1 handled) (= "user=> abc" text) (= "abc" input))
                                {:produced produced? :handled handled :text text :input input}))))))
 
 (defn row-clear-last-menu-item
@@ -412,10 +412,10 @@
                 ((:repl-activate-menu-action!* ui) "clear-last-output")
                 ;; mark sits at the entry's own start (commit-input!'s own
                 ;; mark-entry-start!), so a clear leaves exactly the live
-                ;; "> " prompt from mark onward, not "".
+                ;; "user=> " prompt from mark onward, not "".
                 (let [after (support/since ui mark)]
                   (support/check :clear-last-menu-item
-                                 (and produced? (str/includes? before "=> 8") (= "> " after))
+                                 (and produced? (str/includes? before "=> 8") (= "user=> " after))
                                  {:produced produced? :before before :after after})))))))
 
 (defn row-clear-last-run-selection-mid-run-keeps-mark
@@ -448,7 +448,7 @@
                                                   i (str/index-of t "(+ 9 9)")]
                                               (and i (str/includes? (subs t i) ":tick"))))
           handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
-          cleared? (on-gtk (= "> " (support/since ui mark)))
+          cleared? (on-gtk (= "user=> " (support/since ui mark)))
           _ (on-gtk ((:stop!* ui)))
           stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
       (on-gtk (support/check :clear-last-run-selection-mid-run-keeps-mark
@@ -496,5 +496,5 @@
           handled (on-gtk ((:handle-window-key! ui) nil KEY-L 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil))
           final (on-gtk (support/since ui mark))]
       (on-gtk (support/check :clear-last-mark-lands-after-queued-tail
-                             (and drained? (= 1 handled) (= "OLDTAIL\n> typed" final))
+                             (and drained? (= 1 handled) (= "OLDTAIL\nuser=> typed" final))
                              {:drained drained? :handled handled :final final})))))

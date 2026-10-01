@@ -255,6 +255,32 @@
                              (and not-running? ok attached?)
                              {:not-running not-running? :ok ok :attached attached? :text (support/since ui mark)})))))
 
+(defn row-clj-reconnect-resets-prompt
+  "A new connection is a fresh session, so the prompt goes back to user=> .
+  Run moves the console's prompt to demo.core=> , the server drops, and
+  the next REPL entry reconnects: it evaluates in user and the prompt
+  reads user=> , not the last Run's namespace."
+  [ui]
+  (go-row :clj-reconnect-resets-prompt support/check
+    (let [tail #(support/since ui (support/out-end-offset ui))
+          [ran? _] (run-and-await ui fixture-core-text 10000 #(str/includes? % "=> #'demo.core/nested"))
+          moved? (await-until 2000 20 #(= "demo.core=> " (tail)))
+          _ (fake/drop-connections! (srv))
+          not-running? (await-until 2000 20 #(= "Clojure (JVM) (not running)" (label ui)))
+          cv (:console ui)
+          n (count (fake/requests (srv)))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          answered? (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> 3")))
+          reset? (await-until 2000 20 #(= "user=> " (tail)))
+          sent-ns (keep #(get % "ns") (filter #(= "eval" (get % "op")) (drop n (fake/requests (srv)))))]
+      (on-gtk (support/check :clj-reconnect-resets-prompt
+                             (and ran? moved? not-running? answered? reset? (= ["user"] sent-ns))
+                             {:ran ran? :moved moved? :not-running not-running? :answered answered?
+                              :reset reset? :sent-ns sent-ns :tail (tail)})))))
+
 ;; --- P3.T2 rows: quick doc, jump, and full doc on a second press -----------
 
 (defn row-clj-quick-doc

@@ -471,6 +471,19 @@
             "the next eval reconnects and answers")
         (is (= 2 (count (filter #{"clone"} (fake/ops-seen srv)))))))))
 
+(deftest reconnect-resets-prompt-test
+  (with-project {}
+    (fn [srv dir file]
+      (let [e (make dir)]
+        (run e fixture-core-text {:run? true :path file})
+        (is (= 'demo.core (ev/prompt-ns e)))
+        (fake/drop-connections! srv)
+        (wait-until! (fn [] (not (connection/connected? e))))
+        (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))))
+        (is (= "user" (last (eval-ns-values srv)))
+            "the reconnect's fresh session evaluates in user, not the last Run's namespace")
+        (is (= 'user (ev/prompt-ns e)))))))
+
 (deftest busy-test
   (with-project {:slow {"(slow)" 400}}
     (fn [_srv dir _]

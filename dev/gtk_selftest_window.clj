@@ -29,6 +29,7 @@
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
+            [gtk-selftest-window.prompt :as prompt]
             [gtk-selftest-window.rename-menus :as rename-menus]
             [gtk-selftest-window.run-form :as run-form]
             [gtk-selftest-window.run-repl :as run-repl]
@@ -43,7 +44,8 @@
             [jonquil.main :as main]))
 
 (def ^:private row-fns
-  [run-repl/row-run-output
+  [prompt/row-prompt-starts-user
+   run-repl/row-run-output
    run-repl/row-run-while-running
    run-repl/row-stdin-roundtrip
    run-repl/row-stop-while-reading
@@ -210,6 +212,10 @@
    inspector/row-inspect-escape
    inspector/row-inspect-cols-match
    inspector/row-inspect-def-prompt-escape-safe
+   prompt/row-prompt-follows-repl-ns
+   prompt/row-prompt-keeps-typed-input
+   prompt/row-prompt-follows-run
+   prompt/row-prompt-echo-uses-prompt
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])

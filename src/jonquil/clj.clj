@@ -74,8 +74,10 @@
    ;; :inspect-registered? (ruling 4): whether the connect-time eval of
    ;; nil has been sent on this connection's session yet, so a fresh
    ;; connect always resets it to false and a later reconnect registers
-   ;; again.
-   :on-connect {:session-ns nil :inspect-registered? false}})
+   ;; again. :prompt-ns: a new connection is a new session, so the
+   ;; prompt starts back in user rather than on the last Run's namespace
+   ;; (which a restarted server has never heard of).
+   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user}})
 
 ;; --- the buffer's namespace ---
 
