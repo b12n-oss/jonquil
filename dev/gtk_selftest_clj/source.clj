@@ -126,16 +126,19 @@
 
 (defn row-clj-source-open-in-window
   "F12 on helper opens util.clj (editable). With the window's buffer dirty,
-  Open in window is refused once (the console's unsaved-changes line, the
-  panel stays); Cmd/Ctrl+Shift+O with the panel focused then loads util.clj
-  into the window with the caret on line 6 and hides the panel. The row
-  then reopens the fixture's core.clj so later rows see it."
+  Open in window is refused once (the console's unsaved-changes line, and
+  the panel footer says so too -- final review finding #2 -- since focus
+  is in the panel; the panel stays); Cmd/Ctrl+Shift+O with the panel
+  focused then loads util.clj into the window with the caret on line 6
+  and hides the panel. The row then reopens the fixture's core.clj so
+  later rows see it."
   [ui]
   (go-row :clj-source-open-in-window support/check
     (on-gtk (jump-on! ui "(helper)" "helper")
             (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:editor ui)) " " -1 1))
     (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
-          mark (on-gtk (let [m (support/out-end-offset ui)] ((:source-open!* ui)) m))
+          [mark footer-after-refuse]
+          (on-gtk (let [m (support/out-end-offset ui)] ((:source-open!* ui)) [m (footer ui)]))
           refused? (await-until 2000 20 #(str/includes? (support/since ui mark) "Unsaved changes"))
           still? (on-gtk (visible? (:root (sp ui))))
           _ (on-gtk (source-pane/focus! (sp ui))
@@ -145,8 +148,10 @@
                      :panel (visible? (:root (sp ui)))})
           _ (on-gtk ((:open-path! ui) (:file (rows/fixture))))]
       (on-gtk (support/check :clj-source-open-in-window
-                             (and opened? refused? still? (= rows/util-text (:text v)) (= 6 (:line v)) (not (:panel v)))
-                             (assoc v :opened opened? :refused refused? :still still?))))))
+                             (and opened? refused? still? (str/includes? footer-after-refuse "Unsaved changes")
+                                  (= rows/util-text (:text v)) (= 6 (:line v)) (not (:panel v)))
+                             (assoc v :opened opened? :refused refused? :still still?
+                                    :footer-after-refuse footer-after-refuse))))))
 
 (defn row-clj-source-outside-read-only
   "F12 on outside-fn opens other/place.clj read-only; Cmd/Ctrl+Shift+O says

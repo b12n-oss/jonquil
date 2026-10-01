@@ -371,8 +371,11 @@ the same file or into another, and Cmd/Ctrl+[ goes back. Escape closes
 the panel, and Cmd/Ctrl+I swaps it for the inspector. Library code from
 a jar, and any file outside your project, is read-only. A file in your
 project has an **Open in window** button (Cmd/Ctrl+Shift+O while the panel
-has focus) that loads it into the window for editing, asking first if
-the current buffer has unsaved changes.
+has focus) that loads it into the window for editing. If the window's
+buffer has unsaved changes, the first press refuses and warns instead of
+discarding your edits: "Unsaved changes. Save first, or Open again to
+discard them." Pressing Open in window again goes ahead and loads the
+file.
 
 ![F12 on clojure.string/join in a JVM Clojure window: the source panel shows string.clj from the Clojure jar, read-only, on join's definition](../images/clj-source.png)
 

@@ -242,7 +242,10 @@
 
 (defn- open-path!
   "Loads path into the editor: slurp, set-text!, remember the path. An
-  error is appended as :error, never swallowed. Doesn't touch the title --
+  error is appended as :error, never swallowed, and returned as {:error
+  msg} too (nil on success) -- source.clj's own read-text/load! shape --
+  so a caller that doesn't hold a console in view (do-source-open!) can
+  still tell whether the open actually landed. Doesn't touch the title --
   callers hold the window, this doesn't, so update-title! is theirs to
   call afterward (do-open!, and the ui map's :open-path! below).
 
@@ -257,9 +260,11 @@
       (reset! path-atom path)
       (when (str/includes? text "�")
         (cview/append! cv :system
-                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n")))
+                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
+      nil)
     (catch :default e
-      (cview/append! cv :error (str "; open: " (ex-message e) "\n")))))
+      (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
+      {:error (ex-message e)})))
 
 (defn- temp-path-for
   "A hidden temp file in the same directory as path (M12): the write-then-
@@ -358,13 +363,20 @@
   while STILL dirty (discard-warned? already true) calls proceed! and
   clears the flag; a dirty->clean transition elsewhere (a successful Save)
   also clears it, via the on-dirty-changed! registration in activate!, so
-  a later, unrelated dirty streak earns its own warning."
-  [ed cv discard-warned? proceed!]
-  (if (and (editor/dirty? ed) (not @discard-warned?))
-    (do (reset! discard-warned? true)
-        (cview/append! cv :system "Unsaved changes. Save first, or Open again to discard them.\n"))
-    (do (reset! discard-warned? false)
-        (proceed!))))
+  a later, unrelated dirty streak earns its own warning.
+
+  on-refuse (final review finding #2), when given, also runs on a
+  refusal, on top of the console line above: do-source-open! passes one
+  that puts the same warning on the panel footer, since focus is there
+  when Open in window is the thing that got refused."
+  ([ed cv discard-warned? proceed!] (guarded-open! ed cv discard-warned? proceed! nil))
+  ([ed cv discard-warned? proceed! on-refuse]
+   (if (and (editor/dirty? ed) (not @discard-warned?))
+     (do (reset! discard-warned? true)
+         (cview/append! cv :system "Unsaved changes. Save first, or Open again to discard them.\n")
+         (when on-refuse (on-refuse)))
+     (do (reset! discard-warned? false)
+         (proceed!)))))
 
 (defn- dialog-dismissed?
   "True only for GTK's own GTK_DIALOG_ERROR_DISMISSED (M2), checking BOTH
@@ -1433,19 +1445,31 @@
 (defn- do-source-open!
   "Open in window: an editable panel file loads into the window through the
   unsaved-changes gate (guarded-open!), the caret goes to the panel
-  caret's line, and the panel closes. A read-only location only says why
-  on the footer. ctx is {:ed :cv :win :path :sp :right :discard-warned?}."
+  caret's line, and the panel closes -- but only once open-path! actually
+  landed on loc's own path (@path, compared with source/same-path?: final
+  review finding #2). When it didn't, the window never got the new file
+  and nothing there changed, so the panel stays open and open-path!'s own
+  failure goes on the panel footer instead, rather than closing over a
+  read that never happened. A read-only location only says why on the
+  footer, and guarded-open!'s own refusal over unsaved changes (its
+  on-refuse) says so on the footer too, since focus is in the panel
+  either way, not just on the console. ctx is {:ed :cv :win :path :sp
+  :right :discard-warned?}."
   [{:keys [ed cv win path sp right discard-warned?]}]
   (when-let [{:keys [loc caret]} (source-pane/current sp)]
     (if-not (:editable? loc)
       (source-pane/report! sp (source-pane/read-only-reason loc))
       (let [line (source/line-at (editor/editor-text (:editor sp)) caret)]
-        (guarded-open! ed cv discard-warned?
-                       (fn []
-                         (open-path! ed cv path (:path loc))
-                         (update-title! ed win path)
-                         (place-caret-and-scroll! ed (source/line-offset (editor/editor-text ed) line))
-                         (close-source-panel! right ed)))))))
+        (guarded-open!
+         ed cv discard-warned?
+         (fn []
+           (let [{err :error} (open-path! ed cv path (:path loc))]
+             (if (source/same-path? @path (:path loc))
+               (do (update-title! ed win path)
+                   (place-caret-and-scroll! ed (source/line-offset (editor/editor-text ed) line))
+                   (close-source-panel! right ed))
+               (source-pane/report! sp (or err "Couldn't open that file.")))))
+         (fn [] (source-pane/report! sp "Unsaved changes. Save first, or Open again to discard them.")))))))
 
 ;; --- rename (P4.T7) ------------------------------------------------------
 

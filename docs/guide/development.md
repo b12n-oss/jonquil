@@ -43,7 +43,7 @@ front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 41 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 193 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 195 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
