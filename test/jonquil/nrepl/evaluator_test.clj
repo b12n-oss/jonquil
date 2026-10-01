@@ -9,9 +9,9 @@
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
-            [temp-dirs]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.evaluator :as nrepl]))
+            [jonquil.nrepl.evaluator :as nrepl]
+            [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)
 

@@ -7,9 +7,9 @@
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
-            [temp-dirs]
             [jonquil.nrepl.evaluator :as nrepl]
-            [jonquil.runtime-registry :as registry]))
+            [jonquil.runtime-registry :as registry]
+            [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)
 
