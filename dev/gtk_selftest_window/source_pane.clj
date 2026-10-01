@@ -43,28 +43,45 @@
 
 (defn- caret-line [pane] (inc (first (g/cursor-line-col (:buf (:editor pane))))))
 
+(defn- caret-rect+height
+  "[[x y w h] view-height] for pane's own editor, GTK-thread only."
+  [pane]
+  (let [view (:view (:editor pane))]
+    [(g/caret-window-rect view) (g/gtk-widget-get-height view)]))
+
+(defn- caret-visible?
+  "True once pane's own caret rectangle actually falls inside its view's
+  allocated height -- not just that scroll_to_mark was called, but that
+  it actually landed (P3.T1 fix round 1: the first call alone can settle
+  short of its target and never correct itself)."
+  [pane]
+  (let [[[_ y _ h] view-height] (caret-rect+height pane)]
+    (and (>= y 0) (<= (+ y h) view-height))))
+
 (defn row-source-pane-shows-line
-  "An editable file on line 120 of 200: the text loads, the caret is on line
-  120, the header names the file, Open in window is sensitive, the footer
-  shows the key hints, and the view has scrolled down (vadjustment > 0)."
+  "A long editable file (2000 lines), line 1500: the text loads, the caret
+  is on line 1500, the header names the file, Open in window is sensitive,
+  the footer shows the key hints, and the caret's own rectangle actually
+  lands inside the view -- not just that scroll_to_mark was called once,
+  but that the panel really scrolled there (P3.T1 fix round 1)."
   [_ui]
   (go-row :source-pane-shows-line support/check
     (with-source-pane
       (fn [pane]
         (let [dir (temp-dirs/temp-dir! "jonquil-selftest-source-")
               f (io/file dir "x.clj")
-              _ (spit f (numbered-lines 200))
-              r (on-gtk (source-pane/open-location! pane {:path (.getPath f) :line 120 :editable? true :label "x.clj"}))
-              scrolled? (await-until 2000 20 #(pos? (g/gtk-adjustment-get-value
-                                                     (g/gtk-scrollable-get-vadjustment (:view (:editor pane))))))
+              _ (spit f (numbered-lines 2000))
+              r (on-gtk (source-pane/open-location! pane {:path (.getPath f) :line 1500 :editable? true :label "x.clj"}))
+              visible? (await-until 3000 20 #(caret-visible? pane))
+              [rect view-height] (on-gtk (caret-rect+height pane))
               v (on-gtk {:r r :line (caret-line pane) :header (g/label-text (:header pane))
                          :footer (g/label-text (:footer pane))
                          :open (g/gtk-widget-get-sensitive (:open-btn pane))
                          :starts (str/starts-with? (editor/editor-text (:editor pane)) "(def l1 1)")})]
           (on-gtk (support/check :source-pane-shows-line
-                                 (and (nil? (:r v)) (= 120 (:line v)) (= "x.clj" (:header v))
-                                      (= source-pane/hint-text (:footer v)) (= 1 (:open v)) (:starts v) scrolled?)
-                                 (assoc v :scrolled scrolled?))))))))
+                                 (and (nil? (:r v)) (= 1500 (:line v)) (= "x.clj" (:header v))
+                                      (= source-pane/hint-text (:footer v)) (= 1 (:open v)) (:starts v) visible?)
+                                 (assoc v :visible visible? :rect rect :view-height view-height))))))))
 
 (defn row-source-pane-jar-read-only
   "A jar entry: the header names the entry and its jar and says read-only,

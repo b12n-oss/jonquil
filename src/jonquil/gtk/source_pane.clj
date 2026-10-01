@@ -20,6 +20,25 @@
 
 (def hint-text "F12 follow · Cmd/Ctrl+[ back · Esc close")
 
+(def ^:private SCROLL-SETTLE-POLL-MS
+  ;; estimate: frequent enough to catch the view's own line-height
+  ;; validation promptly, far enough apart not to spin the main loop
+  ;; (jonquil.gtk.inspector-pane/NOTE-POLL-MS's own class of estimate).
+  30)
+
+(def ^:private SCROLL-SETTLE-DEADLINE-MS
+  ;; MEASURED (P3.T1 fix round 1, dev/demo_shots.clj's clj-source scene):
+  ;; place-caret!'s first gtk_text_view_scroll_to_mark, right after a
+  ;; fresh set-text!, can settle on a stale vadjustment well short of its
+  ;; target and never correct itself -- jumping to clojure.string/join in
+  ;; a 377-line jar file landed at vadjustment 1005 instead of ~2521
+  ;; (caret 1684px below a 575px-tall view) and stayed there for 2+
+  ;; continuous seconds. Re-issuing the exact same call a little later,
+  ;; once the text view has had a chance to validate real line heights,
+  ;; converges within a few hundred ms. This caps the retries generously
+  ;; past that.
+  2000)
+
 (defn read-only-reason
   "Why loc can't be opened for editing: Open in window's tooltip, and the
   footer's answer to Cmd/Ctrl+Shift+O."
@@ -40,15 +59,53 @@
   (when-let [loc (:loc @(:state pane))]
     {:loc loc :caret (g/cursor-offset (:buf (:editor pane)))}))
 
+(defn- caret-visible?
+  "True once ed's caret rectangle (g/caret-window-rect, TEXT-window
+  coordinates) actually falls inside the view's own allocated height --
+  not just that scroll_to_mark was called, but that it actually landed."
+  [ed]
+  (let [[_ y _ h] (g/caret-window-rect (:view ed))]
+    (and (>= y 0) (<= (+ y h) (g/gtk-widget-get-height (:view ed))))))
+
+(defn- rescroll!
+  "The scroll_to_mark call place-caret! issues, factored out so
+  arm-scroll-settle!'s shared timeout can re-issue the identical call."
+  [ed]
+  (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 1 0.0 0.3))
+
+(defn- arm-scroll-settle!
+  "Pushes pane's own scroll-settle deadline SCROLL-SETTLE-DEADLINE-MS out
+  from now and bumps its target generation, then arms its single
+  repeating scroll-settle-cb (built once in make-pane, per
+  jonquil.gtk.inspector-pane/arm-note-clear!'s own pattern -- a fresh
+  callable per call would leak, since jonquil.gtk.callbacks retains every
+  one for the process's life) if it isn't already running. A later
+  place-caret! (another jump before this one settles) simply moves the
+  shared deadline/generation forward; the already-scheduled callback goes
+  on re-scrolling toward wherever the editor's caret currently is, which
+  is always the latest target since place-cursor! already moved it there
+  before this is called."
+  [pane]
+  (swap! (:scroll-gen pane) inc)
+  (reset! (:scroll-deadline pane) (+ (System/nanoTime) (* SCROLL-SETTLE-DEADLINE-MS 1000000)))
+  (when (compare-and-set! (:scroll-armed? pane) false true)
+    (g/g-timeout-add SCROLL-SETTLE-POLL-MS (:scroll-settle-cb pane) ffi/null))
+  nil)
+
 (defn- place-caret!
   "Puts the panel editor's caret at offset and scrolls it about a third of
-  the way down. scroll_to_mark, not scroll_to_iter: the text was usually
-  just loaded, and GTK computes line heights later, which scroll_to_mark
-  waits for."
+  the way down, then keeps re-scrolling on a shared timeout (arm-scroll-
+  settle!) until the caret is actually visible or SCROLL-SETTLE-DEADLINE-MS
+  passes. scroll_to_mark, not scroll_to_iter: the text was usually just
+  loaded, and GTK computes line heights later -- MEASURED (P3.T1 fix round
+  1): the very first call, right after a fresh set-text!, can settle on a
+  stale vadjustment well short of its target and never self-correct, so a
+  single call isn't enough; see SCROLL-SETTLE-DEADLINE-MS's own comment."
   [pane offset]
-  (let [{:keys [buf view]} (:editor pane)]
-    (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
-    (g/gtk-text-view-scroll-to-mark view (g/gtk-text-buffer-get-insert buf) 0.0 1 0.0 0.3)))
+  (let [ed (:editor pane)]
+    (g/with-iters* (:buf ed) offset offset (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+    (rescroll! ed)
+    (arm-scroll-settle! pane)))
 
 (defn- show-header! [pane loc]
   (g/gtk-label-set-text (:header pane) (str (:label loc) (when-not (:editable? loc) "  · read-only")))
@@ -148,9 +205,12 @@
 
 (defn make-pane
   "Builds the panel. Returns {:root :header :editor :footer :open-btn
-  :close-btn :state (atom {:loc nil :history []}) :handlers (atom {})}.
-  :root starts visible; the window hides it. The editor is read-only and
-  carries the jonquil-code CSS class, so the window's zoom reaches it."
+  :close-btn :state (atom {:loc nil :history []}) :handlers (atom {})}
+  plus the scroll-settle bookkeeping place-caret! shares across calls
+  (:scroll-gen :scroll-deadline :scroll-armed? :scroll-settle-cb -- see
+  arm-scroll-settle!). :root starts visible; the window hides it. The
+  editor is read-only and carries the jonquil-code CSS class, so the
+  window's zoom reaches it."
   []
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
         header (g/gtk-label-new "")
@@ -159,10 +219,34 @@
         open-btn (g/gtk-button-new-with-label "Open in window")
         close-btn (g/gtk-button-new-with-label "Close")
         footer (g/gtk-label-new hint-text)
+        ;; scroll-gen/deadline/armed? are hoisted out of the pane map
+        ;; literal (rather than built as atoms inline there) so
+        ;; scroll-settle-cb, below, can close over the SAME atoms and ed
+        ;; before pane itself exists -- one callable for the pane's whole
+        ;; lifetime (jonquil.gtk.inspector-pane/note-clear-cb's own
+        ;; pattern), never one per place-caret! call.
+        scroll-gen (atom 0)
+        scroll-deadline (atom 0)
+        scroll-armed? (atom false)
+        scroll-settle-cb
+        (callable (fn [_data]
+                    (try
+                      (if (or (caret-visible? ed) (>= (System/nanoTime) @scroll-deadline))
+                        (do (reset! scroll-armed? false) 0) ;; G_SOURCE_REMOVE
+                        (do (rescroll! ed) 1)) ;; G_SOURCE_CONTINUE
+                      (catch :default e
+                        (reset! scroll-armed? false)
+                        (g/gtk-label-set-text footer (str "; " (ex-message e)))
+                        0)))
+                  [:pointer] :int :on-throw 0)
         pane {:root root :header header :editor ed :footer footer
               :open-btn open-btn :close-btn close-btn
               :state (atom {:loc nil :history []})
-              :handlers (atom {})}]
+              :handlers (atom {})
+              :scroll-gen scroll-gen
+              :scroll-deadline scroll-deadline
+              :scroll-armed? scroll-armed?
+              :scroll-settle-cb scroll-settle-cb}]
     (editor/set-read-only! ed true)
     (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
     (g/gtk-label-set-xalign header 0.0)
