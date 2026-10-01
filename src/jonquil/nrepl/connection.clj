@@ -87,11 +87,10 @@
   (let [v (get messages k)]
     (if (fn? v) (v arg) v)))
 
-(defn- parse-port
-  "text as a port number, or nil when it doesn't hold one. Not
-  jonquil.cljd's copy: connection.clj stays dialect-agnostic (its own
-  Consumes list is client/ops/evaluator only), and every port-file
-  format so far is the same bare number and a newline."
+(defn parse-port
+  "A port file's text as a port number, or nil when it doesn't hold one.
+  Every port file so far (the cljd fork's NREPL.lock, a JVM server's
+  .nrepl-port) is the bare number and a newline."
   [text]
   (let [n (try (some-> text str/trim parse-long) (catch Exception _ nil))]
     (when (and n (< 0 n 65536)) n)))

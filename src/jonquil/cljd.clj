@@ -146,13 +146,6 @@
 
 ;; --- NREPL.lock ------------------------------------------------------------
 
-(defn parse-port
-  "NREPL.lock's text as a port number, or nil when it doesn't hold one. The
-  fork writes the port and a newline (cljd.nrepl/start-nrepl-server)."
-  [text]
-  (let [n (try (some-> text str/trim parse-long) (catch Exception _ nil))]
-    (when (and n (< 0 n 65536)) n)))
-
 ;; --- replies ---------------------------------------------------------------
 
 (def probe-code

@@ -6,6 +6,12 @@
             [jonquil.nrepl.connection :as connection]
             [jonquil.session]))
 
+(deftest parse-port-test
+  (is (= 61151 (connection/parse-port "61151\n")) "a port file holds the port and a newline")
+  (is (= 61151 (connection/parse-port "  61151  ")))
+  (doseq [bad ["" "\n" "abc" "0" "-1" "70000" "61151 61152" nil]]
+    (is (nil? (connection/parse-port bad)) (pr-str bad))))
+
 (deftest attached-protocol-test
   (let [sel {:profile jonquil.dialect/cljd :runtime :attach :project-dir "/nowhere"}
         e (ev/make sel)]
