@@ -597,6 +597,44 @@
                          (and done? (= gen (:gen-now r)) (:kw r) (not (:str-anywhere r)))
                          (assoc r :done done? :gen gen))))))))
 
+(defn- row-read-only-off-supersedes-paint
+  "Fix round 1: set-read-only! supersedes any paint-async! still in flight
+  (its :gen moves on), the same way set-text! does -- without that,
+  toggling read-only off mid-paint re-permits apply-op! edits, and a
+  stale chunk from the old paint can still land afterward at offsets
+  computed against text that no longer exists. Paints a large all-strings
+  text read-only, then within the SAME on-gtk turn (so no paint chunk can
+  have run yet) flips read-only off and replaces the buffer directly --
+  not through set-text!, so only set-read-only!'s own gen bump is under
+  test -- with a short plain text. No string tag may ever land on it, and
+  the superseded generation must never finish."
+  [_ed]
+  (go-row :read-only-off-supersedes-paint check
+    (with-fresh-editor
+      (fn [ed]
+        (let [a-text (apply str (repeat 4000 "\"aaaa\"\n"))
+              short-text "x y z\n"
+              string-tag (get (:tags ed) :string)
+              old-gen (on-gtk (editor/set-read-only! ed true)
+                              (editor/set-text! ed a-text)
+                              (editor/paint-async! ed)
+                              (let [g (:gen @(:paint ed))]
+                                (editor/set-read-only! ed false)
+                                (g/gtk-text-buffer-set-text (:buf ed) short-text -1)
+                                g))
+              _ (<! (timeout 1000))
+              r (on-gtk {:gen-now (:gen @(:paint ed))
+                         :old-done? (:done? @(:paint ed))
+                         :text (editor/editor-text ed)
+                         :str-anywhere (some (fn [o] (g/has-tag-at? (:buf ed) o string-tag))
+                                             (range 0 (count short-text)))})]
+          (on-gtk (check :read-only-off-supersedes-paint
+                         (and (not= old-gen (:gen-now r))
+                              (false? (:old-done? r))
+                              (= short-text (:text r))
+                              (not (:str-anywhere r)))
+                         (assoc r :old-gen old-gen))))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -624,7 +662,8 @@
    row-edit-preedit-yields
    row-read-only-refuses-edits
    row-paint-async-keeps-gtk-responsive
-   row-paint-async-superseded])
+   row-paint-async-superseded
+   row-read-only-off-supersedes-paint])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

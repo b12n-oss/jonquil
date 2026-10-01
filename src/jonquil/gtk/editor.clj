@@ -250,9 +250,16 @@
   already solves exactly this for its own read-only regions with a
   `readonly-tag` (editable false); this editor applies that same tag over
   the whole buffer here, and set-text! (above) reapplies it after a full
-  text replacement."
+  text replacement.
+
+  Fix round 1: also supersedes any paint-async! still in flight (its
+  :gen moves on), the same way set-text! does -- toggling read-only off
+  mid-paint re-permits apply-op! edits, and a chunk from the old paint
+  landing afterward would apply tags at offsets computed from text that
+  no longer exists."
   [ed read-only?]
   (reset! (:read-only? ed) (boolean read-only?))
+  (swap! (:paint ed) update :gen inc)
   (g/gtk-text-view-set-editable (:view ed) (if read-only? 0 1))
   (let [buf (:buf ed)
         tag (:readonly-tag ed)
