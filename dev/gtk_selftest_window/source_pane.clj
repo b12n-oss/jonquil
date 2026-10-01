@@ -5,7 +5,8 @@
   JVM group (dev/gtk_selftest_clj/source.clj).
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.core.async :refer [<! timeout]]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -49,15 +50,6 @@
   (let [view (:view (:editor pane))]
     [(g/caret-window-rect view) (g/gtk-widget-get-height view)]))
 
-(defn- caret-visible?
-  "True once pane's own caret rectangle actually falls inside its view's
-  allocated height -- not just that scroll_to_mark was called, but that
-  it actually landed (P3.T1 fix round 1: the first call alone can settle
-  short of its target and never correct itself)."
-  [pane]
-  (let [[[_ y _ h] view-height] (caret-rect+height pane)]
-    (and (>= y 0) (<= (+ y h) view-height))))
-
 (defn row-source-pane-shows-line
   "A long editable file (2000 lines), line 1500: the text loads, the caret
   is on line 1500, the header names the file, Open in window is sensitive,
@@ -72,7 +64,7 @@
               f (io/file dir "x.clj")
               _ (spit f (numbered-lines 2000))
               r (on-gtk (source-pane/open-location! pane {:path (.getPath f) :line 1500 :editable? true :label "x.clj"}))
-              visible? (await-until 3000 20 #(caret-visible? pane))
+              visible? (await-until 3000 20 #(source-pane/caret-visible? pane))
               [rect view-height] (on-gtk (caret-rect+height pane))
               v (on-gtk {:r r :line (caret-line pane) :header (g/label-text (:header pane))
                          :footer (g/label-text (:footer pane))
@@ -82,6 +74,49 @@
                                  (and (nil? (:r v)) (= 1500 (:line v)) (= "x.clj" (:header v))
                                       (= source-pane/hint-text (:footer v)) (= 1 (:open v)) (:starts v) visible?)
                                  (assoc v :visible visible? :rect rect :view-height view-height))))))))
+
+(def ^:private USER-SCROLL-WINS-THRESHOLD
+  ;; MEASURED (not the brief's literal "must still be 0"): even with the
+  ;; cancel working correctly, GTK's own internal re-validation of a
+  ;; freshly loaded, very long buffer nudges the vadjustment on its own,
+  ;; independent of this fix's own re-scroll timer -- confirmed by a probe
+  ;; that disabled arm-scroll-settle! entirely (so nothing in this fix
+  ;; ever touches the adjustment again): the SAME 752.0 value still
+  ;; appeared after 600 ms, twice, across separate runs. Re-scrolling
+  ;; TOWARD line 1500 (the uncancelled failure mode, mutation-checked
+  ;; below) reaches the tens of thousands (22367 measured). This
+  ;; threshold sits with a wide margin on both sides.
+  5000)
+
+(defn row-source-pane-user-scroll-wins
+  "A person's own scroll cancels the panel's re-scroll settling instead of
+  being fought by it (P3.T1 fix round 2): open the 2000-line file at line
+  1500, call the panel's own :on-user-scroll! handler at once -- the same
+  fn GtkEventControllerScroll's real \"scroll\" signal calls, since there
+  is no synthesizable GdkScroll event to drive here -- force the
+  vadjustment to 0, then wait out the settle window. Absence has no
+  positive condition to poll for (run_repl.clj's own row-run-selection-
+  blank reasoning), so this waits the full window rather than polling for
+  something that should never happen: an uncancelled settle re-scrolling
+  toward line 1500, which would land in the tens of thousands (see
+  USER-SCROLL-WINS-THRESHOLD's own comment), well before 600 ms pass."
+  [_ui]
+  (go-row :source-pane-user-scroll-wins support/check
+    (with-source-pane
+      (fn [pane]
+        (let [dir (temp-dirs/temp-dir! "jonquil-selftest-source-")
+              f (io/file dir "x.clj")
+              _ (spit f (numbered-lines 2000))
+              vadj (on-gtk
+                    (source-pane/open-location! pane {:path (.getPath f) :line 1500 :editable? true :label "x.clj"})
+                    ((:on-user-scroll! pane) nil 0.0 1.0 nil)
+                    (let [vadj (g/gtk-scrollable-get-vadjustment (:view (:editor pane)))]
+                      (g/gtk-adjustment-set-value vadj 0.0)
+                      vadj))]
+          (<! (timeout 600))
+          (on-gtk (let [value (g/gtk-adjustment-get-value vadj)]
+                    (support/check :source-pane-user-scroll-wins
+                                   (< value USER-SCROLL-WINS-THRESHOLD) {:value value}))))))))
 
 (defn row-source-pane-jar-read-only
   "A jar entry: the header names the entry and its jar and says read-only,

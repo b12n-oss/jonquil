@@ -231,6 +231,7 @@
    prompt/row-prompt-follows-run
    prompt/row-prompt-echo-uses-prompt
    source-pane/row-source-pane-shows-line
+   source-pane/row-source-pane-user-scroll-wins
    source-pane/row-source-pane-jar-read-only
    source-pane/row-source-pane-missing-entry
    source-pane/row-source-pane-line-moved

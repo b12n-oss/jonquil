@@ -59,13 +59,23 @@
   (when-let [loc (:loc @(:state pane))]
     {:loc loc :caret (g/cursor-offset (:buf (:editor pane)))}))
 
-(defn- caret-visible?
-  "True once ed's caret rectangle (g/caret-window-rect, TEXT-window
-  coordinates) actually falls inside the view's own allocated height --
-  not just that scroll_to_mark was called, but that it actually landed."
-  [ed]
-  (let [[_ y _ h] (g/caret-window-rect (:view ed))]
-    (and (>= y 0) (<= (+ y h) (g/gtk-widget-get-height (:view ed))))))
+(defn- rect-visible?
+  "True when rect (g/caret-window-rect's own [x y w h], TEXT-window
+  coordinates) falls entirely inside a view of view-height pixels. The
+  one shared check behind caret-visible?, below, and make-pane's own
+  pre-pane scroll-settle-cb (which closes over the editor directly, not
+  pane -- see its own comment)."
+  [[_ y _ h] view-height]
+  (and (>= y 0) (<= (+ y h) view-height)))
+
+(defn caret-visible?
+  "True once pane's own editor caret actually lands inside its view --
+  not just that scroll_to_mark was called, but that it actually landed.
+  Shared by place-caret!'s own re-scroll settling (arm-scroll-settle!,
+  below) and the window-group and demo-shots harnesses that verify it."
+  [pane]
+  (let [view (:view (:editor pane))]
+    (rect-visible? (g/caret-window-rect view) (g/gtk-widget-get-height view))))
 
 (defn- rescroll!
   "The scroll_to_mark call place-caret! issues, factored out so
@@ -73,20 +83,35 @@
   [ed]
   (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 1 0.0 0.3))
 
+(defn- cancel-scroll-settle!
+  "Stops any re-scroll settling in flight from fighting the person: the
+  shared scroll-settle-cb (make-pane) checks cancelled?-atom before every
+  re-scroll and, once true, stops at once (G_SOURCE_REMOVE) without
+  re-scrolling again. Takes the pane's own scroll-cancelled? atom
+  directly, not pane itself, since both callers -- the scroll
+  controller's handler and the cursor-moved hook, both wired in make-pane
+  -- are built before pane exists (same reasoning as scroll-settle-cb
+  closing over ed instead of pane). arm-scroll-settle! resets it back to
+  false on every fresh jump, so a later place-caret! isn't short-circuited
+  by an earlier cancel."
+  [cancelled?-atom]
+  (reset! cancelled?-atom true)
+  nil)
+
 (defn- arm-scroll-settle!
-  "Pushes pane's own scroll-settle deadline SCROLL-SETTLE-DEADLINE-MS out
-  from now and bumps its target generation, then arms its single
+  "Clears pane's own scroll-cancelled? flag and pushes its scroll-settle
+  deadline SCROLL-SETTLE-DEADLINE-MS out from now, then arms its single
   repeating scroll-settle-cb (built once in make-pane, per
   jonquil.gtk.inspector-pane/arm-note-clear!'s own pattern -- a fresh
   callable per call would leak, since jonquil.gtk.callbacks retains every
   one for the process's life) if it isn't already running. A later
   place-caret! (another jump before this one settles) simply moves the
-  shared deadline/generation forward; the already-scheduled callback goes
-  on re-scrolling toward wherever the editor's caret currently is, which
-  is always the latest target since place-cursor! already moved it there
-  before this is called."
+  shared deadline forward and clears any pending cancellation; the
+  already-scheduled callback goes on re-scrolling toward wherever the
+  editor's caret currently is, which is always the latest target since
+  place-cursor! already moved it there before this is called."
   [pane]
-  (swap! (:scroll-gen pane) inc)
+  (reset! (:scroll-cancelled? pane) false)
   (reset! (:scroll-deadline pane) (+ (System/nanoTime) (* SCROLL-SETTLE-DEADLINE-MS 1000000)))
   (when (compare-and-set! (:scroll-armed? pane) false true)
     (g/g-timeout-add SCROLL-SETTLE-POLL-MS (:scroll-settle-cb pane) ffi/null))
@@ -207,8 +232,11 @@
   "Builds the panel. Returns {:root :header :editor :footer :open-btn
   :close-btn :state (atom {:loc nil :history []}) :handlers (atom {})}
   plus the scroll-settle bookkeeping place-caret! shares across calls
-  (:scroll-gen :scroll-deadline :scroll-armed? :scroll-settle-cb -- see
-  arm-scroll-settle!). :root starts visible; the window hides it. The
+  (:scroll-deadline :scroll-armed? :scroll-cancelled? :scroll-settle-cb --
+  see arm-scroll-settle!/cancel-scroll-settle!) and :on-user-scroll!, the
+  panel's own GtkEventControllerScroll handler (test-facing: a self-test
+  row calls it directly to simulate a person's own scroll without driving
+  a real GdkScroll event). :root starts visible; the window hides it. The
   editor is read-only and carries the jonquil-code CSS class, so the
   window's zoom reaches it."
   []
@@ -219,19 +247,21 @@
         open-btn (g/gtk-button-new-with-label "Open in window")
         close-btn (g/gtk-button-new-with-label "Close")
         footer (g/gtk-label-new hint-text)
-        ;; scroll-gen/deadline/armed? are hoisted out of the pane map
-        ;; literal (rather than built as atoms inline there) so
-        ;; scroll-settle-cb, below, can close over the SAME atoms and ed
-        ;; before pane itself exists -- one callable for the pane's whole
-        ;; lifetime (jonquil.gtk.inspector-pane/note-clear-cb's own
-        ;; pattern), never one per place-caret! call.
-        scroll-gen (atom 0)
+        ;; scroll-deadline/armed?/cancelled? are hoisted out of the pane
+        ;; map literal (rather than built as atoms inline there) so
+        ;; scroll-settle-cb and on-user-scroll!, below, can close over the
+        ;; SAME atoms and ed before pane itself exists -- one callable for
+        ;; the pane's whole lifetime (jonquil.gtk.inspector-pane/note-
+        ;; clear-cb's own pattern), never one per place-caret! call.
         scroll-deadline (atom 0)
         scroll-armed? (atom false)
+        scroll-cancelled? (atom false)
         scroll-settle-cb
         (callable (fn [_data]
                     (try
-                      (if (or (caret-visible? ed) (>= (System/nanoTime) @scroll-deadline))
+                      (if (or @scroll-cancelled?
+                              (rect-visible? (g/caret-window-rect (:view ed)) (g/gtk-widget-get-height (:view ed)))
+                              (>= (System/nanoTime) @scroll-deadline))
                         (do (reset! scroll-armed? false) 0) ;; G_SOURCE_REMOVE
                         (do (rescroll! ed) 1)) ;; G_SOURCE_CONTINUE
                       (catch :default e
@@ -239,14 +269,27 @@
                         (g/gtk-label-set-text footer (str "; " (ex-message e)))
                         0)))
                   [:pointer] :int :on-throw 0)
+        ;; The real "scroll" signal's own 4-arg shape (controller, dx, dy,
+        ;; data); dx/dy are never read, since ANY scroll at all means the
+        ;; person is driving the view themselves. Plain fn, not yet
+        ;; wrapped in callable, so it can also be called directly (no FFI
+        ;; marshaling) by a self-test row, and wrapped once below for the
+        ;; real GTK connection.
+        on-user-scroll!
+        (fn [_ctl _dx _dy _data]
+          (try (cancel-scroll-settle! scroll-cancelled?)
+               (catch :default e (g/gtk-label-set-text footer (str "; " (ex-message e)))))
+          0) ;; FALSE: GTK still performs the real scroll
         pane {:root root :header header :editor ed :footer footer
               :open-btn open-btn :close-btn close-btn
               :state (atom {:loc nil :history []})
               :handlers (atom {})
-              :scroll-gen scroll-gen
               :scroll-deadline scroll-deadline
               :scroll-armed? scroll-armed?
-              :scroll-settle-cb scroll-settle-cb}]
+              :scroll-cancelled? scroll-cancelled?
+              :scroll-settle-cb scroll-settle-cb
+              :on-user-scroll! on-user-scroll!}
+        scroll-ctl (g/gtk-event-controller-scroll-new g/EVENT-CONTROLLER-SCROLL-BOTH-AXES)]
     (editor/set-read-only! ed true)
     (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
     (g/gtk-label-set-xalign header 0.0)
@@ -261,6 +304,20 @@
     (g/gtk-box-append root bar)
     (g/gtk-box-append root footer)
     (g/gtk-widget-set-size-request root WIDTH-REQUEST -1)
+    ;; A person's own scroll or caret move over the panel cancels any
+    ;; re-scroll settling in flight (cancel-scroll-settle!), so arm-
+    ;; scroll-settle! never fights them -- the "old single-call behaviour
+    ;; never fought the user" rule the re-scroll timeout would otherwise
+    ;; break. on-cursor-moved! is editor/make-editor's own existing hook
+    ;; (fires on the buffer's notify::cursor-position, which a key press
+    ;; or a click in a read-only view both still trigger): the smallest
+    ;; way to cover "the person moves the caret themselves" without a
+    ;; second key controller alongside the scroll one below.
+    (g/g-signal-connect-data scroll-ctl "scroll"
+                             (callable on-user-scroll! [:pointer :double :double :pointer] :int :on-throw 0)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller (:view ed) scroll-ctl)
+    (editor/on-cursor-moved! ed (fn [_line-col] (cancel-scroll-settle! scroll-cancelled?)))
     (g/g-signal-connect-data open-btn "clicked" (callable (handler-click pane :on-open) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data close-btn "clicked" (callable (handler-click pane :on-close) [:pointer :pointer] :void)

@@ -59,6 +59,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
+            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.main :as main]
             [temp-dirs]))
 
@@ -666,17 +667,6 @@
                       {:header (g/label-text (:header pane)) :info (g/label-text (:info pane))
                        :screenshot-exit exit :screenshot-err err})))))
 
-(defn- caret-visible?
-  "True once ed's caret rectangle (g/caret-window-rect, TEXT-window
-  coordinates) actually falls inside the view's own allocated height.
-  P3.T1 fix round 1: jonquil.gtk.source-pane/place-caret! now keeps
-  re-scrolling on its own shared timeout until this is true (or a
-  deadline passes), so this scene only needs to wait for it -- no
-  scene-local re-scrolling of its own."
-  [ed]
-  (let [[_ y _ h] (g/caret-window-rect (:view ed))]
-    (and (>= y 0) (<= (+ y h) (g/gtk-widget-get-height (:view ed))))))
-
 (defn- scene-clj-source
   "After a Run, F12 on clojure.string/join: the source panel opens the real
   clojure/string.clj from the Clojure jar, read-only, on join's line."
@@ -690,7 +680,11 @@
           ok (await-until 10000 20 #(and (pos? (g/gtk-widget-get-visible (:root sp)))
                                          (str/starts-with? (g/label-text (:header sp)) "string.clj in clojure-")
                                          (:done? @(:paint (:editor sp)))))
-          scrolled? (await-until 3000 20 #(caret-visible? (:editor sp)))
+          ;; P3.T1 fix round 1/2: jonquil.gtk.source-pane/place-caret!
+          ;; keeps re-scrolling on its own shared timeout until this
+          ;; is true (or a deadline passes), so this scene only needs
+          ;; to wait for it -- no scene-local re-scrolling of its own.
+          scrolled? (await-until 3000 20 #(source-pane/caret-visible? sp))
           _ (ga/settle 2)
           {:keys [exit err]} (ga/screenshot (image-path :clj-source "png") (own-pid))]
       (on-gtk (check! :clj-source (and run-ok? ok scrolled? (zero? exit))
