@@ -21,6 +21,9 @@
   (testing "no :file means no location"
     (is (nil? (source/location {:line 3} {:project-dir "/p"})))
     (is (nil? (source/location {:file "" :line 3} {:project-dir "/p"}))))
+  (testing "a :file that isn't a jar:/file: URL or an absolute path is no location either"
+    (is (nil? (source/location {:file "unknown" :line 1} {:project-dir "/p"})))
+    (is (nil? (source/location {:file "clojure/core.clj" :line 10} {:project-dir "/p"}))))
   (testing "a plain file under the project is editable"
     (let [dir (temp-dirs/temp-dir! "jonquil-source-test-")
           f (io/file dir "src/demo/util.clj")]

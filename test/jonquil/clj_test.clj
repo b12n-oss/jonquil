@@ -17,7 +17,6 @@
   (is (= ["Jonquil attaches to a server you started: it never starts or stops the JVM."
           "Reset on Run isn't available: this is your own JVM, so Jonquil doesn't unload namespaces in it."
           "Stdin can't be closed: an empty stdin fails on nREPL 1.7.0, so a read waits for a line."
-          "Jump outside this buffer shows where the definition is, but doesn't open the file."
           "Output printed from other threads after an evaluation finishes isn't shown."]
          clj/limitations)))
 

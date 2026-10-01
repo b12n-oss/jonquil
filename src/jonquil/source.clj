@@ -37,14 +37,26 @@
        (catch :default _ (subs s 5))))
 
 (defn location
-  "Where lookup-info's definition lives, or nil when it carries no :file.
-  opts is {:project-dir dir-or-nil}. A plain file gives {:path p}, a jar
-  entry {:jar j :entry e}; both add :line (1 when absent or not positive),
-  :editable? (only a plain file under :project-dir, compared canonically,
-  so a symlinked project dir counts and a .. path climbing out doesn't) and
-  :label, the panel header's text."
+  "Where lookup-info's definition lives, or nil when it carries no
+  resolvable :file. opts is {:project-dir dir-or-nil}. A plain file gives
+  {:path p}, a jar entry {:jar j :entry e}; both add :line (1 when absent
+  or not positive), :editable? (only a plain file under :project-dir,
+  compared canonically, so a symlinked project dir counts and a .. path
+  climbing out doesn't) and :label, the panel header's text.
+
+  Only a jar:/file: URL or an absolute path counts as a location; anything
+  else is nil, the same as no :file at all. MEASURED (jolt run, not
+  recalled): jonquil.syntax/get-symbol-doc's runtime-Var branch always
+  hands an in-process Jolt lookup a :file string -- a bare relative
+  classpath name (e.g. \"clojure/core.clj\") when the Var's own metadata
+  carries one, else the literal word \"unknown\" (its own (or (:file m)
+  \"unknown\") fallback) -- and neither shape is a place this function, or
+  anything that opens what it returns, can actually read."
   [{:keys [file line]} {:keys [project-dir]}]
-  (when (and (string? file) (seq file))
+  (when (and (string? file) (seq file)
+             (or (str/starts-with? file "jar:")
+                 (str/starts-with? file "file:")
+                 (str/starts-with? file "/")))
     (let [line (if (and (integer? line) (pos? line)) line 1)]
       (if (str/starts-with? file "jar:")
         (when-let [bang (str/index-of file "!/")]

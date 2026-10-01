@@ -12,6 +12,7 @@
   (:require [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [gtk-selftest-clj.rows :as rows]
+            [gtk-selftest-clj.source :as source]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :as cb]
@@ -31,13 +32,22 @@
    rows/row-clj-reconnects-after-restart
    rows/row-clj-reconnect-resets-prompt
    rows/row-clj-quick-doc
-   rows/row-clj-jump-external
    rows/row-clj-full-doc
    rows/row-clj-full-doc-escape
    rows/row-clj-inspect-after-run
    rows/row-clj-inspect-in-out
    rows/row-clj-inspect-lost-connection
    rows/row-clj-inspect-lost-idle
+   source/row-clj-source-jar
+   source/row-clj-source-own-file
+   source/row-clj-source-follow-and-back
+   source/row-clj-source-open-in-window
+   source/row-clj-source-outside-read-only
+   source/row-clj-source-escape
+   source/row-clj-source-missing-entry
+   source/row-clj-source-line-moved
+   source/row-clj-source-read-only
+   source/row-clj-source-shares-slot
    rows/row-clj-reset-tick-round-trip
    rows/row-clj-close])
 

@@ -37,6 +37,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
+            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.nrepl.attach :as attach]
@@ -46,6 +47,7 @@
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]
+            [jonquil.source :as source]
             [jonquil.theme :as theme]))
 
 ;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
@@ -73,6 +75,9 @@
 ;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_i), same lowercase-ascii
 ;; convention as every other single-letter chord above.
 (def ^:private KEY-I 0x069)
+;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_bracketleft), the source panel's
+;; own Cmd/Ctrl+[ back chord.
+(def ^:private KEY-BRACKETLEFT 0x05b)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -727,6 +732,41 @@
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
+(def ^:private PANEL-WIDTH
+  ;; estimate: the brief's own number, matched against jonquil.gtk.
+  ;; inspector-pane/WIDTH-REQUEST (360) plus room for the paned's handle.
+  420)
+
+;; --- the right-hand slot: the inspector and the source panel -------------
+;; One slot, last wins (source-panel spec, decision 3): a vertical GtkBox
+;; holds both panels' roots, only one visible at a time, and the box itself
+;; is hidden when neither is. Each root keeps its own visibility, so "is the
+;; inspector showing?" is still (:root pane)'s own visible flag. These sit
+;; above apply-selection!, which hides the slot on a runtime switch.
+
+(defn- show-right-panel!
+  "Shows which (:inspector or :source) in the slot and hides the other.
+  When the slot was hidden, also sizes h-paned so the panel claims about
+  PANEL-WIDTH, as the inspector always did; while it's showing, the split
+  stays where the person put it. right is {:win :h-paned :slot
+  :inspector-root :source-root}. GTK-thread only."
+  [{:keys [win h-paned slot inspector-root source-root]} which]
+  (let [was-hidden? (zero? (g/gtk-widget-get-visible slot))
+        [show hide] (if (= which :inspector) [inspector-root source-root] [source-root inspector-root])]
+    (g/gtk-widget-set-visible hide 0)
+    (g/gtk-widget-set-visible show 1)
+    (g/gtk-widget-set-visible slot 1)
+    (when was-hidden?
+      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
+
+(defn- hide-right-panel!
+  "Hides which's root, and the slot once neither root is showing."
+  [{:keys [slot inspector-root source-root]} which]
+  (let [[root other] (if (= which :inspector) [inspector-root source-root] [source-root inspector-root])]
+    (g/gtk-widget-set-visible root 0)
+    (when (zero? (g/gtk-widget-get-visible other))
+      (g/gtk-widget-set-visible slot 0))))
+
 ;; apply-selection! sits here, after start-and-report! (above), which it
 ;; calls: Jolt resolves an unqualified symbol at compile time, not lazily,
 ;; so it can't sit any earlier in the file, before start-and-report! exists.
@@ -737,7 +777,7 @@
   showing) hides and drops its own state (minor: the panel's old view
   would otherwise call ev/inspect! on an evaluator that may not even
   implement it). sel-ctx is {:cv :status-label :dialect-label :sel* :ev*
-  :mode-fn :reset-chk :reset-state :pane :inspector-state}.
+  :mode-fn :reset-chk :reset-state :right :inspector-state}.
 
   The new evaluator joins jonquil.runtime-registry as soon as it's made
   (so jonquil.main's stop-all! can never miss it, even if the window
@@ -753,7 +793,7 @@
   (apply-reset-toggle!), and the label is set last, from the evaluator the
   window ends up with, so opening another file of the same app keeps
   reading \"attached\"."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state pane inspector-state]} sel]
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state right inspector-state]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
@@ -764,7 +804,8 @@
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label cv)
         (reset! ev* new)
-        (g/gtk-widget-set-visible (:root pane) 0)
+        (hide-right-panel! right :inspector)
+        (hide-right-panel! right :source)
         (reset! inspector-state nil)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
@@ -1024,32 +1065,25 @@
 
 ;; --- inspector panel (P2.T2) -------------------------------------------
 
-(def ^:private PANEL-WIDTH
-  ;; estimate: the brief's own number, matched against jonquil.gtk.
-  ;; inspector-pane/WIDTH-REQUEST (360) plus room for the paned's handle.
-  420)
-
 (defn- close-inspector-panel!
   "Hides pane's root and focuses the editor (Decisions: closing hides the
   pane's root and focuses the editor -- the pane keeps its state, so the
   next open replaces it). Used both as the pane's own on-close (its Close
   button, or Escape while the rows view itself has focus) and the
   window-level Escape clause (ruling 8, below)."
-  [pane ed]
-  (g/gtk-widget-set-visible (:root pane) 0)
+  [right ed]
+  (hide-right-panel! right :inspector)
   (editor/focus! ed))
 
 (defn- show-inspector-panel!
-  "Makes pane's root visible. The FIRST time (root was hidden), also sizes
-  h-paned so the panel claims about PANEL-WIDTH of the window (Decisions:
-  \"On open, when the pane was hidden, set the position to the window
-  width minus 420 (estimate).\") -- a later open, while it's already
-  showing, leaves the split exactly where the person put it. GTK-thread
-  only."
-  [win h-paned pane]
-  (when (zero? (g/gtk-widget-get-visible (:root pane)))
-    (g/gtk-widget-set-visible (:root pane) 1)
-    (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH)))))
+  "Makes the inspector's root visible. The FIRST time (the slot was
+  hidden), also sizes h-paned so the panel claims about PANEL-WIDTH of the
+  window (Decisions: \"On open, when the pane was hidden, set the
+  position to the window width minus 420 (estimate).\") -- a later open,
+  while it's already showing, leaves the split exactly where the person
+  put it. See show-right-panel!. GTK-thread only."
+  [right]
+  (show-right-panel! right :inspector))
 
 (defn- try-inspect!
   "Ruling 9: the window sends at most one inspect! at a time. Runs f
@@ -1099,13 +1133,13 @@
   allocated (I4: the first open in a window would otherwise measure
   before GTK's own layout pass ever ran) -- guarded by ruling 9, so a
   second press while the first :start is still in flight does nothing."
-  [ev* win h-paned pane inspector-state inspecting? inspector-last-args on-view status-label]
+  [ev* right pane inspector-state inspecting? inspector-last-args on-view status-label]
   (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
     (set-status! status-label inspect/unavailable-message)
     (try-inspect!
      inspecting?
      (fn []
-       (show-inspector-panel! win h-paned pane)
+       (show-inspector-panel! right)
        (inspector-pane/focus! pane)
        (reset! inspector-state nil)
        ;; The evaluator current at the press, not whatever @ev* holds once
@@ -1302,29 +1336,51 @@
     (catch :default e
       (set-status! status-label (str "; quick doc: " (ex-message e))))))
 
+(defn- show-source!
+  "Opens loc in the source panel (painted with the window's current
+  profile) and shows the panel in the right-hand slot, focusing it. A read
+  failure is on the panel's footer; the panel still shows. ctx as
+  do-jump!'s."
+  [{:keys [sp right sel*]} loc]
+  (source-pane/set-profile! sp (:profile @sel*))
+  (source-pane/open-location! sp loc)
+  (show-right-panel! right :source)
+  (source-pane/focus! sp))
+
 (defn- do-jump!
   "F12/Ctrl+B (P4.T4), the ui's own :jump!*: help/jump-target on ed's
-  current snapshot, using ev/lookup (D1.T4) as the doc-info external
-  fallback. :buffer places the cursor at :offset and scrolls it into
-  view, status \"Jumped to <sym>.\"; :external shows its own doc in the
-  quick-doc popover (closing every OTHER open P4 popover first, same
-  close-popovers-fn reasoning as do-quick-doc! above); jump-target's own
-  nil case (no definition anywhere) reads as \"No definition found for
-  <sym>.\" -- the three cases above. No symbol at the caret at all
-  (help/target nil, so there is no sym to name) falls back to quick doc's
-  own \"No symbol at the caret.\" message instead of naming a nil symbol;
-  no row exercises this edge, it's just the sane completion of the two
-  named cases. Same try/catch reasoning as do-quick-doc!."
-  [ed ev* status-label help-pop close-popovers-fn]
+  snapshot, using ev/lookup as the external fallback. :buffer places the
+  caret, status \"Jumped to <sym>.\". An :external target whose lookup
+  carries :file goes through jonquil.source/location: a location in the
+  window's own file moves the caret to that line (clamped) instead;
+  anything else opens in the source panel (source-panel spec). An
+  :external target without :file (in-process Jolt, ClojureDart) shows its
+  doc in the quick-doc popover as before, closing every other P4 popover
+  first. No definition reads \"No definition found for <sym>.\", no symbol
+  \"No symbol at the caret.\" Wrapped in try/catch like do-quick-doc!. ctx
+  is {:ed :ev* :status-label :help-pop :close-popovers-fn :sp :right :path
+  :sel*}."
+  [{:keys [ed ev* status-label help-pop close-popovers-fn path sel*] :as ctx}]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start]} (help/target snap)]
         (let [doc (ev/lookup @ev* symbol (:text snap) start)
-              target (help/jump-target snap doc)]
+              target (help/jump-target snap doc)
+              loc (when (= :external (:kind target))
+                    (source/location (:doc target) {:project-dir (:project-dir @sel*)}))]
           (cond
             (= :buffer (:kind target))
             (do (place-caret-and-scroll! ed (:offset target))
                 (set-status! status-label (str "Jumped to " symbol ".")))
+
+            (and (:path loc) @path (source/same-path? (:path loc) @path))
+            (let [text (editor/editor-text ed)]
+              (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
+              (set-status! status-label (str "Jumped to " symbol ".")))
+
+            loc
+            (do (close-popovers-fn help-pop)
+                (show-source! ctx loc))
 
             (= :external (:kind target))
             (do (close-popovers-fn help-pop)
@@ -1335,6 +1391,51 @@
         (set-status! status-label "No symbol at the caret.")))
     (catch :default e
       (set-status! status-label (str "; jump: " (ex-message e))))))
+
+(defn- do-source-jump!
+  "F12/Ctrl+B inside the source panel: the same lookup on the panel
+  editor's own snapshot, so the namespace comes from the panel file's ns
+  form. A definition in the panel's file moves the panel caret (history
+  kept); one elsewhere loads into the panel; none says so on the footer.
+  ctx as do-jump!'s."
+  [{:keys [ev* sp sel*] :as ctx}]
+  (try
+    (let [snap (editor/snapshot (:editor sp))]
+      (if-let [{:keys [symbol start]} (help/target snap)]
+        (let [doc (ev/lookup @ev* symbol (:text snap) start)
+              target (help/jump-target snap doc)
+              loc (when (= :external (:kind target))
+                    (source/location (:doc target) {:project-dir (:project-dir @sel*)}))]
+          (cond
+            (= :buffer (:kind target)) (source-pane/move-to-offset! sp (:offset target))
+            loc (show-source! ctx loc)
+            :else (source-pane/report! sp (str "No source found for " symbol "."))))
+        (source-pane/report! sp "No symbol at the caret.")))
+    (catch :default e
+      (source-pane/report! sp (str "; jump: " (ex-message e))))))
+
+(defn- close-source-panel!
+  "Hides the source panel (its state kept) and focuses the editor."
+  [right ed]
+  (hide-right-panel! right :source)
+  (editor/focus! ed))
+
+(defn- do-source-open!
+  "Open in window: an editable panel file loads into the window through the
+  unsaved-changes gate (guarded-open!), the caret goes to the panel
+  caret's line, and the panel closes. A read-only location only says why
+  on the footer. ctx is {:ed :cv :win :path :sp :right :discard-warned?}."
+  [{:keys [ed cv win path sp right discard-warned?]}]
+  (when-let [{:keys [loc caret]} (source-pane/current sp)]
+    (if-not (:editable? loc)
+      (source-pane/report! sp (source-pane/read-only-reason loc))
+      (let [line (source/line-at (editor/editor-text (:editor sp)) caret)]
+        (guarded-open! ed cv discard-warned?
+                       (fn []
+                         (open-path! ed cv path (:path loc))
+                         (update-title! ed win path)
+                         (place-caret-and-scroll! ed (source/line-offset (editor/editor-text ed) line))
+                         (close-source-panel! right ed)))))))
 
 ;; --- rename (P4.T7) ------------------------------------------------------
 
@@ -1672,6 +1773,15 @@
   checked ahead of plain Cmd/Ctrl+I (inspect-last-fn), the same
   Shift-first ordering Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
 
+  source-keys ({:focused? :close! :back! :open!}, each a no-arg fn) is the
+  source panel's own key clauses (source-panel spec): Escape closes it
+  when focused, directly after the inspector's own Escape clause above;
+  Cmd/Ctrl+Shift+O opens its current location into the window when it's
+  focused, ahead of the plain Cmd/Ctrl+O clause below; and Cmd/Ctrl+[
+  steps its history back when it's focused, ahead of :else. Every one of
+  these three only fires while (:focused? source-keys) is true, so none
+  of them touch a key meant for the editor or the console.
+
   Clear Last Output (Cmd/Ctrl+Shift+L, CIDER's C-c C-o): its own clause
   sits directly ABOVE the plain Cmd/Ctrl+L clause, since that one doesn't
   itself exclude Shift -- cond takes the first match, so putting the
@@ -1693,7 +1803,7 @@
    run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
    win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
    inspect-last-fn inspect-form-fn pane close-inspector-fn
-   status-label]
+   status-label source-keys]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)]
@@ -1706,6 +1816,8 @@
           ;; every other popover above and before Stop below.
           (and (= keyval KEY-ESCAPE) (inspector-pane/focused? pane win))
           (do (close-inspector-fn) 1)
+          (and (= keyval KEY-ESCAPE) ((:focused? source-keys)))
+          (do ((:close! source-keys)) 1)
           (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
           (= keyval KEY-ESCAPE) 0
           ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
@@ -1713,6 +1825,8 @@
           (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
           (and (= keyval KEY-F6) (not (shift-held? state))) (do (toggle-focus-fn) 1)
           (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
+          (and (command-chord? state) (shift-held? state) (= keyval KEY-O) ((:focused? source-keys)))
+          (do ((:open! source-keys)) 1)
           (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
           (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
           (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
@@ -1735,6 +1849,8 @@
           ;; Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
           (and (command-chord? state) (shift-held? state) (= keyval KEY-I)) (do (inspect-form-fn) 1)
           (and (command-chord? state) (= keyval KEY-I)) (do (inspect-last-fn) 1)
+          (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
+          (do ((:back! source-keys)) 1)
           :else 0))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
@@ -1871,8 +1987,16 @@
         ;; to the same registry below.
         last-shown (atom nil)
         full-doc-pop (help-popover/make-full-doc-popover (:view ed))
+        ;; Source-panel spec: the panel is built before jump-fn, which
+        ;; opens it; its root joins the right-hand slot once the inspector
+        ;; exists (*right, reset below).
+        sp (source-pane/make-pane)
+        *right (atom nil)
+        source-ctx (fn [] {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
+                           :close-popovers-fn close-popovers-fn :sp sp :right @*right
+                           :path path :sel* sel*})
         quick-doc-fn (fn [] (do-quick-doc! ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win))
-        jump-fn (fn [] (do-jump! ed ev* status-label help-pop close-popovers-fn))
+        jump-fn (fn [] (do-jump! (source-ctx)))
         ;; P4.T7: the rename popover, built once on ed's view and joined
         ;; to the SAME registry (Escape/teardown, same reasoning as
         ;; help-pop above -- though autohide ON means GTK's own modal
@@ -1977,16 +2101,26 @@
                             ;; this atom, so :selected is the row on screen.
                             (swap! inspector-state assoc :pending :keep)
                             (ev/inspect! @ev* :def args on-view)))))
-        on-inspector-close (fn [] (close-inspector-panel! @*pane ed))
+        on-inspector-close (fn [] (close-inspector-panel! @*right ed))
         pane (inspector-pane/make-pane {:on-request on-inspector-request
                                         :on-close on-inspector-close
                                         :on-def on-inspector-def
                                         :state inspector-state})
         _ (reset! *pane pane)
-        inspect-last-fn (fn [] (inspect-last! ev* win h-paned pane inspector-state inspecting?
+        slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)}
+        _ (reset! *right right)
+        inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
         inspect-form-fn (fn [] (inspect-form! ed cv ev* status-label flash-fns inspecting? inspect-last-fn))
-        close-inspector-fn (fn [] (close-inspector-panel! pane ed))
+        source-jump-fn (fn [] (do-source-jump! (source-ctx)))
+        source-close-fn (fn [] (close-source-panel! right ed))
+        source-back-fn (fn [] (source-pane/back! sp))
+        source-open-fn (fn [] (do-source-open! {:ed ed :cv cv :win win :path path :sp sp :right right
+                                                :discard-warned? discard-warned?}))
+        source-keys {:focused? (fn [] (source-pane/focused? sp win)) :close! source-close-fn
+                     :back! source-back-fn :open! source-open-fn}
+        close-inspector-fn (fn [] (close-inspector-panel! right ed))
         toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         clear-last-fn (fn [] (do-clear-last-output! cv))
@@ -2033,7 +2167,7 @@
                                      win fb open-find-fn open-replace-fn cycle-theme-fn
                                      close-popovers-fn
                                      inspect-last-fn inspect-form-fn pane close-inspector-fn
-                                     status-label)
+                                     status-label source-keys)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -2075,10 +2209,16 @@
     ;; WIDTH-REQUEST).
     (g/gtk-widget-set-vexpand h-paned 1)
     (g/gtk-paned-set-start-child h-paned paned)
-    (g/gtk-paned-set-end-child h-paned (:root pane))
+    (g/gtk-widget-set-vexpand (:root pane) 1)
+    (g/gtk-widget-set-vexpand (:root sp) 1)
+    (g/gtk-box-append slot (:root pane))
+    (g/gtk-box-append slot (:root sp))
+    (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
     (g/gtk-widget-set-visible (:root pane) 0)
+    (g/gtk-widget-set-visible (:root sp) 0)
+    (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
     (g/gtk-box-append vbox h-paned)
     (g/gtk-widget-set-hexpand status-label 1)
@@ -2096,6 +2236,8 @@
     (g/gtk-style-context-add-provider-for-display
      (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
     ;; TH.T5: the saved theme, in place of TH.T4's fixed theme/default-theme.
+    (source-pane/apply-theme! sp (theme/theme @theme-name))
+    (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
     (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css @settings-path*)
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
@@ -2166,6 +2308,9 @@
     (register-popover-fn full-doc-pop)
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
+    (editor/set-jump-fn! (:editor sp) source-jump-fn)
+    (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
+    (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
     ;; The full-doc popover closes on the same two events as the quick-doc
@@ -2231,7 +2376,7 @@
     ;; the file's path changes (Open, Save As). reset! on path runs on the
     ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
-                   :reset-chk reset-chk :reset-state reset-state :pane pane :inspector-state inspector-state
+                   :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
       (try
         (show-selection! cv dialect-label @sel*)
@@ -2384,6 +2529,17 @@
                  :inspect-form!* inspect-form-fn
                  :inspector-state* (fn [] @inspector-state)
                  :inspector-last-args* (fn [] @inspector-last-args)
+                 ;; Source-panel spec: the jonquil.gtk.source-pane map, the
+                 ;; GtkBox holding it and the inspector in the right-hand
+                 ;; slot, and the window's own F12-inside/Open-in-window/
+                 ;; back/close actions -- exactly what the panel's own keys
+                 ;; and buttons call.
+                 :source-pane sp
+                 :right-slot slot
+                 :source-jump!* source-jump-fn
+                 :source-open!* source-open-fn
+                 :source-back!* source-back-fn
+                 :source-close!* source-close-fn
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
@@ -2437,6 +2593,7 @@
   :activate-menu-action!* :repl-activate-menu-action!*
   :complete!* :completion
   :inspector :inspect-last!* :inspect-form!* :inspector-state* :inspector-last-args*
+  :source-pane :right-slot :source-jump!* :source-open!* :source-back!* :source-close!*
   :handle-window-key! :simulate-open-result! :simulate-save-result! :toolbar
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
@@ -2480,7 +2637,10 @@
   exactly what Cmd/Ctrl+I and Cmd/Ctrl+Shift+I (and the editor menu's two
   new items) call; :inspector-state* reads back the window's own
   inspector-state atom; :inspector-last-args* is self-test-only, naming
-  the args of the last inspect! request this window actually sent."
+  the args of the last inspect! request this window actually sent.
+  :source-pane is the jonquil.gtk.source-pane map; :right-slot the GtkBox
+  holding it and the inspector; the :source-*!* fns are what the panel's
+  keys and buttons call."
   [opts]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one

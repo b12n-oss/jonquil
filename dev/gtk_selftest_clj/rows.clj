@@ -16,7 +16,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
-            [jonquil.gtk.popover :as popover]))
+            [jonquil.gtk.popover :as popover]
+            [temp-dirs]))
 
 ;; This file's own private copies (gdkkeysyms.h, GTK 4.22.4 installed
 ;; headers), same convention as every sibling gtk-selftest-*.rows key
@@ -59,6 +60,38 @@
   (io/file (System/getProperty "java.io.tmpdir")
            (str "jonquil-selftest-clj-" (System/currentTimeMillis) "-" (random-uuid))))
 
+(def util-text
+  ;; demo.util, inside the project: helper2 calls helper (line 4), helper
+  ;; calls outside-fn (line 7).
+  (str "(ns demo.util)\n"
+       "\n"
+       "(defn helper2 []\n"
+       "  (helper))\n"
+       "\n"
+       "(defn helper []\n"
+       "  (outside-fn))\n"))
+
+(def outside-text "(ns other.place)\n(defn outside-fn [] :outside)\n")
+
+(def lib-text
+  ;; The fixture jar's clojure/core.clj stand-in: 30 numbered lines, map on 20.
+  (apply str (map (fn [i] (if (= i 20) "(defn map [f coll] (lazy-seq coll))\n" (str "(def l" i " " i ")\n")))
+                  (range 1 31))))
+
+(defn- write-jar! [path entries]
+  (with-open [z (java.util.zip.ZipOutputStream. (java.io.FileOutputStream. ^String path))]
+    (doseq [[n text] entries]
+      (.putNextEntry z (java.util.zip.ZipEntry. ^String n))
+      (.write z (.getBytes ^String text "UTF-8"))
+      (.closeEntry z)))
+  path)
+
+(defn fixture
+  "What fixture! wrote: {:dir :file :server :lock-text :util-file
+  :outside-file :jar}, paths canonical."
+  []
+  @fixture*)
+
 (defn fixture!
   "Starts the fake server and writes a JVM project directory for it:
   deps.edn, .jonquil.edn {:dialect :clj}, src/demo/core.clj (the spike
@@ -69,7 +102,10 @@
   BEFORE the fake starts, so greet's own :docs entry can point :file at
   this SAME file's real canonical path (mirroring jvm_test.clj's own
   lookup-test comment on the same ordering need); map's own :docs entry
-  is a fixed jar path, ruling 13's own jar-shortening shape."
+  is a fixed jar path, ruling 13's own jar-shortening shape.
+  Also writes src/demo/util.clj and, in a temp-dirs dir outside the project,
+  other/place.clj and lib.jar (clojure/core.clj inside), for the
+  source-panel rows."
   []
   (let [d (temp-project-dir)
         f (io/file d "src/demo/core.clj")]
@@ -77,28 +113,46 @@
     (spit (io/file d "deps.edn") "{}\n")
     (spit (io/file d ".jonquil.edn") "{:dialect :clj}\n")
     (spit f fixture-core-text)
-    (let [srv (fake/start!
-               {:slow {"(slow)" 5000}
-                :completions {"gre" [["greet" "demo.core"]]}
-                :docs {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello."
-                                "arglists-str" "([who])" "file" (.getCanonicalPath f) "line" 4}
-                       "map" {"ns" "clojure.core" "name" "map"
-                              "doc" "Returns a lazy sequence of the results of applying f."
-                              "arglists-str" "([f] [f coll] [f c1 c2] [f c1 c2 c3] [f c1 c2 c3 & colls])"
-                              "file" "jar:file:/x/clojure-1.12.5.jar!/clojure/core.clj" "line" 2748}}
-                :full-docs {"greet" full-doc-greet-text}
-                ;; P3.T2: row-clj-inspect-in-out's own REPL entry, a
-                ;; single-key map so :in always lands on idx 0 with no
-                ;; ambiguity. row-clj-inspect-lost-connection's own delay:
-                ;; every inspect-* op waits this long before answering, so
-                ;; dropping connections right after an in-step's own
-                ;; request is logged (fake/ops-seen) still finds it
-                ;; genuinely pending -- review focus 5's own path.
-                :answers {"(pick)" "{:k 42}"}
-                :inspect-ms 300})
-          lock-text (str (:port srv) "\n")]
-      (spit (io/file d ".nrepl-port") lock-text)
-      (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f) :server srv :lock-text lock-text}))))
+    (let [util (io/file d "src/demo/util.clj")
+          outside-dir (temp-dirs/temp-dir! "jonquil-selftest-clj-outside-")
+          outside (io/file outside-dir "other/place.clj")
+          jar (str (.getCanonicalPath (io/file outside-dir)) "/lib.jar")
+          jar-url (str "jar:file:" jar "!/")]
+      (spit util util-text)
+      (.mkdirs (.getParentFile outside))
+      (spit outside outside-text)
+      (write-jar! jar {"clojure/core.clj" lib-text})
+      (let [srv (fake/start!
+                 {:slow {"(slow)" 5000}
+                  :completions {"gre" [["greet" "demo.core"]]}
+                  :loaded ["demo.util" "other.place" "clojure.core"]
+                  :docs {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello."
+                                  "arglists-str" "([who])" "file" (.getCanonicalPath f) "line" 4}
+                         "map" {"ns" "clojure.core" "name" "map"
+                                "doc" "Returns a lazy sequence of the results of applying f."
+                                "arglists-str" "([f] [f coll] [f c1 c2] [f c1 c2 c3] [f c1 c2 c3 & colls])"
+                                "file" (str jar-url "clojure/core.clj") "line" 20}
+                         "helper2" {"ns" "demo.util" "name" "helper2" "file" (.getCanonicalPath util) "line" 3}
+                         "helper" {"ns" "demo.util" "name" "helper" "file" (.getCanonicalPath util) "line" 6}
+                         "outside-fn" {"ns" "other.place" "name" "outside-fn"
+                                       "file" (.getCanonicalPath outside) "line" 2}
+                         "ghost" {"ns" "clojure.core" "name" "ghost" "file" (str jar-url "nope/ghost.clj") "line" 1}
+                         "late" {"ns" "demo.util" "name" "late" "file" (.getCanonicalPath util) "line" 999}}
+                  :full-docs {"greet" full-doc-greet-text}
+                  ;; P3.T2: row-clj-inspect-in-out's own REPL entry, a
+                  ;; single-key map so :in always lands on idx 0 with no
+                  ;; ambiguity. row-clj-inspect-lost-connection's own delay:
+                  ;; every inspect-* op waits this long before answering, so
+                  ;; dropping connections right after an in-step's own
+                  ;; request is logged (fake/ops-seen) still finds it
+                  ;; genuinely pending -- review focus 5's own path.
+                  :answers {"(pick)" "{:k 42}"}
+                  :inspect-ms 300})
+            lock-text (str (:port srv) "\n")]
+        (spit (io/file d ".nrepl-port") lock-text)
+        (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f) :server srv :lock-text lock-text
+                          :util-file (.getCanonicalPath util) :outside-file (.getCanonicalPath outside)
+                          :jar jar})))))
 
 (defn evaluator [ui] ((:evaluator* ui)))
 
@@ -298,24 +352,6 @@
                                (and (popover/open? hp)
                                     (str/includes? text "demo.core/greet")
                                     (str/includes? text "Says hello."))
-                               {:open (popover/open? hp) :text text})
-                (popover/hide! hp))))))
-
-(defn row-clj-jump-external
-  "F12 on map in (map inc [1]): jump-target finds no definition in the
-  buffer, so it falls to the :external case and shows the SAME quick-doc
-  popover -- ev/lookup's own Defined in line (ruling 13, P3.T1) ends with
-  the fake's own jar path and line."
-  [ui]
-  (go-row :clj-jump-external support/check
-    (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
-              (editor/set-text! ed "(map inc [1])")
-              (support/place-cursor! (:buf ed) 2)
-              ((:jump!* ui))
-              (let [text (help-popover/quick-doc-text hp)]
-                (support/check :clj-jump-external
-                               (and (popover/open? hp)
-                                    (str/ends-with? text "Defined in clojure-1.12.5.jar!/clojure/core.clj:2748"))
                                {:open (popover/open? hp) :text text})
                 (popover/hide! hp))))))
 
