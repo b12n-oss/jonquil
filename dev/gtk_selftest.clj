@@ -635,6 +635,45 @@
                               (not (:str-anywhere r)))
                          (assoc r :old-gen old-gen))))))))
 
+(defn- row-paint-async-stops-on-destroy
+  "A paint still in flight must stop touching the buffer once its own
+  window is destroyed -- the finding behind this row: a transient window
+  (the source panel's own, F12's jump target) can close mid-paint, and
+  every chunk after that was still landing on a buffer whose widget was
+  already gone. Builds its own editor in its own window (not
+  with-fresh-editor, which only closes the window AFTER its callback
+  returns -- here the window has to close WHILE the paint is still
+  running), reads/paints 8,000 lines, closes the window at once, then
+  waits up to 5 s and checks the paint never finished and :destroyed?
+  went true. The wait is measured, not the brief's 1 s: mutation-checked
+  (editor/paint-async!'s current? reverted to drop the destroyed? check)
+  with this same 8,000-line text, (:done? @(:paint ed)) went true, but
+  only after ~1.8 s -- every one of the ~24,000 no-op spans against the
+  destroyed buffer still logs its own Gtk-CRITICAL line, and flushing
+  that volume to the suite's own log file is most of the delay. 5 s
+  leaves comfortable margin over that measurement; await-until returns
+  as soon as :done? flips, so the fixed code (where it never does) is
+  the only path that pays the full 5 s.
+  Mutation check: without that gate, this row FAILs with :done? true."
+  [_ed]
+  (go-row :paint-async-stops-on-destroy check
+    (let [{:keys [win ed]} (on-gtk (let [win (g/gtk-window-new)
+                                         ed (editor/make-editor)]
+                                     (g/gtk-window-set-default-size win 500 400)
+                                     (g/gtk-window-set-child win (:scroll ed))
+                                     (g/gtk-window-present win)
+                                     {:win win :ed ed}))
+          text (big-text 8000)]
+      (on-gtk (editor/set-read-only! ed true)
+              (editor/set-text! ed text)
+              (editor/paint-async! ed))
+      (ga/close-window-bounded! win (:destroyed? ed) 2000 (fn [] nil))
+      (let [done? (await-until 5000 100 #(:done? @(:paint ed)))
+            destroyed? @(:destroyed? ed)]
+        (check :paint-async-stops-on-destroy
+               (and (false? done?) (true? destroyed?))
+               {:done done? :destroyed destroyed?})))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -663,7 +702,8 @@
    row-read-only-refuses-edits
    row-paint-async-keeps-gtk-responsive
    row-paint-async-superseded
-   row-read-only-off-supersedes-paint])
+   row-read-only-off-supersedes-paint
+   row-paint-async-stops-on-destroy])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

@@ -371,7 +371,16 @@
   supersedes one still in flight: every turn checks the generation it
   belongs to. (:paint ed) reads {:gen n :done? bool}. Call it on the GTK
   thread, right after set-text! and placing the caret. A throw is
-  reported through set-error-fn!'s reporter as \"; paint: ...\"."
+  reported through set-error-fn!'s reporter as \"; paint: ...\".
+
+  current? also requires the editor not be destroyed: a chunk's own
+  on-gui! turn can land after the window that owns ed's view has closed
+  (F12 into a large file, then close that window before colouring
+  finishes), and every GTK call below -- the remove-tag pass and each
+  chunk's apply-tag -- would otherwise run against a buffer whose widget
+  is already gone. A superseded-by-destroy paint never marks itself
+  :done?, the same as any other superseded paint, so nothing but the
+  :destroyed? flag need be read to tell the two apart."
   [ed]
   (let [{:keys [buf tags]} ed
         gen (:gen (swap! (:paint ed) (fn [p] {:gen (inc (:gen p)) :done? false})))
@@ -379,7 +388,7 @@
         caret (g/cursor-offset buf)
         profile @(:profile ed)
         len (count text)
-        current? (fn [] (= gen (:gen @(:paint ed))))
+        current? (fn [] (and (= gen (:gen @(:paint ed))) (not @(:destroyed? ed))))
         report (fn [e] (on-gui! (fn [] (when-let [f @(:on-error-fn ed)]
                                          (f (str "; paint: " (ex-message e)))))))]
     (future
@@ -409,27 +418,37 @@
     nil))
 
 (defn- tick! [ed]
-  ;; M7: dirty? copies and compares the whole buffer, which used to run
-  ;; every 20ms regardless of whether anything changed. Only recompute when
-  ;; a `changed` happened since the last check (or set-text!/mark-saved!
-  ;; ran) -- both set dirty-check-needed?; this consumes it. dirty-check-
-  ;; count is bumped on every ACTUAL recompute, purely so a self-test row
-  ;; can observe that idle ticks skip it (there's no other externally
-  ;; visible difference: dirty? itself is still correct on every call, and
-  ;; on-dirty-fns still only fires on a real flip either way).
-  (when @(:dirty-check-needed? ed)
-    (reset! (:dirty-check-needed? ed) false)
-    (swap! (:dirty-check-count ed) inc)
-    (let [cur (dirty? ed)
-          last-dirty? (:last-dirty? ed)]
-      (when (not= cur @last-dirty?)
-        (reset! last-dirty? cur)
-        (doseq [f @(:on-dirty-fns ed)] (f cur)))))
-  (when-let [t @(:dirty-at ed)]
-    (when (>= (- (System/currentTimeMillis) t) 60)
-      (reset! (:dirty-at ed) nil)
-      (when-not @(:read-only? ed) (repaint! ed))))
-  1)
+  ;; The g_timeout_add that calls this every 20ms outlives the editor's own
+  ;; window (it's never removed on destroy), so a tick can still fire after
+  ;; the view -- and its buffer -- are gone, same class of bug as
+  ;; paint-async!'s current? check above. Once :destroyed? is true, touch
+  ;; nothing (not even dirty?, which reads the buffer) and answer
+  ;; G_SOURCE_REMOVE (0) so GTK stops calling this source at all, instead
+  ;; of G_SOURCE_CONTINUE (1).
+  (if @(:destroyed? ed)
+    0
+    (do
+      ;; M7: dirty? copies and compares the whole buffer, which used to run
+      ;; every 20ms regardless of whether anything changed. Only recompute when
+      ;; a `changed` happened since the last check (or set-text!/mark-saved!
+      ;; ran) -- both set dirty-check-needed?; this consumes it. dirty-check-
+      ;; count is bumped on every ACTUAL recompute, purely so a self-test row
+      ;; can observe that idle ticks skip it (there's no other externally
+      ;; visible difference: dirty? itself is still correct on every call, and
+      ;; on-dirty-fns still only fires on a real flip either way).
+      (when @(:dirty-check-needed? ed)
+        (reset! (:dirty-check-needed? ed) false)
+        (swap! (:dirty-check-count ed) inc)
+        (let [cur (dirty? ed)
+              last-dirty? (:last-dirty? ed)]
+          (when (not= cur @last-dirty?)
+            (reset! last-dirty? cur)
+            (doseq [f @(:on-dirty-fns ed)] (f cur)))))
+      (when-let [t @(:dirty-at ed)]
+        (when (>= (- (System/currentTimeMillis) t) 60)
+          (reset! (:dirty-at ed) nil)
+          (when-not @(:read-only? ed) (repaint! ed))))
+      1)))
 
 ;; --- keys: Return/KP-Enter with no Shift/Control/Meta ---------------------
 
@@ -822,7 +841,15 @@
             ;; Source panel: read-only mode (set-read-only!) and the
             ;; asynchronous paint's generation (paint-async!).
             :read-only? (atom false)
-            :paint (atom {:gen 0 :done? true})}]
+            :paint (atom {:gen 0 :done? true})
+            ;; True once view's own "destroy" signal has fired (connected
+            ;; once, below). A paint (paint-async!) or the 20ms tick
+            ;; (tick!) can outlive the editor's own window -- F12 into a
+            ;; large file, then close that window before colouring
+            ;; finishes -- and both check this flag before touching the
+            ;; buffer, so neither runs a GTK call against a destroyed
+            ;; widget.
+            :destroyed? (atom false)}]
     (g/set-bool-property! readonly-tag "editable" false)
     (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) readonly-tag)
     (g/gtk-text-view-set-editable view 1)
@@ -869,6 +896,16 @@
                                          (reset! (:preedit-active? ed) (not (empty? preedit)))
                                          nil)
                                        [:pointer :string :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; A paint (paint-async!) or the 20ms tick (tick!) can outlive the
+    ;; editor's own window: a transient window (the source panel, F12's
+    ;; jump target) can close while either is still running, and both read
+    ;; buffer offsets computed against a buffer that no longer exists once
+    ;; the view is gone. Connected ONCE, here, like every other signal in
+    ;; this fn (mirrors jonquil.gtk.source-pane's own "destroy" backstop).
+    (g/g-signal-connect-data view "destroy"
+                             (callable (fn [_view _data] (reset! (:destroyed? ed) true) nil)
+                                       [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P4.T4: GtkEventControllerFocus's own "leave" signal (ffi.clj's
     ;; citation) -- fires whenever view (or a descendant) stops being the
