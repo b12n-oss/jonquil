@@ -30,6 +30,7 @@
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help
+    jonquil.source
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover
