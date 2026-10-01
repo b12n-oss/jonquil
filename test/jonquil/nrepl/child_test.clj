@@ -5,10 +5,13 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is use-fixtures]]
             [jolt.process :as p]
             [jonquil.nrepl.child :as child]
-            [jonquil.nrepl.client :as client]))
+            [jonquil.nrepl.client :as client]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (defn- force-kill!
   "Cleanup for a test whose fix isn't in place yet: SIGTERM, then
@@ -26,7 +29,7 @@
 (defn temp-project
   "A throwaway project: deps.edn {:paths [\"src\"]} and src/demo/core.clj."
   []
-  (let [d (io/file (System/getProperty "java.io.tmpdir") (str "jonquil-nrepl-test-" (System/nanoTime)))]
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-"))]
     (.mkdirs (io/file d "src/demo"))
     (spit (io/file d "deps.edn") "{:paths [\"src\"]}")
     (spit (io/file d "src/demo/core.clj") "(ns demo.core)\n\n(defn twice\n  \"Doubles x.\"\n  [x]\n  (* 2 x))\n")
@@ -94,7 +97,8 @@
   (let [dir (temp-project)
         _ (spit (io/file dir ".nrepl-port") "9999\n")
         real-process p/process
-        captured (atom nil)]
+        captured (atom nil)
+        log (atom nil)]
     (try
       (with-redefs [child/started? (constantly false)
                     child/ready-deadline-ms 500
@@ -102,18 +106,23 @@
                                 (let [proc (apply real-process args)]
                                   (reset! captured proc)
                                   proc))]
-        (is (thrown? clojure.lang.ExceptionInfo (child/start! dir nil))))
+        (let [ex (try (child/start! dir nil) nil (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex) "start! throws")
+          (reset! log (:log (ex-data ex)))))
+      (is (and @log (.exists (io/file @log))) "the log stays as the post-mortem")
       (let [pid (.pid ^java.lang.Process (:proc @captured))]
         (is (wait-until #(not (.isPresent (java.lang.ProcessHandle/of pid))) 3000)
             "the child is dead within about 3 s of the throw"))
       (is (= "9999\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back, byte-identical")
-      (finally (force-kill! @captured)))))
+      (finally (force-kill! @captured)
+               (when @log (io/delete-file @log true))))))
 
 (deftest start-exited-restores-test
   (let [dir (temp-project)
         _ (spit (io/file dir ".nrepl-port") "5555\n")
         real-process p/process
-        captured (atom nil)]
+        captured (atom nil)
+        log (atom nil)]
     (try
       (with-redefs [p/process (fn [& args]
                                 (let [proc (apply real-process args)]
@@ -123,8 +132,14 @@
                     ;; answers normally, but wait-ready is told it exited, on
                     ;; a path that isn't the bind-failure retry.
                     child/wait-ready (fn [_proc _log _port _deadline-ms] :exited)]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"jolt nrepl-server exited"
-                              (child/start! dir nil))))
+        (let [ex (try (child/start! dir nil) nil (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex) "start! throws")
+          (is (str/includes? (str (ex-message ex)) "jolt nrepl-server exited"))
+          ;; The log name only: wait-ready answers :exited before the
+          ;; child has even opened it, so the file can appear after this
+          ;; throw. It's deleted in the finally, once the child is dead.
+          (reset! log (:log (ex-data ex)))))
       (is (wait-until #(not (p/alive? @captured)) 3000) "the child is dead")
       (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back")
-      (finally (force-kill! @captured)))))
+      (finally (force-kill! @captured)
+               (when @log (io/delete-file @log true))))))

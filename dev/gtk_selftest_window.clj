@@ -41,7 +41,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.main :as main]))
+            [jonquil.main :as main]
+            [temp-dirs]))
 
 (def ^:private row-fns
   [prompt/row-prompt-starts-user
@@ -330,4 +331,5 @@
     (when-not @finished?
       (binding [*out* *err*]
         (println "[gtk-selftest-window] run ended before the last row; no SUMMARY, exiting 1")))
+    (temp-dirs/delete-made!)
     (System/exit (if (and @finished? (seq @support/results) (every? second @support/results)) 0 1))))

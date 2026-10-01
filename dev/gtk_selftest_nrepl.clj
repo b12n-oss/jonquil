@@ -49,7 +49,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.main :as main]
-            [jonquil.nrepl.child :as child]))
+            [jonquil.nrepl.child :as child]
+            [temp-dirs]))
 
 (def ^:private row-fns
   [rows/row-nrepl-starts-and-reports
@@ -177,4 +178,5 @@
   (when-not @finished?
     (binding [*out* *err*]
       (println "[gtk-selftest-nrepl] run ended before the last row; no SUMMARY, exiting 1")))
+  (temp-dirs/delete-made!)
   (System/exit (if (and @finished? (seq @support/results) (every? second @support/results)) 0 1)))

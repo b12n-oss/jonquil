@@ -1,14 +1,13 @@
 (ns jonquil.settings-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
-            [jonquil.settings :as settings]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.settings :as settings]
+            [temp-dirs]))
 
-(defn- temp-dir []
-  (let [d (io/file (System/getProperty "java.io.tmpdir")
-                   (str "jonquil-settings-test-" (System/nanoTime)))]
-    (.mkdirs d)
-    (.getPath d)))
+(use-fixtures :once temp-dirs/fixture)
+
+(defn- temp-dir [] (temp-dirs/temp-dir! "jonquil-settings-test-"))
 
 (deftest settings-path-test
   (is (= "/x/cfg/jonquil/settings.edn" (settings/settings-path {"XDG_CONFIG_HOME" "/x/cfg"} "/home/u")))

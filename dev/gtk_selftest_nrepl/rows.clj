@@ -14,7 +14,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.nrepl.evaluator :as nrepl]
-            [jonquil.session]))
+            [jonquil.session]
+            [temp-dirs]))
 
 (def fixture-core
   "(ns demo.core)\n\n(defn greet\n  \"Says hi.\"\n  [n]\n  (println \"hi\" n)\n  :hi)\n")
@@ -46,10 +47,10 @@
   (the real bug). Given the same unique name anyway (the brief), but
   cleanup stays out of scope: after-close-checks! reads this dir's own
   .nrepl-port back after main/start! returns, so deleting it here isn't
-  trivially safe."
+  trivially safe: the driver deletes it (temp-dirs/delete-made!) only
+  once those checks have run."
   []
-  (let [d (io/file (System/getProperty "java.io.tmpdir")
-                   (str "jonquil-selftest-nrepl-" (System/currentTimeMillis) "-" (random-uuid)))
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-nrepl-"))
         f (io/file d "src/demo/core.clj")]
     (.mkdirs (.getParentFile f))
     (spit (io/file d "deps.edn") "{:paths [\"src\"]}")
@@ -67,8 +68,7 @@
 
   I2: unique dir name, same reasoning as fixture!'s own docstring above."
   []
-  (let [d (io/file (System/getProperty "java.io.tmpdir")
-                   (str "jonquil-selftest-loose-" (System/currentTimeMillis) "-" (random-uuid)))
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-loose-"))
         f (io/file d "scratch.clj")]
     (.mkdirs d)
     (spit f "(+ 1 2)\n")

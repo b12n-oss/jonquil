@@ -10,7 +10,8 @@
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]
-            [jonquil.gtk.ffi :as g]))
+            [jonquil.gtk.ffi :as g]
+            [temp-dirs]))
 
 (defonce results (atom []))
 
@@ -24,9 +25,7 @@
   run of this file, never the user's real $XDG_CONFIG_HOME/jonquil), so
   this self-test can never read or write the real settings file."
   []
-  (str (System/getProperty "java.io.tmpdir")
-       "/jonquil-selftest-window-settings-" (System/currentTimeMillis) "-" (System/nanoTime)
-       "/settings.edn"))
+  (str (temp-dirs/temp-dir! "jonquil-selftest-window-settings-") "/settings.edn"))
 
 (defn console-text [ui] (g/buffer-text (:buf (:console ui))))
 

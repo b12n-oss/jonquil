@@ -3,7 +3,7 @@
   Every test owns its temp project and its fake server, and stops both."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [fake-jvm-nrepl :as fake]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
@@ -11,7 +11,10 @@
             [jonquil.evaluator :as ev]
             [jonquil.inspect :as inspect]
             [jonquil.nrepl.connection :as connection]
-            [jonquil.nrepl.jvm :as jvm]))
+            [jonquil.nrepl.jvm :as jvm]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (def fixture-core-text
   ;; The spike fixture's exact text (its own gitignored planning-store
@@ -35,8 +38,7 @@
   src/demo/core.clj (the spike fixture's text), and .nrepl-port holding
   port-text with no trailing newline (nil for none). [dir file]."
   [port-text]
-  (let [d (io/file (System/getProperty "java.io.tmpdir")
-                   (str "jonquil-jvm-test-" (System/currentTimeMillis) "-" (random-uuid)))
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-jvm-test-"))
         f (io/file d "src/demo/core.clj")]
     (.mkdirs (.getParentFile f))
     (spit (io/file d "deps.edn") "{:deps {}}\n")
@@ -44,9 +46,6 @@
     (spit f fixture-core-text)
     (when port-text (spit (io/file d ".nrepl-port") port-text))
     [(.getCanonicalPath d) (.getCanonicalPath f)]))
-
-(defn- delete-tree! [dir]
-  (doseq [f (reverse (file-seq (io/file dir)))] (.delete ^java.io.File f)))
 
 (defn- lock-state
   ".nrepl-port's bytes and mtime: the file Jonquil must never write or
@@ -85,7 +84,7 @@
   (let [srv (fake/start! opts)
         [dir file] (temp-project (str (:port srv)))]
     (try (f srv dir file)
-         (finally (fake/stop! srv) (delete-tree! dir)))))
+         (finally (fake/stop! srv) (temp-dirs/delete-tree! dir)))))
 
 (defn- wait-until!
   "Polls (pred) every 20ms, up to ~5s, for a background worker to reach a
@@ -116,13 +115,13 @@
         (is (= {:status :notice :text (clj/not-running-message dir)}
                (:result (run e "(+ 1 2)" {:run? false}))))
         (is (nil? (first (lock-state dir))))
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing ".nrepl-port without a port number: the bad-port-file notice"
     (let [[dir _] (temp-project "abc") e (make dir) before (lock-state dir)]
       (try
         (is (= {:status :notice :text clj/bad-port-file-message} (:result (run e "1" {:run? false}))))
         (is (= before (lock-state dir)))
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing "a port nothing answers: the refused notice, after the connecting line"
     (let [dead (doto (fake/start!) fake/stop!)
           [dir _] (temp-project (str (:port dead))) e (make dir) before (lock-state dir)
@@ -131,7 +130,7 @@
         (is (= {:status :notice :text (clj/refused-message (:port dead))} result))
         (is (= [(str (clj/connecting-message (:port dead)) "\n")] (texts out :system)))
         (is (= before (lock-state dir)) "the stale file is never deleted or rewritten")
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing "a server without eval and load-file: the not-server notice"
     (with-project {:ops ["describe" "clone"]}
       (fn [srv dir _]
@@ -561,7 +560,7 @@
                 (is (= (str "Defined in " file ":4") (:location d))))
               (is (nil? (ev/lookup e "nope" fixture-core-text 0))))
             (finally (fake/stop! srv))))
-        (finally (delete-tree! dir)))))
+        (finally (temp-dirs/delete-tree! dir)))))
   (testing "a timeout (a non-vector reply) gives the timeout sentence"
     (with-project {:docs {"greet" {"ns" "demo.core" "name" "greet"}} :lookup-ms 1000}
       (fn [_srv dir _]

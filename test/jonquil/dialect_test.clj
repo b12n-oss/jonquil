@@ -2,15 +2,14 @@
   (:require [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.dialect :as dialect]
-            [jonquil.syntax :as syntax]))
+            [jonquil.syntax :as syntax]
+            [temp-dirs]))
 
-(defn- temp-dir []
-  (let [d (io/file (System/getProperty "java.io.tmpdir")
-                   (str "jonquil-dialect-test-" (System/nanoTime)))]
-    (.mkdirs d)
-    (.getCanonicalPath d)))
+(use-fixtures :once temp-dirs/fixture)
+
+(defn- temp-dir [] (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-dialect-test-"))))
 
 (defn- write! [dir rel text]
   (let [f (io/file dir rel)]
@@ -25,15 +24,6 @@
   (let [dir (temp-dir)]
     (doseq [[rel text] files] (write! dir rel text))
     dir))
-
-(defn- delete-recursively!
-  "Deletes f, and everything under it when it's a directory. Used only to
-  clean up temp-project's own dirs so this suite doesn't add to the
-  ROADMAP's temp-dir leak (D1/D2)."
-  [f]
-  (when (.isDirectory f)
-    (doseq [child (.listFiles f)] (delete-recursively! child)))
-  (.delete f))
 
 ;; A second, jank-shaped profile, so the tie-break rules have something to
 ;; break a tie against. Test data only: D1 ships one profile.
@@ -290,8 +280,8 @@
         (is (= "Clojure (JVM) (not running)" (dialect/label {:profile dialect/clj :runtime :attach} nil)))
         (is (= "Clojure (JVM) (attached)" (dialect/label {:profile dialect/clj :runtime :attach} :attached))))
       (finally
-        (delete-recursively! (io/file proj1))
-        (delete-recursively! (io/file proj2))))))
+        (temp-dirs/delete-tree! proj1)
+        (temp-dirs/delete-tree! proj2)))))
 
 (deftest reset-toggle-test
   (let [jolt-sel {:profile dialect/jolt :runtime :in-process}
