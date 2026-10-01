@@ -486,6 +486,117 @@
               (check :edit-preedit-yields (and (= 0 handled) (= "abc" text))
                      {:handled handled :text text})))))
 
+(defn- with-fresh-editor
+  "Builds a fresh editor in its own transient GtkWindow, shows it, calls
+  (f ed) from the calling go block, then closes the window. Every GTK call
+  runs on the GTK thread; f may park."
+  [f]
+  (let [{:keys [win ed]} (on-gtk (let [win (g/gtk-window-new)
+                                       ed (editor/make-editor)]
+                                   (g/gtk-window-set-default-size win 500 400)
+                                   (g/gtk-window-set-child win (:scroll ed))
+                                   (g/gtk-window-present win)
+                                   {:win win :ed ed}))]
+    (try (f ed)
+         (finally (on-gtk (g/gtk-window-close win))))))
+
+(defn- row-read-only-refuses-edits
+  "A read-only editor changes nothing for typing, Return, an opening
+  bracket, Backspace, Tab, Cmd+/ or Cmd+Y, never marks itself dirty, and
+  edits again once read-only is off."
+  [_ed]
+  (go-row :read-only-refuses-edits check
+    (with-fresh-editor
+      (fn [ed]
+        (let [text "(defn f [x]\n  x)\n"
+              r (on-gtk
+                 (let [buf (:buf ed)]
+                   (editor/set-text! ed text)
+                   (editor/set-read-only! ed true)
+                   (g/with-iters* buf 4 4 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                   (g/gtk-text-buffer-insert-interactive-at-cursor buf "zz" -1 1)
+                   (editor/dispatch-key! ed 0xff0d 0)
+                   (editor/dispatch-key! ed 0x028 0)
+                   (editor/dispatch-key! ed 0xff08 0)
+                   (editor/dispatch-key! ed 0xff09 0)
+                   (editor/dispatch-key! ed 0x02f g/CONTROL-MASK)
+                   (editor/dispatch-key! ed 0x079 g/CONTROL-MASK)
+                   (let [after (editor/editor-text ed)
+                         dirty (editor/dirty? ed)]
+                     (editor/set-read-only! ed false)
+                     (g/gtk-text-buffer-insert-interactive-at-cursor buf "q" -1 1)
+                     {:after after :dirty dirty :editable-again (editor/editor-text ed)})))]
+          (on-gtk (check :read-only-refuses-edits
+                         (and (= text (:after r)) (false? (:dirty r))
+                              (not= text (:editable-again r)))
+                         r)))))))
+
+(defn- big-text
+  "n lines, each with a string and a keyword, so every line gets tags."
+  [n]
+  (apply str (map (fn [i] (str "(defn f" i " [x] (str \"s" i "\" :k" i " x))\n")) (range n))))
+
+(defn- row-paint-async-keeps-gtk-responsive
+  "paint-async! on 8,000 lines finishes within 10 s, colours a string on the
+  first and the last line, and while it runs the GTK thread answers an
+  on-gtk round trip in under 150 ms every time (estimate: one 2,000-span
+  chunk is ~8 ms by the measured 4 µs a span; 150 ms leaves room for GTK's
+  own layout passes). The 20 ms tick never repaints a read-only editor."
+  [_ed]
+  (go-row :paint-async-keeps-gtk-responsive check
+    (with-fresh-editor
+      (fn [ed]
+        (let [text (big-text 8000)
+              last-line-start (inc (str/last-index-of text "\n" (- (count text) 2)))
+              first-str (inc (str/index-of text "\""))
+              last-str (inc (str/index-of text "\"" last-line-start))
+              string-tag (get (:tags ed) :string)
+              _ (on-gtk (editor/set-read-only! ed true)
+                        (editor/set-text! ed text)
+                        (editor/paint-async! ed))
+              start (System/nanoTime)
+              worst (loop [worst 0]
+                      (if (or (:done? @(:paint ed)) (> (- (System/nanoTime) start) 10e9))
+                        worst
+                        (let [t0 (System/nanoTime)
+                              _ (on-gtk nil)
+                              ms (/ (- (System/nanoTime) t0) 1e6)]
+                          (<! (timeout 10))
+                          (recur (max worst ms)))))
+              [a b] (on-gtk [(g/has-tag-at? (:buf ed) first-str string-tag)
+                             (g/has-tag-at? (:buf ed) last-str string-tag)])]
+          (on-gtk (check :paint-async-keeps-gtk-responsive
+                         (and (:done? @(:paint ed)) a b (< worst 150.0))
+                         {:done (:done? @(:paint ed)) :first a :last b :worst-ms worst})))))))
+
+(defn- row-paint-async-superseded
+  "A paint still in flight never lands on newer text: paint text A (all
+  strings), then at once set-text! B (all keywords) and paint again. When
+  the second paint is done, B carries keyword tags and no string tag."
+  [_ed]
+  (go-row :paint-async-superseded check
+    (with-fresh-editor
+      (fn [ed]
+        (let [a-text (apply str (repeat 4000 "\"aaaa\"\n"))
+              b-text (apply str (repeat 400 ":bbbb\n"))
+              string-tag (get (:tags ed) :string)
+              keyword-tag (get (:tags ed) :keyword)
+              gen (on-gtk (editor/set-read-only! ed true)
+                          (editor/set-text! ed a-text)
+                          (editor/paint-async! ed)
+                          (editor/set-text! ed b-text)
+                          (editor/paint-async! ed)
+                          (:gen @(:paint ed)))
+              done? (await-until 10000 20 #(:done? @(:paint ed)))
+              _ (<! (timeout 200))
+              r (on-gtk {:gen-now (:gen @(:paint ed))
+                         :kw (g/has-tag-at? (:buf ed) 1 keyword-tag)
+                         :str-anywhere (some (fn [o] (g/has-tag-at? (:buf ed) o string-tag))
+                                             (range 0 (count b-text) 97))})]
+          (on-gtk (check :paint-async-superseded
+                         (and done? (= gen (:gen-now r)) (:kw r) (not (:str-anywhere r)))
+                         (assoc r :done done? :gen gen))))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -510,7 +621,10 @@
    row-edit-format-selection-macos-cmd-option-f
    row-edit-format-selection-macos-cmd-option-l
    row-edit-redo-y
-   row-edit-preedit-yields])
+   row-edit-preedit-yields
+   row-read-only-refuses-edits
+   row-paint-async-keeps-gtk-responsive
+   row-paint-async-superseded])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
