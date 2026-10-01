@@ -780,5 +780,5 @@
     (g/gtk-widget-add-controller view keyctl)
     ;; on-throw 1 (G_SOURCE_CONTINUE): a throw in one tick must not stop
     ;; dirty tracking for the rest of the session.
-    (g/g-timeout-add 20 (callable (fn [_data] (tick! ed)) [:pointer] :int 1) ffi/null)
+    (g/g-timeout-add 20 (callable (fn [_data] (tick! ed)) [:pointer] :int :on-throw 1) ffi/null)
     ed))

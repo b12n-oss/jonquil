@@ -345,11 +345,33 @@
 
 ;; --- construction ----------------------------------------------------------
 
+(defn set-error-fn!
+  "Registers f (fn [msg] -> nil), the window's error reporter, to run
+  whenever one of the bar's own handlers throws. A single slot, the same
+  late-registration shape as jonquil.gtk.editor/set-error-fn!."
+  [fb f]
+  (reset! (:on-error-fn fb) f)
+  nil)
+
+(defn- contained
+  "Runs thunk for the bar fb's handler named :where. A throw goes to the
+  bar's error reporter as \"; <where>: <message>\" (or *err* before one
+  is registered) and the handler answers :fallback, so GTK carries on."
+  [{:keys [fb where fallback]} thunk]
+  (try (thunk)
+       (catch :default e
+         (let [msg (str "; " where ": " (ex-message e))]
+           (if-let [f @(:on-error-fn fb)]
+             (try (f msg) (catch :default _ nil))
+             (binding [*out* *err*] (println msg))))
+         fallback)))
+
 (defn make-find-bar
   "Builds the find-and-replace bar over ed (a jonquil.gtk.editor map).
   Returns {:box :query :replacement :replace-btn :replace-all-btn
-  :count-label :ed :tag :matches :preedit-active?}; :box is hidden until
-  open! is called."
+  :count-label :ed :tag :matches :preedit-active? :on-error-fn}; :box is
+  hidden until open! is called. Every handler it connects runs through
+  contained, so a throw is reported (set-error-fn!) instead of escaping."
   [ed]
   (let [box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         query (g/gtk-search-entry-new)
@@ -366,7 +388,8 @@
             :count-label count-label
             :ed ed :tag tag :matches (atom [])
             :preedit-active? (atom false)
-            :replacing? (atom false)}]
+            :replacing? (atom false)
+            :on-error-fn (atom nil)}]
     (let [default-t (theme/theme theme/default-theme)]
       (g/set-string-property! tag "background" (:find-highlight default-t))
       (g/set-string-property! tag "foreground" (:text default-t)))
@@ -388,16 +411,16 @@
     (g/gtk-widget-set-visible box 0)
     (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w 0))
     (g/g-signal-connect-data query "changed"
-                             (callable (fn [_ _] (recompute-matches! fb)) [:pointer :pointer] :void)
+                             (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(recompute-matches! fb))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data (:buf ed) "changed"
-                             (callable (fn [_ _] (on-buffer-changed fb)) [:pointer :pointer] :void)
+                             (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(on-buffer-changed fb))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data replace-btn "clicked"
-                             (callable (fn [_ _] (replace-one! fb)) [:pointer :pointer] :void)
+                             (callable (fn [_ _] (contained {:fb fb :where "replace" :fallback nil} #(replace-one! fb))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data replace-all-btn "clicked"
-                             (callable (fn [_ _] (replace-all! fb)) [:pointer :pointer] :void)
+                             (callable (fn [_ _] (contained {:fb fb :where "replace all" :fallback nil} #(replace-all! fb))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3.T4 fix round 1: both entries delegate their GtkEditable
     ;; implementation to an internal GtkText (gtk_editable_get_delegate),
@@ -407,12 +430,14 @@
     (doseq [entry [query replacement]]
       (g/g-signal-connect-data
        (g/gtk-editable-get-delegate entry) "preedit-changed"
-       (callable (fn [_ preedit _] (reset! (:preedit-active? fb) (not (empty? preedit))))
+       (callable (fn [_ preedit _]
+                   (contained {:fb fb :where "find" :fallback nil} #(reset! (:preedit-active? fb) (not (empty? preedit)))))
                  [:pointer :string :pointer] :void)
        ffi/null ffi/null g/CONNECT-DEFAULT))
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (fn [_ctl keyval _keycode state _data] (handle-key! fb keyval state))
+                             (callable (fn [_ctl keyval _keycode state _data]
+                                         (contained {:fb fb :where "find" :fallback 0} #(handle-key! fb keyval state)))
                                        [:pointer :uint :uint :uint :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller box keyctl)

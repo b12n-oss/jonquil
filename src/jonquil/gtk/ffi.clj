@@ -371,6 +371,12 @@
 (ffi/defcfn gtk-check-button-new-with-label "gtk_check_button_new_with_label" [:string] :pointer)
 (ffi/defcfn gtk-check-button-get-active "gtk_check_button_get_active" [:pointer] :int)
 (ffi/defcfn gtk-check-button-set-active "gtk_check_button_set_active" [:pointer :int] :void)
+;; g_signal_emit_by_name (gsignal.h) is variadic; bound with no trailing
+;; arguments, it emits a signal that takes none and returns nothing, such
+;; as a GtkButton's "clicked", synchronously. (gtk_widget_activate on a
+;; GtkButton defers "clicked" behind its press animation instead, so a
+;; caller can't observe the handler within the same step.)
+(ffi/defcfn g-signal-emit-by-name "g_signal_emit_by_name" [:pointer :string] :void)
 
 ;; --- P2.T7: status/title read-back and a self-test-driven close.
 ;; Signatures checked against /opt/homebrew/include/gtk-4.0/gtk/{gtklabel,

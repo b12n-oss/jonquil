@@ -24,6 +24,7 @@
             [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
             [gtk-selftest-window.console-layout :as console-layout]
+            [gtk-selftest-window.contained :as contained]
             [gtk-selftest-window.dialects :as dialects]
             [gtk-selftest-window.files :as files]
             [gtk-selftest-window.find-replace :as find-replace]
@@ -213,6 +214,17 @@
    inspector/row-inspect-escape
    inspector/row-inspect-cols-match
    inspector/row-inspect-def-prompt-escape-safe
+   contained/row-find-change-throw-contained
+   contained/row-find-replace-throw-contained
+   contained/row-find-replace-all-throw-contained
+   contained/row-run-button-throw-contained
+   contained/row-stop-button-throw-contained
+   contained/row-open-button-throw-contained
+   contained/row-save-button-throw-contained
+   contained/row-reset-toggle-throw-contained
+   contained/row-open-result-throw-contained
+   contained/row-save-result-throw-contained
+   contained/row-dirty-timer-survives-throw
    prompt/row-prompt-follows-repl-ns
    prompt/row-prompt-keeps-typed-input
    prompt/row-prompt-follows-run

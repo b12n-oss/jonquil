@@ -48,26 +48,25 @@
 
   Every callable is also contained: a throw from f never crosses the FFI
   boundary into GTK, where it would kill the process. It's reported on
-  *err* (report-callback-exception!) and the callback answers on-throw, or
+  *err* (report-callback-exception!) and the callback answers :on-throw, or
   default-on-throw's value for ret when the call site names none. A site
-  where that default is wrong passes its own: a GSource that must keep
-  running answers 1, a close-request that must not close answers 1. The
-  wrapper has sig's own fixed arity, so foreign-callable sees the same
-  shape f had."
-  ([f sig ret]
-   `(callable ~f ~sig ~ret ~(default-on-throw ret)))
-  ([f sig ret on-throw]
-   (let [args (vec (repeatedly (count sig) #(gensym "arg")))]
-     `(let [f# ~f
-            c# (ffi/foreign-callable
-                (fn ~args
-                  (try (f# ~@args)
-                       (catch :default e#
-                         (report-callback-exception! e#)
-                         ~on-throw)))
-                ~sig ~ret :collect-safe)]
-        (swap! retained conj c#)
-        c#))))
+  where that default is wrong passes its own, as a keyword option: a
+  GSource that must keep running is (callable f sig :int :on-throw 1), and
+  so is a close-request that must not close. The wrapper has sig's own
+  fixed arity, so foreign-callable sees the same shape f had."
+  [f sig ret & {:keys [on-throw] :or {on-throw ::default}}]
+  (let [on-throw (if (= on-throw ::default) (default-on-throw ret) on-throw)
+        args (vec (repeatedly (count sig) #(gensym "arg")))]
+    `(let [f# ~f
+           c# (ffi/foreign-callable
+               (fn ~args
+                 (try (f# ~@args)
+                      (catch :default e#
+                        (report-callback-exception! e#)
+                        ~on-throw)))
+               ~sig ~ret :collect-safe)]
+       (swap! retained conj c#)
+       c#)))
 
 ;; --- on-gui!: hand a thunk to the GTK main thread from any thread --------
 

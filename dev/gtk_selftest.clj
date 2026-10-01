@@ -818,7 +818,7 @@
                                           (if (< (swap! kept inc) 3)
                                             (throw (ex-info "kept timer throws" {}))
                                             0))
-                                        [:pointer] :int 1)
+                                        [:pointer] :int :on-throw 1)
                         ffi/null)
        (g/g-timeout-add 10 (cb/callable (fn [_data]
                                           (swap! dropped inc)
