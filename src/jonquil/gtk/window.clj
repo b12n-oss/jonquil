@@ -2089,9 +2089,11 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)
     (g/g-signal-connect-data win "close-request"
+                             ;; on-throw 1 refuses the close: a window that
+                             ;; may hold unsaved text stays open.
                              (callable (close-request-fn ed cv win app path confirmed-close?
                                                          suppress-close? closing? popovers ev*)
-                                       [:pointer :pointer] :int)
+                                       [:pointer :pointer] :int 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
     ;; delegate lets a Quit AppleEvent (Dock -> Quit, logout, shutdown)

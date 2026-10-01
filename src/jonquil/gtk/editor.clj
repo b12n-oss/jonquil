@@ -778,5 +778,7 @@
                              (callable (on-key ed) [:pointer :uint :uint :uint :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller view keyctl)
-    (g/g-timeout-add 20 (callable (fn [_data] (tick! ed)) [:pointer] :int) ffi/null)
+    ;; on-throw 1 (G_SOURCE_CONTINUE): a throw in one tick must not stop
+    ;; dirty tracking for the rest of the session.
+    (g/g-timeout-add 20 (callable (fn [_data] (tick! ed)) [:pointer] :int 1) ffi/null)
     ed))

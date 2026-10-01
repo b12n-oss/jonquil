@@ -803,6 +803,33 @@
                        {:tail (subs text (max 0 (- (count text) 40))) :input input :at at :sel sel :caret caret
                         :prompt-readonly prompt-readonly}))))))
 
+(defn- row-callable-contains-throw
+  "callable's backstop, through the real FFI boundary: two GLib timers
+  whose callbacks throw. One names on-throw 1 (G_SOURCE_CONTINUE), so GLib
+  keeps calling it until it stops throwing and answers 0 itself; the other
+  takes the :int default, 0, so GLib removes it after its one throw. Both
+  throws are reported on *err*, and the process carries on."
+  [_cv]
+  (go-row :callable-contains-throw check
+    (let [kept (atom 0)
+          dropped (atom 0)]
+      (on-gtk
+       (g/g-timeout-add 10 (cb/callable (fn [_data]
+                                          (if (< (swap! kept inc) 3)
+                                            (throw (ex-info "kept timer throws" {}))
+                                            0))
+                                        [:pointer] :int 1)
+                        ffi/null)
+       (g/g-timeout-add 10 (cb/callable (fn [_data]
+                                          (swap! dropped inc)
+                                          (throw (ex-info "dropped timer throws" {})))
+                                        [:pointer] :int)
+                        ffi/null))
+      (let [ok (await-until 2000 20 #(= 3 @kept))]
+        (<! (timeout 200))
+        (on-gtk (check :callable-contains-throw (and ok (= 3 @kept) (= 1 @dropped))
+                       {:kept @kept :dropped @dropped}))))))
+
 (def ^:private console-row-fns
   [row-console-readonly
    row-console-readonly-delete
@@ -814,6 +841,7 @@
    row-console-unicode
    row-console-history-multiline-caret
    row-console-set-prompt-keeps-selection
+   row-callable-contains-throw
    row-console-preedit-guard
    row-console-history])
 
