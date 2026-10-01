@@ -149,6 +149,37 @@
                                     v)
                                  v)))))))
 
+(defn row-source-pane-back-deleted-file
+  "Open A on line 5, open B on line 3, delete A from disk, then back!: the
+  entry is dropped, the footer says it couldn't be read, back! reports
+  false (it didn't move), and the panel keeps showing B on line 3. A
+  second back! also returns false: the history is now empty."
+  [_ui]
+  (go-row :source-pane-back-deleted-file support/check
+    (with-source-pane
+      (fn [pane]
+        (let [dir (temp-dirs/temp-dir! "jonquil-selftest-source-")
+              a (io/file dir "a.clj")
+              b (io/file dir "b.clj")
+              _ (spit a (numbered-lines 20))
+              _ (spit b (numbered-lines 20))
+              v (on-gtk
+                 (source-pane/open-location! pane {:path (.getPath a) :line 5 :editable? true :label "a.clj"})
+                 (source-pane/open-location! pane {:path (.getPath b) :line 3 :editable? true :label "b.clj"})
+                 (.delete a)
+                 (let [back1 (source-pane/back! pane)
+                       after1 {:header (g/label-text (:header pane)) :line (caret-line pane)
+                               :footer (g/label-text (:footer pane))}
+                       back2 (source-pane/back! pane)]
+                   {:back1 back1 :after1 after1 :back2 back2}))]
+          (on-gtk (support/check :source-pane-back-deleted-file
+                                 (and (false? (:back1 v))
+                                      (= "b.clj" (:header (:after1 v)))
+                                      (= 3 (:line (:after1 v)))
+                                      (str/starts-with? (:footer (:after1 v)) "Couldn't read ")
+                                      (false? (:back2 v)))
+                                 v)))))))
+
 (defn row-source-pane-same-file-no-reload
   "Opening the location already showing, on another line, only moves the
   caret: the paint generation doesn't move (no reload, no repaint)."

@@ -102,13 +102,13 @@
 
 (defn back!
   "Steps back through the history: shows the previous entry's file with
-  its caret. true when it moved, false when the history is empty. An entry
-  whose file can't be read any more is dropped, with the footer saying so."
+  its caret. true when it moved; false when the history was empty or the
+  entry couldn't be read (that entry is dropped, the footer says why, and
+  the panel keeps showing what it had)."
   [pane]
   (if-let [[entry rest-history] (source/back (:history @(:state pane)))]
     (do (swap! (:state pane) assoc :history rest-history)
-        (load! pane (:loc entry) {:caret (:caret entry)})
-        true)
+        (nil? (load! pane (:loc entry) {:caret (:caret entry)})))
     false))
 
 (defn focused?

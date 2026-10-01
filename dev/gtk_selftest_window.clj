@@ -235,6 +235,7 @@
    source-pane/row-source-pane-missing-entry
    source-pane/row-source-pane-line-moved
    source-pane/row-source-pane-history
+   source-pane/row-source-pane-back-deleted-file
    source-pane/row-source-pane-same-file-no-reload
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
