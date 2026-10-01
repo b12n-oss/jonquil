@@ -1008,6 +1008,7 @@
 ;; view's horizontal adjustment value must stay 0 even after a line wider
 ;; than the view is appended.
 (ffi/defcfn gtk-scrollable-get-hadjustment "gtk_scrollable_get_hadjustment" [:pointer] :pointer)
+(ffi/defcfn gtk-scrollable-get-vadjustment "gtk_scrollable_get_vadjustment" [:pointer] :pointer)
 (ffi/defcfn gtk-adjustment-get-value "gtk_adjustment_get_value" [:pointer] :double)
 
 ;; --- P2.T1: the inspector pane -------------------------------------------

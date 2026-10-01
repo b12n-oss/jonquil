@@ -37,6 +37,7 @@
     jonquil.gtk.help-popover
     jonquil.gtk.inspector-pane
     jonquil.gtk.editor
+    jonquil.gtk.source-pane
     jonquil.gtk.completion
     jonquil.gtk.find-bar
     jonquil.gtk.console-view

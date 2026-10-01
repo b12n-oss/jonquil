@@ -34,6 +34,7 @@
             [gtk-selftest-window.rename-menus :as rename-menus]
             [gtk-selftest-window.run-form :as run-form]
             [gtk-selftest-window.run-repl :as run-repl]
+            [gtk-selftest-window.source-pane :as source-pane]
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.themes :as themes]
             [gtk-selftest-window.window-keys :as window-keys]
@@ -229,6 +230,12 @@
    prompt/row-prompt-keeps-typed-input
    prompt/row-prompt-follows-run
    prompt/row-prompt-echo-uses-prompt
+   source-pane/row-source-pane-shows-line
+   source-pane/row-source-pane-jar-read-only
+   source-pane/row-source-pane-missing-entry
+   source-pane/row-source-pane-line-moved
+   source-pane/row-source-pane-history
+   source-pane/row-source-pane-same-file-no-reload
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])
