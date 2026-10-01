@@ -173,6 +173,7 @@
      (row "site:build" "build the documentation site into _site/")
      (row "site:serve [port]" "build, then serve it (first free port from 3000)")
      (row "site:clean" "delete the _site/ build output")
+     (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
      (hdr "Upstream")
      (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
      (println (str "\n" (col "2" (str "first run: " runner " check, then " runner " test, then " runner " app:run")))))}
@@ -351,4 +352,45 @@
 
   site:clean
   {:doc "Delete the _site/ build output"
-   :task (site-task "clean")}}}
+   :task (site-task "clean")}
+
+  clean:tmp
+  {:doc "Delete the temp files and dirs earlier test and self-test runs left under java.io.tmpdir (--dry-run lists them)"
+   ;; Only names this repo's tests and harnesses make: a known prefix
+   ;; followed by the digit its timestamp starts with. The app's own child
+   ;; logs (jonquil-nrepl-<n>.log) aren't on the list. A symlinked
+   ;; directory is never followed, so nothing outside tmpdir is touched.
+   :task (let [dry? (some #{"--dry-run"} *command-line-args*)
+               prefixes ["jonquil-settings-test-" "jonquil-dialect-test-" "jonquil-nrepl-test-"
+                         "jonquil-attach-test-" "jonquil-jvm-test-" "jonquil-selftest-"
+                         "jonquil-selftest-window-settings-" "jonquil-selftest-nrepl-"
+                         "jonquil-selftest-loose-" "jonquil-selftest-cljd-" "jonquil-selftest-clj-"
+                         "jonquil-selftest-dialect-" "jonquil-selftest-atomic-"
+                         "jonquil-selftest-bad-settings-" "jonquil-selftest-badutf8-"
+                         "jonquil-selftest-capslock-" "jonquil-selftest-close-fail-"
+                         "jonquil-selftest-close-save-" "jonquil-selftest-dirty-"
+                         "jonquil-selftest-exec-" "jonquil-selftest-impossible-parent-"
+                         "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
+                         "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
+                         "jonquil-demoshots-settings-" "jonquil-clj-server-" "jonquil-clj-config-"
+                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]
+               prefix-of (fn [^java.io.File f]
+                           (let [n (.getName f)]
+                             (some (fn [p]
+                                     (when (and (str/starts-with? n p)
+                                                (< (count p) (count n))
+                                                (Character/isDigit (.charAt n (count p))))
+                                       p))
+                                   prefixes)))
+               del! (fn del! [^java.io.File f]
+                      (when (and (.isDirectory f) (not (java.nio.file.Files/isSymbolicLink (.toPath f))))
+                        (doseq [c (.listFiles f)] (del! c)))
+                      (try (java.nio.file.Files/deleteIfExists (.toPath f)) (catch Exception _ nil)))
+               tmp (java.io.File. (System/getProperty "java.io.tmpdir"))
+               hits (keep (fn [f] (when-let [p (prefix-of f)] [p f])) (.listFiles tmp))]
+           (doseq [[p fs] (sort-by key (group-by first hits))]
+             (println (format "%6d  %s*" (count fs) p)))
+           (if dry?
+             (println (str (count hits) " entries under " tmp " (dry run, nothing deleted)"))
+             (do (doseq [[_ f] hits] (del! f))
+                 (println (str "deleted " (count hits) " entries under " tmp)))))}}}
