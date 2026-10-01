@@ -94,6 +94,7 @@
            (support/check :clj-close-stuck false
                           {:reason "window still open after the forced close too; exiting to avoid hanging the run"})
            (print-summary!)
+           (temp-dirs/delete-made!)
            (System/exit 1))))))
 
 (defn -main [& _]
