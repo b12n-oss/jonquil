@@ -32,13 +32,17 @@
 (defn- default-on-throw
   "What a callback answers GTK when its body threw and the call site named
   no value: nothing for :void, 0 for an int (a key handler's \"not
-  handled\"), and a null pointer for :pointer."
+  handled\"), and a null pointer for :pointer. Any other ret has no safe
+  default, so it's an error at macroexpansion: a nil handed back as, say, a
+  :double could itself throw while being converted, past the catch."
   [ret]
   (case ret
     :void nil
     (:int :uint :long :ulong) 0
     :pointer `ffi/null
-    nil))
+    (throw (ex-info (str "callable: no default :on-throw for return type " ret
+                         "; pass one explicitly")
+                    {:ret ret}))))
 
 (defmacro callable
   "Wraps f as a :collect-safe foreign-callable with signature sig and return

@@ -375,7 +375,9 @@
 ;; arguments, it emits a signal that takes none and returns nothing, such
 ;; as a GtkButton's "clicked", synchronously. (gtk_widget_activate on a
 ;; GtkButton defers "clicked" behind its press animation instead, so a
-;; caller can't observe the handler within the same step.)
+;; caller can't observe the handler within the same step.) Never pass it
+;; a signal's own arguments through this binding: true varargs need a
+;; variadic-aware declaration, and this one has fixed arguments only.
 (ffi/defcfn g-signal-emit-by-name "g_signal_emit_by_name" [:pointer :string] :void)
 
 ;; --- P2.T7: status/title read-back and a self-test-driven close.
