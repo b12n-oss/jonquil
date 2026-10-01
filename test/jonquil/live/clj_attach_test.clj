@@ -18,12 +18,14 @@
   touches. The last test, which checks .nrepl-port's fate after stop!,
   starts and stops its own separate server instead."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [clj-server :as clj-server]
             [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
-            [jonquil.nrepl.jvm :as jvm]))
+            [jonquil.nrepl.jvm :as jvm]
+            [jonquil.source :as source]))
 
 (def ^:dynamic *srv* nil)
 
@@ -213,6 +215,25 @@
     (let [{:keys [result]} (run e "picked" {:run? false})]
       (is (= :ok (:status result)))
       (is (= "[1 2]" (:printed result))))))
+
+(deftest source-location-live
+  ;; The real server's lookup for clojure.string/join names a jar entry
+  ;; in ~/.m2; jonquil.source reads it locally and line :line is the defn.
+  (let [e (make)]
+    (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))))
+    (let [text "(clojure.string/join \",\" [])"
+          doc (ev/lookup e "clojure.string/join" text 1)
+          loc (source/location doc {:project-dir (:dir *srv*)})
+          {read-text :text} (source/read-text loc)]
+      (is (:jar loc) (str "a jar entry: " (pr-str doc)))
+      (is (str/starts-with? (:label loc) "string.clj in clojure-") (:label loc))
+      (is (false? (:editable? loc)))
+      ;; MEASURED (not the brief's literal "(defn join"): clojure-1.12.5's
+      ;; string.clj hints join's return type, so the real line reads
+      ;; "(defn ^String join". The regex allows that optional hint so the
+      ;; assertion still fails if :line ever points at the wrong defn.
+      (let [defn-line (nth (str/split-lines read-text) (dec (:line loc)))]
+        (is (re-find #"^\(defn(?: \^\S+)? join\b" defn-line) defn-line)))))
 
 (deftest server-stopped-leaves-no-port-file-live
   (let [srv (clj-server/start!)]

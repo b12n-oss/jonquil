@@ -59,6 +59,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
+            [jonquil.gtk.source-pane :as source-pane]
             [jonquil.main :as main]
             [temp-dirs]))
 
@@ -666,7 +667,30 @@
                       {:header (g/label-text (:header pane)) :info (g/label-text (:info pane))
                        :screenshot-exit exit :screenshot-err err})))))
 
-(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector})
+(defn- scene-clj-source
+  "After a Run, F12 on clojure.string/join: the source panel opens the real
+  clojure/string.clj from the Clojure jar, read-only, on join's line."
+  [ui]
+  (go-row :clj-source check!
+    (let [text (str clj-demo-text "\n(clojure.string/join \", \" [\"a\" \"b\"])\n")
+          run-ok? (<! (clj-run-demo! ui text))
+          _ (on-gtk (place-cursor! (:buf (:editor ui)) (+ 1 (str/index-of text "join")))
+                    ((:jump!* ui)))
+          sp (:source-pane ui)
+          ok (await-until 10000 20 #(and (pos? (g/gtk-widget-get-visible (:root sp)))
+                                         (str/starts-with? (g/label-text (:header sp)) "string.clj in clojure-")
+                                         (:done? @(:paint (:editor sp)))))
+          ;; P3.T1 fix round 1/2: jonquil.gtk.source-pane/place-caret!
+          ;; keeps re-scrolling on its own shared timeout until this
+          ;; is true (or a deadline passes), so this scene only needs
+          ;; to wait for it -- no scene-local re-scrolling of its own.
+          scrolled? (await-until 3000 20 #(source-pane/caret-visible? sp))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :clj-source "png") (own-pid))]
+      (on-gtk (check! :clj-source (and run-ok? ok scrolled? (zero? exit))
+                      {:header (g/label-text (:header sp)) :screenshot-exit exit :screenshot-err err})))))
+
+(def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
@@ -693,7 +717,8 @@
    [:clj-attach scene-clj-attach]
    [:clj-quick-doc scene-clj-quick-doc]
    [:clj-full-doc scene-clj-full-doc]
-   [:clj-inspector scene-clj-inspector]])
+   [:clj-inspector scene-clj-inspector]
+   [:clj-source scene-clj-source]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 

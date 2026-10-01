@@ -217,7 +217,7 @@
                           "find" "run-selection" "close-prompt"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
                           "completion" "quick-doc" "rename" "inspector"
-                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector"]
+                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source"]
                results (mapv (fn [id]
                                (let [r (shell {:continue true} "jolt" "-M:shots" id)]
                                  {:id id :ok (zero? (:exit r))}))
@@ -361,16 +361,18 @@
    ;; logs (jonquil-nrepl-<n>.log) aren't on the list. A symlinked
    ;; directory is never followed, so nothing outside tmpdir is touched.
    :task (let [dry? (some #{"--dry-run"} *command-line-args*)
-               prefixes ["jonquil-settings-test-" "jonquil-dialect-test-" "jonquil-nrepl-test-"
+               prefixes ["jonquil-settings-test-" "jonquil-source-test-" "jonquil-dialect-test-" "jonquil-nrepl-test-"
                          "jonquil-attach-test-" "jonquil-jvm-test-" "jonquil-selftest-"
                          "jonquil-selftest-window-settings-" "jonquil-selftest-nrepl-"
                          "jonquil-selftest-loose-" "jonquil-selftest-cljd-" "jonquil-selftest-clj-"
+                         "jonquil-selftest-clj-outside-"
                          "jonquil-selftest-dialect-" "jonquil-selftest-atomic-"
                          "jonquil-selftest-bad-settings-" "jonquil-selftest-badutf8-"
                          "jonquil-selftest-capslock-" "jonquil-selftest-close-fail-"
                          "jonquil-selftest-close-save-" "jonquil-selftest-dirty-"
                          "jonquil-selftest-exec-" "jonquil-selftest-impossible-parent-"
                          "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
+                         "jonquil-selftest-source-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-clj-server-" "jonquil-clj-config-"
                          "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]

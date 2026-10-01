@@ -35,6 +35,8 @@ these:
 P4 added a fourth: `jonquil.help`, the decisions behind completion, quick
 doc, jump to definition and rename, covered in its own section below.
 
+- `jonquil.source`: where a definition outside the buffer lives and its text, from a lookup's `:file` (an absolute path or a `jar:file:…!/entry` URL, read locally with `java.util.zip.ZipFile`), whether it can be edited (a plain file under the project), line arithmetic, and the source panel's bounded history.
+
 This arc added two more: `jonquil.inspect.view`, the inspector's view
 code lifted from clojure-cli.repl (`UPSTREAM.md` carries the provenance
 row), and `jonquil.inspect`, the panel's own pane state and its key-to-op
@@ -86,6 +88,8 @@ P4 added three more, all built on a shared popover base:
 - `jonquil.gtk.completion`: the completion popover, one instance per view (the editor and the console's input line), also built on `jonquil.gtk.popover`.
 
 This arc added one more, outside that popover base: `jonquil.gtk.inspector-pane`, the inspector panel widget, covered in its own section below.
+
+- `jonquil.gtk.source-pane`: the read-only source panel: a header, a read-only `jonquil.gtk.editor`, Open in window and Close, and a footer for hints, notes and errors. It shares the window's right-hand slot (a vertical GtkBox) with the inspector, one visible at a time. Its editor paints with `paint-async!`, which computes the paint plan on a future and applies it a chunk per main-loop turn, nearest the caret first, so an 8,000-line library file never holds the GTK thread.
 
 ### `on-gui!` and the worker-to-GTK-thread path
 

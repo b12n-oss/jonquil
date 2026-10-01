@@ -30,7 +30,7 @@
   (:require [jolt.ffi :as ffi]
             [jonquil.commands :as commands]
             [jonquil.edit :as edit]
-            [jonquil.gtk.callbacks :refer [callable]]
+            [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
             [jonquil.paint :as paint]
             [jonquil.theme :as theme]))
@@ -85,13 +85,21 @@
   before the next tick can run -- so set-text! never itself marks dirty or
   fires on-dirty-changed!. Also marks a dirty recompute needed (M7),
   belt-and-braces alongside the `changed` signal set-text buffer itself
-  emits."
+  emits. Also supersedes any paint-async! still in flight (its :gen moves
+  on). set-text! fully replaces the buffer, so a read-only editor
+  (set-read-only!) reapplies its own read-only tag over the new text --
+  the tag doesn't survive gtk_text_buffer_set_text, since that leaves no
+  old text for the new text to inherit tags from."
   [ed s]
+  (swap! (:paint ed) update :gen inc)
   (let [buf (:buf ed)]
     (g/gtk-text-buffer-begin-irreversible-action buf)
     (g/gtk-text-buffer-set-text buf s -1)
     (g/gtk-text-buffer-end-irreversible-action buf)
-    (reset! (:saved-text ed) s))
+    (reset! (:saved-text ed) s)
+    (when @(:read-only? ed)
+      (g/with-iters* buf 0 (count s)
+        (fn [a b] (g/gtk-text-buffer-apply-tag buf (:readonly-tag ed) a b)))))
   (reset! (:dirty-check-needed? ed) true)
   ;; P3.T5: belt-and-braces alongside the buffer's own cursor notify (below),
   ;; same reasoning as the dirty-check-needed? line above it.
@@ -223,6 +231,46 @@
   (g/gtk-widget-grab-focus (:view ed))
   nil)
 
+(defn set-read-only!
+  "Makes ed read-only (true) or editable again (false). Read-only: the
+  view refuses typing, paste, cut and GTK's own undo (its editable
+  property is off); every key handle-key! turns into an edit is a no-op
+  (apply-op! and the redo clause check this flag); and the 20 ms tick never
+  repaints, since a read-only editor paints through paint-async! instead.
+  Caret movement, selection, copy and the F12/Ctrl+B jump slot still work.
+
+  Deviation from the brief's step 3(g): the view's own editable property
+  (set above) only gates the view's OWN key/IM/paste handling -- it has no
+  effect on a direct buffer call like
+  gtk_text_buffer_insert_interactive_at_cursor, which checks per-range
+  `editable` tags against its own default_editable argument, independent of
+  any view. Measured: the brief's verbatim set-read-only! (view-editable
+  toggle only) left row-read-only-refuses-edits FAILing -- its buffer-level
+  insert went through with the editor read-only. jonquil.gtk.console-view
+  already solves exactly this for its own read-only regions with a
+  `readonly-tag` (editable false); this editor applies that same tag over
+  the whole buffer here, and set-text! (above) reapplies it after a full
+  text replacement.
+
+  Fix round 1: also supersedes any paint-async! still in flight (its
+  :gen moves on), the same way set-text! does -- toggling read-only off
+  mid-paint re-permits apply-op! edits, and a chunk from the old paint
+  landing afterward would apply tags at offsets computed from text that
+  no longer exists."
+  [ed read-only?]
+  (reset! (:read-only? ed) (boolean read-only?))
+  (swap! (:paint ed) update :gen inc)
+  (g/gtk-text-view-set-editable (:view ed) (if read-only? 0 1))
+  (let [buf (:buf ed)
+        tag (:readonly-tag ed)
+        len (count (g/buffer-text buf))]
+    (g/with-iters* buf 0 len
+      (fn [a b]
+        (if read-only?
+          (g/gtk-text-buffer-apply-tag buf tag a b)
+          (g/gtk-text-buffer-remove-tag buf tag a b)))))
+  nil)
+
 (defn apply-theme!
   "Retints every tag in (:tags ed) to theme t's colours (TH.T4): sets each
   tag's foreground to (:fg (paint/style t k)). Only ever touches tag
@@ -259,9 +307,10 @@
   2)\" :caret 0 :sel-start 0 :sel-end 7}) => {:caret 2 :sel [2 9]}, where
   2 = a). So the iter that matches :caret goes first, whichever end that
   is, not always b. Returns true when the op applied, nil when result was
+  nil. A read-only editor (set-read-only!) applies nothing and returns
   nil."
   [ed result]
-  (when result
+  (when (and result (not @(:read-only? ed)))
     (let [buf (:buf ed)
           [sel-a sel-b] (:sel result)
           caret (:caret result)]
@@ -308,28 +357,98 @@
       (when-let [tag (get tags k)]
         (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-apply-tag buf tag a b)))))))
 
+(def ^:private PAINT-CHUNK
+  ;; estimate: a full repaint of clojure/core.clj (8,233 lines, 26,816
+  ;; spans) measured 383-415 ms, paint-plan alone 280-357 ms, so applying
+  ;; tags costs ~4 us a span; 2,000 spans is ~8 ms of GTK time per turn.
+  2000)
+
+(defn paint-async!
+  "Repaints ed without holding the GTK thread for the whole text:
+  paint-plan runs on a future, then its spans are applied PAINT-CHUNK at a
+  time, each chunk its own on-gui! turn, nearest the caret first so the
+  visible region colours first. A later paint-async! or set-text!
+  supersedes one still in flight: every turn checks the generation it
+  belongs to. (:paint ed) reads {:gen n :done? bool}. Call it on the GTK
+  thread, right after set-text! and placing the caret. A throw is
+  reported through set-error-fn!'s reporter as \"; paint: ...\".
+
+  current? also requires the editor not be destroyed: a chunk's own
+  on-gui! turn can land after the window that owns ed's view has closed
+  (F12 into a large file, then close that window before colouring
+  finishes), and every GTK call below -- the remove-tag pass and each
+  chunk's apply-tag -- would otherwise run against a buffer whose widget
+  is already gone. A superseded-by-destroy paint never marks itself
+  :done?, the same as any other superseded paint, so nothing but the
+  :destroyed? flag need be read to tell the two apart."
+  [ed]
+  (let [{:keys [buf tags]} ed
+        gen (:gen (swap! (:paint ed) (fn [p] {:gen (inc (:gen p)) :done? false})))
+        text (g/buffer-text buf)
+        caret (g/cursor-offset buf)
+        profile @(:profile ed)
+        len (count text)
+        current? (fn [] (and (= gen (:gen @(:paint ed))) (not @(:destroyed? ed))))
+        report (fn [e] (on-gui! (fn [] (when-let [f @(:on-error-fn ed)]
+                                         (f (str "; paint: " (ex-message e)))))))]
+    (future
+      (try
+        (let [spans (sort-by (fn [[_ s _]] (Math/abs (long (- s caret))))
+                             (paint/paint-plan profile text))
+              step (fn step [chunks]
+                     (on-gui!
+                      (fn []
+                        (try
+                          (when (current?)
+                            (if-let [c (first chunks)]
+                              (do (doseq [[k s e] c]
+                                    (when-let [tag (get tags k)]
+                                      (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-apply-tag buf tag a b)))))
+                                  (step (rest chunks)))
+                              (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))))
+                          (catch :default e (report e))))))]
+          (on-gui! (fn []
+                     (try
+                       (when (current?)
+                         (doseq [tag (vals tags)]
+                           (g/with-iters* buf 0 len (fn [a b] (g/gtk-text-buffer-remove-tag buf tag a b))))
+                         (step (partition-all PAINT-CHUNK spans)))
+                       (catch :default e (report e))))))
+        (catch :default e (report e))))
+    nil))
+
 (defn- tick! [ed]
-  ;; M7: dirty? copies and compares the whole buffer, which used to run
-  ;; every 20ms regardless of whether anything changed. Only recompute when
-  ;; a `changed` happened since the last check (or set-text!/mark-saved!
-  ;; ran) -- both set dirty-check-needed?; this consumes it. dirty-check-
-  ;; count is bumped on every ACTUAL recompute, purely so a self-test row
-  ;; can observe that idle ticks skip it (there's no other externally
-  ;; visible difference: dirty? itself is still correct on every call, and
-  ;; on-dirty-fns still only fires on a real flip either way).
-  (when @(:dirty-check-needed? ed)
-    (reset! (:dirty-check-needed? ed) false)
-    (swap! (:dirty-check-count ed) inc)
-    (let [cur (dirty? ed)
-          last-dirty? (:last-dirty? ed)]
-      (when (not= cur @last-dirty?)
-        (reset! last-dirty? cur)
-        (doseq [f @(:on-dirty-fns ed)] (f cur)))))
-  (when-let [t @(:dirty-at ed)]
-    (when (>= (- (System/currentTimeMillis) t) 60)
-      (reset! (:dirty-at ed) nil)
-      (repaint! ed)))
-  1)
+  ;; The g_timeout_add that calls this every 20ms outlives the editor's own
+  ;; window (it's never removed on destroy), so a tick can still fire after
+  ;; the view -- and its buffer -- are gone, same class of bug as
+  ;; paint-async!'s current? check above. Once :destroyed? is true, touch
+  ;; nothing (not even dirty?, which reads the buffer) and answer
+  ;; G_SOURCE_REMOVE (0) so GTK stops calling this source at all, instead
+  ;; of G_SOURCE_CONTINUE (1).
+  (if @(:destroyed? ed)
+    0
+    (do
+      ;; M7: dirty? copies and compares the whole buffer, which used to run
+      ;; every 20ms regardless of whether anything changed. Only recompute when
+      ;; a `changed` happened since the last check (or set-text!/mark-saved!
+      ;; ran) -- both set dirty-check-needed?; this consumes it. dirty-check-
+      ;; count is bumped on every ACTUAL recompute, purely so a self-test row
+      ;; can observe that idle ticks skip it (there's no other externally
+      ;; visible difference: dirty? itself is still correct on every call, and
+      ;; on-dirty-fns still only fires on a real flip either way).
+      (when @(:dirty-check-needed? ed)
+        (reset! (:dirty-check-needed? ed) false)
+        (swap! (:dirty-check-count ed) inc)
+        (let [cur (dirty? ed)
+              last-dirty? (:last-dirty? ed)]
+          (when (not= cur @last-dirty?)
+            (reset! last-dirty? cur)
+            (doseq [f @(:on-dirty-fns ed)] (f cur)))))
+      (when-let [t @(:dirty-at ed)]
+        (when (>= (- (System/currentTimeMillis) t) 60)
+          (reset! (:dirty-at ed) nil)
+          (when-not @(:read-only? ed) (repaint! ed))))
+      1)))
 
 ;; --- keys: Return/KP-Enter with no Shift/Control/Meta ---------------------
 
@@ -572,7 +691,7 @@
        (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode))
        (do-format-selection! ed)
 
-       (and (command-chord? state) (= keyval KEY-Y))
+       (and (command-chord? state) (= keyval KEY-Y) (not @(:read-only? ed)))
        (if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
          (do (g/gtk-text-buffer-redo (:buf ed)) 1)
          0)
@@ -673,10 +792,16 @@
         scroll (g/gtk-scrolled-window-new)
         keyctl (g/gtk-event-controller-key-new)
         focusctl (g/gtk-event-controller-focus-new)
+        ;; Source panel: the read-only region tag (editable false), same
+        ;; mechanism jonquil.gtk.console-view's own readonly-tag uses --
+        ;; see set-read-only!'s docstring for why the view's own editable
+        ;; property alone isn't enough.
+        readonly-tag (g/gtk-text-tag-new "editor-read-only")
         ed {:view view
             :buf buf
             :scroll scroll
             :tags (make-tags! buf)
+            :readonly-tag readonly-tag
             :saved-text (atom "")
             :last-dirty? (atom false)
             :on-dirty-fns (atom [])
@@ -712,7 +837,21 @@
             ;; set-error-fn!. nil until jonquil.gtk.window wires it, so a
             ;; throw before that point is silently dropped rather than
             ;; reported (there is no status label to report it to yet).
-            :on-error-fn (atom nil)}]
+            :on-error-fn (atom nil)
+            ;; Source panel: read-only mode (set-read-only!) and the
+            ;; asynchronous paint's generation (paint-async!).
+            :read-only? (atom false)
+            :paint (atom {:gen 0 :done? true})
+            ;; True once view's own "destroy" signal has fired (connected
+            ;; once, below). A paint (paint-async!) or the 20ms tick
+            ;; (tick!) can outlive the editor's own window -- F12 into a
+            ;; large file, then close that window before colouring
+            ;; finishes -- and both check this flag before touching the
+            ;; buffer, so neither runs a GTK call against a destroyed
+            ;; widget.
+            :destroyed? (atom false)}]
+    (g/set-bool-property! readonly-tag "editable" false)
+    (g/gtk-text-tag-table-add (g/gtk-text-buffer-get-tag-table buf) readonly-tag)
     (g/gtk-text-view-set-editable view 1)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
@@ -757,6 +896,16 @@
                                          (reset! (:preedit-active? ed) (not (empty? preedit)))
                                          nil)
                                        [:pointer :string :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; A paint (paint-async!) or the 20ms tick (tick!) can outlive the
+    ;; editor's own window: a transient window (the source panel, F12's
+    ;; jump target) can close while either is still running, and both read
+    ;; buffer offsets computed against a buffer that no longer exists once
+    ;; the view is gone. Connected ONCE, here, like every other signal in
+    ;; this fn (mirrors jonquil.gtk.source-pane's own "destroy" backstop).
+    (g/g-signal-connect-data view "destroy"
+                             (callable (fn [_view _data] (reset! (:destroyed? ed) true) nil)
+                                       [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P4.T4: GtkEventControllerFocus's own "leave" signal (ffi.clj's
     ;; citation) -- fires whenever view (or a descendant) stops being the

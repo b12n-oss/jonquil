@@ -1,0 +1,255 @@
+(ns gtk-selftest-clj.source
+  "The source panel in a real JVM Clojure window against the fake server:
+  F12 on a definition outside the buffer opens it on the right, read-only
+  for a jar or a file outside the project, editable through Open in window
+  for a project file; F12 inside follows, Cmd/Ctrl+[ goes back, Escape
+  closes; the inspector shares the slot.
+
+  Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each.
+  Each row starts by closing the panel and setting the editor text it needs."
+  (:require [clojure.string :as str]
+            [gtk-async :refer [await-until go-row on-gtk]]
+            [gtk-selftest-clj.rows :as rows]
+            [gtk-selftest-window.support :as support]
+            [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.source :as source]))
+
+(def ^:private KEY-ESCAPE 0xff1b)
+(def ^:private KEY-O 0x06f)
+(def ^:private KEY-BRACKETLEFT 0x05b)
+
+(defn- sp [ui] (:source-pane ui))
+(defn- visible? [w] (pos? (g/gtk-widget-get-visible w)))
+(defn- panel-line [ui] (inc (first (g/cursor-line-col (:buf (:editor (sp ui)))))))
+(defn- header [ui] (g/label-text (:header (sp ui))))
+(defn- footer [ui] (g/label-text (:footer (sp ui))))
+
+(defn- jump-on!
+  "Closes the panel, sets the editor to text with the caret inside sym, and
+  runs the window's own F12 fn. GTK-thread only."
+  [ui text sym]
+  ((:source-close!* ui))
+  (let [ed (:editor ui)]
+    (editor/set-text! ed text)
+    (support/place-cursor! (:buf ed) (+ 1 (str/index-of text sym)))
+    ((:jump!* ui))))
+
+(defn- panel-caret-on!
+  "Puts the panel's caret inside the first sym after from in its text."
+  [ui sym from]
+  (let [ed (:editor (sp ui))
+        text (editor/editor-text ed)]
+    (support/place-cursor! (:buf ed) (+ 1 (str/index-of text sym (str/index-of text from))))))
+
+(defn- window-key! [ui keyval state] ((:handle-window-key! ui) nil keyval 0 state nil))
+
+(defn row-clj-source-jar
+  "F12 on map in (map inc [1]): the panel opens the fixture jar's
+  clojure/core.clj on line 20, read-only, Open in window insensitive.
+
+  Fix round 1: the row before this one (row-clj-inspect-lost-idle) leaves
+  the JVM attach connection dropped on purpose, and ev/lookup never
+  reconnects on its own (jonquil.nrepl.jvm's own lookup docstring: \"never
+  connecting on its own\") -- so this row reconnects first with a plain
+  REPL entry, the same \"(pick)\"-style reconnect row-clj-source-shares-
+  slot already uses, before its own F12."
+  [ui]
+  (go-row :clj-source-jar support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(+ 1 2)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          connected? (await-until 5000 20 #(and (rows/idle? ui) (str/includes? (support/since ui mark) "=> 3")))]
+      (on-gtk (jump-on! ui "(map inc [1])" "map"))
+      (let [shown? (await-until 3000 20 #(and (visible? (:root (sp ui))) (visible? (:right-slot ui))))
+            v (on-gtk {:header (header ui) :line (panel-line ui)
+                       :open (g/gtk-widget-get-sensitive (:open-btn (sp ui)))
+                       :focused (source-pane/focused? (sp ui) (:window ui))})]
+        (on-gtk (support/check :clj-source-jar
+                               (and connected? shown? (= "core.clj in lib.jar  · read-only" (:header v))
+                                    (= 20 (:line v)) (= 0 (:open v)) (:focused v))
+                               (assoc v :shown shown? :connected connected?)))))))
+
+(defn row-clj-source-own-file
+  "greet's lookup names the window's own file (the fixture's core.clj), so
+  F12 on a use of greet in a dirty, one-line buffer stays in the buffer:
+  status \"Jumped to greet.\", the panel stays hidden, the buffer's text is
+  unchanged.
+
+  Fix round 1: set-status! defers through on-gui!/g_idle_add even when
+  already called from the GTK thread (jonquil.gtk.callbacks/on-gui!'s own
+  docstring), so reading the status label in the SAME on-gtk step that
+  triggers the jump would still see the PREVIOUS row's own status, never
+  this jump's. await-until the status text first, as every other status
+  check in this codebase already does, before reading the panel/buffer
+  state in a second on-gtk step."
+  [ui]
+  (go-row :clj-source-own-file support/check
+    (let [text "(greet \"x\")"
+          _ (on-gtk (jump-on! ui text "greet"))
+          jumped? (await-until 2000 20 #(= "Jumped to greet." (g/label-text (:status-label ui))))
+          v (on-gtk {:panel (visible? (:root (sp ui))) :text (editor/editor-text (:editor ui))})]
+      (on-gtk (support/check :clj-source-own-file
+                             (and jumped? (not (:panel v)) (= text (:text v)))
+                             (assoc v :jumped jumped?))))))
+
+(defn row-clj-source-follow-and-back
+  "F12 on helper2 opens util.clj on line 3. In the panel, F12 on helper (line
+  4) moves to line 6 in the same file; F12 on outside-fn (line 7) loads
+  other/place.clj on line 2, read-only. Cmd/Ctrl+[ comes back to util.clj on
+  line 7, then to line 4."
+  [ui]
+  (go-row :clj-source-follow-and-back support/check
+    (on-gtk (jump-on! ui "(helper2)" "helper2"))
+    (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
+          first-line (on-gtk (panel-line ui))
+          in-file (on-gtk (panel-caret-on! ui "helper" "(helper))")
+                          ((:source-jump!* ui))
+                          (panel-line ui))
+          out (on-gtk (panel-caret-on! ui "outside-fn" "(outside-fn")
+                      ((:source-jump!* ui))
+                      [(header ui) (panel-line ui)])
+          back1 (on-gtk (window-key! ui KEY-BRACKETLEFT g/CONTROL-MASK)
+                        [(header ui) (panel-line ui)])
+          back2 (on-gtk (window-key! ui KEY-BRACKETLEFT g/CONTROL-MASK)
+                        [(header ui) (panel-line ui)])]
+      (on-gtk (support/check :clj-source-follow-and-back
+                             (and opened? (= 3 first-line) (= 6 in-file)
+                                  (= ["place.clj  · read-only" 2] out)
+                                  (= ["util.clj" 7] back1) (= ["util.clj" 4] back2))
+                             {:opened opened? :first first-line :in-file in-file :out out
+                              :back1 back1 :back2 back2})))))
+
+(defn row-clj-source-open-in-window
+  "F12 on helper opens util.clj (editable). With the window's buffer dirty,
+  Open in window is refused once (the console's unsaved-changes line, and
+  the panel footer says so too -- final review finding #2 -- since focus
+  is in the panel; the panel stays); Cmd/Ctrl+Shift+O with the panel
+  focused then loads util.clj into the window with the caret on line 6
+  and hides the panel. The row then reopens the fixture's core.clj so
+  later rows see it."
+  [ui]
+  (go-row :clj-source-open-in-window support/check
+    (on-gtk (jump-on! ui "(helper)" "helper")
+            (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:editor ui)) " " -1 1))
+    (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
+          [mark footer-after-refuse]
+          (on-gtk (let [m (support/out-end-offset ui)] ((:source-open!* ui)) [m (footer ui)]))
+          refused? (await-until 2000 20 #(str/includes? (support/since ui mark) "Unsaved changes"))
+          still? (on-gtk (visible? (:root (sp ui))))
+          _ (on-gtk (source-pane/focus! (sp ui))
+                    (window-key! ui KEY-O (bit-or g/CONTROL-MASK g/SHIFT-MASK)))
+          v (on-gtk {:text (editor/editor-text (:editor ui))
+                     :line (inc (first (g/cursor-line-col (:buf (:editor ui)))))
+                     :panel (visible? (:root (sp ui)))})
+          _ (on-gtk ((:open-path! ui) (:file (rows/fixture))))]
+      (on-gtk (support/check :clj-source-open-in-window
+                             (and opened? refused? still? (str/includes? footer-after-refuse "Unsaved changes")
+                                  (= rows/util-text (:text v)) (= 6 (:line v)) (not (:panel v)))
+                             (assoc v :opened opened? :refused refused? :still still?
+                                    :footer-after-refuse footer-after-refuse))))))
+
+(defn row-clj-source-outside-read-only
+  "F12 on outside-fn opens other/place.clj read-only; Cmd/Ctrl+Shift+O says
+  why on the footer and leaves the window's buffer alone."
+  [ui]
+  (go-row :clj-source-outside-read-only support/check
+    (on-gtk (jump-on! ui "(outside-fn)" "outside-fn"))
+    (let [opened? (await-until 3000 20 #(= "place.clj  · read-only" (header ui)))
+          v (on-gtk (source-pane/focus! (sp ui))
+                    (window-key! ui KEY-O (bit-or g/CONTROL-MASK g/SHIFT-MASK))
+                    {:footer (footer ui) :text (editor/editor-text (:editor ui))
+                     :tip (g/tooltip-text (:open-btn (sp ui)))})]
+      (on-gtk (support/check :clj-source-outside-read-only
+                             (and opened?
+                                  (= "This file is outside the project, so it opens read-only." (:footer v))
+                                  (= (:footer v) (:tip v))
+                                  (= "(outside-fn)" (:text v)))
+                             (assoc v :opened opened?))))))
+
+(defn row-clj-source-escape
+  "Escape with the panel focused hides the panel and the slot and puts focus
+  back in the window's editor."
+  [ui]
+  (go-row :clj-source-escape support/check
+    (on-gtk (jump-on! ui "(map inc [1])" "map"))
+    (let [opened? (await-until 3000 20 #(visible? (:root (sp ui))))
+          v (on-gtk (source-pane/focus! (sp ui))
+                    (window-key! ui KEY-ESCAPE 0)
+                    {:panel (visible? (:root (sp ui))) :slot (visible? (:right-slot ui))
+                     :focus-editor (= (:view (:editor ui)) (g/gtk-root-get-focus (:window ui)))})]
+      (on-gtk (support/check :clj-source-escape
+                             (and opened? (not (:panel v)) (not (:slot v)) (:focus-editor v))
+                             (assoc v :opened opened?))))))
+
+(defn row-clj-source-missing-entry
+  "F12 on ghost, whose jar entry doesn't exist: the panel shows with the
+  footer naming the missing entry."
+  [ui]
+  (go-row :clj-source-missing-entry support/check
+    (on-gtk (jump-on! ui "(ghost)" "ghost"))
+    (let [ok (await-until 3000 20 #(and (visible? (:root (sp ui)))
+                                        (= "nope/ghost.clj isn't in lib.jar." (footer ui))))]
+      (on-gtk (support/check :clj-source-missing-entry ok {:footer (footer ui)})))))
+
+(defn row-clj-source-line-moved
+  "F12 on late, whose line (999) is past util.clj's end: the caret goes to
+  the last line and the footer says the line moved."
+  [ui]
+  (go-row :clj-source-line-moved support/check
+    (on-gtk (jump-on! ui "(late)" "late"))
+    (let [ok (await-until 3000 20 #(= source/moved-note (footer ui)))
+          line (on-gtk (panel-line ui))]
+      (on-gtk (support/check :clj-source-line-moved
+                             (and ok (= (count (str/split-lines (str rows/util-text "x"))) line))
+                             {:footer (footer ui) :line line})))))
+
+(defn row-clj-source-read-only
+  "In the panel, typing, Return and Backspace change nothing, the buffer has
+  no undo step, and the window's own buffer isn't marked dirty."
+  [ui]
+  (go-row :clj-source-read-only support/check
+    (on-gtk (jump-on! ui "(map inc [1])" "map")
+            (editor/mark-saved! (:editor ui)))
+    (let [opened? (await-until 3000 20 #(visible? (:root (sp ui))))
+          v (on-gtk (let [ped (:editor (sp ui))
+                          before (editor/editor-text ped)]
+                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ped) "zz" -1 1)
+                      (editor/dispatch-key! ped 0xff0d 0)
+                      (editor/dispatch-key! ped 0xff08 0)
+                      {:same (= before (editor/editor-text ped))
+                       :undo (g/gtk-text-buffer-get-can-undo (:buf ped))
+                       :window-dirty (editor/dirty? (:editor ui))}))]
+      (on-gtk (support/check :clj-source-read-only
+                             (and opened? (:same v) (= 0 (:undo v)) (false? (:window-dirty v)))
+                             (assoc v :opened opened?))))))
+
+(defn row-clj-source-shares-slot
+  "One slot, last wins: with the inspector showing (Cmd/Ctrl+I after a REPL
+  entry), F12 replaces it with the panel; Cmd/Ctrl+I brings the inspector
+  back and hides the panel, which keeps its location."
+  [ui]
+  (go-row :clj-source-shares-slot support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(pick)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          evaled? (await-until 5000 20 #(and (rows/idle? ui) (str/includes? (support/since ui mark) "=> {:k 42}")))
+          _ (on-gtk ((:source-close!* ui)) ((:inspect-last!* ui)))
+          ;; Wait for the first view to land: a second Cmd/Ctrl+I while a
+          ;; request is in flight is dropped on purpose (ruling 9).
+          inspector? (await-until 3000 20 #(and (visible? (:root (:inspector ui)))
+                                                (= "*1" (g/label-text (:header (:inspector ui))))))
+          _ (on-gtk (jump-on! ui "(map inc [1])" "map"))
+          swapped? (await-until 3000 20 #(and (visible? (:root (sp ui))) (not (visible? (:root (:inspector ui))))))
+          _ (on-gtk ((:inspect-last!* ui)))
+          back? (await-until 3000 20 #(and (visible? (:root (:inspector ui))) (not (visible? (:root (sp ui))))))
+          kept (on-gtk (header ui))]
+      (on-gtk (support/check :clj-source-shares-slot
+                             (and evaled? inspector? swapped? back? (= "core.clj in lib.jar  · read-only" kept))
+                             {:evaled evaled? :inspector inspector? :swapped swapped? :back back? :kept kept})))))

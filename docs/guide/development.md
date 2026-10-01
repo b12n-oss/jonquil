@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 38 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (280 tests, 1617 assertions
+slower. `bb test` runs the full unit suite (285 tests, 1654 assertions
 today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -22,7 +22,7 @@ still no child process and nothing outside the repo.
 about 32 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
-`bb test:clj` runs a third, separate suite (9 tests, 24 assertions)
+`bb test:clj` runs a third, separate suite (12 tests, 39 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by
 `dev/clj_server.clj` (mirroring `jonquil.nrepl.child`'s shape for a Jolt
 child, but for the real JVM CLI): it needs Java 17+ and the `clojure` CLI,
@@ -42,32 +42,33 @@ others can't.
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
-(`dev/gtk_selftest.clj`, 37 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 186 rows), with its rows split by
+(`dev/gtk_selftest.clj`, 42 rows); the second covers the full application
+window (`dev/gtk_selftest_window.clj`, 195 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
 `console_layout`, `dialects`, `contained` (a forced throw in each find-bar,
 toolbar and file-dialog handler is reported and the app carries on),
 `prompt` (the namespace prompt following a
-REPL line, a Run and a slow evaluation), and `inspector` (the panel widget in
+REPL line, a Run and a slow evaluation), `inspector` (the panel widget in
 isolation, then the real window's own panel: opening, in/out, paging
-across a page edge, table/meta toggles, def, Run Form, and Escape). The
+across a page edge, table/meta toggles, def, Run Form, and Escape), and
+`source_pane` (the source panel widget in isolation). The
 third (`dev/gtk_selftest_nrepl.clj`,
-13 rows, plus two checks after the window closes) opens against a throwaway project whose `.jonquil.edn` asks for
+15 rows, plus two checks after the window closes) opens against a throwaway project whose `.jonquil.edn` asks for
 `{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
 cover starting, running, Stop, help, and closing over that live
 connection; it needs the jolt-lang/nrepl checkout the same way
 `bb test:nrepl` does, and records a single failing row rather than
 opening anything if that checkout isn't there. The fourth
-(`dev/gtk_selftest_cljd.clj`, 13 rows, plus one check after the window closes) opens against a throwaway
+(`dev/gtk_selftest_cljd.clj`, 14 rows, plus one check after the window closes) opens against a throwaway
 ClojureDart app directory whose `NREPL.lock` names a fake fork server
 running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no
 fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, Stop's detach, and the inspector's unavailable sentence, over
 that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 17 rows, plus two checks after the window
+(`dev/gtk_selftest_clj.clj`, 28 rows, plus two checks after the window
 closes) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
@@ -78,7 +79,9 @@ after the server restarts and the prompt going back to `user`, quick doc, jump t
 full docs and its Escape, the inspector before and after a Run, in and
 out, a lost connection and reconnecting while idle, Reset on Run's tick
 through a switch to a Jolt file and back, and a close that never sends
-the server a `close` op.
+the server a `close` op. Its source rows open definitions from a fixture
+jar and from files inside and outside the project, follow and go back,
+open a project file in the window, and share the slot with the inspector.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in

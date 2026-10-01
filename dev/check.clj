@@ -30,12 +30,14 @@
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help
+    jonquil.source
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover
     jonquil.gtk.help-popover
     jonquil.gtk.inspector-pane
     jonquil.gtk.editor
+    jonquil.gtk.source-pane
     jonquil.gtk.completion
     jonquil.gtk.find-bar
     jonquil.gtk.console-view

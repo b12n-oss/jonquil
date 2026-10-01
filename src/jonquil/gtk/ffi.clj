@@ -145,6 +145,19 @@
 ;; gtk_widget_has_focus's OS-window-active dependency (P4.T3's own probe 1
 ;; finding).
 (ffi/defcfn gtk-event-controller-focus-new "gtk_event_controller_focus_new" [] :pointer)
+
+;; P3.T1 fix round 2: GtkEventControllerScroll --
+;; gtkeventcontrollerscroll.h:61-69 (GtkEventControllerScrollFlags;
+;; BOTH_AXES, line 68, is VERTICAL (1 << 0) | HORIZONTAL (1 << 1) = 3)
+;; and :75 (the constructor, gtk_event_controller_scroll_new (flags)).
+;; Lets the source panel notice a person's own scroll over its editor and
+;; cancel its own re-scroll settling (jonquil.gtk.source-pane/arm-
+;; scroll-settle!) instead of fighting them. Its "scroll" signal is
+;; (GtkEventControllerScroll*, double dx, double dy, gpointer) -> gboolean
+;; (GTK docs); FALSE/0 lets GTK still perform the real scroll.
+(ffi/defcfn gtk-event-controller-scroll-new "gtk_event_controller_scroll_new" [:int] :pointer)
+(def EVENT-CONTROLLER-SCROLL-BOTH-AXES 3) ;; VERTICAL (1) | HORIZONTAL (2)
+
 (ffi/defcfn gtk-widget-get-width "gtk_widget_get_width" [:pointer] :int)
 (ffi/defcfn gtk-widget-get-height "gtk_widget_get_height" [:pointer] :int)
 (ffi/defcfn gdk-keyval-to-unicode "gdk_keyval_to_unicode" [:uint] :uint)
@@ -1008,7 +1021,14 @@
 ;; view's horizontal adjustment value must stay 0 even after a line wider
 ;; than the view is appended.
 (ffi/defcfn gtk-scrollable-get-hadjustment "gtk_scrollable_get_hadjustment" [:pointer] :pointer)
+(ffi/defcfn gtk-scrollable-get-vadjustment "gtk_scrollable_get_vadjustment" [:pointer] :pointer)
 (ffi/defcfn gtk-adjustment-get-value "gtk_adjustment_get_value" [:pointer] :double)
+;; gtk_adjustment_set_value: gtkadjustment.h:84-85 -- void
+;; gtk_adjustment_set_value (GtkAdjustment*, double). Fixed arity. Added
+;; for the source panel's user-scroll-wins self-test row (P3.T1 fix round
+;; 2): it sets the vadjustment directly, the same effect a real scroll
+;; has, without driving an actual GdkScroll event.
+(ffi/defcfn gtk-adjustment-set-value "gtk_adjustment_set_value" [:pointer :double] :void)
 
 ;; --- P2.T1: the inspector pane -------------------------------------------
 ;; Header lines re-verified directly against /opt/homebrew/include (gtk4
