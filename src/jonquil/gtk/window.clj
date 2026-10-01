@@ -204,7 +204,12 @@
 (defonce ^:private open-on-result-by-dialog (atom {}))
 (defonce ^:private save-on-result-by-dialog (atom {}))
 
-(defn- make-file-dialog-cb [finish on-result-by-dialog]
+(defn- make-file-dialog-cb
+  "The completion callback one dialog mode shares across every window.
+  on-result is the window's own and contains its own throws (the callers
+  of file-dialog! below report them on their console); anything else that
+  throws here still unrefs the dialog and stops at callable's backstop."
+  [finish on-result-by-dialog]
   (callable (fn [src res _data]
               (when-let [on-result (get @on-result-by-dialog src)]
                 (swap! on-result-by-dialog dissoc src)
@@ -378,10 +383,20 @@
     (dialog-dismissed? result) nil
     :else (cview/append! cv :error (str "; open: " error "\n"))))
 
+(defn- contained-open-result!
+  "handle-open-result!, with a throw reported on the console as \"; open:
+  ...\" instead of reaching the shared dialog callback. The dialog's
+  on-result, and the self-test's :simulate-open-result!. ctx is {:ed :cv
+  :win :path-atom}."
+  [{:keys [ed cv win path-atom]} result]
+  (try (handle-open-result! ed cv win path-atom result)
+       (catch :default e
+         (cview/append! cv :error (str "; open: " (ex-message e) "\n")))))
+
 (defn- do-open! [ed cv win path-atom discard-warned?]
   (guarded-open!
    ed cv discard-warned?
-   (fn [] (file-dialog! :open win (fn [result] (handle-open-result! ed cv win path-atom result))))))
+   (fn [] (file-dialog! :open win (fn [result] (contained-open-result! {:ed ed :cv cv :win win :path-atom path-atom} result))))))
 
 (defn- handle-save-result!
   "handle-open-result!'s counterpart for file-dialog! :save."
@@ -392,8 +407,15 @@
     (dialog-dismissed? result) nil
     :else (cview/append! cv :error (str "; save: " error "\n"))))
 
+(defn- contained-save-result!
+  "contained-open-result!'s counterpart for :save."
+  [{:keys [ed cv win path-atom]} result]
+  (try (handle-save-result! ed cv win path-atom result)
+       (catch :default e
+         (cview/append! cv :error (str "; save: " (ex-message e) "\n")))))
+
 (defn- do-save-as! [ed cv win path-atom]
-  (file-dialog! :save win (fn [result] (handle-save-result! ed cv win path-atom result))))
+  (file-dialog! :save win (fn [result] (contained-save-result! {:ed ed :cv cv :win win :path-atom path-atom} result))))
 
 (defn- do-save! [ed cv win path-atom]
   (if-let [path @path-atom]
@@ -640,6 +662,17 @@
   "Safe from any thread: hands the label update to the GTK thread."
   [status-label text]
   (on-gui! (fn [] (g/gtk-label-set-text status-label text))))
+
+(defn- contain-click
+  "A clicked/toggled handler (two pointers in, nothing out) that runs
+  (f button) and puts a throw on the status label as \"; where: message\",
+  the way the editor's and console's own handlers report theirs."
+  [status-label where f]
+  (fn [button _data]
+    (try (f button)
+         (catch :default e
+           (set-status! status-label (str "; " where ": " (ex-message e)))))
+    nil))
 
 ;; I5 fix wave item 3, cosmetic half: the start report's project path is
 ;; usually somewhere under the user's home directory, and printing it in
@@ -2065,22 +2098,23 @@
     ;; TH.T5: the saved theme, in place of TH.T4's fixed theme/default-theme.
     (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css @settings-path*)
     (g/g-signal-connect-data run-btn "clicked"
-                             (callable (fn [_ _] (run-fn)) [:pointer :pointer] :void)
+                             (callable (contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data stop-btn "clicked"
-                             (callable (fn [_ _] (stop-fn)) [:pointer :pointer] :void)
+                             (callable (contain-click status-label "stop" (fn [_] (stop-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data open-btn "clicked"
-                             (callable (fn [_ _] (open-fn)) [:pointer :pointer] :void)
+                             (callable (contain-click status-label "open" (fn [_] (open-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data save-btn "clicked"
-                             (callable (fn [_ _] (save-fn)) [:pointer :pointer] :void)
+                             (callable (contain-click status-label "save" (fn [_] (save-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data reset-chk "toggled"
-                             (callable (fn [btn _data]
-                                         (ev/set-mode! @ev*
-                                                       (if (zero? (g/gtk-check-button-get-active btn))
-                                                         :accumulate :reset)))
+                             (callable (contain-click status-label "reset on run"
+                                                      (fn [btn]
+                                                        (ev/set-mode! @ev*
+                                                                      (if (zero? (g/gtk-check-button-get-active btn))
+                                                                        :accumulate :reset))))
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
@@ -2089,9 +2123,11 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller win keyctl)
     (g/g-signal-connect-data win "close-request"
+                             ;; on-throw 1 refuses the close: a window that
+                             ;; may hold unsaved text stays open.
                              (callable (close-request-fn ed cv win app path confirmed-close?
                                                          suppress-close? closing? popovers ev*)
-                                       [:pointer :pointer] :int)
+                                       [:pointer :pointer] :int :on-throw 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
     ;; delegate lets a Quit AppleEvent (Dock -> Quit, logout, shutdown)
@@ -2109,6 +2145,7 @@
       (g/g-action-map-add-action app quit-action))
     (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
     (cview/set-error-fn! cv (fn [msg] (set-status! status-label msg)))
+    (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [_dirty] (update-title! ed win path)))
     ;; I4: a dirty->clean transition (a successful Save) re-arms the
     ;; discard warning, so an unrelated LATER dirty streak earns its own.
@@ -2356,8 +2393,11 @@
                  ;; driven with a synthetic result map shaped like
                  ;; g/finish-file's -- file-dialog! itself can't be driven
                  ;; without a live dialog.
-                 :simulate-open-result! (fn [result] (handle-open-result! ed cv win path result))
-                 :simulate-save-result! (fn [result] (handle-save-result! ed cv win path result))
+                 :simulate-open-result! (fn [result] (contained-open-result! {:ed ed :cv cv :win win :path-atom path} result))
+                 :simulate-save-result! (fn [result] (contained-save-result! {:ed ed :cv cv :win win :path-atom path} result))
+                 ;; The toolbar's own buttons, so a row can fire their real
+                 ;; "clicked" handlers (g/g-signal-emit-by-name).
+                 :toolbar {:run run-btn :stop stop-btn :open open-btn :save save-btn}
                  ;; P3.T5: close-choice! is the exact fn the real alert
                  ;; dialog's own completion callback calls; request-close!*
                  ;; runs gtk_window_close, the same path the window's close
@@ -2397,7 +2437,7 @@
   :activate-menu-action!* :repl-activate-menu-action!*
   :complete!* :completion
   :inspector :inspect-last!* :inspect-form!* :inspector-state* :inspector-last-args*
-  :handle-window-key! :simulate-open-result! :simulate-save-result!
+  :handle-window-key! :simulate-open-result! :simulate-save-result! :toolbar
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
   :register-alert-choice-for-test! :complete-alert-for-test!}; the

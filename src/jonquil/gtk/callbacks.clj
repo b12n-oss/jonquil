@@ -20,15 +20,57 @@
 ;; through a macroexpansion.
 (defonce retained (atom []))
 
+(defn report-callback-exception!
+  "Reports an exception a foreign-callable's body threw, on the process's
+  real *err*. callable's backstop calls it; it never throws itself."
+  [e]
+  (try
+    (binding [*out* *err*]
+      (println (str "jonquil.gtk.callbacks: a GTK callback threw: " (ex-message e))))
+    (catch :default _ nil)))
+
+(defn- default-on-throw
+  "What a callback answers GTK when its body threw and the call site named
+  no value: nothing for :void, 0 for an int (a key handler's \"not
+  handled\"), and a null pointer for :pointer. Any other ret has no safe
+  default, so it's an error at macroexpansion: a nil handed back as, say, a
+  :double could itself throw while being converted, past the catch."
+  [ret]
+  (case ret
+    :void nil
+    (:int :uint :long :ulong) 0
+    :pointer `ffi/null
+    (throw (ex-info (str "callable: no default :on-throw for return type " ret
+                         "; pass one explicitly")
+                    {:ret ret}))))
+
 (defmacro callable
   "Wraps f as a :collect-safe foreign-callable with signature sig and return
   ret, retaining it for the process lifetime so GTK's own event loop never
   invokes a collected callback. foreign-callable needs its signature as a
-  literal, so this has to be a macro (from the S2 spike)."
-  [f sig ret]
-  `(let [c# (ffi/foreign-callable ~f ~sig ~ret :collect-safe)]
-     (swap! retained conj c#)
-     c#))
+  literal, so this has to be a macro (from the S2 spike).
+
+  Every callable is also contained: a throw from f never crosses the FFI
+  boundary into GTK, where it would kill the process. It's reported on
+  *err* (report-callback-exception!) and the callback answers :on-throw, or
+  default-on-throw's value for ret when the call site names none. A site
+  where that default is wrong passes its own, as a keyword option: a
+  GSource that must keep running is (callable f sig :int :on-throw 1), and
+  so is a close-request that must not close. The wrapper has sig's own
+  fixed arity, so foreign-callable sees the same shape f had."
+  [f sig ret & {:keys [on-throw] :or {on-throw ::default}}]
+  (let [on-throw (if (= on-throw ::default) (default-on-throw ret) on-throw)
+        args (vec (repeatedly (count sig) #(gensym "arg")))]
+    `(let [f# ~f
+           c# (ffi/foreign-callable
+               (fn ~args
+                 (try (f# ~@args)
+                      (catch :default e#
+                        (report-callback-exception! e#)
+                        ~on-throw)))
+               ~sig ~ret :collect-safe)]
+       (swap! retained conj c#)
+       c#)))
 
 ;; --- on-gui!: hand a thunk to the GTK main thread from any thread --------
 
