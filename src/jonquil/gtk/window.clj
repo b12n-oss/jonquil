@@ -760,10 +760,18 @@
       (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
 
 (defn- hide-right-panel!
-  "Hides which's root, and the slot once neither root is showing."
-  [{:keys [slot inspector-root source-root]} which]
+  "Hides which's root, and the slot once neither root is showing. Hiding
+  :source also cancels any re-scroll settling still in flight for it
+  (source-pane/cancel-scroll-settle!, final review finding #1), so the
+  shared settle timeout stops touching the view behind a hidden panel
+  instead of only finding out once the view is actually destroyed.
+  close-source-panel! reaches this same cancellation by calling through
+  here, not by calling cancel-scroll-settle! a second time."
+  [{:keys [slot inspector-root source-root source-pane]} which]
   (let [[root other] (if (= which :inspector) [inspector-root source-root] [source-root inspector-root])]
     (g/gtk-widget-set-visible root 0)
+    (when (= which :source)
+      (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))
     (when (zero? (g/gtk-widget-get-visible other))
       (g/gtk-widget-set-visible slot 0))))
 
@@ -1415,7 +1423,9 @@
       (source-pane/report! sp (str "; jump: " (ex-message e))))))
 
 (defn- close-source-panel!
-  "Hides the source panel (its state kept) and focuses the editor."
+  "Hides the source panel (its state kept) and focuses the editor;
+  hide-right-panel! also cancels any re-scroll settling still in flight
+  for it."
   [right ed]
   (hide-right-panel! right :source)
   (editor/focus! ed))
@@ -2108,7 +2118,8 @@
                                         :state inspector-state})
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)}
+        right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
+               :source-pane sp}
         _ (reset! *right right)
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))

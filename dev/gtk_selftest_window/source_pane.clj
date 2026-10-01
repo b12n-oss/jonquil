@@ -118,6 +118,40 @@
                     (support/check :source-pane-user-scroll-wins
                                    (< value USER-SCROLL-WINS-THRESHOLD) {:value value}))))))))
 
+(defn row-source-pane-hide-stops-settle
+  "Hiding the panel (source-pane/cancel-scroll-settle!, the same public fn
+  jonquil.gtk.window's close-source-panel!/hide-right-panel! call when the
+  source root hides) stops the settle timer in flight instead of leaving
+  it to keep re-scrolling a view nobody's looking at (final review
+  finding #1). Same shape as row-source-pane-user-scroll-wins, above,
+  with cancel-scroll-settle! in place of :on-user-scroll! as the thing
+  that's supposed to stop it: open the 2000-line file at line 1500,
+  cancel at once the way hiding does, then force the vadjustment to 0 and
+  wait out the settle window. An armed settle timer that ignored the
+  cancel would re-scroll back toward line 1500 (the tens of thousands
+  USER-SCROLL-WINS-THRESHOLD's own comment measured), well before 600 ms
+  pass; this also checks scroll-armed? went back to false, since a
+  cancelled timer removes itself on its very next tick."
+  [_ui]
+  (go-row :source-pane-hide-stops-settle support/check
+    (with-source-pane
+      (fn [pane]
+        (let [dir (temp-dirs/temp-dir! "jonquil-selftest-source-")
+              f (io/file dir "x.clj")
+              _ (spit f (numbered-lines 2000))
+              vadj (on-gtk
+                    (source-pane/open-location! pane {:path (.getPath f) :line 1500 :editable? true :label "x.clj"})
+                    (source-pane/cancel-scroll-settle! (:scroll-cancelled? pane))
+                    (let [vadj (g/gtk-scrollable-get-vadjustment (:view (:editor pane)))]
+                      (g/gtk-adjustment-set-value vadj 0.0)
+                      vadj))]
+          (<! (timeout 600))
+          (on-gtk (let [value (g/gtk-adjustment-get-value vadj)
+                        armed @(:scroll-armed? pane)]
+                    (support/check :source-pane-hide-stops-settle
+                                   (and (< value USER-SCROLL-WINS-THRESHOLD) (false? armed))
+                                   {:value value :armed armed}))))))))
+
 (defn row-source-pane-jar-read-only
   "A jar entry: the header names the entry and its jar and says read-only,
   Open in window is insensitive and its tooltip says why."

@@ -83,15 +83,22 @@
   [ed]
   (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 1 0.0 0.3))
 
-(defn- cancel-scroll-settle!
-  "Stops any re-scroll settling in flight from fighting the person: the
-  shared scroll-settle-cb (make-pane) checks cancelled?-atom before every
-  re-scroll and, once true, stops at once (G_SOURCE_REMOVE) without
-  re-scrolling again. Takes the pane's own scroll-cancelled? atom
-  directly, not pane itself, since both callers -- the scroll
-  controller's handler and the cursor-moved hook, both wired in make-pane
-  -- are built before pane exists (same reasoning as scroll-settle-cb
-  closing over ed instead of pane). arm-scroll-settle! resets it back to
+(defn cancel-scroll-settle!
+  "Stops any re-scroll settling in flight from touching the view again:
+  the shared scroll-settle-cb (make-pane) checks cancelled?-atom before
+  every re-scroll and, once true, stops at once (G_SOURCE_REMOVE) without
+  re-scrolling again. Public (final review finding #1): jonquil.gtk.
+  window's hide-right-panel! calls this too, when it hides the :source
+  root, so a hidden panel's settle timer stops touching the view behind
+  it -- close-source-panel! reaches the same cancellation by calling
+  through hide-right-panel!, not by calling this a second time. Takes the
+  pane's own scroll-cancelled? atom directly, not pane itself, since two
+  of its callers -- the scroll controller's handler and the cursor-moved
+  hook, both wired in make-pane -- are built before pane exists (same
+  reasoning as scroll-settle-cb closing over ed instead of pane); the
+  panel editor view's own \"destroy\" handler (also make-pane) and
+  jonquil.gtk.window both reach it through the pane's public
+  :scroll-cancelled? key instead. arm-scroll-settle! resets it back to
   false on every fresh jump, so a later place-caret! isn't short-circuited
   by an earlier cancel."
   [cancelled?-atom]
@@ -238,7 +245,21 @@
   row calls it directly to simulate a person's own scroll without driving
   a real GdkScroll event). :root starts visible; the window hides it. The
   editor is read-only and carries the jonquil-code CSS class, so the
-  window's zoom reaches it."
+  window's zoom reaches it.
+
+  Final review finding #1: the panel editor view's own \"destroy\" signal
+  is connected ONCE, here, to a callable that cancels scroll-settle (sets
+  scroll-cancelled? true) so scroll-settle-cb's next tick sees it and
+  removes itself (G_SOURCE_REMOVE) before touching the now-gone view --
+  rather than finding out the hard way, via a GTK_IS_TEXT_VIEW/
+  GTK_IS_WIDGET assertion failure, that the view it was about to re-scroll
+  no longer exists. Hiding the panel (hide-right-panel!, close-source-
+  panel!) cancels the same way, through the pane's public
+  :scroll-cancelled? key, well before the view is ever destroyed; this
+  handler is the backstop for when the view goes away without the panel
+  having been hidden first (a transient window closing out from under it,
+  as dev/gtk_selftest_window/source_pane.clj's with-source-pane does
+  between rows)."
   []
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
         header (g/gtk-label-new "")
@@ -318,6 +339,17 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller (:view ed) scroll-ctl)
     (editor/on-cursor-moved! ed (fn [_line-col] (cancel-scroll-settle! scroll-cancelled?)))
+    ;; Final review finding #1: a backstop for when the view is destroyed
+    ;; without the panel having been hidden first (hide-right-panel!/
+    ;; close-source-panel! already cancel on every ordinary hide, well
+    ;; before the view ever goes away) -- a transient window closing out
+    ;; from under the panel, as dev/gtk_selftest_window/source_pane.clj's
+    ;; with-source-pane does between rows. Connected ONCE, here, like
+    ;; every other signal in this fn.
+    (g/g-signal-connect-data (:view ed) "destroy"
+                             (callable (fn [_view _data] (cancel-scroll-settle! scroll-cancelled?) nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data open-btn "clicked" (callable (handler-click pane :on-open) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data close-btn "clicked" (callable (handler-click pane :on-close) [:pointer :pointer] :void)
