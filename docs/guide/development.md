@@ -18,7 +18,7 @@ count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo.
 
-`bb test:nrepl` runs a second, separate suite (28 tests, 97 assertions,
+`bb test:nrepl` runs a second, separate suite (28 tests, 99 assertions,
 about 32 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
@@ -154,6 +154,13 @@ driving. The window self-tests and `docs:shots` pass a temp `:settings-path`
 into `jonquil.main/start!`, and both smokes point `XDG_CONFIG_HOME` at a
 fresh temp directory for every process they launch. Neither the self-tests
 nor the smoke ever reads or writes `~/.config/jonquil/settings.edn`.
+
+Those temp directories don't outlive the run. Suites and self-test
+drivers make them through `dev/temp_dirs.clj`, which records each one and
+deletes it once the namespace's tests (or the driver) finish, so `bb test`,
+`bb test:nrepl`, `bb test:clj` and `bb gtk:selftest` leave nothing behind
+in `$TMPDIR`. `bb clean:tmp` removes what older runs left, and only
+names these harnesses make; `bb clean:tmp --dry-run` lists them first.
 
 ### Traps
 
