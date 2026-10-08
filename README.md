@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/logo.svg" alt="Jonquil logo: a yellow jonquil between a pair of parentheses" width="128"></p>
+<p align="center"><img src="docs/images/logo.svg" alt="Jonquil logo: a yellow jonquil with an orange cup" width="128"></p>
 
 # Jonquil
 
