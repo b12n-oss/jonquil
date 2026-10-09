@@ -3,10 +3,12 @@
             [jonquil.evaluator :as ev]
             [jonquil.session :as session]))
 
-(defn- run [f s code]
-  (let [done (promise)]
-    (f s code {:on-complete (fn [r] (deliver done r))})
-    (deref done 5000 :timeout)))
+(defn- run
+  ([f s code] (run f s code {}))
+  ([f s code opts]
+   (let [done (promise)]
+     (f s code (assoc opts :on-complete (fn [r] (deliver done r))))
+     (deref done 5000 :timeout))))
 
 (defn- run-sync [s code] (run session/run-definitions! s code))
 (defn- repl-sync [s code] (run session/submit-repl! s code))
@@ -70,6 +72,38 @@
       (let [r (deref done 3000 :timeout)]
         (is (= :ok (:status r)))
         (is (= 1 (:value r)))))))
+
+(deftest owner-reset-keeps-other-owners-test
+  (let [s (session/make-session)]
+    (run session/run-definitions! s "(ns tabs.a) (defn hello [] :hi)" {:owner 1})
+    (run session/run-definitions! s "(ns tabs.b) (def x 1)" {:owner 2})
+    (is (= #{'tabs.a} (get (:created @(:state s)) 1)))
+    (is (= #{'tabs.b} (get (:created @(:state s)) 2)))
+    (testing "a reset Run for owner 2 leaves owner 1's namespace"
+      (run session/run-definitions! s "(ns tabs.b) (def x 2)" {:owner 2})
+      (is (some? (find-ns 'tabs.a)))
+      (is (= :hi (:value (run session/submit-repl! s "(tabs.a/hello)")))))
+    (testing "owner 1's own Run removes and recreates tabs.a"
+      (run session/run-definitions! s "(ns tabs.a) (def only 1)" {:owner 1})
+      (is (nil? (ns-resolve 'tabs.a 'hello))))))
+
+(deftest owner-repl-namespaces-go-with-any-run-test
+  (let [s (session/make-session)]
+    (run session/submit-repl! s "(create-ns 'tabs.scratch)")
+    (is (= #{'tabs.scratch} (get (:created @(:state s)) :repl)))
+    (run session/run-definitions! s "(+ 1 2)" {:owner 7})
+    (is (nil? (find-ns 'tabs.scratch)))))
+
+(deftest owner-run-while-running-test
+  (let [s (session/make-session)
+        done (promise)]
+    (run session/run-definitions! s "(ns tabs.keep) (def v 1)" {:owner 1})
+    (session/run-definitions! s "(Thread/sleep 400) :done"
+                              {:owner 2 :on-complete (fn [r] (deliver done r))})
+    (Thread/sleep 50)
+    (is (string? (session/run-definitions! s "(+ 1 2)" {:owner 1})))
+    (deref done 3000 :timeout)
+    (is (some? (find-ns 'tabs.keep)) "the refused Run removed nothing")))
 
 (deftest last-value-test
   (let [s (session/make-session)]

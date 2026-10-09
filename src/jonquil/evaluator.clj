@@ -21,7 +21,11 @@
     "Evaluates code without blocking the caller. opts is
     jonquil.eval/eval-async's (:on-output :on-wait-input :on-status-change
     :on-complete) plus :run?, true for Run Definitions (which first resets,
-    in :reset mode). nil when started, else the busy warning string.")
+    in :reset mode), and :owner: who the evaluation's new namespaces belong
+    to (a tab id, or :repl). A reset-mode Run removes only its own owner's,
+    the REPL's, and `user`. Defaults: :run for a Run, :repl otherwise.
+    Attach evaluators ignore it. nil when started, else the busy warning
+    string.")
   (interrupt! [ev]
     "Stop: asks the running evaluation to end. nil.")
   (evaluating? [ev])
