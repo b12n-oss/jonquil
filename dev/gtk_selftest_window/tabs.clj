@@ -379,3 +379,86 @@
           back? (await-until 5000 20 #(= "Jolt" (g/label-text (:dialect-label ui))))]
       (on-gtk (support/check :tab-close-to-one-adopts-project (and kept? adopted? back?)
                              {:kept kept? :adopted adopted? :back back? :out (support/since ui m)})))))
+
+;; --- closing the window with several dirty tabs (tabs plan P2.T5) ----------
+
+(defn- two-dirty-tabs!
+  "Opens two temp files in new tabs and types into both; [t2 t3 f2 f3].
+  f3 sits in its own dir (so a row can make that dir read-only)."
+  [ui]
+  (occupy-first! ui)
+  (let [f2 (temp-file! "one.clj" "(def one 1)\n")
+        f3 (temp-file! "two.clj" "(def two 2)\n")
+        _ ((:open-file! ui) f2)
+        t2 (active ui)
+        _ (type-into! t2 "a")
+        _ ((:open-file! ui) f3)
+        t3 (active ui)
+        _ (type-into! t3 "b")]
+    [t2 t3 f2 f3]))
+
+(defn- with-suppressed-close
+  "Runs (f) with the window's real quit suppressed, then resets the close
+  hooks and the pending alert. GTK-thread only."
+  [ui f]
+  (reset! (:suppress-close? ui) true)
+  (try (f)
+       (finally
+         (reset! (:suppress-close? ui) false)
+         (reset! (:closing? ui) false)
+         (reset! (:alert-pending? ui) false)
+         (close-extra-tabs! ui))))
+
+(defn row-close-all-message
+  "Two dirty tabs: closing the window shows ONE alert; Cancel keeps it open."
+  [ui]
+  (go-row :close-all-message support/check
+    (on-gtk
+     (with-suppressed-close ui
+       (fn []
+         (let [_ (two-dirty-tabs! ui)
+               before @(:alert-dialog-count ui)
+               _ ((:request-close!* ui))
+               shown (- @(:alert-dialog-count ui) before)
+               _ ((:close-choice! ui) {:index 2})
+               v {:shown shown :closing @(:closing? ui) :n (count (tabs ui))}]
+           (support/check :close-all-message (and (= 1 shown) (not (:closing v)) (= 3 (:n v))) v)))))))
+
+(defn row-close-all-save-all
+  "Save All writes every dirty tab, then the window closes."
+  [ui]
+  (go-row :close-all-save-all support/check
+    (on-gtk
+     (with-suppressed-close ui
+       (fn []
+         (let [[t2 t3 f2 f3] (two-dirty-tabs! ui)
+               _ ((:request-close!* ui))
+               _ ((:close-choice! ui) {:index 0})
+               v {:f2 (= (slurp f2) (editor/editor-text (:ed t2)))
+                  :f3 (= (slurp f3) (editor/editor-text (:ed t3)))
+                  :closing @(:closing? ui)}]
+           (support/check :close-all-save-all (and (:f2 v) (:f3 v) (:closing v)) v)))))))
+
+(defn row-close-all-save-failure
+  "Save All with the second file's directory read-only: the first file is
+  saved, the window stays open, and the failing tab is active."
+  [ui]
+  (go-row :close-all-save-failure support/check
+    (on-gtk
+     (let [dir (atom nil)]
+       (with-suppressed-close ui
+         (fn []
+           (try
+             (let [[t2 t3 f2 _f3] (two-dirty-tabs! ui)
+                   d (.getParentFile (io/file @(:path t3)))
+                   _ (reset! dir d)
+                   _ (.setWritable d false)
+                   _ ((:request-close!* ui))
+                   _ ((:close-choice! ui) {:index 0})
+                   v {:f2 (= (slurp f2) (editor/editor-text (:ed t2)))
+                      :closing @(:closing? ui)
+                      :active-failing (= (:id t3) (:id (active ui)))
+                      :t3-dirty (editor/dirty? (:ed t3))}]
+               (support/check :close-all-save-failure
+                              (and (:f2 v) (not (:closing v)) (:active-failing v) (:t3-dirty v)) v))
+             (finally (when @dir (.setWritable ^java.io.File @dir true))))))))))

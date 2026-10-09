@@ -534,34 +534,43 @@
   (reset! confirmed-close? true)
   (g/gtk-window-close win))
 
+(defn- save-all!
+  "Save All (tabs plan P2.T5): saves each tab in dirty-tabs in order -- a
+  tab with a path through save-to!, an Untitled one through the Save
+  dialog, continuing from its callback. The first tab still dirty after
+  its save (the save failed) or whose dialog is dismissed stops the
+  sequence and is selected, and the window stays open. All saved closes
+  the window. ctx is {:cv :win :confirmed-close? :select!}."
+  [{:keys [cv win confirmed-close? select!] :as ctx} dirty-tabs]
+  (if-let [[{:keys [ed path] :as t} & more] (seq dirty-tabs)]
+    (let [next! (fn [] (if (editor/dirty? ed) (select! t) (save-all! ctx more)))]
+      (if-let [p @path]
+        (do (save-to! ed cv path p) (next!))
+        (do (select! t)
+            (file-dialog!
+             :save win
+             (fn [{p :path err :error :as r}]
+               (cond
+                 p (do (save-to! ed cv path p) (next!))
+                 (dialog-dismissed? r) nil
+                 :else (cview/append! cv :error (str "; save: " err "\n"))))))))
+    (finish-close! win confirmed-close?)))
+
 (defn- close-choice!
-  "The GtkAlertDialog decision (probe 3; the brief's :close-choice!):
-  index 0 Save, 1 Don't Save, 2 Cancel; an :error means the dialog was
-  dismissed. Index 2 and an error both do nothing -- the window stays open
-  and the text untouched. Index 0 with no remembered path opens the Save
-  dialog; a successful save (editor no longer dirty afterward -- save-to!
-  cleared it) confirms and closes, a cancelled or failed save leaves the
-  window open. Rows call this directly with a synthetic {:index n}
-  (probe 3), exactly as the real dialog's own completion callback does."
-  [ed cv win path-atom confirmed-close? {:keys [index error]}]
+  "The window-close alert's decision (probe 3; the brief's :close-choice!):
+  index 0 Save (Save All with several dirty tabs), 1 Don't Save, 2 Cancel;
+  an :error means the dialog was dismissed. Index 2 and an error both do
+  nothing -- the window stays open and the text untouched. Index 0 runs
+  save-all! over the tabs that were dirty, which closes the window only
+  once every one of them saved. Rows call this directly with a synthetic
+  {:index n} (probe 3), exactly as the real dialog's own completion
+  callback does. ctx is save-all!'s plus :dirty-tabs."
+  [{:keys [dirty-tabs win confirmed-close?] :as ctx} {:keys [index error]}]
   (cond
     error nil
     (= index 2) nil
     (= index 1) (finish-close! win confirmed-close?)
-    (= index 0)
-    (if-let [path @path-atom]
-      (do (save-to! ed cv path-atom path)
-          (update-title! ed win path-atom)
-          (when-not (editor/dirty? ed) (finish-close! win confirmed-close?)))
-      (file-dialog!
-       :save win
-       (fn [{:keys [path error] :as save-result}]
-         (cond
-           path (do (save-to! ed cv path-atom path)
-                    (update-title! ed win path-atom)
-                    (when-not (editor/dirty? ed) (finish-close! win confirmed-close?)))
-           (dialog-dismissed? save-result) nil
-           :else (cview/append! cv :error (str "; save: " error "\n"))))))
+    (= index 0) (save-all! ctx dirty-tabs)
     :else nil))
 
 ;; --- popover teardown --------------------------------------------------
@@ -639,10 +648,14 @@
   D1.T4: ev* is stopped (ev/stop!, guarded) right before g_application_
   quit, in the real-quit branch only -- never in the suppress-close?
   self-test branch, which doesn't actually quit anything."
-  [{:keys [active-tab cv win app confirmed-close? suppress-close? closing? popovers ev*]}]
+  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!]}]
   (fn [_win _data]
-    (let [{ed :ed path-atom :path} (active-tab)]
-      (if (and (editor/dirty? ed) (not @confirmed-close?))
+    ;; Tabs plan P2.T5: one alert naming every dirty tab, in tab order.
+    (let [ts @tabs
+          names (tabs/labels (map (fn [t] {:path @(:path t)}) ts))
+          dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
+          dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
+      (if (and (seq dirty) (not @confirmed-close?))
         (do (when-not @alert-pending?
               (reset! alert-pending? true)
             ;; P3 fix wave #10: a throw while building the alert used to
@@ -652,8 +665,10 @@
             ;; window stays open, since the text is still unsaved.
               (try
                 (show-close-dialog!
-                 win (tabs/close-alert [(if-let [p @path-atom] (file-name p) "Untitled")])
-                 (fn [result] (close-choice! ed cv win path-atom confirmed-close? result)))
+                 win (tabs/close-alert dirty-names)
+                 (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
+                                              :select! select!}
+                                             result)))
                 (catch :default e
                   (reset! alert-pending? false)
                   (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
@@ -2623,7 +2638,8 @@
     (g/g-signal-connect-data win "close-request"
                              ;; on-throw 1 refuses the close: a window that
                              ;; may hold unsaved text stays open.
-                             (callable (close-request-fn {:active-tab active-tab :cv cv :win win :app app
+                             (callable (close-request-fn {:tabs tabs :select! (fn [t] (select-tab! @*tab-ctx (:id t)))
+                                                          :cv cv :win win :app app
                                                           :confirmed-close? confirmed-close?
                                                           :suppress-close? suppress-close? :closing? closing?
                                                           :popovers popovers :ev* ev*})
@@ -2875,8 +2891,11 @@
                  ;; runs gtk_window_close, the same path the window's close
                  ;; button/OS chrome uses. closing?/suppress-close? are
                  ;; self-test-only hooks (close-request-fn's docstring).
-                   :close-choice! (fn [result] (let [t (active-tab)]
-                                                 (close-choice! (:ed t) cv win (:path t) confirmed-close? result)))
+                   :close-choice! (fn [result]
+                                    (close-choice! {:dirty-tabs (filterv (fn [t] (editor/dirty? (:ed t))) @tabs)
+                                                    :cv cv :win win :confirmed-close? confirmed-close?
+                                                    :select! (fn [t] (select-tab! @*tab-ctx (:id t)))}
+                                                   result))
                  ;; P3 fix wave C3: activates the application's "quit"
                  ;; action exactly as GTK's macOS delegate does on a Quit
                  ;; AppleEvent.
