@@ -48,6 +48,9 @@
   ;; server is involved.
   :selftest-clj {:extra-paths ["dev"]
                  :main-opts ["-m" "gtk-selftest-clj"]}
+  ;; File-tree plan P2.T3: a window launched on a directory.
+  :selftest-tree {:extra-paths ["dev"]
+                  :main-opts ["-m" "gtk-selftest-tree"]}
   ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
   ;; one GIF) for the guide, driving jonquil.main/start! the same way
   ;; :selftest-window does.
