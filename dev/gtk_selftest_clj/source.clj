@@ -125,33 +125,33 @@
                               :back1 back1 :back2 back2})))))
 
 (defn row-clj-source-open-in-window
-  "F12 on helper opens util.clj (editable). With the window's buffer dirty,
-  Open in window is refused once (the console's unsaved-changes line, and
-  the panel footer says so too -- final review finding #2 -- since focus
-  is in the panel; the panel stays); Cmd/Ctrl+Shift+O with the panel
-  focused then loads util.clj into the window with the caret on line 6
-  and hides the panel. The row then reopens the fixture's core.clj so
-  later rows see it."
+  "F12 on helper opens util.clj (editable). Tabs plan P2.T3: Open in window
+  no longer replaces the window's buffer, so there's no unsaved-changes
+  refusal: with the first tab dirty, Cmd/Ctrl+Shift+O with the panel
+  focused opens util.clj in a new tab, caret on line 6, hides the panel,
+  and leaves the first tab's text alone. The row then closes that tab so
+  later rows see one tab again."
   [ui]
   (go-row :clj-source-open-in-window support/check
     (on-gtk (jump-on! ui "(helper)" "helper")
             (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:editor ui)) " " -1 1))
     (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
-          [mark footer-after-refuse]
-          (on-gtk (let [m (support/out-end-offset ui)] ((:source-open!* ui)) [m (footer ui)]))
-          refused? (await-until 2000 20 #(str/includes? (support/since ui mark) "Unsaved changes"))
-          still? (on-gtk (visible? (:root (sp ui))))
+          first-text (on-gtk (editor/editor-text (:editor ui)))
           _ (on-gtk (source-pane/focus! (sp ui))
                     (window-key! ui KEY-O (bit-or g/CONTROL-MASK g/SHIFT-MASK)))
-          v (on-gtk {:text (editor/editor-text (:editor ui))
-                     :line (inc (first (g/cursor-line-col (:buf (:editor ui)))))
-                     :panel (visible? (:root (sp ui)))})
-          _ (on-gtk ((:open-path! ui) (:file (rows/fixture))))]
+          v (on-gtk (let [t ((:active-tab* ui))]
+                      {:tabs (count ((:tabs* ui)))
+                       :text (editor/editor-text (:ed t))
+                       :line (inc (first (g/cursor-line-col (:buf (:ed t)))))
+                       :panel (visible? (:root (sp ui)))
+                       :first-kept (= first-text (editor/editor-text (:editor ui)))}))
+          _ (on-gtk (doseq [t (rest ((:tabs* ui)))]
+                      (editor/mark-saved! (:ed t))
+                      ((:close-tab! ui) (:id t))))]
       (on-gtk (support/check :clj-source-open-in-window
-                             (and opened? refused? still? (str/includes? footer-after-refuse "Unsaved changes")
-                                  (= rows/util-text (:text v)) (= 6 (:line v)) (not (:panel v)))
-                             (assoc v :opened opened? :refused refused? :still still?
-                                    :footer-after-refuse footer-after-refuse))))))
+                             (and opened? (= 2 (:tabs v)) (= rows/util-text (:text v)) (= 6 (:line v))
+                                  (not (:panel v)) (:first-kept v))
+                             (assoc v :opened opened?))))))
 
 (defn row-clj-source-outside-read-only
   "F12 on outside-fn opens other/place.clj read-only; Cmd/Ctrl+Shift+O says
