@@ -18,7 +18,8 @@
 
   file-dialog! is the S2/S4 spike's helper (spikes/s2/src/spike/window.clj),
   ported unchanged in shape."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.cljd :as cljd]
             [jonquil.commands :as commands]
@@ -33,6 +34,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.file-tree :as ft]
+            [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
@@ -234,17 +237,26 @@
 
 (defonce ^:private open-cb (make-file-dialog-cb g/gtk-file-dialog-open-finish open-on-result-by-dialog))
 (defonce ^:private save-cb (make-file-dialog-cb g/gtk-file-dialog-save-finish save-on-result-by-dialog))
+;; File-tree plan P2.T2: Open Folder..., same per-dialog routing.
+(defonce ^:private folder-on-result-by-dialog (atom {}))
+(defonce ^:private folder-cb (make-file-dialog-cb g/gtk-file-dialog-select-folder-finish folder-on-result-by-dialog))
 
 (defn- file-dialog!
-  "mode is :open or :save. on-result gets {:path s} or {:error msg :code n}."
-  [mode window on-result]
-  (let [d (g/gtk-file-dialog-new)
-        [on-result-by-dialog cb start]
-        (if (= mode :open)
-          [open-on-result-by-dialog open-cb g/gtk-file-dialog-open]
-          [save-on-result-by-dialog save-cb g/gtk-file-dialog-save])]
-    (swap! on-result-by-dialog assoc d on-result)
-    (start d window ffi/null cb ffi/null)))
+  "mode is :open, :save or :folder (Open Folder..., file-tree plan P2.T2).
+  on-result gets {:path s} or {:error msg :code n}. initial-folder, when
+  given, is where the dialog starts."
+  ([mode window on-result] (file-dialog! mode window on-result nil))
+  ([mode window on-result initial-folder]
+   (let [d (g/gtk-file-dialog-new)
+         [on-result-by-dialog cb start]
+         (case mode
+           :open [open-on-result-by-dialog open-cb g/gtk-file-dialog-open]
+           :save [save-on-result-by-dialog save-cb g/gtk-file-dialog-save]
+           :folder [folder-on-result-by-dialog folder-cb g/gtk-file-dialog-select-folder])]
+     (when initial-folder
+       (g/gtk-file-dialog-set-initial-folder d (g/g-file-new-for-path initial-folder)))
+     (swap! on-result-by-dialog assoc d on-result)
+     (start d window ffi/null cb ffi/null))))
 
 ;; --- open / save: the no-dialog forms the rows (and the dialog callbacks
 ;; below) call -------------------------------------------------------------
@@ -648,7 +660,7 @@
   D1.T4: ev* is stopped (ev/stop!, guarded) right before g_application_
   quit, in the real-quit branch only -- never in the suppress-close?
   self-test branch, which doesn't actually quit anything."
-  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!]}]
+  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select! save-tree-width!]}]
   (fn [_win _data]
     ;; Tabs plan P2.T5: one alert naming every dirty tab, in tab order.
     (let [ts @tabs
@@ -681,6 +693,12 @@
             ;; why this branch specifically, never the suppress-close?
             ;; one above.
               (do (unparent-registered-popovers! popovers)
+                  ;; File-tree plan P2.T2: the tree's width, when it's showing.
+                  (when save-tree-width!
+                    (try (save-tree-width!)
+                         (catch :default e
+                           (binding [*out* *err*]
+                             (println "jonquil: saving the file tree's width failed:" (ex-message e))))))
                   (try (ev/stop! @ev*)
                        (catch :default e
                        ;; The window is going away, so the console can't show
@@ -1893,7 +1911,7 @@
            run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
            win active-tab open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
            inspect-last-fn inspect-form-fn pane close-inspector-fn
-           status-label source-keys new-tab-fn step-tab-fn digit-tab-fn]}]
+           status-label source-keys new-tab-fn step-tab-fn digit-tab-fn toggle-tree-fn]}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
@@ -1923,7 +1941,11 @@
           (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
           (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
           (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
-          (and (command-chord? state) (= keyval KEY-E)) (do (run-selection-fn) 1)
+                    ;; File-tree plan P2.T2: Cmd/Ctrl+Shift+E shows or hides the tree
+          ;; (spike §6: E with Shift, lowered to e), ahead of Run Selection,
+          ;; which now needs Shift up.
+          (and (command-chord? state) (shift-held? state) (= keyval KEY-E)) (do (toggle-tree-fn) 1)
+          (and (command-chord? state) (not (shift-held? state)) (= keyval KEY-E)) (do (run-selection-fn) 1)
           ;; Cmd/Ctrl+Shift+L, ahead of plain Cmd/Ctrl+L below -- see this
           ;; docstring's own citation.
           (and (command-chord? state) (not (alt-held? state)) (shift-held? state) (= keyval KEY-L))
@@ -2025,9 +2047,12 @@
 (defn- on-switch!
   "Makes t the active tab: the window's title, Ln/Col and focus follow it,
   and every open popover closes (one on a hidden page would be lost)."
-  [{:keys [active-id win line-col-label close-popovers-fn]} t]
+  [{:keys [active-id win line-col-label close-popovers-fn tree-pane]} t]
   (reset! active-id (:id t))
   (close-popovers-fn)
+  ;; File-tree plan P2.T2: the tree selects the active tab's file (never
+  ;; expanding folders for it, ruling 5).
+  (when tree-pane (file-tree-pane/select-path! tree-pane @(:path t)))
   (update-title! (:ed t) win (:path t))
   (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
     (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
@@ -2143,7 +2168,7 @@
   :rename-to! :complete! :run-form!} (each a fn bound to this tab) added.
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
-           active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn
+           active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
            open-find-fn open-replace-fn] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion last-shown path discard-warned?] :as t}]
   (let [flash-fns (make-flash-fn ed)
@@ -2177,9 +2202,11 @@
          (fn [msg] (set-status! status-label msg)))]
     (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
     (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
-    (editor/on-dirty-changed! ed (fn [_dirty]
+    (editor/on-dirty-changed! ed (fn [dirty]
                                    (refresh-labels! ctx)
-                                   (when (active? t) (update-title! ed win path))))
+                                   (when (active? t) (update-title! ed win path))
+                                   ;; File-tree plan ruling 1: a save shows its file.
+                                   (when (and (not dirty) tree-saved!) (tree-saved! t))))
     (g/g-signal-connect-data (:close-btn t) "clicked"
                              (callable (contain-click status-label "close tab" (fn [_] (close-tab! ctx (:id t))))
                                        [:pointer :pointer] :void)
@@ -2238,7 +2265,8 @@
                           (catch :default e
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
                           (finally (editor/set-profile! ed (:profile tsel))
-                                   (refresh-labels! ctx)))))))
+                                   (refresh-labels! ctx)
+                                   (when tree-saved! (tree-saved! t))))))))
     (assoc t
            :flash-fns flash-fns
            :menu-group menu-group
@@ -2318,7 +2346,7 @@
 
 ;; --- activate ---------------------------------------------------------------
 
-(defn- activate! [app {:keys [file on-ready settings-path]}]
+(defn- activate! [app {:keys [file dir cwd on-ready settings-path]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
         ;; impossible path so a save can be forced to fail without ever
@@ -2340,7 +2368,10 @@
         ;; call time. session stays the evaluator the window started with,
         ;; for the ui map's :session. Joins jonquil.runtime-registry right
         ;; away, same as every later evaluator apply-selection! makes.
-        sel* (atom (select-for file @settings-path*))
+                ;; File-tree plan P2.T2: a directory launch resolves the directory's
+        ;; own project; find-project starts at a path's parent, so it's
+        ;; given a child of dir (measured 2026-10-09).
+        sel* (atom (select-for (or file (when dir (str (io/file dir "_")))) @settings-path*))
         ev* (atom (doto (ev/make @sel*) registry/register!))
         session @ev*
         evaluating-fn (fn [] (ev/evaluating? @ev*))
@@ -2541,6 +2572,15 @@
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
+        ;; File-tree plan P2.T2: the tree on the left, its toggle first in
+        ;; the toolbar, and the outer paned that holds it beside h-paned.
+        *open-folder (atom nil)
+        *folder-result (atom nil)
+        tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (open-file! @*tab-ctx p))
+                                             :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
+                                             :on-error (fn [msg] (set-status! status-label msg))})
+        files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
+        tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         window-key-fn (on-window-key {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
@@ -2553,7 +2593,10 @@
                                       :pane pane :close-inspector-fn close-inspector-fn
                                       :status-label status-label :source-keys source-keys
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
-                                      :digit-tab-fn digit-tab-fn})
+                                      :digit-tab-fn digit-tab-fn
+                                      :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
+                                                              files-btn
+                                                              (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))})
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -2569,6 +2612,7 @@
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
+    (g/gtk-box-append toolbar files-btn)
     (g/gtk-box-append toolbar run-btn)
     (g/gtk-box-append toolbar stop-btn)
     (g/gtk-box-append toolbar open-btn)
@@ -2605,7 +2649,12 @@
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
-    (g/gtk-box-append vbox h-paned)
+    (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
+    (g/gtk-paned-set-end-child tree-paned h-paned)
+    (g/gtk-paned-set-resize-start-child tree-paned 0)
+    (g/gtk-paned-set-shrink-start-child tree-paned 0)
+    (g/gtk-widget-set-vexpand tree-paned 1)
+    (g/gtk-box-append vbox tree-paned)
     (g/gtk-widget-set-hexpand status-label 1)
     (g/gtk-box-append status-box status-label)
     (g/gtk-box-append status-box dialect-label)
@@ -2655,7 +2704,13 @@
                                                           :cv cv :win win :app app
                                                           :confirmed-close? confirmed-close?
                                                           :suppress-close? suppress-close? :closing? closing?
-                                                          :popovers popovers :ev* ev*})
+                                                          :popovers popovers :ev* ev*
+                                                          :save-tree-width!
+                                                          (fn [] (when (pos? (g/gtk-widget-get-visible (:root tree-pane)))
+                                                                   (settings/save-settings!
+                                                                    @settings-path*
+                                                                    {:file-tree {:visible? true
+                                                                                 :width (g/gtk-paned-get-position tree-paned)}})))})
                                        [:pointer :pointer] :int :on-throw 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
@@ -2691,6 +2746,14 @@
           ;; Open button's dialog result, this is the documented normal
           ;; case, not an error to report.
           text (when file (try (slurp file) (catch :default _ nil)))
+          ;; File-tree plan P2.T2: a save (or a path change) under the root
+          ;; expands to the file and highlights it when its tab is active.
+          tree-saved! (fn [t]
+                        (let [p @(:path t)
+                              m @(:state tree-pane)]
+                          (when (and p (ft/under-root? m p))
+                            (file-tree-pane/show-model! tree-pane (ft/expand-to m p))
+                            (when (active? t) (file-tree-pane/select-path! tree-pane p)))))
           tab-ctx {:win win :cv cv :ev* ev* :sel* sel* :status-label status-label
                    :line-col-label line-col-label :close-popovers-fn close-popovers-fn
                    :register-popover-fn register-popover-fn :active? active? :source-ctx source-ctx
@@ -2698,12 +2761,53 @@
                    :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn
                    :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
                    :theme-name theme-name :completion-opts completion-opts
-                   :active-id active-id :active-tab active-tab :popovers popovers}
-          first-tab (add-tab! tab-ctx {:path file :text (or text "")})]
+                   :active-id active-id :active-tab active-tab :popovers popovers
+                   :tree-pane tree-pane :tree-saved! tree-saved!}
+          first-tab (add-tab! tab-ctx {:path file :text (or text "")})
+          tree-settings (:file-tree (settings/load-settings @settings-path*))
+          ;; Open Folder...'s result: re-roots the tree; the window's project
+          ;; follows only while its one tab is an untouched Untitled one.
+          folder-result! (fn [{p :path err :error :as r}]
+                           (cond
+                             p (do (file-tree-pane/show-model! tree-pane (ft/load-model p))
+                                   (let [ts @tabs
+                                         t (first ts)]
+                                     (when (and (= 1 (count ts))
+                                                (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))}))
+                                       (apply-selection! sel-ctx (select-for (str (io/file p "_")) @settings-path*)))))
+                             (dialog-dismissed? r) nil
+                             :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
       ;; Spike §1: switch-page fired inside that first append, before the
       ;; tab was in tabs, so the tab is made active here.
       (reset! active-id (:id first-tab))
       (reset! *tab-ctx tab-ctx)
+      (reset! *folder-result folder-result!)
+      ;; File-tree plan P2.T2: the tree's root, starting width and
+      ;; visibility (saved, else shown only for a directory launch, ruling 3),
+      ;; Open Folder..., and the toggle's handler -- the one place that shows,
+      ;; hides and saves (spike §4).
+      (file-tree-pane/show-model! tree-pane (ft/load-model (ft/root-for {:dir dir :file file :cwd cwd})))
+      (reset! *open-folder (fn [] (file-dialog! :folder win
+                                                (fn [r] (try (folder-result! r)
+                                                             (catch :default e
+                                                               (cview/append! cv :error (str "; open folder: " (ex-message e) "\n")))))
+                                                (:root @(:state tree-pane)))))
+      (g/gtk-paned-set-position tree-paned (or (:width tree-settings) 240))
+      (g/g-signal-connect-data files-btn "toggled"
+                               (callable (contain-click
+                                          status-label "files"
+                                          (fn [btn]
+                                            (let [show? (pos? (g/gtk-toggle-button-get-active btn))
+                                                  width (g/gtk-paned-get-position tree-paned)]
+                                              (g/gtk-widget-set-visible (:root tree-pane) (if show? 1 0))
+                                              (when-let [err (settings/save-settings!
+                                                              @settings-path* {:file-tree {:visible? show? :width (max 1 width)}})]
+                                                (cview/append! cv :system (str "; settings: " err "\n"))))))
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
+      (g/gtk-widget-set-visible (:root tree-pane) 0)
+      (when (if (some? (:visible? tree-settings)) (:visible? tree-settings) (boolean dir))
+        (g/gtk-toggle-button-set-active files-btn 1))
       (g/g-signal-connect-data notebook "switch-page"
                                (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -2738,6 +2842,15 @@
                  ;; active tab, read live.
                    :notebook notebook
                    :tabs* (fn [] @tabs)
+                 ;; File-tree plan P2.T2: the tree, its toggle, Open Folder's
+                 ;; result handler (for rows), and the outer paned.
+                   :file-tree tree-pane
+                   :files-btn files-btn
+                   :tree-paned tree-paned
+                   :toggle-file-tree!* (fn [] (g/gtk-toggle-button-set-active
+                                               files-btn (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
+                   :file-tree-visible?* (fn [] (pos? (g/gtk-widget-get-visible (:root tree-pane))))
+                   :simulate-folder-result! (fn [r] (@*folder-result r))
                    :active-tab* active-tab
                  ;; Tabs plan P2.T3: the tab operations, exactly what the
                  ;; keys, the toolbar and the tabs' close buttons call.
@@ -2927,10 +3040,14 @@
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
-  {:file path-or-nil :on-ready (fn [ui]) :settings-path path-or-nil}, where
+  {:file path-or-nil :dir path-or-nil :cwd path-or-nil :on-ready (fn [ui])
+  :settings-path path-or-nil}, where :dir (a directory launch) and :cwd root
+  the file tree (jonquil.file-tree/root-for) and
   :settings-path defaults to (jonquil.settings/settings-path) -- every
   self-test/docs-shots/smoke harness must pass its own isolated path so it
-  never touches the user's real settings file (TH.T5). ui is {:notebook
+  never touches the user's real settings file (TH.T5). ui is {:file-tree
+  :files-btn :tree-paned :toggle-file-tree!* :file-tree-visible?*
+  :simulate-folder-result! :notebook
   :tabs* :active-tab* :editor
   :console :session :status-label :line-col-label :evaluator* :selection*
   :dialect-label :reset-check :window :find-bar :run!*

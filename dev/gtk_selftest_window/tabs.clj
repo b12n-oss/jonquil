@@ -42,7 +42,7 @@
     (spit f text)
     (.getPath f)))
 
-(defn- occupy-first!
+(defn occupy-first!
   "Gives the first tab text, so Open adds a tab instead of filling it
   (run-row leaves it empty, and possibly Untitled, between rows)."
   [ui]

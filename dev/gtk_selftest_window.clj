@@ -27,6 +27,7 @@
             [gtk-selftest-window.contained :as contained]
             [gtk-selftest-window.dialects :as dialects]
             [gtk-selftest-window.files :as files]
+            [gtk-selftest-window.file-tree :as file-tree]
             [gtk-selftest-window.file-tree-pane :as file-tree-pane]
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.inspector :as inspector]
@@ -275,6 +276,14 @@
    tabs/row-tab-close-cancels-flash
    tabs/row-tab-close-while-running-eof
    tabs/row-tab-foreign-refuses-inspect-form
+   file-tree/row-tree-toggle-chord
+   file-tree/row-tree-chord-not-run-selection
+   file-tree/row-tree-button-toggles
+   file-tree/row-tree-open-and-focus
+   file-tree/row-tree-highlight-follows-tab
+   file-tree/row-tree-save-shows-file
+   file-tree/row-tree-settings-persist
+   file-tree/row-tree-follows-theme
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
