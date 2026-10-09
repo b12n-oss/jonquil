@@ -4,7 +4,7 @@
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
   (:require [clojure.java.io :as io]
-            [gtk-async :refer [go-row on-gtk]]
+            [gtk-async :as gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.ffi :as g]
@@ -151,3 +151,40 @@
                         ms (/ (- (System/nanoTime) t0) 1e6)
                         n (count (pane/row-widgets p))]
                     (support/check :tree-pane-large-folder (and (< ms 1000) (= 3001 n)) {:ms ms :rows n}))))))))
+
+(defn row-tree-pane-select-non-canonical
+  "select-path! finds a row from a non-canonical path to the same file
+  (final review finding 3): temp-dirs hands out /var/... paths, rows hold
+  /private/var/... on macOS."
+  [_ui]
+  (go-row :tree-pane-select-non-canonical support/check
+    (with-pane
+      (fn [p _]
+        (on-gtk (let [raw (temp-dirs/temp-dir! "jonquil-selftest-tree-")
+                      _ (doseq [rel ["src/a.clj"]] (let [f (io/file raw rel)] (io/make-parents f) (spit f "")))
+                      root (.getCanonicalPath (io/file raw))]
+                  (pane/show-model! p (ft/toggle (ft/load-model root) (str root "/src")))
+                  (pane/select-path! p (str raw "/src/../src/a.clj"))
+                  (let [v {:selected (pane/selected-path p) :raw raw :root root}]
+                    (support/check :tree-pane-select-non-canonical
+                                   (= (str root "/src/a.clj") (:selected v)) v))))))))
+
+(defn row-tree-pane-deferred-activation-by-path
+  "A click's deferred action acts on the row that was clicked even if the
+  list was rebuilt in between (final review finding 7)."
+  [_ui]
+  (go-row :tree-pane-deferred-activation-by-path support/check
+    (with-pane
+      (fn [p opened]
+        (let [root (on-gtk (let [r (tree!)]
+                             (pane/show-model! p (ft/load-model r))
+                             ;; README.md is row 1; emit the row's own activate,
+                             ;; which defers, then rebuild with src expanded so
+                             ;; row 1 becomes src/b before the deferred run.
+                             (g/g-signal-emit-by-name (:row (second (pane/row-widgets p))) "activate")
+                             (pane/show-model! p (ft/toggle (ft/load-model r) (str r "/src")))
+                             r))
+              done (gtk-async/await-until 2000 20 #(seq @opened))]
+          (on-gtk (support/check :tree-pane-deferred-activation-by-path
+                                 (and done (= [(str root "/README.md")] @opened))
+                                 {:opened @opened})))))))

@@ -112,3 +112,28 @@
           linked (some #(when (= "linked" (:name %)) %) (ft/children m root))]
       (is (:dir? linked))
       (is (= (str root "/src/a.clj") (:path (first (ft/children m (:path linked)))))))))
+
+(deftest symlink-cycle-test
+  ;; Final review finding 2: a link to the folder itself (or an ancestor)
+  ;; has the same canonical path as an expanded folder; rows must not
+  ;; recurse forever.
+  (let [root (tree! {"a/x.clj" ""})
+        a (str root "/a")]
+    (java.nio.file.Files/createSymbolicLink (.toPath (io/file a "self")) (.toPath (io/file "."))
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (java.nio.file.Files/createSymbolicLink (.toPath (io/file a "up")) (.toPath (io/file ".."))
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (let [m (-> (ft/load-model root) (ft/toggle a) (ft/toggle root))
+          rs (deref (future (ft/rows m)) 3000 ::hung)]
+      (is (not= ::hung rs))
+      (is (= ["a" "self" "up" "x.clj"] (mapv :name rs)))
+      (is (not-any? :expanded? (rest rs)) "a cycle's row is shown collapsed"))))
+
+(deftest project-selection-test
+  ;; Final review finding 1: a directory's own marker decides its dialect.
+  (let [cljd (tree! {"pubspec.yaml" "name: x\n"})
+        jolt (tree! {"deps.edn" "{}"})]
+    (is (= :cljd (get-in (ft/project-selection cljd nil) [:profile :id])))
+    (is (= cljd (:project-dir (ft/project-selection cljd nil))))
+    (is (= :jolt (get-in (ft/project-selection jolt nil) [:profile :id])))
+    (is (= jolt (:project-dir (ft/project-selection jolt nil))))))

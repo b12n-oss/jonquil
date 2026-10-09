@@ -135,11 +135,16 @@
         (finally
           (.setReadable f true false)))
       (is (= "{:theme :navy :dialect :jolt}" (slurp path)) "file should be unchanged byte-for-byte")))
-  (testing "malformed EDN: overwrite and return nil"
+  (testing "malformed EDN: refuse with a message and leave the file alone"
+    ;; File-tree final review finding 5: saves now also happen when the
+    ;; tree is toggled, so overwriting a file mid-edit would silently drop
+    ;; its other keys.
     (let [path (str (temp-dir) "/settings.edn")]
       (spit path "{:theme :navy :dialect :jolt")
-      (is (nil? (settings/save-settings! path {:theme :dark})))
-      (is (= {:theme :dark} (settings/load-settings path)))))
+      (let [msg (settings/save-settings! path {:theme :dark})]
+        (is (string? msg))
+        (is (str/includes? msg "isn't valid EDN")))
+      (is (= "{:theme :navy :dialect :jolt" (slurp path)))))
   (testing "missing file: create and return nil"
     (let [path (str (temp-dir) "/settings.edn")]
       (is (nil? (settings/save-settings! path {:theme :dark})))

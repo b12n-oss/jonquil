@@ -252,6 +252,8 @@
    file-tree-pane/row-tree-pane-refresh-deleted
    file-tree-pane/row-tree-pane-unreadable-root
    file-tree-pane/row-tree-pane-large-folder
+   file-tree-pane/row-tree-pane-select-non-canonical
+   file-tree-pane/row-tree-pane-deferred-activation-by-path
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip
@@ -284,6 +286,7 @@
    file-tree/row-tree-save-shows-file
    file-tree/row-tree-settings-persist
    file-tree/row-tree-follows-theme
+   file-tree/row-tree-escape-returns-focus
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

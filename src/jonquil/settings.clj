@@ -102,8 +102,8 @@
   "Merges map m (say {:theme k}, or {:file-tree {...}}) into the settings
   file at path and writes it atomically, so a save keeps every key the file
   already holds -- a theme change must not drop a hand-set :dialect or the
-  file tree's state (file-tree plan P1.T2). A missing or malformed file is
-  replaced by m alone; an unreadable one is left untouched and reported.
+    file tree's state (file-tree plan P1.T2). A missing file is created with m
+  alone; an unreadable or malformed one is left untouched and reported.
   nil on success, else a message.
   When path is a symlink, the real target is rewritten in place (the temp
   file sits beside the target and the rename lands on the target), so the
@@ -120,10 +120,16 @@
                                             ;; other keys can't be kept. Signal an error.
                                             (throw (Exception.
                                                     (str "couldn't read " target
-                                                         " to keep its other settings; nothing saved")))))]
-                         ;; Malformed EDN or not a map: nothing to keep.
-                         (try (let [v (edn/read-string content)] (when (map? v) v))
-                              (catch Exception _ nil))))]
+                                                         " to keep its other settings; nothing saved")))))
+                             ;; Malformed EDN: refuse rather than overwrite the file's
+                             ;; other keys (final review finding 5, now that toggling
+                             ;; the tree saves too). Valid EDN that isn't a map has
+                             ;; nothing to keep.
+                             v (try (edn/read-string content)
+                                    (catch Exception _
+                                      (throw (Exception.
+                                              (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it")))))]
+                         (when (map? v) v)))]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
         (spit @tmp (pr-str (merge existing m)))

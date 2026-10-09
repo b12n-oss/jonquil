@@ -76,8 +76,16 @@
   [pane]
   (show-model! pane (ft/prune @(:state pane))))
 
-(defn- index-of [pane path]
-  (first (keep-indexed (fn [i r] (when (= path (:path r)) i)) (visible-rows pane))))
+(defn- canonical [p]
+  (try (.getCanonicalPath (File. ^String p)) (catch Exception _ p)))
+
+(defn- index-of
+  "path's row index. Rows hold canonical paths and tabs keep what they were
+  given (a relative argument, a /var path on macOS), so path is
+  canonicalised first (final review finding 3)."
+  [pane path]
+  (let [c (canonical path)]
+    (first (keep-indexed (fn [i r] (when (= c (:path r)) i)) (visible-rows pane)))))
 
 (defn select-path!
   "Selects path's row when it's visible, else selects nothing. Never opens
@@ -99,17 +107,23 @@
   (show-model! pane model)
   (select-path! pane path))
 
-(defn activate-index!
-  "What a click or Return on row i does: a folder toggles, a file calls
-  :on-open with its path, an error row does nothing. Also the self-test's
-  way in."
-  [{:keys [state on-open] :as pane} i]
-  (when-let [{:keys [path dir? error?]} (get (visible-rows pane) i)]
+(defn activate-path!
+  "What a click or Return on path's row does: a folder toggles, a file
+  calls :on-open with its path, an error row (or a row no longer shown)
+  does nothing."
+  [{:keys [state on-open] :as pane} path]
+  (when-let [{:keys [dir? error?]} (some (fn [r] (when (= path (:path r)) r)) (visible-rows pane))]
     (cond
       error? nil
       dir? (rebuild-keeping-selection! pane (ft/toggle @state path) path)
       :else (on-open path)))
   nil)
+
+(defn activate-index!
+  "activate-path! for row i. Also the self-test's way in."
+  [pane i]
+  (when-let [{:keys [path]} (get (visible-rows pane) i)]
+    (activate-path! pane path)))
 
 (defn- key-target
   "The selected folder row Left would collapse or Right would expand, or nil."
@@ -180,8 +194,11 @@
                              ;; included, so it runs on the next main-loop turn,
                              ;; never inside the row's own signal emission.
                              (callable (guard "tree" (fn [_box row _data]
-                                                       (let [i (g/gtk-list-box-row-get-index row)]
-                                                         (on-gui! (guard "tree" (fn [] (activate-index! pane i)))))
+                                                                                                              ;; The row's path is read now, so a rebuild landing
+                                                       ;; before the deferred run can't redirect it to
+                                                       ;; another row (final review finding 7).
+                                                       (when-let [{:keys [path]} (get (visible-rows pane) (g/gtk-list-box-row-get-index row))]
+                                                         (on-gui! (guard "tree" (fn [] (activate-path! pane path)))))
                                                        nil))
                                        [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

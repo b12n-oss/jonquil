@@ -57,6 +57,17 @@
     (on-gtk (let [dir (:project-dir ((:selection* ui)))]
               (support/check :tree-dir-launch-project (= @fixture* dir) {:project-dir dir :fixture @fixture*})))))
 
+(defn- row-tree-dir-launch-no-save
+  "Showing the tree for a directory launch is the starting default, not a
+  choice: nothing is written to the settings file (final review finding 6)."
+  [ui]
+  (go-row :tree-dir-launch-no-save support/check
+    (on-gtk (let [p ((:settings-path* ui))
+                  exists (.exists (io/file p))
+                  text (when exists (slurp p))]
+              (support/check :tree-dir-launch-no-save (or (not exists) (not (re-find #":file-tree" text)))
+                             {:exists exists :text text})))))
+
 (defn- row-tree-dir-launch-close
   "The deliberately last row: the app's quit action, with nothing unsaved."
   [ui]
@@ -66,6 +77,7 @@
 (def ^:private row-fns
   [row-tree-dir-launch-root
    row-tree-dir-launch-project
+   row-tree-dir-launch-no-save
    row-tree-dir-launch-close])
 
 (def ^:private PER-ROW-MS 30000)

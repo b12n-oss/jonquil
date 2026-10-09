@@ -195,3 +195,23 @@
                      :changed (not= css-navy css-light)}]
               ((:set-theme!* ui) before)
               (support/check :tree-follows-theme (and (= 1 (:class v)) (:changed v)) v)))))
+
+(defn row-tree-escape-returns-focus
+  "With the tree focused, Escape gives focus back to the active editor
+  (final review finding 4); hiding a focused tree does the same."
+  [ui]
+  (go-row :tree-escape-returns-focus support/check
+    (on-gtk (let [original (root ui)
+                  win (:window ui)]
+              (try
+                ((:toggle-file-tree!* ui))
+                (pane/focus! (pane ui))
+                (let [in-tree (pane/focused? (pane ui) win)
+                      h ((:handle-window-key! ui) ffi/null 0xff1b 0 0 ffi/null)
+                      back (= (g/gtk-root-get-focus win) (:view (:ed ((:active-tab* ui)))))
+                      _ (pane/focus! (pane ui))
+                      _ ((:toggle-file-tree!* ui))
+                      back2 (= (g/gtk-root-get-focus win) (:view (:ed ((:active-tab* ui)))))]
+                  (support/check :tree-escape-returns-focus (and in-tree (= 1 h) back back2)
+                                 {:in-tree in-tree :handled h :back back :back-after-hide back2}))
+                (finally (restore! ui original)))))))

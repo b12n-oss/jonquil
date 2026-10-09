@@ -18,8 +18,7 @@
 
   file-dialog! is the S2/S4 spike's helper (spikes/s2/src/spike/window.clj),
   ported unchanged in shape."
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.cljd :as cljd]
             [jonquil.commands :as commands]
@@ -254,7 +253,11 @@
            :save [save-on-result-by-dialog save-cb g/gtk-file-dialog-save]
            :folder [folder-on-result-by-dialog folder-cb g/gtk-file-dialog-select-folder])]
      (when initial-folder
-       (g/gtk-file-dialog-set-initial-folder d (g/g-file-new-for-path initial-folder)))
+       (let [gf (g/g-file-new-for-path initial-folder)]
+         (g/gtk-file-dialog-set-initial-folder d gf)
+         ;; The dialog keeps its own reference (final review nit: one GFile
+         ;; leaked per Open Folder...).
+         (g/g-object-unref gf)))
      (swap! on-result-by-dialog assoc d on-result)
      (start d window ffi/null cb ffi/null))))
 
@@ -695,7 +698,9 @@
               (do (unparent-registered-popovers! popovers)
                   ;; File-tree plan P2.T2: the tree's width, when it's showing.
                   (when save-tree-width!
-                    (try (save-tree-width!)
+                    (try (when-let [err (save-tree-width!)]
+                           (binding [*out* *err*]
+                             (println "jonquil: saving the file tree's width failed:" err)))
                          (catch :default e
                            (binding [*out* *err*]
                              (println "jonquil: saving the file tree's width failed:" (ex-message e))))))
@@ -1911,7 +1916,7 @@
            run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
            win active-tab open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
            inspect-last-fn inspect-form-fn pane close-inspector-fn
-           status-label source-keys new-tab-fn step-tab-fn digit-tab-fn toggle-tree-fn]}]
+           status-label source-keys new-tab-fn step-tab-fn digit-tab-fn toggle-tree-fn tree-keys]}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
@@ -1928,6 +1933,10 @@
           (do (close-inspector-fn) 1)
           (and (= keyval KEY-ESCAPE) ((:focused? source-keys)))
           (do ((:close! source-keys)) 1)
+          ;; File-tree final review finding 4: Escape in the tree hands focus
+          ;; back to the editor, ahead of Stop.
+          (and (= keyval KEY-ESCAPE) tree-keys ((:focused? tree-keys)))
+          (do ((:leave! tree-keys)) 1)
           (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
           (= keyval KEY-ESCAPE) 0
           ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
@@ -2371,7 +2380,9 @@
                 ;; File-tree plan P2.T2: a directory launch resolves the directory's
         ;; own project; find-project starts at a path's parent, so it's
         ;; given a child of dir (measured 2026-10-09).
-        sel* (atom (select-for (or file (when dir (str (io/file dir "_")))) @settings-path*))
+        sel* (atom (if (and dir (not file))
+                     (ft/project-selection dir (:dialect (settings/load-settings @settings-path*)))
+                     (select-for file @settings-path*)))
         ev* (atom (doto (ev/make @sel*) registry/register!))
         session @ev*
         evaluating-fn (fn [] (ev/evaluating? @ev*))
@@ -2575,6 +2586,9 @@
         ;; File-tree plan P2.T2: the tree on the left, its toggle first in
         ;; the toolbar, and the outer paned that holds it beside h-paned.
         *open-folder (atom nil)
+        ;; True while the starting visibility is applied, so the toggled
+        ;; handler doesn't save it as if a person had chosen it.
+        applying-start? (atom false)
         *folder-result (atom nil)
         tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (open-file! @*tab-ctx p))
                                              :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
@@ -2594,6 +2608,8 @@
                                       :status-label status-label :source-keys source-keys
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                       :digit-tab-fn digit-tab-fn
+                                      :tree-keys {:focused? (fn [] (file-tree-pane/focused? tree-pane win))
+                                                  :leave! (fn [] (editor/focus! (:ed (active-tab))))}
                                       :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
                                                               files-btn
                                                               (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))})
@@ -2774,7 +2790,8 @@
                                          t (first ts)]
                                      (when (and (= 1 (count ts))
                                                 (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))}))
-                                       (apply-selection! sel-ctx (select-for (str (io/file p "_")) @settings-path*)))))
+                                       (apply-selection! sel-ctx (ft/project-selection
+                                                                  p (:dialect (settings/load-settings @settings-path*)))))))
                              (dialog-dismissed? r) nil
                              :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
       ;; Spike §1: switch-page fired inside that first append, before the
@@ -2798,16 +2815,25 @@
                                           status-label "files"
                                           (fn [btn]
                                             (let [show? (pos? (g/gtk-toggle-button-get-active btn))
-                                                  width (g/gtk-paned-get-position tree-paned)]
+                                                  width (g/gtk-paned-get-position tree-paned)
+                                                  had-focus? (file-tree-pane/focused? tree-pane win)]
                                               (g/gtk-widget-set-visible (:root tree-pane) (if show? 1 0))
-                                              (when-let [err (settings/save-settings!
-                                                              @settings-path* {:file-tree {:visible? show? :width (max 1 width)}})]
-                                                (cview/append! cv :system (str "; settings: " err "\n"))))))
+                                              ;; Hiding the focused tree leaves focus nowhere;
+                                              ;; give it to the editor (final review finding 4).
+                                              (when (and (not show?) had-focus?) (editor/focus! (:ed (active-tab))))
+                                              ;; Only a person's toggle is a choice worth saving;
+                                              ;; the starting state isn't (finding 6).
+                                              (when-not @applying-start?
+                                                (when-let [err (settings/save-settings!
+                                                                @settings-path* {:file-tree {:visible? show? :width (max 1 width)}})]
+                                                  (cview/append! cv :system (str "; settings: " err "\n")))))))
                                          [:pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (g/gtk-widget-set-visible (:root tree-pane) 0)
       (when (if (some? (:visible? tree-settings)) (:visible? tree-settings) (boolean dir))
-        (g/gtk-toggle-button-set-active files-btn 1))
+        (reset! applying-start? true)
+        (try (g/gtk-toggle-button-set-active files-btn 1)
+             (finally (reset! applying-start? false))))
       (g/g-signal-connect-data notebook "switch-page"
                                (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)

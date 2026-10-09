@@ -99,18 +99,21 @@
   [{:keys [root expanded] :as model}]
   (if-not root
     []
-    (letfn [(walk [dir depth]
+        ;; ancestors: the folders above this point. A symlink to one of them
+    ;; (or to the folder itself) has the same canonical path, so it's shown
+    ;; collapsed instead of recursed into forever (final review finding 2).
+    (letfn [(walk [dir depth ancestors]
               (let [cs (children model dir)]
                 (if (map? cs)
                   [{:path (str dir "/") :name "(can't read)" :depth depth :dir? false :dim? true :error? true}]
                   (mapcat (fn [{:keys [path name dir?]}]
-                            (let [open? (and dir? (contains? expanded path))
+                            (let [open? (and dir? (contains? expanded path) (not (contains? ancestors path)))
                                   row {:path path :name name :depth depth :dir? dir? :expanded? open?
                                        :dim? (and (not dir?) (not (clojure-file? name))) :error? false}]
-                              (if open? (cons row (walk path (inc depth))) [row])))
+                              (if open? (cons row (walk path (inc depth) (conj ancestors path))) [row])))
                           cs))))]
       (let [cs (children model root)]
-        (if (map? cs) [] (vec (walk root 0)))))))
+        (if (map? cs) [] (vec (walk root 0 #{root})))))))
 
 (defn toggle
   "model with folder dir expanded, or collapsed when it already was."
@@ -138,6 +141,19 @@
     (let [parts (str/split (subs (canonical path) (inc (count root))) #"/")
           dirs (reductions (fn [acc p] (str acc "/" p)) (str root "/" (first parts)) (rest (butlast parts)))]
       (update model :expanded into (when (> (count parts) 1) dirs)))))
+
+(defn project-selection
+  "dialect/select for directory dir as a project, with default the settings
+  file's :dialect: dir's own .jonquil.edn or marker decides, as it would for
+  a file inside it with no extension to argue. find-project starts at a
+  path's parent, so it's given a child of dir; select gets no path, so a
+  single marker decides (final review finding 1: a pubspec.yaml directory
+  must select ClojureDart)."
+  [dir default]
+  (dialect/select dialect/profiles
+                  (dialect/find-project dialect/profiles (str (io/file dir "_")))
+                  nil
+                  default))
 
 (defn root-for
   "The tree's starting root (spec decision 2): a directory argument; a
