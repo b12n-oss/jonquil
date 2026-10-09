@@ -690,6 +690,38 @@
       (on-gtk (check! :clj-source (and run-ok? ok scrolled? (zero? exit))
                       {:header (g/label-text (:header sp)) :screenshot-exit exit :screenshot-err err})))))
 
+(defn- scene-tabs
+  "Tabs: talk/core.clj and talk/demo.clj open side by side, core Run then
+  demo Run (demo calls core's hello through an alias), and demo left with
+  an unsaved change so its label carries the dirty mark."
+  [ui]
+  (go-row :tabs check!
+    (let [dir (temp-dirs/temp-dir! "jonquil-demoshots-tabs-")
+          core (io/file dir "talk" "core.clj")
+          demo (io/file dir "talk" "demo.clj")
+          _ (io/make-parents core)
+          _ (spit core "(ns talk.core)\n\n(defn hello [] \"hi\")\n")
+          _ (spit demo "(ns talk.demo\n  (:require [talk.core :as c]))\n\n(c/hello)\n")
+          [t1 t2] (on-gtk ((:open-file! ui) (.getPath core))
+                          ((:open-file! ui) (.getPath demo))
+                          ((:tabs* ui)))
+          mark1 (on-gtk (let [m (out-end-offset ui)] ((:select-tab! ui) (:id t1)) ((:run!* ui)) m))
+          ok1 (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark1) "=> #'talk.core/hello")))
+          mark2 (on-gtk (let [m (out-end-offset ui)] ((:select-tab! ui) (:id t2)) ((:run!* ui)) m))
+          ok2 (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark2) "=> \"hi\"")))
+          _ (on-gtk (let [buf (:buf (:ed t2))]
+                      (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                      (g/gtk-text-buffer-insert-interactive-at-cursor buf ";; next: greet by name\n" -1 1)))
+          _ (ga/settle 2)
+          labels (on-gtk (mapv (fn [t] (g/label-text (:label t))) ((:tabs* ui))))
+          {:keys [exit err]} (ga/screenshot (image-path :tabs "png") (own-pid))
+          ;; Saved, so the harness's own close afterwards isn't held up by
+          ;; the unsaved-changes alert.
+          _ (on-gtk (editor/mark-saved! (:ed t2)))]
+      (on-gtk (check! :tabs (and ok1 ok2 (= ["core.clj" "demo.clj ●"] labels) (zero? exit))
+                      {:labels labels :run1 (since ui mark1) :run2 (since ui mark2)
+                       :screenshot-exit exit :screenshot-err err})))))
+
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
@@ -718,7 +750,8 @@
    [:clj-quick-doc scene-clj-quick-doc]
    [:clj-full-doc scene-clj-full-doc]
    [:clj-inspector scene-clj-inspector]
-   [:clj-source scene-clj-source]])
+   [:clj-source scene-clj-source]
+   [:tabs scene-tabs]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 

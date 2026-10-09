@@ -217,7 +217,7 @@
                           "find" "run-selection" "close-prompt"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
                           "completion" "quick-doc" "rename" "inspector"
-                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source"]
+                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs"]
                results (mapv (fn [id]
                                (let [r (shell {:continue true} "jolt" "-M:shots" id)]
                                  {:id id :ok (zero? (:exit r))}))
@@ -374,7 +374,7 @@
                          "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
                          "jonquil-selftest-source-" "jonquil-selftest-tabs-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
-                         "jonquil-demoshots-settings-" "jonquil-clj-server-" "jonquil-clj-config-"
+                         "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-clj-server-" "jonquil-clj-config-"
                          "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
