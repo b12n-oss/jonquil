@@ -32,6 +32,7 @@
     jonquil.help
     jonquil.source
     jonquil.tabs
+    jonquil.file-tree
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover
