@@ -263,6 +263,10 @@
    tabs/row-close-all-message
    tabs/row-close-all-save-all
    tabs/row-close-all-save-failure
+   tabs/row-tab-close-releases-namespaces
+   tabs/row-tab-close-cancels-flash
+   tabs/row-tab-close-while-running-eof
+   tabs/row-tab-foreign-refuses-inspect-form
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

@@ -17,6 +17,16 @@
 
 (declare run-definitions! submit-repl! set-mode!)
 
+(defn release-owner-in!
+  "Moves owner's namespaces under :repl in state's :created map (an atom
+  holding {:created {owner #{ns}}}). Shared by the in-process session and
+  the nREPL evaluator (jonquil.evaluator/Owners)."
+  [state owner]
+  (swap! state update :created
+         (fn [c] (if-let [nss (get c owner)]
+                   (-> c (update :repl (fnil into #{}) nss) (dissoc owner))
+                   c))))
+
 (defrecord InProcess [ctx state]
   ev/Evaluator
   (start! [_] nil)
@@ -54,7 +64,9 @@
           (try (on-view {:error (or (ex-message e) (str (class e)))})
                (catch Throwable _)))))
     nil)
-  (inspectable? [_] true))
+  (inspectable? [_] true)
+  ev/Owners
+  (release-owner! [_ owner] (release-owner-in! state owner) nil))
 
 (defn make-session
   "A session in reset mode with the prompt in `user`."

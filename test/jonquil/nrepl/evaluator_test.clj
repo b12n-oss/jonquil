@@ -380,3 +380,26 @@
         (run-owned e "(ns tabs.c) (def here 3)" 3)
         (is (= "3" (:printed (first (run e "here" false))))))
       (finally (ev/stop! e)))))
+
+(deftest history-vars-survive-owner-snapshots-test
+  ;; Final review finding 1: the owner snapshots are evals on the user's
+  ;; session, and the server shifts *1/*2/*3 on every successful eval.
+  (let [e (make (temp-project))]
+    (try
+      (run e "(+ 1 2)" false)
+      (run e "(+ 10 10)" false)
+      (is (= "[20 3]" (:printed (first (run e "[*1 *2]" false)))))
+      (run-owned e "(ns tabs.h) (def v 5) v" 1)
+      (is (= "5" (:printed (first (run e "*1" false)))) "a Run's value is *1 afterwards")
+      (finally (ev/stop! e)))))
+
+(deftest release-owner-over-nrepl-test
+  ;; Final review finding 2: a closed tab's namespaces go to :repl, so the
+  ;; next Run clears them.
+  (let [e (make (temp-project))]
+    (try
+      (run-owned e "(ns orphan.a) (defn old-fn [] 1)" 2)
+      (ev/release-owner! e 2)
+      (run-owned e "(ns orphan.a) (def x 1)" 3)
+      (is (= "nil" (:printed (first (run e "(ns-resolve 'orphan.a 'old-fn)" false)))))
+      (finally (ev/stop! e)))))

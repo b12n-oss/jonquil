@@ -46,6 +46,17 @@
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
 
+(defprotocol Owners
+  "Tabs plan, final review finding 2: evaluators that track which owner
+  (tab) created which namespaces (jonquil.session's InProcess, jonquil.
+  nrepl.evaluator's NRepl). Attach evaluators never reset, so they don't
+  implement it; callers check (satisfies? Owners ev) first."
+  (release-owner! [ev owner]
+    "Hands owner's namespaces to :repl, so the next reset-mode Run, from
+    any tab, removes them. Called when a tab closes: nothing would ever
+    Run as that owner again, and a reopened file (a new tab id) would
+    otherwise never reset them."))
+
 (defprotocol FullDoc
   "P3.T2: full documentation beyond quick doc's own summary, for a second
   quick-doc press on the same target (jonquil.gtk.window's do-quick-doc!,

@@ -83,10 +83,13 @@
     (is (str/includes? (ops/reset-code []) "(remove-ns 'user) (create-ns 'user) nil"))))
 
 (deftest ns-snapshot-code-test
-  ;; The server prints the value itself (eval-result's :printed), so one
-  ;; read-string of :printed gives the vector back.
-  (is (= '[(clojure.core/mapv clojure.core/ns-name (clojure.core/all-ns)) (clojure.core/vec (clojure.core/loaded-libs))]
-         (read-string ops/ns-snapshot-code))))
+  ;; One form, printing the snapshot and returning the old *1 (final
+  ;; review finding 1); the live test history-vars-survive-owner-snapshots-
+  ;; test checks the effect on a real server.
+  (let [form (read-string ops/ns-snapshot-code)]
+    (is (= 'clojure.core/let (first form)))
+    (is (= 'o1 (last form)))
+    (is (str/includes? ops/ns-snapshot-code "(clojure.core/all-ns)"))))
 
 (deftest reads-stdin-test
   (is (ops/reads-stdin? "(println (read-line))"))

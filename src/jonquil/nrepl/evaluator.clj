@@ -105,13 +105,16 @@
   throw here only leaves that evaluation's namespaces unowned (spike: about
   1 ms per call)."
   [conn sid]
-  ;; No :ns, unlike eval-sync!: an eval with :ns "user" would leave the
+    ;; No :ns, unlike eval-sync!: an eval with :ns "user" would leave the
   ;; session in user and the next REPL entry would lose the Run's namespace.
+  ;; The data comes back on :out; the value is the old *1 (see
+  ;; ops/ns-snapshot-code), so the server's own *1/*2/*3 shift puts the
+  ;; user's history back where it was (final review finding 1).
   (try
     (let [r (client/request-sync conn {:op "eval" :code ops/ns-snapshot-code :session sid} request-timeout-ms)
           res (when (vector? r) (ops/eval-result r false))]
       (when (= :ok (:status res))
-        (read-string (:printed res))))
+        (read-string (apply str (keep :out r)))))
     (catch Throwable _ nil)))
 
 (defn- start-runtime!
@@ -344,7 +347,9 @@
              "Output appears when an evaluation finishes, not while it runs (the jolt-lang/nrepl middleware sends it at the end)."
              "Jump to definition stays in this buffer: lookup reports no file or line."]
       (and (live? this) (not (contains? (:ops (runtime this)) "interrupt")))
-      (conj "Stop restarts the runtime: this server has no interrupt op."))))
+      (conj "Stop restarts the runtime: this server has no interrupt op.")))
+  ev/Owners
+  (release-owner! [_ owner] (session/release-owner-in! state owner) nil))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

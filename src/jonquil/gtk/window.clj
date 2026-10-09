@@ -925,7 +925,10 @@
                     ;; the read (and the append! that depends on it) is handed to
                     ;; on-gui! rather than called here directly.
                     (on-gui! (fn []
-                               (when-let [msg (console/unclosed-bracket-message (editor/editor-text ed))]
+                                                              ;; Final review finding 3b: the Run's tab may have
+                               ;; closed while it ran; its buffer is gone then.
+                               (when-let [msg (when-not @(:destroyed? ed)
+                                                (console/unclosed-bracket-message (editor/editor-text ed)))]
                                  (cview/append! cv :system (str msg "\n")))))))})
 
 (defn- refuse-foreign!
@@ -1234,28 +1237,32 @@
   Ruling 9: a press while an inspect! request is already pending does
   nothing at all, not even the eval -- the same drop inspect-last!/
   on-request/on-def give a key or button in that window."
-  [ed cv ev* status-label flash-fns inspecting? inspect-last-fn]
-  (cond
-    (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
-    (set-status! status-label inspect/unavailable-message)
+  [{:keys [tab cv ev* status-label inspecting? inspect-last-fn] :as ctx}]
+  (let [{:keys [ed flash-fns]} tab]
+    (cond
+    ;; Final review finding 4: a foreign tab can't evaluate this way either.
+      (refuse-foreign! ctx) nil
 
-    @inspecting? nil
+      (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
+      (set-status! status-label inspect/unavailable-message)
 
-    :else
-    (let [snap (editor/snapshot ed)]
-      (if-let [{:keys [text start end]} (commands/run-form snap)]
-        (let [base-opts (make-eval-opts ed cv ev* status-label false)
-              opts (assoc base-opts
-                          :on-complete
-                          (fn [result]
-                            ((:on-complete base-opts) result)
-                            (when (= :ok (:status result))
-                              (on-gui! inspect-last-fn))))]
-          ((:flash! flash-fns) start end (:caret snap))
-          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-          (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap)))]
-            (when warning (cview/append! cv :system warning))))
-        (set-status! status-label "No form at the caret.")))))
+      @inspecting? nil
+
+      :else
+      (let [snap (editor/snapshot ed)]
+        (if-let [{:keys [text start end]} (commands/run-form snap)]
+          (let [base-opts (make-eval-opts ed cv ev* status-label false)
+                opts (assoc base-opts
+                            :on-complete
+                            (fn [result]
+                              ((:on-complete base-opts) result)
+                              (when (= :ok (:status result))
+                                (on-gui! inspect-last-fn))))]
+            ((:flash! flash-fns) start end (:caret snap))
+            (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+            (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+              (when warning (cview/append! cv :system warning))))
+          (set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
@@ -2051,7 +2058,7 @@
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."
-  [{:keys [tabs active-id notebook popovers sel* sel-ctx cv] :as ctx} id]
+  [{:keys [tabs active-id notebook popovers sel* sel-ctx cv ev*] :as ctx} id]
   (when-let [t (tab-by-id tabs id)]
     (let [ts @tabs
           i (.indexOf ^java.util.List (mapv :id ts) id)
@@ -2061,6 +2068,12 @@
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
       (swap! popovers (fn [ps] (vec (remove gone ps))))
+      ;; Final review finding 3a: a Run Form flash still pending would
+      ;; restore the selection on this tab's buffer after it's destroyed.
+      (when-let [cancel! (:cancel! (:flash-fns t))] (cancel!))
+      ;; Final review finding 2: nothing will Run as this tab again, so
+      ;; its namespaces go to the REPL's set for the next Run to clear.
+      (let [e @ev*] (when (satisfies? ev/Owners e) (ev/release-owner! e id)))
       (tab/dispose-popovers! t)
       (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook (:root t)))
       (refresh-labels! ctx)
@@ -2492,8 +2505,8 @@
         _ (reset! *right right)
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
-        inspect-form-fn (fn [] (let [t (active-tab)]
-                                 (inspect-form! (:ed t) cv ev* status-label (:flash-fns t) inspecting? inspect-last-fn)))
+        inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                               :inspecting? inspecting? :inspect-last-fn inspect-last-fn}))
         source-jump-fn (fn [] (do-source-jump! (source-ctx (active-tab))))
         source-close-fn (fn [] (close-source-panel! right (:ed (active-tab))))
         source-back-fn (fn [] (source-pane/back! sp))

@@ -105,6 +105,17 @@
     (deref done 3000 :timeout)
     (is (some? (find-ns 'tabs.keep)) "the refused Run removed nothing")))
 
+(deftest release-owner-test
+  ;; Final review finding 2: a closed tab's namespaces would otherwise be
+  ;; owned by nobody that ever Runs again, so a reopened file kept stale defs.
+  (let [s (session/make-session)]
+    (run session/run-definitions! s "(ns orphan.b) (defn old-fn [] 1)" {:owner 2})
+    (ev/release-owner! s 2)
+    (is (= #{'orphan.b} (get (:created @(:state s)) :repl)))
+    (is (nil? (get (:created @(:state s)) 2)))
+    (run session/run-definitions! s "(ns orphan.b) (def x 1)" {:owner 3})
+    (is (nil? (ns-resolve 'orphan.b 'old-fn)))))
+
 (deftest last-value-test
   (let [s (session/make-session)]
     (run-sync s "{:a [1 2]}")

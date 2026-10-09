@@ -462,3 +462,82 @@
                (support/check :close-all-save-failure
                               (and (:f2 v) (not (:closing v)) (:active-failing v) (:t3-dirty v)) v))
              (finally (when @dir (.setWritable ^java.io.File @dir true))))))))))
+
+;; --- final review fixes ------------------------------------------------------
+
+(defn row-tab-close-releases-namespaces
+  "Final review finding 2: a closed tab's namespaces go back to the REPL's
+  set, so reopening the file and Running it no longer keeps a deleted defn."
+  [ui]
+  (go-row :tab-close-releases-namespaces support/check
+    (let [t2 (on-gtk ((:new-tab!* ui)))
+          [ok1 _] (<! (run-tab ui t2 "(ns tabs.rel) (defn old-fn [] 1)" 5000 #(str/includes? % "=> ")))
+          t3 (on-gtk (editor/mark-saved! (:ed t2))
+                     ((:close-tab! ui) (:id t2))
+                     ((:new-tab!* ui)))
+          [ok2 _] (<! (run-tab ui t3 "(ns tabs.rel) (def x 1)" 5000 #(str/includes? % "=> ")))]
+      (on-gtk (try
+                (let [stale (some? (ns-resolve 'tabs.rel 'old-fn))]
+                  (support/check :tab-close-releases-namespaces (and ok1 ok2 (not stale))
+                                 {:ok1 ok1 :ok2 ok2 :stale stale}))
+                (finally (close-extra-tabs! ui)))))))
+
+(defn row-tab-close-cancels-flash
+  "Final review finding 3a: Run Form flashes the form for 250 ms; closing
+  the tab inside that window cancels the flash, so its restore never reads
+  the destroyed buffer."
+  [ui]
+  (go-row :tab-close-cancels-flash support/check
+    (on-gtk
+     (try
+       (let [t2 ((:new-tab!* ui))
+             _ (editor/set-text! (:ed t2) "(+ 1 2)")
+             _ (support/place-cursor! (:buf (:ed t2)) 1)
+             _ ((:run-form! (:actions t2)))
+             _ ((:close-tab! ui) (:id t2))
+             still-pending ((:cancel! (:flash-fns t2)))]
+         (support/check :tab-close-cancels-flash (and (= 1 (count (tabs ui))) (not still-pending))
+                        {:n (count (tabs ui)) :still-pending still-pending}))
+       (finally (close-extra-tabs! ui))))))
+
+(defn row-tab-close-while-running-eof
+  "Final review finding 3b: a tab closed while its Run is still going,
+  which then ends in an EOF error: the EOF hint skips the destroyed editor
+  instead of reading its buffer, and the window keeps answering."
+  [ui]
+  (go-row :tab-close-while-running-eof support/check
+    (let [t2 (on-gtk ((:new-tab!* ui)))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:ed t2) "(do (Thread/sleep 400) (read-string \"(\"))")
+                         ((:run!* ui))
+                         m))
+          _ (on-gtk (editor/mark-saved! (:ed t2)) ((:close-tab! ui) (:id t2)))
+          done (await-until 5000 20 #(and (not (ev/evaluating? ((:evaluator* ui))))
+                                          (str/includes? (support/since ui mark) "EOF")))]
+      (on-gtk (let [out (support/since ui mark)]
+                (support/check :tab-close-while-running-eof
+                               (and done (= 1 (count (tabs ui))))
+                               {:done done :out out}))))))
+
+(defn row-tab-foreign-refuses-inspect-form
+  "Final review finding 4: Inspect Form in a foreign tab is refused like
+  Run, Run Selection and Run Form."
+  [ui]
+  (go-row :tab-foreign-refuses-inspect-form support/check
+    (let [[mark n] (on-gtk (occupy-first! ui)
+                           ((:new-tab!* ui))
+                           (editor/set-text! (:ed (active ui)) ";; two\n")
+                           ((:open-file! ui) (cljd-project!))
+                           (let [t (active ui)
+                                 m (support/out-end-offset ui)]
+                             (editor/set-text! (:ed t) "(+ 1 2)")
+                             (support/place-cursor! (:buf (:ed t)) 1)
+                             ((:inspect-form!* ui))
+                             [m (count (tabs ui))]))
+          refused (await-until 2000 20 #(str/includes? (support/since ui mark) "so it can't run here."))]
+      (on-gtk (try
+                (let [out (support/since ui mark)]
+                  (support/check :tab-foreign-refuses-inspect-form
+                                 (and refused (= 3 n) (not (str/includes? out "=> 3")))
+                                 {:out out}))
+                (finally (close-extra-tabs! ui)))))))
