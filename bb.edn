@@ -150,7 +150,7 @@
      (row "test:clj" "live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)")
      (row "verify" "lint (report) + test (must pass) — pre-commit gate")
      (hdr "Run and build")
-     (row "app:run [file]" "launch Jonquil, optionally opening a file")
+     (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
@@ -220,7 +220,7 @@
                           "find" "run-selection" "close-prompt"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
                           "completion" "quick-doc" "rename" "inspector"
-                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs"]
+                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs" "file-tree"]
                results (mapv (fn [id]
                                (let [r (shell {:continue true} "jolt" "-M:shots" id)]
                                  {:id id :ok (zero? (:exit r))}))
@@ -232,7 +232,7 @@
              (println (str "docs:shots: " (count failed) " of " (count results) " scenes FAILED")))
            (System/exit (if (seq failed) 1 0)))}
   app:run
-  {:doc "Launch Jonquil, optionally opening a file"
+  {:doc "Launch Jonquil, optionally opening a file or a project folder (the file tree roots there)"
    :task (apply shell "jolt" "-M" "-m" "jonquil.main" *command-line-args*)}
   app:build
   {:doc "Build the ./jonquil binary (unsigned on macOS)"
@@ -377,7 +377,7 @@
                          "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
                          "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-tree-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
-                         "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-clj-server-" "jonquil-clj-config-"
+                         "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-clj-server-" "jonquil-clj-config-"
                          "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]

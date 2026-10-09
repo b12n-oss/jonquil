@@ -9,7 +9,7 @@ after Phase 3, the Themes phase, and P4's help features.
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](../images/window.png)
 
-Across the top sits a toolbar: **Run (F5)**, **Stop (Esc)**, **Open…**,
+Across the top sits a toolbar: **☰ Files** (the [file tree](#file-tree)), **Run (F5)**, **Stop (Esc)**, **Open…**,
 **Save…**, and a **Reset on Run** checkbox that starts checked. Below that,
 a vertical split holds two panes you can resize by dragging the divider
 between them: the **Definitions** editor on top, where you write a program,
@@ -313,6 +313,57 @@ window runs. In-process Jolt files run wherever they live, since they'd
 use the same evaluator anyway. With only one tab open, opening a file
 from another project switches the window over as it always did, and
 closing tabs until the one left belongs elsewhere switches it too.
+
+## File tree
+
+![The file tree beside two tabs: my-talk with src/talk expanded, core.clj and demo.clj open, and demo.clj's row highlighted](../images/file-tree.png)
+
+Launch Jonquil on a folder and you get a tree of it on the left:
+
+```bash
+jonquil ~/dev/my-talk          # the built binary
+bb app:run ~/dev/my-talk       # from a checkout
+```
+
+The window then runs that folder's project (its `deps.edn`, `pubspec.yaml`
+or `.jonquil.edn` decides the dialect, as it would for a file inside it)
+and starts with one empty Untitled tab. Launched on a file instead, the
+tree is rooted at that file's project folder, or at the file's own folder
+when it isn't in a project. With no argument from a terminal it's the
+current directory. From Finder or the Dock there's no useful current
+directory, so the tree starts empty and offers **Open Folder…**.
+
+**☰ Files** in the toolbar, or Cmd/Ctrl+Shift+E, shows and hides it.
+Hidden, the window looks exactly as it does without a tree. The tree
+starts shown when you launched on a folder and hidden otherwise; after
+that, whatever you last chose is remembered in the settings file, along
+with the tree's width (drag its edge).
+
+A click on a folder opens or closes it. A click on a file opens it in a
+tab, or brings forward the tab that already has it. With the tree focused,
+the arrow keys move, Right and Left open and close a folder, Return opens,
+and Escape hands focus back to the editor. The active tab's file is
+highlighted when its row is showing. Switching tabs never opens folders by
+itself, but saving a file somewhere under the root, or opening one into a
+tab, does: a new file you just saved shows up in the tree right away.
+
+Dotfiles and dot-folders (`.git`, `.cpcache`, `.clj-kondo`…), `target`
+and `node_modules` are hidden, along with whatever the root's `.gitignore`
+names, as long as the line is a plain name (`out`), a `*` pattern (`*.log`)
+or a folder (`classes/`). Lines with `!`, `**` or a `/` in them are left
+out rather than half-applied, and nested `.gitignore` files aren't read.
+Folders come first, then files, alphabetically. Anything that isn't a
+Clojure-family file (`.clj`, `.cljc`, `.cljs`, `.cljd`, `.edn`, `.bb`) is
+dimmed, but still opens. A symlinked folder opens like any other, and a
+link that loops back to one of its own parents shows up but won't open
+into itself.
+
+The tree doesn't watch the disk. ⟳ in its header re-reads every open
+folder, and opening a folder always reads it fresh. **Open Folder…**, also
+in the header, roots the tree somewhere else; it doesn't open or close any
+tab, and only changes which project the window runs while the window holds
+nothing but one empty Untitled tab. There's no creating, renaming or
+deleting files from the tree yet.
 
 ## Themes
 
@@ -837,6 +888,10 @@ server for a doc it already knows nothing useful about.
 | Cmd/Ctrl+Shift+[ | anywhere in the window | Previous tab (wraps) |
 | Cmd/Ctrl+1 to 8 | anywhere in the window | Go to that tab |
 | Cmd/Ctrl+9 | anywhere in the window | Go to the last tab |
+| Cmd/Ctrl+Shift+E | anywhere in the window | Show or hide the file tree |
+| Up/Down, Return | file tree | Move, and open a file or a folder |
+| Right/Left | file tree | Open or close the selected folder |
+| Escape | file tree | Give focus back to the editor |
 | ( [ { " | Definitions editor | Auto-pair the closer, or wrap the selection |
 | Tab | Definitions editor | Indent the line or selection |
 | Shift+Tab | Definitions editor | Unindent the line or selection |
