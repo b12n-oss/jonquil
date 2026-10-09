@@ -1,8 +1,10 @@
 (ns jonquil.session
   "One window's evaluation session: Run and the REPL prompt over one eval
-  context. Run resets by default (spec decision O1): it removes every
-  namespace earlier Runs and REPL entries created, except libraries, plus
-  `user`, then evaluates into a fresh `user`.
+  context. Run resets by default (spec decision O1). Every namespace an
+  evaluation creates, except libraries, belongs to that evaluation's
+  :owner (a tab id, :run or :repl), and a reset-mode Run removes only its
+  own owner's namespaces, the REPL's, and `user`, then evaluates into a
+  fresh `user`. Other owners' namespaces stay (tabs spec).
 
   A session is the InProcess record, the in-process implementation of
   jonquil.evaluator/Evaluator. It keeps the :ctx and :state keys a plain
@@ -14,6 +16,16 @@
             [jonquil.inspect.view :as view]))
 
 (declare run-definitions! submit-repl! set-mode!)
+
+(defn release-owner-in!
+  "Moves owner's namespaces under :repl in state's :created map (an atom
+  holding {:created {owner #{ns}}}). Shared by the in-process session and
+  the nREPL evaluator (jonquil.evaluator/Owners)."
+  [state owner]
+  (swap! state update :created
+         (fn [c] (if-let [nss (get c owner)]
+                   (-> c (update :repl (fnil into #{}) nss) (dissoc owner))
+                   c))))
 
 (defrecord InProcess [ctx state]
   ev/Evaluator
@@ -52,13 +64,15 @@
           (try (on-view {:error (or (ex-message e) (str (class e)))})
                (catch Throwable _)))))
     nil)
-  (inspectable? [_] true))
+  (inspectable? [_] true)
+  ev/Owners
+  (release-owner! [_ owner] (release-owner-in! state owner) nil))
 
 (defn make-session
   "A session in reset mode with the prompt in `user`."
   []
   (->InProcess (eval/make-eval-context)
-               (atom {:mode :reset :prompt-ns 'user :created #{}
+               (atom {:mode :reset :prompt-ns 'user :created {}
                       :inspect-view (atom nil)})))
 
 (defmethod ev/make :in-process [_] (make-session))
@@ -78,13 +92,17 @@
   (swap! (:state session) assoc :mode mode))
 
 (defn reset-namespaces!
-  "Removes what earlier evaluations created, plus `user`, then recreates
-  `user` at once so a doc lookup never finds it missing."
-  [{:keys [state]}]
-  (doseq [n (conj (:created @state) 'user)]
-    (when (find-ns n) (remove-ns n)))
+  "Removes what owner's earlier evaluations created, what REPL entries
+  created, and `user`, then recreates `user` at once so a doc lookup never
+  finds it missing. Other owners' namespaces stay."
+  [{:keys [state]} owner]
+  (let [created (:created @state)]
+    (doseq [n (concat (get created owner) (get created :repl) ['user])]
+      (when (find-ns n) (remove-ns n))))
   (create-ns 'user)
-  (swap! state assoc :created #{} :prompt-ns 'user))
+  (swap! state (fn [s] (-> s
+                           (update :created dissoc owner :repl)
+                           (assoc :prompt-ns 'user)))))
 
 (defn- evaluate!
   [{:keys [ctx state]} code ns-sym opts]
@@ -98,8 +116,8 @@
                               (swap! state
                                      (fn [s]
                                        (cond-> (-> s
-                                                   (update :created into
-                                                           (namespaces-created before (ns-names) (loaded-libs)))
+                                                   (update-in [:created (:owner opts)] (fnil into #{})
+                                                              (namespaces-created before (ns-names) (loaded-libs)))
                                                    (assoc :prompt-ns (:ns result)))
                                          (= :ok (:status result)) (assoc :last-value (:value result)))))
                               (when user-complete (user-complete result)))))))
@@ -110,10 +128,11 @@
   string when a program is already running (and then resets nothing)."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
-   (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
-     (reset-namespaces! session))
-   (create-ns 'user)
-   (evaluate! session code 'user opts)))
+   (let [owner (:owner opts :run)]
+     (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
+       (reset-namespaces! session owner))
+     (create-ns 'user)
+     (evaluate! session code 'user (assoc opts :owner owner)))))
 
 (defn submit-repl!
   "Evaluates one REPL entry in the namespace the last evaluation left, and
@@ -121,4 +140,4 @@
   ([session code] (submit-repl! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (swap! (:history ctx) eval/history-add code)
-   (evaluate! session code (:prompt-ns @state) opts)))
+   (evaluate! session code (:prompt-ns @state) (assoc opts :owner (:owner opts :repl)))))

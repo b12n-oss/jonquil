@@ -1082,3 +1082,48 @@
 ;; top-level for measuring the inspector pane's real allocated size
 ;; outside the main Jonquil window.
 (ffi/defcfn gtk-window-new "gtk_window_new" [] :pointer)
+
+;; --- tabs (tabs plan P2.T1) ---------------------------------------------------
+;; Header citations are under /opt/homebrew/include/gtk-4.0/gtk (gtk4 4.22.4);
+;; every call here was exercised in the tabs spike (switch-page and
+;; page-removed are [:pointer :pointer :uint :pointer] :void).
+
+;; gtknotebook.h:70 GtkWidget * gtk_notebook_new (void)
+(ffi/defcfn gtk-notebook-new "gtk_notebook_new" [] :pointer)
+;; gtknotebook.h:72 int gtk_notebook_append_page (GtkNotebook*, GtkWidget *child, GtkWidget *tab_label)
+(ffi/defcfn gtk-notebook-append-page "gtk_notebook_append_page" [:pointer :pointer :pointer] :int)
+;; gtknotebook.h:90 int gtk_notebook_insert_page (GtkNotebook*, GtkWidget*, GtkWidget*, int position)
+(ffi/defcfn gtk-notebook-insert-page "gtk_notebook_insert_page" [:pointer :pointer :pointer :int] :int)
+;; gtknotebook.h:101 void gtk_notebook_remove_page (GtkNotebook*, int page_num)
+(ffi/defcfn gtk-notebook-remove-page "gtk_notebook_remove_page" [:pointer :int] :void)
+;; gtknotebook.h:121 int gtk_notebook_get_current_page (GtkNotebook*)
+(ffi/defcfn gtk-notebook-get-current-page "gtk_notebook_get_current_page" [:pointer] :int)
+;; gtknotebook.h:123 GtkWidget* gtk_notebook_get_nth_page (GtkNotebook*, int)
+(ffi/defcfn gtk-notebook-get-nth-page "gtk_notebook_get_nth_page" [:pointer :int] :pointer)
+;; gtknotebook.h:126 int gtk_notebook_get_n_pages (GtkNotebook*)
+(ffi/defcfn gtk-notebook-get-n-pages "gtk_notebook_get_n_pages" [:pointer] :int)
+;; gtknotebook.h:128 int gtk_notebook_page_num (GtkNotebook*, GtkWidget *child)
+(ffi/defcfn gtk-notebook-page-num "gtk_notebook_page_num" [:pointer :pointer] :int)
+;; gtknotebook.h:131 void gtk_notebook_set_current_page (GtkNotebook*, int)
+(ffi/defcfn gtk-notebook-set-current-page "gtk_notebook_set_current_page" [:pointer :int] :void)
+;; gtknotebook.h:143 void gtk_notebook_set_show_border (GtkNotebook*, gboolean)
+(ffi/defcfn gtk-notebook-set-show-border "gtk_notebook_set_show_border" [:pointer :int] :void)
+;; gtknotebook.h:148 void gtk_notebook_set_show_tabs (GtkNotebook*, gboolean)
+(ffi/defcfn gtk-notebook-set-show-tabs "gtk_notebook_set_show_tabs" [:pointer :int] :void)
+;; gtknotebook.h:151 gboolean gtk_notebook_get_show_tabs (GtkNotebook*)
+(ffi/defcfn gtk-notebook-get-show-tabs "gtk_notebook_get_show_tabs" [:pointer] :int)
+;; gtknotebook.h:158 void gtk_notebook_set_scrollable (GtkNotebook*, gboolean)
+(ffi/defcfn gtk-notebook-set-scrollable "gtk_notebook_set_scrollable" [:pointer :int] :void)
+;; gtknotebook.h:180 void gtk_notebook_set_tab_label (GtkNotebook*, GtkWidget *child, GtkWidget *tab_label)
+(ffi/defcfn gtk-notebook-set-tab-label "gtk_notebook_set_tab_label" [:pointer :pointer :pointer] :void)
+;; gtknotebook.h:205 void gtk_notebook_reorder_child (GtkNotebook*, GtkWidget *child, int position)
+(ffi/defcfn gtk-notebook-reorder-child "gtk_notebook_reorder_child" [:pointer :pointer :int] :void)
+;; gtkbutton.h:88 void gtk_button_set_has_frame (GtkButton*, gboolean)
+(ffi/defcfn gtk-button-set-has-frame "gtk_button_set_has_frame" [:pointer :int] :void)
+;; gtkwidget.h:395 void gtk_widget_set_focus_on_click (GtkWidget*, gboolean)
+(ffi/defcfn gtk-widget-set-focus-on-click "gtk_widget_set_focus_on_click" [:pointer :int] :void)
+;; gtkwidget.h:928 gboolean gtk_widget_has_css_class (GtkWidget*, const char *css_class)
+(ffi/defcfn gtk-widget-has-css-class "gtk_widget_has_css_class" [:pointer :string] :int)
+;; gobject.h:513 gpointer g_object_ref (gpointer object). The tab rows hold a
+;; popover alive across dispose-popovers!, whose unparent drops the last ref.
+(ffi/defcfn g-object-ref "g_object_ref" [:pointer] :pointer)

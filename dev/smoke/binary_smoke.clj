@@ -199,7 +199,7 @@
 (defn- windows-edn!
   "This pid's on-screen windows, parsed. Normally exactly one for jonquil
   (M6: G_APPLICATION_NON_UNIQUE, one window per process) -- callers that
-  care about count (row-open-refuses-dirty's \"opens no panel\" check)
+  care about count (step-open-dirty-opens-panel!'s \"opens the panel\" check)
   read (count (windows-edn! pid)) directly rather than assuming 1."
   [pid]
   (let [{:keys [out]} (cgevent! "windows" "--pid" (str pid) "--edn")]
@@ -1006,21 +1006,26 @@
               {:title-lost-star title-ok :on-disk on-disk :window-name (:name (window-for pid))}))
     (stop! {:proc proc :pid pid})))
 
-(defn- step-open-refuses-dirty!
-  "Brief step 10 (first half): with a dirty buffer, command+o prints the
-  refusal line and opens no panel -- checked here as \"still exactly one
-  window for this pid\" (a real GtkFileDialog would add a second
-  top-level surface), since pid-routed keys can't drive a native panel's
-  buttons anyway even if one did open."
+(defn- step-open-dirty-opens-panel!
+  "Brief step 10 (first half), as changed by tabs (plan P2.T3): Open never
+  replaces a buffer any more -- the chosen file lands in a new tab -- so
+  with a dirty buffer command+o opens the Open panel straight away (a real
+  GtkFileDialog adds a second top-level window for this pid), prints no
+  \"Unsaved changes\" refusal, and leaves the buffer dirty. Pid-routed keys
+  can't drive the native panel's buttons, so stop! ends the process with
+  the panel still open."
   []
   (let [{:keys [proc pid]} (launch! nil)]
     (ensure-window! pid 8000)
     (type-text! pid "1")
     (cg-key! pid "command + o")
-    (let [{:keys [ok last]} (wait-for-ocr! pid 4000 "Unsaved changes")
-          window-count (count (windows-edn! pid))]
-      (screenshot! pid "step10a-open-refuses-dirty")
-      (check! :open-refuses-dirty (and ok (= 1 window-count)) {:console last :window-count window-count}))
+    (let [panel? (wait-for! 4000 200 (fn [] (<= 2 (count (windows-edn! pid)))))
+          text (ocr-text! pid)
+          title (some (fn [w] (when (str/includes? (or (:name w) "") "Jonquil") (:name w))) (windows-edn! pid))]
+      (screenshot! pid "step10a-open-dirty-opens-panel")
+      (check! :open-dirty-opens-panel
+              (and panel? (not (str/includes? text "Unsaved changes")) (some-> title (str/starts-with? "*")))
+              {:panel panel? :title title :console text}))
     (stop! {:proc proc :pid pid})))
 
 (defn- write-latin1-fixture!
@@ -1479,7 +1484,7 @@
    ["stop-infinite-loop" step-stop-infinite-loop!]
    ["stop-print-forever" step-stop-print-forever!]
    ["save" step-save!]
-   ["open-refuses-dirty" step-open-refuses-dirty!]
+   ["open-dirty-opens-panel" step-open-dirty-opens-panel!]
    ["latin1-warning" step-latin1-warning!]
    ["command-chord-close" step-command-chord-close!]
    ["close-while-running" step-close-while-running!]

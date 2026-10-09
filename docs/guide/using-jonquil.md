@@ -137,8 +137,8 @@ interrupting it.
 ## Reset on Run, versus accumulate
 
 The **Reset on Run** checkbox in the toolbar starts checked. While it's
-checked, each Run first removes every namespace that earlier Runs or REPL
-entries created (libraries you've required stay loaded, since `require`
+checked, each Run first removes every namespace that earlier Runs of the
+same tab, or REPL entries, created (libraries you've required stay loaded, since `require`
 won't bring them back), then evaluates the Definitions pane fresh. Uncheck
 it, and Run stops clearing first: later Runs build on whatever earlier
 ones already defined, the same way the REPL prompt always does. In a
@@ -237,12 +237,11 @@ by itself, so an entry that ends that way needs only one Return.
 
 ## Open and Save
 
-Cmd/Ctrl+O opens a file into the Definitions pane. If the pane has unsaved
-changes, the first Open attempt refuses and prints a warning instead of
-discarding your edits: "Unsaved changes. Save first, or Open again to
-discard them." Pressing Open again goes ahead and discards them. Each new
-round of unsaved edits gets its own warning, so a Save in between starts
-the count over.
+Cmd/Ctrl+O opens a file in a new tab, next to the one you're in (see
+[Tabs](#tabs), below). Nothing you've typed is ever replaced by an Open.
+The one exception is a fresh, empty Untitled tab: Open fills that tab
+instead of leaving it behind. A file that's already open in a tab, even
+when you pick it through a symlink, just brings that tab forward.
 
 Opening a file that isn't valid UTF-8 doesn't fail either. Bytes that
 can't be decoded turn into the replacement character, and the console
@@ -262,14 +261,58 @@ plain file at that name.
 
 ![The close prompt: Save, Don't Save and Cancel over unsaved changes](../images/close-prompt.png)
 
-Closing with unsaved changes asks first, however you close: Cmd/Ctrl+W,
-the window's own close button, Cmd+Q, Dock → Quit, or logging out all
-raise the same prompt, offering Save, Don't Save and Cancel. Cancel, or
-dismissing the prompt any other way, leaves everything open and
-untouched. If a save fails or you cancel partway through it, the window
-stays open too, so a bad save can't quietly close your work out from
-under you. `docs/demos/close-prompt.clj` is there to try it on: make an
-edit, then close the window.
+Closing with unsaved changes asks first, however you close: Cmd/Ctrl+W on
+the last tab, the window's own close button, Cmd+Q, Dock → Quit, or
+logging out all raise the same prompt, offering Save, Don't Save and
+Cancel. With several tabs holding unsaved changes you get one prompt that
+names them all, and its first button is Save All. Cancel, or dismissing
+the prompt any other way, leaves everything open and untouched. If a save
+fails or you cancel partway through, the window stays open and the tab
+that didn't save comes to the front, so a bad save can't quietly close
+your work out from under you. `docs/demos/close-prompt.clj` is there to
+try it on: make an edit, then close the window.
+
+## Tabs
+
+![Two tabs: core.clj, and demo.clj with unsaved changes, after running both](../images/tabs.png)
+
+One window holds as many files as you like, one per tab. Cmd/Ctrl+T opens
+an empty Untitled tab, and Open puts each file in a tab of its own. The
+tab strip only appears once there are two tabs, so a one-file session
+looks exactly as it always did. A tab's label carries a dot while it has
+unsaved changes. When two open files share a name, each label adds its
+folder (`core.clj · talk`). Cmd/Ctrl+Shift+] and Cmd/Ctrl+Shift+[ step
+through the tabs, wrapping round at either end, and Cmd/Ctrl+1 to 8 jump
+straight to a tab, with Cmd/Ctrl+9 for the last. Cmd/Ctrl+W, or a tab's
+×, closes that tab, asking first when it has unsaved changes.
+
+Every tab shares the window's one evaluator and its one console, the way
+a project REPL in CIDER or Calva does. So `demo.clj` can call what
+`core.clj` defined, and the prompt follows whichever tab ran last.
+
+Reset on Run works per tab. Each tab owns the namespaces its own Runs
+created, and a Run with the box ticked removes only that tab's
+namespaces, plus anything you created at the prompt, plus `user`.
+Running `demo.clj` leaves `talk.core` alone. Closing a tab hands its
+namespaces back to the prompt's pile, so the next Run from any tab
+clears them. Two things follow from sharing one session, and they're
+worth knowing:
+
+- Running `core.clj` again removes and recreates `talk.core`, but
+  `talk.demo` still holds its alias to the old namespace until you run
+  `demo.clj` again too. That's ordinary Clojure reloading. Tabs just make
+  it come up more often.
+- Every Run still starts from a fresh `user`, so two Untitled tabs without
+  an `ns` form overwrite each other's definitions.
+
+A window belongs to one project, the one its first file came from. Open a
+file from somewhere else and it still gets a tab you can edit and save,
+but Run, Run Selection, Run Form and Inspect Form refuse in that tab, and
+the console says which project the file belongs to and which one the
+window runs. In-process Jolt files run wherever they live, since they'd
+use the same evaluator anyway. With only one tab open, opening a file
+from another project switches the window over as it always did, and
+closing tabs until the one left belongs elsewhere switches it too.
 
 ## Themes
 
@@ -371,11 +414,9 @@ the same file or into another, and Cmd/Ctrl+[ goes back. Escape closes
 the panel, and Cmd/Ctrl+I swaps it for the inspector. Library code from
 a jar, and any file outside your project, is read-only. A file in your
 project has an **Open in window** button (Cmd/Ctrl+Shift+O while the panel
-has focus) that loads it into the window for editing. If the window's
-buffer has unsaved changes, the first press refuses and warns instead of
-discarding your edits: "Unsaved changes. Save first, or Open again to
-discard them." Pressing Open in window again goes ahead and loads the
-file.
+has focus) that opens it in a tab for editing, on the same line, or
+brings forward the tab that already has it. Nothing in your other tabs is
+touched.
 
 ![F12 on clojure.string/join in a JVM Clojure window: the source panel shows string.clj from the Clojure jar, read-only, on join's definition](../images/clj-source.png)
 
@@ -790,7 +831,12 @@ server for a doc it already knows nothing useful about.
 | Cmd/Ctrl+O | anywhere in the window | Open |
 | Cmd/Ctrl+S | anywhere in the window | Save |
 | Cmd/Ctrl+Shift+S | anywhere in the window | Save As |
-| Cmd/Ctrl+W | anywhere in the window | Close the window (asks first over unsaved changes), which quits the app |
+| Cmd/Ctrl+W | anywhere in the window | Close the tab (asks first over unsaved changes); on the last tab, close the window, which quits the app |
+| Cmd/Ctrl+T | anywhere in the window | New Untitled tab |
+| Cmd/Ctrl+Shift+] | anywhere in the window | Next tab (wraps) |
+| Cmd/Ctrl+Shift+[ | anywhere in the window | Previous tab (wraps) |
+| Cmd/Ctrl+1 to 8 | anywhere in the window | Go to that tab |
+| Cmd/Ctrl+9 | anywhere in the window | Go to the last tab |
 | ( [ { " | Definitions editor | Auto-pair the closer, or wrap the selection |
 | Tab | Definitions editor | Indent the line or selection |
 | Shift+Tab | Definitions editor | Unindent the line or selection |
@@ -839,7 +885,7 @@ server for a doc it already knows nothing useful about.
 | d | inspector panel | Open the def prompt |
 | Escape | inspector panel | Close the panel and focus the editor |
 | Cmd/Ctrl+[ | Source panel | Back to where the panel was |
-| Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in the window |
+| Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
 | Escape | Source panel | Close the panel |
 
 ## Known limits

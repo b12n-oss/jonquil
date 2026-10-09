@@ -101,16 +101,32 @@
      (cond-> r ns-str (assoc :ns (symbol ns-str))))))
 
 (defn reset-code
-  "Code for the child that removes every namespace not in baseline (the
-  namespace names right after the child started) and not a loaded
-  library, then `user`, and recreates `user`: the in-process Reset on
-  Run's rule (jonquil.session/reset-namespaces!) run where the program
-  lives. Measured over the wire: user defs, Run-created namespaces and a
-  load-file namespace go, a required library stays."
-  [baseline]
-  (str "(let [keep (into (set '" (pr-str (vec baseline)) ") (loaded-libs))]"
-       " (doseq [n (map ns-name (all-ns))] (when-not (contains? keep n) (remove-ns n)))"
+  "Code for the child that removes each namespace in names that exists,
+  then `user`, and recreates `user`: the in-process Reset on Run's rule
+  (jonquil.session/reset-namespaces!) run where the program lives. names
+  is the running owner's namespaces plus the REPL's (tabs spec)."
+  [names]
+  (str "(do (doseq [n '" (pr-str (vec names)) "] (when (find-ns n) (remove-ns n)))"
        " (remove-ns 'user) (create-ns 'user) nil)"))
+
+(def ns-snapshot-code
+  "Code that prints [namespace-names loaded-libs] in the child on :out:
+  read before and after an evaluation to learn which namespaces it created
+  (jonquil.session/namespaces-created). Fully qualified, since it runs in
+  whatever namespace the session is in.
+
+  The server shifts *3 <- *2, *2 <- *1, *1 <- value after every successful
+  eval (jolt.nrepl, alter-var-root on the global vars). So this pre-shifts
+  *2 <- *3 and *1 <- *2 and returns the old *1: after the server's own
+  shift the user's *1, *2 and *3 are exactly what they were (final review
+  finding 1). The cost is printing the old *1 as this eval's value."
+  (str "(clojure.core/let [o1 clojure.core/*1 o2 clojure.core/*2 o3 clojure.core/*3]"
+       " (clojure.core/print (clojure.core/pr-str [(clojure.core/mapv clojure.core/ns-name (clojure.core/all-ns))"
+       " (clojure.core/vec (clojure.core/loaded-libs))]))"
+       " (clojure.core/flush)"
+       " (clojure.core/alter-var-root (var clojure.core/*2) (clojure.core/constantly o3))"
+       " (clojure.core/alter-var-root (var clojure.core/*1) (clojure.core/constantly o2))"
+       " o1)"))
 
 (def ^:private stdin-names
   #{"read-line" "read" "*in*" "clojure.core/read-line" "clojure.core/read" "clojure.core/*in*"})

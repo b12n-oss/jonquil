@@ -31,6 +31,7 @@
     jonquil.commands
     jonquil.help
     jonquil.source
+    jonquil.tabs
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover
@@ -41,6 +42,7 @@
     jonquil.gtk.completion
     jonquil.gtk.find-bar
     jonquil.gtk.console-view
+    jonquil.gtk.tab
     jonquil.gtk.window
     jonquil.main])
 

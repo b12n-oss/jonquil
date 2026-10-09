@@ -36,6 +36,8 @@
             [gtk-selftest-window.run-repl :as run-repl]
             [gtk-selftest-window.source-pane :as source-pane]
             [gtk-selftest-window.support :as support]
+            [gtk-selftest-window.tab-widget :as tab-widget]
+            [gtk-selftest-window.tabs :as tabs]
             [gtk-selftest-window.themes :as themes]
             [gtk-selftest-window.window-keys :as window-keys]
             [jolt.ffi :as ffi]
@@ -239,8 +241,32 @@
    source-pane/row-source-pane-history
    source-pane/row-source-pane-back-deleted-file
    source-pane/row-source-pane-same-file-no-reload
+   tab-widget/row-tab-widget-builds
+   tab-widget/row-tab-widget-dispose-unparents
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
+   tabs/row-tab-new-shows-strip
+   tabs/row-tab-open-replaces-untouched
+   tabs/row-tab-open-focuses-existing
+   tabs/row-tab-switch-keys
+   tabs/row-tab-dirty-label
+   tabs/row-tab-close-dirty-cancel
+   tabs/row-tab-close-dirty-discard
+   tabs/row-tab-close-with-open-popover
+   tabs/row-tab-switch-closes-popovers
+   tabs/row-tab-theme-all-tabs
+   tabs/row-tab-source-open-in-window
+   tabs/row-tab-run-keeps-other-tab-ns
+   tabs/row-tab-run-banner-names-file
+   tabs/row-tab-foreign-refuses-run
+   tabs/row-tab-close-to-one-adopts-project
+   tabs/row-close-all-message
+   tabs/row-close-all-save-all
+   tabs/row-close-all-save-failure
+   tabs/row-tab-close-releases-namespaces
+   tabs/row-tab-close-cancels-flash
+   tabs/row-tab-close-while-running-eof
+   tabs/row-tab-foreign-refuses-inspect-form
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

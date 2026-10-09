@@ -74,10 +74,22 @@
   (is (= "nil" (:printed (ops/eval-result [{:status ["done"]}] false)))))
 
 (deftest reset-code-test
-  (let [code (ops/reset-code '[clojure.core user.x])]
-    (is (str/starts-with? code "(let [keep (into (set '[clojure.core user.x]) (loaded-libs))]"))
-    (is (str/includes? code "(remove-ns 'user) (create-ns 'user) nil)"))
-    (is (= 'let (first (read-string code))))))
+  (let [code (ops/reset-code '[tabs.a tabs.b])
+        form (read-string code)]
+    (is (str/includes? code "'[tabs.a tabs.b]"))
+    (is (str/includes? code "(remove-ns 'user) (create-ns 'user) nil"))
+    (is (seq? form)))
+  (testing "an empty owner set still resets user"
+    (is (str/includes? (ops/reset-code []) "(remove-ns 'user) (create-ns 'user) nil"))))
+
+(deftest ns-snapshot-code-test
+  ;; One form, printing the snapshot and returning the old *1 (final
+  ;; review finding 1); the live test history-vars-survive-owner-snapshots-
+  ;; test checks the effect on a real server.
+  (let [form (read-string ops/ns-snapshot-code)]
+    (is (= 'clojure.core/let (first form)))
+    (is (= 'o1 (last form)))
+    (is (str/includes? ops/ns-snapshot-code "(clojure.core/all-ns)"))))
 
 (deftest reads-stdin-test
   (is (ops/reads-stdin? "(println (read-line))"))

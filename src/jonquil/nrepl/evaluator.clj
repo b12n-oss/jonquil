@@ -18,7 +18,8 @@
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.ops :as ops])
+            [jonquil.nrepl.ops :as ops]
+            [jonquil.session :as session])
   (:import (java.util.concurrent.locks ReentrantLock)))
 
 (def request-timeout-ms
@@ -98,6 +99,24 @@
         (:printed res)
         (throw (ex-info (or (:error-text res) "evaluation failed") {}))))))
 
+(defn- ns-snapshot
+  "[namespace-names loaded-libs] in the child, or nil when asking failed:
+  the evaluation's own result never depends on this bookkeeping, so a
+  throw here only leaves that evaluation's namespaces unowned (spike: about
+  1 ms per call)."
+  [conn sid]
+    ;; No :ns, unlike eval-sync!: an eval with :ns "user" would leave the
+  ;; session in user and the next REPL entry would lose the Run's namespace.
+  ;; The data comes back on :out; the value is the old *1 (see
+  ;; ops/ns-snapshot-code), so the server's own *1/*2/*3 shift puts the
+  ;; user's history back where it was (final review finding 1).
+  (try
+    (let [r (client/request-sync conn {:op "eval" :code ops/ns-snapshot-code :session sid} request-timeout-ms)
+          res (when (vector? r) (ops/eval-result r false))]
+      (when (= :ok (:status res))
+        (read-string (apply str (keep :out r)))))
+    (catch Throwable _ nil)))
+
 (defn- start-runtime!
   "Launches and connects a child if none is live. nil, or a sentence.
   stop! is terminal for the evaluator: once its :stopped? flag is up, no
@@ -123,9 +142,10 @@
               (let [c (reset! ch (child/start! (:project-dir (:selection ev)) (child/middleware-root)))
                     conn (client/connect (:port c))
                     ops (ops/op-names (client/request-sync conn {:op "describe"} request-timeout-ms))
-                    sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))
-                    baseline (read-string (eval-sync! conn sid "(pr-str (mapv ns-name (all-ns)))"))]
-                (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops :baseline baseline})
+                    sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))]
+                ;; A new child has none of the old one's namespaces, so the
+                ;; owner map starts empty with it (tabs plan, ruling 9).
+                (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops} :created {})
                 ;; stop! may have run while this was spawning/connecting/cloning:
                 ;; it can't have torn this down (try-shutdown-runtime! only wins
                 ;; the lock once this releases it), so tear it down here instead.
@@ -196,15 +216,21 @@
           (when (and on-output had-runtime? (not was-live?))
             (on-output :system "; The Jolt runtime had exited, so a new one was started.\n"))
           (when (and on-output (ops/reads-stdin? code)) (on-output :system stdin-notice))
-          (when run?
-            (let [{:keys [conn session baseline]} (runtime ev)]
-              (eval-sync! conn session (if (= :reset (:mode @(:state ev)))
-                                         (ops/reset-code baseline)
-                                         "nil"))))
-          (if (stop-requested? ev)
-            (finish! ev opts {:status :interrupted})
-            (let [msgs @(send-main! ev code opts)]
-              (finish! ev opts (ops/eval-result msgs (stop-requested? ev))))))))
+          (let [{:keys [conn session]} (runtime ev)
+                owner (:owner opts (if run? :run :repl))]
+            (when (and run? (= :reset (:mode @(:state ev))))
+              (let [created (:created @(:state ev))]
+                (eval-sync! conn session (ops/reset-code (concat (get created owner) (get created :repl))))
+                (swap! (:state ev) update :created dissoc owner :repl)))
+            (if (stop-requested? ev)
+              (finish! ev opts {:status :interrupted})
+              (let [before (ns-snapshot conn session)
+                    msgs @(send-main! ev code opts)
+                    after (ns-snapshot conn session)]
+                (when (and before after)
+                  (swap! (:state ev) update-in [:created owner] (fnil into #{})
+                         (session/namespaces-created (first before) (first after) (second after))))
+                (finish! ev opts (ops/eval-result msgs (stop-requested? ev)))))))))
     (catch Throwable e
       (finish! ev opts (if (stop-requested? ev)
                          {:status :interrupted}
@@ -321,7 +347,9 @@
              "Output appears when an evaluation finishes, not while it runs (the jolt-lang/nrepl middleware sends it at the end)."
              "Jump to definition stays in this buffer: lookup reports no file or line."]
       (and (live? this) (not (contains? (:ops (runtime this)) "interrupt")))
-      (conj "Stop restarts the runtime: this server has no interrupt op."))))
+      (conj "Stop restarts the runtime: this server has no interrupt op.")))
+  ev/Owners
+  (release-owner! [_ owner] (session/release-owner-in! state owner) nil))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

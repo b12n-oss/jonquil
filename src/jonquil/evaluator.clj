@@ -21,7 +21,11 @@
     "Evaluates code without blocking the caller. opts is
     jonquil.eval/eval-async's (:on-output :on-wait-input :on-status-change
     :on-complete) plus :run?, true for Run Definitions (which first resets,
-    in :reset mode). nil when started, else the busy warning string.")
+    in :reset mode), and :owner: who the evaluation's new namespaces belong
+    to (a tab id, or :repl). A reset-mode Run removes only its own owner's,
+    the REPL's, and `user`. Defaults: :run for a Run, :repl otherwise.
+    Attach evaluators ignore it. nil when started, else the busy warning
+    string.")
   (interrupt! [ev]
     "Stop: asks the running evaluation to end. nil.")
   (evaluating? [ev])
@@ -41,6 +45,17 @@
     "A doc-info map, jonquil.docs/symbol-doc's shape, or nil. Never throws.")
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
+
+(defprotocol Owners
+  "Tabs plan, final review finding 2: evaluators that track which owner
+  (tab) created which namespaces (jonquil.session's InProcess, jonquil.
+  nrepl.evaluator's NRepl). Attach evaluators never reset, so they don't
+  implement it; callers check (satisfies? Owners ev) first."
+  (release-owner! [ev owner]
+    "Hands owner's namespaces to :repl, so the next reset-mode Run, from
+    any tab, removes them. Called when a tab closes: nothing would ever
+    Run as that owner again, and a reopened file (a new tab id) would
+    otherwise never reset them."))
 
 (defprotocol FullDoc
   "P3.T2: full documentation beyond quick doc's own summary, for a second

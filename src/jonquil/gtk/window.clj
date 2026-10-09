@@ -38,6 +38,7 @@
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.gtk.tab :as tab]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.nrepl.attach :as attach]
@@ -48,6 +49,7 @@
             [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.source :as source]
+            [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
 
 ;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
@@ -78,6 +80,13 @@
 ;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_bracketleft), the source panel's
 ;; own Cmd/Ctrl+[ back chord.
 (def ^:private KEY-BRACKETLEFT 0x05b)
+;; Tabs plan P2.T3 (spike §2, measured on macOS): Cmd/Ctrl+Shift+] and [
+;; arrive as braceright/braceleft, Cmd/Ctrl+T as t, the digits as 1-9.
+(def ^:private KEY-T 0x074)
+(def ^:private KEY-BRACERIGHT 0x07d)
+(def ^:private KEY-BRACELEFT 0x07b)
+(def ^:private KEY-1 0x031)
+(def ^:private KEY-9 0x039)
 
 (defn- command-chord?
   "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
@@ -355,28 +364,22 @@
                        (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))
 
 (defn- guarded-open!
-  "I4's dirty-discard gate, shared by do-open! (real button/chord, which
-  opens a file dialog) and the ui map's dialog-free :open-path! (so a
-  self-test row exercises the SAME gate the button does): when ed is dirty
-  and the previous attempt hasn't been warned about it yet, refuses and
-  appends a :system warning instead of calling proceed!. The next attempt
-  while STILL dirty (discard-warned? already true) calls proceed! and
-  clears the flag; a dirty->clean transition elsewhere (a successful Save)
-  also clears it, via the on-dirty-changed! registration in activate!, so
-  a later, unrelated dirty streak earns its own warning.
-
-  on-refuse (final review finding #2), when given, also runs on a
-  refusal, on top of the console line above: do-source-open! passes one
-  that puts the same warning on the panel footer, since focus is there
-  when Open in window is the thing that got refused."
-  ([ed cv discard-warned? proceed!] (guarded-open! ed cv discard-warned? proceed! nil))
-  ([ed cv discard-warned? proceed! on-refuse]
-   (if (and (editor/dirty? ed) (not @discard-warned?))
-     (do (reset! discard-warned? true)
-         (cview/append! cv :system "Unsaved changes. Save first, or Open again to discard them.\n")
-         (when on-refuse (on-refuse)))
-     (do (reset! discard-warned? false)
-         (proceed!)))))
+  "I4's dirty-discard gate for loading a file into the active tab: when ed
+  is dirty and the previous attempt hasn't been warned about it yet,
+  refuses and appends a :system warning instead of calling proceed!. The
+  next attempt while STILL dirty (discard-warned? already true) calls
+  proceed! and clears the flag; a dirty->clean transition elsewhere (a
+  successful Save) also clears it, via wire-tab!'s on-dirty-changed!
+  registration, so a later, unrelated dirty streak earns its own warning.
+  Since tabs (P2.T3) Open and Open in window open a tab instead of
+  replacing a buffer, so the ui's :open-path! is this gate's only caller
+  (ruling 4)."
+  [ed cv discard-warned? proceed!]
+  (if (and (editor/dirty? ed) (not @discard-warned?))
+    (do (reset! discard-warned? true)
+        (cview/append! cv :system "Unsaved changes. Save first, or Open again to discard them.\n"))
+    (do (reset! discard-warned? false)
+        (proceed!))))
 
 (defn- dialog-dismissed?
   "True only for GTK's own GTK_DIALOG_ERROR_DISMISSED (M2), checking BOTH
@@ -392,10 +395,9 @@
   row can drive it with a synthetic result map shaped like g/finish-file's
   (M2's dismissed-dialog case has no other way to reach it without a live
   dialog)."
-  [ed cv win path-atom {:keys [path error] :as result}]
+  [open! cv {:keys [path error] :as result}]
   (cond
-    path (do (open-path! ed cv path-atom path)
-             (update-title! ed win path-atom))
+    path (open! path)
     ;; M2: a cancelled/dismissed dialog is not an error.
     (dialog-dismissed? result) nil
     :else (cview/append! cv :error (str "; open: " error "\n"))))
@@ -404,16 +406,20 @@
   "handle-open-result!, with a throw reported on the console as \"; open:
   ...\" instead of reaching the shared dialog callback. The dialog's
   on-result, and the self-test's :simulate-open-result!. ctx is {:ed :cv
-  :win :path-atom}."
-  [{:keys [ed cv win path-atom]} result]
-  (try (handle-open-result! ed cv win path-atom result)
+  :open!}: open! (fn [path]) is how a chosen file opens -- the real Open
+  goes through open-file! (tabs plan P2.T3); the ui's simulated result
+  loads into the active tab, as :open-path! does (ruling 4)."
+  [{:keys [cv open!]} result]
+  (try (handle-open-result! open! cv result)
        (catch :default e
          (cview/append! cv :error (str "; open: " (ex-message e) "\n")))))
 
-(defn- do-open! [ed cv win path-atom discard-warned?]
-  (guarded-open!
-   ed cv discard-warned?
-   (fn [] (file-dialog! :open win (fn [result] (contained-open-result! {:ed ed :cv cv :win win :path-atom path-atom} result))))))
+(defn- do-open!
+  "Open: the file dialog, then open! with the chosen path. Since tabs
+  (P2.T3) Open never replaces a buffer with unsaved changes -- it opens a
+  tab or fills an untouched Untitled one -- so there's no discard gate."
+  [cv win open!]
+  (file-dialog! :open win (fn [result] (contained-open-result! {:cv cv :open! open!} result))))
 
 (defn- handle-save-result!
   "handle-open-result!'s counterpart for file-dialog! :save."
@@ -507,12 +513,12 @@
   differ between attempts after a Save As), but reuses the ONE retained
   alert-choose-cb across every attempt. Cancel button 2, default button 0,
   per the brief."
-  [win name on-choice]
+  [win {:keys [message buttons]} on-choice]
   (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)]
     (swap! alert-dialog-count inc)
     (register-alert-choice! d on-choice)
-    (g/gtk-alert-dialog-set-message d (str "Save changes to " name " before closing?"))
-    (ffi/with-c-string-array [labels 4] ["Save" "Don't Save" "Cancel" nil]
+    (g/gtk-alert-dialog-set-message d message)
+    (ffi/with-c-string-array [labels 4] (conj (vec buttons) nil)
       (g/gtk-alert-dialog-set-buttons d labels))
     (g/gtk-alert-dialog-set-cancel-button d 2)
     (g/gtk-alert-dialog-set-default-button d 0)
@@ -528,34 +534,43 @@
   (reset! confirmed-close? true)
   (g/gtk-window-close win))
 
+(defn- save-all!
+  "Save All (tabs plan P2.T5): saves each tab in dirty-tabs in order -- a
+  tab with a path through save-to!, an Untitled one through the Save
+  dialog, continuing from its callback. The first tab still dirty after
+  its save (the save failed) or whose dialog is dismissed stops the
+  sequence and is selected, and the window stays open. All saved closes
+  the window. ctx is {:cv :win :confirmed-close? :select!}."
+  [{:keys [cv win confirmed-close? select!] :as ctx} dirty-tabs]
+  (if-let [[{:keys [ed path] :as t} & more] (seq dirty-tabs)]
+    (let [next! (fn [] (if (editor/dirty? ed) (select! t) (save-all! ctx more)))]
+      (if-let [p @path]
+        (do (save-to! ed cv path p) (next!))
+        (do (select! t)
+            (file-dialog!
+             :save win
+             (fn [{p :path err :error :as r}]
+               (cond
+                 p (do (save-to! ed cv path p) (next!))
+                 (dialog-dismissed? r) nil
+                 :else (cview/append! cv :error (str "; save: " err "\n"))))))))
+    (finish-close! win confirmed-close?)))
+
 (defn- close-choice!
-  "The GtkAlertDialog decision (probe 3; the brief's :close-choice!):
-  index 0 Save, 1 Don't Save, 2 Cancel; an :error means the dialog was
-  dismissed. Index 2 and an error both do nothing -- the window stays open
-  and the text untouched. Index 0 with no remembered path opens the Save
-  dialog; a successful save (editor no longer dirty afterward -- save-to!
-  cleared it) confirms and closes, a cancelled or failed save leaves the
-  window open. Rows call this directly with a synthetic {:index n}
-  (probe 3), exactly as the real dialog's own completion callback does."
-  [ed cv win path-atom confirmed-close? {:keys [index error]}]
+  "The window-close alert's decision (probe 3; the brief's :close-choice!):
+  index 0 Save (Save All with several dirty tabs), 1 Don't Save, 2 Cancel;
+  an :error means the dialog was dismissed. Index 2 and an error both do
+  nothing -- the window stays open and the text untouched. Index 0 runs
+  save-all! over the tabs that were dirty, which closes the window only
+  once every one of them saved. Rows call this directly with a synthetic
+  {:index n} (probe 3), exactly as the real dialog's own completion
+  callback does. ctx is save-all!'s plus :dirty-tabs."
+  [{:keys [dirty-tabs win confirmed-close?] :as ctx} {:keys [index error]}]
   (cond
     error nil
     (= index 2) nil
     (= index 1) (finish-close! win confirmed-close?)
-    (= index 0)
-    (if-let [path @path-atom]
-      (do (save-to! ed cv path-atom path)
-          (update-title! ed win path-atom)
-          (when-not (editor/dirty? ed) (finish-close! win confirmed-close?)))
-      (file-dialog!
-       :save win
-       (fn [{:keys [path error] :as save-result}]
-         (cond
-           path (do (save-to! ed cv path-atom path)
-                    (update-title! ed win path-atom)
-                    (when-not (editor/dirty? ed) (finish-close! win confirmed-close?)))
-           (dialog-dismissed? save-result) nil
-           :else (cview/append! cv :error (str "; save: " error "\n"))))))
+    (= index 0) (save-all! ctx dirty-tabs)
     :else nil))
 
 ;; --- popover teardown --------------------------------------------------
@@ -633,45 +648,52 @@
   D1.T4: ev* is stopped (ev/stop!, guarded) right before g_application_
   quit, in the real-quit branch only -- never in the suppress-close?
   self-test branch, which doesn't actually quit anything."
-  [ed cv win app path-atom confirmed-close? suppress-close? closing? popovers ev*]
+  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!]}]
   (fn [_win _data]
-    (if (and (editor/dirty? ed) (not @confirmed-close?))
-      (do (when-not @alert-pending?
-            (reset! alert-pending? true)
+    ;; Tabs plan P2.T5: one alert naming every dirty tab, in tab order.
+    (let [ts @tabs
+          names (tabs/labels (map (fn [t] {:path @(:path t)}) ts))
+          dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
+          dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
+      (if (and (seq dirty) (not @confirmed-close?))
+        (do (when-not @alert-pending?
+              (reset! alert-pending? true)
             ;; P3 fix wave #10: a throw while building the alert used to
             ;; leave alert-pending? true for the rest of the session (every
             ;; later close silently did nothing) and escape into GTK's
             ;; signal emission. Reset the flag and report it instead; the
             ;; window stays open, since the text is still unsaved.
-            (try
-              (show-close-dialog!
-               win (if-let [p @path-atom] (file-name p) "Untitled")
-               (fn [result] (close-choice! ed cv win path-atom confirmed-close? result)))
-              (catch :default e
-                (reset! alert-pending? false)
-                (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
-          1)
-      (do (reset! closing? true)
-          (if @suppress-close?
-            (do (reset! confirmed-close? false) 1)
+              (try
+                (show-close-dialog!
+                 win (tabs/close-alert dirty-names)
+                 (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
+                                              :select! select!}
+                                             result)))
+                (catch :default e
+                  (reset! alert-pending? false)
+                  (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
+            1)
+        (do (reset! closing? true)
+            (if @suppress-close?
+              (do (reset! confirmed-close? false) 1)
             ;; Unparents every registered P4 popover BEFORE the real quit
             ;; -- see unparent-registered-popovers!'s own docstring for
             ;; why this branch specifically, never the suppress-close?
             ;; one above.
-            (do (unparent-registered-popovers! popovers)
-                (try (ev/stop! @ev*)
-                     (catch :default e
+              (do (unparent-registered-popovers! popovers)
+                  (try (ev/stop! @ev*)
+                       (catch :default e
                        ;; The window is going away, so the console can't show
                        ;; it; the process's real stderr can.
-                       (binding [*out* *err*]
-                         (println "jonquil: stopping the runtime failed:" (ex-message e))))
+                         (binding [*out* *err*]
+                           (println "jonquil: stopping the runtime failed:" (ex-message e))))
                      ;; Leaves jonquil.runtime-registry: this evaluator is
                      ;; stopped (or its stop! call at least ran), so
                      ;; jonquil.main's stop-all! has nothing left to do for
                      ;; it once the whole app quits.
-                     (finally (registry/unregister! @ev*)))
-                (g/g-application-quit app)
-                0))))))
+                       (finally (registry/unregister! @ev*)))
+                  (g/g-application-quit app)
+                  0)))))))
 
 ;; --- Run / Stop ------------------------------------------------------------
 
@@ -903,8 +925,22 @@
                     ;; the read (and the append! that depends on it) is handed to
                     ;; on-gui! rather than called here directly.
                     (on-gui! (fn []
-                               (when-let [msg (console/unclosed-bracket-message (editor/editor-text ed))]
+                                                              ;; Final review finding 3b: the Run's tab may have
+                               ;; closed while it ran; its buffer is gone then.
+                               (when-let [msg (when-not @(:destroyed? ed)
+                                                (console/unclosed-bracket-message (editor/editor-text ed)))]
                                  (cview/append! cv :system (str msg "\n")))))))})
+
+(defn- refuse-foreign!
+  "Tabs plan P2.T4: true, after printing why, when tab belongs to another
+  project or dialect than the window (jonquil.tabs/runnable-here?), so Run,
+  Run Selection and Run Form evaluate nothing there."
+  [{:keys [tab cv sel*]}]
+  (let [tsel @(:project tab)]
+    (when-not (tabs/runnable-here? @sel* tsel)
+      (cview/append! cv :system (tabs/refusal-message {:file (file-name @(:path tab)) :tab-sel tsel
+                                                       :window-sel @sel*}))
+      true)))
 
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).
@@ -937,20 +973,25 @@
   before the banner itself is queued, so it resolves (on the console's own
   next drain) right where the banner's own text lands -- never on the busy
   path above, which prints no banner at all."
-  [ed cv ev* status-label path-atom]
-  (if (ev/evaluating? @ev*)
-    (let [warning (ev/eval! @ev* (editor/editor-text ed)
-                            (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom))]
-      (when warning (cview/append! cv :system warning)))
-    (let [text (editor/editor-text ed)
-          problem (commands/pre-run-problem text)]
-      (cview/mark-entry-start! cv)
-      (cview/append! cv :system "; --- Running Definitions ---\n")
-      (if problem
-        (do (cview/append! cv :error (str problem "\n"))
-            (set-status! status-label "Ready"))
-        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom))]
-          (when warning (cview/append! cv :system warning)))))))
+  [{:keys [tab cv ev* status-label] :as ctx}]
+  (let [{ed :ed path-atom :path id :id} tab
+        opts (fn [] (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom :owner id))]
+    (cond
+      (refuse-foreign! ctx) nil
+      (ev/evaluating? @ev*)
+      (let [warning (ev/eval! @ev* (editor/editor-text ed) (opts))]
+        (when warning (cview/append! cv :system warning)))
+      :else
+      (let [text (editor/editor-text ed)
+            problem (commands/pre-run-problem text)]
+        (cview/mark-entry-start! cv)
+      ;; Tabs plan ruling 5: a saved tab's banner names its file.
+        (cview/append! cv :system (tabs/run-banner @path-atom))
+        (if problem
+          (do (cview/append! cv :error (str problem "\n"))
+              (set-status! status-label "Ready"))
+          (let [warning (ev/eval! @ev* text (opts))]
+            (when warning (cview/append! cv :system warning))))))))
 
 (defn- do-stop!
   "Fix round 2, finding B: a running Stop's detached line comes from that
@@ -1004,11 +1045,13 @@
   as before) but must NOT steal the last-entry mark from that running
   program: a later Shift+L needs to keep clearing the WHOLE run, not stop
   short at wherever this mid-run echo landed."
-  [ed cv ev* status-label]
-  (let [snap (editor/snapshot ed)]
+  [{:keys [tab cv ev* status-label] :as ctx}]
+  (let [ed (:ed tab)
+        snap (editor/snapshot ed)]
     (when-let [text (commands/run-selection-text snap)]
-      (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-      (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
+      (when-not (refuse-foreign! ctx)
+        (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)})))))
 
 ;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
 
@@ -1075,12 +1118,14 @@
   @ev*)), same idle/busy split as do-run-selection! above, and for the
   same reason -- a mid-run Cmd+Enter must still echo and flash, but must
   never steal the mark from a program that's still running."
-  [ed cv ev* status-label flash-fns]
-  (let [snap (editor/snapshot ed)]
+  [{:keys [tab cv ev* status-label flash-fns] :as ctx}]
+  (let [ed (:ed tab)
+        snap (editor/snapshot ed)]
     (if-let [{:keys [text start end]} (commands/run-form snap)]
-      (do ((:flash! flash-fns) start end (:caret snap))
-          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-          (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
+      (when-not (refuse-foreign! ctx)
+        ((:flash! flash-fns) start end (:caret snap))
+        (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)}))
       (set-status! status-label "No form at the caret."))))
 
 ;; --- inspector panel (P2.T2) -------------------------------------------
@@ -1192,28 +1237,32 @@
   Ruling 9: a press while an inspect! request is already pending does
   nothing at all, not even the eval -- the same drop inspect-last!/
   on-request/on-def give a key or button in that window."
-  [ed cv ev* status-label flash-fns inspecting? inspect-last-fn]
-  (cond
-    (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
-    (set-status! status-label inspect/unavailable-message)
+  [{:keys [tab cv ev* status-label inspecting? inspect-last-fn] :as ctx}]
+  (let [{:keys [ed flash-fns]} tab]
+    (cond
+    ;; Final review finding 4: a foreign tab can't evaluate this way either.
+      (refuse-foreign! ctx) nil
 
-    @inspecting? nil
+      (not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*)))
+      (set-status! status-label inspect/unavailable-message)
 
-    :else
-    (let [snap (editor/snapshot ed)]
-      (if-let [{:keys [text start end]} (commands/run-form snap)]
-        (let [base-opts (make-eval-opts ed cv ev* status-label false)
-              opts (assoc base-opts
-                          :on-complete
-                          (fn [result]
-                            ((:on-complete base-opts) result)
-                            (when (= :ok (:status result))
-                              (on-gui! inspect-last-fn))))]
-          ((:flash! flash-fns) start end (:caret snap))
-          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-          (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap)))]
-            (when warning (cview/append! cv :system warning))))
-        (set-status! status-label "No form at the caret.")))))
+      @inspecting? nil
+
+      :else
+      (let [snap (editor/snapshot ed)]
+        (if-let [{:keys [text start end]} (commands/run-form snap)]
+          (let [base-opts (make-eval-opts ed cv ev* status-label false)
+                opts (assoc base-opts
+                            :on-complete
+                            (fn [result]
+                              ((:on-complete base-opts) result)
+                              (when (= :ok (:status result))
+                                (on-gui! inspect-last-fn))))]
+            ((:flash! flash-fns) start end (:caret snap))
+            (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+            (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+              (when warning (cview/append! cv :system warning))))
+          (set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
@@ -1318,7 +1367,7 @@
   status. Every other press, and every evaluator without FullDoc (cljd,
   in-process), takes the ordinary re-show path below unchanged, which
   also records the freshly shown target in last-shown."
-  [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win]
+  [{:keys [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win active?]}]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start] :as target} (help/target snap)]
@@ -1331,6 +1380,13 @@
                                 (fn []
                                   (try
                                     (cond
+                                      ;; Tabs (spike §3): another tab became active
+                                      ;; while the server answered; a popover popped
+                                      ;; up on a hidden page maps anyway and is lost
+                                      ;; on the next switch, so show nothing.
+                                      (not (active?))
+                                      (set-status! status-label "Ready")
+
                                       ;; The caret moved to another symbol while the
                                       ;; server answered: drop the text, but don't
                                       ;; leave "Loading full docs..." behind.
@@ -1443,33 +1499,25 @@
   (editor/focus! ed))
 
 (defn- do-source-open!
-  "Open in window: an editable panel file loads into the window through the
-  unsaved-changes gate (guarded-open!), the caret goes to the panel
-  caret's line, and the panel closes -- but only once open-path! actually
-  landed on loc's own path (@path, compared with source/same-path?: final
-  review finding #2). When it didn't, the window never got the new file
-  and nothing there changed, so the panel stays open and open-path!'s own
-  failure goes on the panel footer instead, rather than closing over a
-  read that never happened. A read-only location only says why on the
-  footer, and guarded-open!'s own refusal over unsaved changes (its
-  on-refuse) says so on the footer too, since focus is in the panel
-  either way, not just on the console. ctx is {:ed :cv :win :path :sp
-  :right :discard-warned?}."
-  [{:keys [ed cv win path sp right discard-warned?]}]
+  "Open in window: an editable panel file opens in a tab through open-file!
+  (a new tab, or the tab already showing it), the caret goes to the panel
+  caret's line, and the panel closes -- but only once that tab really
+  shows loc's own path (source/same-path?: final review finding #2). When
+  it doesn't, the read failed: the panel stays open and says so on its
+  footer. A read-only location only says why on the footer. Tabs (P2.T3):
+  nothing is replaced any more, so there's no unsaved-changes gate. ctx
+  is {:cv :sp :right :open-file! :active-tab}."
+  [{:keys [sp right open-file! active-tab]}]
   (when-let [{:keys [loc caret]} (source-pane/current sp)]
     (if-not (:editable? loc)
       (source-pane/report! sp (source-pane/read-only-reason loc))
-      (let [line (source/line-at (editor/editor-text (:editor sp)) caret)]
-        (guarded-open!
-         ed cv discard-warned?
-         (fn []
-           (let [{err :error} (open-path! ed cv path (:path loc))]
-             (if (source/same-path? @path (:path loc))
-               (do (update-title! ed win path)
-                   (place-caret-and-scroll! ed (source/line-offset (editor/editor-text ed) line))
-                   (close-source-panel! right ed))
-               (source-pane/report! sp (or err "Couldn't open that file.")))))
-         (fn [] (source-pane/report! sp "Unsaved changes. Save first, or Open again to discard them.")))))))
+      (let [line (source/line-at (editor/editor-text (:editor sp)) caret)
+            {err :error} (open-file! (:path loc))
+            {:keys [ed path]} (active-tab)]
+        (if (source/same-path? @path (:path loc))
+          (do (place-caret-and-scroll! ed (source/line-offset (editor/editor-text ed) line))
+              (close-source-panel! right ed))
+          (source-pane/report! sp (or err "Couldn't open that file.")))))))
 
 ;; --- rename (P4.T7) ------------------------------------------------------
 
@@ -1660,11 +1708,13 @@
   gtk-interface-color-scheme, instead (g/set-color-scheme!, measured
   live to darken the chrome exactly as the old boolean did -- see
   ffi.clj's own citation)."
-  [ed cv fb provider zoom-px theme-name code-css k]
+  [{:keys [tabs cv provider zoom-px theme-name code-css]} k]
   (let [t (theme/theme k)]
-    (editor/apply-theme! ed t)
+    ;; Tabs plan P2.T2: every tab's editor and find bar, not just one.
+    (doseq [{:keys [ed fb]} @tabs]
+      (editor/apply-theme! ed t)
+      (find-bar/apply-theme! fb t))
     (cview/apply-theme! cv t)
-    (find-bar/apply-theme! fb t)
     (reload-code-css! provider t @zoom-px code-css)
     (g/set-color-scheme! (g/gtk-settings-get-default) (:dark? t))
     (reset! theme-name k))
@@ -1677,9 +1727,9 @@
   with a :warning appended to the console as :system once. Used both by
   activate! at startup and as the :load-settings!* self-test hook, so a row
   can drive the exact same startup path against a synthetic path."
-  [ed cv fb provider zoom-px theme-name code-css path]
+  [{:keys [cv] :as theme-ctx} path]
   (let [{:keys [theme warning]} (settings/load-settings path)]
-    (apply-window-theme! ed cv fb provider zoom-px theme-name code-css theme)
+    (apply-window-theme! theme-ctx theme)
     (when warning
       (cview/append! cv :system (str "; settings: " warning "\n")))))
 
@@ -1693,9 +1743,9 @@
   brief): while a program is running, the status label is left alone --
   overwriting a live Running…/Waiting for input would make the status
   lie, so only the idle case gets 'Theme: <name>'."
-  [ed cv fb provider zoom-px theme-name code-css settings-path status-label evaluating?]
+  [{:keys [cv theme-name settings-path status-label evaluating?] :as theme-ctx}]
   (let [k (theme/next-theme @theme-name)]
-    (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k)
+    (apply-window-theme! theme-ctx k)
     (when-let [err (settings/save-settings! @settings-path {:theme k})]
       (cview/append! cv :system (str "; settings: " err "\n")))
     (when-not (evaluating?)
@@ -1707,10 +1757,10 @@
   call time -- by then activate! has reset! it to the real cv (P2.T7's only
   forward reference; every other closure below is built after its pieces
   already exist)."
-  [ed *cv ev* status-label]
+  [ed-fn *cv ev* status-label]
   (fn [{:keys [action text]}]
     (case action
-      :eval (do-repl-eval! ed @*cv ev* status-label text)
+      :eval (do-repl-eval! (ed-fn) @*cv ev* status-label text)
       :send-stdin (ev/send-input! @ev* text)
       :eof (ev/send-eof! @ev*))))
 
@@ -1761,7 +1811,13 @@
   handler a real close-button click or OS window-close would
   (close-request-fn): since P3.T5 that asks before closing a dirty buffer,
   and otherwise calls g_application_quit -- so this needs no prompt or quit
-  call of its own.
+  call of its own. Since tabs (P2.T3) close-fn closes the active tab and
+  only reaches gtk_window_close on the last one (close-tab!).
+
+  Tabs plan P2.T3: Cmd/Ctrl+T (new-tab-fn), Cmd/Ctrl+Shift+] and [
+  (step-tab-fn, keyvals braceright/braceleft, spike §2) and Cmd/Ctrl+1-9
+  (digit-tab-fn) -- the digits after the zoom clauses, so Cmd/Ctrl+0 stays
+  Reset zoom.
 
   P3.T4: the find bar's own handle-key! is checked FIRST for Escape, before
   evaluating? even runs -- see find-bar-focused?'s docstring for why this
@@ -1833,14 +1889,16 @@
   handle-nav-key! stay unwrapped on their own account -- this only
   contains a throw because they happen to be called from inside this same
   function."
-  [run-fn stop-fn open-fn save-fn save-as-fn close-fn
-   run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
-   win fb open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
-   inspect-last-fn inspect-form-fn pane close-inspector-fn
-   status-label source-keys]
+  [{:keys [run-fn stop-fn open-fn save-fn save-as-fn close-fn
+           run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
+           win active-tab open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
+           inspect-last-fn inspect-form-fn pane close-inspector-fn
+           status-label source-keys new-tab-fn step-tab-fn digit-tab-fn]}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
-      (let [keyval (g/gdk-keyval-to-lower keyval0)]
+      (let [keyval (g/gdk-keyval-to-lower keyval0)
+            ;; Tabs plan P2.T2: the find bar is the active tab's.
+            fb (:fb (active-tab))]
         (cond
           (= keyval KEY-F5) (do (run-fn) 1)
           (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
@@ -1877,12 +1935,21 @@
           (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
           (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
           (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
+          ;; Tabs plan P2.T3: Cmd/Ctrl+1-8 pick a tab, 9 the last; a digit
+          ;; past the last tab is still consumed.
+          (and (command-chord? state) (<= KEY-1 keyval KEY-9))
+          (do (digit-tab-fn (- keyval (dec KEY-1))) 1)
+          (and (command-chord? state) (= keyval KEY-T)) (do (new-tab-fn) 1)
           (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
           ;; P2.T2: Cmd/Ctrl+Shift+I (inspect-form-fn) ahead of plain
           ;; Cmd/Ctrl+I (inspect-last-fn), same Shift-first ordering
           ;; Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
           (and (command-chord? state) (shift-held? state) (= keyval KEY-I)) (do (inspect-form-fn) 1)
           (and (command-chord? state) (= keyval KEY-I)) (do (inspect-last-fn) 1)
+                    ;; Tabs plan P2.T3: next and previous tab, wrapping. Ahead of the
+          ;; source panel's Cmd/Ctrl+[, which is a different keyval.
+          (and (command-chord? state) (= keyval KEY-BRACERIGHT)) (do (step-tab-fn 1) 1)
+          (and (command-chord? state) (= keyval KEY-BRACELEFT)) (do (step-tab-fn -1) 1)
           (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
           (do ((:back! source-keys)) 1)
           :else 0))
@@ -1940,6 +2007,317 @@
 
 ;; --- construction ------------------------------------------------------
 
+;; --- tab operations (tabs plan P2.T3) --------------------------------------
+;; ctx below is the window's tab map (activate!'s tab-ctx): {:tabs :active-id
+;; :notebook :win :cv :line-col-label :close-popovers-fn :popovers ...}.
+
+(defn- tab-by-id [tabs id] (some (fn [t] (when (= id (:id t)) t)) @tabs))
+
+(defn- refresh-labels!
+  "Sets every tab's label (jonquil.tabs/labels) and shows the strip only
+  while there are two or more tabs."
+  [{:keys [tabs notebook]}]
+  (let [ts @tabs]
+    (doseq [[t text] (map vector ts (tabs/labels (map (fn [t] {:path @(:path t) :dirty? (editor/dirty? (:ed t))}) ts)))]
+      (tab/set-label! t text))
+    (g/gtk-notebook-set-show-tabs notebook (if (> (count ts) 1) 1 0))))
+
+(defn- on-switch!
+  "Makes t the active tab: the window's title, Ln/Col and focus follow it,
+  and every open popover closes (one on a hidden page would be lost)."
+  [{:keys [active-id win line-col-label close-popovers-fn]} t]
+  (reset! active-id (:id t))
+  (close-popovers-fn)
+  (update-title! (:ed t) win (:path t))
+  (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
+    (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
+  (editor/focus! (:ed t)))
+
+(defn- switch-page-fn
+  "The notebook's switch-page handler. Spike §1: the tab is found from the
+  page argument, never get_current_page (which reads -1 while a current
+  page is being removed), and a page that isn't in tabs (the first
+  append, or a tab already taken out) is ignored."
+  [{:keys [tabs] :as ctx}]
+  (fn [_nb page _n _data]
+    (when-let [t (some (fn [t] (when (= page (:root t)) t)) @tabs)]
+      (on-switch! ctx t))
+    nil))
+
+(defn- select-tab!
+  "Shows tab id's page. set_current_page fires switch-page, except when the
+  page is already current, so on-switch! runs here in that case."
+  [{:keys [tabs notebook active-id] :as ctx} id]
+  (when-let [t (tab-by-id tabs id)]
+    (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook (:root t)))
+    (when-not (= id @active-id) (on-switch! ctx t))))
+
+(defn- remove-tab!
+  "Takes tab id out of the window, in the spike's order: out of tabs first
+  (so the switch-page remove_page fires never resolves to it), its four
+  popovers out of the registry and unparented (unparenting drops their
+  last reference, and a page removed with a popover still parented spins
+  GTK in a warning loop), then the page, then the neighbour selected."
+  [{:keys [tabs active-id notebook popovers sel* sel-ctx cv ev*] :as ctx} id]
+  (when-let [t (tab-by-id tabs id)]
+    (let [ts @tabs
+          i (.indexOf ^java.util.List (mapv :id ts) id)
+          neighbour (or (get ts (inc i)) (get ts (dec i)))
+          was-active? (= id @active-id)
+          gone (set (tab/popovers t))]
+      (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
+      (when was-active? (reset! active-id (:id neighbour)))
+      (swap! popovers (fn [ps] (vec (remove gone ps))))
+      ;; Final review finding 3a: a Run Form flash still pending would
+      ;; restore the selection on this tab's buffer after it's destroyed.
+      (when-let [cancel! (:cancel! (:flash-fns t))] (cancel!))
+      ;; Final review finding 2: nothing will Run as this tab again, so
+      ;; its namespaces go to the REPL's set for the next Run to clear.
+      (let [e @ev*] (when (satisfies? ev/Owners e) (ev/release-owner! e id)))
+      (tab/dispose-popovers! t)
+      (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook (:root t)))
+      (refresh-labels! ctx)
+      (when was-active?
+        (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook (:root neighbour)))
+        (on-switch! ctx neighbour))
+      ;; Ruling 1: one tab left, from another project -> the window adopts
+      ;; it (today's switch, with its "Switched to" line).
+      (let [[only & more] @tabs
+            osel (when only @(:project only))]
+        (when (and only (not more) osel
+                   (not= (dialect/selection-key osel) (dialect/selection-key @sel*)))
+          (try (apply-selection! sel-ctx osel)
+               (catch :default e
+                 (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))))
+
+(defn- close-tab-choice!
+  "The close-tab alert's decision: 0 Save (then close once saved), 1 Don't
+  Save (close), 2 Cancel or a dismissal (nothing)."
+  [{:keys [tabs cv win] :as ctx} id {:keys [index error]}]
+  (when-let [{:keys [ed path]} (tab-by-id tabs id)]
+    (let [close-if-saved! (fn [] (refresh-labels! ctx) (when-not (editor/dirty? ed) (remove-tab! ctx id)))]
+      (cond
+        error nil
+        (= index 1) (remove-tab! ctx id)
+        (= index 0)
+        (if-let [p @path]
+          (do (save-to! ed cv path p) (close-if-saved!))
+          (file-dialog! :save win
+                        (fn [{p :path err :error :as r}]
+                          (cond
+                            p (do (save-to! ed cv path p) (close-if-saved!))
+                            (dialog-dismissed? r) nil
+                            :else (cview/append! cv :error (str "; save: " err "\n"))))))
+        :else nil))))
+
+(defn- close-tab!
+  "Cmd/Ctrl+W and a tab's ×: on the last tab, closes the window (today's
+  path, with its own alert). Otherwise a dirty tab asks first, with the
+  same alert the window uses for one file; a clean one closes."
+  [{:keys [tabs win cv] :as ctx} id]
+  (when-let [{:keys [ed path]} (tab-by-id tabs id)]
+    (cond
+      (= 1 (count @tabs)) (g/gtk-window-close win)
+      (editor/dirty? ed)
+      (when-not @alert-pending?
+        (reset! alert-pending? true)
+        (try
+          (show-close-dialog! win (tabs/close-alert [(if-let [p @path] (file-name p) "Untitled")])
+                              (fn [result] (close-tab-choice! ctx id result)))
+          (catch :default e
+            (reset! alert-pending? false)
+            (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
+      :else (remove-tab! ctx id))))
+
+;; --- tabs (tabs plan P2.T2) -------------------------------------------------
+;; The window keeps its tabs in a vector (tabs) and the active one's id
+;; (active-id); everything per buffer lives in a tab map built by
+;; jonquil.gtk.tab/make-tab! and wired here. Closures built in wire-tab!
+;; capture their own tab, never the active one: a tab's editor keys, menu
+;; and popovers act on that tab even while another is active.
+
+(defn- wire-tab!
+  "Connects one tab to the window, doing for its editor everything
+  activate! used to do for the single editor, and returns the tab with
+  :flash-fns, :menu-group and :actions {:quick-doc! :jump! :rename!
+  :rename-to! :complete! :run-form!} (each a fn bound to this tab) added.
+  ctx is the window's map; see add-tab!."
+  [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
+           active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn
+           open-find-fn open-replace-fn] :as ctx}
+   {:keys [ed fb help-pop full-doc-pop rename-pop completion last-shown path discard-warned?] :as t}]
+  (let [flash-fns (make-flash-fn ed)
+        quick-doc-fn (fn [] (do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
+                                            :full-doc-pop full-doc-pop :last-shown last-shown
+                                            :close-popovers-fn close-popovers-fn :win win
+                                            :active? (fn [] (active? t))}))
+        jump-fn (fn [] (do-jump! (source-ctx t)))
+        rename-fn (fn [] (do-rename! ed rename-pop status-label close-popovers-fn))
+        rename-to-fn (fn [name] (do-rename-to! ed rename-pop name status-label))
+        complete-fn (fn [] (do-complete! ed completion status-label))
+        run-form-fn (fn [] (do-run-form! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                          :flash-fns flash-fns}))
+        menu-group
+        (install-context-menu!
+         (:view ed)
+         [["Run Form" "run-form" run-form-fn]
+          ["Jump to Definition" "jump" jump-fn]
+          ["Rename Symbol" "rename" rename-fn]
+          ["Quick Documentation" "quick-doc" quick-doc-fn]
+          ["Inspect Last Result" "inspect-last" inspect-last-fn]
+          ["Inspect Form" "inspect-form" inspect-form-fn]
+          ["Complete" "complete" complete-fn]
+          ["Toggle Comment" "toggle-comment" (fn [] (editor/do-toggle-comment! ed))]
+          ["Format All" "format-all" (fn [] (editor/do-format-all! ed))]
+          ["Format Selection" "format-selection" (fn [] (editor/do-format-selection! ed))]
+          ["Indent" "indent" (fn [] (editor/do-indent! ed))]
+          ["Unindent" "unindent" (fn [] (editor/do-unindent! ed))]
+          ["Find" "find" open-find-fn]
+          ["Replace" "replace" open-replace-fn]]
+         (fn [msg] (set-status! status-label msg)))]
+    (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
+    (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
+    (editor/on-dirty-changed! ed (fn [_dirty]
+                                   (refresh-labels! ctx)
+                                   (when (active? t) (update-title! ed win path))))
+    (g/g-signal-connect-data (:close-btn t) "clicked"
+                             (callable (contain-click status-label "close tab" (fn [_] (close-tab! ctx (:id t))))
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; I4: a dirty->clean transition (a successful Save) re-arms the
+    ;; discard warning, so an unrelated LATER dirty streak earns its own.
+    (editor/on-dirty-changed! ed (fn [dirty] (when-not dirty (reset! discard-warned? false))))
+    ;; P3.T5: the status bar's Ln/Col label, the active tab's position only.
+    (editor/on-cursor-moved!
+     ed (fn [[line col]]
+          (when (active? t)
+            (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))))
+    ;; P4.T4/P3.T2: the quick-doc and full-doc popovers join the window's
+    ;; registry (Escape and teardown close them) and close on any caret
+    ;; move or focus leaving the editor.
+    (register-popover-fn help-pop)
+    (register-popover-fn full-doc-pop)
+    (editor/set-quick-doc-fn! ed quick-doc-fn)
+    (editor/set-jump-fn! ed jump-fn)
+    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
+    (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
+    ;; P4.T7: rename is autohide ON, so GTK's own grab closes it.
+    (register-popover-fn rename-pop)
+    (editor/set-rename-fn! ed rename-fn)
+    (editor/set-run-form-fn! ed run-form-fn)
+    (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
+    (g/g-signal-connect-data (:entry rename-pop) "activate"
+                             (callable (fn [_entry _data]
+                                         (try
+                                           (rename-to-fn (help-popover/rename-entry-text rename-pop))
+                                           (catch :default e
+                                             (set-status! status-label (str "; rename: " (ex-message e)))))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (wire-completion! completion complete-fn status-label register-popover-fn
+                      (fn [fns] (editor/set-completion-fns! ed fns))
+                      (fn [f] (editor/on-cursor-moved! ed f))
+                      (fn [f] (editor/on-focus-lost! ed f)))
+    ;; D1.T4: re-selection whenever this tab's path changes (Open, Save
+    ;; As). The reset! runs on the GTK thread, so the watch does too; it
+    ;; never throws into GTK. set-profile! sits in a finally so the editor
+    ;; follows @sel* even when apply-selection! throws after its own reset!.
+    ;; Tabs plan P2.T3 (ruling 10): the tab keeps its own selection in
+    ;; :project, and paints with that selection's profile.
+    (add-watch path ::dialect
+               (fn [_ _ old new]
+                 (when (not= old new)
+                   (let [tsel (select-for new @settings-path*)]
+                     (reset! (:project t) tsel)
+                                          ;; Ruling 1: with one tab the window follows, as it always
+                     ;; did; with two or more its project is fixed.
+                     (try (when (= 1 (count @tabs)) (apply-selection! sel-ctx tsel))
+                          (catch :default e
+                            (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
+                          (finally (editor/set-profile! ed (:profile tsel))
+                                   (refresh-labels! ctx)))))))
+    (assoc t
+           :flash-fns flash-fns
+           :menu-group menu-group
+           :actions {:quick-doc! quick-doc-fn :jump! jump-fn :rename! rename-fn
+                     :rename-to! rename-to-fn :complete! complete-fn :run-form! run-form-fn})))
+
+(defn- add-tab!
+  "Builds a tab for path (nil for Untitled) holding text, with the
+  window's current theme and the profile path's own selection gives it,
+  appends its page to the notebook, wires it, and only then adds it to
+  tabs. Returns the wired tab. Spike §1: the notebook fires switch-page
+  inside the first append, before the tab is in tabs, so the caller makes
+  the tab active itself. ctx is wire-tab!'s map plus {:tabs :next-id
+  :notebook :theme-name :completion-opts}."
+  [{:keys [tabs next-id notebook theme-name completion-opts settings-path* sel*] :as ctx} {:keys [path text]}]
+  (let [tsel (select-for path @settings-path*)
+        t (tab/make-tab! {:id (swap! next-id inc) :path path :text text
+                          :theme (theme/theme @theme-name)
+                          :profile (:profile (if path tsel @sel*))
+                          :completion-opts completion-opts})]
+    (when path (reset! (:project t) tsel))
+    (g/gtk-notebook-append-page notebook (:root t) (:label-box t))
+    (let [wired (wire-tab! ctx t)]
+      (swap! tabs conj wired)
+      wired)))
+
+(defn- new-tab!
+  "Cmd/Ctrl+T and Open: a tab for path (nil for Untitled) holding text,
+  placed right after the active tab (ruling 8) and selected. A failure
+  while building it goes on the console and leaves the tabs as they were."
+  [{:keys [tabs notebook active-id cv] :as ctx} {:keys [path text]}]
+  (try
+    (let [i (.indexOf ^java.util.List (mapv :id @tabs) @active-id)
+          t (add-tab! ctx {:path path :text (or text "")})]
+      (swap! tabs (fn [v] (tabs/insert-after (vec (remove (fn [x] (= (:id t) (:id x))) v)) i t)))
+      (g/gtk-notebook-reorder-child notebook (:root t) (inc i))
+      (refresh-labels! ctx)
+      (select-tab! ctx (:id t))
+      t)
+    (catch :default e
+      (cview/append! cv :error (str "; new tab: " (ex-message e) "\n"))
+      nil)))
+
+(defn- read-for-tab
+  "{:text t} for path, warning on the console when it isn't UTF-8 (as
+  open-path! does), or {:error msg} after appending it."
+  [cv path]
+  (try
+    (let [text (slurp path)]
+      (when (str/includes? text "�")
+        (cview/append! cv :system
+                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
+      {:text text})
+    (catch :default e
+      (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
+      {:error (ex-message e)})))
+
+(defn- open-file!
+  "Open (tabs plan P2.T3): the tab already showing path is selected;
+  otherwise an untouched Untitled active tab is filled (open-path!, ruling
+  4); otherwise path opens in a new tab. Returns {:error msg} when the file
+  couldn't be read, else nil."
+  [{:keys [tabs cv win active-tab] :as ctx} path]
+  (let [ts @tabs
+        t (active-tab)]
+    (if-let [i (tabs/find-open (map (fn [x] {:path @(:path x)}) ts) path)]
+      (do (select-tab! ctx (:id (nth ts i))) nil)
+      (if (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))})
+        (let [r (open-path! (:ed t) cv (:path t) path)]
+          (update-title! (:ed t) win (:path t))
+          (refresh-labels! ctx)
+          r)
+        (let [{:keys [text error]} (read-for-tab cv path)]
+          (if error
+            {:error error}
+            (do (new-tab! ctx {:path path :text text}) nil)))))))
+
+;; --- activate ---------------------------------------------------------------
+
 (defn- activate! [app {:keys [file on-ready settings-path]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
@@ -1966,10 +2344,19 @@
         ev* (atom (doto (ev/make @sel*) registry/register!))
         session @ev*
         evaluating-fn (fn [] (ev/evaluating? @ev*))
-        path (atom file)
-        discard-warned? (atom false)
-        ed (editor/make-editor)
-        fb (find-bar/make-find-bar ed)
+        ;; Tabs plan P2.T2: the window's tabs, in order, and the active
+        ;; one's id; every window-level action resolves the active tab when
+        ;; it runs (active-tab), never one captured at build time.
+        tabs (atom [])
+        active-id (atom nil)
+        next-id (atom 0)
+        active-tab (fn [] (some (fn [t] (when (= @active-id (:id t)) t)) @tabs))
+        active? (fn [t] (= @active-id (:id t)))
+        notebook (g/gtk-notebook-new)
+        ;; The tab operations' context (tab-ctx), set once the tabs' wiring
+        ;; context exists in the body below -- the same forward-reference
+        ;; idiom *cv and *right use.
+        *tab-ctx (atom nil)
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
@@ -1981,7 +2368,7 @@
         suppress-close? (atom false)
         closing? (atom false)
         *cv (atom nil)
-        cv (cview/make-console-view {:on-submit (make-on-submit ed *cv ev* status-label)
+        cv (cview/make-console-view {:on-submit (make-on-submit (fn [] (:ed (active-tab))) *cv ev* status-label)
                                      :history-prev (history-prev-fn ev*)
                                      :history-next (history-next-fn ev*)
                                      ;; I2: the console reads busy/waiting state
@@ -2008,62 +2395,25 @@
         popovers (atom [])
         close-popovers-fn (fn [& [skip]] (close-popovers! popovers skip))
         register-popover-fn (fn [p] (register-popover! popovers p))
-        ;; P4.T4: the quick-doc popover, built once on ed's view and
-        ;; joined to the SAME registry above (Escape closes it, like every
-        ;; other P4 popover); quick-doc-fn/jump-fn are the ui's own
-        ;; :quick-doc!*/:jump!* and are also what editor.clj's own key
-        ;; dispatch calls (set-quick-doc-fn!/set-jump-fn! below), since ed
-        ;; itself is built before session/status-label/help-pop exist.
-        help-pop (help-popover/make-help-popover (:view ed))
-        ;; P3.T2 (ruling 11): the target {:symbol :start} quick-doc-fn last
-        ;; showed, and the full-doc popover a second press over that SAME
-        ;; target shows in -- a second popover built the same way, joined
-        ;; to the same registry below.
-        last-shown (atom nil)
-        full-doc-pop (help-popover/make-full-doc-popover (:view ed))
-        ;; Source-panel spec: the panel is built before jump-fn, which
-        ;; opens it; its root joins the right-hand slot once the inspector
-        ;; exists (*right, reset below).
+        ;; Source-panel spec: the panel is built before the tabs, whose
+        ;; jump opens it; its root joins the right-hand slot once the
+        ;; inspector exists (*right, reset below).
         sp (source-pane/make-pane)
         *right (atom nil)
-        source-ctx (fn [] {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
-                           :close-popovers-fn close-popovers-fn :sp sp :right @*right
-                           :path path :sel* sel*})
-        quick-doc-fn (fn [] (do-quick-doc! ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win))
-        jump-fn (fn [] (do-jump! (source-ctx)))
-        ;; P4.T7: the rename popover, built once on ed's view and joined
-        ;; to the SAME registry (Escape/teardown, same reasoning as
-        ;; help-pop above -- though autohide ON means GTK's own modal
-        ;; grab, not the registry's Escape clause, is what actually closes
-        ;; it in practice, per popover.clj's own ns docstring). rename-fn
-        ;; is editor.clj's own Shift+F6/F2 action (set-rename-fn! below);
-        ;; rename-to-fn is the popover entry's own \"activate\" action,
-        ;; wired below once rename-pop exists.
-        rename-pop (help-popover/make-rename-popover (:view ed))
-        rename-fn (fn [] (do-rename! ed rename-pop status-label close-popovers-fn))
-        rename-to-fn (fn [name] (do-rename-to! ed rename-pop name status-label))
-        ;; P4.T5: the completion popover, built once on ed's view and
-        ;; joined to the SAME registry (Escape closes it, teardown
-        ;; unparents it); close-others! is close-popovers-fn itself, so
-        ;; completion's own open! closes quick doc/jump's popover before
-        ;; showing (context bullet #3), through the registry, never a
-        ;; pairwise special case. ns-fn is called at every lookup, not
-        ;; captured once -- the running program's namespace can change
-        ;; between Runs. on-error is completion's own handle-key!
-        ;; reporting a throw from move!/commit!/close! to the status bar,
-        ;; the same set-status! every other lookup here uses.
-        ;; Shared by both completion instances below (P4.T6): the running
-        ;; program's namespace, read fresh at every lookup either way.
+        source-ctx (fn [t] {:ed (:ed t) :ev* ev* :status-label status-label :help-pop (:help-pop t)
+                            :close-popovers-fn close-popovers-fn :sp sp :right @*right
+                            :path (:path t) :sel* sel*})
+        ;; Shared by every tab's completion and the console's: the running
+        ;; program's namespace, read fresh at every lookup.
         completion-ns-fn (fn [] (ev/prompt-ns @ev*))
-        completion (completion/make-completion
-                    (:view ed)
-                    {:ed ed
-                     :ns-fn completion-ns-fn
-                     :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
-                     :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
-                     :close-others! close-popovers-fn
-                     :on-error (fn [msg] (set-status! status-label msg))})
-        complete-fn (fn [] (do-complete! ed completion status-label))
+        ;; P4.T5: what each tab's completion is built with (jonquil.gtk.tab
+        ;; adds its own :ed); close-others! is the registry-wide close, so
+        ;; opening completion closes any other open popover.
+        completion-opts {:ns-fn completion-ns-fn
+                         :candidates-fn (fn [prefix text pos extra] (ev/complete @ev* prefix text pos extra))
+                         :doc-fn (fn [sym text pos] (ev/lookup @ev* sym text pos))
+                         :close-others! close-popovers-fn
+                         :on-error (fn [msg] (set-status! status-label msg))}
         ;; P4.T6: a second jonquil.gtk.completion instance, on the
         ;; console's own input region -- :position :top (above the input
         ;; line, per probe 2, vs. the editor's own :bottom),
@@ -2088,17 +2438,25 @@
                           :snapshot-fn (fn [] (cview/input-snapshot cv))
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
         repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
-        run-fn (fn [] (do-run! ed cv ev* status-label path))
+        run-fn (fn [] (do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
         stop-fn (fn [] (do-stop! ev* cv))
-        open-fn (fn [] (do-open! ed cv win path discard-warned?))
-        save-fn (fn [] (do-save! ed cv win path))
-        save-as-fn (fn [] (do-save-as! ed cv win path))
-        close-fn (fn [] (g/gtk-window-close win))
-        run-selection-fn (fn [] (do-run-selection! ed cv ev* status-label))
-        ;; cljd plan P3.T2: Run Form, from Cmd/Ctrl+Enter in the editor and
-        ;; the editor menu's first item.
-        flash-fns (make-flash-fn ed)
-        run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fns))
+        open-fn (fn [] (do-open! cv win (fn [p] (open-file! @*tab-ctx p))))
+        save-fn (fn [] (let [t (active-tab)] (do-save! (:ed t) cv win (:path t))))
+        save-as-fn (fn [] (let [t (active-tab)] (do-save-as! (:ed t) cv win (:path t))))
+                ;; Tabs plan P2.T3: Cmd/Ctrl+W closes the active tab; on the last
+        ;; one close-tab! closes the window, as Cmd/Ctrl+W always did.
+        close-fn (fn [] (close-tab! @*tab-ctx (:id (active-tab))))
+        new-tab-fn (fn [] (new-tab! @*tab-ctx {}))
+        step-tab-fn (fn [delta]
+                      (let [ts @tabs
+                            i (.indexOf ^java.util.List (mapv :id ts) @active-id)]
+                        (select-tab! @*tab-ctx (:id (nth ts (tabs/cycle-index (count ts) i delta))))))
+        digit-tab-fn (fn [digit]
+                       (let [ts @tabs]
+                         (when-let [i (tabs/index-for-digit (count ts) digit)]
+                           (select-tab! @*tab-ctx (:id (nth ts i))))))
+        run-selection-fn (fn [] (do-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                                    :status-label status-label}))
         ;; P2.T2: the inspector panel. h-paned is the new horizontal split
         ;; (editor+console keep their existing vertical paned as its start
         ;; child; the pane's own :root becomes its end child, wired below
@@ -2135,7 +2493,7 @@
                             ;; this atom, so :selected is the row on screen.
                             (swap! inspector-state assoc :pending :keep)
                             (ev/inspect! @ev* :def args on-view)))))
-        on-inspector-close (fn [] (close-inspector-panel! @*right ed))
+        on-inspector-close (fn [] (close-inspector-panel! @*right (:ed (active-tab))))
         pane (inspector-pane/make-pane {:on-request on-inspector-request
                                         :on-close on-inspector-close
                                         :on-def on-inspector-def
@@ -2147,62 +2505,55 @@
         _ (reset! *right right)
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
-        inspect-form-fn (fn [] (inspect-form! ed cv ev* status-label flash-fns inspecting? inspect-last-fn))
-        source-jump-fn (fn [] (do-source-jump! (source-ctx)))
-        source-close-fn (fn [] (close-source-panel! right ed))
+        inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                               :inspecting? inspecting? :inspect-last-fn inspect-last-fn}))
+        source-jump-fn (fn [] (do-source-jump! (source-ctx (active-tab))))
+        source-close-fn (fn [] (close-source-panel! right (:ed (active-tab))))
         source-back-fn (fn [] (source-pane/back! sp))
-        source-open-fn (fn [] (do-source-open! {:ed ed :cv cv :win win :path path :sp sp :right right
-                                                :discard-warned? discard-warned?}))
+        source-open-fn (fn [] (do-source-open! {:sp sp :right right :active-tab active-tab
+                                                :open-file! (fn [p] (open-file! @*tab-ctx p))}))
         source-keys {:focused? (fn [] (source-pane/focused? sp win)) :close! source-close-fn
                      :back! source-back-fn :open! source-open-fn}
-        close-inspector-fn (fn [] (close-inspector-panel! right ed))
-        toggle-focus-fn (fn [] (do-toggle-focus! win ed cv))
+        close-inspector-fn (fn [] (close-inspector-panel! right (:ed (active-tab))))
+        toggle-focus-fn (fn [] (do-toggle-focus! win (:ed (active-tab)) cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         clear-last-fn (fn [] (do-clear-last-output! cv))
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
-        set-theme-fn (fn [k] (apply-window-theme! ed cv fb provider zoom-px theme-name code-css k))
+        theme-ctx {:tabs tabs :cv cv :provider provider :zoom-px zoom-px :theme-name theme-name
+                   :code-css code-css :settings-path settings-path* :status-label status-label
+                   :evaluating? evaluating-fn}
+        set-theme-fn (fn [k] (apply-window-theme! theme-ctx k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
-        cycle-theme-fn (fn [] (do-cycle-theme! ed cv fb provider zoom-px theme-name code-css
-                                               settings-path* status-label evaluating-fn))
-        open-find-fn (fn [] (find-bar/open! fb :find))
-        open-replace-fn (fn [] (find-bar/open! fb :replace))
+        cycle-theme-fn (fn [] (do-cycle-theme! theme-ctx))
+        open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
+        open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe
         ;; 3) -- each item calls the EXACT SAME fn its key does. install-
         ;; context-menu! returns the GSimpleActionGroup, so :activate-
         ;; menu-action!*/:repl-activate-menu-action!* (below) can fire an
         ;; item directly, by name, for rows and the smoke.
-        editor-menu-group
-        (install-context-menu!
-         (:view ed)
-         [["Run Form" "run-form" run-form-fn]
-          ["Jump to Definition" "jump" jump-fn]
-          ["Rename Symbol" "rename" rename-fn]
-          ["Quick Documentation" "quick-doc" quick-doc-fn]
-          ["Inspect Last Result" "inspect-last" inspect-last-fn]
-          ["Inspect Form" "inspect-form" inspect-form-fn]
-          ["Complete" "complete" complete-fn]
-          ["Toggle Comment" "toggle-comment" (fn [] (editor/do-toggle-comment! ed))]
-          ["Format All" "format-all" (fn [] (editor/do-format-all! ed))]
-          ["Format Selection" "format-selection" (fn [] (editor/do-format-selection! ed))]
-          ["Indent" "indent" (fn [] (editor/do-indent! ed))]
-          ["Unindent" "unindent" (fn [] (editor/do-unindent! ed))]
-          ["Find" "find" open-find-fn]
-          ["Replace" "replace" open-replace-fn]]
-         (fn [msg] (set-status! status-label msg)))
         console-menu-group
         (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]
                                            ["Clear Last Output" "clear-last-output" clear-last-fn]]
                                (fn [msg] (set-status! status-label msg)))
-        activate-menu-action-fn (fn [name] (g/g-action-group-activate-action editor-menu-group name ffi/null))
+        ;; Ruling 3: the ui's editor-menu hook fires the FIRST tab's menu
+        ;; (tabs are built after this let), as the other per-tab ui keys do.
+        activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
         repl-activate-menu-action-fn
         (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
-        window-key-fn (on-window-key run-fn stop-fn open-fn save-fn save-as-fn close-fn
-                                     run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn
-                                     evaluating-fn
-                                     win fb open-find-fn open-replace-fn cycle-theme-fn
-                                     close-popovers-fn
-                                     inspect-last-fn inspect-form-fn pane close-inspector-fn
-                                     status-label source-keys)
+        window-key-fn (on-window-key {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
+                                      :save-as-fn save-as-fn :close-fn close-fn
+                                      :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
+                                      :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn
+                                      :zoom-fn zoom-fn :evaluating? evaluating-fn
+                                      :win win :active-tab active-tab :open-find-fn open-find-fn
+                                      :open-replace-fn open-replace-fn :theme-cycle-fn cycle-theme-fn
+                                      :close-popovers-fn close-popovers-fn
+                                      :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn
+                                      :pane pane :close-inspector-fn close-inspector-fn
+                                      :status-label status-label :source-keys source-keys
+                                      :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
+                                      :digit-tab-fn digit-tab-fn})
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -2217,12 +2568,6 @@
         status-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
-        ;; P3.T4: the find bar's box sits above the editor's own scroll
-        ;; view, inside a dedicated vertical box that becomes the paned's
-        ;; start child (in place of (:scroll ed) directly) -- the scroll
-        ;; view keeps vexpand so it, not the bar, absorbs the pane's
-        ;; height.
-        editor-pane (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
     (g/gtk-box-append toolbar run-btn)
     (g/gtk-box-append toolbar stop-btn)
@@ -2231,10 +2576,15 @@
     (g/gtk-box-append toolbar reset-chk)
     (g/gtk-check-button-set-active reset-chk 1)
     (g/gtk-widget-set-vexpand paned 1)
-    (g/gtk-box-append editor-pane (:box fb))
-    (g/gtk-widget-set-vexpand (:scroll ed) 1)
-    (g/gtk-box-append editor-pane (:scroll ed))
-    (g/gtk-paned-set-start-child paned editor-pane)
+    ;; Tabs plan P2.T2: a notebook of tabs is the paned's start child; each
+    ;; page is a tab's own find bar over its editor (jonquil.gtk.tab). The
+    ;; strip stays hidden while there's one tab, so a one-file window looks
+    ;; as it always did.
+    (g/gtk-notebook-set-show-tabs notebook 0)
+    (g/gtk-notebook-set-show-border notebook 0)
+    (g/gtk-notebook-set-scrollable notebook 1)
+    (g/gtk-widget-set-vexpand notebook 1)
+    (g/gtk-paned-set-start-child paned notebook)
     (g/gtk-paned-set-end-child paned (:scroll cv))
     (g/gtk-paned-set-position paned 430)
     ;; P2.T2: the editor/console paned becomes h-paned's start child; the
@@ -2266,14 +2616,13 @@
     ;; P3.T3: one shared GtkCssProvider for the display, added once; both
     ;; views get the jonquil-code CSS class so a single reload resizes both
     ;; live (probe 4).
-    (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
+    ;; Each tab's view gets the class in jonquil.gtk.tab/make-tab!.
     (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
     (g/gtk-style-context-add-provider-for-display
      (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
     ;; TH.T5: the saved theme, in place of TH.T4's fixed theme/default-theme.
     (source-pane/apply-theme! sp (theme/theme @theme-name))
     (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
-    (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css @settings-path*)
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -2302,8 +2651,11 @@
     (g/g-signal-connect-data win "close-request"
                              ;; on-throw 1 refuses the close: a window that
                              ;; may hold unsaved text stays open.
-                             (callable (close-request-fn ed cv win app path confirmed-close?
-                                                         suppress-close? closing? popovers ev*)
+                             (callable (close-request-fn {:tabs tabs :select! (fn [t] (select-tab! @*tab-ctx (:id t)))
+                                                          :cv cv :win win :app app
+                                                          :confirmed-close? confirmed-close?
+                                                          :suppress-close? suppress-close? :closing? closing?
+                                                          :popovers popovers :ev* ev*})
                                        [:pointer :pointer] :int :on-throw 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
@@ -2320,99 +2672,46 @@
                                          [:pointer :pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (g/g-action-map-add-action app quit-action))
-    (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
     (cview/set-error-fn! cv (fn [msg] (set-status! status-label msg)))
-    (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
-    (editor/on-dirty-changed! ed (fn [_dirty] (update-title! ed win path)))
-    ;; I4: a dirty->clean transition (a successful Save) re-arms the
-    ;; discard warning, so an unrelated LATER dirty streak earns its own.
-    (editor/on-dirty-changed! ed (fn [dirty] (when-not dirty (reset! discard-warned? false))))
-    ;; P3.T5: the status bar's Ln/Col label, editor position only (probe 6).
-    (editor/on-cursor-moved!
-     ed (fn [[line col]] (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col)))))
-    ;; P4.T4: joins the SAME popover registry P4.T3 built (Escape closes
-    ;; it), wires the editor's own Ctrl+Q/Shift+F1/F12/Ctrl+B key clauses
-    ;; to quick-doc-fn/jump-fn, and closes the popover on any caret move
-    ;; or focus leaving the editor -- both beyond Escape, which the
-    ;; registry above already covers.
-    (register-popover-fn help-pop)
-    ;; P3.T2: joins the same registry (Escape/teardown close it, same as
-    ;; every other P4 popover) -- do-quick-doc! is the only thing that
-    ;; ever SHOWS it (ruling 10/11); a caret move or focus loss also
-    ;; closes it, same as help-pop below.
-    (register-popover-fn full-doc-pop)
-    (editor/set-quick-doc-fn! ed quick-doc-fn)
-    (editor/set-jump-fn! ed jump-fn)
     (editor/set-jump-fn! (:editor sp) source-jump-fn)
     (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
     (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
-    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
-    (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
-    ;; The full-doc popover closes on the same two events as the quick-doc
-    ;; popover above -- it's a second, wider popover left open over the
-    ;; editor with no other close hook of its own besides Escape and
-    ;; do-quick-doc!'s own re-show path.
-    (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
-    (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
-    ;; P4.T7: joins the SAME popover registry, wires the editor's own
-    ;; Shift+F6/F2 chords to rename-fn, and wires the popover's own entry
-    ;; "activate" signal (a real Enter keypress in a focused GtkEntry,
-    ;; never gtk_widget_activate -- find-bar's own ns docstring measured
-    ;; that entry point unreliable for GtkSearchEntry, so this project
-    ;; never relies on it) to rename-to-fn. No on-cursor-moved!/on-focus-
-    ;; lost! close hook, unlike help-pop/completion above: rename is
-    ;; autohide ON, so GTK's own modal grab -- not a caret move or a focus
-    ;; change the editor could observe -- is what closes it (popover.clj's
-    ;; own ns docstring).
-    (register-popover-fn rename-pop)
     ;; I5: joins the SAME registry, so Escape closes the def prompt
-    ;; before it can fall through to Stop (ruling 8) -- the window's own
-    ;; capture controller does see keys from an autohide popover (probe
-    ;; 4, jonquil.gtk.popover's own ns docstring), the same reasoning
-    ;; that already applies to rename-pop just above.
+    ;; before it can fall through to Stop (ruling 8).
     (register-popover-fn (:def-popover pane))
-    (editor/set-rename-fn! ed rename-fn)
-    (editor/set-run-form-fn! ed run-form-fn)
-    (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
-    (g/g-signal-connect-data (:entry rename-pop) "activate"
-                             (callable (fn [_entry _data]
-                                         (try
-                                           (rename-to-fn (help-popover/rename-entry-text rename-pop))
-                                           (catch :default e
-                                             (set-status! status-label (str "; rename: " (ex-message e)))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; P4.T5/P4.T6: the editor's and the console's own completion
-    ;; instance, wired identically -- see wire-completion!'s own
-    ;; docstring.
-    (wire-completion! completion complete-fn status-label register-popover-fn
-                      (fn [fns] (editor/set-completion-fns! ed fns))
-                      (fn [f] (editor/on-cursor-moved! ed f))
-                      (fn [f] (editor/on-focus-lost! ed f)))
     (wire-completion! repl-completion repl-complete-fn status-label register-popover-fn
                       (fn [fns] (cview/set-completion-fns! cv fns))
                       (fn [f] (cview/on-input-changed! cv f))
                       (fn [f] (cview/on-focus-lost! cv f)))
-    (when file
-      ;; A file argument that doesn't exist opens an empty editor with the
-      ;; path remembered anyway, so Save creates it -- unlike the Open
-      ;; button's dialog result, this is the documented normal case, not an
-      ;; error to report.
-      (try
-        (let [text (slurp file)]
-          (editor/set-text! ed text)
-          ;; I6: same non-UTF-8 warning as open-path!.
-          (when (str/includes? text "�")
-            (cview/append! cv :system
-                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n")))
-        (catch :default _ nil)))
-    ;; D1.T4: the starting selection's warnings, then re-selection whenever
-    ;; the file's path changes (Open, Save As). reset! on path runs on the
-    ;; GTK thread, so the watch does too; it never throws into GTK.
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
                    :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
-                   :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}]
+                   :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}
+          ;; A file argument that doesn't exist opens an empty editor with
+          ;; the path remembered anyway, so Save creates it -- unlike the
+          ;; Open button's dialog result, this is the documented normal
+          ;; case, not an error to report.
+          text (when file (try (slurp file) (catch :default _ nil)))
+          tab-ctx {:win win :cv cv :ev* ev* :sel* sel* :status-label status-label
+                   :line-col-label line-col-label :close-popovers-fn close-popovers-fn
+                   :register-popover-fn register-popover-fn :active? active? :source-ctx source-ctx
+                   :sel-ctx sel-ctx :settings-path* settings-path* :inspect-last-fn inspect-last-fn
+                   :inspect-form-fn inspect-form-fn :open-find-fn open-find-fn
+                   :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
+                   :theme-name theme-name :completion-opts completion-opts
+                   :active-id active-id :active-tab active-tab :popovers popovers}
+          first-tab (add-tab! tab-ctx {:path file :text (or text "")})]
+      ;; Spike §1: switch-page fired inside that first append, before the
+      ;; tab was in tabs, so the tab is made active here.
+      (reset! active-id (:id first-tab))
+      (reset! *tab-ctx tab-ctx)
+      (g/g-signal-connect-data notebook "switch-page"
+                               (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)
+      (load-and-apply-theme! theme-ctx @settings-path*)
+      ;; I6: same non-UTF-8 warning as open-path!.
+      (when (and text (str/includes? text "�"))
+        (cview/append! cv :system
+                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
       (try
         (show-selection! cv dialect-label @sel*)
         ;; cljd plan P2.T4: the starting evaluator's connection, label and
@@ -2423,100 +2722,102 @@
         (refresh-prompt! cv ev*)
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
-      ;; P1.T2 (cljd plan): the editor paints with the selected profile's
-      ;; own sets, here and after every re-selection below.
-      (editor/set-profile! ed (:profile @sel*))
       (start-and-report! cv status-label @ev* @sel*)
-      (add-watch path ::dialect
-                 (fn [_ _ old new]
-                   (when (not= old new)
-                     ;; Fix round 1 (Important): set-profile! moved into a
-                     ;; finally, so the editor's dialect follows @sel* even
-                     ;; when apply-selection! throws after its own (reset!
-                     ;; sel* sel) -- the very first thing it does -- has
-                     ;; already run. Reading @sel* here (not sel, the local
-                     ;; select-for result) is what makes that safe: it's the
-                     ;; same value apply-selection! itself just reset,
-                     ;; whether or not anything after that reset threw.
-                     (try (apply-selection! sel-ctx (select-for new @settings-path*))
-                          (catch :default e
-                            (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
-                          (finally (editor/set-profile! ed (:profile @sel*))))))))
-    (update-title! ed win path)
-    (g/gtk-window-present win)
-    (editor/focus! ed)
+      (update-title! (:ed first-tab) win (:path first-tab))
+      (g/gtk-window-present win)
+      (editor/focus! (:ed first-tab)))
     (when on-ready
-      (on-ready {:editor ed :console cv :session session :status-label status-label :window win
-                 :line-col-label line-col-label
+      ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
+      ;; objects, so every existing row keeps working unchanged; rows that
+      ;; need another tab use :tabs* and :active-tab*. Actions that act on
+      ;; "the window's file" (:open-path!, :save-to!, the simulated dialog
+      ;; results, :close-choice!) use the active tab.
+      (let [{:keys [ed fb help-pop full-doc-pop rename-pop completion actions]} (first @tabs)]
+        (on-ready {:editor ed :console cv :session session :status-label status-label :window win
+                 ;; Tabs plan P2.T2: the notebook, the tab list and the
+                 ;; active tab, read live.
+                   :notebook notebook
+                   :tabs* (fn [] @tabs)
+                   :active-tab* active-tab
+                 ;; Tabs plan P2.T3: the tab operations, exactly what the
+                 ;; keys, the toolbar and the tabs' close buttons call.
+                   :new-tab!* (fn [] (new-tab! @*tab-ctx {}))
+                   :open-file! (fn [p] (open-file! @*tab-ctx p))
+                   :select-tab! (fn [id] (select-tab! @*tab-ctx id))
+                   :close-tab! (fn [id] (close-tab! @*tab-ctx id))
+                   :close-tab-choice! (fn [id result] (close-tab-choice! @*tab-ctx id result))
+                   :line-col-label line-col-label
                  ;; D1.T4: the window's evaluator and dialect selection, read
                  ;; live at call time (D2.T5 swaps ev*), and the dialect
                  ;; label itself.
-                 :evaluator* (fn [] @ev*)
-                 :selection* (fn [] @sel*)
-                 :dialect-label dialect-label
+                   :evaluator* (fn [] @ev*)
+                   :selection* (fn [] @sel*)
+                   :dialect-label dialect-label
                  ;; cljd plan P2.T4: the Reset on Run checkbox, for rows
                  ;; that read its sensitivity and tooltip.
-                 :reset-check reset-chk
-                 :find-bar fb
-                 :run!* run-fn :stop!* stop-fn
-                 :open-path! (fn [p]
-                               (guarded-open! ed cv discard-warned?
-                                              (fn [] (open-path! ed cv path p) (update-title! ed win path))))
-                 :save-to! (fn [p] (save-to! ed cv path p) (update-title! ed win path))
+                   :reset-check reset-chk
+                   :find-bar fb
+                   :run!* run-fn :stop!* stop-fn
+                   :open-path! (fn [p]
+                                 (let [{ed :ed path :path :keys [discard-warned?]} (active-tab)]
+                                   (guarded-open! ed cv discard-warned?
+                                                  (fn [] (open-path! ed cv path p) (update-title! ed win path)))))
+                   :save-to! (fn [p] (let [{ed :ed path :path} (active-tab)]
+                                       (save-to! ed cv path p) (update-title! ed win path)))
                  ;; P3.T3 self-test hooks: the exact fns the F6/Cmd+E/Cmd+L/
                  ;; zoom key chords call, so rows can drive them directly.
-                 :run-selection!* run-selection-fn
+                   :run-selection!* run-selection-fn
                  ;; cljd plan P3.T2: Run Form's own fn, the one Cmd/Ctrl+Enter
                  ;; and the menu item call.
-                 :run-form!* run-form-fn
-                 :toggle-focus!* toggle-focus-fn
-                 :clear-console!* clear-console-fn
+                   :run-form!* (:run-form! actions)
+                   :toggle-focus!* toggle-focus-fn
+                   :clear-console!* clear-console-fn
                  ;; Cmd/Ctrl+Shift+L's own fn, the one that clears only the
                  ;; last entry's block -- same self-test-hook shape as
                  ;; :clear-console!* just above.
-                 :clear-last-output!* clear-last-fn
-                 :zoom!* zoom-fn
+                   :clear-last-output!* clear-last-fn
+                   :zoom!* zoom-fn
                  ;; TH.T4 self-test hooks: applies a theme (never saves --
                  ;; TH.T5's job), reads back the active theme name, and
                  ;; reads back the shared CSS provider's OWN serialisation
                  ;; (fix wave item 7 -- the code-css atom was a mirror the
                  ;; rows could drift from; g/css-provider-string asks the
                  ;; provider itself instead).
-                 :set-theme!* set-theme-fn
-                 :theme-name* (fn [] @theme-name)
-                 :code-css* (fn [] (g/css-provider-string provider))
+                   :set-theme!* set-theme-fn
+                   :theme-name* (fn [] @theme-name)
+                   :code-css* (fn [] (g/css-provider-string provider))
                  ;; TH.T5: the chord's own action, the settings path this
                  ;; window reads/writes, and the exact startup-load fn
                  ;; activate! itself just ran (so a row can drive the same
                  ;; path against a synthetic settings file).
-                 :cycle-theme!* cycle-theme-fn
-                 :settings-path* (fn [] @settings-path*)
-                 :load-settings!* (fn [p] (load-and-apply-theme! ed cv fb provider zoom-px theme-name code-css p))
+                   :cycle-theme!* cycle-theme-fn
+                   :settings-path* (fn [] @settings-path*)
+                   :load-settings!* (fn [p] (load-and-apply-theme! theme-ctx p))
                  ;; TH.T5 self-test hook only (row-theme-save-failure-
                  ;; reported): repoints the window's own settings path so a
                  ;; save can be forced to fail without touching the real
                  ;; settings file or racing the filesystem.
-                 :settings-path!* (fn [p] (reset! settings-path* p))
+                   :settings-path!* (fn [p] (reset! settings-path* p))
                  ;; P4.T3: the window's own popover registry -- close-
                  ;; popovers-fn is exactly what the new Escape clause calls;
                  ;; register-popover-fn is how a popover (a self-test row's
                  ;; own test popover today, completion/quick-doc/rename from
                  ;; P4.T4-T7 on) joins that registry.
-                 :close-popovers!* close-popovers-fn
-                 :register-popover!* register-popover-fn
+                   :close-popovers!* close-popovers-fn
+                   :register-popover!* register-popover-fn
                  ;; P4.T4: the ui's own quick-doc/jump actions -- the exact
                  ;; fns editor.clj's own Ctrl+Q/Shift+F1/F12/Ctrl+B clauses
                  ;; call (set-quick-doc-fn!/set-jump-fn!, above) -- and the
                  ;; quick-doc popover itself, for rows to read back via
                  ;; jonquil.gtk.popover/open? and help-popover/quick-doc-text.
-                 :quick-doc!* quick-doc-fn
-                 :jump!* jump-fn
-                 :help-popover help-pop
+                   :quick-doc!* (:quick-doc! actions)
+                   :jump!* (:jump! actions)
+                   :help-popover help-pop
                  ;; P3.T2: the full-doc popover a second quick-doc press
                  ;; over the same target shows in (ruling 11) -- rows read
                  ;; it back via jonquil.gtk.popover/open? and help-popover/
                  ;; full-doc-text, same as :help-popover above.
-                 :full-doc-popover full-doc-pop
+                   :full-doc-popover full-doc-pop
                  ;; P4.T7: the ui's own rename actions -- rename!* is the
                  ;; exact fn editor.clj's own Shift+F6/F2 clauses call
                  ;; (set-rename-fn!, above); rename-to!* is the exact fn
@@ -2525,30 +2826,30 @@
                  ;; rename popover itself, for rows to read back via
                  ;; jonquil.gtk.popover/open? and help-popover/rename-
                  ;; entry-text/rename-problem-text.
-                 :rename!* rename-fn
-                 :rename-to!* rename-to-fn
-                 :rename-popover rename-pop
+                   :rename!* (:rename! actions)
+                   :rename-to!* (:rename-to! actions)
+                   :rename-popover rename-pop
                  ;; P4.T7: fires a context-menu item by its own unprefixed
                  ;; action name (\"jump\", \"rename\", \"toggle-comment\",
                  ;; ...) through g_action_group_activate_action on the
                  ;; editor's/the console's own GSimpleActionGroup --
                  ;; install-context-menu!'s own docstring on why that's
                  ;; equivalent to activating the prefixed \"p4.<name>\".
-                 :activate-menu-action!* activate-menu-action-fn
-                 :repl-activate-menu-action!* repl-activate-menu-action-fn
+                   :activate-menu-action!* activate-menu-action-fn
+                   :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
                  ;; completion popover itself, for rows to read back via
                  ;; jonquil.gtk.popover/open? and jonquil.gtk.completion/
                  ;; state.
-                 :complete!* complete-fn
-                 :completion completion
+                   :complete!* (:complete! actions)
+                   :completion completion
                  ;; P4.T6: the ui's own console-facing completion action --
                  ;; the exact fn console-view's own Ctrl+Space clause calls
                  ;; -- and the console's completion popover itself, same
                  ;; reasoning as :complete!*/:completion above.
-                 :repl-complete!* repl-complete-fn
-                 :repl-completion repl-completion
+                   :repl-complete!* repl-complete-fn
+                   :repl-completion repl-completion
                  ;; P2.T2: the inspector panel map (P2.T1's make-pane
                  ;; return, including its own :on-def -- rows drive the
                  ;; def prompt through it directly), the window's own
@@ -2559,64 +2860,78 @@
                  ;; window actually sent (ruling 9's own :inspector-last-
                  ;; args* -- row-inspect-cols-match compares a :start's own
                  ;; :cols against the pane's own measure).
-                 :inspector pane
-                 :inspect-last!* inspect-last-fn
-                 :inspect-form!* inspect-form-fn
-                 :inspector-state* (fn [] @inspector-state)
-                 :inspector-last-args* (fn [] @inspector-last-args)
+                   :inspector pane
+                   :inspect-last!* inspect-last-fn
+                   :inspect-form!* inspect-form-fn
+                   :inspector-state* (fn [] @inspector-state)
+                   :inspector-last-args* (fn [] @inspector-last-args)
                  ;; Source-panel spec: the jonquil.gtk.source-pane map, the
                  ;; GtkBox holding it and the inspector in the right-hand
                  ;; slot, and the window's own F12-inside/Open-in-window/
                  ;; back/close actions -- exactly what the panel's own keys
                  ;; and buttons call.
-                 :source-pane sp
-                 :right-slot slot
-                 :source-jump!* source-jump-fn
-                 :source-open!* source-open-fn
-                 :source-back!* source-back-fn
-                 :source-close!* source-close-fn
+                   :source-pane sp
+                   :right-slot slot
+                   :source-jump!* source-jump-fn
+                   :source-open!* source-open-fn
+                   :source-back!* source-back-fn
+                   :source-close!* source-close-fn
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
                  ;; synthetic keyval/state -- an ordinary function call, not
                  ;; a synthesized OS keystroke.
-                 :handle-window-key! window-key-fn
+                   :handle-window-key! window-key-fn
                  ;; M2 self-test hook: the exact dialog-result decisions,
                  ;; driven with a synthetic result map shaped like
                  ;; g/finish-file's -- file-dialog! itself can't be driven
                  ;; without a live dialog.
-                 :simulate-open-result! (fn [result] (contained-open-result! {:ed ed :cv cv :win win :path-atom path} result))
-                 :simulate-save-result! (fn [result] (contained-save-result! {:ed ed :cv cv :win win :path-atom path} result))
+                                    ;; Ruling 4: a simulated Open loads into the active tab, as
+                 ;; :open-path! does.
+                   :simulate-open-result! (fn [result]
+                                            (contained-open-result!
+                                             {:cv cv
+                                              :open! (fn [p] (let [t (active-tab)]
+                                                               (open-path! (:ed t) cv (:path t) p)
+                                                               (update-title! (:ed t) win (:path t))))}
+                                             result))
+                   :simulate-save-result! (fn [result] (let [t (active-tab)]
+                                                         (contained-save-result! {:ed (:ed t) :cv cv :win win :path-atom (:path t)} result)))
                  ;; The toolbar's own buttons, so a row can fire their real
                  ;; "clicked" handlers (g/g-signal-emit-by-name).
-                 :toolbar {:run run-btn :stop stop-btn :open open-btn :save save-btn}
+                   :toolbar {:run run-btn :stop stop-btn :open open-btn :save save-btn}
                  ;; P3.T5: close-choice! is the exact fn the real alert
                  ;; dialog's own completion callback calls; request-close!*
                  ;; runs gtk_window_close, the same path the window's close
                  ;; button/OS chrome uses. closing?/suppress-close? are
                  ;; self-test-only hooks (close-request-fn's docstring).
-                 :close-choice! (fn [result] (close-choice! ed cv win path confirmed-close? result))
+                   :close-choice! (fn [result]
+                                    (close-choice! {:dirty-tabs (filterv (fn [t] (editor/dirty? (:ed t))) @tabs)
+                                                    :cv cv :win win :confirmed-close? confirmed-close?
+                                                    :select! (fn [t] (select-tab! @*tab-ctx (:id t)))}
+                                                   result))
                  ;; P3 fix wave C3: activates the application's "quit"
                  ;; action exactly as GTK's macOS delegate does on a Quit
                  ;; AppleEvent.
-                 :activate-quit-action!* (fn [] (g/g-action-group-activate-action app "quit" ffi/null))
-                 :request-close!* (fn [] (g/gtk-window-close win))
-                 :closing? closing?
-                 :suppress-close? suppress-close?
+                   :activate-quit-action!* (fn [] (g/g-action-group-activate-action app "quit" ffi/null))
+                   :request-close!* (fn [] (g/gtk-window-close win))
+                   :closing? closing?
+                   :suppress-close? suppress-close?
                  ;; Fix round 1 self-test hooks only (Important #1): drive
                  ;; complete-alert!'s per-dialog routing directly, with
                  ;; synthetic, non-GTK "dialog" identities -- see the report.
-                 :alert-dialog-count alert-dialog-count
-                 :alert-pending? alert-pending?
-                 :alert-release! alert-release!
-                 :register-alert-choice-for-test! register-alert-choice!
-                 :complete-alert-for-test! complete-alert!}))))
+                   :alert-dialog-count alert-dialog-count
+                   :alert-pending? alert-pending?
+                   :alert-release! alert-release!
+                   :register-alert-choice-for-test! register-alert-choice!
+                   :complete-alert-for-test! complete-alert!})))))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :on-ready (fn [ui]) :settings-path path-or-nil}, where
   :settings-path defaults to (jonquil.settings/settings-path) -- every
   self-test/docs-shots/smoke harness must pass its own isolated path so it
-  never touches the user's real settings file (TH.T5). ui is {:editor
+  never touches the user's real settings file (TH.T5). ui is {:notebook
+  :tabs* :active-tab* :editor
   :console :session :status-label :line-col-label :evaluator* :selection*
   :dialect-label :reset-check :window :find-bar :run!*
   :stop!* :open-path! :save-to! :run-selection!* :run-form!* :toggle-focus!*

@@ -34,6 +34,7 @@
    rows/row-cljd-idle-stop-detaches
    rows/row-cljd-not-running-message
    rows/row-cljd-inspect-unavailable
+   rows/row-cljd-two-tabs-run
    rows/row-cljd-close])
 
 (def ^:private PER-ROW-MS

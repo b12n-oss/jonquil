@@ -8,7 +8,7 @@ Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, a
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
-See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, themes, help, dialects and running Jolt out of process, and the keys.
+See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
 
 Jonquil picks a dialect for whatever file is open. For Jolt, a program
 runs either inline, in Jonquil's own process, or out of process over
@@ -25,6 +25,8 @@ connects the first time you Run. A short list of limits for each runtime
 is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
+
+Several files can be open at once, one tab each, over one evaluator and one console. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
 
 Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
 
@@ -68,6 +70,7 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 - `jonquil.edit`: Pure edit operations (smart enter, auto-pair, indent, rename, etc.).
 - `jonquil.eval`: The eval engine with `run-interruptible` Stop, output streaming and REPL history.
 - `jonquil.help`: The decisions behind completion, quick doc, jump to definition and rename.
+- `jonquil.tabs`: The window's tabs as plain data: labels, the open-file lookup, the runnable-here check, and alert and banner text.
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.
 - `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).

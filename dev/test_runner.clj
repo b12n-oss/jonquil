@@ -22,6 +22,7 @@
     jonquil.commands-test
     jonquil.help-test
     jonquil.source-test
+    jonquil.tabs-test
     jonquil.dialect-test
     jonquil.evaluator-test
     jonquil.nrepl.bencode-test

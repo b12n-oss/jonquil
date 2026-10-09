@@ -49,7 +49,7 @@
       (run e "(ns scratch.evaltest) (def z 7)" true)
       (is (= 'scratch.evaltest (ev/prompt-ns e)))
       (is (= 7 (:value (run e "z" false))))
-      (session/reset-namespaces! e))))
+      (session/reset-namespaces! e :run))))
 
 (deftest busy-and-interrupt-test
   (let [e (fresh)

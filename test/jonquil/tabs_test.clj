@@ -1,0 +1,59 @@
+(ns jonquil.tabs-test
+  (:require [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.dialect :as dialect]
+            [jonquil.tabs :as tabs]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
+
+(deftest labels-test
+  (is (= ["a.clj" "b.clj ●"] (tabs/labels [{:path "/p/a.clj"} {:path "/p/b.clj" :dirty? true}])))
+  (is (= ["core.clj · talk" "core.clj · lib"] (tabs/labels [{:path "/x/talk/core.clj"} {:path "/y/lib/core.clj"}])))
+  (is (= ["Untitled" "a.clj" "Untitled 2 ●"] (tabs/labels [{} {:path "/p/a.clj"} {:dirty? true}]))))
+
+(deftest find-open-test
+  (let [dir (temp-dirs/temp-dir! "jonquil-tabs-test-")
+        f (java.io.File. dir "a.clj")
+        link (java.io.File. dir "link.clj")]
+    (spit f "1")
+    (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath f) (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (= 1 (tabs/find-open [{} {:path (str f)}] (str link))))
+    (is (nil? (tabs/find-open [{} {:path (str f)}] (str dir "/other.clj"))))
+    (is (nil? (tabs/find-open [{}] nil)))))
+
+(deftest untouched-untitled-test
+  (is (tabs/untouched-untitled? {:path nil :text ""}))
+  (is (not (tabs/untouched-untitled? {:path nil :text " "})))
+  (is (not (tabs/untouched-untitled? {:path "/a.clj" :text ""}))))
+
+(deftest runnable-here-test
+  (let [jolt {:profile dialect/jolt :runtime :in-process :project-dir "/a"}]
+    (is (tabs/runnable-here? jolt nil))
+    (is (tabs/runnable-here? jolt (assoc jolt :project-dir "/elsewhere")) "in-process ignores the dir")
+    (is (not (tabs/runnable-here? (assoc jolt :runtime :nrepl) (assoc jolt :runtime :nrepl :project-dir "/b"))))
+    (is (not (tabs/runnable-here? jolt (assoc jolt :profile dialect/cljd :runtime :attach))))))
+
+(deftest close-alert-test
+  (is (= {:message "Save changes to a.clj before closing?" :buttons ["Save" "Don't Save" "Cancel"]}
+         (tabs/close-alert ["a.clj"])))
+  (is (= {:message "2 files have unsaved changes: a.clj, Untitled" :buttons ["Save All" "Don't Save" "Cancel"]}
+         (tabs/close-alert ["a.clj" "Untitled"]))))
+
+(deftest run-banner-test
+  (is (= "; --- Running Definitions ---\n" (tabs/run-banner nil)))
+  (is (= "; --- Running demo.clj ---\n" (tabs/run-banner "/p/talk/demo.clj"))))
+
+(deftest index-test
+  (is (= 0 (tabs/cycle-index 3 2 1)))
+  (is (= 2 (tabs/cycle-index 3 0 -1)))
+  (is (= 1 (tabs/index-for-digit 3 2)))
+  (is (nil? (tabs/index-for-digit 3 5)))
+  (is (= 2 (tabs/index-for-digit 3 9)))
+  (is (= [:a :x :b] (tabs/insert-after [:a :b] 0 :x))))
+
+(deftest refusal-message-test
+  (let [home (System/getProperty "user.home")
+        msg (tabs/refusal-message {:file "demo.cljd"
+                                   :tab-sel {:profile dialect/cljd :runtime :attach :project-dir (str home "/dev/other")}
+                                   :window-sel {:profile dialect/jolt :runtime :in-process :project-dir (str home "/dev/my-talk")}})]
+    (is (= "; demo.cljd belongs to ~/dev/other (ClojureDart (not running)). This window runs ~/dev/my-talk (Jolt), so it can't run here.\n" msg))))

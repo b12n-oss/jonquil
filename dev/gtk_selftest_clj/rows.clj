@@ -3,11 +3,13 @@
   JVM project directory whose .nrepl-port names a fake nREPL server
   running in this process (dev/fake_jvm_nrepl.clj). Nothing here reads or
   connects to a real project's own .nrepl-port."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.core.async :refer [<!]]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [fake-jvm-nrepl :as fake]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [gtk-selftest-window.tabs :as tabs]
             [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -560,6 +562,26 @@
                           {:seen seen :label (label ui)})))
         (finally
           (on-gtk (doseq [f (reverse (file-seq d))] (.delete ^java.io.File f))))))))
+
+(defn- close-extra-tabs!
+  "Marks every tab but the first saved and closes it, then selects the
+  first. GTK-thread only."
+  [ui]
+  (doseq [t (rest ((:tabs* ui)))]
+    (editor/mark-saved! (:ed t))
+    ((:close-tab! ui) (:id t)))
+  ((:select-tab! ui) (:id (first ((:tabs* ui))))))
+
+(defn row-clj-two-tabs-run
+  "Tabs plan P2.T4: a JVM attach window runs from a second tab too."
+  [ui]
+  (go-row :clj-two-tabs-run support/check
+    (let [[t1 t2] (on-gtk [(first ((:tabs* ui))) ((:new-tab!* ui))])
+          [ok1 _] (<! (tabs/run-tab ui t1 fixture-core-text 10000 #(str/includes? % "=> #'demo.core/nested")))
+          [ok2 m2] (<! (tabs/run-tab ui t2 fixture-core-text 10000 #(str/includes? % "=> #'demo.core/nested")))]
+      (on-gtk (try
+                (support/check :clj-two-tabs-run (and ok1 ok2) {:ok1 ok1 :ok2 ok2 :second (support/since ui m2)})
+                (finally (close-extra-tabs! ui)))))))
 
 (defn row-clj-close
   "The deliberately LAST row: fires the app's quit action, the path a Quit
