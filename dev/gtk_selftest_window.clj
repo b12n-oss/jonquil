@@ -36,6 +36,7 @@
             [gtk-selftest-window.run-repl :as run-repl]
             [gtk-selftest-window.source-pane :as source-pane]
             [gtk-selftest-window.support :as support]
+            [gtk-selftest-window.tab-widget :as tab-widget]
             [gtk-selftest-window.themes :as themes]
             [gtk-selftest-window.window-keys :as window-keys]
             [jolt.ffi :as ffi]
@@ -239,6 +240,8 @@
    source-pane/row-source-pane-history
    source-pane/row-source-pane-back-deleted-file
    source-pane/row-source-pane-same-file-no-reload
+   tab-widget/row-tab-widget-builds
+   tab-widget/row-tab-widget-dispose-unparents
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    window-keys/row-command-chord-close])

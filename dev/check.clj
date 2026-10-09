@@ -42,6 +42,7 @@
     jonquil.gtk.completion
     jonquil.gtk.find-bar
     jonquil.gtk.console-view
+    jonquil.gtk.tab
     jonquil.gtk.window
     jonquil.main])
 
