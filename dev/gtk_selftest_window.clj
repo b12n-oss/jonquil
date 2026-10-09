@@ -27,6 +27,7 @@
             [gtk-selftest-window.contained :as contained]
             [gtk-selftest-window.dialects :as dialects]
             [gtk-selftest-window.files :as files]
+            [gtk-selftest-window.file-tree-pane :as file-tree-pane]
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
@@ -243,6 +244,13 @@
    source-pane/row-source-pane-same-file-no-reload
    tab-widget/row-tab-widget-builds
    tab-widget/row-tab-widget-dispose-unparents
+   file-tree-pane/row-tree-pane-shows-rows
+   file-tree-pane/row-tree-pane-folder-click
+   file-tree-pane/row-tree-pane-file-click
+   file-tree-pane/row-tree-pane-select-path
+   file-tree-pane/row-tree-pane-refresh-deleted
+   file-tree-pane/row-tree-pane-unreadable-root
+   file-tree-pane/row-tree-pane-large-folder
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip

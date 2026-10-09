@@ -372,7 +372,7 @@
                          "jonquil-selftest-close-save-" "jonquil-selftest-dirty-"
                          "jonquil-selftest-exec-" "jonquil-selftest-impossible-parent-"
                          "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
-                         "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-file-tree-test-"
+                         "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-tree-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-clj-server-" "jonquil-clj-config-"
                          "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]

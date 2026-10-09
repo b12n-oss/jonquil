@@ -44,6 +44,7 @@
     jonquil.gtk.find-bar
     jonquil.gtk.console-view
     jonquil.gtk.tab
+    jonquil.gtk.file-tree-pane
     jonquil.gtk.window
     jonquil.main])
 
