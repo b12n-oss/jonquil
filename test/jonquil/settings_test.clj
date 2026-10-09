@@ -1,5 +1,6 @@
 (ns jonquil.settings-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.settings :as settings]
@@ -143,3 +144,25 @@
     (let [path (str (temp-dir) "/settings.edn")]
       (is (nil? (settings/save-settings! path {:theme :dark})))
       (is (= {:theme :dark} (settings/load-settings path))))))
+
+(deftest save-merges-test
+  ;; File-tree plan P1.T2: a save keeps every key the file already holds.
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :dialect :jolt :file-tree {:visible? true :width 240}}")
+    (is (nil? (settings/save-settings! path {:theme :dark})))
+    (is (= {:theme :dark :dialect :jolt :file-tree {:visible? true :width 240}}
+           (edn/read-string (slurp path))))
+    (is (nil? (settings/save-settings! path {:file-tree {:visible? false :width 300}})))
+    (is (= {:theme :dark :dialect :jolt :file-tree {:visible? false :width 300}}
+           (edn/read-string (slurp path))))))
+
+(deftest file-tree-load-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :navy :file-tree {:visible? true :width 240}}")
+    (is (= {:visible? true :width 240} (:file-tree (settings/load-settings path)))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :navy :file-tree {:visible? \"yes\"}}")
+    (let [r (settings/load-settings path)]
+      (is (nil? (:file-tree r)))
+      (is (= :navy (:theme r)))
+      (is (str/includes? (:warning r) "unusable :file-tree")))))
