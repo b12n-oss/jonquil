@@ -6,6 +6,7 @@
             [gtk-async :refer [on-gtk await-until go-row]]
             [gtk-selftest-window.support :as support]
             [jonquil.eval :as eval]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]
@@ -180,7 +181,10 @@
             (support/place-cursor! (:buf (:editor ui)) 2)
             ((:quick-doc!* ui))
             ((:run!* ui)))
-    (let [started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))]
+    ;; The window's live evaluator, not the starting :session: an earlier
+    ;; tabs row switches the window to ClojureDart and back, which leaves a
+    ;; new in-process evaluator (tabs plan P2.T4).
+    (let [started? (await-until 2000 20 #(ev/evaluating? ((:evaluator* ui))))]
       ;; The close chord ends the GTK main loop, so the check is recorded in
       ;; the same on-gtk step: no on-gtk may follow this one.
       (on-gtk (let [popover-was-open? (popover/open? (:help-popover ui))

@@ -49,6 +49,7 @@
    source/row-clj-source-read-only
    source/row-clj-source-shares-slot
    rows/row-clj-reset-tick-round-trip
+   rows/row-clj-two-tabs-run
    rows/row-clj-close])
 
 (def ^:private PER-ROW-MS

@@ -256,6 +256,10 @@
    tabs/row-tab-switch-closes-popovers
    tabs/row-tab-theme-all-tabs
    tabs/row-tab-source-open-in-window
+   tabs/row-tab-run-keeps-other-tab-ns
+   tabs/row-tab-run-banner-names-file
+   tabs/row-tab-foreign-refuses-run
+   tabs/row-tab-close-to-one-adopts-project
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

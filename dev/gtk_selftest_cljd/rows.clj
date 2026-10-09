@@ -3,11 +3,13 @@
   directory whose NREPL.lock names a fake fork server running in this
   process (dev/fake_cljd_nrepl.clj). Nothing here reads or connects to a
   real app's NREPL.lock."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.core.async :refer [<!]]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [fake-cljd-nrepl :as fake]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [gtk-selftest-window.tabs :as tabs]
             [jonquil.cljd :as cljd]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
@@ -316,6 +318,36 @@
                         (and shown? (zero? (g/gtk-widget-get-visible (:root pane))))
                         {:shown shown? :status (g/label-text (:status-label ui))
                          :visible (g/gtk-widget-get-visible (:root pane))}))))))
+
+(defn- close-extra-tabs!
+  "Marks every tab but the first saved and closes it, then selects the
+  first. GTK-thread only."
+  [ui]
+  (doseq [t (rest ((:tabs* ui)))]
+    (editor/mark-saved! (:ed t))
+    ((:close-tab! ui) (:id t)))
+  ((:select-tab! ui) (:id (first ((:tabs* ui))))))
+
+(defn row-cljd-two-tabs-run
+  "Tabs plan P2.T4: an attach window runs from a second tab too. The cljd
+  runtime only loads saved files, so tab 1 gets the fixture back (an
+  earlier row pointed the window at another app; with one tab the window
+  follows) and tab 2 opens a second file of the same app. Both Runs reach
+  the app."
+  [ui]
+  (go-row :cljd-two-tabs-run support/check
+    (let [{:keys [dir file]} @fixture*
+          f2 (io/file dir "dev/demo/drive2.cljd")
+          _ (spit f2 (str/replace fixture-drive "demo.drive" "demo.drive2"))
+          t1 (on-gtk ((:open-path! ui) file) (first ((:tabs* ui))))
+          _ (await-until 3000 20 #(str/starts-with? (label ui) "ClojureDart"))
+          t2 (on-gtk ((:open-file! ui) (.getCanonicalPath f2)) ((:active-tab* ui)))
+          [ok1 m1] (<! (tabs/run-tab ui t1 nil 10000 #(str/includes? % "; Loaded demo.drive (")))
+          [ok2 m2] (<! (tabs/run-tab ui t2 nil 10000 #(str/includes? % "; Loaded demo.drive2 (")))]
+      (on-gtk (try
+                (support/check :cljd-two-tabs-run (and ok1 ok2 (not= (:id t1) (:id t2)))
+                               {:ok1 ok1 :ok2 ok2 :first (support/since ui m1) :second (support/since ui m2)})
+                (finally (close-extra-tabs! ui)))))))
 
 (defn row-cljd-close
   "The deliberately LAST row: fires the app's quit action, the path a Quit

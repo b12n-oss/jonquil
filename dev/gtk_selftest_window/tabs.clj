@@ -6,11 +6,13 @@
   close-extra-tabs! in a finally.
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.core.async :refer [<! go]]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]
@@ -275,3 +277,105 @@
                         (and (= 2 (:n v)) (= f (:path v)) (= 3 (:line v)) (= 0 (:panel-visible v)))
                         v))
        (finally (close-extra-tabs! ui))))))
+
+;; --- Run per tab (tabs plan P2.T4) -------------------------------------------
+
+(defn run-tab
+  "A go-block step: selects tab t, sets its text to code (when given) and
+  Runs it; parks until the window's evaluator is idle and (expect-fn
+  text-since-start) holds, or deadline-ms passes. A channel of [ok mark]."
+  [ui t code deadline-ms expect-fn]
+  (go
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                         ((:select-tab! ui) (:id t))
+                         (when code (editor/set-text! (:ed t) code))
+                         ((:run!* ui))
+                         m))
+          ok (await-until deadline-ms 20 #(and (not (ev/evaluating? ((:evaluator* ui))))
+                                               (expect-fn (support/since ui mark))))]
+      [ok mark])))
+
+(defn row-tab-run-keeps-other-tab-ns
+  "Tab 1 defines tabs.one; tab 2 requires it and calls it; Running tab 2
+  again (a reset) leaves tabs.one in place."
+  [ui]
+  (go-row :tab-run-keeps-other-tab-ns support/check
+    (let [[t1 t2] (on-gtk [(first (tabs ui)) ((:new-tab!* ui))])
+          [ok1 _] (<! (run-tab ui t1 "(ns tabs.one) (defn hello [] :hi)" 5000 #(str/includes? % "=> ")))
+          code2 "(ns tabs.two (:require [tabs.one :as one])) (one/hello)"
+          [ok2 m2] (<! (run-tab ui t2 code2 5000 #(str/includes? % "=> :hi")))
+          [ok3 m3] (<! (run-tab ui t2 nil 5000 #(str/includes? % "=> :hi")))]
+      (on-gtk (try
+                (support/check :tab-run-keeps-other-tab-ns (and ok1 ok2 ok3)
+                               {:ok1 ok1 :ok2 ok2 :ok3 ok3 :second (support/since ui m2) :third (support/since ui m3)})
+                (finally (close-extra-tabs! ui)))))))
+
+(defn row-tab-run-banner-names-file
+  "Run in a saved tab names its file in the banner."
+  [ui]
+  (go-row :tab-run-banner-names-file support/check
+    (let [t (on-gtk (occupy-first! ui)
+                    ((:open-file! ui) (temp-file! "demo.clj" "(+ 1 2)\n"))
+                    (active ui))
+          [ok m] (<! (run-tab ui t nil 5000 #(str/includes? % "=> 3")))]
+      (on-gtk (try
+                (let [out (support/since ui m)]
+                  (support/check :tab-run-banner-names-file
+                                 (and ok (str/includes? out "; --- Running demo.clj ---")) {:out out}))
+                (finally (close-extra-tabs! ui)))))))
+
+(defn- cljd-project!
+  "A temp ClojureDart project (pubspec.yaml) with lib/x.cljd; the file's path."
+  []
+  (let [dir (temp-dirs/temp-dir! "jonquil-selftest-tabs-")]
+    (spit (io/file dir "pubspec.yaml") "name: other\n")
+    (let [f (io/file dir "lib" "x.cljd")]
+      (io/make-parents f)
+      (spit f "(ns other.x)\n")
+      (.getCanonicalPath f))))
+
+(defn row-tab-foreign-refuses-run
+  "With two tabs open the window's project is fixed: a ClojureDart file
+  opens as a third tab, and Run there is refused with the console's note,
+  leaving the evaluator and the dialect label as they were."
+  [ui]
+  (go-row :tab-foreign-refuses-run support/check
+    (let [[before label t] (on-gtk (occupy-first! ui)
+                                   ((:new-tab!* ui))
+                                   (editor/set-text! (:ed (active ui)) ";; two\n")
+                                   (let [before ((:evaluator* ui))
+                                         label (g/label-text (:dialect-label ui))]
+                                     ((:open-file! ui) (cljd-project!))
+                                     [before label (active ui)]))
+          [_ m] (<! (run-tab ui t nil 2000 #(str/includes? % "so it can't run here.")))]
+      (on-gtk (try
+                (let [out (support/since ui m)
+                      v {:out out :n (count (tabs ui)) :same-ev (identical? before ((:evaluator* ui)))
+                         :label (g/label-text (:dialect-label ui)) :label-before label}]
+                  (support/check :tab-foreign-refuses-run
+                                 (and (= 3 (:n v)) (str/includes? out "belongs to") (str/includes? out "so it can't run here.")
+                                      (:same-ev v) (= label (:label v)))
+                                 v))
+                (finally (close-extra-tabs! ui)))))))
+
+(defn row-tab-close-to-one-adopts-project
+  "With two tabs, a ClojureDart file opened into tab 1 doesn't switch the
+  window; closing tab 2 leaves one tab whose project differs, so the window
+  adopts it. Restored afterwards by opening a plain .clj file into the one
+  tab (one tab switches, as dialects.clj's rows rely on)."
+  [ui]
+  (go-row :tab-close-to-one-adopts-project support/check
+    (let [[before t2 m] (on-gtk (let [before ((:evaluator* ui))
+                                      t2 ((:new-tab!* ui))
+                                      m (support/out-end-offset ui)]
+                                  ((:select-tab! ui) (:id (first (tabs ui))))
+                                  ((:open-path! ui) (cljd-project!))
+                                  [before t2 m]))
+          kept? (on-gtk (identical? before ((:evaluator* ui))))
+          _ (on-gtk ((:close-tab! ui) (:id t2)))
+          adopted? (await-until 3000 20 #(and (str/includes? (support/since ui m) "; Switched to ClojureDart")
+                                              (str/starts-with? (g/label-text (:dialect-label ui)) "ClojureDart")))
+          _ (on-gtk ((:open-path! ui) (temp-file! "back.clj" "(+ 1 1)\n")))
+          back? (await-until 5000 20 #(= "Jolt" (g/label-text (:dialect-label ui))))]
+      (on-gtk (support/check :tab-close-to-one-adopts-project (and kept? adopted? back?)
+                             {:kept kept? :adopted adopted? :back back? :out (support/since ui m)})))))

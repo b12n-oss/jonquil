@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [gtk-async :refer [on-gtk await-until go-row]]
             [gtk-selftest-window.support :as support]
+            [gtk-selftest-window.tabs :as tabs]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -387,6 +388,29 @@
                              {:switched1? switched1? :label1 label1 :inproc1? inproc1?
                               :old-pid old-pid :dead1? dead1? :started2? started2?
                               :label2 label2 :text (support/since ui mark3)})))))
+
+(defn- close-extra-tabs!
+  "Marks every tab but the first saved and closes it, then selects the
+  first. GTK-thread only."
+  [ui]
+  (doseq [t (rest ((:tabs* ui)))]
+    (editor/mark-saved! (:ed t))
+    ((:close-tab! ui) (:id t)))
+  ((:select-tab! ui) (:id (first ((:tabs* ui))))))
+
+(defn row-nrepl-two-tabs-owner-reset
+  "Tabs plan P2.T4 over nREPL: tab 1 and a new tab each define a
+  namespace; Running tab 1 again (a reset) leaves tab 2's tabs.two."
+  [ui]
+  (go-row :nrepl-two-tabs-owner-reset support/check
+    (let [[t1 t2] (on-gtk [(first ((:tabs* ui))) ((:new-tab!* ui))])
+          [ok1 _] (<! (tabs/run-tab ui t1 "(ns tabs.one) (def v 1)" 20000 #(str/includes? % "=> ")))
+          [ok2 _] (<! (tabs/run-tab ui t2 "(ns tabs.two) (def w 2)" 20000 #(str/includes? % "=> ")))
+          [ok3 m3] (<! (tabs/run-tab ui t1 "(ns tabs.one) (def v 1) tabs.two/w" 20000 #(str/includes? % "=> 2")))]
+      (on-gtk (try
+                (support/check :nrepl-two-tabs-owner-reset (and ok1 ok2 ok3)
+                               {:ok1 ok1 :ok2 ok2 :ok3 ok3 :third (support/since ui m3)})
+                (finally (close-extra-tabs! ui)))))))
 
 (defn row-nrepl-close-kills-child
   "The deliberately LAST row: records the live child's own pid, leaves the

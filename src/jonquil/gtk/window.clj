@@ -913,6 +913,17 @@
                                (when-let [msg (console/unclosed-bracket-message (editor/editor-text ed))]
                                  (cview/append! cv :system (str msg "\n")))))))})
 
+(defn- refuse-foreign!
+  "Tabs plan P2.T4: true, after printing why, when tab belongs to another
+  project or dialect than the window (jonquil.tabs/runnable-here?), so Run,
+  Run Selection and Run Form evaluate nothing there."
+  [{:keys [tab cv sel*]}]
+  (let [tsel @(:project tab)]
+    (when-not (tabs/runnable-here? @sel* tsel)
+      (cview/append! cv :system (tabs/refusal-message {:file (file-name @(:path tab)) :tab-sel tsel
+                                                       :window-sel @sel*}))
+      true)))
+
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).
   ev/evaluating? is checked BEFORE ev/eval! and the banner (when printed)
@@ -944,20 +955,25 @@
   before the banner itself is queued, so it resolves (on the console's own
   next drain) right where the banner's own text lands -- never on the busy
   path above, which prints no banner at all."
-  [ed cv ev* status-label path-atom]
-  (if (ev/evaluating? @ev*)
-    (let [warning (ev/eval! @ev* (editor/editor-text ed)
-                            (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom))]
-      (when warning (cview/append! cv :system warning)))
-    (let [text (editor/editor-text ed)
-          problem (commands/pre-run-problem text)]
-      (cview/mark-entry-start! cv)
-      (cview/append! cv :system "; --- Running Definitions ---\n")
-      (if problem
-        (do (cview/append! cv :error (str problem "\n"))
-            (set-status! status-label "Ready"))
-        (let [warning (ev/eval! @ev* text (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom))]
-          (when warning (cview/append! cv :system warning)))))))
+  [{:keys [tab cv ev* status-label] :as ctx}]
+  (let [{ed :ed path-atom :path id :id} tab
+        opts (fn [] (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom :owner id))]
+    (cond
+      (refuse-foreign! ctx) nil
+      (ev/evaluating? @ev*)
+      (let [warning (ev/eval! @ev* (editor/editor-text ed) (opts))]
+        (when warning (cview/append! cv :system warning)))
+      :else
+      (let [text (editor/editor-text ed)
+            problem (commands/pre-run-problem text)]
+        (cview/mark-entry-start! cv)
+      ;; Tabs plan ruling 5: a saved tab's banner names its file.
+        (cview/append! cv :system (tabs/run-banner @path-atom))
+        (if problem
+          (do (cview/append! cv :error (str problem "\n"))
+              (set-status! status-label "Ready"))
+          (let [warning (ev/eval! @ev* text (opts))]
+            (when warning (cview/append! cv :system warning))))))))
 
 (defn- do-stop!
   "Fix round 2, finding B: a running Stop's detached line comes from that
@@ -1011,11 +1027,13 @@
   as before) but must NOT steal the last-entry mark from that running
   program: a later Shift+L needs to keep clearing the WHOLE run, not stop
   short at wherever this mid-run echo landed."
-  [ed cv ev* status-label]
-  (let [snap (editor/snapshot ed)]
+  [{:keys [tab cv ev* status-label] :as ctx}]
+  (let [ed (:ed tab)
+        snap (editor/snapshot ed)]
     (when-let [text (commands/run-selection-text snap)]
-      (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-      (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))))
+      (when-not (refuse-foreign! ctx)
+        (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)})))))
 
 ;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
 
@@ -1082,12 +1100,14 @@
   @ev*)), same idle/busy split as do-run-selection! above, and for the
   same reason -- a mid-run Cmd+Enter must still echo and flash, but must
   never steal the mark from a program that's still running."
-  [ed cv ev* status-label flash-fns]
-  (let [snap (editor/snapshot ed)]
+  [{:keys [tab cv ev* status-label flash-fns] :as ctx}]
+  (let [ed (:ed tab)
+        snap (editor/snapshot ed)]
     (if-let [{:keys [text start end]} (commands/run-form snap)]
-      (do ((:flash! flash-fns) start end (:caret snap))
-          (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-          (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap)}))
+      (when-not (refuse-foreign! ctx)
+        ((:flash! flash-fns) start end (:caret snap))
+        (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)}))
       (set-status! status-label "No form at the caret."))))
 
 ;; --- inspector panel (P2.T2) -------------------------------------------
@@ -2016,7 +2036,7 @@
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."
-  [{:keys [tabs active-id notebook popovers] :as ctx} id]
+  [{:keys [tabs active-id notebook popovers sel* sel-ctx cv] :as ctx} id]
   (when-let [t (tab-by-id tabs id)]
     (let [ts @tabs
           i (.indexOf ^java.util.List (mapv :id ts) id)
@@ -2031,7 +2051,16 @@
       (refresh-labels! ctx)
       (when was-active?
         (g/gtk-notebook-set-current-page notebook (g/gtk-notebook-page-num notebook (:root neighbour)))
-        (on-switch! ctx neighbour)))))
+        (on-switch! ctx neighbour))
+      ;; Ruling 1: one tab left, from another project -> the window adopts
+      ;; it (today's switch, with its "Switched to" line).
+      (let [[only & more] @tabs
+            osel (when only @(:project only))]
+        (when (and only (not more) osel
+                   (not= (dialect/selection-key osel) (dialect/selection-key @sel*)))
+          (try (apply-selection! sel-ctx osel)
+               (catch :default e
+                 (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))))
 
 (defn- close-tab-choice!
   "The close-tab alert's decision: 0 Save (then close once saved), 1 Don't
@@ -2086,7 +2115,7 @@
   :rename-to! :complete! :run-form!} (each a fn bound to this tab) added.
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
-           active? source-ctx sel-ctx settings-path* inspect-last-fn inspect-form-fn
+           active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn
            open-find-fn open-replace-fn] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion last-shown path discard-warned?] :as t}]
   (let [flash-fns (make-flash-fn ed)
@@ -2098,7 +2127,8 @@
         rename-fn (fn [] (do-rename! ed rename-pop status-label close-popovers-fn))
         rename-to-fn (fn [name] (do-rename-to! ed rename-pop name status-label))
         complete-fn (fn [] (do-complete! ed completion status-label))
-        run-form-fn (fn [] (do-run-form! ed cv ev* status-label flash-fns))
+        run-form-fn (fn [] (do-run-form! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                          :flash-fns flash-fns}))
         menu-group
         (install-context-menu!
          (:view ed)
@@ -2174,7 +2204,9 @@
                  (when (not= old new)
                    (let [tsel (select-for new @settings-path*)]
                      (reset! (:project t) tsel)
-                     (try (apply-selection! sel-ctx tsel)
+                                          ;; Ruling 1: with one tab the window follows, as it always
+                     ;; did; with two or more its project is fixed.
+                     (try (when (= 1 (count @tabs)) (apply-selection! sel-ctx tsel))
                           (catch :default e
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
                           (finally (editor/set-profile! ed (:profile tsel))
@@ -2193,11 +2225,11 @@
   inside the first append, before the tab is in tabs, so the caller makes
   the tab active itself. ctx is wire-tab!'s map plus {:tabs :next-id
   :notebook :theme-name :completion-opts}."
-  [{:keys [tabs next-id notebook theme-name completion-opts settings-path*] :as ctx} {:keys [path text]}]
+  [{:keys [tabs next-id notebook theme-name completion-opts settings-path* sel*] :as ctx} {:keys [path text]}]
   (let [tsel (select-for path @settings-path*)
         t (tab/make-tab! {:id (swap! next-id inc) :path path :text text
                           :theme (theme/theme @theme-name)
-                          :profile (:profile tsel)
+                          :profile (:profile (if path tsel @sel*))
                           :completion-opts completion-opts})]
     (when path (reset! (:project t) tsel))
     (g/gtk-notebook-append-page notebook (:root t) (:label-box t))
@@ -2378,7 +2410,7 @@
                           :snapshot-fn (fn [] (cview/input-snapshot cv))
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
         repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
-        run-fn (fn [] (let [t (active-tab)] (do-run! (:ed t) cv ev* status-label (:path t))))
+        run-fn (fn [] (do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
         stop-fn (fn [] (do-stop! ev* cv))
         open-fn (fn [] (do-open! cv win (fn [p] (open-file! @*tab-ctx p))))
         save-fn (fn [] (let [t (active-tab)] (do-save! (:ed t) cv win (:path t))))
@@ -2395,7 +2427,8 @@
                        (let [ts @tabs]
                          (when-let [i (tabs/index-for-digit (count ts) digit)]
                            (select-tab! @*tab-ctx (:id (nth ts i))))))
-        run-selection-fn (fn [] (do-run-selection! (:ed (active-tab)) cv ev* status-label))
+        run-selection-fn (fn [] (do-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                                    :status-label status-label}))
         ;; P2.T2: the inspector panel. h-paned is the new horizontal split
         ;; (editor+console keep their existing vertical paned as its start
         ;; child; the pane's own :root becomes its end child, wired below
