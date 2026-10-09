@@ -101,16 +101,20 @@
      (cond-> r ns-str (assoc :ns (symbol ns-str))))))
 
 (defn reset-code
-  "Code for the child that removes every namespace not in baseline (the
-  namespace names right after the child started) and not a loaded
-  library, then `user`, and recreates `user`: the in-process Reset on
-  Run's rule (jonquil.session/reset-namespaces!) run where the program
-  lives. Measured over the wire: user defs, Run-created namespaces and a
-  load-file namespace go, a required library stays."
-  [baseline]
-  (str "(let [keep (into (set '" (pr-str (vec baseline)) ") (loaded-libs))]"
-       " (doseq [n (map ns-name (all-ns))] (when-not (contains? keep n) (remove-ns n)))"
+  "Code for the child that removes each namespace in names that exists,
+  then `user`, and recreates `user`: the in-process Reset on Run's rule
+  (jonquil.session/reset-namespaces!) run where the program lives. names
+  is the running owner's namespaces plus the REPL's (tabs spec)."
+  [names]
+  (str "(do (doseq [n '" (pr-str (vec names)) "] (when (find-ns n) (remove-ns n)))"
        " (remove-ns 'user) (create-ns 'user) nil)"))
+
+(def ns-snapshot-code
+  "Code whose printed value is [namespace-names loaded-libs] in the child:
+  read before and after an evaluation to learn which namespaces it
+  created (jonquil.session/namespaces-created). Fully qualified, since it
+  runs in whatever namespace the session is in."
+  "[(clojure.core/mapv clojure.core/ns-name (clojure.core/all-ns)) (clojure.core/vec (clojure.core/loaded-libs))]")
 
 (def ^:private stdin-names
   #{"read-line" "read" "*in*" "clojure.core/read-line" "clojure.core/read" "clojure.core/*in*"})

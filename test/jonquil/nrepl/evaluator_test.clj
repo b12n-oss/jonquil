@@ -29,6 +29,13 @@
                        :on-complete (fn [r] (deliver done r))})
      [(deref done 20000 :timeout) @out])))
 
+(defn- run-owned [e code owner]
+  (let [done (promise) out (atom [])]
+    (ev/eval! e code {:run? true :owner owner
+                      :on-output (fn [k s] (swap! out conj [k s]))
+                      :on-complete (fn [r] (deliver done r))})
+    [(deref done 20000 :timeout) @out]))
+
 (defn- wait-until [pred ms]
   (loop [n 0] (cond (pred) true (> (* n 20) ms) false :else (do (Thread/sleep 20) (recur (inc n))))))
 
@@ -358,4 +365,18 @@
               "the console shows the failed restart")
           (is (not (some (fn [[_ s]] (str/includes? s "Stop restarted the Jolt runtime")) @out))
               "and not the success line")))
+      (finally (ev/stop! e)))))
+
+(deftest owner-reset-over-nrepl-test
+  (let [e (make (temp-project))]
+    (try
+      (is (= :ok (:status (first (run-owned e "(ns tabs.a) (defn hello [] :hi)" 1)))))
+      (is (= :ok (:status (first (run-owned e "(ns tabs.b) (def x 1)" 2)))))
+      (testing "a reset Run for owner 1 leaves tabs.b and recreates tabs.a"
+        (is (= :ok (:status (first (run-owned e "(ns tabs.a) (def only 1)" 1)))))
+        (is (= "1" (:printed (first (run e "tabs.b/x" false)))))
+        (is (= "nil" (:printed (first (run e "(ns-resolve 'tabs.a 'hello)" false))))))
+      (testing "the owner snapshots don't move the session out of the Run's namespace"
+        (run-owned e "(ns tabs.c) (def here 3)" 3)
+        (is (= "3" (:printed (first (run e "here" false))))))
       (finally (ev/stop! e)))))

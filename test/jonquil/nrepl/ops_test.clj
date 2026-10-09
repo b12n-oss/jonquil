@@ -74,10 +74,19 @@
   (is (= "nil" (:printed (ops/eval-result [{:status ["done"]}] false)))))
 
 (deftest reset-code-test
-  (let [code (ops/reset-code '[clojure.core user.x])]
-    (is (str/starts-with? code "(let [keep (into (set '[clojure.core user.x]) (loaded-libs))]"))
-    (is (str/includes? code "(remove-ns 'user) (create-ns 'user) nil)"))
-    (is (= 'let (first (read-string code))))))
+  (let [code (ops/reset-code '[tabs.a tabs.b])
+        form (read-string code)]
+    (is (str/includes? code "'[tabs.a tabs.b]"))
+    (is (str/includes? code "(remove-ns 'user) (create-ns 'user) nil"))
+    (is (seq? form)))
+  (testing "an empty owner set still resets user"
+    (is (str/includes? (ops/reset-code []) "(remove-ns 'user) (create-ns 'user) nil"))))
+
+(deftest ns-snapshot-code-test
+  ;; The server prints the value itself (eval-result's :printed), so one
+  ;; read-string of :printed gives the vector back.
+  (is (= '[(clojure.core/mapv clojure.core/ns-name (clojure.core/all-ns)) (clojure.core/vec (clojure.core/loaded-libs))]
+         (read-string ops/ns-snapshot-code))))
 
 (deftest reads-stdin-test
   (is (ops/reads-stdin? "(println (read-line))"))
