@@ -299,4 +299,9 @@
   [ev]
   (:pid (:child @(:state ev))))
 
+(defn run-dir
+  "The private run directory of ev's current child, or nil."
+  [ev]
+  (:run-dir (:child @(:state ev))))
+
 (defmethod ev/make :launch [selection] (make-jank selection))

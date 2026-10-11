@@ -46,6 +46,7 @@
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
