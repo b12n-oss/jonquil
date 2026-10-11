@@ -9,10 +9,9 @@
   project directory.
 
   `jank repl` always runs a terminal REPL next to the nREPL server, and EOF
-  on its stdin ends the process. The launch command therefore pipes it from
-  a long sleep, which holds stdin open without feeding it (jank re-check
-  spike, 2026-10-12). That makes the child a process tree (bash, sleep,
-  jank), which is why kill! uses destroy-tree."
+  on its stdin ends the process. jank is spawned directly with the stdin
+  pipe jolt.process opens by default, and the child map keeps that stream
+  open until kill! (jank re-check spike, 2026-10-12)."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
@@ -45,18 +44,12 @@
       (if (.isDirectory src) (.getPath src) project-dir))
     file-dir))
 
-(defn shell-quote
-  "s in single quotes, each embedded ' written '\\''."
-  [s]
-  (str "'" (str/replace s "'" "'\\''") "'"))
-
 (defn launch-command
-  "The argv that starts jank with stdin held open (see the ns docstring)."
+  "The argv that starts jank. The caller keeps its stdin pipe open."
   [binary module-path]
-  ["bash" "-c"
-   (str "sleep 100000000 | " (shell-quote binary)
-        (when module-path (str " --module-path " (shell-quote module-path)))
-        " repl")])
+  (if module-path
+    [binary "--module-path" module-path "repl"]
+    [binary "repl"]))
 
 (def default-timeout-ms
   ;; estimate: the re-check spike saw the port file within about a second;
@@ -76,11 +69,12 @@
     (try (java.nio.file.Files/deleteIfExists (.toPath f)) (catch Exception _ nil))))
 
 (defn kill!
-  "Kills the child's whole process tree, waits up to 1 s for it to be
-  gone and deletes the run dir. Idempotent; nil is fine."
+  "Closes the child's stdin, kills its process tree, waits up to 1 s for
+  it to be gone and deletes the run dir. Idempotent; nil is fine."
   [child]
   (when child
     (let [proc (:proc child)]
+      (when-let [in (:stdin child)] (try (.close ^java.io.OutputStream in) (catch Exception _ nil)))
       (when (p/alive? proc)
         (p/destroy-tree proc)
         (loop [n 0]
@@ -93,20 +87,6 @@
 (defn- tail [path n]
   (try (str/join "\n" (take-last n (str/split-lines (slurp path))))
        (catch Exception _ "")))
-
-(defn- jank-gone?
-  "True when the only thing left under the launch shell is the stdin
-  holder. bash waits for every member of a pipeline, so when jank exits
-  by itself the shell stays alive on the sleep and alive? never says so.
-  Two looks 50 ms apart rule out the moment before bash has forked jank."
-  [proc]
-  (let [holder-only? (fn []
-                       (let [pids (map #(.pid ^java.lang.ProcessHandle %)
-                                       (iterator-seq (.iterator (.descendants (.toHandle ^java.lang.Process (:proc proc))))))
-                             cmds (when (seq pids)
-                                    (str/split-lines (:out (p/sh "ps" "-o" "command=" "-p" (str/join "," pids)))))]
-                         (and (seq cmds) (every? #(str/includes? % "sleep 100000000") cmds))))]
-    (and (holder-only?) (do (Thread/sleep 50) (holder-only?)))))
 
 (defn- read-port [run-dir]
   (let [f (io/file run-dir ".nrepl-port")]
@@ -130,9 +110,10 @@
                   (.mkdirs d)
                   (.getCanonicalPath d))
         log (str run-dir "/server.log")
-        proc (apply p/process {:dir run-dir :out (io/file log) :err :out :in (io/file "/dev/null")}
+        proc (apply p/process {:dir run-dir :out (io/file log) :err :out}
                     (launch-command binary module-path))
-        child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir}
+        child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
+               :stdin (:in proc)}
         fail (fn [e] (kill! child) {:error e})
         t0 (System/currentTimeMillis)]
     (loop []
@@ -140,8 +121,9 @@
         (cond
           port (assoc child :port port)
           (and cancelled? (cancelled?)) (fail :cancelled)
-          (or (not (p/alive? proc)) (jank-gone? proc))
-          (fail (str "jank exited: " (tail log 5)))
+          (not (p/alive? proc))
+          (let [r (deref proc 500 nil)]
+            (fail (str "jank exited (exit " (:exit r) "): " (tail log 5))))
           (> (- (System/currentTimeMillis) t0) timeout-ms)
           (fail (str "jank didn't write a port file within " timeout-ms " ms: " (tail log 5)))
           :else (do (Thread/sleep 50) (recur)))))))

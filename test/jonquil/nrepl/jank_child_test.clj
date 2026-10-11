@@ -46,10 +46,9 @@
     (is (nil? (jank/module-path {})))))
 
 (deftest launch-command-test
-  (is (= ["bash" "-c" "sleep 100000000 | '/a b/it'\\''s/jank' --module-path '/p q/src' repl"]
+  (is (= ["/a b/it's/jank" "--module-path" "/p q/src" "repl"]
          (jank/launch-command "/a b/it's/jank" "/p q/src")))
-  (is (= ["bash" "-c" "sleep 100000000 | '/b/jank' repl"]
-         (jank/launch-command "/b/jank" nil))))
+  (is (= ["/b/jank" "repl"] (jank/launch-command "/b/jank" nil))))
 
 (deftest start-and-kill-test
   (let [child (jank/start! {:binary fake-jank})]
@@ -68,11 +67,21 @@
     (is (nil? (jank/kill! nil)))))
 
 (deftest kill-tree-test
-  (let [child (jank/start! {:binary fake-jank})]
-    (is (pgrep? "sleep 100000000"))
+  (let [child (jank/start! {:binary fake-jank})
+        pid (str (:pid child))]
     (jank/kill! child)
-    (is (wait-until #(not (pgrep? "sleep 100000000")) 2000))
-    (is (not (pgrep? (:run-dir child))))))
+    (is (not (zero? (:exit (p/sh "kill" "-0" pid)))) "the pid is gone")
+    (is (not (zero? (:exit (p/sh "pgrep" "-P" pid)))) "no descendants remain")
+    (is (not (.exists (io/file (:run-dir child)))))))
+
+(deftest dies-on-its-own-test
+  (let [bin (str (temp-dirs/temp-dir! "jonquil-jank-test-") "/dying-jank")]
+    (spit bin "#!/usr/bin/env bash\necho 51234 > .nrepl-port\nsleep 0.3\n")
+    (.setExecutable (io/file bin) true)
+    (let [child (jank/start! {:binary bin})]
+      (try (is (nil? (:error child)) (str child))
+           (is (wait-until #(not (jank/alive? child)) 2000))
+           (finally (jank/kill! child))))))
 
 (deftest kill-during-start-test
   (let [t0 (System/currentTimeMillis)
@@ -82,7 +91,7 @@
                             :timeout-ms 10000
                             :cancelled? #(> (- (System/currentTimeMillis) t0) 100)})]
     (is (= {:error :cancelled} child))
-    (is (not (pgrep? "sleep 100000000")))))
+    (is (not (pgrep? "slow-jank")))))
 
 (deftest start-quoted-paths-test
   (let [d (str (temp-dirs/temp-dir! "jonquil-jank-test-") "/a b'c")
@@ -90,7 +99,7 @@
     (.mkdirs (io/file d))
     ;; dev/fake-jank finds its sources relative to itself, so the copy
     ;; with the odd name is a wrapper that execs it (cwd is kept).
-    (spit bin (str "#!/usr/bin/env bash\nexec " (jank/shell-quote fake-jank) " \"$@\"\n"))
+    (spit bin (str "#!/usr/bin/env bash\nexec " (str "'" fake-jank "'") " \"$@\"\n"))
     (.setExecutable (io/file bin) true)
     (let [child (jank/start! {:binary bin})]
       (try (is (nil? (:error child)) (str child))
