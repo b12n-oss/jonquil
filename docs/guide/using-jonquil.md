@@ -583,7 +583,7 @@ count, and paging still works over everything up to the cap.
 ## Dialects and runtimes
 
 Jonquil evaluates through a dialect profile: what a language's files look
-like, how they're painted, and which evaluator runs them. Two profiles
+like, how they're painted, and which evaluator runs them. Four profiles
 exist today: Jolt, ClojureDart (experimental), JVM Clojure and jank
 (experimental). Selection and the evaluator seam underneath them are
 generic enough for more. The status
@@ -954,14 +954,18 @@ the file first." rather than running the code in `user`.
 
 jank has no interrupt, so Stop kills the process and starts a fresh one:
 "; Stopped. jank restarted, so earlier definitions are gone." Reset on
-Run does the same before each Run, and it's on by default, as it is for
-every other runtime ("; Reset: restarted jank."). Uncheck it and Run
-builds on whatever the process already has.
+Run is on by default, as it is for every other runtime. With it ticked, a
+Run restarts jank first ("; Reset: restarted jank."), but only when the
+process has already served a request: the first Run just starts jank and
+prints no Reset line. Uncheck it and Run builds on whatever the process
+already has.
 
 One caveat for a loose `.jank` file with no project: when the first
 evaluation is a REPL line or Run Selection rather than Run, jank starts
 without the file's folder on its module path, so a `require` of a sibling
-file fails until you Stop or Reset. Run the file first to avoid it.
+file fails. It lasts until a Run starts jank: a Run after a Stop, or any
+Run with Reset on Run ticked. Stop alone doesn't help, because a REPL line
+still starts jank without the path. Run the file first to avoid it.
 
 #### Docs and completion
 

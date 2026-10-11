@@ -180,7 +180,8 @@ underneath runs in this process or somewhere else. `jonquil.session`'s
 still the one every window starts with by default. The `make` multimethod
 dispatches on a selection's `:runtime`, so requiring a new
 implementation's namespace is what registers it; `jonquil.nrepl.
-evaluator` is the second one, and every `:attach` runtime is the third:
+evaluator` is the second one, `jonquil.nrepl.jank` registers `:launch` as
+the third, and every `:attach` runtime is another:
 `ev/make :attach` forwards to `jonquil.nrepl.connection`'s own
 `make-attached` multimethod, dispatched a second time on the selection's
 profile id, so `jonquil.nrepl.attach` (`:cljd`) and `jonquil.nrepl.jvm`
