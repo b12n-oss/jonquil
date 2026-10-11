@@ -853,3 +853,75 @@
                                     (wait-until! (fn [] (some #{"inspect-start"} (fake/ops-seen srv))))
                                     (fake/drop-connections! srv))))))))))
 
+
+;; --- auto-require (.jonquil.edn :auto-require, via the selection) ---
+
+(defn- make-auto [dir nss]
+  (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir dir :auto-require nss}
+                {:describe-timeout-ms 500 :clone-timeout-ms 500 :interrupt-timeout-ms 200
+                 :help-timeout-ms 200 :full-doc-timeout-ms 500}))
+
+(defn- eval-codes [srv]
+  (keep #(when (= "eval" (get % "op")) (get % "code")) (fake/requests srv)))
+
+(def ^:private require-code "(require 'my.app.core 'my.app.dev)")
+
+(deftest auto-require-once-per-connection-test
+  (with-project {}
+    (fn [srv dir file]
+      (let [e (make-auto dir '[my.app.core my.app.dev])
+            {:keys [result out]} (run e fixture-core-text {:run? true :path file})]
+        (is (= :ok (:status result)))
+        (is (= ["describe" "clone" "eval" "eval" "load-file"] (fake/ops-seen srv))
+            "registration, then the require, then the user's own Run")
+        (is (= ["nil" require-code] (eval-codes srv)))
+        (is (some #(= (str (clj/auto-require-message '[my.app.core my.app.dev]) "\n") %) (texts out :system)))
+        (run e "(+ 1 2)" {:run? false})
+        (is (= ["nil" require-code "(+ 1 2)"] (eval-codes srv))
+            "not sent again on the same connection")))))
+
+(deftest auto-require-after-reconnect-test
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make-auto dir '[my.app.core])]
+        (run e "(+ 1 2)" {:run? false})
+        (fake/drop-connections! srv)
+        (wait-until! (fn [] (not (connection/connected? e))))
+        (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))))
+        (is (= 2 (count (filter #{"(require 'my.app.core)"} (eval-codes srv))))
+            "a restarted server has forgotten everything, so a reconnect requires again")))))
+
+(deftest auto-require-failure-still-runs-test
+  (with-project {:fail-on "my.app.core"}
+    (fn [srv dir _]
+      (let [e (make-auto dir '[my.app.core])
+            {:keys [result out]} (run e "(+ 1 2)" {:run? false})]
+        (is (= :ok (:status result)) "the user's own request still answers")
+        (is (= "3" (:printed result)))
+        (is (some #(= (str clj/auto-require-failed-message "\n") %) (texts out :system)))
+        (is (some #(str/includes? % "boom") (texts out :err)) "the server's own error streams first")
+        (run e "(+ 1 2)" {:run? false})
+        (is (= 1 (count (filter #{"(require 'my.app.core)"} (eval-codes srv))))
+            "no retry on the same connection")))))
+
+(deftest auto-require-none-test
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make-auto dir nil)]
+        (run e "(+ 1 2)" {:run? false})
+        (is (= ["nil" "(+ 1 2)"] (eval-codes srv)))))))
+
+(deftest stop-during-auto-require-test
+  (with-project {:slow {"my.app.core" 1000}}
+    (fn [srv dir _]
+      (let [e (make-auto dir '[my.app.core]) done (promise) out (atom [])]
+        (ev/eval! e "(+ 1 2)" {:run? false
+                               :on-output (fn [k s] (swap! out conj [k s]))
+                               :on-complete (fn [r] (deliver done r))})
+        (wait-until! (fn [] (some #(= "(require 'my.app.core)" (get % "code")) (fake/requests srv))))
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 3000 :timeout))))
+        (is (not-any? #(= "(+ 1 2)" (get % "code")) (fake/requests srv))
+            "the user's request never went out")
+        (is (not-any? #(= (str clj/auto-require-failed-message "\n") %) (texts @out :system))
+            "a Stop isn't reported as a failed require")))))

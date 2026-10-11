@@ -155,10 +155,23 @@
                   :config-error err})
                (recur (.getParentFile dir))))))))))
 
+(defn- auto-require-part
+  "[symbols-or-nil warning-or-nil] for .jonquil.edn's :auto-require: a
+  non-empty vector of symbols, else nil (absent or [] says nothing; any
+  other shape is a warning)."
+  [v]
+  (cond
+    (and (vector? v) (every? symbol? v)) [(not-empty v) nil]
+    (nil? v) [nil nil]
+    :else [nil (str ".jonquil.edn :auto-require should be a vector of namespace symbols, like [my.app.core], not "
+                    (pr-str v) ", so it is ignored")]))
+
 (defn parse-config
-  "{:dialect k? :runtime k? :warnings [str]} from .jonquil.edn's text.
-  Never throws: unreadable text, a non-map or a non-keyword value is a
-  warning, and the bad part is ignored."
+  "{:dialect k? :runtime k? :auto-require [sym]? :warnings [str]} from
+  .jonquil.edn's text. Never throws: unreadable text, a non-map, a
+  non-keyword value or a malformed :auto-require is a warning, and the bad
+  part is ignored. :auto-require is present only when it names at least
+  one namespace."
   [text read-error]
   (let [bad (fn [msg] {:warnings [(str ".jonquil.edn " msg ", so it is ignored")]})]
     (cond
@@ -177,8 +190,10 @@
                                      (keyword? v) [v nil]
                                      :else [nil (str ".jonquil.edn " k " should be a keyword, not " (pr-str v))])))
                 [d dw] (kw-or-warn :dialect)
-                [r rw] (kw-or-warn :runtime)]
-            {:dialect d :runtime r :warnings (vec (remove nil? [dw rw]))}))))))
+                [r rw] (kw-or-warn :runtime)
+                [ar arw] (auto-require-part (get m :auto-require))]
+            (cond-> {:dialect d :runtime r :warnings (vec (remove nil? [dw rw arw]))}
+              ar (assoc :auto-require ar))))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."
@@ -199,12 +214,13 @@
   project is find-project's map or nil (a loose or unsaved file); path is
   the file's path or nil; default is the settings :dialect or nil.
   Returns {:profile p :runtime k :project-dir dir-or-nil :source k
-  :warnings [str]}, :source one of :config :marker :extension :settings
+  :warnings [str]}, plus :auto-require [sym] when the project's config
+  names one and the dialect is :clj, :source one of :config :marker :extension :settings
   :fallback. A settings default naming a marker-less profile (in practice
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
-  (let [{:keys [dialect runtime warnings]} (if project
+  (let [{:keys [dialect runtime auto-require warnings]} (if project
                                              (parse-config (:config project) (:config-error project))
                                              {:warnings []})
         by-config (when dialect (profile profiles dialect))
@@ -240,12 +256,19 @@
         w2 (if (and runtime (not rt-ok?))
              [(str ".jonquil.edn asks for runtime " runtime ", which " (:name p)
                    " doesn't offer here; using " (runtime-name (:evaluator p)))]
+             [])
+        ;; Only JVM Clojure sends :auto-require (the attach evaluator
+        ;; requires the list once per connection); elsewhere it's ignored.
+        clj? (= :clj (:id p))
+        w3 (if (and auto-require (not clj?))
+             [(str ".jonquil.edn :auto-require only applies to JVM Clojure, not " (:name p) ", so it is ignored")]
              [])]
-    {:profile p
-     :runtime (if rt-ok? runtime (:evaluator p))
-     :project-dir (:dir project)
-     :source source
-     :warnings (into (into (vec warnings) w1) w2)}))
+    (cond-> {:profile p
+             :runtime (if rt-ok? runtime (:evaluator p))
+             :project-dir (:dir project)
+             :source source
+             :warnings (-> (vec warnings) (into w1) (into w2) (into w3))}
+      (and auto-require clj?) (assoc :auto-require auto-require))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the

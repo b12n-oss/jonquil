@@ -164,6 +164,24 @@
       (client/request-sync conn {:op "eval" :code "nil" :session session} (:describe-timeout-ms timings))
       (swap! state assoc :inspect-registered? true))))
 
+(defn- auto-require!
+  "Once per connection, when the selection carries .jonquil.edn's
+  :auto-require list: says so, then requires every namespace in it with
+  one eval on the session, streaming its output like any evaluation. A
+  failure (not a Stop) says so after the server's own error; either way
+  the user's request goes out next, and :auto-required? is set first so
+  a failed list isn't resent until the next connect."
+  [{:keys [selection state] :as ev} on-output]
+  (let [nss (:auto-require selection)]
+    (when (and (seq nss) (not (:auto-required? @state)))
+      (swap! state assoc :auto-required? true)
+      (connection/say! on-output :system (str (clj/auto-require-message nss) "\n"))
+      (let [msgs (connection/request! ev {:op "eval" :code (clj/auto-require-code nss)}
+                                      {:on-output on-output :still-waiting nil})]
+        (when (and (not= :ok (:status (clj/eval-result msgs false)))
+                   (not (stop-requested? ev)))
+          (connection/say! on-output :system (str clj/auto-require-failed-message "\n")))))))
+
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? path ns-source on-output on-wait-input on-status-change] :as opts}]
   (try
@@ -178,8 +196,10 @@
         (finish! ev opts {:status :interrupted})
         (do
           (register-inspect! ev)
-          ;; The registration is a round trip of its own, so a Stop can land
-          ;; during it: check again before the user's request goes out.
+          (when-not (stop-requested? ev) (auto-require! ev on-output))
+          ;; The registration and the auto-require are round trips of their
+          ;; own, so a Stop can land during either: check again before the
+          ;; user's request goes out.
           (if (stop-requested? ev)
             (finish! ev opts {:status :interrupted})
             (let [watch (stdin-watch state on-wait-input)
