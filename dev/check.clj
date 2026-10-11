@@ -32,6 +32,7 @@
     jonquil.help
     jonquil.source
     jonquil.tabs
+    jonquil.file-tree
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover
@@ -43,6 +44,7 @@
     jonquil.gtk.find-bar
     jonquil.gtk.console-view
     jonquil.gtk.tab
+    jonquil.gtk.file-tree-pane
     jonquil.gtk.window
     jonquil.main])
 

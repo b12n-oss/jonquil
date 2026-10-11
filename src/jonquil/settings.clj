@@ -1,9 +1,10 @@
 (ns jonquil.settings
   "The user's saved settings: a small EDN map at
   $XDG_CONFIG_HOME/jonquil/settings.edn, or ~/.config/jonquil/settings.edn
-  when XDG_CONFIG_HOME is unset or blank. It stores :theme, and :dialect
-  (the fallback dialect for a file no project decides) when the user set
-  one by hand. Loading never throws: a missing file is the default quietly,
+  when XDG_CONFIG_HOME is unset or blank. It stores :theme, :dialect (the
+  fallback dialect for a file no project decides) when the user set one by
+  hand, and :file-tree {:visible? :width}. A save merges into what the file
+  already holds, so each feature only writes its own keys. Loading never throws: a missing file is the default quietly,
   and an unreadable file, an unknown theme or an unknown dialect is the
   default plus a :warning. Saving writes
   a temp file beside the target and renames it over the target with
@@ -53,9 +54,22 @@
       (dialect/profile d) {:dialect d}
       :else {:warning (str path " names :dialect " (pr-str d) ", which isn't a known dialect")})))
 
+(defn- file-tree-part
+  "{:file-tree {:visible? :width}} when m holds a usable one (a boolean
+  :visible? and a positive integer :width), {} when it holds none, and
+  {:warning ..} otherwise (file-tree plan P1.T2)."
+  [path m]
+  (let [ft (when (map? m) (get m :file-tree ::none))]
+    (cond
+      (or (nil? ft) (= ::none ft)) {}
+      (and (map? ft) (boolean? (:visible? ft)) (pos-int? (:width ft)))
+      {:file-tree (select-keys ft [:visible? :width])}
+      :else {:warning (str path " has an unusable :file-tree, ignoring it")})))
+
 (defn load-settings
-  "{:theme k} from path, plus :dialect when the file names a known one, plus
-  :warning when the file exists but part of it can't be used. A missing
+  "{:theme k} from path, plus :dialect when the file names a known one,
+  :file-tree when it holds a usable one, and :warning when the file exists
+  but part of it can't be used. A missing
   file is {:theme theme/default-theme} with no warning."
   [path]
   (let [f (io/file path)]
@@ -64,8 +78,9 @@
       (let [m (try (edn/read-string (slurp f)) (catch Exception _ ::unreadable))
             t (theme-part path m)
             d (dialect-part path m)
-            warnings (remove nil? [(:warning t) (:warning d)])]
-        (cond-> (merge (dissoc t :warning) (dissoc d :warning))
+            ft (file-tree-part path m)
+            warnings (remove nil? [(:warning t) (:warning d) (:warning ft)])]
+        (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
 (defn- resolved-target
@@ -84,37 +99,40 @@
       path)))
 
 (defn save-settings!
-  "Writes {:theme k} to path atomically, keeping a :dialect: the one given,
-  else the one the file already names (a theme change must not drop a
-  hand-set dialect). nil on success, else a message.
+  "Merges map m (say {:theme k}, or {:file-tree {...}}) into the settings
+  file at path and writes it atomically, so a save keeps every key the file
+  already holds -- a theme change must not drop a hand-set :dialect or the
+    file tree's state (file-tree plan P1.T2). A missing file is created with m
+  alone; an unreadable or malformed one is left untouched and reported.
+  nil on success, else a message.
   When path is a symlink, the real target is rewritten in place (the temp
   file sits beside the target and the rename lands on the target), so the
   link itself survives the save."
-  [path {:keys [theme dialect]}]
+  [path m]
   (let [tmp (atom nil)]
     (try
       (let [target (resolved-target path)
             f (io/file target)
-            kept (if dialect
-                   dialect
-                   ;; No dialect given; try to keep the existing one.
-                   ;; Distinguish IO failure (file unreadable) from parse failure.
-                   (when (.exists f)
-                     (try
-                       (let [content (slurp target)]
-                         ;; File is readable; try to parse it and extract dialect.
-                         (try
-                           (:dialect (edn/read-string content))
-                           (catch Exception _
-                             ;; Parse failed (malformed EDN); no dialect to keep.
-                             nil)))
-                       (catch Exception _
-                         ;; IO failure; file is unreadable. Signal an error.
-                         (throw (Exception.
-                                 (str "couldn't read " target " to keep its :dialect; theme not saved")))))))]
+            existing (when (.exists f)
+                       (let [content (try (slurp target)
+                                          (catch Exception _
+                                            ;; IO failure: the file is unreadable, so its
+                                            ;; other keys can't be kept. Signal an error.
+                                            (throw (Exception.
+                                                    (str "couldn't read " target
+                                                         " to keep its other settings; nothing saved")))))
+                             ;; Malformed EDN: refuse rather than overwrite the file's
+                             ;; other keys (final review finding 5, now that toggling
+                             ;; the tree saves too). Valid EDN that isn't a map has
+                             ;; nothing to keep.
+                             v (try (edn/read-string content)
+                                    (catch Exception _
+                                      (throw (Exception.
+                                              (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it")))))]
+                         (when (map? v) v)))]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
-        (spit @tmp (pr-str (cond-> {:theme theme} kept (assoc :dialect kept))))
+        (spit @tmp (pr-str (merge existing m)))
         (java.nio.file.Files/move
          (.toPath (java.io.File. ^String @tmp))
          (.toPath (java.io.File. ^String target))

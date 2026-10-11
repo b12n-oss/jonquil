@@ -871,8 +871,11 @@
   [widget target x y]
   (let [in (ffi/alloc 8) out (ffi/alloc 8)]
     (try
-      (ffi/write in :float (float x) 0)
-      (ffi/write in :float (float y) 4)
+      ;; (double ...), not (float ...): jolt v0.8.20's foreign-set! takes
+      ;; only a Double for a :float slot and rejects a java.lang.Float
+      ;; (measured 2026-10-09; v0.8.19 took both).
+      (ffi/write in :float (double x) 0)
+      (ffi/write in :float (double y) 4)
       (when (pos? (gtk-widget-compute-point widget target in out))
         [(ffi/read out :float 0) (ffi/read out :float 4)])
       (finally (ffi/free in) (ffi/free out)))))
@@ -1127,3 +1130,35 @@
 ;; gobject.h:513 gpointer g_object_ref (gpointer object). The tab rows hold a
 ;; popover alive across dispose-popovers!, whose unparent drops the last ref.
 (ffi/defcfn g-object-ref "g_object_ref" [:pointer] :pointer)
+
+;; --- file tree (file-tree plan P2.T1) ------------------------------------------
+;; Header citations under /opt/homebrew/include/gtk-4.0/gtk and glib-2.0/gio
+;; (gtk4 4.22.4); the toggle button, folder dialog and paned position were
+;; exercised in the file-tree spike (spikes/file-tree/ft_probe.clj).
+
+;; gtklistbox.h:148 int gtk_list_box_row_get_index (GtkListBoxRow*)
+(ffi/defcfn gtk-list-box-row-get-index "gtk_list_box_row_get_index" [:pointer] :int)
+;; gtklistbox.h:187 GtkListBoxRow* gtk_list_box_get_selected_row (GtkListBox*)
+(ffi/defcfn gtk-list-box-get-selected-row "gtk_list_box_get_selected_row" [:pointer] :pointer)
+;; gtklistbox.h:222 void gtk_list_box_unselect_all (GtkListBox*)
+(ffi/defcfn gtk-list-box-unselect-all "gtk_list_box_unselect_all" [:pointer] :void)
+;; gtktogglebutton.h:71 GtkWidget* gtk_toggle_button_new_with_label (const char*)
+(ffi/defcfn gtk-toggle-button-new-with-label "gtk_toggle_button_new_with_label" [:string] :pointer)
+;; gtktogglebutton.h:75 void gtk_toggle_button_set_active (GtkToggleButton*, gboolean)
+(ffi/defcfn gtk-toggle-button-set-active "gtk_toggle_button_set_active" [:pointer :int] :void)
+;; gtktogglebutton.h:78 gboolean gtk_toggle_button_get_active (GtkToggleButton*)
+(ffi/defcfn gtk-toggle-button-get-active "gtk_toggle_button_get_active" [:pointer] :int)
+;; gtkpaned.h:81 int gtk_paned_get_position (GtkPaned*)
+(ffi/defcfn gtk-paned-get-position "gtk_paned_get_position" [:pointer] :int)
+;; gtkpaned.h:51 void gtk_paned_set_resize_start_child (GtkPaned*, gboolean)
+(ffi/defcfn gtk-paned-set-resize-start-child "gtk_paned_set_resize_start_child" [:pointer :int] :void)
+;; gtkpaned.h:63 void gtk_paned_set_shrink_start_child (GtkPaned*, gboolean)
+(ffi/defcfn gtk-paned-set-shrink-start-child "gtk_paned_set_shrink_start_child" [:pointer :int] :void)
+;; gtkfiledialog.h:71 void gtk_file_dialog_set_initial_folder (GtkFileDialog*, GFile*)
+(ffi/defcfn gtk-file-dialog-set-initial-folder "gtk_file_dialog_set_initial_folder" [:pointer :pointer] :void)
+;; gtkfiledialog.h:108 void gtk_file_dialog_select_folder (GtkFileDialog*, GtkWindow*, GCancellable*, GAsyncReadyCallback, gpointer)
+(ffi/defcfn gtk-file-dialog-select-folder "gtk_file_dialog_select_folder" [:pointer :pointer :pointer :pointer :pointer] :void)
+;; gtkfiledialog.h:115 GFile* gtk_file_dialog_select_folder_finish (GtkFileDialog*, GAsyncResult*, GError**)
+(ffi/defcfn gtk-file-dialog-select-folder-finish "gtk_file_dialog_select_folder_finish" [:pointer :pointer :pointer] :pointer)
+;; gio/gfile.h:611 GFile* g_file_new_for_path (const char*)
+(ffi/defcfn g-file-new-for-path "g_file_new_for_path" [:string] :pointer)

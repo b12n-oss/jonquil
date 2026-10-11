@@ -54,6 +54,7 @@
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
@@ -722,6 +723,40 @@
                       {:labels labels :run1 (since ui mark1) :run2 (since ui mark2)
                        :screenshot-exit exit :screenshot-err err})))))
 
+(defn- scene-file-tree
+  "The file tree: a my-talk project opened as a folder, the tree shown with
+  src and src/talk expanded, core.clj and demo.clj opened from it, both
+  Run, and demo's row highlighted as the active tab."
+  [ui]
+  (go-row :file-tree check!
+    (let [dir (io/file (temp-dirs/temp-dir! "jonquil-demoshots-tree-") "my-talk")
+          put! (fn [rel text] (let [f (io/file dir rel)] (io/make-parents f) (spit f text)))
+          _ (do (put! "deps.edn" "{:paths [\"src\"]}\n")
+                (put! "src/talk/core.clj" "(ns talk.core)\n\n(defn hello [] \"hi\")\n")
+                (put! "src/talk/demo.clj" "(ns talk.demo\n  (:require [talk.core :as c]))\n\n(c/hello)\n")
+                (put! "dev/user.clj" "(ns user)\n")
+                (put! "README.md" "# my-talk\n"))
+          root (.getCanonicalPath dir)
+          p (:file-tree ui)
+          click! (fn [path] (file-tree-pane/activate-path! p path))
+          [t1 t2] (on-gtk ((:simulate-folder-result! ui) {:path root})
+                          ((:toggle-file-tree!* ui))
+                          (click! (str root "/src"))
+                          (click! (str root "/src/talk"))
+                          (click! (str root "/src/talk/core.clj"))
+                          (click! (str root "/src/talk/demo.clj"))
+                          ((:tabs* ui)))
+          mark1 (on-gtk (let [m (out-end-offset ui)] ((:select-tab! ui) (:id t1)) ((:run!* ui)) m))
+          ok1 (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark1) "=> #'talk.core/hello")))
+          mark2 (on-gtk (let [m (out-end-offset ui)] ((:select-tab! ui) (:id t2)) ((:run!* ui)) m))
+          ok2 (await-until 5000 20 #(and (idle? ui) (str/includes? (since ui mark2) "=> \"hi\"")))
+          _ (ga/settle 2)
+          v (on-gtk {:selected (file-tree-pane/selected-path p)
+                     :rows (mapv :name (file-tree-pane/visible-rows p))})
+          {:keys [exit err]} (ga/screenshot (image-path :file-tree "png") (own-pid))]
+      (on-gtk (check! :file-tree (and ok1 ok2 (= (str root "/src/talk/demo.clj") (:selected v)) (zero? exit))
+                      (assoc v :screenshot-exit exit :screenshot-err err))))))
+
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
@@ -751,7 +786,8 @@
    [:clj-full-doc scene-clj-full-doc]
    [:clj-inspector scene-clj-inspector]
    [:clj-source scene-clj-source]
-   [:tabs scene-tabs]])
+   [:tabs scene-tabs]
+   [:file-tree scene-file-tree]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 

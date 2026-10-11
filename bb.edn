@@ -150,7 +150,7 @@
      (row "test:clj" "live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)")
      (row "verify" "lint (report) + test (must pass) — pre-commit gate")
      (hdr "Run and build")
-     (row "app:run [file]" "launch Jonquil, optionally opening a file")
+     (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
@@ -187,23 +187,26 @@
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
-  {:doc "Open five real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server)"
+  {:doc "Open six real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory)"
    :task (let [r1 (shell {:continue true} "jolt" "-M:selftest")
                r2 (shell {:continue true} "jolt" "-M:selftest-window")
                r3 (shell {:continue true} "jolt" "-M:selftest-nrepl")
                r4 (shell {:continue true} "jolt" "-M:selftest-cljd")
                r5 (shell {:continue true} "jolt" "-M:selftest-clj")
+               r6 (shell {:continue true} "jolt" "-M:selftest-tree")
                ok1 (zero? (:exit r1))
                ok2 (zero? (:exit r2))
                ok3 (zero? (:exit r3))
                ok4 (zero? (:exit r4))
-               ok5 (zero? (:exit r5))]
+               ok5 (zero? (:exit r5))
+               ok6 (zero? (:exit r6))]
            (when-not ok1 (println "gtk:selftest: editor/console rows FAILED"))
            (when-not ok2 (println "gtk:selftest: window rows FAILED"))
            (when-not ok3 (println "gtk:selftest: nREPL rows FAILED"))
            (when-not ok4 (println "gtk:selftest: ClojureDart rows FAILED"))
            (when-not ok5 (println "gtk:selftest: JVM Clojure rows FAILED"))
-           (System/exit (if (and ok1 ok2 ok3 ok4 ok5) 0 1)))}
+           (when-not ok6 (println "gtk:selftest: directory-launch rows FAILED"))
+           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6) 0 1)))}
   docs:shots
   {:doc "Self-capture docs/images/*.png (+ one GIF): one fresh process per scene"
    ;; P2.T9 round 1: one shared process/window for all 7 scenes let every
@@ -217,7 +220,7 @@
                           "find" "run-selection" "close-prompt"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
                           "completion" "quick-doc" "rename" "inspector"
-                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs"]
+                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs" "file-tree"]
                results (mapv (fn [id]
                                (let [r (shell {:continue true} "jolt" "-M:shots" id)]
                                  {:id id :ok (zero? (:exit r))}))
@@ -229,7 +232,7 @@
              (println (str "docs:shots: " (count failed) " of " (count results) " scenes FAILED")))
            (System/exit (if (seq failed) 1 0)))}
   app:run
-  {:doc "Launch Jonquil, optionally opening a file"
+  {:doc "Launch Jonquil, optionally opening a file or a project folder (the file tree roots there)"
    :task (apply shell "jolt" "-M" "-m" "jonquil.main" *command-line-args*)}
   app:build
   {:doc "Build the ./jonquil binary (unsigned on macOS)"
@@ -372,9 +375,9 @@
                          "jonquil-selftest-close-save-" "jonquil-selftest-dirty-"
                          "jonquil-selftest-exec-" "jonquil-selftest-impossible-parent-"
                          "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
-                         "jonquil-selftest-source-" "jonquil-selftest-tabs-"
+                         "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-tree-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
-                         "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-clj-server-" "jonquil-clj-config-"
+                         "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-clj-server-" "jonquil-clj-config-"
                          "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
