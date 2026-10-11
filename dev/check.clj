@@ -23,6 +23,7 @@
     jonquil.clj
     jonquil.nrepl.client
     jonquil.nrepl.connection
+    jonquil.nrepl.jank-child
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach

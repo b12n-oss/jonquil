@@ -364,7 +364,7 @@
    ;; logs (jonquil-nrepl-<n>.log) aren't on the list. A symlinked
    ;; directory is never followed, so nothing outside tmpdir is touched.
    :task (let [dry? (some #{"--dry-run"} *command-line-args*)
-               prefixes ["jonquil-settings-test-" "jonquil-source-test-" "jonquil-dialect-test-" "jonquil-nrepl-test-"
+               prefixes ["jonquil-settings-test-" "jonquil-jank-" "jonquil-source-test-" "jonquil-dialect-test-" "jonquil-nrepl-test-"
                          "jonquil-attach-test-" "jonquil-jvm-test-" "jonquil-selftest-"
                          "jonquil-selftest-window-settings-" "jonquil-selftest-nrepl-"
                          "jonquil-selftest-loose-" "jonquil-selftest-cljd-" "jonquil-selftest-clj-"
