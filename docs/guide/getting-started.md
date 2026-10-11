@@ -13,6 +13,25 @@
   pulls in `pango` and `glib` as dependencies. Jonquil loads GTK4 and pango
   from Homebrew at startup rather than linking against them.
 
+Jonquil was most recently tested on Jolt v0.8.21.
+
+Each dialect other than in-process Jolt needs one more thing, and only when
+you use it:
+
+- **jank** (experimental): a `jank` binary. `brew install
+  jank-lang/jank/jank` is the simplest; Jonquil also looks on `PATH`, in
+  `~/.local/bin`, and at whatever `JONQUIL_JANK` names. See
+  [jank](using-jonquil.md#jank-experimental).
+- **JVM Clojure**: Java 17 or later and the `clojure` CLI, plus an nREPL
+  server you start yourself in the project. See
+  [JVM Clojure](using-jonquil.md#jvm-clojure-attaching-to-your-own-nrepl-server).
+- **ClojureDart** (experimental): a running app built with the ClojureDart
+  fork that serves nREPL. See
+  [ClojureDart](using-jonquil.md#clojuredart-experimental-attaching-to-a-running-app).
+- **Jolt out of process**: a checkout of jolt-lang/nrepl for the full
+  nREPL middleware. See
+  [Running Jolt out of process](using-jonquil.md#running-jolt-out-of-process).
+
 Linux is a target Jonquil's native library lookup already knows about
 (`deps.edn` lists `libgtk-4.so.1`, `libpango-1.0.so.0`, and so on), but a
 full Linux build and run hasn't shipped yet; ROADMAP.md tracks it under
@@ -21,8 +40,9 @@ Phase 5.
 ## Running
 
 ```bash
-bb app:run           # opens an empty window
-bb app:run file.clj  # opens file.clj in the Definitions editor
+bb app:run                # opens an empty window
+bb app:run file.clj       # opens file.clj in the Definitions editor
+bb app:run ~/dev/project  # opens a folder: the file tree shows it, ready to pick a file
 ```
 
 ## Building
@@ -31,7 +51,7 @@ bb app:run file.clj  # opens file.clj in the Definitions editor
 bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
 ```
 
-Once it's built, `./jonquil` and `./jonquil file.clj` work the same way as
+Once it's built, `./jonquil`, `./jonquil file.clj` and `./jonquil <folder>` work the same way as
 `bb app:run` does, without needing Jolt or babashka on `PATH` at all.
 
 ### The macOS quarantine note
@@ -49,19 +69,34 @@ Gatekeeper only objects to a binary that arrived from somewhere else.
 
 ## Settings
 
-Jonquil remembers one thing today: the theme you last picked with
-Cmd/Ctrl+Shift+M. It's saved to `$XDG_CONFIG_HOME/jonquil/settings.edn`, or
-`~/.config/jonquil/settings.edn` when that variable is unset, blank, or not
-an absolute path, as a small EDN map: `{:theme :navy}`, or whichever theme
-you last chose.
+Jonquil keeps a few choices between runs in
+`$XDG_CONFIG_HOME/jonquil/settings.edn`, or `~/.config/jonquil/settings.edn`
+when that variable is unset, blank, or not an absolute path. It's a small
+EDN map:
 
-Loading the file never throws. A missing file starts Jonquil in light,
-the default theme, with nothing said about it. A file that can't be read,
-or that names a theme Jonquil doesn't know, also falls back to light, but
-says so once in the console. Saving is atomic: Jonquil writes a temp file
-beside the target and renames it into place, and if the settings file is a
-symlink, the save follows it and the link itself survives. To go back to
-light, delete the file.
+```clojure
+{:theme :navy
+ :file-tree {:visible? true :width 240}
+ :dialect :jolt}
+```
+
+- `:theme` is the theme you last picked with Cmd/Ctrl+Shift+M.
+- `:file-tree` is whether the file tree was showing and how wide it was,
+  saved when you toggle it and when you quit.
+- `:dialect` is optional and only written by hand: the dialect an untitled
+  buffer or a file outside any project starts in (see
+  [Choosing a dialect](using-jonquil.md#choosing-a-dialect)).
+
+Loading the file never throws. A missing file starts Jonquil with the
+defaults (the light theme, and the tree hidden unless you opened a folder) and says nothing. A file that
+can't be read, or a value Jonquil can't use, falls back to the default for
+that key and says so once in the console. Saving changes only
+the key it's saving and keeps everything else in the file, and it refuses
+to overwrite a file it couldn't read, telling you in the console instead,
+so a hand edit with a typo is never thrown away. Saving is atomic: Jonquil
+writes a temp file beside the target and renames it into place, and if the
+settings file is a symlink, the save follows it and the link itself
+survives. To go back to every default, delete the file.
 
 See [Using Jonquil](using-jonquil.md) for the rest of the window, and
 [Development](development.md) for the test suite, the self-test harnesses,

@@ -12,7 +12,11 @@ code don't cover on their own.
    build and run Jonquil, and find where its saved settings live.
 2. **[Using Jonquil](using-jonquil.md)**: the window, Run versus the REPL
    prompt, stdin, Stop, Reset on Run, editing, find and replace, Open and
-   Save, themes, the P4 help features, and the full key table.
+   Save, tabs, the file tree, themes, the help features, the inspector, and
+   the full key table. Its "Dialects and runtimes" part covers each language
+   Jonquil runs: Jolt in process or out of process, ClojureDart and JVM
+   Clojure by attaching to a server you started (with auto-require for JVM
+   projects), and jank, which Jonquil launches itself.
 3. **[Development](development.md)**: the task groups `bb info` prints,
    the unit suite, the self-test and binary-smoke harnesses, screenshots,
    and lint, format, and the git hooks.
