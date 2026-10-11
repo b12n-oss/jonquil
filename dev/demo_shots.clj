@@ -62,6 +62,7 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.main :as main]
+            [jonquil.nrepl.jank-child :as jank-child]
             [temp-dirs]))
 
 (def ^:private images-dir "docs/images")
@@ -757,6 +758,36 @@
       (on-gtk (check! :file-tree (and ok1 ok2 (= (str root "/src/talk/demo.clj") (:selected v)) (zero? exit))
                       (assoc v :screenshot-exit exit :screenshot-err err))))))
 
+;; --- jank scene ------------------------------------------------------------
+;; Runs against a REAL jank (jank-child/find-binary: JONQUIL_JANK, PATH, the
+;; usual install dirs). -main opens a window on a temp project's
+;; src/demo/core.jank and does nothing when no jank is found, so this scene
+;; never needs the fake.
+
+(def ^:private jank-demo-text
+  "(ns demo.core)
+
+(defn greet
+  \"Says hello to someone.\"
+  [who]
+  (str \"Hello, \" who \"!\"))
+
+(println (greet \"Jonquil\"))
+")
+
+(defn- scene-jank
+  "Run starts jank and loads the buffer (a printed line), then one REPL
+  entry runs in the buffer's namespace."
+  [ui]
+  (go-row :jank check!
+    (let [run-ok? (<! (clj-run-demo! ui jank-demo-text))
+          m1 (on-gtk (clj-enter! ui "(greet \"again\")"))
+          ok1 (await-until 10000 20 #(and (clj-idle? ui) (str/includes? (since ui m1) "=> \"Hello, again!\"")))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :jank "png") (own-pid))]
+      (on-gtk (check! :jank (and run-ok? ok1 (zero? exit))
+                      {:console (console-text ui) :screenshot-exit exit :screenshot-err err})))))
+
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
@@ -787,7 +818,8 @@
    [:clj-inspector scene-clj-inspector]
    [:clj-source scene-clj-source]
    [:tabs scene-tabs]
-   [:file-tree scene-file-tree]])
+   [:file-tree scene-file-tree]
+   [:jank scene-jank]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
@@ -826,18 +858,30 @@
 (defn -main [& args]
   (let [scene-id (some-> (first args) keyword)
         scene-fn (some (fn [[id f]] (when (= id scene-id) f)) scenes)]
-    (if-not scene-fn
+    (cond
+      (and scene-fn (= :jank scene-id) (nil? (jank-child/find-binary)))
+      (do (log "jank: no jank binary found (set JONQUIL_JANK); nothing captured")
+          (System/exit 0))
+
+      (not scene-fn)
       (do (log "usage: jolt -M:shots <scene-id>, one of:"
                (str/join ", " (map (fn [[id _]] (name id)) scenes)))
           (log "got:" (pr-str (first args)))
           (System/exit 1))
-      (let [srv (when (clj-scenes scene-id)
+
+      :else
+      (let [jank-file (when (= :jank scene-id)
+                        (let [f (io/file (temp-dirs/temp-dir! "jonquil-demoshots-jank-") "src/demo/core.jank")]
+                          (io/make-parents f)
+                          (spit f jank-demo-text)
+                          (.getPath f)))
+            srv (when (clj-scenes scene-id)
                   (let [srv (clj-server/start!)]
                     (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
                     srv))]
         (try
           (main/start!
-           {:file (when srv (str (:dir srv) "/src/demo/core.clj"))
+           {:file (or jank-file (when srv (str (:dir srv) "/src/demo/core.clj")))
             :settings-path (fresh-settings-path)
             :on-ready (fn [ui]
                         (g/g-signal-connect-data (:window ui) "destroy"

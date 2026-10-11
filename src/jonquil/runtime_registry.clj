@@ -19,7 +19,8 @@
   GTK involved."
   (:require [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
-            [jonquil.nrepl.evaluator :as nrepl]))
+            [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.jank :as jank]))
 
 (defonce ^:private live (atom #{}))
 
@@ -31,12 +32,14 @@
 
 (defn- settled?
   "True for any evaluator whose stop! can't still be mid-teardown: an
-  nREPL evaluator only once nrepl/settled? says so, anything else (no
-  child to wait for) at once."
+  nREPL evaluator only once nrepl/settled? says so, a jank evaluator once
+  jank/settled? says so (no launch in flight), anything else (no child to
+  wait for) at once."
   [ev]
-  (if (instance? jonquil.nrepl.evaluator.NRepl ev)
-    (nrepl/settled? ev)
-    true))
+  (cond
+    (instance? jonquil.nrepl.evaluator.NRepl ev) (nrepl/settled? ev)
+    (instance? jonquil.nrepl.jank.Jank ev) (jank/settled? ev)
+    :else true))
 
 (defn unregister!
   "Removes ev from the registry -- but only once it has settled (C1, the
@@ -54,12 +57,12 @@
   nil)
 
 (defn- wait-until-settled!
-  "Polls nrepl/settled? every 20ms until it's true or deadline-ms passes."
+  "Polls settled? every 20ms until it's true or deadline-ms passes."
   [ev deadline-ms]
   (let [t0 (System/currentTimeMillis)]
     (loop []
       (cond
-        (nrepl/settled? ev) true
+        (settled? ev) true
         (> (- (System/currentTimeMillis) t0) deadline-ms) false
         :else (do (Thread/sleep 20) (recur))))))
 
@@ -72,8 +75,10 @@
   start-runtime! to notice it and tear down what it just started. Without
   this wait, jonquil.main's System/exit right after this returns could cut
   that teardown off mid-flight and orphan the child it was about to kill.
-  A plain Evaluator (the in-process engine) has no child to wait for, so
-  only nREPL evaluators are waited on here; stop! itself already handles
+  A jank evaluator is waited on the same way while a launch is in flight
+  (bounded by jank/settle-deadline-ms). A plain Evaluator (the in-process
+  engine) has no child to wait for, so only nREPL and jank evaluators are
+  waited on here; stop! itself already handles
   every evaluator kind.
 
   Each evaluator's wait is bounded by child/ready-deadline-ms (a start's
@@ -85,6 +90,9 @@
     (doseq [e evs]
       (try (ev/stop! e) (catch Throwable _ nil)))
     (doseq [e evs]
-      (when (instance? jonquil.nrepl.evaluator.NRepl e)
-        (wait-until-settled! e (+ child/ready-deadline-ms child/term-grace-ms))))
+      (cond
+        (instance? jonquil.nrepl.evaluator.NRepl e)
+        (wait-until-settled! e (+ child/ready-deadline-ms child/term-grace-ms))
+        (instance? jonquil.nrepl.jank.Jank e)
+        (wait-until-settled! e jank/settle-deadline-ms)))
     nil))

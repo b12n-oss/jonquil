@@ -9,9 +9,9 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 38 namespaces in under half a second, and it's the fastest
+currently loads 47 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (285 tests, 1654 assertions
+slower. `bb test` runs the full unit suite (381 tests, 1996 assertions
 today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -27,18 +27,22 @@ against a real `clojure -M:serve`, started fresh for the suite by
 `dev/clj_server.clj` (mirroring `jonquil.nrepl.child`'s shape for a Jolt
 child, but for the real JVM CLI): it needs Java 17+ and the `clojure` CLI,
 and the network on a first run that hasn't cached clojure-cli.repl-server
-yet. `bb test` never touches a child process or a real server and stays
+yet. `bb test:jank` runs a fourth suite against a real jank: it launches a
+`jank repl` through the same launcher the app uses. It honours
+`JONQUIL_JANK`, then looks for `jank` the way the app does, and when it
+finds none it prints a message and skips, exiting 0, so it is safe on a
+machine without jank. `bb test` never touches a child process or a real server and stays
 that self-contained on purpose, which is why the live suites are separate
 tasks rather than tags inside the same one. `bb verify` is the pre-commit
 gate: clj-kondo in report mode, then `bb test` followed by `bb
 test:nrepl`, both of which must pass.
 
-## Self-test and docs: five windows, one binary, one camera
+## Self-test and docs: seven windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens five real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens seven real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
@@ -82,6 +86,16 @@ through a switch to a Jolt file and back, and a close that never sends
 the server a `close` op. Its source rows open definitions from a fixture
 jar and from files inside and outside the project, follow and go back,
 open a project file in the window, and share the slot with the inspector.
+
+The seventh group (`dev/gtk_selftest_jank.clj`) opens a window on a
+throwaway `.jank` project. `bb gtk:selftest` sets `JONQUIL_JANK` to
+`dev/fake-jank` for it, a small script that ignores its arguments and
+serves a fake jank nREPL (`dev/fake_jank_nrepl.clj`) in its working
+directory, writing `.nrepl-port` there as jank does. The launcher still
+starts it as a real child process with a held-open stdin and a private run
+directory, so rows can check the pid and the directory on disk, and nothing
+needs a jank install. To run the group alone, set `JONQUIL_JANK` to the
+absolute path of `dev/fake-jank` and run `jolt -M:selftest-jank`.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
@@ -144,6 +158,11 @@ earlier scene's leftover output. `bb docs:shots` regenerates every scene in
 one pass; to retake just one, run `jolt -M:shots <scene-id>` directly, the
 same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
+
+The `jank` scene runs against a real jank, found the way the app finds it
+(`JONQUIL_JANK`, `PATH`, the usual install folders). With none installed it
+prints that and exits 0 without writing an image. Retake it with
+`jolt -M:shots jank`.
 
 The four JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`
 and `clj-inspector`) run against a real `clojure -M:serve`, started through

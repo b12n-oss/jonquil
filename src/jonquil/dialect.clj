@@ -95,7 +95,37 @@
    :runtimes #{:attach}
    :port-file "NREPL.lock"
    :experimental true
+   ;; The same text as jonquil.cljd/experimental-message (dialect can't
+   ;; require cljd); a test keeps the two equal.
+   :experimental-message "; ClojureDart support is experimental. Jonquil connects to the running app on the first Run."
    :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
+
+(def ^:private jank-special-forms
+  ;; jank's own forms, added to Jolt's set for the :jank profile. Read from
+  ;; `special-forms` in jank.nrepl.server.handler.completions
+  ;; (compiler+runtime/src/jank/jank/nrepl/server/handler/completions.jank
+  ;; at jank 38a6382be, noted there as from jank/read/parse.cpp). Its
+  ;; def, fn*, recur, do, if, quote, var, throw and try are already in
+  ;; Jolt's set; these are the ones Jolt lacks.
+  #{"let*" "loop*" "case*" "letfn*"
+    "cpp/raw" "cpp/dsl" "cpp/value" "cpp/cast" "cpp/unsafe-cast"
+    "cpp/box" "cpp/unbox" "cpp/new" "cpp/delete"})
+
+(def jank
+  {:id :jank
+   :name "jank"
+   :extensions #{"jank"}
+   ;; A guess: jank's reader-conditional feature keyword hasn't been measured.
+   :reader-features #{:jank}
+   :special-forms (into (:special-forms jolt) jank-special-forms)
+   :builtins (:builtins jolt)
+   ;; No markers: a .jank file selects it by extension.
+   :project-markers []
+   ;; Jonquil starts its own jank process on the first Run.
+   :evaluator :launch
+   :runtimes #{:launch}
+   :experimental true
+   :experimental-message "; jank support is experimental. Jonquil starts its own jank process on the first Run."})
 
 (def clj
   {:id :clj
@@ -118,7 +148,7 @@
 
   clj joined this list in P2.T4, once the window required jonquil.nrepl.jvm
   and could reach make-attached :clj (ruling 3)."
-  [jolt cljd clj])
+  [jolt cljd clj jank])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
@@ -303,5 +333,6 @@
   ([{:keys [profile runtime]} connection]
    (cond
      (= :attach runtime) (str (:name profile) (if (= :attached connection) " (attached)" " (not running)"))
+     (= :launch runtime) (str (:name profile) (if (= :attached connection) " (running)" " (not running)"))
      (= runtime (:evaluator profile)) (:name profile)
      :else (str (:name profile) " (" (runtime-name runtime) ")"))))

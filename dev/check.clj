@@ -21,12 +21,15 @@
     jonquil.nrepl.ops
     jonquil.cljd
     jonquil.clj
+    jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection
+    jonquil.nrepl.jank-child
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach
     jonquil.nrepl.jvm
+    jonquil.nrepl.jank
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help

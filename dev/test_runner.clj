@@ -4,7 +4,8 @@
   With no arguments every namespace in `test-namespaces` runs. With arguments,
   only the named ones do, which is the focused loop during TDD. The exit is
   explicit because a Jolt process with live threads may not exit on its own."
-  (:require [clojure.test :as t]))
+  (:require [clojure.test :as t]
+            [jonquil.nrepl.jank-child :as jank-child]))
 
 (def test-namespaces
   ;; Add each new test namespace here as tasks land.
@@ -29,13 +30,17 @@
     jonquil.nrepl.bencode-test
     jonquil.nrepl.client-test
     jonquil.nrepl.connection-test
+    jonquil.nrepl.jank-child-test
     jonquil.nrepl.ops-test
     jonquil.cljd-test
     jonquil.clj-test
+    jonquil.jank-test
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
+    jonquil.fake-jank-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.nrepl.jvm-test
+    jonquil.nrepl.jank-eval-test
     jonquil.gtk.ffi-test
     jonquil.inspect.view-test
     jonquil.inspect-test])
@@ -54,9 +59,18 @@
   ;; 17+, the clojure CLI and, on a first run, the network.
   '[jonquil.live.clj-attach-test])
 
+(def live-jank-namespaces
+  ;; The :jank dialect's live suite: launches a real `jank repl` per test.
+  ;; Run with `bb test:jank`, not `bb test`. JONQUIL_JANK picks the binary.
+  '[jonquil.live.jank-live-test])
+
 (defn -main [& args]
+  (when (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
+    (println "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping")
+    (System/exit 0))
   (let [nss (cond (= ["--live"] args) live-namespaces
                   (= ["--live-clj"] args) live-clj-namespaces
+                  (= ["--live-jank"] args) live-jank-namespaces
                   (seq args) (mapv symbol args)
                   :else test-namespaces)]
     (apply require nss)

@@ -22,7 +22,10 @@ JVM Clojure attaches the same way, to a project's own nREPL server, once
 its `.jonquil.edn` says `{:dialect :clj}`: start a server with
 `clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil
 connects the first time you Run, requiring any namespaces the project
-lists under `:auto-require` as it does. A short list of limits for each runtime
+lists under `:auto-require` as it does. jank is the other experimental
+dialect: open a `.jank` file and Jonquil starts its own `jank repl` for the
+window on the first Run (`brew install jank-lang/jank/jank`, or set
+`JONQUIL_JANK`). A short list of limits for each runtime
 is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
@@ -79,6 +82,7 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 - `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
 - `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `bb test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
 - `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
+- `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`: the jank dialect (experimental). Jonquil launches its own `jank repl` per window from a private temp folder and talks to it over nREPL. `bb test` runs these against an in-process fake server, and `bb test:jank` runs a live suite against a real jank.
 
 ## Commands
 
@@ -87,8 +91,9 @@ bb check                  # require every namespace, exit 0
 bb test                   # all test namespaces; exits 1 on any failure or error
 bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
 bb test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
+bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
 bb test jonquil.edit-test # one namespace (the TDD loop)
-bb gtk:selftest           # real-window self-tests, opens five windows (don't type while it runs)
+bb gtk:selftest           # real-window self-tests, opens seven windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
 bb smoke:cljd             # drive the built binary against a running ClojureDart app (start it with bb dev:macos first)

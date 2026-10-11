@@ -46,6 +46,7 @@
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
@@ -782,10 +783,10 @@
     ;; clj plan P2.T4: satisfies? connection/Attached, not an instance? on
     ;; any one dialect's record, so a :clj window prints its own limits too
     ;; -- the experimental line stays gated on the profile's own flag,
-    ;; which only cljd sets.
+    ;; which cljd and jank set.
     (satisfies? connection/Attached e)
     (do (when (:experimental (:profile sel))
-          (cview/append! cv :system (str cljd/experimental-message "\n")))
+          (cview/append! cv :system (str (:experimental-message (:profile sel)) "\n")))
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
