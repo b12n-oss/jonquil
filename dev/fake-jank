@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A stand-in for `jank repl` for Jonquil's tests: ignores its arguments
+# and serves fake jank nREPL in the caller's working directory, writing
+# .nrepl-port there, as jank does.
+dir=$(pwd -P)
+cd "$(dirname "$0")/.." && exec jolt -M:fake-jank -m fake-jank-nrepl "$dir"

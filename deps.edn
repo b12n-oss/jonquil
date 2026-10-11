@@ -48,6 +48,9 @@
   ;; server is involved.
   :selftest-clj {:extra-paths ["dev"]
                  :main-opts ["-m" "gtk-selftest-clj"]}
+  ;; D3 plan P1.T2: the fake jank nREPL server as a stand-in `jank`
+  ;; executable (dev/fake-jank runs -m fake-jank-nrepl).
+  :fake-jank {:extra-paths ["dev"]}
   ;; File-tree plan P2.T3: a window launched on a directory.
   :selftest-tree {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-tree"]}
