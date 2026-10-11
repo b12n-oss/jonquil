@@ -3,6 +3,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.cljd :as cljd]
             [jonquil.dialect :as dialect]
             [jonquil.syntax :as syntax]
             [temp-dirs]))
@@ -126,9 +127,9 @@
       (is (= [:jolt :marker :in-process] [(:id (:profile s)) (:source s) (:runtime s)]))
       (is (= [".jonquil.edn isn't valid EDN, so it is ignored"] (:warnings s)))))
   (testing "an unknown :dialect is a warning"
-    (let [s (dialect/select dialect/profiles (proj #{} "{:dialect :jank}") "/p/a.clj" nil)]
+    (let [s (dialect/select dialect/profiles (proj #{} "{:dialect :bogus}") "/p/a.clj" nil)]
       (is (= :jolt (:id (:profile s))))
-      (is (= [".jonquil.edn names :jank, which isn't a known dialect"] (:warnings s)))))
+      (is (= [".jonquil.edn names :bogus, which isn't a known dialect"] (:warnings s)))))
   (is (= "/p" (:project-dir (dialect/select dialect/profiles (proj #{"deps.edn"} nil) nil nil)))))
 
 (deftest label-test
@@ -164,7 +165,7 @@
     (let [added (set/difference (:special-forms dialect/cljd) (:special-forms dialect/jolt))]
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
-  (is (= [dialect/jolt dialect/cljd dialect/clj] dialect/profiles) "clj joins profiles in P2.T4"))
+  (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank] dialect/profiles) "clj joined in P2.T4, jank in D3 P1.T1"))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
@@ -331,3 +332,44 @@
       (is (nil? (:auto-require s)))
       (is (= 1 (count (:warnings s))))
       (is (str/includes? (first (:warnings s)) ":auto-require only applies to JVM Clojure")))))
+
+;; D3 P1.T1: the :jank profile, which Jonquil launches itself.
+(def ^:private all4 [dialect/jolt dialect/cljd dialect/clj dialect/jank])
+
+(deftest jank-profile-test
+  (is (= :jank (:id dialect/jank)))
+  (is (contains? (:extensions dialect/jank) "jank"))
+  (is (contains? (:special-forms dialect/jank) "cpp/raw"))
+  (is (contains? (:special-forms dialect/jank) "let*"))
+  (is (contains? (:special-forms dialect/jank) "defn") "Jolt's forms are kept")
+  (is (= #{:launch} (:runtimes dialect/jank))))
+
+(deftest jank-selection-test
+  (let [dir (temp-project {"deps.edn" "{}" "src/a.jank" "(ns a)\n" "src/b.jank" "(ns b)\n"
+                           "src/c.clj" "(ns c)\n"})
+        sel-of (fn [path]
+                 (dialect/select all4 (dialect/find-project all4 path) path nil))]
+    (try
+      (testing "a .jank file in a deps.edn project: jank by extension"
+        (let [sel (sel-of (str dir "/src/a.jank"))]
+          (is (= [:jank :extension :launch] [(:id (:profile sel)) (:source sel) (:runtime sel)]))))
+      (testing "a loose .jank file"
+        (is (= :jank (:id (:profile (dialect/select all4 nil "/tmp/x.jank" nil))))))
+      (testing ".jonquil.edn {:dialect :jank} takes a .clj file"
+        (write! dir ".jonquil.edn" "{:dialect :jank}")
+        (let [sel (sel-of (str dir "/src/c.clj"))]
+          (is (= [:jank :config :launch] [(:id (:profile sel)) (:source sel) (:runtime sel)]))))
+      (testing "two .jank files in one project share a selection key"
+        (is (= (dialect/selection-key (sel-of (str dir "/src/a.jank")))
+               (dialect/selection-key (sel-of (str dir "/src/b.jank"))))))
+      (finally (temp-dirs/delete-tree! dir)))))
+
+(deftest jank-label-test
+  (is (= "jank (not running)" (dialect/label {:profile dialect/jank :runtime :launch} nil)))
+  (is (= "jank (running)" (dialect/label {:profile dialect/jank :runtime :launch} :attached))))
+
+(deftest experimental-message-test
+  (doseq [p dialect/profiles :when (:experimental p)]
+    (is (string? (:experimental-message p)) (str (:id p))))
+  ;; dialect can't require cljd, so the text lives in both places.
+  (is (= cljd/experimental-message (:experimental-message dialect/cljd))))
