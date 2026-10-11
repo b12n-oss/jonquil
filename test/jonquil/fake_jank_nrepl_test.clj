@@ -2,10 +2,13 @@
   "The fake jank nREPL server answers the way jank (upstream main 38a6382)
   was measured to in the D3 re-check spike."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is use-fixtures]]
             [fake-jank-nrepl :as fake]
             [jonquil.nrepl.client :as client]
-            [jonquil.nrepl.ops :as ops]))
+            [jonquil.nrepl.ops :as ops]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (defn- strip [msgs] (mapv (fn [m] (dissoc m :id :session)) msgs))
 
@@ -74,15 +77,33 @@
       (is (= [{:status ["error" "unknown-op" "done"]}]
              (strip (client/request-sync conn {:op "interrupt"} 2000)))))))
 
+(defn- read-port
+  "The port in file once its trimmed contents parse, else nil after ~5 s."
+  [^java.io.File f]
+  (loop [n 0]
+    (let [port (try (Long/parseLong (str/trim (slurp f))) (catch Exception _ nil))]
+      (cond port port
+            (>= n 200) nil
+            :else (do (Thread/sleep 25) (recur (inc n)))))))
+
 (deftest main-writes-port-file-test
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/fake-jank-" (System/currentTimeMillis))
-        _ (.mkdirs (java.io.File. dir))
+  (let [dir (temp-dirs/temp-dir! "jonquil-fake-jank-test-")
         fut (future (fake/-main dir))
-        port-file (java.io.File. (str dir "/.nrepl-port"))
-        _ (loop [n 0] (when (and (not (.exists port-file)) (< n 200)) (Thread/sleep 25) (recur (inc n))))
-        port (Long/parseLong (str/trim (slurp port-file)))
-        conn (client/connect port)]
+        port (read-port (java.io.File. (str dir "/.nrepl-port")))]
     (try
-      (is (= (set fake/jank-ops) (ops/op-names (client/request-sync conn {:op "describe"} 2000))))
-      (is (= "[\"([w])\" \"Says hi.\"]" (:value (first (ev conn meta-code)))))
-      (finally (client/close! conn) (fake/stop-main!) (future-cancel fut)))))
+      (is (some? port) "-main wrote a numeric .nrepl-port within 5 s")
+      (when port
+        (let [conn (client/connect port)]
+          (try
+            (is (= (set fake/jank-ops) (ops/op-names (client/request-sync conn {:op "describe"} 2000))))
+            (is (= "[\"([w])\" \"Says hi.\"]" (:value (first (ev conn meta-code)))))
+            (finally (client/close! conn)))))
+      (finally
+        (fake/stop-main!)
+        (is (not= :timeout (deref fut 3000 :timeout)) "-main returns once stopped")))))
+
+(deftest load-file-of-comments-test
+  (with-fake {}
+    (fn [conn]
+      (is (= [{:value "nil" :ns "user"} {:status ["done"]}]
+             (strip (client/request-sync conn {:op "load-file" :file "; nothing\n"} 2000)))))))

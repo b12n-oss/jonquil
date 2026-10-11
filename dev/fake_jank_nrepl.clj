@@ -83,7 +83,7 @@
           start-ns (if (and req-ns (contains? @loaded req-ns)) req-ns "user")]
       (loop [fs (seq (read-forms text)) current start-ns last-value nil]
         (if (nil? fs)
-          (do (when-not eval? (reply {"value" last-value "ns" current}))
+          (do (when-not eval? (reply {"value" (or last-value "nil") "ns" current}))
               (reply {"status" ["done"]}))
           (let [f (first fs)]
             (if (matches? (:fail-on opts) f)
@@ -163,17 +163,28 @@
 
 (def ^:private main-server (atom nil))
 
+(def ^:private main-latch (atom nil))
+
 (defn stop-main!
-  "Stops the server -main started, if any (tests only)."
+  "Stops the server -main started, if any, and lets -main return."
   []
-  (when-let [srv @main-server] (stop! srv) (reset! main-server nil)))
+  (when-let [srv @main-server] (stop! srv) (reset! main-server nil))
+  (when-let [l @main-latch] (deliver l true) (reset! main-latch nil)))
 
 (defn -main
   "Starts the stand-in jank server, writes its port to <dir>/.nrepl-port
-  and blocks forever."
+  (written under a temp name and renamed, so the file appears whole) and
+  blocks until stop-main! is called."
   [dir]
   (let [srv (start! {:docs {"greet" ["([w])" "Says hi."]}
-                     :slow {"(spin)" 60000}})]
+                     :slow {"(spin)" 60000}})
+        latch (promise)
+        tmp (java.io.File. (str dir "/.nrepl-port.tmp"))]
     (reset! main-server srv)
-    (spit (str dir "/.nrepl-port") (str (:port srv)))
-    @(promise)))
+    (reset! main-latch latch)
+    (spit tmp (str (:port srv)))
+    (java.nio.file.Files/move (.toPath tmp) (.toPath (java.io.File. (str dir "/.nrepl-port")))
+                              (into-array java.nio.file.CopyOption
+                                          [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+    @latch
+    nil))
