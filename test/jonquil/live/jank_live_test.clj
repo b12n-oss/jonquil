@@ -27,8 +27,8 @@
 (def busy-loop
   ;; Not (loop [] (recur)): an unconditional recur in a loop fails to
   ;; compile on both jank builds ('break' statement not in loop, jank core.jank
-  ;; line 3594; re-checked 2026-10-12), so it never runs. This one does.
-  ;; (loop [] (recur)) doesn't compile on jank 0.1 or upstream 38a6382 (jank re-check, 2026-10-12).
+  ;; line 3594; jank 0.1 and upstream 38a6382, jank re-check, 2026-10-12), so
+  ;; it never runs. This one does.
   "(loop [i 0] (when true (recur (inc i))))")
 
 (def ^:dynamic *dir* nil)
@@ -49,8 +49,8 @@
 (defmacro ^:private with-jank
   "Binds sym to a fresh evaluator and stops it afterwards. Written as
   (with-jank [e (make)] ...), which clj-kondo reads as a let (see the ns config)."
-  [[sym] & body]
-  `(let [~sym (make)]
+  [[sym init] & body]
+  `(let [~sym ~init]
      (try ~@body (finally (ev/stop! ~sym)))))
 
 (defn- run
@@ -69,7 +69,8 @@
 
 (defn- pid-alive? [pid]
   (let [r (deref (p/process "ps" "-p" (str pid)) 5000 :timeout)]
-    (zero? (:exit r))))
+    ;; A ps that times out can't say the pid is gone, so it counts as alive.
+    (or (= :timeout r) (zero? (:exit r)))))
 
 (deftest run-requires-across-files-live
   (with-jank [e (make)]
@@ -134,7 +135,7 @@
     (if (some #(= "zqprobevar" (:symbol %)) (ev/complete e "zqprobe" "(zqprobe" 8 {}))
       (let [cands (ev/complete e "tw" "(tw" 3 {})]
         (is (some #(= "twice" (:symbol %)) cands) (pr-str cands)))
-      (println "test:jank: skipped completions-from-jank-live: this jank's completions op lists builtins only"))))
+      (println "test:jank: skipped completions-from-jank-live: this jank's completions op omits vars referred from other namespaces"))))
 
 (deftest error-live
   (with-jank [e (make)]
