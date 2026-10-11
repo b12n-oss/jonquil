@@ -21,7 +21,8 @@ ClojureDart app you already have running, over its own nREPL server.
 JVM Clojure attaches the same way, to a project's own nREPL server, once
 its `.jonquil.edn` says `{:dialect :clj}`: start a server with
 `clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil
-connects the first time you Run. A short list of limits for each runtime
+connects the first time you Run, requiring any namespaces the project
+lists under `:auto-require` as it does. A short list of limits for each runtime
 is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)

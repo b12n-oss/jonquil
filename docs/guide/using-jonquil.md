@@ -640,7 +640,10 @@ next rule as though the file weren't there at all.
 
 `{:dialect :clj}` is the only way to reach JVM Clojure: a project with
 just that one line in its `.jonquil.edn` attaches to its own nREPL server
-instead of running under Jolt (see below).
+instead of running under Jolt (see below). A JVM project can also list
+namespaces under `:auto-require` for Jonquil to load as it connects (see
+[Auto-require](#auto-require)). Any other dialect ignores that key, and
+the console says so.
 
 ### Running Jolt out of process
 
@@ -806,6 +809,37 @@ have stopped.", and a port that answers but isn't nREPL at all gets
 "; Port N isn't an nREPL server Jonquil can use." Jonquil only ever
 reads `.nrepl-port`: since it never started the server that owns the
 file, it never writes to it or deletes it either.
+
+#### Auto-require
+
+A project's usual namespaces can load on their own, so the first line you
+type at the prompt can call into them without a `require` first. List them
+in the project's `.jonquil.edn`:
+
+```clojure
+;; .jonquil.edn
+{:dialect :clj
+ :auto-require [my.app.core my.app.dev]}
+```
+
+Each time Jonquil connects, it prints `; auto-require: my.app.core
+my.app.dev` and sends one `(require 'my.app.core 'my.app.dev)` on its
+session before whatever you asked to run. That means the first Run or REPL
+entry, and again after a reconnect, because a restarted server has
+forgotten everything. It isn't sent twice on the same connection.
+
+If the require fails, a namespace that isn't on the classpath for example,
+the server's own error shows in the console, followed by "; auto-require
+failed (the error is above), so carrying on without it. It runs again on
+the next connect." Your own Run or REPL line still goes out after it.
+Stop during a slow require ends that evaluation as usual, and your request
+isn't sent.
+
+The list has to be a vector of namespace symbols. Anything else is
+ignored, with a line like `; project: .jonquil.edn :auto-require should be
+a vector of namespace symbols, like [my.app.core], not my.app.core, so it
+is ignored`. Jonquil reads `.jonquil.edn` when a window chooses its
+dialect, so an edit to the list takes effect in a new window.
 
 Run sends the whole Definitions pane as a `load-file`, without naming a
 namespace itself: the file's own `ns` form is what decides where the
