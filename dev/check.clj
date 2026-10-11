@@ -29,6 +29,7 @@
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach
     jonquil.nrepl.jvm
+    jonquil.nrepl.jank
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help

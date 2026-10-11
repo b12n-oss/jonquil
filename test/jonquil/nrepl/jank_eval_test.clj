@@ -1,0 +1,251 @@
+(ns jonquil.nrepl.jank-eval-test
+  "The jank evaluator against dev/fake_jank_nrepl.clj, with the child
+  process faked: a launch fn that writes the fake's port into a temp run
+  dir, so no real jank is needed."
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [fake-jank-nrepl :as fake]
+            [jonquil.dialect :as dialect]
+            [jonquil.evaluator :as ev]
+            [jonquil.jank :as jank]
+            [jonquil.nrepl.connection :as connection]
+            [jonquil.nrepl.jank :as jank-eval]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
+
+(def core-text "(ns demo.core)\n(defn f [] 1)\n")
+
+(defn- make-test-jank
+  "A Jank evaluator over srv with a faked child. Returns {:ev e :launches
+  atom :kills atom :launch-opts atom}; opts override the hooks."
+  ([srv] (make-test-jank srv {}))
+  ([srv overrides]
+   (let [launches (atom 0) kills (atom 0) launch-opts (atom [])
+         launch (fn [o]
+                  (swap! launches inc)
+                  (swap! launch-opts conj o)
+                  (let [d (temp-dirs/temp-dir! "jonquil-jank-eval-test-")]
+                    (spit (io/file d ".nrepl-port") (str (:port srv) "\n"))
+                    {:run-dir d :pid -1 :live (atom true)}))
+         e (jank-eval/make-jank
+            {:profile dialect/jank :runtime :launch :project-dir nil}
+            (merge {:timings {:describe-timeout-ms 500 :clone-timeout-ms 500}
+                    :launch launch
+                    :find-binary (fn [] "/fake/jank")
+                    :alive? (fn [c] (boolean (some-> (:live c) deref)))
+                    :kill (fn [c] (swap! kills inc) (some-> (:live c) (reset! false)))}
+                   overrides))]
+     {:ev e :launches launches :kills kills :launch-opts launch-opts})))
+
+(defn- run
+  "Evaluates and waits. {:result r :out [[kind text]...]}."
+  [e code opts]
+  (let [done (promise) out (atom [])]
+    (ev/eval! e code (assoc opts
+                            :on-output (fn [k s] (swap! out conj [k s]))
+                            :on-complete (fn [r] (deliver done r))))
+    {:result (deref done 10000 :timeout) :out @out}))
+
+(defn- all-text [out] (apply str (map second out)))
+
+(defn- wait-until! [pred]
+  (loop [n 0]
+    (when (and (< n 250) (not (pred)))
+      (Thread/sleep 20)
+      (recur (inc n)))))
+
+(defn- with-fake [opts f]
+  (let [srv (fake/start! opts)]
+    (try (f srv) (finally (fake/stop! srv)))))
+
+(defmacro ^:private with-jank
+  "Binds sym to (make-test-jank srv overrides) over a fake (fake-opts),
+  stops the evaluator and the fake afterwards."
+  [[sym fake-opts overrides srv-sym] & body]
+  `(with-fake ~fake-opts
+     (fn [~srv-sym]
+       (let [~sym (make-test-jank ~srv-sym ~overrides)]
+         (try ~@body (finally (ev/stop! (:ev ~sym))))))))
+
+(deftest make-test
+  (let [e (ev/make {:profile dialect/jank :runtime :launch :project-dir nil})]
+    (is (instance? jonquil.nrepl.jank.Jank e))
+    (is (satisfies? connection/Attached e))
+    (is (not (connection/connected? e)))
+    (is (nil? (ev/start! e)))
+    (is (= 'user (ev/prompt-ns e)))
+    (is (= jank/limitations (ev/limitations e)))
+    (is (false? (ev/waiting-for-input? e)))))
+
+(deftest lazy-start-test
+  #_{:clj-kondo/ignore [:unresolved-symbol]}
+  (with-jank [j {} {} srv]
+    (is (zero? @(:launches j)) "nothing launches before the first evaluation")
+    (let [{:keys [result out]} (run (:ev j) "(+ 1 2)" {:run? false})]
+      (is (= :ok (:status result)))
+      (is (= 1 @(:launches j)))
+      (is (re-find (re-pattern (java.util.regex.Pattern/quote (jank/starting-message "/fake/jank")))
+                   (all-text out))))))
+
+(deftest run-moves-prompt-test
+  (with-jank [j {} {} srv]
+    (let [{:keys [result]} (run (:ev j) "(ns demo.core)\n(defn f [] 1)" {:run? true})]
+      (is (= :ok (:status result)))
+      (is (= 'demo.core (ev/prompt-ns (:ev j))))
+      (is (some #{"load-file"} (fake/ops-seen srv))))))
+
+(deftest repl-line-test
+  (with-jank [j {:answers {"(+ 1 2)" "3"}} {} srv]
+    (let [{:keys [result]} (run (:ev j) "(+ 1 2)" {:run? false})]
+      (is (= {:status :ok :printed "3" :ns 'user} (select-keys result [:status :printed :ns])))
+      (is (= "user" (get (last (filter #(= "eval" (get % "op")) (fake/requests srv))) "ns"))))))
+
+(deftest selection-not-loaded-test
+  (with-jank [j {} {} srv]
+    (let [{:keys [result]} (run (:ev j) "(f)" {:run? false :ns-source "(ns demo.other)"})]
+      (is (= {:status :notice :text (jank/not-loaded-message "demo.other")} result))
+      (let [codes (keep #(get % "code") (fake/requests srv))]
+        (is (some #{(jank/find-ns-code "demo.other")} codes))
+        (is (not (some #{"(f)"} codes)))))))
+
+(deftest selection-loaded-test
+  (with-jank [j {} {} srv]
+    (run (:ev j) core-text {:run? true})
+    (let [{:keys [result]} (run (:ev j) "(f)" {:run? false :ns-source core-text})]
+      (is (= :ok (:status result)))
+      (is (= "demo.core" (get (last (filter #(= "eval" (get % "op")) (fake/requests srv))) "ns")))
+      (is (= 'demo.core (ev/prompt-ns (:ev j))) "a selection leaves the prompt alone")))
+  (with-jank [j {} {} srv]
+    (let [{:keys [result]} (run (:ev j) "(g)" {:run? false :ns-source "(def x 1)"})]
+      (is (= :ok (:status result)) "no ns form: evaluates in the prompt ns, no find-ns")
+      (is (not-any? #{(jank/find-ns-code "user")} (keep #(get % "code") (fake/requests srv)))))))
+
+(deftest stop-kills-child-test
+  (with-jank [j {:slow {"(spin)" 5000}} {} srv]
+    (let [e (:ev j) done (promise) out (atom [])]
+      (ev/eval! e "(spin)" {:run? false
+                            :on-output (fn [k s] (swap! out conj [k s]))
+                            :on-complete (fn [r] (deliver done r))})
+      (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
+      (ev/interrupt! e)
+      (is (= {:status :interrupted} (deref done 5000 :timeout)))
+      (is (= 1 @(:kills j)))
+      (is (re-find (re-pattern (java.util.regex.Pattern/quote jank/stopped-message)) (all-text @out)))
+      (is (nil? (jank-eval/child-pid e)))
+      (is (= :ok (:status (:result (run e "(+ 1 1)" {:run? false})))))
+      (is (= 2 @(:launches j))))))
+
+(deftest idle-stop-is-noop-test
+  (with-jank [j {} {} srv]
+    (run (:ev j) "1" {:run? false})
+    (ev/interrupt! (:ev j))
+    (is (zero? @(:kills j)))
+    (is (connection/connected? (:ev j)))))
+
+(deftest stop-during-start-test
+  (let [started (promise) launched (atom 0)]
+    (with-jank [j {} {:launch (fn [{:keys [cancelled?]}]
+                                (swap! launched inc)
+                                (deliver started true)
+                                (loop [] (if (cancelled?) {:error :cancelled} (do (Thread/sleep 10) (recur)))))}
+                srv]
+      (let [e (:ev j) done (promise)]
+        (ev/eval! e "1" {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (deref started 5000 nil)
+        (ev/interrupt! e)
+        (is (= {:status :interrupted} (deref done 5000 :timeout)))
+        (is (nil? (jank-eval/child-pid e)))
+        (is (zero? @(:kills j)))))))
+
+(deftest stop-races-launch-test
+  (testing "stop! while launch is in flight: the child launch returns is killed"
+    (let [gate (promise) started (promise)]
+      (with-jank [j {} {:launch (fn [_]
+                                  (deliver started true)
+                                  @gate
+                                  (let [d (temp-dirs/temp-dir! "jonquil-jank-eval-test-")]
+                                    (spit (io/file d ".nrepl-port") (str (:port srv) "\n"))
+                                    {:run-dir d :pid -1 :live (atom true)}))}
+                  srv]
+        (let [e (:ev j) done (promise)]
+          (ev/eval! e "1" {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+          (deref started 5000 nil)
+          (ev/stop! e)
+          (deliver gate true)
+          (is (= {:status :interrupted} (deref done 5000 :timeout)))
+          (is (= 1 @(:kills j)) "the late child is killed")
+          (is (nil? (jank-eval/child-pid e))))))))
+
+(deftest reset-restarts-test
+  (with-jank [j {} {} srv]
+    (let [e (:ev j)]
+      (ev/set-mode! e :reset)
+      (let [{:keys [result]} (run e core-text {:run? true})]
+        (is (= :ok (:status result)))
+        (is (= 1 @(:launches j)) "a fresh child isn't restarted"))
+      (let [{:keys [result out]} (run e core-text {:run? true})]
+        (is (= :ok (:status result)))
+        (is (= 2 @(:launches j)))
+        (is (= 1 @(:kills j)))
+        (is (re-find (re-pattern (java.util.regex.Pattern/quote jank/reset-message)) (all-text out))))))
+  (with-jank [j {} {} srv]
+    (let [e (:ev j)]
+      (run e core-text {:run? true})
+      (run e core-text {:run? true})
+      (is (= 1 @(:launches j)) "accumulate mode keeps the child"))))
+
+(deftest child-death-test
+  (with-jank [j {:slow {"(spin)" 5000}} {} srv]
+    (let [e (:ev j) done (promise)]
+      (ev/eval! e "(spin)" {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+      (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
+      (fake/drop-connections! srv)
+      (is (= {:status :error :error-text jank/lost-connection} (deref done 5000 :timeout)))
+      (is (= 1 @(:kills j)))
+      (is (= :ok (:status (:result (run e "(+ 1 1)" {:run? false})))))
+      (is (= 2 @(:launches j))))))
+
+(deftest no-binary-test
+  (with-jank [j {} {:find-binary (fn [] nil)} srv]
+    (is (= {:status :notice :text jank/no-binary-message}
+           (:result (run (:ev j) "1" {:run? false}))))
+    (is (zero? @(:launches j)))))
+
+(deftest start-failure-test
+  (with-jank [j {} {:launch (fn [_] {:error "boom"})} srv]
+    (is (= {:status :notice :text (jank/start-failed-message "boom")}
+           (:result (run (:ev j) "1" {:run? false}))))
+    (is (nil? (jank-eval/child-pid (:ev j))))))
+
+(deftest launch-throw-test
+  (with-jank [j {} {:launch (fn [_] (throw (ex-info "kaboom" {})))} srv]
+    (let [{:keys [result]} (run (:ev j) "1" {:run? false})]
+      (is (= :error (:status result)))
+      (is (re-find #"kaboom" (:error-text result))))))
+
+(deftest launch-options-test
+  (with-jank [j {} {} srv]
+    (let [d (temp-dirs/temp-dir! "jonquil-jank-eval-test-")]
+      (run (:ev j) "1" {:run? true :path (str d "/a.jank")})
+      (let [o (first @(:launch-opts j))]
+        (is (= "/fake/jank" (:binary o)))
+        (is (= (str d) (:module-path o)) "no project: the file's own directory")
+        (is (fn? (:cancelled? o)))))))
+
+(deftest never-lookup-test
+  (with-jank [j {} {} srv]
+    (let [e (:ev j)]
+      (run e core-text {:run? true})
+      (run e "(+ 1 2)" {:run? false})
+      (ev/lookup e "map" "(map)" 1)
+      (ev/complete e "ma" "(ma" 3 {})
+      (is (not (some #{"lookup"} (fake/ops-seen srv)))))))
+
+(deftest stop!-idempotent-test
+  (with-jank [j {} {} srv]
+    (run (:ev j) "1" {:run? false})
+    (ev/stop! (:ev j))
+    (ev/stop! (:ev j))
+    (is (= 1 @(:kills j)))
+    (is (not (connection/connected? (:ev j))))))
