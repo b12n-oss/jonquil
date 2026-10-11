@@ -385,7 +385,7 @@
                          "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-tree-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-demoshots-jank-" "jonquil-clj-server-" "jonquil-clj-config-"
-                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-"]
+                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
                              (some (fn [p]

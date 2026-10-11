@@ -37,6 +37,7 @@
     jonquil.tabs
     jonquil.file-tree
     jonquil.tool-path
+    jonquil.login-path
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover

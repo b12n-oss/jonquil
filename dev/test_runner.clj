@@ -26,6 +26,7 @@
     jonquil.tabs-test
     jonquil.file-tree-test
     jonquil.tool-path-test
+    jonquil.login-path-test
     jonquil.dialect-test
     jonquil.evaluator-test
     jonquil.nrepl.bencode-test
