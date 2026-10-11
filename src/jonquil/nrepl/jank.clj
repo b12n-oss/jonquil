@@ -15,14 +15,18 @@
   Everything mutable lives in the record's state atom, the child included.
   The child is killed on Stop, on a reset-mode Run that follows an earlier
   request, when the connection dies, and when the window stops the
-  evaluator. Completion and docs are offline placeholders until the help
-  task."
+  evaluator.
+
+  Help never asks jank while an evaluation runs, because jank serves one
+  request at a time and the question would queue behind it. Docs come from
+  an eval of the var's metadata, not the lookup op."
   (:require [clojure.java.io :as io]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.jank :as jank]
+            [jonquil.nrepl.client :as client]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.jank-child :as jank-child]
             [jonquil.nrepl.ops :as ops]))
@@ -33,6 +37,10 @@
    :describe-timeout-ms 5000
    :clone-timeout-ms 10000
    :still-waiting-ms 30000
+   ;; estimate: jonquil.nrepl.jvm's GTK-thread help bound.
+   :help-timeout-ms 300
+   ;; estimate: a popover wait off the GTK thread, shorter than jvm's.
+   :full-doc-timeout-ms 5000
    ;; nil: jank-child/start! applies its own default.
    :start-timeout-ms nil})
 
@@ -169,6 +177,36 @@
       (try (kill-child! ev) (catch Throwable _ nil))
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
 
+;; --- help ---
+
+(def not-running-doc "No docs: jank isn't running yet. Run something first.")
+(def timeout-doc "No docs: jank didn't answer in time.")
+
+(defn- help-state
+  "The state to ask jank with, or nil when asking would hang or fail: the
+  connection isn't open, or an evaluation is running."
+  [ev]
+  (let [s @(:state ev)]
+    (when (and (connection/live? ev) (not (:running s))) s)))
+
+(defn- meta-lookup
+  "Docs for sym from an eval of its metadata, bounded by timeout-ms. The
+  namespace comes from the text, and jank falls back to user for one it
+  hasn't loaded (jank re-check spike, 2026-10-12). Never the lookup op."
+  [ev sym text timeout-ms]
+  (let [{:keys [state timings]} ev
+        {:keys [running conn session prompt-ns]} @state]
+    (cond
+      (not (connection/live? ev)) (cljd/no-docs sym not-running-doc)
+      running (cljd/no-docs sym jank/busy-doc)
+      :else
+      (let [r (client/request-sync conn {:op "eval" :code (jank/meta-doc-code sym)
+                                         :ns (clj/help-ns text prompt-ns) :session session}
+                                   (or timeout-ms (:help-timeout-ms timings)))]
+        (if (vector? r)
+          (jank/meta-doc sym r)
+          (cljd/no-docs sym timeout-doc))))))
+
 (defrecord Jank [selection state history listeners timings hooks]
   ev/Evaluator
   ;; The child starts on the first evaluation: nothing to start here.
@@ -201,14 +239,35 @@
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
-  ;; Offline until the help task: the same buffer and profile based
-  ;; candidates as cljd, and no docs.
-  (complete [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
-         (catch Throwable _ [])))
-  (lookup [_ sym _text _pos]
-    (cljd/no-docs sym (str "No docs for " sym)))
+  ;; Offline candidates, plus jank's own when the connection is live and
+  ;; nothing is running, bounded by :help-timeout-ms since this runs on the
+  ;; GTK thread. A timeout or a throw falls back to offline alone.
+  (complete [this prefix text pos extra-context]
+    (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+                       (catch Throwable _ []))]
+      (try
+        (if-let [{:keys [conn session prompt-ns]} (help-state this)]
+          (let [r (client/request-sync conn {:op "completions" :prefix prefix
+                                             :ns (clj/help-ns text prompt-ns)
+                                             :session session}
+                                       (:help-timeout-ms timings))]
+            (if (vector? r)
+              (ops/merge-candidates prefix offline (ops/candidates r))
+              offline))
+          offline)
+        (catch Throwable _ offline))))
+  (lookup [this sym text _pos]
+    (try (meta-lookup this sym text nil)
+         (catch Throwable _ (cljd/no-docs sym timeout-doc))))
   (limitations [_] jank/limitations)
+
+  ev/FullDoc
+  ;; Off the GTK thread, with the longer bound; on-result is called once.
+  (full-doc [this sym text on-result]
+    (future
+      (on-result (try (meta-lookup this sym text (:full-doc-timeout-ms timings))
+                      (catch Throwable _ (cljd/no-docs sym timeout-doc)))))
+    nil)
 
   connection/Attached
   (connected? [this] (connection/live? this))

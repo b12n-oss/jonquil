@@ -240,6 +240,7 @@
       (run e "(+ 1 2)" {:run? false})
       (ev/lookup e "map" "(map)" 1)
       (ev/complete e "ma" "(ma" 3 {})
+      (deref (let [p (promise)] (ev/full-doc e "map" "(map)" #(deliver p %)) p) 5000 nil)
       (is (not (some #{"lookup"} (fake/ops-seen srv)))))))
 
 (deftest stop!-idempotent-test
@@ -278,3 +279,73 @@
       (let [ks (map (fn [[k s]] (if (= k :complete) :complete (when (= s (str jank/stopped-message "\n")) :stopped))) @events)]
         (is (< (.indexOf (vec ks) :complete) (.indexOf (vec ks) :stopped)))
         (is (not= -1 (.indexOf (vec ks) :stopped)))))))
+
+;; --- help ---
+
+(defn- candidate-names [cands] (set (map :symbol cands)))
+
+(deftest complete-merges-server-test
+  (with-jank [j {:completions {"gr" [["greet" "demo.core" "function"]]}} {} srv]
+    (let [e (:ev j)]
+      (run e "(+ 1 2)" {:run? false})
+      (is (contains? (candidate-names (ev/complete e "gr" "(gr" 3 {})) "greet"))
+      (is (some #{"completions"} (fake/ops-seen srv))))))
+
+(deftest complete-offline-when-idle-not-connected-test
+  (with-jank [j {:completions {"gr" [["greet" "demo.core" "function"]]}} {} srv]
+    (let [e (:ev j)
+          cands (ev/complete e "gr" "(defn greet [])\n(gr" 19 {})]
+      (is (sequential? cands))
+      (is (not (contains? (candidate-names cands) "demo.core/greet")))
+      (is (empty? (fake/requests srv)) "not connected: nothing sent"))))
+
+(deftest help-while-running-test
+  (with-jank [j {:slow {"(spin)" 800}
+                 :completions {"gr" [["greet" "demo.core" "function"]]}
+                 :docs {"greet" ["([w])" "Says hi."]}} {} srv]
+    (let [e (:ev j) done (promise)]
+      (run e "(+ 1 2)" {:run? false})
+      (ev/eval! e "(spin)" {:run? false :on-output (fn [_ _]) :on-complete #(deliver done %)})
+      (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
+      (let [before (count (fake/requests srv))
+            cands (ev/complete e "gr" "(gr" 3 {})
+            doc (ev/lookup e "greet" "(greet)" 1)]
+        (is (not (contains? (candidate-names cands) "greet")))
+        (is (= jank/busy-doc (:doc doc)))
+        (is (= before (count (fake/requests srv))) "no completions, no metadata eval while running"))
+      (is (= :ok (:status (deref done 10000 :timeout)))))))
+
+(deftest lookup-meta-test
+  (with-jank [j {:docs {"greet" ["([w])" "Says hi."]}} {} srv]
+    (let [e (:ev j)]
+      (is (= "No docs: jank isn't running yet. Run something first."
+             (:doc (ev/lookup e "greet" "(greet)" 1))))
+      (run e "(+ 1 2)" {:run? false})
+      (let [d (ev/lookup e "greet" "(greet)" 1)]
+        (is (= :found (:status d)))
+        (is (= "([w])" (:arglists d)))
+        (is (= "Says hi." (:doc d))))
+      (is (not (some #{"lookup"} (fake/ops-seen srv)))))))
+
+(deftest lookup-unknown-test
+  (with-jank [j {} {} srv]
+    (let [e (:ev j)]
+      (run e "(+ 1 2)" {:run? false})
+      (is (= "No docs for nope" (:doc (ev/lookup e "nope" "(nope)" 1)))))))
+
+(deftest lookup-timeout-test
+  (with-jank [j {:slow {"(resolve (quote greet))" 1000}} {:timings {:help-timeout-ms 100}} srv]
+    (let [e (:ev j)]
+      (run e "(+ 1 2)" {:run? false})
+      (is (= "No docs: jank didn't answer in time." (:doc (ev/lookup e "greet" "(greet)" 1)))))))
+
+(deftest full-doc-test
+  (with-jank [j {:docs {"greet" ["([w])" "Says hi."]}} {} srv]
+    (let [e (:ev j) p (promise) calls (atom 0)]
+      (run e "(+ 1 2)" {:run? false})
+      (ev/full-doc e "greet" "(greet)" (fn [d] (swap! calls inc) (deliver p d)))
+      (let [d (deref p 5000 :timeout)]
+        (is (= :found (:status d)))
+        (is (= "Says hi." (:doc d))))
+      (Thread/sleep 100)
+      (is (= 1 @calls)))))
