@@ -110,20 +110,31 @@
                   (.mkdirs d)
                   (.getCanonicalPath d))
         log (str run-dir "/server.log")
-        proc (apply p/process {:dir run-dir :out (io/file log) :err :out}
-                    (launch-command binary module-path))
-        child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
-               :stdin (:in proc)}
-        fail (fn [e] (kill! child) {:error e})
-        t0 (System/currentTimeMillis)]
-    (loop []
-      (let [port (read-port run-dir)]
-        (cond
-          port (assoc child :port port)
-          (and cancelled? (cancelled?)) (fail :cancelled)
-          (not (p/alive? proc))
-          (let [r (deref proc 500 nil)]
-            (fail (str "jank exited (exit " (:exit r) "): " (tail log 5))))
-          (> (- (System/currentTimeMillis) t0) timeout-ms)
-          (fail (str "jank didn't write a port file within " timeout-ms " ms: " (tail log 5)))
-          :else (do (Thread/sleep 50) (recur)))))))
+        spawned (try (apply p/process {:dir run-dir :out (io/file log) :err :out}
+                            (launch-command binary module-path))
+                     (catch Exception e
+                       ;; e.g. a stale JONQUIL_JANK: nothing was spawned.
+                       (delete-tree! run-dir)
+                       {:spawn-error (str "couldn't start jank: " (ex-message e))}))]
+    (if-let [e (:spawn-error spawned)]
+      {:error e}
+      (let [proc spawned
+            child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
+                   :stdin (:in proc)}
+            fail (fn [e] (kill! child) {:error e})
+            t0 (System/currentTimeMillis)]
+        ;; Anything thrown while waiting (cancelled?, reading the port)
+        ;; must not leave the spawned tree behind.
+        (try
+          (loop []
+            (let [port (read-port run-dir)]
+              (cond
+                port (assoc child :port port)
+                (and cancelled? (cancelled?)) (fail :cancelled)
+                (not (p/alive? proc))
+                (let [r (deref proc 500 nil)]
+                  (fail (str "jank exited (exit " (:exit r) "): " (tail log 5))))
+                (> (- (System/currentTimeMillis) t0) timeout-ms)
+                (fail (str "jank didn't write a port file within " timeout-ms " ms: " (tail log 5)))
+                :else (do (Thread/sleep 50) (recur)))))
+          (catch Throwable e (kill! child) (throw e)))))))

@@ -21,6 +21,18 @@
 (defn- wait-until [pred ms]
   (loop [n 0] (cond (pred) true (> (* n 50) ms) false :else (do (Thread/sleep 50) (recur (inc n))))))
 
+(defn- run-dirs []
+  (set (filter #(re-matches #"jonquil-jank-\d+" %)
+               (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
+
+(defn- slow-binary
+  "A jank stand-in that stays up and never writes a port file."
+  []
+  (let [slow (str (temp-dirs/temp-dir! "jonquil-jank-test-") "/slow-jank")]
+    (spit slow "#!/usr/bin/env bash\nsleep 60\n")
+    (.setExecutable (io/file slow) true)
+    slow))
+
 (deftest find-binary-test
   (let [on (fn [& present] (fn [f] (boolean (some #{f} present))))
         opts (fn [env exists?] {:env env :path-dirs ["/x/bin" "/y/bin"] :exists? exists?})]
@@ -55,6 +67,7 @@
     (try
       (is (nil? (:error child)) (str child))
       (is (.exists (io/file (:run-dir child) ".nrepl-port")))
+      (is (contains? (run-dirs) (.getName (io/file (:run-dir child)))) "run-dirs sees a live run dir")
       (let [conn (client/connect (:port child))]
         (try (is (some :versions (client/request-sync conn {:op "describe"} 2000)))
              (finally (client/close! conn))))
@@ -85,9 +98,7 @@
 
 (deftest kill-during-start-test
   (let [t0 (System/currentTimeMillis)
-        slow (str (temp-dirs/temp-dir! "jonquil-jank-test-") "/slow-jank")
-        _ (do (spit slow "#!/usr/bin/env bash\nsleep 60\n") (.setExecutable (io/file slow) true))
-        child (jank/start! {:binary slow
+        child (jank/start! {:binary (slow-binary)
                             :timeout-ms 10000
                             :cancelled? #(> (- (System/currentTimeMillis) t0) 100)})]
     (is (= {:error :cancelled} child))
@@ -106,10 +117,6 @@
            (is (pos? (or (:port child) 0)))
            (finally (jank/kill! child))))))
 
-(defn- run-dirs []
-  (set (filter #(re-matches #"jonquil-jank-\\d+" %)
-               (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
-
 (deftest start-failure-test
   (let [before (run-dirs)
         t0 (System/currentTimeMillis)
@@ -118,6 +125,20 @@
     (is (str/includes? (:error r) "exit"))
     (is (< (- (System/currentTimeMillis) t0) 2000))
     (is (= before (run-dirs)) "the failed start left no run dir")))
+
+(deftest start-missing-binary-test
+  (let [before (run-dirs)
+        r (jank/start! {:binary "/nonexistent/jank"})]
+    (is (string? (:error r)) (str r))
+    (is (str/starts-with? (:error r) "couldn't start jank: "))
+    (is (= before (run-dirs)) "no run dir left")))
+
+(deftest throwing-cancelled-kills-child-test
+  (let [before (run-dirs)]
+    (is (thrown? Exception
+                 (jank/start! {:binary (slow-binary) :cancelled? (fn [] (throw (ex-info "boom" {})))})))
+    (is (= before (run-dirs)))
+    (is (not (pgrep? "slow-jank")))))
 
 (deftest two-children-test
   (let [a (jank/start! {:binary fake-jank})
