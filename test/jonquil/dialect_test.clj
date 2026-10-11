@@ -302,3 +302,32 @@
     (testing "Jolt to Jolt leaves the box as the person set it"
       (is (= {:state {} :active? false :sensitive? true :tooltip nil}
              (dialect/reset-toggle {} jolt-sel false))))))
+
+(deftest auto-require-config-test
+  (testing "a vector of symbols is read as is"
+    (is (= '[my.app.core my.app.dev]
+           (:auto-require (dialect/parse-config "{:dialect :clj :auto-require [my.app.core my.app.dev]}" nil)))))
+  (testing "absent or empty: no key, no warning, so other configs read exactly as before"
+    (is (= {:dialect :clj :runtime nil :warnings []} (dialect/parse-config "{:dialect :clj}" nil)))
+    (is (= {:dialect :clj :runtime nil :warnings []} (dialect/parse-config "{:dialect :clj :auto-require []}" nil))))
+  (doseq [text ["{:dialect :clj :auto-require my.app.core}"
+                "{:dialect :clj :auto-require [my.app.core \"my.app.dev\"]}"
+                "{:dialect :clj :auto-require (my.app.core)}"]]
+    (testing (str "malformed is a warning and ignored, the rest still read: " text)
+      (let [r (dialect/parse-config text nil)]
+        (is (= :clj (:dialect r)))
+        (is (nil? (:auto-require r)))
+        (is (str/includes? (first (:warnings r)) ":auto-require should be a vector of namespace symbols"))))))
+
+(deftest auto-require-selection-test
+  (testing "a :clj project's list reaches the selection"
+    (let [s (dialect/select all3 (proj #{"deps.edn"} "{:dialect :clj :auto-require [my.app.core]}") "/p/a.clj" nil)]
+      (is (= :clj (:id (:profile s))))
+      (is (= '[my.app.core] (:auto-require s)))
+      (is (= [] (:warnings s)))))
+  (testing "any other dialect ignores it, with a warning"
+    (let [s (dialect/select all3 (proj #{"deps.edn"} "{:auto-require [my.app.core]}") "/p/a.clj" nil)]
+      (is (= :jolt (:id (:profile s))))
+      (is (nil? (:auto-require s)))
+      (is (= 1 (count (:warnings s))))
+      (is (str/includes? (first (:warnings s)) ":auto-require only applies to JVM Clojure")))))

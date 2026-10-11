@@ -71,6 +71,33 @@
       (is (= :ok (:status result)))
       (is (= ":private-ok" (:printed result))))))
 
+(deftest auto-require-live
+  ;; .jonquil.edn's :auto-require on a real server: demo.auto is written
+  ;; here (nothing else loads it), required on connect, and usable from
+  ;; the first REPL line without a require of its own.
+  (let [f (io/file (:dir *srv*) "src/demo/auto.clj")]
+    (spit f "(ns demo.auto)\n\n(def loaded :yes)\n")
+    (try
+      (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)
+                             :auto-require '[demo.auto]})
+            {:keys [result out]} (run e "demo.auto/loaded" {:run? false})]
+        (is (= :ok (:status result)))
+        (is (= ":yes" (:printed result)))
+        (is (some #{(str (clj/auto-require-message '[demo.auto]) "\n")} (keep (fn [[k s]] (when (= :system k) s)) out))))
+      (finally (io/delete-file f true)))))
+
+(deftest auto-require-missing-live
+  ;; A namespace the server can't find: its own error streams, Jonquil says
+  ;; the require failed, and the user's line still answers.
+  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)
+                         :auto-require '[demo.nowhere]})
+        {:keys [result out]} (run e "(+ 1 2)" {:run? false})
+        texts (fn [kind] (keep (fn [[k s]] (when (= kind k) s)) out))]
+    (is (= :ok (:status result)))
+    (is (= "3" (:printed result)))
+    (is (some #(str/includes? % "demo/nowhere") (texts :err)) (pr-str out))
+    (is (some #{(str clj/auto-require-failed-message "\n")} (texts :system)))))
+
 (deftest not-loaded-live
   (let [e (make)
         {:keys [result]} (run e "(+ 1 2)" {:run? false :ns-source "(ns demo.never)\n(+ 1 2)"})]

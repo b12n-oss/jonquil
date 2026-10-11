@@ -21,9 +21,17 @@
          clj/limitations)))
 
 (deftest policy-test
-  (is (= {:session-ns nil :inspect-registered? false :prompt-ns 'user} (:on-connect clj/connect-policy)))
+  (is (= {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false}
+         (:on-connect clj/connect-policy)))
   (is (= clj/no-project-message (get-in clj/connect-policy [:messages :no-project])))
   (is (= (clj/refused-message 9) ((get-in clj/connect-policy [:messages :refused]) 9))))
+
+(deftest auto-require-text-test
+  (is (= "(require 'my.app.core 'my.app.dev)" (clj/auto-require-code '[my.app.core my.app.dev])))
+  (is (= "(require 'demo.auto)" (clj/auto-require-code '[demo.auto])))
+  (is (= "; auto-require: my.app.core my.app.dev" (clj/auto-require-message '[my.app.core my.app.dev])))
+  (is (= "; auto-require failed (the error is above), so carrying on without it. It runs again on the next connect."
+         clj/auto-require-failed-message)))
 
 (deftest buffer-ns-test
   (is (= "demo.core" (clj/buffer-ns "(ns demo.core\n  (:require [clojure.string :as s]))\n(defn f [])")))

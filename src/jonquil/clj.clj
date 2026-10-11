@@ -30,6 +30,19 @@
 (defn not-loaded-message [ns-name]
   (str "; " ns-name " isn't loaded in the server yet. Run the file first."))
 
+(defn auto-require-message
+  "The line said before .jonquil.edn's :auto-require list is required."
+  [nss]
+  (str "; auto-require: " (str/join " " nss)))
+
+(def auto-require-failed-message
+  "; auto-require failed (the error is above), so carrying on without it. It runs again on the next connect.")
+
+(defn auto-require-code
+  "One require form for the namespace symbols in nss."
+  [nss]
+  (str "(require " (str/join " " (map (fn [n] (str "'" n)) nss)) ")"))
+
 (def interrupt-failed-message
   "; The server didn't stop the evaluation, so Jonquil detached. It may still be running.")
 
@@ -75,8 +88,10 @@
    ;; connect always resets it to false and a later reconnect registers
    ;; again. :prompt-ns: a new connection is a new session, so the
    ;; prompt starts back in user rather than on the last Run's namespace
-   ;; (which a restarted server has never heard of).
-   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user}})
+   ;; (which a restarted server has never heard of). :auto-required?:
+   ;; whether this connection has sent .jonquil.edn's :auto-require list
+   ;; yet; a restarted server has forgotten it, so every connect resets it.
+   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false}})
 
 ;; --- the buffer's namespace ---
 
