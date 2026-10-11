@@ -49,13 +49,16 @@
 (defn- finish!
   "Ends the running evaluation: clears :running, then idle, then
   on-complete, each in its own try so a throwing caller can't swallow the
-  other. An interrupted result first says why the child is gone."
+  other. An interrupted result then says why the child is gone."
   [{:keys [state] :as ev} {:keys [on-output on-status-change on-complete]} result]
-  (when (and (= :interrupted (:status result)) (stopping? ev))
-    (connection/say! on-output :system (str jank/stopped-message "\n")))
-  (swap! state assoc :running nil)
-  (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
-  (try (when on-complete (on-complete result)) (catch Throwable _ nil)))
+  (let [stopped? (and (= :interrupted (:status result)) (stopping? ev))]
+    (swap! state assoc :running nil)
+    (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
+    (try (when on-complete (on-complete result)) (catch Throwable _ nil))
+    ;; After on-complete: the window prints its "interrupted" line from
+    ;; there, and the sentence explaining the restart follows it.
+    (when stopped?
+      (connection/say! on-output :system (str jank/stopped-message "\n")))))
 
 (defn- kill-child!
   "Drops the connection (pending requests fail as disconnected), clears the
@@ -132,7 +135,11 @@
                         {:status :interrupted}
                         (connection/connect! ev on-output (connect-policy (:child @state) ev))))]
       (cond
-        problem (finish! ev opts problem)
+        ;; A notice after a launch (refused, not a server, bad port file):
+        ;; the child is no use, and keeping it would fail the same way on
+        ;; every later evaluation.
+        problem (do (when (:child @state) (kill-child! ev))
+                    (finish! ev opts problem))
         (stopping? ev) (finish! ev opts {:status :interrupted})
         run?
         (let [f (when path (io/file path))

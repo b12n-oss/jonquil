@@ -249,3 +249,32 @@
     (ev/stop! (:ev j))
     (is (= 1 @(:kills j)))
     (is (not (connection/connected? (:ev j))))))
+
+(deftest connect-notice-replaces-child-test
+  (let [dead (doto (fake/start!) fake/stop!) n (atom 0)]
+    (with-jank [j {} {:launch (fn [_]
+                                (let [d (temp-dirs/temp-dir! "jonquil-jank-eval-test-")
+                                      port (if (= 1 (swap! n inc)) (:port dead) (:port srv))]
+                                  (spit (io/file d ".nrepl-port") (str port "\n"))
+                                  {:run-dir d :pid -1 :live (atom true)}))}
+                srv]
+      (let [e (:ev j)]
+        (is (= :notice (:status (:result (run e "1" {:run? false})))))
+        (is (= 1 @(:kills j)) "the child that wouldn't connect is killed")
+        (is (nil? (jank-eval/child-pid e)))
+        (is (= :ok (:status (:result (run e "1" {:run? false})))))
+        (is (= 2 @n) "the next evaluation launches again")))))
+
+(deftest stopped-sentence-follows-result-test
+  (with-jank [j {:slow {"(spin)" 5000}} {} srv]
+    (let [e (:ev j) events (atom []) done (promise)]
+      (ev/eval! e "(spin)" {:run? false
+                            :on-output (fn [_ s] (swap! events conj [:out s]))
+                            :on-complete (fn [r] (swap! events conj [:complete (:status r)]) (deliver done r))})
+      (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
+      (ev/interrupt! e)
+      (deref done 5000 nil)
+      (wait-until! #(some (fn [[k s]] (and (= k :out) (= s (str jank/stopped-message "\n")))) @events))
+      (let [ks (map (fn [[k s]] (if (= k :complete) :complete (when (= s (str jank/stopped-message "\n")) :stopped))) @events)]
+        (is (< (.indexOf (vec ks) :complete) (.indexOf (vec ks) :stopped)))
+        (is (not= -1 (.indexOf (vec ks) :stopped)))))))
