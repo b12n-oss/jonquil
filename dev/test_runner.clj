@@ -33,6 +33,7 @@
     jonquil.nrepl.ops-test
     jonquil.cljd-test
     jonquil.clj-test
+    jonquil.jank-test
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
     jonquil.fake-jank-nrepl-test

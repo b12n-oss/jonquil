@@ -21,6 +21,7 @@
     jonquil.nrepl.ops
     jonquil.cljd
     jonquil.clj
+    jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection
     jonquil.nrepl.jank-child

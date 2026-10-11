@@ -115,6 +115,9 @@
   policy is {:messages {:no-project s :not-running s-or-fn-of-dir
   :bad-port-file s :refused fn-of-port :not-server fn-of-port :connecting
   fn-of-port} :on-connect {state keys merged into :state on success}
+  :port-file fn-of-ev returning a java.io.File or nil, optional
+  (default: the profile's port file in the project directory; jank passes
+  one because it writes its port into a run dir of its own),
   :stop-requested? fn-of-ev, optional}. :stop-requested? defaults to
   connection/stop-requested? itself; a dialect passes its own so a test
   can intercept every guard connect! checks (a with-redefs on a var
@@ -123,7 +126,7 @@
   [{:keys [state timings] :as ev} on-output {:keys [messages on-connect] :as policy}]
   (let [stop? (or (:stop-requested? policy) stop-requested?)]
     (when-not (connected? ev)
-      (let [f (port-file ev)]
+      (let [f (if-let [pf (:port-file policy)] (pf ev) (port-file ev))]
         (cond
           (nil? f) {:status :notice :text (message-text messages :no-project nil)}
           (not (.exists ^java.io.File f))
