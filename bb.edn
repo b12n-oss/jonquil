@@ -148,6 +148,7 @@
      (row "test" "run the unit suite; pass namespace names to run a subset")
      (row "test:nrepl" "live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)")
      (row "test:clj" "live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)")
+     (row "test:jank" "live jank tests: launch a real jank repl (JONQUIL_JANK or any jank on PATH; skips without one)")
      (row "verify" "lint (report) + test (must pass) — pre-commit gate")
      (hdr "Run and build")
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
@@ -184,6 +185,8 @@
               :task (shell "jolt" "-M:test" "--live")}
   test:clj {:doc "Live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)"
             :task (shell "jolt" "-M:test" "--live-clj")}
+  test:jank {:doc "Live jank tests: launch a real jank repl (JONQUIL_JANK or any jank on PATH; skips without one)"
+             :task (shell "jolt" "-M:test" "--live-jank")}
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
