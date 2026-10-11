@@ -80,12 +80,39 @@
     (is (nil? (jank/kill! nil)))))
 
 (deftest kill-tree-test
-  (let [child (jank/start! {:binary fake-jank})
-        pid (str (:pid child))]
-    (jank/kill! child)
-    (is (not (zero? (:exit (p/sh "kill" "-0" pid)))) "the pid is gone")
-    (is (not (zero? (:exit (p/sh "pgrep" "-P" pid)))) "no descendants remain")
-    (is (not (.exists (io/file (:run-dir child)))))))
+  ;; Like jank, the stand-in leaves when its stdin hits EOF, but only after
+  ;; spawning a grandchild: kill! has to take the grandchild down too, even
+  ;; though closing stdin ends the parent first.
+  (let [dir (temp-dirs/temp-dir! "jonquil-jank-test-")
+        bin (str dir "/tree-jank")
+        pid-file (str dir "/grandchild.pid")]
+    (spit bin (str "#!/usr/bin/env bash\n"
+                   "echo 51234 > .nrepl-port\n"
+                   "sleep 61 & echo $! > '" pid-file "'\n"
+                   "read -r _\n"))
+    (.setExecutable (io/file bin) true)
+    (let [child (jank/start! {:binary bin})
+          _ (is (wait-until #(.exists (io/file pid-file)) 2000) "the grandchild started")
+          grandchild (str/trim (slurp pid-file))
+          gone? (fn [pid] (not (zero? (:exit (p/sh "kill" "-0" pid)))))]
+      (is (not (gone? grandchild)) "the grandchild is up before kill!")
+      (jank/kill! child)
+      (is (gone? (str (:pid child))) "the pid is gone")
+      (is (wait-until #(gone? grandchild) 1000) "the grandchild is gone too")
+      (p/sh "kill" "-9" grandchild) ; only matters when the assertion above failed
+      (is (not (.exists (io/file (:run-dir child))))))))
+
+(deftest find-binary-relative-test
+  ;; A relative JONQUIL_JANK that exists from Jonquil's cwd would be
+  ;; resolved against the run dir by the spawn and fail with error=2.
+  (let [found (jank/find-binary {:env {"JONQUIL_JANK" "dev/fake-jank"}
+                                 :path-dirs ["dev"]
+                                 :exists? (fn [f] (.isFile (io/file f)))})
+        via-path (jank/find-binary {:env {} :path-dirs ["dev"]
+                                    :exists? (fn [f] (= f (.getAbsolutePath (io/file "dev/jank"))))})]
+    (is (= fake-jank found))
+    (is (= (.getAbsolutePath (io/file "dev/jank")) via-path))
+    (is (.isAbsolute (io/file found)))))
 
 (deftest dies-on-its-own-test
   (let [bin (str (temp-dirs/temp-dir! "jonquil-jank-test-") "/dying-jank")]

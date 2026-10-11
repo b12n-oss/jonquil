@@ -115,7 +115,7 @@
   {:id :jank
    :name "jank"
    :extensions #{"jank"}
-   ;; no :jank feature measured yet; the evaluator task sets this.
+   ;; A guess: jank's reader-conditional feature keyword hasn't been measured.
    :reader-features #{:jank}
    :special-forms (into (:special-forms jolt) jank-special-forms)
    :builtins (:builtins jolt)

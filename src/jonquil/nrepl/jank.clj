@@ -294,6 +294,20 @@
               :alive? (or alive? jank-child/alive?)
               :kill (or kill jank-child/kill!)}))))
 
+(def settle-deadline-ms
+  ;; estimate: a launch notices a Stop within its 50 ms poll, then kills the
+  ;; tree (jank-child/kill-wait-ms, 1 s at most); the rest is slack.
+  5000)
+
+(defn settled?
+  "True once no evaluation, and so no launch, is in flight. A Stop doesn't
+  wait for a launch that is still polling for the port file (it only marks
+  the evaluator stopped); the launch then kills what it spawned and
+  deletes its run dir itself. jonquil.runtime-registry waits on this
+  before the process exits."
+  [ev]
+  (nil? (:running @(:state ev))))
+
 (defn child-pid
   "The pid of ev's current child, or nil."
   [ev]

@@ -17,11 +17,16 @@
             [jolt.process :as p]
             [jonquil.nrepl.connection :as connection]))
 
+(defn- absolute [path]
+  (str (.normalize (.toAbsolutePath (.toPath (io/file path))))))
+
 (defn find-binary
   "The jank executable as an absolute path, or nil. Order: env
-  JONQUIL_JANK (used as given), <dir>/jank for each of path-dirs,
-  /opt/homebrew/bin/jank, ~/.local/bin/jank; the first that exists?
-  accepts. With no argument it reads the real environment and PATH."
+  JONQUIL_JANK, <dir>/jank for each of path-dirs, /opt/homebrew/bin/jank,
+  ~/.local/bin/jank; the first that exists? accepts. A relative candidate
+  is made absolute against the current directory first, because the spawn
+  runs in the run dir. With no argument it reads the real environment
+  and PATH."
   ([]
    (find-binary
     {:env (into {} (System/getenv))
@@ -32,7 +37,7 @@
                        (map #(str % "/jank") path-dirs)
                        ["/opt/homebrew/bin/jank"
                         (str (System/getProperty "user.home") "/.local/bin/jank")])]
-     (first (filter exists? cands)))))
+     (first (filter exists? (map absolute cands))))))
 
 (defn module-path
   "The directory jank loads namespaces from: <project-dir>/src when that
@@ -69,18 +74,25 @@
     (try (java.nio.file.Files/deleteIfExists (.toPath f)) (catch Exception _ nil))))
 
 (defn kill!
-  "Closes the child's stdin, kills its process tree, waits up to 1 s for
-  it to be gone and deletes the run dir. Idempotent; nil is fine."
+  "Kills the child's process tree first, then closes its stdin (closing it
+  first lets jank exit on EOF before the tree is signalled, which would
+  skip the kill and orphan any descendant). Waits up to 1 s for it to be
+  gone, escalates to destroyForcibly if it isn't, and deletes the run
+  dir. Idempotent; nil is fine."
   [child]
   (when child
-    (let [proc (:proc child)]
+    (let [proc (:proc child)
+          wait! (fn []
+                  (loop [n 0]
+                    (when (and (p/alive? proc) (< (* n 20) kill-wait-ms))
+                      (Thread/sleep 20)
+                      (recur (inc n)))))]
+      (when (p/alive? proc) (p/destroy-tree proc))
       (when-let [in (:stdin child)] (try (.close ^java.io.OutputStream in) (catch Exception _ nil)))
+      (wait!)
       (when (p/alive? proc)
-        (p/destroy-tree proc)
-        (loop [n 0]
-          (when (and (p/alive? proc) (< (* n 20) kill-wait-ms))
-            (Thread/sleep 20)
-            (recur (inc n))))))
+        (.destroyForcibly ^java.lang.Process (:proc proc))
+        (wait!)))
     (when-let [d (:run-dir child)] (delete-tree! d))
     nil))
 

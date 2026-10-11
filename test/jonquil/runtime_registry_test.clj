@@ -2,12 +2,17 @@
   "stop-all! is jonquil.main's own guard against the process-exit path
   orphaning a child: a start still mid-spawn when it runs must still be
   torn down, and stop-all! must not return before that's actually true."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is use-fixtures]]
+            [jolt.process :as p]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.jank :as jank-eval]
+            [jonquil.nrepl.jank-child :as jank-child]
             [jonquil.runtime-registry :as registry]
             [temp-dirs]))
 
@@ -92,3 +97,43 @@
         (registry/unregister! e)
         (ev/stop! e)
         (ev/stop! untouched)))))
+
+(defn- jank-run-dirs []
+  (set (filter #(re-matches #"jonquil-jank-\d+" %)
+               (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
+
+(defn- pgrep? [pattern]
+  (let [r (p/sh "pgrep" "-f" pattern)]
+    (boolean (and (zero? (:exit r)) (not (str/blank? (:out r)))))))
+
+(deftest quit-while-jank-starts-leaves-nothing-behind-test
+  ;; Finding 1 of the whole-branch review: the window's close order (stop!,
+  ;; unregister!, stop-all!) used to find a Jank evaluator "settled" while
+  ;; its launch was still polling for the port file, so System/exit could
+  ;; cut the launch off with the process and run dir still there. The
+  ;; stand-in never writes a port file, so the launch stays in flight.
+  (let [before (jank-run-dirs)
+        bin (str (temp-dirs/temp-dir! "jonquil-jank-test-") "/quit-jank")
+        _ (do (spit bin "#!/usr/bin/env bash\nsleep 60\n")
+              (.setExecutable (io/file bin) true))
+        launched (promise)
+        e (jank-eval/make-jank {:profile dialect/jank :runtime :launch :project-dir nil}
+                               {:find-binary (fn [] bin)
+                                ;; Slow to spawn, then the real launcher, so
+                                ;; stop-all! must outwait the whole launch.
+                                :launch (fn [o]
+                                          (Thread/sleep 300)
+                                          (try (jank-child/start! o)
+                                               (finally (deliver launched true))))})]
+    (try
+      (registry/register! e)
+      (ev/eval! e "(+ 1 2)" {:on-output (fn [_ _]) :on-complete (fn [_])})
+      (Thread/sleep 100) ;; the launch is now sleeping before its spawn
+      (try (ev/stop! e) (finally (registry/unregister! e)))
+      (registry/stop-all!)
+      (is (realized? launched) "stop-all! outwaited the launch")
+      (is (not (pgrep? "quit-jank")) "no process left")
+      (is (= before (jank-run-dirs)) "no run dir left")
+      (finally
+        (registry/unregister! e)
+        (ev/stop! e)))))
