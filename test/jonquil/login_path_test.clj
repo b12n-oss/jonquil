@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jolt.process :as p]
             [jonquil.login-path :as lp]
+            [jonquil.tool-path :as tp]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)
@@ -112,6 +113,7 @@
       @(p/process {:out :string} "pkill" "-f" "sleep 86477"))))
 
 (deftest endless-output-test
+  ;; Regression guard: the old code also fell back here, so this cannot tell it apart.
   (let [sh (fake-shell! "while :; do echo spam; done")
         dt (elapsed-ms (fn []
                          (start-with sh {:timeout-ms 1000})
@@ -124,10 +126,27 @@
         "nothing left running")))
 
 (deftest hung-answer-is-stored-test
-  (start-with (fake-shell! "sleep 86478") {:timeout-ms 1000})
-  (lp/answer)
-  (is (< (elapsed-ms lp/answer) 50))
-  (is (< (elapsed-ms lp/path) 50)))
+  ;; The shell ignores TERM, so the lookup outlives the 500 ms grace and
+  ;; answer reaches its late branch; that fallback must then be stored.
+  (start-with (fake-shell! "trap '' TERM; while :; do sleep 1; done # jonquil-hung-86479")
+              {:timeout-ms 300})
+  (try
+    (let [first-ms (elapsed-ms (fn []
+                                 (let [a (lp/answer)]
+                                   (is (= :fallback (:source a)))
+                                   (is (= "timed out" (:reason a))))))]
+      (is (< 600 first-ms 2500) (str "first answer took " first-ms " ms"))
+      (is (< (elapsed-ms lp/answer) 50))
+      (is (< (elapsed-ms lp/path) 50)))
+    (finally
+      @(p/process {:out :string} "pkill" "-9" "-f" "jonquil-hung-86479"))))
+
+(deftest start-catch-delivers-test
+  ;; An exception after the once-guard is set must not leave answer waiting.
+  (with-redefs [tp/needs-lookup? (fn [& _] (throw (ex-info "boom" {})))]
+    (start-with (fake-shell! "exit 1") {}))
+  (let [dt (elapsed-ms (fn [] (is (= :fallback (:source (lp/answer))))))]
+    (is (< dt 1000) (str "answer took " dt " ms"))))
 
 (deftest throwing-exists-test
   (start-with (fake-shell! "exit 1") {:exists? (fn [_] (throw (ex-info "boom" {})))})
