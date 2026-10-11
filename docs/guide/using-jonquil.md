@@ -584,13 +584,15 @@ count, and paging still works over everything up to the cap.
 
 Jonquil evaluates through a dialect profile: what a language's files look
 like, how they're painted, and which evaluator runs them. Two profiles
-exist today, Jolt and ClojureDart (experimental), and selection and the
-evaluator seam underneath both are generic enough for a third. The status
+exist today: Jolt, ClojureDart (experimental), JVM Clojure and jank
+(experimental). Selection and the evaluator seam underneath them are
+generic enough for more. The status
 bar's dialect label reads `Jolt` most of the time, or `Jolt (nREPL)` when
 this window's Jolt is running out of process rather than inside Jonquil
 itself. For ClojureDart it reads `ClojureDart (attached)` while Jonquil
 holds a live connection to the app, and `ClojureDart (not running)` the
-rest of the time.
+rest of the time. For jank it reads `jank (running)` while Jonquil's own jank process is
+up, and `jank (not running)` until the first evaluation starts one.
 
 ### Choosing a dialect
 
@@ -623,6 +625,10 @@ file with no project at all; inside a project, a marker-less default like
 this one is skipped, and selection falls through to whichever rule comes
 next.
 
+jank has no project marker either. A `.jank` file opens as jank by its
+extension, and a project can name it with `{:dialect :jank}` in its
+`.jonquil.edn`, the same way as JVM Clojure.
+
 ### `.jonquil.edn`
 
 A `.jonquil.edn` at the project root pins the dialect and, for Jolt,
@@ -637,6 +643,9 @@ isn't valid EDN, or that doesn't hold a map, never blocks Jonquil from
 opening anything: the console prints a line like `; project: .jonquil.edn
 isn't valid EDN, so it is ignored`, and selection falls through to the
 next rule as though the file weren't there at all.
+
+`{:dialect :jank}` pins jank for a project whose files aren't all `.jank`
+(see [jank](#jank-experimental)).
 
 `{:dialect :clj}` is the only way to reach JVM Clojure: a project with
 just that one line in its `.jonquil.edn` attaches to its own nREPL server
@@ -905,6 +914,79 @@ resolve tells you so again in the status bar, rather than asking the
 server for a doc it already knows nothing useful about.
 
 ![Full documentation for map after a second quick-doc press, with ClojureDocs' examples](../images/clj-full-doc.png)
+
+### jank (experimental)
+
+Jonquil supports jank as an experimental dialect. Unlike ClojureDart and JVM Clojure, you don't start
+anything yourself: Jonquil launches a `jank repl` for the window.
+
+A window picks jank when the open file is a `.jank` file, or when the
+project's `.jonquil.edn` says `{:dialect :jank}`. There is no project
+marker for it. The status bar reads `jank (not running)` until the first
+evaluation, then `jank (running)`.
+
+![A jank window after Run: the console starts jank, prints the program's line, then answers a REPL entry in the file's namespace](../images/jank.png)
+
+#### Installing jank
+
+Install jank with `brew install jank-lang/jank/jank`, or point the
+`JONQUIL_JANK` environment variable at a jank binary you already have.
+Jonquil looks for the binary in this order: `JONQUIL_JANK`, `jank` on your
+`PATH`, `/opt/homebrew/bin/jank`, then `~/.local/bin/jank`. With none of
+them present, the first Run says so, naming both ways to fix it.
+
+#### How it runs
+
+Jonquil starts one jank per window, on the first evaluation, and not when
+the window opens. It runs `jank repl` from a private temporary folder with
+`--module-path <project>/src`, or the project folder when there's no
+`src`, or the file's own folder for a loose file with no project. jank
+writes its `.nrepl-port` into that private folder, so your project's
+`.nrepl-port`, if it has one, is never touched. Closing the window, or
+quitting while jank is still starting, stops the process and removes the
+folder.
+
+Run sends the whole file as a `load-file`, and the prompt then moves to the
+file's namespace. A REPL line evaluates in the prompt's namespace. Run
+Selection and Run Form evaluate in the buffer's namespace, and when jank
+hasn't loaded it yet they say "; demo.core isn't loaded in jank yet. Run
+the file first." rather than running the code in `user`.
+
+jank has no interrupt, so Stop kills the process and starts a fresh one:
+"; Stopped. jank restarted, so earlier definitions are gone." Reset on
+Run does the same before each Run, and it's on by default, as it is for
+every other runtime ("; Reset: restarted jank."). Uncheck it and Run
+builds on whatever the process already has.
+
+One caveat for a loose `.jank` file with no project: when the first
+evaluation is a REPL line or Run Selection rather than Run, jank starts
+without the file's folder on its module path, so a `require` of a sibling
+file fails until you Stop or Reset. Run the file first to avoid it.
+
+#### Docs and completion
+
+Quick documentation reads the var's own metadata, through an ordinary
+eval, because nREPL's `lookup` op hangs on current jank. Jonquil never
+sends it. While an evaluation is running there are no docs, since jank
+answers one request at a time: the popover says "No docs while jank is
+running."
+
+Completion merges jank's own candidates with the offline ones. Homebrew's
+jank 0.1 lists only the prompt namespace's own vars and the builtins, not
+the vars a namespace referred from another one, so those names come from
+the words in your buffer instead.
+
+#### Limits
+
+The console prints these when a jank window opens:
+
+- jank is experimental, and Jonquil starts and stops its own jank process.
+- Stop restarts jank, so earlier definitions are gone afterwards.
+- Programs can't read input: jank hasn't implemented read-line yet.
+- Jump to definition outside this file and the inspector aren't available.
+
+Jonquil can't attach to a jank you started yourself yet, and F12 works
+only inside the buffer.
 
 ## Keys
 
