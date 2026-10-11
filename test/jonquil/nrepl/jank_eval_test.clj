@@ -191,9 +191,20 @@
         (is (re-find (re-pattern (java.util.regex.Pattern/quote jank/reset-message)) (all-text out))))))
   (with-jank [j {} {} srv]
     (let [e (:ev j)]
+      (ev/set-mode! e :accumulate)
       (run e core-text {:run? true})
       (run e core-text {:run? true})
       (is (= 1 @(:launches j)) "accumulate mode keeps the child"))))
+
+(deftest reset-is-the-default-mode-test
+  ;; The window's first evaluator never gets set-mode!, and its Reset on
+  ;; Run box starts ticked, so the default has to be reset.
+  (with-jank [j {} {} srv]
+    (let [e (:ev j)]
+      (run e core-text {:run? true})
+      (let [{:keys [out]} (run e core-text {:run? true})]
+        (is (= 2 @(:launches j)))
+        (is (re-find (re-pattern (java.util.regex.Pattern/quote jank/reset-message)) (all-text out)))))))
 
 (deftest child-death-test
   (with-jank [j {:slow {"(spin)" 5000}} {} srv]

@@ -125,8 +125,7 @@
    :evaluator :launch
    :runtimes #{:launch}
    :experimental true
-   :experimental-message "; jank support is experimental. Jonquil starts its own jank process on the first Run."
-   :reset-tooltip "Resetting a jank process isn't supported yet, so every Run adds to the running one."})
+   :experimental-message "; jank support is experimental. Jonquil starts its own jank process on the first Run."})
 
 (def clj
   {:id :clj

@@ -283,7 +283,7 @@
    (let [timings (merge default-timings timings)]
      (->Jank selection
              (atom {:running nil :conn nil :connecting nil :session nil :ops #{}
-                    :session-ns nil :prompt-ns 'user :mode nil
+                    :session-ns nil :prompt-ns 'user :mode :reset
                     :child nil :used? false :stopped? false})
              (atom (eval/create-history))
              (atom [])

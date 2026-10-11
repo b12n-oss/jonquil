@@ -230,12 +230,9 @@
   [ui]
   (go-row :jank-reset-restarts support/check
     (let [chk (:reset-check ui)
-          ;; Untick, then tick: only a toggled signal tells the evaluator
-          ;; the mode (see the report: the window's first evaluator starts
-          ;; with no mode, so an already-ticked box does nothing).
+          ;; The box starts ticked; tick it only if something unticked it.
           before (on-gtk (let [a (g/gtk-check-button-get-active chk)]
-                           (g/gtk-check-button-set-active chk 0)
-                           (g/gtk-check-button-set-active chk 1)
+                           (when (zero? a) (g/gtk-check-button-set-active chk 1))
                            a))]
       (try
         (let [[ok1 _] (run-and-await ui fixture-core-text 30000 #(str/includes? % "=> "))
