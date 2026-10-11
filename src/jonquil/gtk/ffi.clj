@@ -871,9 +871,10 @@
   [widget target x y]
   (let [in (ffi/alloc 8) out (ffi/alloc 8)]
     (try
-      ;; (double ...), not (float ...): jolt v0.8.20's foreign-set! takes
-      ;; only a Double for a :float slot and rejects a java.lang.Float
-      ;; (measured 2026-10-09; v0.8.19 took both).
+      ;; (double ...), not (float ...): jolt v0.8.20's foreign-set! took
+      ;; only a Double for a :float slot and rejected a java.lang.Float
+      ;; (measured 2026-10-09). v0.8.21 accepts both again (jolt-lang/jolt
+      ;; #1298, #1300); a double works on every version.
       (ffi/write in :float (double x) 0)
       (ffi/write in :float (double y) 4)
       (when (pos? (gtk-widget-compute-point widget target in out))
