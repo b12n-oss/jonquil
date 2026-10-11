@@ -994,6 +994,17 @@ The console prints these when a jank window opens:
 Jonquil can't attach to a jank you started yourself yet, and F12 works
 only inside the buffer.
 
+jank also holds a program's printed output until the evaluation ends, so a
+`println` inside a long loop shows nothing while it runs, and an evaluation
+you Stop never shows its output at all. While something runs, the status
+bar reads "Running…"; that's the signal to watch before pressing Stop.
+
+Some loops don't compile in jank yet: `(loop [] (recur))`, and a `recur`
+that follows a `when` in the loop body, fail with
+`codegen/internal-failure`. Writing every `recur` inside an `if` branch
+works, for example
+`(loop [i 0] (if (< i n) (recur (inc i)) i))`.
+
 ## Keys
 
 | Key | Where | Does |
