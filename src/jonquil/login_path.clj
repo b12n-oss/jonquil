@@ -46,26 +46,52 @@
   (let [s (if (or (nil? shell) (re-find #"^\s*$" shell)) "/bin/zsh" shell)]
     (.getName (io/file s))))
 
-(defn- fallback [{:keys [env home exists?]} reason]
-  {:path (tp/fallback-path (get env "PATH") home exists?)
-   :source :fallback
-   :reason reason})
+(defn- fallback
+  "The well-known-folders answer. Never throws: a failing exists? leaves the
+  current PATH as it was."
+  [{:keys [env home exists?]} reason]
+  (try
+    {:path (tp/fallback-path (get env "PATH") home exists?)
+     :source :fallback
+     :reason reason}
+    (catch Throwable _
+      {:path (get env "PATH") :source :fallback :reason reason})))
+
+(def ^:private read-cap
+  "At most this many bytes of the shell's output are read."
+  (* 1024 1024))
+
+(defn- read-capped [^java.io.File f]
+  (try
+    (with-open [in (java.io.FileInputStream. f)]
+      (let [buf (byte-array read-cap)
+            n (.read in buf 0 read-cap)]
+        (if (pos? n) (String. buf 0 (int n) "UTF-8") "")))
+    (catch Throwable _ "")))
 
 (defn- run-shell
-  "Spawns the probe and returns {:out s} or {:reason r}. A timed-out shell is
-  killed with its whole process tree."
+  "Spawns the probe with stdout going to a temp file, so the one deadline
+  covers the shell's whole run (a pipe would also wait for every process
+  holding it open). Returns {:out s} or {:reason r}. On timeout the shell's
+  process tree is killed, and whatever it had printed is still parsed."
   [{:keys [shell timeout-ms]}]
-  (let [proc (apply p/process {:in (io/file "/dev/null") :out :string :err :discard}
-                    (tp/shell-command shell))
-        r (deref proc timeout-ms ::timeout)]
-    (if (= ::timeout r)
-      (do (p/destroy-tree proc)
+  (let [tmp (java.io.File/createTempFile "jonquil-login-path-" ".out")]
+    (try
+      (let [proc (apply p/process {:in (io/file "/dev/null") :out tmp :err :discard}
+                        (tp/shell-command shell))
+            r (deref proc timeout-ms ::timeout)
+            timed-out? (= ::timeout r)]
+        (when timed-out?
+          (p/destroy-tree proc)
           (when (= ::timeout (deref proc 1000 ::timeout))
-            (.destroyForcibly ^java.lang.Process (:proc proc)))
-          {:reason "timed out"})
-      (if (zero? (:exit r))
-        {:out (:out r)}
-        {:reason "failed"}))))
+            (.destroyForcibly ^java.lang.Process (:proc proc))))
+        (let [out (read-capped tmp)]
+          (cond
+            (and timed-out? (tp/parse-answer out)) {:out out}
+            timed-out? {:reason "timed out"}
+            (zero? (:exit r)) {:out out}
+            :else {:reason "failed"})))
+      (finally (.delete tmp)))))
 
 (defn- lookup [{:keys [shell] :as opts}]
   (try
@@ -99,11 +125,16 @@
            entry {:result result :timeout-ms (:timeout-ms opts) :opts opts}]
        (when (compare-and-set! state nil entry)
          (if (tp/needs-lookup? (get env "PATH") home)
-           (do (future (deliver result (lookup opts)))
+           (do (future (deliver result (try (lookup opts)
+                                            (catch Throwable _ (fallback opts "failed")))))
                :started)
            (do (deliver result {:path (get env "PATH") :source :process})
                :not-needed))))
-     (catch Throwable _ nil))))
+     (catch Throwable _
+       ;; The once-guard may already be set; nobody must wait on it forever.
+       (when-let [{:keys [result opts]} @state]
+         (deliver result (fallback (or opts {}) "failed")))
+       nil))))
 
 (defn answer
   "The lookup's result map, waiting for it for at most timeout-ms plus 500 ms.
@@ -112,7 +143,10 @@
   (try
     (if-let [{:keys [result timeout-ms opts]} @state]
       (let [r (deref result (+ timeout-ms grace-ms) ::late)]
-        (if (= ::late r) (fallback opts "timed out") r))
+        (if (= ::late r)
+          (do (deliver result (fallback opts "timed out"))
+              (deref result 0 (fallback opts "timed out")))
+          r))
       {:path (System/getenv "PATH") :source :process})
     (catch Throwable _ {:path (System/getenv "PATH") :source :process})))
 

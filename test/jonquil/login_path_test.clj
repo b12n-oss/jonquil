@@ -95,3 +95,43 @@
   (lp/reset-for-test!)
   (start-with (fake-shell! "exit 1") {})
   (is (= "; PATH from well-known folders (your login shell failed)." (lp/console-line))))
+
+(defn- elapsed-ms [f]
+  (let [t0 (System/currentTimeMillis)]
+    (f)
+    (- (System/currentTimeMillis) t0)))
+
+(deftest backgrounded-child-test
+  (testing "a shell that answers then leaves a child holding stdout open"
+    (let [sh (fake-shell! (str "printf '\\n__JONQUIL_PATH__/a:/b__END__\\n'\n"
+                               "sleep 86477 &\nexit 0"))
+          dt (elapsed-ms (fn []
+                           (start-with sh {:timeout-ms 1000})
+                           (is (= {:path "/a:/b" :source :shell :shell "shell"} (lp/answer)))))]
+      (is (< dt 2000) (str "answered after " dt " ms"))
+      @(p/process {:out :string} "pkill" "-f" "sleep 86477"))))
+
+(deftest endless-output-test
+  (let [sh (fake-shell! "while :; do echo spam; done")
+        dt (elapsed-ms (fn []
+                         (start-with sh {:timeout-ms 1000})
+                         (let [a (lp/answer)]
+                           (is (= :fallback (:source a)))
+                           (is (= "timed out" (:reason a))))))]
+    (is (< dt 2500) (str "answered after " dt " ms"))
+    (Thread/sleep 200)
+    (is (not (zero? (:exit @(p/process {:out :string} "pgrep" "-f" (str "^/bin/sh " (subs sh 0 (.lastIndexOf ^String sh "/")))))))
+        "nothing left running")))
+
+(deftest hung-answer-is-stored-test
+  (start-with (fake-shell! "sleep 86478") {:timeout-ms 1000})
+  (lp/answer)
+  (is (< (elapsed-ms lp/answer) 50))
+  (is (< (elapsed-ms lp/path) 50)))
+
+(deftest throwing-exists-test
+  (start-with (fake-shell! "exit 1") {:exists? (fn [_] (throw (ex-info "boom" {})))})
+  (let [dt (elapsed-ms (fn []
+                         (is (= :fallback (:source (lp/answer))))
+                         (is (= "/usr/bin:/bin:/usr/sbin:/sbin" (lp/path)))))]
+    (is (< dt 1000))))
