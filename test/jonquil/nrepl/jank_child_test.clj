@@ -57,6 +57,22 @@
     (is (= "/f" (jank/module-path {:project-dir nil :file-dir "/f"})))
     (is (nil? (jank/module-path {})))))
 
+(deftest module-path-from-ns-test
+  ;; A loose file (no project) whose ns matches its path: the module path is
+  ;; the root above the namespace's own folders, so a sibling namespace
+  ;; resolves (src/talk/core.jank, ns talk.core -> src).
+  (is (= "/p/src" (jank/module-path {:file-dir "/p/src/talk" :file-path "/p/src/talk/core.jank" :ns-name "talk.core"})))
+  (is (= "/p/src" (jank/module-path {:file-dir "/p/src/my_app" :file-path "/p/src/my_app/main_thing.jank" :ns-name "my-app.main-thing"}))
+      "dashes in the ns are underscores in the path")
+  (is (= "/p" (jank/module-path {:file-dir "/p" :file-path "/p/core.jank" :ns-name "core"})))
+  (is (= "/p/src/talk" (jank/module-path {:file-dir "/p/src/talk" :file-path "/p/src/talk/core.jank" :ns-name "other.core"}))
+      "an ns that doesn't match the path falls back to the file's folder")
+  (is (= "/p/src/talk" (jank/module-path {:file-dir "/p/src/talk" :file-path "/p/src/talk/core.jank" :ns-name nil})))
+  (let [root (temp-dirs/temp-dir! "jonquil-jank-test-")]
+    (.mkdirs (io/file root "src"))
+    (is (= (str root "/src") (jank/module-path {:project-dir root :file-dir "/x/y" :file-path "/x/y/z.jank" :ns-name "y.z"}))
+        "a project's own src still wins")))
+
 (deftest launch-command-test
   (is (= ["/a b/it's/jank" "--module-path" "/p q/src" "repl"]
          (jank/launch-command "/a b/it's/jank" "/p q/src")))

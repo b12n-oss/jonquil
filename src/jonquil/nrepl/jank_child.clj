@@ -39,15 +39,31 @@
                         (str (System/getProperty "user.home") "/.local/bin/jank")])]
      (first (filter exists? (map absolute cands))))))
 
+(defn- ns-root
+  "The directory above ns-name's own folders when file-path is where that
+  namespace lives (talk.core at /p/src/talk/core.jank gives /p/src; dashes
+  in the ns are underscores in the path), else nil."
+  [file-path ns-name]
+  (when (and file-path ns-name)
+    (let [f (io/file file-path)
+          n (.getName f)
+          i (str/last-index-of n ".")
+          ext (if i (subs n i) "")
+          rel (str (-> ns-name (str/replace "-" "_") (str/replace "." "/")) ext)
+          path (.getPath f)]
+      (when (str/ends-with? path (str "/" rel))
+        (subs path 0 (- (count path) (count rel) 1))))))
+
 (defn module-path
   "The directory jank loads namespaces from: <project-dir>/src when that
-  is a directory, else project-dir; with no project, file-dir; nil when
-  both are nil."
-  [{:keys [project-dir file-dir]}]
+  is a directory, else project-dir. With no project, the root the file's
+  own ns implies (so a sibling namespace resolves), else file-dir. nil when
+  nothing is known."
+  [{:keys [project-dir file-dir file-path ns-name]}]
   (if project-dir
     (let [src (io/file project-dir "src")]
       (if (.isDirectory src) (.getPath src) project-dir))
-    file-dir))
+    (or (ns-root file-path ns-name) file-dir)))
 
 (defn launch-command
   "The argv that starts jank. The caller keeps its stdin pipe open."

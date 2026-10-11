@@ -86,7 +86,7 @@
   lands during the launch, or after it returned, kills what the launch
   produced: the child is stored before the check, so either this check or
   the Stop's own kill-child! sees it."
-  [{:keys [state hooks selection] :as ev} on-output run-path]
+  [{:keys [state hooks selection] :as ev} on-output run-path run-ns]
   (let [{:keys [alive?]} hooks
         child (:child @state)]
     (if (and child (alive? child))
@@ -100,7 +100,9 @@
                            {:binary binary
                             :module-path (jank-child/module-path
                                           {:project-dir (:project-dir selection)
-                                           :file-dir (some-> run-path io/file .getParent)})
+                                           :file-dir (some-> run-path io/file .getParent)
+                                           :file-path run-path
+                                           :ns-name run-ns})
                             :cancelled? (fn [] (stopping? ev))})]
               (cond
                 (= :cancelled (:error started)) {:status :interrupted}
@@ -138,7 +140,7 @@
           _ (when (and run? (= :reset (:mode @state)) (:used? @state))
               (kill-child! ev)
               (connection/say! on-output :system (str jank/reset-message "\n")))
-          problem (or (ensure-child! ev on-output (when run? path))
+          problem (or (ensure-child! ev on-output (when run? path) (when run? (clj/buffer-ns code)))
                       (if (stopping? ev)
                         {:status :interrupted}
                         (connection/connect! ev on-output (connect-policy (:child @state) ev))))]

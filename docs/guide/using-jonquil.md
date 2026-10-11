@@ -940,7 +940,10 @@ them present, the first Run says so, naming both ways to fix it.
 Jonquil starts one jank per window, on the first evaluation, and not when
 the window opens. It runs `jank repl` from a private temporary folder with
 `--module-path <project>/src`, or the project folder when there's no
-`src`, or the file's own folder for a loose file with no project. jank
+`src`. For a loose file with no project, the module path is the folder its
+`ns` implies: `talk.core` saved as `…/src/talk/core.jank` gives `…/src`, so
+a sibling such as `talk.util` loads. A file whose `ns` doesn't match its
+path falls back to its own folder. jank
 writes its `.nrepl-port` into that private folder, so your project's
 `.nrepl-port`, if it has one, is never touched. Closing the window, or
 quitting while jank is still starting, stops the process and removes the
@@ -962,8 +965,7 @@ already has.
 
 One caveat for a loose `.jank` file with no project: when the first
 evaluation is a REPL line or Run Selection rather than Run, jank starts
-without the file's folder on its module path, so a `require` of a sibling
-file fails. It lasts until a Run starts jank: a Run after a Stop, or any
+without that module path, so a `require` of a sibling namespace fails. It lasts until a Run starts jank: a Run after a Stop, or any
 Run with Reset on Run ticked. Stop alone doesn't help, because a REPL line
 still starts jank without the path. Run the file first to avoid it.
 

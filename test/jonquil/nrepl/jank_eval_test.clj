@@ -244,6 +244,14 @@
         (is (= (str d) (:module-path o)) "no project: the file's own directory")
         (is (fn? (:cancelled? o)))))))
 
+(deftest launch-options-ns-root-test
+  ;; A loose file's Run passes the root its ns implies, so sibling
+  ;; namespaces resolve (src/talk/core.jank, ns talk.core -> src).
+  (with-jank [j {} {} srv]
+    (let [d (temp-dirs/temp-dir! "jonquil-jank-eval-test-")]
+      (run (:ev j) "(ns talk.core)\n1" {:run? true :path (str d "/src/talk/core.jank")})
+      (is (= (str d "/src") (:module-path (first @(:launch-opts j))))))))
+
 (deftest never-lookup-test
   (with-jank [j {} {} srv]
     (let [e (:ev j)]
