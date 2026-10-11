@@ -28,6 +28,7 @@
   ;; Not (loop [] (recur)): an unconditional recur in a loop fails to
   ;; compile on both jank builds ('break' statement not in loop, jank core.jank
   ;; line 3594; re-checked 2026-10-12), so it never runs. This one does.
+  ;; (loop [] (recur)) doesn't compile on jank 0.1 or upstream 38a6382 (jank re-check, 2026-10-12).
   "(loop [i 0] (when true (recur (inc i))))")
 
 (def ^:dynamic *dir* nil)
@@ -120,12 +121,20 @@
 
 (deftest completions-from-jank-live
   ;; A buffer that never mentions twice, so only jank's completions op can
-  ;; supply it. Homebrew jank 0.1's op answers builtins only (measured
-  ;; 2026-10-12); the upstream build lists loaded user vars.
+  ;; supply it. Gated on a probe: Homebrew jank 0.1's op lists builtins and the
+  ;; prompt namespace's own vars only
+  ;; (measured 2026-10-12), the upstream build lists vars referred into the
+  ;; prompt namespace.
   (with-jank [e (make)]
     (is (= :ok (:status (:result (run-core! e)))))
-    (let [cands (ev/complete e "tw" "(tw" 3 {})]
-      (is (some #(= "twice" (:symbol %)) cands) (pr-str cands)))))
+    ;; A var defined in the prompt namespace itself is listed by both
+    ;; builds, so the probe refers one in from another namespace, as the
+    ;; Run's :refer does for twice.
+    (is (= :ok (:status (:result (run e "(do (intern 'demo.util 'zqprobevar 1) (refer 'demo.util :only '[zqprobevar]))" {:run? false})))))
+    (if (some #(= "zqprobevar" (:symbol %)) (ev/complete e "zqprobe" "(zqprobe" 8 {}))
+      (let [cands (ev/complete e "tw" "(tw" 3 {})]
+        (is (some #(= "twice" (:symbol %)) cands) (pr-str cands)))
+      (println "test:jank: skipped completions-from-jank-live: this jank's completions op lists builtins only"))))
 
 (deftest error-live
   (with-jank [e (make)]
