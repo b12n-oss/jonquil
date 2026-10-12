@@ -421,6 +421,54 @@ namespaces make it up, plus a profile in `jonquil.dialect`.
 deadline, for a launch that is still in flight, so a window closed while
 jank starts leaves no process and no run directory behind.
 
+## The macOS app: PATH and Open With
+
+A Finder or Dock launch has a bare `PATH`, and Open With hands the app files
+through GApplication rather than argv. Three small namespaces and a build
+script cover both.
+
+- `jonquil.tool-path` is pure. It knows the four well-known folders, decides
+  whether a `PATH` needs a lookup (`needs-lookup?`: none of the folders is an
+  entry), builds the probe's argv (the login, interactive shell printing
+  `PATH` between two markers, so an rc file's banner can't be mistaken for
+  the answer), parses the last marker pair, appends the existing well-known
+  folders for the fallback, and resolves a program name against a `PATH`
+  string. Anything that touches the disk arrives as an `exists?` argument.
+- `jonquil.login-path` runs the lookup. `jonquil.main/-main` calls `start!`,
+  which either records the process `PATH` or starts the shell in a future,
+  once per process (a second call changes nothing). The shell's stdout goes
+  to a temp file, so a single deadline (5 s) covers its whole run, where a
+  pipe would also wait for every process still holding it open; on timeout
+  the process tree is killed and whatever it printed is still parsed. The
+  result is cached in a promise, and `answer` waits for it at most the
+  deadline plus 500 ms. Nothing in it throws out. `console-line` turns the
+  result into the sentence the window appends to the console from a future
+  (through `on-gui!`), so the wait never sits on the GTK thread.
+- Children don't trust their own lookup of bare names: `jolt.process`
+  resolves a bare program name against Jonquil's own `PATH`, not against
+  `:extra-env`. So `jonquil.nrepl.child` resolves `jolt` to an absolute path
+  with `tool-path/resolve-program` over the login `PATH`, and both it and
+  `jonquil.nrepl.jank-child` pass that `PATH` as `:extra-env {"PATH" ...}` so
+  the programs the child itself starts see it too.
+- Open With and Dock drops arrive as GApplication's `open` signal, which
+  needs `G_APPLICATION_HANDLES_OPEN`. The application keeps
+  `G_APPLICATION_NON_UNIQUE` (see M6), so a launch never forwards to an
+  already-running process.
+  `on-app-open!` turns the `GFile**` array into local paths (a file with no
+  local path is reported as not local and skipped), builds the window first
+  if GTK hasn't yet, and calls the window's `:open-paths!`. That function
+  re-roots and shows the tree for a directory (the same `folder-result!` as
+  Open Folder) and sends a file through `open-file!`, the function behind
+  Open, so tab rules are identical. A failure is written to the status line
+  per file, so with several failures only the last remains visible.
+- `dev/app_bundle.clj` builds `Jonquil.app`: `info-plist` is a pure function
+  of the version, build number and extensions, and `replaceable?` is the
+  rule install uses to replace only a Jonquil bundle. The bundle isn't
+  re-signed because `jolt build` appends the program image after the
+  launcher's Mach-O, and `codesign --force` then fails strict validation;
+  the linker's ad-hoc signature on the launcher is
+  what macOS checks, and the build task verifies it exists.
+
 ### The inspector: `Inspector`, `jonquil.inspect` and `jonquil.inspect.view`
 
 `jonquil.evaluator` carries a second, optional protocol alongside

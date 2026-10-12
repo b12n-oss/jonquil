@@ -9,9 +9,9 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 47 namespaces in under half a second, and it's the fastest
+currently loads 49 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (381 tests, 1996 assertions
+slower. `bb test` runs the full unit suite (411 tests, 2103 assertions
 today) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -47,14 +47,16 @@ front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 42 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 195 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 241 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
 `console_layout`, `dialects`, `contained` (a forced throw in each find-bar,
 toolbar and file-dialog handler is reported and the app carries on),
 `prompt` (the namespace prompt following a
-REPL line, a Run and a slow evaluation), `inspector` (the panel widget in
+REPL line, a Run and a slow evaluation), `app_open` (Open With and Dock drops: two files through a real
+`g_application_open`, a folder, a missing path, a file already open and a
+non-local URI), `inspector` (the panel widget in
 isolation, then the real window's own panel: opening, in/out, paging
 across a page edge, table/meta toggles, def, Run Form, and Escape), and
 `source_pane` (the source panel widget in isolation). The
@@ -212,6 +214,31 @@ names these harnesses make; `bb clean:tmp --dry-run` lists them first.
   a Ctrl-C midway can skip that. Run `pgrep -fl clojure-cli.repl.server`
   afterward, and kill only a pid that run started, never a server of your
   own.
+
+## The macOS app: bundle, install, icon
+
+`bb app:bundle` rebuilds `./jonquil` and then runs `dev/app_bundle.clj` to
+make `./Jonquil.app`, printing a `check` line for each of three post-build
+checks: `plutil -lint` on the `Info.plist`, the executable bit on the
+binary, and `codesign -dv` reporting the linker's ad-hoc signature. A failed
+check exits non-zero naming it. `bb app:install` runs the bundle task, then
+copies the result to `~/Applications/Jonquil.app` (it replaces an existing
+one only when its plist names `net.b12n.jonquil`) and runs `lsregister -f`
+on it. `bb app:icon` regenerates `resources/Jonquil.icns` from
+`resources/icon/icon.swift`, so it needs Swift; the `.icns` is committed, so
+you only run it after changing the icon.
+
+The bundle is deliberately not re-signed. `jolt build` appends the program
+image after the launcher's Mach-O, and `codesign --force` then fails strict
+validation. The launcher's own ad-hoc signature from the linker is what
+macOS checks, so the task only verifies it's there.
+
+The unit suite covers this without touching your Applications folder:
+`jonquil.app-bundle-test` (the `Info.plist` text and the replace-only-Jonquil
+rule), `jonquil.tool-path-test` (the pure `PATH` decisions) and
+`jonquil.login-path-test` (the lookup against fake shells, covering success,
+timeout, failure and no `PATH`). The `app_open` rows of `bb gtk:selftest`
+cover the open handler, as listed above.
 
 ## Quality: lint, format, and the git hooks
 

@@ -55,7 +55,9 @@ bb app:run ~/dev/my-talk  # opens a window on a project folder, with the file tr
 ## Building
 
 ```bash
-bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
+bb app:build     # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
+bb app:bundle    # builds ./jonquil, then ./Jonquil.app (macOS)
+bb app:install   # the same, then copies it to ~/Applications and registers it (macOS)
 ```
 
 The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
@@ -67,7 +69,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-10-02, 285 tests pass (1654 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-10-12, 411 tests pass (2103 assertions).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.

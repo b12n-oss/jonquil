@@ -67,6 +67,55 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 Building and running it yourself on the same machine needs neither step;
 Gatekeeper only objects to a binary that arrived from somewhere else.
 
+## The macOS app
+
+```bash
+bb app:bundle    # builds ./jonquil, then ./Jonquil.app from it
+bb app:install   # the same, then copies it to ~/Applications/Jonquil.app and registers it
+```
+
+`bb app:bundle` writes `./Jonquil.app` (gitignored) with the icon, an
+`Info.plist` whose identifier is `net.b12n.jonquil`, and the binary inside.
+The short version string comes from `git describe --tags --always` and the
+build number from `git rev-list --count HEAD`. The bundle declares two
+document types, Clojure source (`clj`, `cljc`, `cljd`, `jank`, `edn` and
+`bb`) and Folder, both as Alternate. That means they show up under Open
+With and as Dock drop targets, but Jonquil never becomes the default app for
+anything. `bb app:install` replaces an existing `~/Applications/Jonquil.app`
+only when it really is a Jonquil bundle, and refuses otherwise.
+
+The app still loads GTK4 and pango from Homebrew, so `brew install gtk4`
+stays a requirement. It isn't notarized either: the quarantine note above
+applies when you copy `Jonquil.app` to another Mac.
+
+macOS registers any new `.app` it finds on disk, so after `bb app:bundle` the
+checkout's `./Jonquil.app` may also appear in Open With next to the installed
+one. Installing and then deleting `./Jonquil.app` avoids the second entry, or
+run `lsregister -u ./Jonquil.app` (it lives under
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`).
+
+### Where tools come from in a Finder launch
+
+A Finder or Dock launch inherits a bare `PATH`, without Homebrew, so `jolt`
+and `jank` wouldn't be found. When Jonquil's `PATH` has none of
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`, it asks
+your login shell once, in the background (`$SHELL -il -c`, zsh when `SHELL`
+is unset), and hands the answer to the Jolt child and to jank. If the shell
+takes more than 5 seconds, fails, or prints no `PATH`, Jonquil falls back to
+those four folders instead, using the ones that exist. It then says where
+the `PATH` came from in the console, with one of these lines:
+
+```
+; PATH from your login shell (zsh).
+; PATH from well-known folders (your login shell timed out).
+; PATH from well-known folders (your login shell failed).
+; PATH from well-known folders (your login shell printed no PATH).
+```
+
+A launch from a terminal (`./jonquil`, `bb app:run`) is unchanged. It
+inherits your shell's `PATH`, which has at least one of those folders, so
+there's no lookup and no line.
+
 ## Settings
 
 Jonquil keeps a few choices between runs in
