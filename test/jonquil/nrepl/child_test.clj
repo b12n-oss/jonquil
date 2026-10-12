@@ -179,3 +179,7 @@
       (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back")
       (finally (force-kill! @captured)
                (when @log (io/delete-file @log true))))))
+
+(deftest process-options-without-a-path-test
+  (with-redefs [lp/path (fn [] nil)]
+    (is (not (contains? (child/process-options {:dir "/d" :log "/l"}) :extra-env)))))

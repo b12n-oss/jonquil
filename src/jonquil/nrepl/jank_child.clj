@@ -124,10 +124,11 @@
 
 (defn process-options
   "The jolt.process options for the jank child: {:dir :log}, plus
-  login-path's PATH in its environment."
+  login-path's PATH in its environment when there is one."
   [{:keys [dir log]}]
-  {:dir dir :out (io/file log) :err :out
-   :extra-env {"PATH" (login-path/path)}})
+  (let [path (login-path/path)]
+    (cond-> {:dir dir :out (io/file log) :err :out}
+      path (assoc :extra-env {"PATH" path}))))
 
 (defn start!
   "Starts jank in a fresh <tmpdir>/jonquil-jank-<nanos> and waits for its

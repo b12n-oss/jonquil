@@ -126,20 +126,23 @@
         "nothing left running")))
 
 (deftest hung-answer-is-stored-test
-  ;; The shell ignores TERM, so the lookup outlives the 500 ms grace and
-  ;; answer reaches its late branch; that fallback must then be stored.
-  (start-with (fake-shell! "trap '' TERM; while :; do sleep 1; done # jonquil-hung-86479")
-              {:timeout-ms 300})
-  (try
-    (let [first-ms (elapsed-ms (fn []
-                                 (let [a (lp/answer)]
-                                   (is (= :fallback (:source a)))
-                                   (is (= "timed out" (:reason a))))))]
-      (is (< 600 first-ms 2500) (str "first answer took " first-ms " ms"))
-      (is (< (elapsed-ms lp/answer) 50))
-      (is (< (elapsed-ms lp/path) 50)))
-    (finally
-      @(p/process {:out :string} "pkill" "-9" "-f" "jonquil-hung-86479"))))
+  ;; The lookup itself never returns until the test releases it, so answer
+  ;; always reaches its late branch (no race with a shell's start-up); that
+  ;; fallback must then be stored. Against code that doesn't store it, the
+  ;; second answer would wait another full grace period and fail the 50 ms bound.
+  (let [gate (promise)]
+    (with-redefs [lp/lookup (fn [_] @gate {:path "/never" :source :shell :shell "sh"})]
+      (start-with "/bin/sh" {:timeout-ms 300})
+      (try
+        (let [first-ms (elapsed-ms (fn []
+                                     (let [a (lp/answer)]
+                                       (is (= :fallback (:source a)))
+                                       (is (= "timed out" (:reason a))))))]
+          (is (<= 700 first-ms 2500) (str "first answer took " first-ms " ms"))
+          (is (< (elapsed-ms lp/answer) 50))
+          (is (< (elapsed-ms lp/path) 50))
+          (is (= :fallback (:source (lp/answer)))))
+        (finally (deliver gate :released))))))
 
 (deftest start-catch-delivers-test
   ;; An exception after the once-guard is set must not leave answer waiting.

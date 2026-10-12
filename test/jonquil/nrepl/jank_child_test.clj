@@ -207,3 +207,7 @@
              (.getCanonicalPath (io/file (jank/find-binary)))))
       (is (= {"PATH" (lp/path)} (:extra-env (jank/process-options {:dir "/d" :log "/l"}))))
       (finally (lp/reset-for-test!)))))
+
+(deftest process-options-without-a-path-test
+  (with-redefs [lp/path (fn [] nil)]
+    (is (not (contains? (jank/process-options {:dir "/d" :log "/l"}) :extra-env)))))

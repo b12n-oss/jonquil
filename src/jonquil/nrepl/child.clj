@@ -69,10 +69,12 @@
 
 (defn process-options
   "The jolt.process options for the child: {:dir :log}, plus login-path's
-  PATH in the child's environment so jolt's own tool lookups see it."
+  PATH in the child's environment so jolt's own tool lookups see it
+  (no :extra-env when there is no PATH at all)."
   [{:keys [dir log]}]
-  {:dir dir :out (io/file log) :err :out :in (io/file "/dev/null")
-   :extra-env {"PATH" (login-path/path)}})
+  (let [path (login-path/path)]
+    (cond-> {:dir dir :out (io/file log) :err :out :in (io/file "/dev/null")}
+      path (assoc :extra-env {"PATH" path}))))
 
 (defn- port-file [dir] (io/file dir ".nrepl-port"))
 
