@@ -266,23 +266,33 @@
   "A plain interrupt (Review focus 2's easy case): the child answers, so
   Stop ends the evaluation without ever restarting it -- the same pid
   before and after, and `before`'s binding (set at the top of the same
-  Run) survives, unlike a restart, which would lose it."
+  Run) survives, unlike a restart, which would lose it.
+
+  Stop must land after the loop is running. Pressing it once the file was
+  read but before `(def before 1)` ran left `before` unbound (Linux spike
+  finding 4), so the row waits for proof the loop started before Stop.
+  The server only sends a program's printed output when the evaluation
+  ends, so a `println` can't be that proof: the buffer writes a marker
+  file instead, which the row polls."
   [ui]
   (go-row :nrepl-stop-interrupts support/check
-    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
-                         (editor/set-text! (:editor ui) "(def before 1)\n(loop [] (recur))")
+    (let [marker (io/file (temp-dirs/temp-dir! "jonquil-selftest-nrepl-") "looping")
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui)
+                                           (str "(def before 1)\n(spit " (pr-str (.getPath marker)) " \"looping\")\n(loop [] (recur))"))
                          ((:run!* ui))
                          m))
           started? (await-until 2000 20 #(not (idle? ui)))
+          looping? (await-until 5000 20 #(.exists marker))
           before-pid (own-child-pid ui)
           _ (on-gtk ((:stop!* ui)))
           interrupted? (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "; interrupted")))
           after-pid (own-child-pid ui)
           [ok? mark2] (submit-and-await ui "before" 5000 #(str/includes? % "=> 1"))]
       (on-gtk (support/check :nrepl-stop-interrupts
-                             (and started? interrupted? ok?
+                             (and started? looping? interrupted? ok?
                                   (some? before-pid) (= before-pid after-pid))
-                             {:started started? :interrupted interrupted?
+                             {:started started? :looping looping? :interrupted interrupted?
                               :before-pid before-pid :after-pid after-pid
                               :text (support/since ui mark2)})))))
 
