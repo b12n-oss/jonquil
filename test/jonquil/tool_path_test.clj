@@ -25,6 +25,31 @@
   (is (= ["/bin/zsh" "-il" "-c" "printf '\\n__JONQUIL_PATH__%s__END__\\n' \"$PATH\""]
          (tp/shell-command "  "))))
 
+(deftest passwd-shell-test
+  (is (= "/bin/sh" (tp/passwd-shell "dev:x:1001:1001::/home/dev:/bin/sh" 1001)))
+  (let [text (str "root:x:0:0:root:/root:/bin/bash\n"
+                  "dev:x:1001:1001::/home/dev:/bin/fish\n"
+                  "nobody:x:65534:65534::/nonexistent:/usr/sbin/nologin\n")]
+    (is (= "/bin/fish" (tp/passwd-shell text 1001))))
+  (is (nil? (tp/passwd-shell "dev:x:1001:1001::/home/dev:/bin/sh" 42)))
+  (is (nil? (tp/passwd-shell "dev:x:1001:1001::/home/dev:" 1001)))
+  (testing "a malformed line is skipped"
+    (is (= "/bin/sh" (tp/passwd-shell (str "bad:x:1001:1001\n"
+                                           "dev:x:1001:1001::/home/dev:/bin/sh")
+                                      1001)))))
+
+(deftest default-shell-test
+  (let [t "dev:x:1001:1001::/home/dev:/bin/fish"]
+    (is (= "/bin/zsh" (tp/default-shell {:os "Mac OS X" :passwd-text t :uid 1001})))
+    (is (= "/bin/fish" (tp/default-shell {:os "Linux" :passwd-text t :uid 1001})))
+    (is (= "/bin/sh" (tp/default-shell {:os "Linux" :passwd-text nil :uid 1001})))
+    (is (= "/bin/sh" (tp/default-shell {:os "Linux" :passwd-text t :uid nil})))))
+
+(deftest shell-command-default-test
+  (is (= ["/bin/sh" "-il" "-c" "printf '\\n__JONQUIL_PATH__%s__END__\\n' \"$PATH\""]
+         (tp/shell-command " " "/bin/sh")))
+  (is (= "/bin/zsh" (first (tp/shell-command nil)))))
+
 (deftest parse-answer-test
   (testing "a clean answer"
     (is (= "/opt/homebrew/bin:/usr/bin"

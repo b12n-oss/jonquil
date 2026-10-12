@@ -37,14 +37,37 @@
   (let [have (set (entries path-string))]
     (not-any? have (well-known-dirs home))))
 
+(defn passwd-shell
+  "The shell field of the passwd-text line whose third field (the uid) is uid,
+  an int. nil when no line matches, the field is blank, or passwd-text or uid
+  is nil. Lines with fewer than 7 fields are skipped."
+  [passwd-text uid]
+  (when (and passwd-text uid)
+    (some (fn [line]
+            (let [fields (str/split line #":" -1)]
+              (when (and (>= (count fields) 7)
+                         (= (str uid) (nth fields 2)))
+                (let [shell (str/trim (nth fields 6))]
+                  (when-not (str/blank? shell) shell)))))
+          (str/split-lines passwd-text))))
+
+(defn default-shell
+  "The shell to run when SHELL is unset, for {:os :passwd-text :uid}: /bin/zsh
+  on \"Mac OS X\", otherwise the passwd shell of uid, else /bin/sh."
+  [{:keys [os passwd-text uid]}]
+  (if (= "Mac OS X" os)
+    "/bin/zsh"
+    (or (passwd-shell passwd-text uid) "/bin/sh")))
+
 (defn shell-command
-  "The argv that prints the login and interactive PATH of shell (default
-  /bin/zsh when nil or blank). The markers are the constants above, so the
-  answer stays findable."
-  [shell]
-  (let [sh (if (str/blank? shell) "/bin/zsh" shell)]
-    [sh "-il" "-c"
-     (str "printf '\\n" marker-start "%s" marker-end "\\n' \"$PATH\"")]))
+  "The argv that prints the login and interactive PATH of shell (default when
+  nil or blank; /bin/zsh when no default is given). The markers are the
+  constants above, so the answer stays findable."
+  ([shell] (shell-command shell "/bin/zsh"))
+  ([shell default]
+   (let [sh (if (str/blank? shell) default shell)]
+     [sh "-il" "-c"
+      (str "printf '\\n" marker-start "%s" marker-end "\\n' \"$PATH\"")])))
 
 (defn parse-answer
   "The PATH between the markers in the probe's stdout. When several marker

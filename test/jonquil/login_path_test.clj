@@ -69,6 +69,17 @@
   (start-with "/nonexistent/shell" {})
   (is (= :fallback (:source (lp/answer)))))
 
+(deftest no-shell-env-on-linux-test
+  (let [sh (fake-shell! "printf '\\n__JONQUIL_PATH__/a:/b__END__\\n'")
+        passwd (io/file (temp-dirs/temp-dir! "jonquil-login-path-test-") "passwd")
+        uid 4242]
+    (spit passwd (str "x:x:" uid ":" uid "::/h:" sh "\n"))
+    (with-redefs [lp/os-name (fn [] "Linux")
+                  lp/passwd-file (.getPath passwd)
+                  lp/current-uid (fn [] uid)]
+      (is (= :started (start-with nil {})))
+      (is (= {:path "/a:/b" :source :shell :shell "shell"} (lp/answer))))))
+
 (deftest not-needed-test
   (let [env {"PATH" "/usr/bin:/opt/homebrew/bin"}
         marker (io/file (temp-dirs/temp-dir! "jonquil-login-path-test-") "ran")

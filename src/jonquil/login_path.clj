@@ -14,6 +14,7 @@
   start! passes them as one function that picks by whether the path is a
   directory, which suits fallback-path (it only asks about directories)."
   (:require [clojure.java.io :as io]
+            [jolt.ffi :as ffi]
             [jolt.process :as p]
             [jonquil.tool-path :as tp]))
 
@@ -51,8 +52,29 @@
   [path]
   (.isDirectory (io/file path)))
 
-(defn- shell-name [shell]
-  (let [s (if (or (nil? shell) (re-find #"^\s*$" shell)) "/bin/zsh" shell)]
+(ffi/defcfn ^:private getuid "getuid" [] :int)
+
+(def ^:private passwd-file "/etc/passwd")
+
+(defn- os-name [] (System/getProperty "os.name"))
+
+(defn- read-passwd
+  "The text of passwd-file, nil on any failure."
+  []
+  (try (slurp passwd-file) (catch Throwable _ nil)))
+
+(defn- current-uid
+  "The process's uid, nil on any failure."
+  []
+  (try (getuid) (catch Throwable _ nil)))
+
+(defn- default-shell
+  "The shell to run when SHELL is unset: see tp/default-shell."
+  []
+  (tp/default-shell {:os (os-name) :passwd-text (read-passwd) :uid (current-uid)}))
+
+(defn- shell-name [shell default]
+  (let [s (if (or (nil? shell) (re-find #"^\s*$" shell)) default shell)]
     (.getName (io/file s))))
 
 (defn- fallback
@@ -111,11 +133,11 @@
   holding it open). Returns {:out s} or {:reason r}. On timeout, or once the
   output passes read-cap, the shell's process tree is killed, and whatever it
   had printed is still parsed."
-  [{:keys [shell timeout-ms]}]
+  [{:keys [shell default timeout-ms]}]
   (let [tmp (java.io.File/createTempFile "jonquil-login-path-" ".out")]
     (try
       (let [proc (apply p/process {:in (io/file "/dev/null") :out tmp :err :discard}
-                        (tp/shell-command shell))
+                        (tp/shell-command shell default))
             r (wait-for proc tmp timeout-ms)
             stopped? (contains? #{::timeout ::too-much} r)]
         (when stopped? (kill-tree! proc))
@@ -130,11 +152,13 @@
 
 (defn- lookup [{:keys [shell] :as opts}]
   (try
-    (let [{:keys [out reason]} (run-shell opts)]
+    (let [default (default-shell)
+          opts (assoc opts :default default)
+          {:keys [out reason]} (run-shell opts)]
       (if reason
         (fallback opts reason)
         (if-let [path (tp/parse-answer out)]
-          {:path path :source :shell :shell (shell-name shell)}
+          {:path path :source :shell :shell (shell-name shell default)}
           (fallback opts "printed no PATH"))))
     (catch Throwable _ (fallback opts "failed"))))
 
