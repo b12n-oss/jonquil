@@ -418,6 +418,9 @@
                          (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
                          {:handled handled :text text :undone undone})))))))
 
+(def ^:private os-name (System/getProperty "os.name"))
+(def ^:private mac? (= "Mac OS X" os-name))
+
 (defn- row-edit-format-selection-macos-cmd-option-f
   "Bug fix (Cmd+Option+F did nothing in the built macOS app): the MEASURED
   macOS triple for Cmd+Option+F, from a pid-driven cgevent probe against
@@ -438,11 +441,18 @@
               (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
               (let [handled (editor/handle-key! ed 0x8f6 3 (bit-or g/META-MASK g/ALT-MASK))
                     text (editor/editor-text ed)]
-                (g/gtk-text-buffer-undo buf)
-                (let [undone (editor/editor-text ed)]
+                (if mac?
+                  (do
+                    (g/gtk-text-buffer-undo buf)
+                    (let [undone (editor/editor-text ed)]
+                      (check :edit-format-selection-macos-cmd-option-f
+                             (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                             {:handled handled :text text :undone undone})))
+                  ;; Off macOS the keycode fallback is off (keycode 37 is
+                  ;; Control_L on X11): the chord must not format.
                   (check :edit-format-selection-macos-cmd-option-f
-                         (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
-                         {:handled handled :text text :undone undone})))))))
+                         (and (= 0 handled) (= original text))
+                         {:handled handled :text text :os os-name})))))))
 
 (defn- row-edit-format-selection-macos-cmd-option-l
   "Same bug, the L chord: MEASURED macOS triple for Cmd+Option+L -- keyval
@@ -457,11 +467,18 @@
               (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
               (let [handled (editor/handle-key! ed 0xac 37 (bit-or g/META-MASK g/ALT-MASK))
                     text (editor/editor-text ed)]
-                (g/gtk-text-buffer-undo buf)
-                (let [undone (editor/editor-text ed)]
+                (if mac?
+                  (do
+                    (g/gtk-text-buffer-undo buf)
+                    (let [undone (editor/editor-text ed)]
+                      (check :edit-format-selection-macos-cmd-option-l
+                             (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                             {:handled handled :text text :undone undone})))
+                  ;; Off macOS the keycode fallback is off (keycode 37 is
+                  ;; Control_L on X11): the chord must not format.
                   (check :edit-format-selection-macos-cmd-option-l
-                         (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
-                         {:handled handled :text text :undone undone})))))))
+                         (and (= 0 handled) (= original text))
+                         {:handled handled :text text :os os-name})))))))
 
 (defn- row-edit-redo-y [ed]
   (go-row :edit-redo-y check
