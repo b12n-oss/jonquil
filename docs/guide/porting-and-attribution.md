@@ -40,10 +40,10 @@ not a behaviour change.
 
 `bb upstream:diff` lists upstream commits since `UPSTREAM_PIN` that touch
 `src` or `test`, against the checkout at `$DRCLOJURE_DIR` (default
-`~/dev/b12n-oss/kimtg--DrClojure-Neo`). Reviewing each one and porting what
-matters, then bumping `UPSTREAM_PIN` to the new commit SHA in the same
-commit that lands the port, is what keeps Jonquil's provenance honest
-instead of quietly drifting from what `UPSTREAM.md` claims.
+`~/dev/b12n-oss/kimtg--DrClojure-Neo`). Review each one, port what
+matters, and bump `UPSTREAM_PIN` to the new commit SHA in the same commit
+as the port. Then `UPSTREAM.md` keeps matching the code Jonquil took from
+upstream.
 
 ## The Jolt fixes this project needed along the way
 

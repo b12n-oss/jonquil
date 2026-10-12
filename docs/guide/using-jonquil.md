@@ -126,7 +126,7 @@ forever until you stop it.
 
 ![The same demo, animated: Run, a few ticks, then Stop](../images/stop.gif)
 
-Esc only does this while something is actually running. The rest of the
+Esc only does this while something is running. The rest of the
 time it's left alone, so it can still reach an IME composition or GTK's
 own handling of the key.
 
@@ -247,7 +247,7 @@ Opening a file that isn't valid UTF-8 doesn't fail either. Bytes that
 can't be decoded turn into the replacement character, and the console
 warns in grey: "This file isn't valid UTF-8; unreadable bytes show as �
 and saving will replace them." The file on disk is left untouched until
-you actually save.
+you save.
 
 Cmd/Ctrl+S saves to the file's remembered path, or opens a Save dialog if
 there isn't one yet. Cmd/Ctrl+Shift+S always opens the Save dialog, even
@@ -268,8 +268,8 @@ Cancel. With several tabs holding unsaved changes you get one prompt that
 names them all, and its first button is Save All. Cancel, or dismissing
 the prompt any other way, leaves everything open and untouched. If a save
 fails or you cancel partway through, the window stays open and the tab
-that didn't save comes to the front, so a bad save can't quietly close
-your work out from under you. `docs/demos/close-prompt.clj` is there to
+that didn't save comes to the front, so a failed save never closes a tab
+that still has unsaved work in it. `docs/demos/close-prompt.clj` is there to
 try it on: make an edit, then close the window.
 
 ## Tabs
@@ -600,8 +600,8 @@ count, and paging still works over everything up to the cap.
 Jonquil evaluates through a dialect profile: what a language's files look
 like, how they're painted, and which evaluator runs them. Four profiles
 exist today: Jolt, ClojureDart (experimental), JVM Clojure and jank
-(experimental). Selection and the evaluator seam underneath them are
-generic enough for more. The status
+(experimental). The way Jonquil picks a profile, and the evaluator
+protocol under it, are general enough to take more. The status
 bar's dialect label reads `Jolt` most of the time, or `Jolt (nREPL)` when
 this window's Jolt is running out of process rather than inside Jonquil
 itself. For ClojureDart it reads `ClojureDart (attached)` while Jonquil
@@ -879,11 +879,11 @@ switching the session there first: Jonquil never sends a buffer's `ns`
 form on its own. When the server hasn't loaded that namespace yet,
 typically because the file hasn't been Run, the console says so instead
 of guessing: "; demo.core isn't loaded in the server yet. Run the file
-first." Running the file first, so the server actually knows the
+first." Running the file first, so the server knows the
 namespace, clears it.
 
 Stop sends the server's own `interrupt` and waits up to a second for the
-evaluation to actually end. When it does, the result reads
+evaluation to end. When it does, the result reads
 `; interrupted`, the same as every other runtime. When it doesn't,
 Jonquil falls back the way ClojureDart's Stop always works: "; The
 server didn't stop the evaluation, so Jonquil detached. It may still be
@@ -901,7 +901,7 @@ read just keeps waiting for an actual line.
 Completion and quick documentation both ask the server, not just this
 buffer. Ctrl+Space merges the server's own candidates in with the
 offline ones, and Ctrl+Q or Shift+F1 shows a symbol's real docstring and
-arglists, wherever it's actually defined. A definition outside the
+arglists, wherever it's defined. A definition outside the
 buffer ends with a `Defined in` line naming the file and line number
 and F12 opens it in the source panel (see Jump to definition), `Defined in clojure-1.12.5.jar!/clojure/core.clj:2748`
 for something inside a jar, or a plain path and line for project code.
@@ -1126,7 +1126,7 @@ than being surprises you'd otherwise have to rediscover:
   ClojureDart carries no nREPL server to attach to.
 - `println` output arrives for ClojureDart too, but is lost once the form
   that printed it throws.
-- Jonquil never re-sends what you actually ran against ClojureDart: only
+- Jonquil never re-sends what you ran against ClojureDart: only
   its own `(+ 1 2)` wake-up probe repeats, and if the app's REPL still
   doesn't answer it, Jonquil says so instead of sending your code.
 - No server-side completion for ClojureDart: only this buffer's own

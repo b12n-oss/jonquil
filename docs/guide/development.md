@@ -3,7 +3,7 @@
 `bb info` (or `jolt info`, since jolt reads the same `bb.edn`) prints the
 full task list grouped by what it's for. This page walks through the same
 groups with the detail the cheat-sheet has no room for: what each harness
-actually drives, and the traps that catch anyone running them for the first
+drives, and the traps that catch anyone running them for the first
 time.
 
 ## Verify: check, test, and the pre-commit gate
@@ -245,7 +245,7 @@ cover the open handler, as listed above.
 
 `bb lint` runs clj-kondo over `src`, `test`, and `dev` in report mode;
 `bb lint:strict` is the same lint but exits non-zero on any finding (2 for
-warnings, 3 for errors), which is what CI and the hooks actually gate on.
+warnings, 3 for errors), which is what CI and the hooks gate on.
 `bb lsp:format` and `bb lsp:format-check` reformat (or dry-run check) with
 clojure-lsp, and `bb lsp:clean-ns`/`bb lsp:clean-ns-check` do the same for
 `ns` forms; `bb lsp:check` runs both dry-run checks together. All four LSP
