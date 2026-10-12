@@ -101,8 +101,10 @@ and `jank` wouldn't be found. When Jonquil's `PATH` has none of
 `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`, it asks
 your login shell once, in the background (`$SHELL -il -c`, zsh when `SHELL`
 is unset), and hands the answer to the Jolt child and to jank. If the shell
-takes more than 5 seconds, fails, or prints no `PATH`, Jonquil falls back to
-those four folders instead, using the ones that exist. It then says where
+takes more than 5 seconds but had already printed its `PATH`, Jonquil uses
+that. If the shell fails, or times out with nothing usable printed, or prints
+no `PATH`, Jonquil keeps the `PATH` it has and adds whichever of those four
+folders exist and aren't already in it. It then says where
 the `PATH` came from in the console, with one of these lines:
 
 ```
@@ -113,8 +115,9 @@ the `PATH` came from in the console, with one of these lines:
 ```
 
 A launch from a terminal (`./jonquil`, `bb app:run`) is unchanged. It
-inherits your shell's `PATH`, which has at least one of those folders, so
-there's no lookup and no line.
+inherits your shell's `PATH`, which usually has one of those folders, so no
+lookup runs and no line appears. A terminal `PATH` with none of them triggers
+the lookup too.
 
 ## Settings
 

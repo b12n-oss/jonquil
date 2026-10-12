@@ -452,8 +452,8 @@ script cover both.
   the programs the child itself starts see it too.
 - Open With and Dock drops arrive as GApplication's `open` signal, which
   needs `G_APPLICATION_HANDLES_OPEN`. The application keeps
-  `G_APPLICATION_NON_UNIQUE` (see M6), so a launch never forwards to an
-  already-running process.
+  `G_APPLICATION_NON_UNIQUE` so a second launch starts its own process
+  instead of handing its activation to the running one over D-Bus.
   `on-app-open!` turns the `GFile**` array into local paths (a file with no
   local path is reported as not local and skipped), builds the window first
   if GTK hasn't yet, and calls the window's `:open-paths!`. That function
