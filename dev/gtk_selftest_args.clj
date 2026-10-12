@@ -1,8 +1,8 @@
 (ns gtk-selftest-args
   "P1.T4: opens the REAL Jonquil window the way a terminal launch does:
-  jonquil.main/start! with :argv from jonquil.main/gtk-argv for two files
-  and a folder, so GApplication emits \"open\" (and not \"activate\"). Checks
-  the two files are tabs with no Untitled left, the folder roots the tree,
+  jonquil.main/start! with :argv from jonquil.main/gtk-argv for two files (src/a.clj and b.clj of a project with a deps.edn), so
+  GApplication emits \"open\" (and not \"activate\"). Checks the two files
+  are tabs with no Untitled left, the first file's project roots the tree,
   and the last file is the active tab. A group of its own (plan ruling 2):
   g_application_run can't be re-run from a row of a running app.
 
@@ -21,15 +21,12 @@
 (defonce ^:private fixture* (atom nil))
 
 (defn- fixture!
-  "A temp project: a.clj, b.clj and sub/c.clj. Its canonical paths."
+  "A temp project: deps.edn, src/a.clj and b.clj. Its canonical paths."
   []
   (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-args-")))]
-    (doseq [rel ["a.clj" "b.clj" "sub/c.clj"]]
-      (let [f (io/file d rel)] (io/make-parents f) (spit f "(def x 1)\n")))
-    (reset! fixture* {:dir d
-                      :a (str d "/a.clj")
-                      :b (str d "/b.clj")
-                      :sub (str d "/sub")})))
+    (doseq [[rel text] [["deps.edn" "{}\n"] ["src/a.clj" "(def a 1)\n"] ["b.clj" "(def b 2)\n"]]]
+      (let [f (io/file d rel)] (io/make-parents f) (spit f text)))
+    (reset! fixture* {:dir d :a (str d "/src/a.clj") :b (str d "/b.clj")})))
 
 (defn- tab-paths [ui] (mapv (fn [t] @(:path t)) ((:tabs* ui))))
 
@@ -43,14 +40,14 @@
                              (and (= 2 (count ps)) (= #{a b} (set ps)))
                              {:paths ps :want [a b]})))))
 
-(defn- row-args-folder-roots-tree
-  "The tree is showing, rooted at sub."
+(defn- row-args-tree-rooted-at-project
+  "The first file's project (the dir holding deps.edn) roots the tree, as a
+  single-file launch always did."
   [ui]
-  (go-row :args-folder-roots-tree support/check
-    (on-gtk (let [root (:root @(:state (:file-tree ui)))
-                  visible ((:file-tree-visible?* ui))]
-              (support/check :args-folder-roots-tree (and visible (= (:sub @fixture*) root))
-                             {:visible visible :root root :want (:sub @fixture*)})))))
+  (go-row :args-tree-rooted-at-project support/check
+    (on-gtk (let [root (:root @(:state (:file-tree ui)))]
+              (support/check :args-tree-rooted-at-project (= (:dir @fixture*) root)
+                             {:root root :want (:dir @fixture*)})))))
 
 (defn- row-args-active-tab-is-last-file
   "The active tab is the last file argument, b.clj."
@@ -69,7 +66,7 @@
 
 (def ^:private row-fns
   [row-args-two-files-open-as-tabs
-   row-args-folder-roots-tree
+   row-args-tree-rooted-at-project
    row-args-active-tab-is-last-file
    row-args-close])
 
@@ -109,7 +106,7 @@
         driver-done (a/promise-chan)]
     (main/start!
      {:cwd (:dir dir)
-      :argv (main/gtk-argv [(:a dir) (:b dir) (:sub dir)] (:dir dir))
+      :argv (main/gtk-argv [(:a dir) (:b dir)] (:dir dir))
       :settings-path (support/fresh-settings-path)
       :on-ready (fn [ui]
                   (g/g-signal-connect-data (:window ui) "destroy"

@@ -2395,17 +2395,31 @@
 
 (declare activate!)
 
+(defn launch-split
+  "When an \"open\" is what launched the app, its first path is the launch
+  option activate! always took from the command line: a directory is :dir,
+  anything else (a missing file too) is :file. The rest open as tabs.
+  dir? is injected, so this stays pure. => {:launch {..} :rest [..]}"
+  [paths dir?]
+  (if-let [p (first paths)]
+    {:launch (if (dir? p) {:dir p} {:file p}) :rest (vec (rest paths))}
+    {:launch {} :rest []}))
+
 (defn- on-app-open!
   "The application's \"open\" handler: n GFiles go to the window's
-  open-paths fn. With no window yet (GTK fires activate first, so a guard),
-  activate! builds one. Nothing throws into GTK; a failure is reported."
+  open-paths fn. With no window yet (the open launched the app), the first
+  path is activate!'s launch option and only the rest go to open-paths
+  (launch-split). Nothing throws into GTK; a failure is reported."
   [app opts files n]
   (try
-    ;; The window first, so a file that can't be opened is said on its
-    ;; status line rather than on stderr, which a Finder launch never shows.
-    (when (nil? @current-open-paths) (activate! app opts))
     (let [paths (open-paths-from-gfiles files n)]
-      (when-let [f @current-open-paths] (f paths)))
+      (if (nil? @current-open-paths)
+        (let [{:keys [launch rest]}
+              (launch-split paths (fn [p] (.isDirectory (java.io.File. ^String p))))]
+          (activate! app (merge opts launch))
+          (when (seq rest)
+            (when-let [f @current-open-paths] (f rest))))
+        (when-let [f @current-open-paths] (f paths))))
     (catch :default e
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
