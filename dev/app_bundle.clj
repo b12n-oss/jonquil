@@ -129,7 +129,14 @@
       (when-not (zero? (:exit r)) (fail! (str "copy failed: " (:err r)))))
     (let [r (p/sh lsregister "-f" dest)]
       (when-not (zero? (:exit r)) (fail! (str "lsregister failed: " (:err r)))))
-    (println (str "installed " dest))))
+    ;; macOS registers the checkout's copy too, a moment after it appears on
+    ;; disk, so Open With would list Jonquil twice. Unregistering alone races
+    ;; that, so the copy is unregistered (if it already was registered) and
+    ;; then removed: install moves the bundle rather than copying it.
+    (let [here (.getCanonicalPath (io/file bundle-dir))]
+      (p/sh lsregister "-u" here)
+      (p/sh "rm" "-rf" here))
+    (println (str "installed " dest " (moved from ./" bundle-dir ")"))))
 
 (defn -main [& args]
   (case (or (first args) "bundle")
