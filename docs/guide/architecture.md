@@ -146,7 +146,7 @@ Jump to definition is the one place `jonquil.help` overrides upstream's own logi
 
 `jonquil.docs` resolves lookups in the namespace the user's program actually runs in, not the IDE's own. When that namespace no longer exists, because Reset on Run just removed it, `resolve-ns` falls back to `user` rather than letting `the-ns` throw. Both `symbol-doc` and `candidates` wrap their real lookup in `try`/`catch` and return nil (or `[]` for candidates) on any exception, so a bad lookup never escapes into a key handler. `symbol-doc` also memoises on `[namespace symbol text]`: looking up a name defined only in the buffer costs around 144 ms on a 2,000-line file, too slow for a preview that has to keep up with every arrow key. The cache is cleared after every completed evaluation, Run or REPL alike, from the same `on-complete` callback in `jonquil.gtk.window` that already reports the result; without that, a lookup made before a name existed would go on returning its stale answer forever after, even once the same evaluation had defined it.
 
-The three popover namespaces share `jonquil.gtk.popover` as their base. Its most important fact is where a popover's `GtkWidget` parent actually is: never the `GtkTextView` it's anchored to, always that view's own container (its `GtkScrolledWindow`, in both the editor and the console). Parenting a popover directly to the text view, which is what the P4 spike probes did, hangs a real window close: `GtkTextView`'s own dispose walks its structural children to detach them, doesn't recognise a popover as one of its own, and spins forever logging that the popover isn't a child of the text view, pinning the main thread at 100% CPU. The probes themselves never hit this because every probe process exits without ever destroying its window. A `GtkScrolledWindow` has no such override and tears down cleanly. `jonquil.gtk.window` keeps a registry of every P4 popover a window creates (`register-popover!`), and `close-popovers!` walks it to hide whichever one is open, whether that's Escape's own job or one popover making room for another. At window close, `close-request-fn`'s real-quit branch calls `unparent-registered-popovers!`, which hides an open popover before unparenting it (unparenting first would leave its `:open?` atom reading true against a widget that no longer exists, and a later focus-lost listener would then call `hide!` on it and hit a GTK-CRITICAL) and skips an entry that's already unparented, so the session's popovers detach cleanly instead of leaving `GtkScrolledWindow` still holding a child when it finalizes.
+The three popover namespaces share `jonquil.gtk.popover` as their base. Its most important fact is where a popover's `GtkWidget` parent is: never the `GtkTextView` it's anchored to, always that view's own container (its `GtkScrolledWindow`, in both the editor and the console). Parenting a popover directly to the text view, which is what the P4 spike probes did, hangs a real window close: `GtkTextView`'s own dispose walks its structural children to detach them, doesn't recognise a popover as one of its own, and spins forever logging that the popover isn't a child of the text view, pinning the main thread at 100% CPU. The probes themselves never hit this because every probe process exits without ever destroying its window. A `GtkScrolledWindow` has no such override and tears down cleanly. `jonquil.gtk.window` keeps a registry of every P4 popover a window creates (`register-popover!`), and `close-popovers!` walks it to hide whichever one is open, whether that's Escape's own job or one popover making room for another. At window close, `close-request-fn`'s real-quit branch calls `unparent-registered-popovers!`, which hides an open popover before unparenting it (unparenting first would leave its `:open?` atom reading true against a widget that no longer exists, and a later focus-lost listener would then call `hide!` on it and hit a GTK-CRITICAL) and skips an entry that's already unparented, so the session's popovers detach cleanly instead of leaving `GtkScrolledWindow` still holding a child when it finalizes.
 
 `jonquil.gtk.help-popover` builds the quick-doc popover (autohide off, so it never steals keys from the view, per `jonquil.gtk.popover`'s own autohide note) and the rename popover (autohide on, since its entry needs to receive typing; GTK itself closes it on Escape or a click outside, and a `"closed"` signal handler keeps the popover's `:open?` bit in sync when that happens with no call into this namespace at all). `jonquil.gtk.completion` is one popover per view, a candidate list over a doc preview, built once per view and reused for the rest of the session; `open!`, `refine!` and `commit!` all read `(popover/open? c)` rather than trusting the state atom directly, because a close driven from outside this namespace (the window's registry-wide `close-popovers!`) only ever calls the generic `popover/hide!` and has no idea this namespace's own state atom exists.
 
@@ -172,8 +172,8 @@ compares before deciding a new file needs a new evaluator: the dialect,
 the runtime, and, when the runtime isn't `:in-process`, the project
 directory too.
 
-`jonquil.evaluator`'s `Evaluator` protocol is the seam a window is built
-against: `start!`, `stop!`, `eval!`, `interrupt!`, completion and lookup,
+Every window talks to its runtime through `jonquil.evaluator`'s
+`Evaluator` protocol: `start!`, `stop!`, `eval!`, `interrupt!`, completion and lookup,
 history and prompt namespace, all independent of whether the code
 underneath runs in this process or somewhere else. `jonquil.session`'s
 `InProcess` record, described above, is the original implementation and
@@ -299,11 +299,11 @@ sequenceDiagram
 Run goes through `load-file`, and its result is quiet on purpose: one
 `; Loaded <ns> (<n> forms)` line instead of a value per top-level form,
 built by `jonquil.cljd/load-result` from however many `:value` replies
-actually came back. The session's namespace is tracked from every
+came back. The session's namespace is tracked from every
 reply's own `:ns` rather than asked for separately, and Run Selection
 and Run Form pass the buffer as `:ns-source`: when the tracked namespace
 doesn't match the buffer's own `ns` form, `run-worker!` evaluates that
-form first, ahead of the code the user actually asked to run.
+form first, ahead of the code the user asked to run.
 
 A freshly cloned session gets Jonquil's own probe, `(+ 1 2)`, ahead of
 anything the user typed: `wake!` sends it once, and once more if the app
@@ -351,7 +351,7 @@ reconnect requires again; a failure streams the server's error, prints
 Unlike ClojureDart, this server supports `interrupt` and `stdin`. Stop
 marks the running evaluation and, when the server advertises `interrupt`,
 sends it and gives the server up to `:interrupt-timeout-ms` (1 s) to
-actually end it before Jonquil gives up and detaches instead, printing
+end it before Jonquil gives up and detaches instead, printing
 `clj/interrupt-failed-message`; without the op, or when it doesn't take
 in time, Jonquil detaches the same way. stdin sends a line through the
 live session and never closes it: nREPL 1.7.0 fails an empty `stdin` op
@@ -554,7 +554,7 @@ first.
 ### Plug points for more dialects
 
 Three more dialects exist now, ClojureDart, JVM Clojure and jank. The first
-two prove out two of these seams. `jonquil.paint/paint-plan` takes the active
+two already use two of these plug points. `jonquil.paint/paint-plan` takes the active
 profile as an argument, so highlighting and completion both draw on each
 profile's own `:special-forms` and `:builtins` rather than Jolt's alone.
 A profile's `:port-file` is most of what an attach runtime needs:
@@ -562,15 +562,15 @@ A profile's `:port-file` is most of what an attach runtime needs:
 names `.nrepl-port`, while `jonquil.nrepl.connection` holds the connect,
 describe, clone and detach lifecycle both share.
 
-A few seams still carry Jolt's own shape rather than a profile's,
-though. `child/start!`'s launch args, its port scan, and the log text it
+A few places are still written for Jolt rather than read from a
+profile, though. `child/start!`'s launch args, its port scan, and the log text it
 waits for are all Jolt-specific. The console strings inside `NRepl`
 spell out "Jolt" by hand rather than reading a profile's name. The
 baseline-namespaces eval `start-runtime!` runs, and the reset form's
 `loaded-libs` call, both fail the whole start outright if a future
 dialect happens to lack either, rather than degrading gracefully. And
 the offline help fallback always resolves against Jolt's own `user`
-namespace, whichever dialect actually asked. jank didn't reuse that
+namespace, whichever dialect asked. jank didn't reuse that
 launcher: its runtime is `:launch`, with its own `make` method and its
 own child namespace (see above).
 
@@ -578,7 +578,7 @@ own child namespace (see above).
 
 Each window has an eval context. Run and REPL both use the same `eval-async` function with an `:ns-name` option. The engine does not distinguish between them. Results carry a `:printed` field: the value printed with `pr-str` under `*print-length*` 1000, inside the interruptible region, so realizing a lazy value can be stopped and its side effects reach the console. The GUI shows `:printed` and never re-prints `:value`.
 
-Stop uses `jolt.host/run-interruptible` with a token. Each Run creates a token and evaluates inside the interruptible region on a worker thread. Stop calls `interrupt!` on the token, which aborts busy loops at back-edges. The engine tracks whether the worker has actually exited before returning `:idle`.
+Stop uses `jolt.host/run-interruptible` with a token. Each Run creates a token and evaluates inside the interruptible region on a worker thread. Stop calls `interrupt!` on the token, which aborts busy loops at back-edges. The engine tracks whether the worker has exited before returning `:idle`.
 
 Callbacks (like `on-output` for print statements) run on the worker thread, and `on-status-change` runs while the context's lock is held for its `:running` and `:idle` transitions. The caller rule is simple: a callback enqueues its work and returns. It must never wait on another thread that may itself call `eval-async` or `stop-eval!` on the same context, because that deadlocks. The front-end drains output from a queue on the main thread.
 

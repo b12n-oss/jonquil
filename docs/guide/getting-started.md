@@ -82,7 +82,7 @@ document types, Clojure source (`clj`, `cljc`, `cljd`, `jank`, `edn` and
 `bb`) and Folder, both as Alternate. That means they show up under Open
 With and as Dock drop targets, but Jonquil never becomes the default app for
 anything. `bb app:install` replaces an existing `~/Applications/Jonquil.app`
-only when it really is a Jonquil bundle, and refuses otherwise.
+only when it is a Jonquil bundle, and refuses otherwise.
 
 The app still loads GTK4 and pango from Homebrew, so `brew install gtk4`
 stays a requirement. It isn't notarized either: the quarantine note above
