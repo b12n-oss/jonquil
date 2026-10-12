@@ -9,7 +9,8 @@
 
 (def test-namespaces
   ;; Add each new test namespace here as tasks land.
-  '[jonquil.smoke-test
+  '[jonquil.app-bundle-test
+    jonquil.smoke-test
     jonquil.upstream.syntax-test
     jonquil.theme-test
     jonquil.settings-test

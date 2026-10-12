@@ -6,6 +6,7 @@
 .nrepl-port
 /jonquil
 /jonquil.build/
+/Jonquil.app
 /dist/
 /_site/
 .claude/
