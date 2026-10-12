@@ -71,7 +71,7 @@ Gatekeeper only objects to a binary that arrived from somewhere else.
 
 ```bash
 bb app:bundle    # builds ./jonquil, then ./Jonquil.app from it
-bb app:install   # the same, then copies it to ~/Applications/Jonquil.app and registers it
+bb app:install   # the same, then moves it to ~/Applications/Jonquil.app and registers it
 ```
 
 `bb app:bundle` writes `./Jonquil.app` (gitignored) with the icon, an
@@ -90,8 +90,9 @@ applies when you copy `Jonquil.app` to another Mac.
 
 macOS registers any new `.app` it finds on disk, so after `bb app:bundle` the
 checkout's `./Jonquil.app` may also appear in Open With next to the installed
-one. Installing and then deleting `./Jonquil.app` avoids the second entry, or
-run `lsregister -u ./Jonquil.app` (it lives under
+one. `bb app:install` moves the bundle into `~/Applications`, so no second
+copy is left. After a plain `bb app:bundle`, delete `./Jonquil.app` or run
+`lsregister -u ./Jonquil.app` (it lives under
 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`).
 
 ### Where tools come from in a Finder launch

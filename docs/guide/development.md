@@ -222,9 +222,10 @@ make `./Jonquil.app`, printing a `check` line for each of three post-build
 checks: `plutil -lint` on the `Info.plist`, the executable bit on the
 binary, and `codesign -dv` reporting the linker's ad-hoc signature. A failed
 check exits non-zero naming it. `bb app:install` runs the bundle task, then
-copies the result to `~/Applications/Jonquil.app` (it replaces an existing
-one only when its plist names `net.b12n.jonquil`) and runs `lsregister -f`
-on it. `bb app:icon` regenerates `resources/Jonquil.icns` from
+moves the result to `~/Applications/Jonquil.app` (it replaces an existing
+one only when its plist names `net.b12n.jonquil`), runs `lsregister -f`
+on it. The checkout's `./Jonquil.app` is unregistered and removed, so Open
+With lists Jonquil once. `bb app:icon` regenerates `resources/Jonquil.icns` from
 `resources/icon/icon.swift`, so it needs Swift; the `.icns` is committed, so
 you only run it after changing the icon.
 

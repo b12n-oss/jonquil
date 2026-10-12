@@ -57,7 +57,7 @@ bb app:run ~/dev/my-talk  # opens a window on a project folder, with the file tr
 ```bash
 bb app:build     # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
 bb app:bundle    # builds ./jonquil, then ./Jonquil.app (macOS)
-bb app:install   # the same, then copies it to ~/Applications and registers it (macOS)
+bb app:install   # the same, then moves it to ~/Applications and registers it (macOS)
 ```
 
 The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:

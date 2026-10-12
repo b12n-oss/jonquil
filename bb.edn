@@ -154,7 +154,7 @@
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "app:bundle" "rebuild ./jonquil, then make ./Jonquil.app from it (macOS)")
-     (row "app:install" "app:bundle, then copy to ~/Applications and register it (macOS)")
+     (row "app:install" "app:bundle, then move to ~/Applications and register it (macOS)")
      (row "app:icon" "regenerate resources/Jonquil.icns from resources/icon/icon.swift (macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
@@ -252,7 +252,7 @@
    :depends [app:build]
    :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "bundle")}
   app:install
-  {:doc "app:bundle, then copy Jonquil.app to ~/Applications and register it with LaunchServices (macOS)"
+  {:doc "app:bundle, then move Jonquil.app to ~/Applications and register it with LaunchServices (macOS)"
    :depends [app:bundle]
    :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "install")}
   app:icon
