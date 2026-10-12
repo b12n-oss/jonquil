@@ -44,7 +44,7 @@
                    "CFBundleDocumentTypes.1.LSItemContentTypes.0" "public.folder"}]
       (testing k (is (= v (extract path k)))))
     (testing "document type extensions keep their order"
-      (is (= "6" (extract path "CFBundleDocumentTypes.0.CFBundleTypeExtensions" )) "count")
+      (is (= "6" (extract path "CFBundleDocumentTypes.0.CFBundleTypeExtensions")) "count")
       (is (= ["clj" "cljc" "cljd" "jank" "edn" "bb"]
              (mapv #(extract path (str "CFBundleDocumentTypes.0.CFBundleTypeExtensions." %)) (range 6)))))
     (testing "exactly two document types"

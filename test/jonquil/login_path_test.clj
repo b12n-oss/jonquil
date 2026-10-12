@@ -112,19 +112,6 @@
       (is (< dt 2000) (str "answered after " dt " ms"))
       @(p/process {:out :string} "pkill" "-f" "sleep 86477"))))
 
-(deftest endless-output-test
-  ;; Regression guard: the old code also fell back here, so this cannot tell it apart.
-  (let [sh (fake-shell! "while :; do echo spam; done")
-        dt (elapsed-ms (fn []
-                         (start-with sh {:timeout-ms 1000})
-                         (let [a (lp/answer)]
-                           (is (= :fallback (:source a)))
-                           (is (= "timed out" (:reason a))))))]
-    (is (< dt 2500) (str "answered after " dt " ms"))
-    (Thread/sleep 200)
-    (is (not (zero? (:exit @(p/process {:out :string} "pgrep" "-f" (str "^/bin/sh " (subs sh 0 (.lastIndexOf ^String sh "/")))))))
-        "nothing left running")))
-
 (deftest hung-answer-is-stored-test
   ;; The lookup itself never returns until the test releases it, so answer
   ;; always reaches its late branch (no race with a shell's start-up); that
@@ -164,3 +151,40 @@
   (is (= :not-needed (start-with "/bin/sh" {:env {"PATH" "/usr/bin:/opt/homebrew/bin"}})))
   (is (nil? (lp/console-line)))
   (is (= "/usr/bin:/opt/homebrew/bin" (lp/path))))
+
+(defn- running? [pattern]
+  (zero? (:exit @(p/process {:out :string} "pgrep" "-f" pattern))))
+
+(deftest term-ignoring-tree-test
+  ;; A .zshrc that ignores TERM hands that to every child it starts, so on a
+  ;; timeout the children must be killed too, not just the shell.
+  (let [sh (fake-shell! "trap '' TERM\nsleep 86491 &\nsleep 86492")]
+    (try
+      (start-with sh {:timeout-ms 1000})
+      (is (= "timed out" (:reason (lp/answer))))
+      (Thread/sleep 300)
+      (is (not (running? "sleep 86491")) "background child gone")
+      (is (not (running? "sleep 86492")) "foreground child gone")
+      (finally @(p/process {} "pkill" "-9" "-f" "sleep 8649[12]")))))
+
+(deftest printed-then-hung-test
+  ;; A shell that printed its PATH and then hung while ignoring TERM: the
+  ;; printed PATH is used, so killing it must fit inside answer's wait.
+  (let [sh (fake-shell! (str "trap '' TERM\n"
+                             "printf '\\n__JONQUIL_PATH__/a:/b__END__\\n'\n"
+                             "sleep 86493"))]
+    (try
+      (start-with sh {:timeout-ms 1000})
+      (is (= {:path "/a:/b" :source :shell :shell "shell"} (lp/answer)))
+      (finally @(p/process {} "pkill" "-9" "-f" "sleep 86493")))))
+
+(deftest endless-output-is-capped-test
+  ;; Output past the read cap stops the shell at once instead of filling the
+  ;; disk until the deadline.
+  (let [sh (fake-shell! "exec yes jonquil-86494")
+        dt (elapsed-ms (fn []
+                         (start-with sh {:timeout-ms 4000})
+                         (is (= :fallback (:source (lp/answer))))))]
+    (is (< dt 2000) (str "answered after " dt " ms"))
+    (Thread/sleep 200)
+    (is (not (running? "jonquil-86494")))))
