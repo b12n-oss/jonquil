@@ -21,6 +21,7 @@
   closes the window, so order matters), the driver, and -main."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
             [gtk-async :as ga :refer [on-gtk await-until go-row]]
+            [gtk-selftest-window.app-open :as app-open]
             [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
             [gtk-selftest-window.console-layout :as console-layout]
@@ -287,6 +288,11 @@
    file-tree/row-tree-settings-persist
    file-tree/row-tree-follows-theme
    file-tree/row-tree-escape-returns-focus
+   app-open/row-app-open-two-files
+   app-open/row-app-open-folder
+   app-open/row-app-open-missing
+   app-open/row-app-open-already-open
+   app-open/row-app-open-non-local
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [jolt.process :as p]
+            [jonquil.login-path :as lp]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.client :as client]
             [temp-dirs]))
@@ -35,12 +36,36 @@
     (spit (io/file d "src/demo/core.clj") "(ns demo.core)\n\n(defn twice\n  \"Doubles x.\"\n  [x]\n  (* 2 x))\n")
     (.getCanonicalPath d)))
 
+(defn- with-login-path
+  "Runs f with login-path answering {:path path :source :process}: the PATH
+  holds a well-known dir (the fake home's .local/bin), so start! needs no
+  shell. Resets login-path before and after."
+  [path f]
+  (lp/reset-for-test!)
+  (try (lp/start! {:env {"PATH" path} :home "/fake-home-for-test"})
+       (f)
+       (finally (lp/reset-for-test!))))
+
 (deftest launch-args-test
-  (is (= ["jolt" "-Sdeps"
-          "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"}} :nrepl/middleware [nrepl.middleware/default-middleware]}"
-          "nrepl-server" "7950"]
-         (child/launch-args 7950 "/r/nrepl")))
-  (is (= ["jolt" "nrepl-server" "7951"] (child/launch-args 7951 nil))))
+  (with-login-path "/nonexistent-jonquil:/fake-home-for-test/.local/bin"
+    (fn []
+      (is (= ["jolt" "-Sdeps"
+              "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"}} :nrepl/middleware [nrepl.middleware/default-middleware]}"
+              "nrepl-server" "7950"]
+             (child/launch-args 7950 "/r/nrepl")))
+      (is (= ["jolt" "nrepl-server" "7951"] (child/launch-args 7951 nil))))))
+
+(deftest child-uses-resolved-jolt-test
+  (let [bin (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "bin")
+        jolt (io/file bin "jolt")]
+    (.mkdirs bin)
+    (spit jolt "#!/bin/sh\n")
+    (.setExecutable jolt true)
+    (let [path (str (.getPath bin) ":/fake-home-for-test/.local/bin")]
+      (with-login-path path
+        (fn []
+          (is (= [(.getPath jolt) "nrepl-server" "7951"] (child/launch-args 7951 nil)))
+          (is (= {"PATH" path} (:extra-env (child/process-options {:dir "/d" :log "/l"})))))))))
 
 (deftest middleware-root-test
   (is (some? (child/middleware-root)) "these tests need the jolt-lang/nrepl checkout (JONQUIL_JOLT_NREPL or ~/dev/jolt-lang/nrepl)"))
@@ -154,3 +179,7 @@
       (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back")
       (finally (force-kill! @captured)
                (when @log (io/delete-file @log true))))))
+
+(deftest process-options-without-a-path-test
+  (with-redefs [lp/path (fn [] nil)]
+    (is (not (contains? (child/process-options {:dir "/d" :log "/l"}) :extra-env)))))

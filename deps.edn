@@ -19,6 +19,8 @@
   ;;   jolt -M:test jonquil.edit-test
   :test {:extra-paths ["test" "dev"]
          :main-opts ["-m" "test-runner"]}
+  ;; Builds and installs Jonquil.app: jolt -M:bundle -m app-bundle <bundle|install>
+  :bundle {:extra-paths ["dev"]}
   ;; Headless compile-check: requires every project namespace and exits.
   :check {:extra-paths ["dev"]
           :main-opts ["-m" "check"]}

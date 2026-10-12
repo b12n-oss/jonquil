@@ -15,6 +15,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
+            [jonquil.login-path :as login-path]
             [jonquil.nrepl.connection :as connection]))
 
 (defn- absolute [path]
@@ -26,11 +27,11 @@
   ~/.local/bin/jank; the first that exists? accepts. A relative candidate
   is made absolute against the current directory first, because the spawn
   runs in the run dir. With no argument it reads the real environment
-  and PATH."
+  and login-path's PATH (the shell's, for a Finder launch)."
   ([]
    (find-binary
     {:env (into {} (System/getenv))
-     :path-dirs (remove str/blank? (str/split (or (System/getenv "PATH") "") #":"))
+     :path-dirs (remove str/blank? (str/split (or (login-path/path) "") #":"))
      :exists? (fn [path] (let [f (io/file path)] (and (.isFile f) (.canExecute f))))}))
   ([{:keys [env path-dirs exists?]}]
    (let [cands (concat (when-let [e (get env "JONQUIL_JANK")] [e])
@@ -121,6 +122,14 @@
     (when (.exists f)
       (try (connection/parse-port (slurp f)) (catch Exception _ nil)))))
 
+(defn process-options
+  "The jolt.process options for the jank child: {:dir :log}, plus
+  login-path's PATH in its environment when there is one."
+  [{:keys [dir log]}]
+  (let [path (login-path/path)]
+    (cond-> {:dir dir :out (io/file log) :err :out}
+      path (assoc :extra-env {"PATH" path}))))
+
 (defn start!
   "Starts jank in a fresh <tmpdir>/jonquil-jank-<nanos> and waits for its
   port file. Returns {:proc :pid :port :run-dir}, or {:error text} when
@@ -138,7 +147,7 @@
                   (.mkdirs d)
                   (.getCanonicalPath d))
         log (str run-dir "/server.log")
-        spawned (try (apply p/process {:dir run-dir :out (io/file log) :err :out}
+        spawned (try (apply p/process (process-options {:dir run-dir :log log})
                             (launch-command binary module-path))
                      (catch Exception e
                        ;; e.g. a stale JONQUIL_JANK: nothing was spawned.

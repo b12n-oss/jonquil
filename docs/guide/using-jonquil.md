@@ -314,6 +314,21 @@ use the same evaluator anyway. With only one tab open, opening a file
 from another project switches the window over as it always did, and
 closing tabs until the one left belongs elsewhere switches it too.
 
+## Opening from Finder and the Dock
+
+With the macOS app installed (see [Getting started](getting-started.md#the-macos-app)),
+Open With on a Clojure file in Finder, or dropping files on Jonquil's Dock
+icon, opens each file in a tab. The usual tab rules apply: a file that's
+already open just selects its tab, an untouched Untitled tab is filled
+first, and a file from another project than the window's gets an editable
+tab that refuses Run (see [Tabs](#tabs)). A folder, from Open With or a
+drop, roots the file tree there and shows it, even if you'd hidden it.
+
+A file Jonquil can't honour says so on the status line: a path it can't read
+is named with the reason, and a file that isn't local (a URI) is reported as
+"not a local file". The rest of a batch still opens. When several fail, only
+the last failure stays on the status line.
+
 ## File tree
 
 ![The file tree beside two tabs: my-talk with src/talk expanded, core.clj and demo.clj open, and demo.clj's row highlighted](../images/file-tree.png)

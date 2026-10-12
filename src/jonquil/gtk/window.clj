@@ -43,6 +43,7 @@
             [jonquil.gtk.tab :as tab]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
+            [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
@@ -2356,6 +2357,57 @@
 
 ;; --- activate ---------------------------------------------------------------
 
+;; P5a: the live window's open-paths fn (a vector of paths), published by
+;; activate! and read by the application's "open" handler. nil until a
+;; window exists.
+;; Never reset: the app quits with its window.
+(defonce ^:private current-open-paths (atom nil))
+;; The live window's status reporter (fn [text]); nil until a window exists.
+(defonce ^:private current-report (atom nil))
+
+(defn- report-open-problem!
+  "Says text on the window's status label, else on stderr with a prefix."
+  [text]
+  (if-let [r @current-report]
+    (r text)
+    (binding [*out* *err*] (println (str "jonquil: " text)))))
+
+(defn- open-paths-from-gfiles
+  "The n local paths of a GFile** array, as strings. A file with no local
+  path (a remote URI) or one that throws is reported and skipped."
+  [files n]
+  (into []
+        (keep (fn [i]
+                (let [gf (ffi/read files :pointer (* 8 i))]
+                  (try
+                    (let [p (g/g-file-get-path* gf)]
+                      (if (ffi/null? p)
+                        (let [u (g/g-file-get-uri* gf)
+                              uri (if (ffi/null? u) "(unknown)"
+                                      (try (ffi/ptr->string u) (finally (g/g-free u))))]
+                          (report-open-problem! (str "Couldn't open " uri ": not a local file"))
+                          nil)
+                        (try (ffi/ptr->string p) (finally (g/g-free p)))))
+                    (catch :default e
+                      (report-open-problem! (str "Couldn't open file " i ": " (ex-message e)))
+                      nil)))))
+        (range n)))
+
+(declare activate!)
+
+(defn- on-app-open!
+  "The application's \"open\" handler: n GFiles go to the window's
+  open-paths fn. With no window yet (GTK fires activate first, so a guard),
+  activate! builds one. Nothing throws into GTK; a failure is reported."
+  [app opts files n]
+  (try
+    (let [paths (open-paths-from-gfiles files n)]
+      (when (nil? @current-open-paths) (activate! app opts))
+      (when-let [f @current-open-paths] (f paths)))
+    (catch :default e
+      (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
+           (catch :default _ nil)))))
+
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
@@ -2800,6 +2852,23 @@
       (reset! active-id (:id first-tab))
       (reset! *tab-ctx tab-ctx)
       (reset! *folder-result folder-result!)
+      ;; P5a: Open With and Dock drops. A directory re-roots the tree like an
+      ;; Open Folder result and shows it; a file opens in a tab, and one that can't be read
+      ;; goes to the status line while the rest still open.
+      (reset! current-report (fn [text] (set-status! status-label text)))
+      (reset! current-open-paths
+              (fn [paths]
+                (doseq [p paths]
+                  (try
+                    (if (.isDirectory (java.io.File. ^String p))
+                      (do (folder-result! {:path p})
+                          ;; The tree now shows this folder, so show the tree
+                          ;; too; the toggle handler saves it as a choice.
+                          (g/gtk-toggle-button-set-active files-btn 1))
+                      (when-let [err (:error (open-file! @*tab-ctx p))]
+                        (set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
+                    (catch :default e
+                      (set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
       ;; File-tree plan P2.T2: the tree's root, starting width and
       ;; visibility (saved, else shown only for a directory launch, ruling 3),
       ;; Open Folder..., and the toggle's handler -- the one place that shows,
@@ -2854,6 +2923,13 @@
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       (start-and-report! cv status-label @ev* @sel*)
+      ;; P5a: say where the child tools' PATH came from. The wait for the
+      ;; lookup is off the GTK thread; the append goes through on-gui!, and
+      ;; a window closed meanwhile must not throw out of the future.
+      (future
+        (try (when-let [line (login-path/console-line)]
+               (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
+             (catch :default _ nil)))
       (update-title! (:ed first-tab) win (:path first-tab))
       (g/gtk-window-present win)
       (editor/focus! (:ed first-tab)))
@@ -2878,6 +2954,8 @@
                                                files-btn (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                    :file-tree-visible?* (fn [] (pos? (g/gtk-widget-get-visible (:root tree-pane))))
                    :simulate-folder-result! (fn [r] (@*folder-result r))
+                   :open-paths! (fn [paths] (@current-open-paths paths))
+                   :app app
                    :active-tab* active-tab
                  ;; Tabs plan P2.T3: the tab operations, exactly what the
                  ;; keys, the toolbar and the tabs' close buttons call.
@@ -3140,9 +3218,16 @@
   ;; process instead of forwarding "activate" into an already-running one
   ;; over D-Bus (the default GApplication behaviour for a shared app id).
   (let [app (g/gtk-application-new "net.b12n.jonquil"
-                                   (bit-or g/APPLICATION-DEFAULT-FLAGS g/G-APPLICATION-NON-UNIQUE))]
+                                   (bit-or g/APPLICATION-DEFAULT-FLAGS g/G-APPLICATION-NON-UNIQUE
+                                           g/G-APPLICATION-HANDLES-OPEN))]
     (g/g-signal-connect-data app "activate"
                              (callable (fn [app _data] (activate! app opts)) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; P5a: "open" (GApplication::open, void (*)(GApplication*, GFile**, gint,
+    ;; const gchar*, gpointer)) carries Finder's Open With and Dock drops.
+    (g/g-signal-connect-data app "open"
+                             (callable (fn [app files n _hint _data] (on-app-open! app opts files n))
+                                       [:pointer :pointer :int :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-application-run app 0 ffi/null)
     nil))

@@ -24,6 +24,8 @@
     jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection
+    jonquil.tool-path
+    jonquil.login-path
     jonquil.nrepl.jank-child
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
