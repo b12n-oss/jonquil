@@ -19,7 +19,7 @@
   (let [r (p/sh "plutil" "-extract" keypath "raw" "-o" "-" path)]
     (when (zero? (:exit r)) (str/trim (:out r)))))
 
-(def ^:private base {:version "v0.1.0-3-gabc123" :doc-extensions ["clj" "cljc" "cljs" "edn"]})
+(def ^:private base {:version "v0.1.0-3-gabc123" :doc-extensions ["clj" "cljc" "cljd" "jank" "edn" "bb"]})
 
 (deftest info-plist-keys-test
   (let [path (plist-file! (ab/info-plist base))]
@@ -39,9 +39,9 @@
                    "CFBundleDocumentTypes.0.LSHandlerRank" "Alternate"}]
       (testing k (is (= v (extract path k)))))
     (testing "document type extensions keep their order"
-      (is (= "4" (extract path "CFBundleDocumentTypes.0.CFBundleTypeExtensions" )) "count")
-      (is (= ["clj" "cljc" "cljs" "edn"]
-             (mapv #(extract path (str "CFBundleDocumentTypes.0.CFBundleTypeExtensions." %)) (range 4)))))
+      (is (= "6" (extract path "CFBundleDocumentTypes.0.CFBundleTypeExtensions" )) "count")
+      (is (= ["clj" "cljc" "cljd" "jank" "edn" "bb"]
+             (mapv #(extract path (str "CFBundleDocumentTypes.0.CFBundleTypeExtensions." %)) (range 6)))))
     (testing "exactly one document type"
       (is (nil? (extract path "CFBundleDocumentTypes.1"))))))
 
