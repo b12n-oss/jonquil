@@ -350,7 +350,7 @@
 (defn row-plain-return-apply-op-throw-contained
   "Forces jonquil.gtk.editor/apply-op! to throw for the duration of one
   plain Return, through handle-return!'s own call to it -- the same
-  with-redefs seam row-completion-commit-throw-consumes-key uses above.
+  with-redefs override row-completion-commit-throw-consumes-key uses above.
   Calls editor/dispatch-key!, the exact fn on-key calls (never handle-key!
   directly, which has no try/catch of its own): the process survives, the
   key is consumed (1), the buffer keeps its pre-Return text, and the

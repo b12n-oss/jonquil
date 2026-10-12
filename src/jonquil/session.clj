@@ -31,7 +31,7 @@
   ev/Evaluator
   (start! [_] nil)
   ;; The in-process engine lives and dies with Jonquil's own process, as it
-  ;; did before the Evaluator seam: nothing to end.
+  ;; did before the Evaluator protocol existed: nothing to end.
   (stop! [_] nil)
   (eval! [this code opts]
     (if (:run? opts)

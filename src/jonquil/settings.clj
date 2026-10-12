@@ -4,7 +4,7 @@
   when XDG_CONFIG_HOME is unset or blank. It stores :theme, :dialect (the
   fallback dialect for a file no project decides) when the user set one by
   hand, and :file-tree {:visible? :width}. A save merges into what the file
-  already holds, so each feature only writes its own keys. Loading never throws: a missing file is the default quietly,
+  already holds, so each feature only writes its own keys. Loading never throws: a missing file gives the defaults with no warning,
   and an unreadable file, an unknown theme or an unknown dialect is the
   default plus a :warning. Saving writes
   a temp file beside the target and renames it over the target with

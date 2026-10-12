@@ -228,7 +228,7 @@
 
 (defn row-menu-action-throw-is-contained
   "Forces jonquil.gtk.editor/do-toggle-comment! to throw for one
-  activation (with-redefs, the same seam row-completion-commit-throw-
+  activation (with-redefs, the same override row-completion-commit-throw-
   consumes-key reaches through a closure of the same shape), then
   activates p4.toggle-comment through :activate-menu-action!*. Without
   install-context-menu!'s own try/catch, the SAME throw crosses a
