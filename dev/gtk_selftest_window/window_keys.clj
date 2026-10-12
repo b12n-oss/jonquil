@@ -123,7 +123,7 @@
   "Forces jonquil.gtk.window/do-cycle-theme! to throw for one Cmd+Shift+M,
   through on-window-key's own theme-cycle-fn call to it (with-redefs on
   that var reaches the call even though it's unqualified and intra-
-  namespace, the same seam row-completion-commit-throw-consumes-key
+  namespace, the same override row-completion-commit-throw-consumes-key
   checks). Calls the exact fn the \"key-pressed\" signal calls
   (:handle-window-key!), the same chord row-theme-chord already drives
   (0x06d + META-MASK/CONTROL-MASK + SHIFT-MASK). Without on-window-key's

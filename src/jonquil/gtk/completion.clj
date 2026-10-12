@@ -11,7 +11,7 @@
   ({:text :caret :sel-start :sel-end}, optionally :extra-context for docs/
   candidates' 5-arity) -- jonquil.gtk.editor/snapshot is only the DEFAULT
   source of one, not a hard dependency. :apply-op! is the matching write
-  seam: (fn [edit-op] -> nil), defaulting to jonquil.gtk.editor/apply-op!
+  hook: (fn [edit-op] -> nil), defaulting to jonquil.gtk.editor/apply-op!
   on :ed. Both default closures reproduce the editor instance's exact prior
   behaviour; the console instance overrides them to read and write its own
   input region (jonquil.gtk.console-view/input-snapshot and its own grouped-

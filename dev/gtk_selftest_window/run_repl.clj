@@ -398,7 +398,7 @@
   "The console's right-click 'Clear Last Output' item does exactly what
   the key does (brief Test 5) -- fired through :repl-activate-menu-
   action!* (install-context-menu!'s own unprefixed action-name
-  activation), the same seam rename-menus.clj's own row-menu-actions-
+  activation), the same path rename-menus.clj's own row-menu-actions-
   console-complete already exercises for the console's Complete item."
   [ui]
   (go-row :clear-last-menu-item support/check

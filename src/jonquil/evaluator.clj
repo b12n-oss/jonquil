@@ -1,5 +1,5 @@
 (ns jonquil.evaluator
-  "The seam between a window and whatever runs its programs. The in-process
+  "What a window calls to run its programs, whatever runs them. The in-process
   Jolt engine (jonquil.session's InProcess record) is one implementation;
   an out-of-process runtime over nREPL is another. A window holds exactly
   one evaluator, chosen by jonquil.dialect/select.

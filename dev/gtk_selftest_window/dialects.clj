@@ -1,6 +1,6 @@
 (ns gtk-selftest-window.dialects
   "D1.T4 rows: the dialect label, the in-process engine behind the
-  Evaluator seam, and .jonquil.edn warnings when a file opens."
+  Evaluator protocol, and .jonquil.edn warnings when a file opens."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until on-gtk go-row]]
@@ -159,7 +159,7 @@
   sel) calls it first, so the throw fires at the earliest point
   apply-selection! can fail -- the exact shape the finding describes.
 
-  Measured, not g/gtk-label-set-text (the more obvious seam,
+  Measured, not g/gtk-label-set-text (the more obvious place to throw,
   show-selection!'s OWN next call): editor/set-text! -- open-path!'s
   first step, before it ever resets the path atom that ::dialect
   watches -- fires the SAME editor's on-cursor-moved! listeners, and
