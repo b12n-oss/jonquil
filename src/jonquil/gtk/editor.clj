@@ -508,6 +508,10 @@
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
 
+;; os.name read once. The keycode fallback is macOS-only: on Linux X11
+;; keycode 37 is Control_L.
+(def ^:private OS-NAME (System/getProperty "os.name"))
+
 (def ^:private open-chars
   {KEY-PARENLEFT \( KEY-BRACKETLEFT \[ KEY-BRACELEFT \{ KEY-QUOTEDBL \"})
 
@@ -592,6 +596,16 @@
 (defn do-unindent! [ed]
   (apply-op! ed (edit/unindent (snapshot ed))))
 
+(defn keycode-fallback?
+  "True when os is \"Mac OS X\", keycode is the physical F or L key
+  (MAC-KEYCODE-F/MAC-KEYCODE-L) and Alt/Option is held in state. Pure, so a
+  test can pass any os. Off macOS it is always false: on Linux X11 keycode
+  37 is Control_L, and the keycode numbering means nothing there."
+  [os keycode state]
+  (and (= "Mac OS X" os)
+       (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L} keycode)
+       (alt-held? state)))
+
 (defn- alt-chord-f-or-l?
   "True for Cmd/Ctrl+Alt+F or Cmd/Ctrl+Alt+L, on either platform.
 
@@ -616,9 +630,9 @@
   this guard a Ctrl+Alt press sequence could in principle mis-fire on the
   Control_L keystroke itself; the guard makes that impossible regardless
   of keyval-lower's actual value that day."
-  [keyval keycode]
+  [keyval keycode state]
   (or (contains? #{KEY-F KEY-L} keyval)
-      (and (< keyval 0x1000) (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L} keycode))))
+      (and (< keyval 0x1000) (keycode-fallback? OS-NAME keycode state))))
 
 (defn handle-key!
   "The editor's key dispatch (P3.T2 gtk-keys.md), first match wins. Returns
@@ -688,7 +702,7 @@
        (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
        (do-format-all! ed)
 
-       (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode))
+       (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode state))
        (do-format-selection! ed)
 
        (and (command-chord? state) (= keyval KEY-Y) (not @(:read-only? ed)))
