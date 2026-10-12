@@ -23,9 +23,9 @@
 (defn- kv [k v] (str "  <key>" k "</key>\n  <string>" (xml-escape v) "</string>\n"))
 
 (defn info-plist
-  "The Info.plist XML for the bundle. opts: :version (both version keys)
-  and :doc-extensions (the extensions Jonquil offers to open, in order)."
-  [{:keys [version doc-extensions]}]
+  "The Info.plist XML for the bundle. opts: :version (CFBundleShortVersionString),
+  :build (CFBundleVersion, period-separated integers) and :doc-extensions (the extensions Jonquil offers to open, in order)."
+  [{:keys [version build doc-extensions]}]
   (str "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
        "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
@@ -36,7 +36,7 @@
        (kv "CFBundleExecutable" "jonquil")
        (kv "CFBundleIconFile" "Jonquil")
        (kv "CFBundlePackageType" "APPL")
-       (kv "CFBundleVersion" version)
+       (kv "CFBundleVersion" build)
        (kv "CFBundleShortVersionString" version)
        (kv "LSMinimumSystemVersion" "13.0")
        "  <key>NSHighResolutionCapable</key>\n  <true/>\n"
@@ -46,7 +46,13 @@
        "      <key>LSHandlerRank</key>\n      <string>Alternate</string>\n"
        "      <key>CFBundleTypeExtensions</key>\n      <array>\n"
        (apply str (map (fn [e] (str "        <string>" (xml-escape e) "</string>\n")) doc-extensions))
-       "      </array>\n    </dict>\n  </array>\n"
+       "      </array>\n    </dict>\n"
+       "    <dict>\n"
+       "      <key>CFBundleTypeName</key>\n      <string>Folder</string>\n"
+       "      <key>CFBundleTypeRole</key>\n      <string>Viewer</string>\n"
+       "      <key>LSHandlerRank</key>\n      <string>Alternate</string>\n"
+       "      <key>LSItemContentTypes</key>\n      <array>\n"
+       "        <string>public.folder</string>\n      </array>\n    </dict>\n  </array>\n"
        "</dict>\n</plist>\n"))
 
 (defn replaceable?
@@ -66,6 +72,13 @@
 (defn- git-version []
   (let [r (p/sh "git" "describe" "--tags" "--always")]
     (if (zero? (:exit r)) (str/trim (:out r)) "0.0.0")))
+
+(defn- build-number
+  "The commit count as CFBundleVersion (Apple wants period-separated integers)."
+  []
+  (let [r (p/sh "git" "rev-list" "--count" "HEAD")
+        n (str/trim (str (:out r)))]
+    (if (and (zero? (:exit r)) (re-matches #"\d+" n)) n "0")))
 
 (defn- copy! [from to]
   (io/make-parents to)
@@ -94,7 +107,7 @@
   (.setExecutable (io/file bundle-dir "Contents/MacOS/jonquil") true)
   (copy! "resources/Jonquil.icns" (str bundle-dir "/Contents/Resources/Jonquil.icns"))
   (spit (str bundle-dir "/Contents/Info.plist")
-        (info-plist {:version (git-version) :doc-extensions doc-extensions}))
+        (info-plist {:version (git-version) :build (build-number) :doc-extensions doc-extensions}))
   (println (str "built " bundle-dir))
   (check-bundle! bundle-dir))
 

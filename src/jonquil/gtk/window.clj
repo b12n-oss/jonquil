@@ -2853,7 +2853,7 @@
       (reset! *tab-ctx tab-ctx)
       (reset! *folder-result folder-result!)
       ;; P5a: Open With and Dock drops. A directory re-roots the tree like an
-      ;; Open Folder result; a file opens in a tab, and one that can't be read
+      ;; Open Folder result and shows it; a file opens in a tab, and one that can't be read
       ;; goes to the status line while the rest still open.
       (reset! current-report (fn [text] (set-status! status-label text)))
       (reset! current-open-paths
@@ -2861,7 +2861,10 @@
                 (doseq [p paths]
                   (try
                     (if (.isDirectory (java.io.File. ^String p))
-                      (folder-result! {:path p})
+                      (do (folder-result! {:path p})
+                          ;; The tree now shows this folder, so show the tree
+                          ;; too; the toggle handler saves it as a choice.
+                          (g/gtk-toggle-button-set-active files-btn 1))
                       (when-let [err (:error (open-file! @*tab-ctx p))]
                         (set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
                     (catch :default e
@@ -3224,7 +3227,7 @@
     ;; const gchar*, gpointer)) carries Finder's Open With and Dock drops.
     (g/g-signal-connect-data app "open"
                              (callable (fn [app files n _hint _data] (on-app-open! app opts files n))
-                                       [:pointer :pointer :int :string :pointer] :void)
+                                       [:pointer :pointer :int :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-application-run app 0 ffi/null)
     nil))

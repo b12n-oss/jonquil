@@ -59,15 +59,24 @@
                   (finally (restore! ui original))))))))
 
 (defn row-app-open-folder
-  "A directory roots the tree there."
+  "A directory roots the tree there and shows it, even when it was hidden."
   [ui]
   (go-row :app-open-folder support/check
     (on-gtk (let [original (root ui)
+                  was-visible? ((:file-tree-visible?* ui))
                   d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-appopen-")))]
               (try
-                ((:open-paths! ui) [d])
-                (support/check :app-open-folder (= d (root ui)) {:root (root ui) :want d})
-                (finally (restore! ui original)))))))
+                (when was-visible? ((:toggle-file-tree!* ui)))
+                (let [hidden? (not ((:file-tree-visible?* ui)))]
+                  ((:open-paths! ui) [d])
+                  (support/check :app-open-folder
+                                 (and hidden? (= d (root ui)) ((:file-tree-visible?* ui)))
+                                 {:hidden-first hidden? :root (root ui) :want d
+                                  :visible ((:file-tree-visible?* ui))}))
+                (finally
+                  (restore! ui original)
+                  (when (not= was-visible? ((:file-tree-visible?* ui)))
+                    ((:toggle-file-tree!* ui)))))))))
 
 (defn row-app-open-missing
   "A path that doesn't exist names itself in the status line; no tab is added."
