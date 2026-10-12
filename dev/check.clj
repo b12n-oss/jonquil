@@ -24,6 +24,8 @@
     jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection
+    jonquil.tool-path
+    jonquil.login-path
     jonquil.nrepl.jank-child
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
@@ -36,8 +38,6 @@
     jonquil.source
     jonquil.tabs
     jonquil.file-tree
-    jonquil.tool-path
-    jonquil.login-path
     jonquil.gtk.ffi
     jonquil.gtk.callbacks
     jonquil.gtk.popover

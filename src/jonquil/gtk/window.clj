@@ -43,6 +43,7 @@
             [jonquil.gtk.tab :as tab]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
+            [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
@@ -2854,6 +2855,13 @@
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       (start-and-report! cv status-label @ev* @sel*)
+      ;; P5a: say where the child tools' PATH came from. The wait for the
+      ;; lookup is off the GTK thread; the append goes through on-gui!, and
+      ;; a window closed meanwhile must not throw out of the future.
+      (future
+        (try (when-let [line (login-path/console-line)]
+               (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
+             (catch :default _ nil)))
       (update-title! (:ed first-tab) win (:path first-tab))
       (g/gtk-window-present win)
       (editor/focus! (:ed first-tab)))

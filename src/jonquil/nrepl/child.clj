@@ -17,7 +17,9 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
-            [jolt.socket]))
+            [jolt.socket]
+            [jonquil.login-path :as login-path]
+            [jonquil.tool-path :as tool-path]))
 
 (def port-base
   ;; estimate: any unprivileged range works; this one avoids 7888, the
@@ -50,14 +52,27 @@
 (defn launch-args
   "The child's argv. With a middleware root, the follow-up spike's
   command: jolt -Sdeps '{:deps {nrepl/nrepl {:local/root R}}
-  :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P."
+  :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P.
+  The program is jolt's absolute path found on login-path's PATH (jolt.process
+  resolves a bare name against Jonquil's own PATH, which a Finder launch has
+  too bare), or the bare \"jolt\" when none is found."
   [port root]
-  (if root
-    ["jolt" "-Sdeps"
+  (let [program (or (tool-path/resolve-program "jolt" (login-path/path)
+                                               login-path/executable-file?)
+                    "jolt")]
+    (if root
+      [program "-Sdeps"
      (str "{:deps {nrepl/nrepl {:local/root " (pr-str root) "}}"
           " :nrepl/middleware [nrepl.middleware/default-middleware]}")
-     "nrepl-server" (str port)]
-    ["jolt" "nrepl-server" (str port)]))
+       "nrepl-server" (str port)]
+      [program "nrepl-server" (str port)])))
+
+(defn process-options
+  "The jolt.process options for the child: {:dir :log}, plus login-path's
+  PATH in the child's environment so jolt's own tool lookups see it."
+  [{:keys [dir log]}]
+  {:dir dir :out (io/file log) :err :out :in (io/file "/dev/null")
+   :extra-env {"PATH" (login-path/path)}})
 
 (defn- port-file [dir] (io/file dir ".nrepl-port"))
 
@@ -135,7 +150,7 @@
     (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
       (if-let [port (first ports)]
         (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
-              proc (apply p/process {:dir dir :out (io/file log) :err :out :in (io/file "/dev/null")}
+              proc (apply p/process (process-options {:dir dir :log log})
                           (launch-args port root))
               state (wait-ready proc log port ready-deadline-ms)]
           (case state

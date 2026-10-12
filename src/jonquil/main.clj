@@ -3,6 +3,7 @@
   window and blocks in the GTK main loop."
   (:require [clojure.java.io :as io]
             [jonquil.gtk.window :as window]
+            [jonquil.login-path :as login-path]
             [jonquil.runtime-registry :as registry]))
 
 (defn start!
@@ -15,6 +16,9 @@
   (window/start! opts))
 
 (defn -main [& args]
+  ;; Asks the login shell for PATH in the background when launched from
+  ;; Finder; self-tests call start! directly and keep the process PATH.
+  (login-path/start!)
   ;; File-tree plan P2.T2: a directory argument roots the file tree there
   ;; (and sets the window's project); anything else is a file, as before.
   ;; :cwd roots the tree when there's no argument.

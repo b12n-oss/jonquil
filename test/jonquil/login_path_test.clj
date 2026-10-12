@@ -154,3 +154,10 @@
                          (is (= :fallback (:source (lp/answer))))
                          (is (= "/usr/bin:/bin:/usr/sbin:/sbin" (lp/path)))))]
     (is (< dt 1000))))
+
+(deftest terminal-launch-test
+  ;; A PATH that already has a well-known dir: no lookup, so the line the
+  ;; window appends is nil and it prints nothing extra.
+  (is (= :not-needed (start-with "/bin/sh" {:env {"PATH" "/usr/bin:/opt/homebrew/bin"}})))
+  (is (nil? (lp/console-line)))
+  (is (= "/usr/bin:/opt/homebrew/bin" (lp/path))))

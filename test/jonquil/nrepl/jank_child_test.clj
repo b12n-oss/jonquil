@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [jolt.process :as p]
+            [jonquil.login-path :as lp]
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.jank-child :as jank]
             [temp-dirs]))
@@ -190,3 +191,19 @@
       (is (not= (:port a) (:port b)))
       (is (not= (:run-dir a) (:run-dir b)))
       (finally (jank/kill! a) (jank/kill! b)))))
+
+(deftest jank-find-binary-login-path-test
+  ;; The zero-arity scans login-path's PATH, not the process PATH.
+  (let [bin (io/file (temp-dirs/temp-dir! "jonquil-jank-test-") "bin")
+        jank-file (io/file bin "jank")]
+    (.mkdirs bin)
+    (spit jank-file "#!/bin/sh\n")
+    (.setExecutable jank-file true)
+    (lp/reset-for-test!)
+    (try
+      (lp/start! {:env {"PATH" (str (.getPath bin) ":/fake-home-for-test/.local/bin")}
+                  :home "/fake-home-for-test"})
+      (is (= (.getCanonicalPath jank-file)
+             (.getCanonicalPath (io/file (jank/find-binary)))))
+      (is (= {"PATH" (lp/path)} (:extra-env (jank/process-options {:dir "/d" :log "/l"}))))
+      (finally (lp/reset-for-test!)))))
