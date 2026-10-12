@@ -2357,6 +2357,36 @@
 
 ;; --- activate ---------------------------------------------------------------
 
+;; P5a: the live window's open-paths fn (a vector of paths), published by
+;; activate! and read by the application's "open" handler. nil until a
+;; window exists.
+(defonce ^:private current-open-paths (atom nil))
+
+(defn- open-paths-from-gfiles
+  "The n paths of a GFile** array, as strings; a file with no path is skipped."
+  [files n]
+  (into []
+        (keep (fn [i]
+                (try
+                  (let [p (g/g-file-get-path* (ffi/read files :pointer (* 8 i)))]
+                    (when-not (ffi/null? p)
+                      (try (ffi/ptr->string p) (finally (g/g-free p)))))
+                  (catch :default _ nil))))
+        (range n)))
+
+(declare activate!)
+
+(defn- on-app-open!
+  "The application's \"open\" handler: n GFiles go to the window's
+  open-paths fn. With no window yet (GTK fires activate first, so a guard),
+  activate! builds one. Nothing throws into GTK."
+  [app opts files n]
+  (try
+    (let [paths (open-paths-from-gfiles files n)]
+      (when (nil? @current-open-paths) (activate! app opts))
+      (when-let [f @current-open-paths] (f paths)))
+    (catch :default _ nil)))
+
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
@@ -2801,6 +2831,19 @@
       (reset! active-id (:id first-tab))
       (reset! *tab-ctx tab-ctx)
       (reset! *folder-result folder-result!)
+      ;; P5a: Open With and Dock drops. A directory re-roots the tree like an
+      ;; Open Folder result; a file opens in a tab, and one that can't be read
+      ;; goes to the status line while the rest still open.
+      (reset! current-open-paths
+              (fn [paths]
+                (doseq [p paths]
+                  (try
+                    (if (.isDirectory (java.io.File. ^String p))
+                      (folder-result! {:path p})
+                      (when-let [err (:error (open-file! @*tab-ctx p))]
+                        (set-status! status-label (str "Couldn't open " (.getName (java.io.File. ^String p)) ": " err))))
+                    (catch :default e
+                      (set-status! status-label (str "Couldn't open " p ": " (ex-message e))))))))
       ;; File-tree plan P2.T2: the tree's root, starting width and
       ;; visibility (saved, else shown only for a directory launch, ruling 3),
       ;; Open Folder..., and the toggle's handler -- the one place that shows,
@@ -2886,6 +2929,8 @@
                                                files-btn (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                    :file-tree-visible?* (fn [] (pos? (g/gtk-widget-get-visible (:root tree-pane))))
                    :simulate-folder-result! (fn [r] (@*folder-result r))
+                   :open-paths! (fn [paths] (@current-open-paths paths))
+                   :app app
                    :active-tab* active-tab
                  ;; Tabs plan P2.T3: the tab operations, exactly what the
                  ;; keys, the toolbar and the tabs' close buttons call.
@@ -3148,9 +3193,16 @@
   ;; process instead of forwarding "activate" into an already-running one
   ;; over D-Bus (the default GApplication behaviour for a shared app id).
   (let [app (g/gtk-application-new "net.b12n.jonquil"
-                                   (bit-or g/APPLICATION-DEFAULT-FLAGS g/G-APPLICATION-NON-UNIQUE))]
+                                   (bit-or g/APPLICATION-DEFAULT-FLAGS g/G-APPLICATION-NON-UNIQUE
+                                           g/G-APPLICATION-HANDLES-OPEN))]
     (g/g-signal-connect-data app "activate"
                              (callable (fn [app _data] (activate! app opts)) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; P5a: "open" (GApplication::open, void (*)(GApplication*, GFile**, gint,
+    ;; const gchar*, gpointer)) carries Finder's Open With and Dock drops.
+    (g/g-signal-connect-data app "open"
+                             (callable (fn [app files n _hint _data] (on-app-open! app opts files n))
+                                       [:pointer :pointer :int :string :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-application-run app 0 ffi/null)
     nil))

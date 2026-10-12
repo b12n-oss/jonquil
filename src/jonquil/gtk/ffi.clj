@@ -440,6 +440,15 @@
 ;; "activate" into an already-running instance over D-Bus.
 (def G-APPLICATION-NON-UNIQUE (bit-shift-left 1 5))
 
+;; G_APPLICATION_HANDLES_OPEN: /opt/homebrew/include/glib-2.0/gio/gioenums.h:1578
+;; (GApplicationFlags enum, G_APPLICATION_HANDLES_OPEN = 1 << 2 = 4). P5a: lets
+;; the app emit "open" for files from Finder's Open With and Dock drops.
+(def G-APPLICATION-HANDLES-OPEN (bit-shift-left 1 2))
+
+;; g_application_open: /opt/homebrew/include/glib-2.0/gio/gapplication.h:218-221
+;; (void g_application_open (GApplication*, GFile **files, gint n_files, const gchar *hint)).
+(ffi/defcfn g-application-open "g_application_open" [:pointer :pointer :int :string] :void)
+
 ;; g_application_get_flags: /opt/homebrew/include/glib-2.0/gio/gapplication.h:159-160
 ;; (GApplicationFlags g_application_get_flags (GApplication *application)).
 ;; Round-trip readback for G-APPLICATION-NON-UNIQUE's own unit test -- doesn't
