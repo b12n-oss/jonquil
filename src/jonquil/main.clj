@@ -8,25 +8,33 @@
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
-  {:file path-or-nil :dir path-or-nil :cwd path-or-nil :on-ready (fn [ui])
-  :settings-path path-or-nil}
+  {:file path-or-nil :dir path-or-nil :cwd path-or-nil :argv [\"jonquil\" ...]
+  :on-ready (fn [ui]) :settings-path path-or-nil}
   (:settings-path defaults to (jonquil.settings/settings-path), TH.T5); see
   jonquil.gtk.window/start! for ui's shape."
   [opts]
   (window/start! opts))
 
+(defn gtk-argv
+  "The argv handed to g_application_run: \"jonquil\", then every arg made
+  absolute against cwd. Absolute paths can't start with a dash, so GTK's
+  option parser never sees a file named like an option (--help). Pure: no
+  filesystem check, no canonicalisation."
+  [args cwd]
+  (into ["jonquil"]
+        (map (fn [a] (let [f (io/file a)]
+                       (if (.isAbsolute f) a (.getAbsolutePath (io/file cwd a)))))
+             args)))
+
 (defn -main [& args]
   ;; Asks the login shell for PATH in the background when launched from
   ;; Finder; self-tests call start! directly and keep the process PATH.
   (login-path/start!)
-  ;; File-tree plan P2.T2: a directory argument roots the file tree there
-  ;; (and sets the window's project); anything else is a file, as before.
-  ;; :cwd roots the tree when there's no argument.
-  (let [a (first args)
-        dir? (and a (.isDirectory (io/file a)))]
-    (start! (cond-> {:cwd (System/getProperty "user.dir")}
-              dir? (assoc :dir a)
-              (and a (not dir?)) (assoc :file a))))
+  ;; Every argument goes through GApplication's "open" signal, so several
+  ;; files open as tabs and a folder roots the file tree. :cwd roots the
+  ;; tree when there's no argument.
+  (let [cwd (System/getProperty "user.dir")]
+    (start! {:cwd cwd :argv (gtk-argv args cwd)}))
   ;; The GTK loop has ended by the time g-application-run (inside start!)
   ;; returns, so blocking here is fine -- unlike ev/stop! (jonquil.nrepl.
   ;; evaluator), which never blocks the GTK thread. registry/stop-all!

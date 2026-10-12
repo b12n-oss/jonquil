@@ -95,7 +95,7 @@ bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt
 bb test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
 bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
 bb test jonquil.edit-test # one namespace (the TDD loop)
-bb gtk:selftest           # real-window self-tests, opens seven windows (don't type while it runs)
+bb gtk:selftest           # real-window self-tests, opens eight windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
 bb smoke:cljd             # drive the built binary against a running ClojureDart app (start it with bb dev:macos first)

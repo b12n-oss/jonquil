@@ -37,12 +37,12 @@ tasks rather than tags inside the same one. `bb verify` is the pre-commit
 gate: clj-kondo in report mode, then `bb test` followed by `bb
 test:nrepl`, both of which must pass.
 
-## Self-test and docs: seven windows, one binary, one camera
+## Self-test and docs: eight windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens seven real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens eight real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
@@ -98,6 +98,12 @@ starts it as a real child process with a held-open stdin and a private run
 directory, so rows can check the pid and the directory on disk, and nothing
 needs a jank install. To run the group alone, set `JONQUIL_JANK` to the
 absolute path of `dev/fake-jank` and run `jolt -M:selftest-jank`.
+
+The eighth group (`dev/gtk_selftest_args.clj`, 3 rows) launches the way a
+terminal does, with `jonquil.main/gtk-argv` turning two files and a folder
+into absolute paths for `g_application_run`. GApplication then emits `open`
+(and not `activate`), and the rows check the two files are the only tabs,
+the folder roots the tree, and the last file is active.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in

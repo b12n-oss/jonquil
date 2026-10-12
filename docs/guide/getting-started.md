@@ -51,7 +51,7 @@ bb app:run ~/dev/project  # opens a folder: the file tree shows it, ready to pic
 bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
 ```
 
-Once it's built, `./jonquil`, `./jonquil file.clj` and `./jonquil <folder>` work the same way as
+Once it's built, `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` (one tab each) and `./jonquil <folder>` work the same way as
 `bb app:run` does, without needing Jolt or babashka on `PATH` at all.
 
 ### The macOS quarantine note

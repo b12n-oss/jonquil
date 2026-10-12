@@ -3145,6 +3145,26 @@
                    :register-alert-choice-for-test! register-alert-choice!
                    :complete-alert-for-test! complete-alert!})))))
 
+(defn- run-application!
+  "Runs the application's main loop. With an argv of more than the program
+  name, hands GApplication a NULL-terminated char** so it emits \"open\"
+  with the files; otherwise runs with no argv, so \"activate\" fires. The C
+  strings and the array are freed after the loop ends."
+  [app argv]
+  (if (> (count argv) 1)
+    (let [n (count argv)
+          arr (ffi/alloc (* 8 (inc n)))
+          strs (mapv ffi/string->ptr argv)]
+      (try
+        (doseq [[i p] (map-indexed vector strs)]
+          (ffi/write arr :pointer p (* 8 i)))
+        (ffi/write arr :pointer ffi/null (* 8 n))
+        (g/g-application-run app n arr)
+        (finally
+          (doseq [p strs] (ffi/free p))
+          (ffi/free arr))))
+    (g/g-application-run app 0 ffi/null)))
+
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :dir path-or-nil :cwd path-or-nil :on-ready (fn [ui])
@@ -3214,8 +3234,12 @@
   the args of the last inspect! request this window actually sent.
   :source-pane is the jonquil.gtk.source-pane map; :right-slot the GtkBox
   holding it and the inspector; the :source-*!* fns are what the panel's
-  keys and buttons call."
-  [opts]
+  keys and buttons call.
+
+  :argv (a vector of strings, \"jonquil\" first; jonquil.main/gtk-argv) is
+  handed to g_application_run when it has more than the program name, so
+  GApplication emits \"open\" with those files instead of \"activate\"."
+  [{:keys [argv] :as opts}]
   ;; M6: G_APPLICATION_NON_UNIQUE, so a second launch starts its own
   ;; process instead of forwarding "activate" into an already-running one
   ;; over D-Bus (the default GApplication behaviour for a shared app id).
@@ -3231,5 +3255,5 @@
                              (callable (fn [app files n _hint _data] (on-app-open! app opts files n))
                                        [:pointer :pointer :int :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    (g/g-application-run app 0 ffi/null)
+    (run-application! app argv)
     nil))
