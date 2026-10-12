@@ -438,10 +438,13 @@ script cover both.
   which either records the process `PATH` or starts the shell in a future,
   once per process (a second call changes nothing). The shell's stdout goes
   to a temp file, so a single deadline (5 s) covers its whole run, where a
-  pipe would also wait for every process still holding it open; on timeout
-  the process tree is killed and whatever it printed is still parsed. The
-  result is cached in a promise, and `answer` waits for it at most the
-  deadline plus 500 ms. Nothing in it throws out. `console-line` turns the
+  pipe would also wait for every process still holding it open. On timeout,
+  or once the output passes 1 MB, the process tree is killed and whatever it
+  printed is still parsed. The tree's members are listed before the TERM and
+  any still alive 300 ms later get KILL, since a `.zshrc` that ignores TERM
+  passes that on to its children. The result is cached in a promise, and
+  `answer` waits for it at most the deadline plus 1.5 s, long enough for that
+  kill to finish. Nothing in it throws out. `console-line` turns the
   result into the sentence the window appends to the console from a future
   (through `on-gui!`), so the wait never sits on the GTK thread.
 - Children don't trust their own lookup of bare names: `jolt.process`

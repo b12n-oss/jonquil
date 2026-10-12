@@ -4,7 +4,7 @@
   jonquil.tool-path for why that PATH is too bare to find jolt or jank).
 
   start! decides and, when a lookup is needed, runs it in a future. answer
-  waits for the result, but never longer than timeout-ms plus 500 ms, and
+  waits for the result, but never longer than timeout-ms plus 1.5 s, and
   falls back to well-known folders when the shell fails, times out or prints
   no PATH. Nothing here throws out of start!, answer or path.
 
@@ -22,7 +22,16 @@
   warm for an interactive login zsh."
   5000)
 
-(def ^:private grace-ms 500)
+(def ^:private grace-ms
+  "How far past timeout-ms answer waits. Longer than kill-wait-ms plus a poll
+  step, so a PATH printed before a hang is still used."
+  1500)
+
+(def ^:private kill-wait-ms
+  "How long a timed-out shell gets to exit on TERM before it is killed."
+  300)
+
+(def ^:private poll-ms 100)
 
 (defonce ^:private state (atom nil))
 
@@ -69,26 +78,52 @@
         (if (pos? n) (String. buf 0 (int n) "UTF-8") "")))
     (catch Throwable _ "")))
 
+(defn- kill-tree!
+  "TERM to the shell and everything under it, then KILL whatever is still
+  alive after kill-wait-ms. The descendants are listed first: a shell that
+  ignores TERM passes that to its children, and once it is gone they are no
+  longer under it."
+  [proc]
+  (let [^java.lang.Process jp (:proc proc)
+        kids (try (vec (.descendants (.toHandle jp))) (catch Throwable _ []))]
+    (p/destroy-tree proc)
+    (when (= ::running (deref proc kill-wait-ms ::running))
+      (.destroyForcibly jp))
+    (doseq [^java.lang.ProcessHandle h kids]
+      (try (when (.isAlive h) (.destroyForcibly h)) (catch Throwable _ nil)))))
+
+(defn- wait-for
+  "The shell's exit result, or ::timeout at the deadline, or ::too-much once
+  its output passes read-cap."
+  [proc ^java.io.File tmp timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [r (deref proc poll-ms ::running)]
+        (cond
+          (not= ::running r) r
+          (> (.length tmp) read-cap) ::too-much
+          (>= (System/currentTimeMillis) deadline) ::timeout
+          :else (recur))))))
+
 (defn- run-shell
   "Spawns the probe with stdout going to a temp file, so the one deadline
   covers the shell's whole run (a pipe would also wait for every process
-  holding it open). Returns {:out s} or {:reason r}. On timeout the shell's
-  process tree is killed, and whatever it had printed is still parsed."
+  holding it open). Returns {:out s} or {:reason r}. On timeout, or once the
+  output passes read-cap, the shell's process tree is killed, and whatever it
+  had printed is still parsed."
   [{:keys [shell timeout-ms]}]
   (let [tmp (java.io.File/createTempFile "jonquil-login-path-" ".out")]
     (try
       (let [proc (apply p/process {:in (io/file "/dev/null") :out tmp :err :discard}
                         (tp/shell-command shell))
-            r (deref proc timeout-ms ::timeout)
-            timed-out? (= ::timeout r)]
-        (when timed-out?
-          (p/destroy-tree proc)
-          (when (= ::timeout (deref proc 1000 ::timeout))
-            (.destroyForcibly ^java.lang.Process (:proc proc))))
+            r (wait-for proc tmp timeout-ms)
+            stopped? (contains? #{::timeout ::too-much} r)]
+        (when stopped? (kill-tree! proc))
         (let [out (read-capped tmp)]
           (cond
-            (and timed-out? (tp/parse-answer out)) {:out out}
-            timed-out? {:reason "timed out"}
+            (and stopped? (tp/parse-answer out)) {:out out}
+            (= ::timeout r) {:reason "timed out"}
+            (= ::too-much r) {:reason "printed no PATH"}
             (zero? (:exit r)) {:out out}
             :else {:reason "failed"})))
       (finally (.delete tmp)))))
@@ -137,7 +172,7 @@
        nil))))
 
 (defn answer
-  "The lookup's result map, waiting for it for at most timeout-ms plus 500 ms.
+  "The lookup's result map, waiting for it for at most timeout-ms plus 1.5 s.
   Before start! has run: the current PATH with source :process."
   []
   (try

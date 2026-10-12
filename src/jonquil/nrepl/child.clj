@@ -62,8 +62,8 @@
                     "jolt")]
     (if root
       [program "-Sdeps"
-     (str "{:deps {nrepl/nrepl {:local/root " (pr-str root) "}}"
-          " :nrepl/middleware [nrepl.middleware/default-middleware]}")
+       (str "{:deps {nrepl/nrepl {:local/root " (pr-str root) "}}"
+            " :nrepl/middleware [nrepl.middleware/default-middleware]}")
        "nrepl-server" (str port)]
       [program "nrepl-server" (str port)])))
 

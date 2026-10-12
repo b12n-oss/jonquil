@@ -2401,8 +2401,10 @@
   activate! builds one. Nothing throws into GTK; a failure is reported."
   [app opts files n]
   (try
+    ;; The window first, so a file that can't be opened is said on its
+    ;; status line rather than on stderr, which a Finder launch never shows.
+    (when (nil? @current-open-paths) (activate! app opts))
     (let [paths (open-paths-from-gfiles files n)]
-      (when (nil? @current-open-paths) (activate! app opts))
       (when-let [f @current-open-paths] (f paths)))
     (catch :default e
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
