@@ -292,6 +292,7 @@
    app-open/row-app-open-folder
    app-open/row-app-open-missing
    app-open/row-app-open-already-open
+   app-open/row-app-open-non-local
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

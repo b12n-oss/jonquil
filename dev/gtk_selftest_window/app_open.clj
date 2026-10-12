@@ -99,3 +99,28 @@
                       v {:n1 n1 :n2 (count (tab-list ui)) :same (= id (:id ((:active-tab* ui))))}]
                   (support/check :app-open-already-open (and (= 2 (:n1 v)) (= 2 (:n2 v)) (:same v)) v))
                 (finally (restore! ui original)))))))
+
+(defn row-app-open-non-local
+  "A non-local GFile is named in the status line as not local, and the real
+  file opened in the same call still gets its tab."
+  [ui]
+  (go-row :app-open-non-local support/check
+    (let [original (on-gtk (root ui))
+          a (on-gtk (tabs/occupy-first! ui) (temp-file! "real.clj" "(def real 1)\n"))]
+      (on-gtk (let [arr (ffi/alloc 16)
+                    gfs [(g/g-file-new-for-uri "http://example.invalid/x.clj") (g/g-file-new-for-path a)]]
+                (try
+                  (ffi/write arr :pointer (first gfs) 0)
+                  (ffi/write arr :pointer (second gfs) 8)
+                  (g/g-application-open (:app ui) arr 2 "")
+                  (finally
+                    (doseq [f gfs] (g/g-object-unref f))
+                    (ffi/free arr)))))
+      (let [ok (await-until 3000 20 #(and (some #{a} (tab-paths ui))
+                                          (let [st (g/label-text (:status-label ui))]
+                                            (and (str/includes? st "http://example.invalid/x.clj")
+                                                 (str/includes? st "not a local file")))))]
+        (on-gtk (try
+                  (support/check :app-open-non-local ok
+                                 {:status (g/label-text (:status-label ui)) :paths (tab-paths ui)})
+                  (finally (restore! ui original))))))))

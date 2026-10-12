@@ -1172,3 +1172,7 @@
 (ffi/defcfn gtk-file-dialog-select-folder-finish "gtk_file_dialog_select_folder_finish" [:pointer :pointer :pointer] :pointer)
 ;; gio/gfile.h:611 GFile* g_file_new_for_path (const char*)
 (ffi/defcfn g-file-new-for-path "g_file_new_for_path" [:string] :pointer)
+;; gio/gfile.h:613 GFile* g_file_new_for_uri (const char*)
+(ffi/defcfn g-file-new-for-uri "g_file_new_for_uri" [:string] :pointer)
+;; gio/gfile.h:663 char* g_file_get_uri (GFile*); free the result with g_free
+(ffi/defcfn g-file-get-uri* "g_file_get_uri" [:pointer] :pointer)

@@ -2360,18 +2360,37 @@
 ;; P5a: the live window's open-paths fn (a vector of paths), published by
 ;; activate! and read by the application's "open" handler. nil until a
 ;; window exists.
+;; Never reset: the app quits with its window.
 (defonce ^:private current-open-paths (atom nil))
+;; The live window's status reporter (fn [text]); nil until a window exists.
+(defonce ^:private current-report (atom nil))
+
+(defn- report-open-problem!
+  "Says text on the window's status label, else on stderr with a prefix."
+  [text]
+  (if-let [r @current-report]
+    (r text)
+    (binding [*out* *err*] (println (str "jonquil: " text)))))
 
 (defn- open-paths-from-gfiles
-  "The n paths of a GFile** array, as strings; a file with no path is skipped."
+  "The n local paths of a GFile** array, as strings. A file with no local
+  path (a remote URI) or one that throws is reported and skipped."
   [files n]
   (into []
         (keep (fn [i]
-                (try
-                  (let [p (g/g-file-get-path* (ffi/read files :pointer (* 8 i)))]
-                    (when-not (ffi/null? p)
-                      (try (ffi/ptr->string p) (finally (g/g-free p)))))
-                  (catch :default _ nil))))
+                (let [gf (ffi/read files :pointer (* 8 i))]
+                  (try
+                    (let [p (g/g-file-get-path* gf)]
+                      (if (ffi/null? p)
+                        (let [u (g/g-file-get-uri* gf)
+                              uri (if (ffi/null? u) "(unknown)"
+                                      (try (ffi/ptr->string u) (finally (g/g-free u))))]
+                          (report-open-problem! (str "Couldn't open " uri ": not a local file"))
+                          nil)
+                        (try (ffi/ptr->string p) (finally (g/g-free p)))))
+                    (catch :default e
+                      (report-open-problem! (str "Couldn't open file " i ": " (ex-message e)))
+                      nil)))))
         (range n)))
 
 (declare activate!)
@@ -2379,13 +2398,15 @@
 (defn- on-app-open!
   "The application's \"open\" handler: n GFiles go to the window's
   open-paths fn. With no window yet (GTK fires activate first, so a guard),
-  activate! builds one. Nothing throws into GTK."
+  activate! builds one. Nothing throws into GTK; a failure is reported."
   [app opts files n]
   (try
     (let [paths (open-paths-from-gfiles files n)]
       (when (nil? @current-open-paths) (activate! app opts))
       (when-let [f @current-open-paths] (f paths)))
-    (catch :default _ nil)))
+    (catch :default e
+      (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
+           (catch :default _ nil)))))
 
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
@@ -2834,6 +2855,7 @@
       ;; P5a: Open With and Dock drops. A directory re-roots the tree like an
       ;; Open Folder result; a file opens in a tab, and one that can't be read
       ;; goes to the status line while the rest still open.
+      (reset! current-report (fn [text] (set-status! status-label text)))
       (reset! current-open-paths
               (fn [paths]
                 (doseq [p paths]
