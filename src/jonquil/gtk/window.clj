@@ -3165,6 +3165,11 @@
   with the files; otherwise runs with no argv, so \"activate\" fires. The C
   strings and the array are freed after the loop ends."
   [app argv]
+  ;; On Linux X11 GTK writes WM_CLASS from the prgname, and g_application_run
+  ;; would set it from argv[0] (or the process name). The launcher's
+  ;; StartupWMClass is the app id, so set it first. macOS keeps its value.
+  (when (= "Linux" (System/getProperty "os.name"))
+    (g/g-set-prgname "net.b12n.jonquil"))
   (if (> (count argv) 1)
     (let [n (count argv)
           arr (ffi/alloc (* 8 (inc n)))

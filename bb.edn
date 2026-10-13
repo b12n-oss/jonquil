@@ -118,7 +118,7 @@
             listening? (fn [p]
                          (try (with-open [_ (java.net.Socket. "127.0.0.1" (int p))] true)
                               (catch Exception _ false)))]
-        ;; Both probes: a 127.0.0.1 bind succeeds on macOS even while another
+        ;; All three probes: a 127.0.0.1 bind succeeds on macOS even while another
         ;; process holds *:p (measured: Docker on *:3001), and then localhost
         ;; traffic silently reaches whichever listener the OS prefers.
         (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1") (not (listening? p))) p))
