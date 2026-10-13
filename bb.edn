@@ -166,12 +166,13 @@
        (a name, a published port). Exits with the container's status, or
        returns it when return-status? is true."
       [{:keys [arch command out docker-args return-status?]}]
-      (let [copy (str "set -eo pipefail; mkdir -p ~/jonquil; "
-                      ;; tar exits 1 with \"file changed as we read it\" for `.` on the
-                      ;; read-only mount (measured, every run); 1 is a warning, 2 is fatal.
-                      "{ tar -C /src --exclude=./jonquil --exclude=./jonquil.build "
-                      "--exclude=./Jonquil.app --exclude=./_site --exclude=./target "
-                      "-cf - . || [ $? -le 1 ]; } | tar -C ~/jonquil -xf -; cd ~/jonquil; ")
+      (let [copy (str "set -eo pipefail; mkdir -p ~/jonquil; shopt -s dotglob nullglob; "
+                      ;; cp, not tar: under amd64 emulation GNU tar's stat of some files
+                      ;; on the read-only mount fails with ENOSYS (measured), and cp -a
+                      ;; copies the same tree cleanly. The case skips the Mac's builds.
+                      "for e in /src/*; do case ${e#/src/} in "
+                      "jonquil|jonquil.build|Jonquil.app|_site|target) ;; "
+                      "*) cp -a \"$e\" ~/jonquil/ ;; esac; done; cd ~/jonquil; ")
             argv (concat ["docker" "run" "--rm" "--init" "--platform" (str "linux/" arch)
                           "-v" (str (fs/cwd) ":/src:ro")]
                          (when out ["-v" (str out ":/out")])
