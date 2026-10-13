@@ -184,3 +184,40 @@
       (is (.exists (io/file (:binary p))))
       (is (.exists (io/file (:mime p))))
       (is (= "[Desktop Entry]\nName=Other\n" (slurp (:desktop p)))))))
+
+(deftest install-reports-failed-move-test
+  (let [home (temp-home)
+        p (al/install-paths home)]
+    (io/make-parents (:binary p))
+    (.mkdirs (io/file (:binary p) "sub"))
+    (spit (io/file (:binary p) "sub" "f") "x")
+    (let [r (run-install home {})]
+      (is (= 1 (:status r)))
+      (is (not (str/includes? (:out r) "installed")))
+      (is (str/includes? (:err r) "install failed: move"))
+      (is (not (.exists (io/file (str (:binary p) ".new"))))))))
+
+(deftest install-reports-write-exception-test
+  (let [home (temp-home)
+        p (al/install-paths home)]
+    ;; a plain file where the install dir must be: the binary copy throws
+    (io/make-parents (:dir p))
+    (spit (:dir p) "in the way")
+    (let [r (run-install home {})]
+      (is (= 1 (:status r)))
+      (is (str/includes? (:err r) "app-linux: install failed:"))
+      (is (str/includes? (:err r) (:desktop p)) "names the files already written")
+      (is (not (str/includes? (:out r) "installed"))))))
+
+(deftest uninstall-reports-failed-delete-test
+  (let [home (temp-home)
+        p (al/install-paths home)
+        share (io/file home ".local/share")]
+    (run-install home {})
+    (.setWritable share false)
+    (try
+      (let [r (run-uninstall home {})]
+        (is (= 1 (:status r)))
+        (is (not (str/includes? (:out r) "uninstalled")))
+        (is (str/includes? (:err r) (:dir p))))
+      (finally (.setWritable share true)))))

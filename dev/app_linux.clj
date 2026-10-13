@@ -127,6 +127,16 @@
   (io/make-parents path)
   (content-fn path))
 
+(defn- move!
+  "Renames from onto to, replacing a file. Returns nil, or the error text.
+  Not `mv`: that would move from INTO an existing directory at to."
+  [from to]
+  (try (java.nio.file.Files/move (.toPath (io/file from)) (.toPath (io/file to))
+                                 (into-array java.nio.file.CopyOption
+                                             [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+       nil
+       (catch Exception e (or (.getMessage e) (str e)))))
+
 (defn install!
   "Installs the binary at :source under :home/.local/share. opts: :home,
   :source (the built ./jonquil), :version, and optionally :which (a fn from
@@ -141,22 +151,37 @@
       (not (.isFile (io/file source)))
       (err! (str source " is missing; run `bb app:build` first"))
       :else
-      (let [tmp (str (:binary paths) ".new")]
-        (write-file! (:mime paths) #(spit % (mime-xml)))
-        (write-file! (:icon paths) #(io/copy (io/file "resources/icon/jonquil-256.png") (io/file %)))
-        (write-file! desktop #(spit % (desktop-entry {:binary (:binary paths) :version version})))
-        ;; The binary goes last, through a temp name and a rename, so a
-        ;; running copy is replaced rather than overwritten in place.
-        (write-file! tmp #(io/copy (io/file source) (io/file %)))
-        (.setExecutable (io/file tmp) true)
-        (p/sh "mv" "-f" tmp (:binary paths))
-        (refresh-databases! paths which)
-        (println (str "installed " (:binary paths)))
-        0))))
+      (let [tmp (str (:binary paths) ".new")
+            written (atom [])
+            note! (fn [path] (swap! written conj path))
+            fail (fn [msg]
+                   (java.nio.file.Files/deleteIfExists (.toPath (io/file tmp)))
+                   (err! (str msg (when (seq @written)
+                                    (str "; already written: " (str/join ", " @written)
+                                         " (re-run bb app:install, or run bb app:uninstall)")))))]
+        (try
+          (write-file! (:mime paths) #(spit % (mime-xml)))
+          (note! (:mime paths))
+          (write-file! (:icon paths) #(io/copy (io/file "resources/icon/jonquil-256.png") (io/file %)))
+          (note! (:icon paths))
+          (write-file! desktop #(spit % (desktop-entry {:binary (:binary paths) :version version})))
+          (note! desktop)
+          ;; The binary goes last, through a temp name and a rename, so a
+          ;; running copy is replaced rather than overwritten in place.
+          (write-file! tmp #(io/copy (io/file source) (io/file %)))
+          (if-not (.setExecutable (io/file tmp) true)
+            (fail (str "install failed: chmod +x " tmp " failed"))
+            (if-let [msg (move! tmp (:binary paths))]
+              (fail (str "install failed: move " tmp " to " (:binary paths) ": " msg))
+              (do (refresh-databases! paths which)
+                  (println (str "installed " (:binary paths)))
+                  0)))
+          (catch Exception e
+            (fail (str "install failed: " (.getMessage e)))))))))
 
 (defn uninstall!
   "Removes what install! wrote: the four files, then :dir (the only
-  recursive delete). opts: :home and optionally :which. Returns 0, or 1 on
+  recursive delete; everything inside ~/.local/share/jonquil goes with it). opts: :home and optionally :which. Returns 0, or 1 on
   a launcher that isn't ours (nothing is deleted then). With nothing
   installed it prints `nothing to uninstall` and returns 0."
   [{:keys [home which] :or {which on-path?}}]
@@ -170,7 +195,9 @@
       :else
       (do (doseq [f files]
             (java.nio.file.Files/deleteIfExists (.toPath (io/file f))))
-          (p/sh "rm" "-rf" (:dir paths))
-          (refresh-databases! paths which)
-          (println "uninstalled")
-          0))))
+          (let [r (p/sh "rm" "-rf" (:dir paths))]
+            (if-not (zero? (:exit r))
+              (err! (str "could not remove " (:dir paths) ": " (str/trim (str (:err r)))))
+              (do (refresh-databases! paths which)
+                  (println "uninstalled")
+                  0)))))))
