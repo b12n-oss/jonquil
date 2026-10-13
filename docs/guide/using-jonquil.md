@@ -329,8 +329,9 @@ drop or the command line, roots the file tree there and shows it, even if
 you'd hidden it. When a command line mixes a folder and files, the first
 argument sets the window's project the way a single argument always has, and
 the others open as tabs. A file manager on Linux doesn't offer Jonquil for
-folders, because the MIME package has no `inode/directory` entry;
-`gtk-launch net.b12n.jonquil <folder>` does the job.
+folders, because the MIME package has no `inode/directory` entry. Pass the
+folder on the command line instead, to `~/.local/share/jonquil/jonquil` or
+to `gtk4-launch net.b12n.jonquil <folder>` (from `libgtk-4-bin`).
 
 A file Jonquil can't honour says so on the status line: a path it can't read
 is named with the reason, and a file that isn't local (a URI) is reported as

@@ -166,9 +166,11 @@ each that isn't.
 Running it again replaces the earlier install. The launcher carries an
 `X-Jonquil-Install=1` line, and `app:install` and `app:uninstall` refuse to
 touch a launcher at that path without it, since that file isn't theirs. To
-start Jonquil from a terminal after installing, use
-`gtk-launch net.b12n.jonquil [file or folder...]`, or run
-`~/.local/share/jonquil/jonquil` directly.
+start Jonquil from a terminal after installing, run
+`~/.local/share/jonquil/jonquil [file or folder...]`, or go through the
+launcher with `gtk4-launch net.b12n.jonquil [file or folder...]`. That
+command comes in Ubuntu's `libgtk-4-bin` package, which a GTK 4 install
+doesn't pull in; GTK 3's `gtk-launch` (in `libgtk-3-bin`) works the same.
 
 ### Where tools come from in a launcher start
 

@@ -303,9 +303,12 @@ as `http://localhost:6080/vnc.html?autoconnect=true&resize=scale`. The
 port is the first free one from 6080 (found by trying to bind it);
 `--port P` asks for one and is refused when busy. Open the URL, and pcmanfm
 shows a `~/smoke` folder holding `hello.clj`, `hello.jank` and an
-`nrepl-project`. Check that Jonquil is in Open With with its icon, that the
-files open in it, and that `gtk-launch net.b12n.jonquil` starts it. Ctrl-C
-stops the container and frees the port.
+`nrepl-project`. Check that right-clicking a file offers Jonquil, that the
+file opens in it, and that selecting `hello.clj` and `hello.jank` together
+opens one window with both as tabs. The session has no terminal of its own,
+so run anything else from the Mac with `docker exec jonquil-vnc-<P> ...`
+(add `-e DISPLAY=:1` for anything that opens a window). Ctrl-C stops the
+container and frees the port.
 
 ## Quality: lint, format, and the git hooks
 
