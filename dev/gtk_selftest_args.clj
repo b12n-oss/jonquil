@@ -62,7 +62,7 @@
   "Ruling C's third regression: showing the tree for a folder launch is the
   starting state, not a person's choice, so the settings file holds no
   :file-tree."
-  [ui]
+  [_ui]
   (go-row :args-folder-launch-saves-no-tree-visibility support/check
     (on-gtk (let [f (io/file @settings-path*)
                   text (when (.exists f) (slurp f))]
@@ -73,7 +73,7 @@
 (defn- row-args-prgname
   "Linux: the prgname is the launcher's StartupWMClass, so X11's WM_CLASS
   pairs the window with its entry. macOS: left as GApplication set it."
-  [ui]
+  [_ui]
   (go-row :args-prgname support/check
     (on-gtk (let [p (g/g-get-prgname)
                   got (when-not (ffi/null? p) (ffi/ptr->string p))
