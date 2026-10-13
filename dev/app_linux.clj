@@ -20,7 +20,7 @@
   "Every path the install writes, for the given home directory."
   [home]
   (let [share (str home "/.local/share")]
-    {:dir share
+    {:dir (str share "/jonquil")
      :binary (str share "/jonquil/jonquil")
      :desktop (str share "/applications/" app-id ".desktop")
      :icon (str share "/icons/hicolor/256x256/apps/" app-id ".png")

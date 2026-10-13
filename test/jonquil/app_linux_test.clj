@@ -12,7 +12,7 @@
 (def ^:private bin "/home/dev/.local/share/jonquil/jonquil")
 
 (deftest install-paths-test
-  (is (= {:dir "/home/dev/.local/share"
+  (is (= {:dir "/home/dev/.local/share/jonquil"
           :binary "/home/dev/.local/share/jonquil/jonquil"
           :desktop "/home/dev/.local/share/applications/net.b12n.jonquil.desktop"
           :icon "/home/dev/.local/share/icons/hicolor/256x256/apps/net.b12n.jonquil.png"
