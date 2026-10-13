@@ -208,7 +208,7 @@
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "app:bundle" "rebuild ./jonquil, then make ./Jonquil.app from it (macOS)")
      (row "app:install" "app:bundle, then move to ~/Applications and register it (macOS)")
-     (row "app:icon" "regenerate resources/Jonquil.icns from resources/icon/icon.swift (macOS)")
+     (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
@@ -319,7 +319,7 @@
    :depends [app:bundle]
    :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "install")}
   app:icon
-  {:doc "Regenerate resources/Jonquil.icns: swift draws a 1024px PNG, sips scales it, iconutil packs it (macOS)"
+  {:doc "Regenerate resources/Jonquil.icns: swift draws a 1024px PNG, sips scales it, iconutil packs it; then sips makes resources/icon/jonquil-256.png for the Linux install (macOS)"
    :task (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-icon-"}))
                set-dir (str tmp "/Jonquil.iconset")
                big (str tmp "/icon-1024.png")]
@@ -330,6 +330,7 @@
                (shell "sips" "-z" (str n) (str n) big "--out" (str set-dir "/icon_" n "x" n ".png"))
                (shell "sips" "-z" (str (* 2 n)) (str (* 2 n)) big "--out" (str set-dir "/icon_" n "x" n "@2x.png")))
              (shell "iconutil" "-c" "icns" set-dir "-o" "resources/Jonquil.icns")
+             (shell "sips" "-s" "format" "png" "-z" "256" "256" "resources/Jonquil.icns" "--out" "resources/icon/jonquil-256.png")
              (finally (fs/delete-tree tmp))))}
   smoke:binary
   {:doc "P2.T10: automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
@@ -513,7 +514,7 @@
                          "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-appopen-" "jonquil-selftest-tree-" "jonquil-selftest-args-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-demoshots-jank-" "jonquil-clj-server-" "jonquil-clj-config-"
-                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-"]
+                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-" "jonquil-app-linux-test-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
                              (some (fn [p]

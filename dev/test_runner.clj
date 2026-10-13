@@ -10,6 +10,7 @@
 (def test-namespaces
   ;; Add each new test namespace here as tasks land.
   '[jonquil.app-bundle-test
+    jonquil.app-linux-test
     jonquil.smoke-test
     jonquil.upstream.syntax-test
     jonquil.theme-test
