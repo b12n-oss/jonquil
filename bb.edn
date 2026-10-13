@@ -119,6 +119,22 @@
         (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1")) p))
               (range base (+ base 21)))))
 
+    (defn linux-arch
+      "The --arch value for the linux: tasks (arm64 or amd64); the host's own
+       architecture when absent. Anything else exits with a message."
+      [args]
+      (let [asked (second (drop-while (fn [a] (not= a "--arch")) args))
+            host  (System/getProperty "os.arch")
+            arch  (or asked
+                      (case host
+                        ("aarch64" "arm64") "arm64"
+                        ("x86_64" "amd64") "amd64"
+                        host))]
+        (if (contains? #{"arm64" "amd64"} arch)
+          arch
+          (do (println (str "Unsupported architecture: " arch " (use --arch arm64 or --arch amd64)"))
+              (System/exit 1)))))
+
     (defn site-task
       "Runs one of the engine's tasks against this project."
       [task & args]
@@ -177,6 +193,9 @@
      (row "site:build" "build the documentation site into _site/")
      (row "site:serve [port]" "build, then serve it (first free port from 3000)")
      (row "site:clean" "delete the _site/ build output")
+     (hdr "Linux (local Docker, no CI)")
+     (row "linux:image [--arch A]" "build the jonquil-linux:<arm64|amd64> image (host arch by default)")
+     (row "linux:clean" "remove both jonquil-linux images and target/linux")
      (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
      (hdr "Upstream")
      (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
@@ -391,6 +410,18 @@
   {:doc "Delete the _site/ build output"
    :task (site-task "clean")}
 
+  linux:image
+  {:doc "Build the local Linux check image jonquil-linux:<arch> (--arch arm64|amd64; the host's by default)"
+   :task (let [arch (linux-arch *command-line-args*)]
+           (shell "docker" "build" "--platform" (str "linux/" arch)
+                  "-t" (str "jonquil-linux:" arch) "dev/linux"))}
+  linux:clean
+  {:doc "Remove the jonquil-linux images (both arches) and delete target/linux"
+   :task (do (doseq [arch ["arm64" "amd64"]]
+               (shell {:continue true :out :string :err :string}
+                      "docker" "image" "rm" "-f" (str "jonquil-linux:" arch)))
+             (fs/delete-tree "target/linux")
+             (println "removed jonquil-linux images and target/linux"))}
   clean:tmp
   {:doc "Delete the temp files and dirs earlier test and self-test runs left under java.io.tmpdir (--dry-run lists them)"
    ;; Only names this repo's tests and harnesses make: a known prefix
