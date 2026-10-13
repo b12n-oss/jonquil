@@ -207,7 +207,8 @@
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "app:bundle" "rebuild ./jonquil, then make ./Jonquil.app from it (macOS)")
-     (row "app:install" "app:bundle, then move to ~/Applications and register it (macOS)")
+     (row "app:install" "install Jonquil: ~/Applications on macOS, ~/.local/share on Linux (macOS and Linux)")
+     (row "app:uninstall" "remove what app:install put in place (macOS and Linux)")
      (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
@@ -315,9 +316,14 @@
    :depends [app:build]
    :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "bundle")}
   app:install
-  {:doc "app:bundle, then move Jonquil.app to ~/Applications and register it with LaunchServices (macOS)"
-   :depends [app:bundle]
-   :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "install")}
+  {:doc "Install Jonquil: on macOS app:bundle, then move Jonquil.app to ~/Applications and register it; on Linux app:build, then copy the binary, launcher, icon and MIME types under ~/.local/share (macOS and Linux)"
+   :task (do (if (str/includes? (System/getProperty "os.name") "Linux")
+               (run 'app:build)
+               (run 'app:bundle))
+             (shell "jolt" "-M:bundle" "-m" "app-bundle" "install"))}
+  app:uninstall
+  {:doc "Remove what app:install put in place: on Linux the files under ~/.local/share; on macOS it says to drag the app to the Trash (macOS and Linux)"
+   :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "uninstall")}
   app:icon
   {:doc "Regenerate resources/Jonquil.icns: swift draws a 1024px PNG, sips scales it, iconutil packs it; then sips makes resources/icon/jonquil-256.png for the Linux install (macOS)"
    :task (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-icon-"}))

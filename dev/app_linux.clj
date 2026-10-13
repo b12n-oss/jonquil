@@ -4,7 +4,9 @@
   install itself (copying files, running the database updaters) lives in
   install!/uninstall!, which app-bundle/-main dispatches to on Linux.
   Everything lands under ~/.local/share and no default app is ever set."
-  (:require [clojure.string :as str]))
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [jolt.process :as p]))
 
 (def app-id "net.b12n.jonquil")
 
@@ -86,3 +88,89 @@
   [text]
   (or (nil? text)
       (boolean (some #{marker} (str/split-lines text)))))
+
+(defn- slurp-or-nil [path]
+  (let [f (io/file path)]
+    (when (.isFile f) (slurp f))))
+
+(defn- on-path?
+  "True when tool is an executable on PATH."
+  [tool]
+  (zero? (:exit (p/sh "sh" "-c" (str "command -v " tool)))))
+
+(defn- refresh-databases!
+  "Runs update-mime-database and update-desktop-database for paths, each
+  only when `which` (default: PATH lookup) finds it; otherwise prints a note.
+  A tool that fails prints a note too and does not fail the install."
+  [paths which]
+  (doseq [[tool dir] [["update-mime-database" (:mime-db paths)]
+                      ["update-desktop-database" (:apps-db paths)]]]
+    (if (which tool)
+      (let [r (p/sh tool dir)]
+        (when-not (zero? (:exit r))
+          (println (str "note: " tool " failed, skipped: " (str/trim (str (:err r)))))))
+      (println (str "note: " tool " not found, skipped")))))
+
+(defn- err!
+  "Prints msg to stderr, returns 1."
+  [msg]
+  (.write *err* (str "app-linux: " msg "\n"))
+  (.flush *err*)
+  1)
+
+(defn- refuse
+  "Prints the refusal for a launcher that isn't ours to stderr; returns 1."
+  [desktop verb]
+  (err! (str desktop " is not a Jonquil launcher (no X-Jonquil-Install=1); refusing to " verb " it")))
+
+(defn- write-file! [path content-fn]
+  (io/make-parents path)
+  (content-fn path))
+
+(defn install!
+  "Installs the binary at :source under :home/.local/share. opts: :home,
+  :source (the built ./jonquil), :version, and optionally :which (a fn from
+  tool name to boolean, default a PATH lookup). Returns the exit status: 0,
+  or 1 when the launcher at the target path is somebody else's (nothing is
+  written then)."
+  [{:keys [home source version which] :or {which on-path?}}]
+  (let [paths (install-paths home)
+        desktop (:desktop paths)]
+    (cond
+      (not (replaceable? (slurp-or-nil desktop))) (refuse desktop "replace")
+      (not (.isFile (io/file source)))
+      (err! (str source " is missing; run `bb app:build` first"))
+      :else
+      (let [tmp (str (:binary paths) ".new")]
+        (write-file! (:mime paths) #(spit % (mime-xml)))
+        (write-file! (:icon paths) #(io/copy (io/file "resources/icon/jonquil-256.png") (io/file %)))
+        (write-file! desktop #(spit % (desktop-entry {:binary (:binary paths) :version version})))
+        ;; The binary goes last, through a temp name and a rename, so a
+        ;; running copy is replaced rather than overwritten in place.
+        (write-file! tmp #(io/copy (io/file source) (io/file %)))
+        (.setExecutable (io/file tmp) true)
+        (p/sh "mv" "-f" tmp (:binary paths))
+        (refresh-databases! paths which)
+        (println (str "installed " (:binary paths)))
+        0))))
+
+(defn uninstall!
+  "Removes what install! wrote: the four files, then :dir (the only
+  recursive delete). opts: :home and optionally :which. Returns 0, or 1 on
+  a launcher that isn't ours (nothing is deleted then). With nothing
+  installed it prints `nothing to uninstall` and returns 0."
+  [{:keys [home which] :or {which on-path?}}]
+  (let [paths (install-paths home)
+        files (map paths [:binary :desktop :icon :mime])
+        present? (fn [path] (.exists (io/file path)))]
+    (cond
+      (not (replaceable? (slurp-or-nil (:desktop paths)))) (refuse (:desktop paths) "remove")
+      (not-any? present? (cons (:dir paths) files))
+      (do (println "nothing to uninstall") 0)
+      :else
+      (do (doseq [f files]
+            (java.nio.file.Files/deleteIfExists (.toPath (io/file f))))
+          (p/sh "rm" "-rf" (:dir paths))
+          (refresh-databases! paths which)
+          (println "uninstalled")
+          0))))
