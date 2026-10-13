@@ -561,18 +561,28 @@
 
 (defn row-inspect-cols-match
   "Reopens the panel (closed by row-inspect-escape); the :cols the last
-  :start sent (:inspector-last-args*) equals the pane's own live measure."
+  :start sent (:inspector-last-args*) equals the pane's own live measure.
+  It measures only once GTK has laid the reopened panel out (its root's
+  own width is positive again: hiding a widget zeroes its allocation,
+  though not its children's), because before that the rows view still
+  reports the width it had before the close, and a measure taken then
+  agrees with a stale :start by accident."
   [ui]
   (go-row :row-inspect-cols-match support/check
     (let [pane (:inspector ui)]
       (on-gtk ((:inspect-last!* ui)))
-      (let [opened? (await-until 2000 20 #(pos? (g/gtk-widget-get-visible (:root pane))))]
+      (let [opened? (await-until 2000 20 #(pos? (g/gtk-widget-get-visible (:root pane))))
+            laid-out? (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:root pane))))
+            snapshot (fn [] {:sent-cols (:cols ((:inspector-last-args* ui)))
+                             :measured-cols (:cols (inspector-pane/measure pane))})
+            matched? (await-until 2000 20 #(let [{:keys [sent-cols measured-cols]} (snapshot)]
+                                             (= sent-cols measured-cols)))]
         (on-gtk
-         (let [sent-cols (:cols ((:inspector-last-args* ui)))
-               measured-cols (:cols (inspector-pane/measure pane))]
+         (let [{:keys [sent-cols measured-cols]} (snapshot)]
            (support/check :row-inspect-cols-match
-                          (and opened? (= sent-cols measured-cols))
-                          {:sent-cols sent-cols :measured-cols measured-cols})))))))
+                          (and opened? laid-out? matched?)
+                          {:sent-cols sent-cols :measured-cols measured-cols
+                           :opened opened? :laid-out laid-out?})))))))
 
 (defn row-inspect-def-prompt-escape-safe
   "I5: the def prompt joins the window's own close-popovers registry, so
