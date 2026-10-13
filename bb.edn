@@ -189,7 +189,13 @@
       [{:keys [arch port]}]
       (let [cname   (str "jonquil-vnc-" port)
             url     (str "http://localhost:" port "/vnc.html")
-            rm!     (fn [] (shell {:continue true :out :null :err :null} "docker" "rm" "-f" cname))
+            ;; ProcessBuilder, not shell: shell registers a shutdown hook of its own,
+            ;; which throws "Shutdown in progress" inside this one (measured).
+            rm!     (fn [] (-> (ProcessBuilder. ["docker" "rm" "-f" cname])
+                               (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
+                               (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD)
+                               (.start)
+                               (.waitFor)))
             ;; Twice, a second apart: an interrupt right after start can reach the
             ;; docker client before the daemon has created the container (measured).
             cleanup (fn [] (rm!) (Thread/sleep 1000) (rm!))]
