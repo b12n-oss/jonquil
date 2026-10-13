@@ -291,7 +291,7 @@
                          :h-out h-out :out out? :tag0 tag0?}))))))
 
 (defn row-inspect-page-edge
-  "A REPL entry (vec (range 40)), open, then Down past the last visible
+  "A REPL entry (vec (range n)), open, then Down past the last visible
   row: the footer's start moves on and line 0 is selected (jonquil.inspect/
   key-step's own :page {:delta 1} request). Ruling 9, folded into this same
   row (context bullet: \"add a row check in row-inspect-in-out or a
@@ -301,18 +301,23 @@
   back to back, no wait between them, must still land on page 1 (start
   advances by exactly one page's worth, not two): a dropped-nothing bug
   would send a second :page request that the session processes for real,
-  advancing the shared view atom's own page counter twice."
+  advancing the shared view atom's own page counter twice.
+
+  The first value is sized off the pane's measured rows too (twice as
+  many items): a fixed 40 fitted on one page whenever the pane had 40 or
+  more rows, and then Down had no edge to cross (seen on macOS with 55)."
   [ui]
   (go-row :row-inspect-page-edge support/check
     (let [pane (:inspector ui)
-          [submitted1? _] (submit-repl! ui "(vec (range 40))" 3000)]
+          n-items (* 2 (on-gtk (:rows (inspector-pane/measure pane))))
+          [submitted1? _] (submit-repl! ui (str "(vec (range " n-items "))") 3000)]
       (on-gtk ((:inspect-last!* ui)))
       ;; The panel is already visible from an earlier row, so a bare
       ;; visibility check can't tell "still showing the last row's
       ;; value" from "this fresh :start reply landed" -- wait for the
       ;; info line to actually name THIS value instead.
       (let [opened1? (await-until 2000 20
-                                  #(str/includes? (g/label-text (:info pane)) "40 items"))
+                                  #(str/includes? (g/label-text (:info pane)) (str n-items " items")))
             n1 (on-gtk (count (str/split-lines (g/buffer-text (:buf pane)))))
             start0 (on-gtk (footer-start pane))]
         (on-gtk (dotimes [_ (dec n1)] (inspector-pane/dispatch-key! pane KEY-DOWN)))
