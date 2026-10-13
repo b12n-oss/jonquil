@@ -110,13 +110,18 @@
        probe: a port taken in between fails loudly in the engine, not
        silently. An explicit port is never scanned (see site:serve)."
       [base]
-      (let [binds? (fn [p addr]
-                     (try (with-open [_ (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName addr))] true)
-                          (catch Exception _ false)))]
+      (let [binds?     (fn [p addr]
+                         (try (with-open [_ (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName addr))] true)
+                              (catch Exception _ false)))
+            ;; Java binds dual-stack on macOS, so the binds above miss an IPv4
+            ;; wildcard listener (measured with a python one); connecting sees it.
+            listening? (fn [p]
+                         (try (with-open [_ (java.net.Socket. "127.0.0.1" (int p))] true)
+                              (catch Exception _ false)))]
         ;; Both probes: a 127.0.0.1 bind succeeds on macOS even while another
         ;; process holds *:p (measured: Docker on *:3001), and then localhost
         ;; traffic silently reaches whichever listener the OS prefers.
-        (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1")) p))
+        (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1") (not (listening? p))) p))
               (range base (+ base 21)))))
 
     (defn linux-arch
@@ -158,8 +163,9 @@
       "Runs command (a bash string) in the jonquil-linux:<arch> container, on a
        copy of the read-only checkout at ~/jonquil. out, when given, is a host
        dir mounted read-write at /out. docker-args are extra `docker run` flags
-       (a name, a published port). Exits with the container's status."
-      [{:keys [arch command out docker-args]}]
+       (a name, a published port). Exits with the container's status, or
+       returns it when return-status? is true."
+      [{:keys [arch command out docker-args return-status?]}]
       (let [copy (str "set -eo pipefail; mkdir -p ~/jonquil; "
                       ;; tar exits 1 with \"file changed as we read it\" for `.` on the
                       ;; read-only mount (measured, every run); 1 is a warning, 2 is fatal.
@@ -172,7 +178,7 @@
                          docker-args
                          [(str "jonquil-linux:" arch) "bash" "-lc" (str copy command)])
             res  (apply shell {:continue true} argv)]
-        (System/exit (:exit res))))
+        (if return-status? (:exit res) (System/exit (:exit res)))))
 
     (defn linux-vnc
       "Runs the desktop session container (dev/linux/vnc-session.sh) with the
@@ -182,21 +188,26 @@
       [{:keys [arch port]}]
       (let [cname   (str "jonquil-vnc-" port)
             url     (str "http://localhost:" port "/vnc.html")
-            cleanup (fn [] (shell {:continue true :out :null :err :null} "docker" "rm" "-f" cname))]
+            rm!     (fn [] (shell {:continue true :out :null :err :null} "docker" "rm" "-f" cname))
+            ;; Twice, a second apart: an interrupt right after start can reach the
+            ;; docker client before the daemon has created the container (measured).
+            cleanup (fn [] (rm!) (Thread/sleep 1000) (rm!))]
         (.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (cleanup))))
         (future
           (loop [tries 0]
             (let [code (:out (shell {:continue true :out :string :err :null}
                                     "curl" "-s" "-o" "/dev/null" "-w" "%{http_code}" url))]
               (cond
-                (= code "200") (println (str "Open " url " (Ctrl-C to stop)"))
-                (< tries 600)  (do (Thread/sleep 1000) (recur (inc tries)))))))
+                (= code "200") (println (str "Open " url "?autoconnect=true&resize=scale (Ctrl-C to stop)"))
+                (< tries 600)  (do (Thread/sleep 1000) (recur (inc tries)))
+                :else          (println (str "The desktop did not answer on " url " within 10 minutes."))))))
         (println (str "Starting the Linux desktop on port " port " (the first start builds Jonquil, about a minute)..."))
-        (try
-          (linux-docker {:arch arch
-                         :docker-args ["--name" cname "-p" (str "127.0.0.1:" port ":6080")]
-                         :command "dev/linux/vnc-session.sh"})
-          (finally (cleanup)))))
+        (let [status (try
+                       (linux-docker {:arch arch :return-status? true
+                                      :docker-args ["--name" cname "-p" (str "127.0.0.1:" port ":6080")]
+                                      :command "dev/linux/vnc-session.sh"})
+                       (finally (cleanup)))]
+          (System/exit status))))
 
     (defn site-task
       "Runs one of the engine's tasks against this project."
@@ -532,12 +543,7 @@
                        (nil? asked) (free-port 6080)
                        (re-matches (re-pattern "[0-9]+") asked)
                        (let [p (parse-long asked)]
-                         ;; free-port's binds miss an IPv4 wildcard listener (Java binds
-                         ;; dual-stack on macOS, measured with a python listener), so an
-                         ;; explicit port is also probed by connecting to it.
-                         (if (and (= p (free-port p))
-                                  (not (try (with-open [_ (java.net.Socket. "127.0.0.1" (int p))] true)
-                                            (catch Exception _ false))))
+                         (if (= p (free-port p))
                            p
                            (do (println (str "Port " p " is busy; pick another or omit --port"))
                                (System/exit 1))))

@@ -26,6 +26,8 @@ bb app:install
 openbox &
 wait_for openbox xprop -root _NET_SUPPORTING_WM_CHECK
 pcmanfm --desktop &
+# The folder window is handed to the desktop instance, so wait for that one.
+wait_for "the pcmanfm desktop" sh -c 'xwininfo -root -tree | grep -q "1600x1000.*pcmanfm\|pcmanfm.*1600x1000"'
 
 # Smoke files for the hand check.
 mkdir -p ~/smoke/nrepl-project
