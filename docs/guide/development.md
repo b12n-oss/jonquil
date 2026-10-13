@@ -11,12 +11,15 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 49 namespaces in under half a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (413 tests, 2106 assertions
-today) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (431 tests, 2193 assertions
+on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
-still no child process and nothing outside the repo.
+still no child process and nothing outside the repo. On Linux (arm64) the
+same suite runs 431 tests and 2169 assertions: the `desktop-file-validate`
+and `plutil` asserts are gated by OS, so the two systems differ by 24
+assertions.
 
 `bb test:nrepl` runs a second, separate suite (28 tests, 99 assertions,
 about 32 s): every test in it spawns a real Jolt child over
@@ -61,21 +64,20 @@ isolation, then the real window's own panel: opening, in/out, paging
 across a page edge, table/meta toggles, def, Run Form, and Escape), and
 `source_pane` (the source panel widget in isolation). The
 third (`dev/gtk_selftest_nrepl.clj`,
-15 rows, plus two checks after the window closes) opens against a throwaway project whose `.jonquil.edn` asks for
+16 rows) opens against a throwaway project whose `.jonquil.edn` asks for
 `{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
 cover starting, running, Stop, help, and closing over that live
 connection; it needs the jolt-lang/nrepl checkout the same way
 `bb test:nrepl` does, and records a single failing row rather than
 opening anything if that checkout isn't there. The fourth
-(`dev/gtk_selftest_cljd.clj`, 14 rows, plus one check after the window closes) opens against a throwaway
+(`dev/gtk_selftest_cljd.clj`, 15 rows) opens against a throwaway
 ClojureDart app directory whose `NREPL.lock` names a fake fork server
 running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no
 fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, Stop's detach, and the inspector's unavailable sentence, over
 that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 28 rows, plus two checks after the window
-closes) opens against a throwaway JVM Clojure project whose
+(`dev/gtk_selftest_clj.clj`, 29 rows) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
 (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its
@@ -89,7 +91,11 @@ the server a `close` op. Its source rows open definitions from a fixture
 jar and from files inside and outside the project, follow and go back,
 open a project file in the window, and share the slot with the inspector.
 
-The seventh group (`dev/gtk_selftest_jank.clj`) opens a window on a
+The sixth group (`dev/gtk_selftest_tree.clj`, 3 rows) launches on a
+directory: the tree is rooted there and showing, the window runs that
+directory's project, and the one tab is Untitled.
+
+The seventh group (`dev/gtk_selftest_jank.clj`, 13 rows) opens a window on a
 throwaway `.jank` project. `bb gtk:selftest` sets `JONQUIL_JANK` to
 `dev/fake-jank` for it, a small script that ignores its arguments and
 serves a fake jank nREPL (`dev/fake_jank_nrepl.clj`) in its working
@@ -99,11 +105,14 @@ directory, so rows can check the pid and the directory on disk, and nothing
 needs a jank install. To run the group alone, set `JONQUIL_JANK` to the
 absolute path of `dev/fake-jank` and run `jolt -M:selftest-jank`.
 
-The eighth group (`dev/gtk_selftest_args.clj`, 3 rows) launches the way a
-terminal does, with `jonquil.main/gtk-argv` turning two files and a folder
+The eighth group (`dev/gtk_selftest_args.clj`, 5 rows) launches the way a
+terminal does, with `jonquil.main/gtk-argv` turning a folder and two files
 into absolute paths for `g_application_run`. GApplication then emits `open`
-(and not `activate`), and the rows check the two files are the only tabs,
-the folder roots the tree, and the last file is active.
+(and not `activate`), and the rows check that the tree is rooted at the folder
+argument, that a folder launch saves no tree visibility, that the two files
+open as tabs, that the active tab is the last file, and that the program name
+is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). A full run reports
+42, 242, 16, 15, 29, 3, 13 and 5 rows passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
@@ -242,10 +251,61 @@ macOS checks, so the task only verifies it's there.
 
 The unit suite covers this without touching your Applications folder:
 `jonquil.app-bundle-test` (the `Info.plist` text and the replace-only-Jonquil
-rule), `jonquil.tool-path-test` (the pure `PATH` decisions) and
-`jonquil.login-path-test` (the lookup against fake shells, covering success,
-timeout, failure and no `PATH`). The `app_open` rows of `bb gtk:selftest`
-cover the open handler, as listed above.
+rule), `jonquil.tool-path-test` (the pure `PATH` decisions, including the
+passwd lookup by uid) and `jonquil.login-path-test` (the lookup against fake
+shells, covering success, timeout, failure and no `PATH`). The `app_open` rows
+of `bb gtk:selftest` cover the open handler, as listed above, and the
+`args` group covers the command line. `jonquil.main-test` pins `gtk-argv`,
+including a file named like an option, and `jonquil.gtk.editor-test` pins that
+the macOS keycode fallback for the Alt chords is macOS-only.
+
+## Linux checks in Docker
+
+Every Linux check runs in a local Docker container, so a Mac can verify the
+Linux build without a Linux machine. There is no CI for it: the workflows in
+`.github/` stay manual. Docker is the only requirement beyond the usual
+tools, and the numbers below come from Docker Desktop on an Apple Silicon Mac.
+
+| Task | What it does | Measured |
+|---|---|---|
+| `bb linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.21, babashka) | arm64 11 min 30 s, 1.76 GB; amd64 6 min 36 s, 1.75 GB |
+| `bb linux:test [ns...]` | `bb test` on a copy of the checkout | arm64 47 s; amd64 64 s |
+| `bb linux:selftest` | `bb gtk:selftest` under Xvfb | arm64 70 to 86 s; amd64 106 to 110 s |
+| `bb linux:build` | `bb app:build`; the binary lands in `target/linux/<arch>/` | arm64 about 23 s; amd64 46 s |
+| `bb linux:run -- cmd...` | any command in the copied tree | |
+| `bb linux:vnc` | a desktop in the browser for the hand check | |
+| `bb linux:clean` | removes both images and `target/linux` | |
+
+The image task takes `--arch arm64|amd64` (the host's architecture by
+default), as do the others except `linux:clean`. The arm64 image compiles
+Jolt and Chez Scheme from source, because Jolt publishes no Linux arm64
+binary. The amd64 image uses the pinned
+release tarball, but its `apt` step runs under emulation and takes 349 s of
+the 6 minutes 36. Pulling the base image needs Docker Hub, so run the first
+`bb linux:image` from a normal terminal.
+
+The checkout is mounted read-only and copied to `~/jonquil` inside the
+container, so no task writes into your tree except `target/linux/<arch>/`.
+The copy skips `jonquil`, `jonquil.build`, `Jonquil.app`, `_site` and
+`target`, which are the Mac's own build products.
+
+An arch other than the host's runs under emulation, several times slower.
+`bb linux:selftest` sets `JONQUIL_SELFTEST_EMULATED=1` in that case, which
+widens the paint-async row's budget from 150 to 750 ms. The self-tests also
+wait 20 s for a Jolt nREPL child to start, and that wait can run out under
+emulation on a busy host (parked in the ROADMAP).
+
+### The noVNC hand check
+
+`bb linux:vnc` starts a container with Xvfb, openbox, pcmanfm, x11vnc and
+noVNC, installs Jonquil into it with `bb app:install`, and prints a URL such
+as `http://localhost:6080/vnc.html?autoconnect=true&resize=scale`. The
+port is the first free one from 6080 (found by trying to bind it);
+`--port P` asks for one and is refused when busy. Open the URL, and pcmanfm
+shows a `~/smoke` folder holding `hello.clj`, `hello.jank` and an
+`nrepl-project`. Check that Jonquil is in Open With with its icon, that the
+files open in it, and that `gtk-launch net.b12n.jonquil` starts it. Ctrl-C
+stops the container and frees the port.
 
 ## Quality: lint, format, and the git hooks
 

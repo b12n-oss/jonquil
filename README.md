@@ -39,7 +39,7 @@ Ctrl+Space completes as you type, with a documentation preview beside the candid
 ## Requirements
 
 - [Jolt](https://github.com/jolt-lang/jolt) v0.8.15 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, and the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on
-- GTK4 and pango, installed via Homebrew
+- GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
 - A [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) checkout, only for the out-of-process nREPL runtime and `bb test:nrepl`: set `$JONQUIL_JOLT_NREPL` to it, or place it at `~/dev/jolt-lang/nrepl`
 - The `nrepl-poc` ClojureDart fork at `199d173d` or later, only for the ClojureDart dialect: upstream ClojureDart has no nREPL server for Jonquil to attach to
 - Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
@@ -58,7 +58,10 @@ bb app:run ~/dev/my-talk  # opens a window on a project folder, with the file tr
 bb app:build     # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
 bb app:bundle    # builds ./jonquil, then ./Jonquil.app (macOS)
 bb app:install   # the same, then moves it to ~/Applications and registers it (macOS)
+                 # on Linux: builds, then installs under ~/.local/share (launcher, icon, MIME types); bb app:uninstall removes it
 ```
+
+Jonquil also builds and runs on Linux (tested on Ubuntu 26.04 with GTK 4.22): the same `bb app:build`, and `bb app:install` puts a launcher, icon and MIME types under `~/.local/share`. See [Getting started](docs/guide/getting-started.md#linux).
 
 The binary is unsigned on macOS. `bb app:build` itself prints the fix if you need to hand it to someone else:
 
@@ -69,7 +72,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-10-12, 413 tests pass (2106 assertions).
+The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-10-14, 431 tests pass (2193 assertions on macOS; 2169 on Linux).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
@@ -95,6 +98,7 @@ bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt
 bb test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
 bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
 bb test jonquil.edit-test # one namespace (the TDD loop)
+bb linux:test             # bb test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)
 bb gtk:selftest           # real-window self-tests, opens eight windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)

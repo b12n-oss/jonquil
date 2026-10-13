@@ -318,11 +318,19 @@ closing tabs until the one left belongs elsewhere switches it too.
 
 With the macOS app installed (see [Getting started](getting-started.md#the-macos-app)),
 Open With on a Clojure file in Finder, or dropping files on Jonquil's Dock
-icon, opens each file in a tab. The usual tab rules apply: a file that's
+icon, opens each file in a tab. On Linux, a file manager's Open With on an
+installed Jonquil does the same (see [Linux](getting-started.md#linux)), and
+so does giving several files on the command line: `jonquil a.clj b.clj` opens
+two tabs on either system. The usual tab rules apply: a file that's
 already open just selects its tab, an untouched Untitled tab is filled
 first, and a file from another project than the window's gets an editable
-tab that refuses Run (see [Tabs](#tabs)). A folder, from Open With or a
-drop, roots the file tree there and shows it, even if you'd hidden it.
+tab that refuses Run (see [Tabs](#tabs)). A folder, from Open With, a
+drop or the command line, roots the file tree there and shows it, even if
+you'd hidden it. When a command line mixes a folder and files, the first
+argument sets the window's project the way a single argument always has, and
+the others open as tabs. A file manager on Linux doesn't offer Jonquil for
+folders, because the MIME package has no `inode/directory` entry;
+`gtk-launch net.b12n.jonquil <folder>` does the job.
 
 A file Jonquil can't honour says so on the status line: a path it can't read
 is named with the reason, and a file that isn't local (a URI) is reported as

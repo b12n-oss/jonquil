@@ -9,9 +9,10 @@
   threaded Chez Scheme 10.x on `PATH`; if you don't already have one,
   Jolt's own `make` provisions Chez 10.4.1 for you, so there's usually
   nothing to install separately.
-- **GTK4 and pango**, installed via Homebrew: `brew install gtk4`, which
-  pulls in `pango` and `glib` as dependencies. Jonquil loads GTK4 and pango
-  from Homebrew at startup rather than linking against them.
+- **GTK4 and pango**. On macOS, install them with Homebrew: `brew install
+  gtk4`, which pulls in `pango` and `glib` as dependencies. Jonquil loads GTK4
+  and pango at startup rather than linking against them. On Linux they come
+  from your distribution; see [Linux](#linux).
 
 Jonquil was most recently tested on Jolt v0.8.21.
 
@@ -32,11 +33,6 @@ you use it:
   nREPL middleware. See
   [Running Jolt out of process](using-jonquil.md#running-jolt-out-of-process).
 
-Linux is a target Jonquil's native library lookup already knows about
-(`deps.edn` lists `libgtk-4.so.1`, `libpango-1.0.so.0`, and so on), but a
-full Linux build and run hasn't shipped yet; ROADMAP.md tracks it under
-Phase 5.
-
 ## Running
 
 ```bash
@@ -48,7 +44,7 @@ bb app:run ~/dev/project  # opens a folder: the file tree shows it, ready to pic
 ## Building
 
 ```bash
-bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from Homebrew at startup
+bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from the system at startup
 ```
 
 Once it's built, `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` (one tab each) and `./jonquil <folder>` work the same way as
@@ -119,6 +115,81 @@ A launch from a terminal (`./jonquil`, `bb app:run`) is unchanged. It
 inherits your shell's `PATH`, which usually has one of those folders, so no
 lookup runs and no line appears. A terminal `PATH` with none of them triggers
 the lookup too.
+
+## Linux
+
+Jonquil builds and runs on Linux. It was tested on Ubuntu 26.04 with GTK 4.22,
+in Docker on both arm64 and amd64 (see [Development](development.md#linux-checks-in-docker)),
+and checked by hand in a noVNC desktop.
+
+### Requirements
+
+- **GTK 4 and pango from your distribution.** On Ubuntu that is `libgtk-4-1`
+  and `libpango-1.0-0`, plus `adwaita-icon-theme` for the icon theme. Jonquil loads the shared libraries by
+  name at startup (`libgtk-4.so.1`, `libpango-1.0.so.0`, and so on), so
+  nothing is linked at build time.
+- **Jolt** v0.8.15 or later, as above. On x86_64 take the binary from Jolt's
+  release page. Jolt publishes no Linux arm64 binary, so there you build it
+  from source (`make` provisions its own Chez Scheme).
+- A desktop session. The checks so far ran under X11 (Xvfb, openbox and
+  pcmanfm in Docker); a Wayland desktop on real hardware is untested.
+
+### Build and install
+
+```bash
+bb app:build       # writes ./jonquil
+bb app:install     # the same build, then installs it for your user
+bb app:uninstall   # takes it out again
+```
+
+`./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` and
+`./jonquil <folder>` behave as they do on macOS.
+
+`bb app:install` writes four paths, all under `~/.local/share`:
+
+| Path | What it is |
+|---|---|
+| `~/.local/share/jonquil/jonquil` | the binary |
+| `~/.local/share/applications/net.b12n.jonquil.desktop` | the launcher |
+| `~/.local/share/icons/hicolor/256x256/apps/net.b12n.jonquil.png` | the icon |
+| `~/.local/share/mime/packages/net.b12n.jonquil.xml` | the MIME types |
+
+The MIME package defines `text/x-clojure` (`*.clj`, `*.cljc`, `*.cljd`,
+`*.bb`), `application/edn` (`*.edn`) and `text/x-jank` (`*.jank`), each a
+kind of `text/plain`. The launcher lists those three types, so Jonquil
+appears in a file manager's Open With list. Nothing outside `~/.local/share`
+is touched, and Jonquil is never made the default app for anything. Afterwards
+the installer runs `update-mime-database` and `update-desktop-database` on
+your `~/.local/share` folders when they are on `PATH`, and prints a note for
+each that isn't.
+
+Running it again replaces the earlier install. The launcher carries an
+`X-Jonquil-Install=1` line, and `app:install` and `app:uninstall` refuse to
+touch a launcher at that path without it, since that file isn't theirs. To
+start Jonquil from a terminal after installing, use
+`gtk-launch net.b12n.jonquil [file or folder...]`, or run
+`~/.local/share/jonquil/jonquil` directly.
+
+### Where tools come from in a launcher start
+
+A start from the desktop launcher can inherit a short `PATH`, and the
+lookup described in [the macOS section](#where-tools-come-from-in-a-finder-launch)
+runs here too. When `SHELL` is unset, the shell it asks is the one in your
+`/etc/passwd` entry (matched by user id), or `/bin/sh` when there is no entry
+or its shell field is empty. Users whose account lives in LDAP or another
+network source have no line in that file, so they get `/bin/sh`.
+
+One gap remains. The lookup only runs when none of `/opt/homebrew/bin`,
+`/usr/local/bin`, `~/.local/bin` and `~/bin` is on the `PATH`. A desktop
+session that has `/usr/local/bin` on its `PATH` skips the lookup, so a tool
+that lives only in `~/.local/bin` isn't found from a launcher start. Start
+Jonquil from a terminal, or put the tool in `/usr/local/bin`.
+
+### Keys
+
+Ctrl is the command key, so the shortcuts the guide writes as Cmd/Ctrl work
+as Ctrl chords. Ctrl+Q is quick doc, as it is on macOS, and it does not quit.
+Closing the window quits. There is no Linux quit chord yet.
 
 ## Settings
 
