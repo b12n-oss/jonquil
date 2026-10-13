@@ -157,8 +157,9 @@
     (defn linux-docker
       "Runs command (a bash string) in the jonquil-linux:<arch> container, on a
        copy of the read-only checkout at ~/jonquil. out, when given, is a host
-       dir mounted read-write at /out. Exits with the container's status."
-      [{:keys [arch command out]}]
+       dir mounted read-write at /out. docker-args are extra `docker run` flags
+       (a name, a published port). Exits with the container's status."
+      [{:keys [arch command out docker-args]}]
       (let [copy (str "set -eo pipefail; mkdir -p ~/jonquil; "
                       ;; tar exits 1 with \"file changed as we read it\" for `.` on the
                       ;; read-only mount (measured, every run); 1 is a warning, 2 is fatal.
@@ -168,9 +169,34 @@
             argv (concat ["docker" "run" "--rm" "--init" "--platform" (str "linux/" arch)
                           "-v" (str (fs/cwd) ":/src:ro")]
                          (when out ["-v" (str out ":/out")])
+                         docker-args
                          [(str "jonquil-linux:" arch) "bash" "-lc" (str copy command)])
             res  (apply shell {:continue true} argv)]
         (System/exit (:exit res))))
+
+    (defn linux-vnc
+      "Runs the desktop session container (dev/linux/vnc-session.sh) with the
+       noVNC port published on 127.0.0.1:port, and prints the URL once it
+       answers. The container is removed on every exit path: a finally, and a
+       shutdown hook for the signals that skip it."
+      [{:keys [arch port]}]
+      (let [cname   (str "jonquil-vnc-" port)
+            url     (str "http://localhost:" port "/vnc.html")
+            cleanup (fn [] (shell {:continue true :out :null :err :null} "docker" "rm" "-f" cname))]
+        (.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (cleanup))))
+        (future
+          (loop [tries 0]
+            (let [code (:out (shell {:continue true :out :string :err :null}
+                                    "curl" "-s" "-o" "/dev/null" "-w" "%{http_code}" url))]
+              (cond
+                (= code "200") (println (str "Open " url " (Ctrl-C to stop)"))
+                (< tries 600)  (do (Thread/sleep 1000) (recur (inc tries)))))))
+        (println (str "Starting the Linux desktop on port " port " (the first start builds Jonquil, about a minute)..."))
+        (try
+          (linux-docker {:arch arch
+                         :docker-args ["--name" cname "-p" (str "127.0.0.1:" port ":6080")]
+                         :command "dev/linux/vnc-session.sh"})
+          (finally (cleanup)))))
 
     (defn site-task
       "Runs one of the engine's tasks against this project."
@@ -237,6 +263,7 @@
      (row "linux:selftest [--arch A]" "bb gtk:selftest inside the image, under Xvfb")
      (row "linux:build [--arch A]" "bb app:build inside the image; binary lands in target/linux/<A>/")
      (row "linux:run [--arch A] -- cmd" "run any command in the copied tree inside the image")
+     (row "linux:vnc [--arch A] [--port P]" "a Linux desktop with Jonquil installed, in your browser via noVNC")
      (row "linux:clean" "remove both jonquil-linux images and target/linux")
      (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
      (hdr "Upstream")
@@ -493,6 +520,32 @@
              (do (println "usage: bb linux:run [--arch arm64|amd64] -- <command...>")
                  (System/exit 1))
              (linux-docker {:arch arch :command (str/join " " (map sh-quote cmd))})))}
+  linux:vnc
+  {:doc "A Linux desktop in Docker served through noVNC for a hand check: first free port from 6080, or --port P (refused if busy)"
+   :task (let [args  (vec *command-line-args*)
+               arch  (linux-arch args)
+               rest* (linux-strip-arch args)
+               asked (let [flag (drop-while (fn [a] (not (str/starts-with? a "--port"))) rest*)
+                           a    (first flag)]
+                       (when a (if (= a "--port") (second flag) (str/replace-first a "--port=" ""))))
+               port  (cond
+                       (nil? asked) (free-port 6080)
+                       (re-matches (re-pattern "[0-9]+") asked)
+                       (let [p (parse-long asked)]
+                         ;; free-port's binds miss an IPv4 wildcard listener (Java binds
+                         ;; dual-stack on macOS, measured with a python listener), so an
+                         ;; explicit port is also probed by connecting to it.
+                         (if (and (= p (free-port p))
+                                  (not (try (with-open [_ (java.net.Socket. "127.0.0.1" (int p))] true)
+                                            (catch Exception _ false))))
+                           p
+                           (do (println (str "Port " p " is busy; pick another or omit --port"))
+                               (System/exit 1))))
+                       :else (do (println (str "--port needs a number, got: " asked)) (System/exit 1)))]
+           (if port
+             (linux-vnc {:arch arch :port port})
+             (do (println "No free port in 6080-6100; pass one: bb linux:vnc --port P")
+                 (System/exit 1))))}
   linux:clean
   {:doc "Remove the jonquil-linux images (both arches) and delete target/linux"
    :task (do (doseq [arch ["arm64" "amd64"]]
