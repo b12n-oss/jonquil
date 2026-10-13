@@ -139,6 +139,39 @@
           (do (println (str "Unsupported architecture: " arch " (use --arch arm64 or --arch amd64)"))
               (System/exit 1)))))
 
+    (defn linux-strip-arch
+      "args without the --arch flag: both `--arch A` and `--arch=A`, value included."
+      [args]
+      (loop [in (seq args) out []]
+        (cond
+          (empty? in) out
+          (= (first in) "--arch") (recur (nnext in) out)
+          (str/starts-with? (first in) "--arch=") (recur (next in) out)
+          :else (recur (next in) (conj out (first in))))))
+
+    (defn sh-quote
+      "s as one single-quoted word for a POSIX shell."
+      [s]
+      (str "'" (str/replace s "'" "'\\''") "'"))
+
+    (defn linux-docker
+      "Runs command (a bash string) in the jonquil-linux:<arch> container, on a
+       copy of the read-only checkout at ~/jonquil. out, when given, is a host
+       dir mounted read-write at /out. Exits with the container's status."
+      [{:keys [arch command out]}]
+      (let [copy (str "set -eo pipefail; mkdir -p ~/jonquil; "
+                      ;; tar exits 1 with \"file changed as we read it\" for `.` on the
+                      ;; read-only mount (measured, every run); 1 is a warning, 2 is fatal.
+                      "{ tar -C /src --exclude=./jonquil --exclude=./jonquil.build "
+                      "--exclude=./Jonquil.app --exclude=./_site --exclude=./target "
+                      "-cf - . || [ $? -le 1 ]; } | tar -C ~/jonquil -xf -; cd ~/jonquil; ")
+            argv (concat ["docker" "run" "--rm" "--init" "--platform" (str "linux/" arch)
+                          "-v" (str (fs/cwd) ":/src:ro")]
+                         (when out ["-v" (str out ":/out")])
+                         [(str "jonquil-linux:" arch) "bash" "-lc" (str copy command)])
+            res  (apply shell {:continue true} argv)]
+        (System/exit (:exit res))))
+
     (defn site-task
       "Runs one of the engine's tasks against this project."
       [task & args]
@@ -199,6 +232,10 @@
      (row "site:clean" "delete the _site/ build output")
      (hdr "Linux (local Docker, no CI)")
      (row "linux:image [--arch A]" "build the jonquil-linux:<arm64|amd64> image (host arch by default)")
+     (row "linux:test [--arch A] [ns...]" "bb test inside the image, on a copy of the checkout")
+     (row "linux:selftest [--arch A]" "bb gtk:selftest inside the image, under Xvfb")
+     (row "linux:build [--arch A]" "bb app:build inside the image; binary lands in target/linux/<A>/")
+     (row "linux:run [--arch A] -- cmd" "run any command in the copied tree inside the image")
      (row "linux:clean" "remove both jonquil-linux images and target/linux")
      (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
      (hdr "Upstream")
@@ -419,6 +456,36 @@
    :task (let [arch (linux-arch *command-line-args*)]
            (shell "docker" "build" "--platform" (str "linux/" arch)
                   "-t" (str "jonquil-linux:" arch) "dev/linux"))}
+  linux:test
+  {:doc "Run bb test [ns...] in the Linux image on a copy of the checkout (--arch arm64|amd64)"
+   :task (let [arch (linux-arch *command-line-args*)
+               nss  (linux-strip-arch *command-line-args*)]
+           (linux-docker {:arch arch
+                          :command (str/join " " (cons "bb test" (map sh-quote nss)))}))}
+  linux:selftest
+  {:doc "Run bb gtk:selftest under Xvfb in the Linux image (--arch arm64|amd64)"
+   :task (let [arch (linux-arch *command-line-args*)]
+           (linux-docker {:arch arch
+                          :command (str "GDK_BACKEND=x11 xvfb-run -a -s "
+                                        (sh-quote "-screen 0 1600x1200x24")
+                                        " bb gtk:selftest")}))}
+  linux:build
+  {:doc "Build the Linux jonquil binary in the image; it lands in target/linux/<arch>/ (--arch arm64|amd64)"
+   :task (let [arch (linux-arch *command-line-args*)
+               out  (str (fs/absolutize (str "target/linux/" arch)))]
+           (fs/create-dirs out)
+           (linux-docker {:arch arch :out out
+                          :command "bb app:build && cp jonquil /out/jonquil"}))}
+  linux:run
+  {:doc "Run a command in the copied tree in the Linux image: bb linux:run [--arch A] -- <command...>"
+   :task (let [args (vec *command-line-args*)
+               [before after] (split-with (fn [a] (not= a "--")) args)
+               cmd  (rest after)
+               arch (linux-arch (vec before))]
+           (if (empty? cmd)
+             (do (println "usage: bb linux:run [--arch arm64|amd64] -- <command...>")
+                 (System/exit 1))
+             (linux-docker {:arch arch :command (str/join " " (map sh-quote cmd))})))}
   linux:clean
   {:doc "Remove the jonquil-linux images (both arches) and delete target/linux"
    :task (do (doseq [arch ["arm64" "amd64"]]
