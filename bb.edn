@@ -510,9 +510,14 @@
                           :command (str/join " " (cons "bb test" (map sh-quote nss)))}))}
   linux:selftest
   {:doc "Run bb gtk:selftest under Xvfb in the Linux image (--arch arm64|amd64)"
-   :task (let [arch (linux-arch *command-line-args*)]
+   :task (let [arch (linux-arch *command-line-args*)
+               ;; Another arch than the host's runs under emulation, several
+               ;; times slower; rows with a time budget widen it (see
+               ;; gtk-selftest's paint-async row).
+               emulated? (not= arch (linux-arch []))]
            (linux-docker {:arch arch
-                          :command (str "GDK_BACKEND=x11 xvfb-run -a -s "
+                          :command (str (when emulated? "JONQUIL_SELFTEST_EMULATED=1 ")
+                                        "GDK_BACKEND=x11 xvfb-run -a -s "
                                         (sh-quote "-screen 0 1600x1200x24")
                                         " bb gtk:selftest")}))}
   linux:build
