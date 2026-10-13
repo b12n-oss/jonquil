@@ -123,7 +123,11 @@
       "The --arch value for the linux: tasks (arm64 or amd64); the host's own
        architecture when absent. Anything else exits with a message."
       [args]
-      (let [asked (second (drop-while (fn [a] (not= a "--arch")) args))
+      (let [flag  (drop-while (fn [a] (not (str/starts-with? a "--arch"))) args)
+            asked (when-let [a (first flag)]
+                    (if (= a "--arch")
+                      (or (second flag) "(missing value)")
+                      (str/replace-first a "--arch=" "")))
             host  (System/getProperty "os.arch")
             arch  (or asked
                       (case host
@@ -418,8 +422,7 @@
   linux:clean
   {:doc "Remove the jonquil-linux images (both arches) and delete target/linux"
    :task (do (doseq [arch ["arm64" "amd64"]]
-               (shell {:continue true :out :string :err :string}
-                      "docker" "image" "rm" "-f" (str "jonquil-linux:" arch)))
+               (shell "docker" "image" "rm" "-f" (str "jonquil-linux:" arch)))
              (fs/delete-tree "target/linux")
              (println "removed jonquil-linux images and target/linux"))}
   clean:tmp
