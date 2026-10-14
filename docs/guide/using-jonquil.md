@@ -905,7 +905,8 @@ in Jonquil: type at the prompt while the status bar reads "Waiting for
 input", and the line goes straight to the program. One thing doesn't
 carry over: Cmd/Ctrl+D can't send end-of-input here, because an empty
 `stdin` op fails on nREPL 1.7.0 rather than answering EOF, so a waiting
-read just keeps waiting for an actual line.
+read just keeps waiting for an actual line. nREPL 1.8.0 fixed this, but
+Jonquil doesn't send EOF to a newer server yet either.
 
 Completion and quick documentation both ask the server, not just this
 buffer. Ctrl+Space merges the server's own candidates in with the
@@ -1152,7 +1153,8 @@ than being surprises you'd otherwise have to rediscover:
 - Reset on Run isn't available for JVM Clojure either: it's your own JVM,
   so Jonquil doesn't unload namespaces in it.
 - No EOF for JVM Clojure's stdin: an empty stdin fails on nREPL 1.7.0, so
-  a waiting `read-line` just keeps waiting for an actual line.
+  a waiting `read-line` just keeps waiting for an actual line. nREPL 1.8.0
+  fixed it, and Jonquil doesn't use the fix yet.
 - Output JVM Clojure prints from a thread other than the one an
   evaluation ran on, after that evaluation finishes, isn't shown.
 - Stop can't end a JVM Clojure loop that never checks for interruption,
