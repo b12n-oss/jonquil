@@ -10,6 +10,7 @@
 (def test-namespaces
   ;; Add each new test namespace here as tasks land.
   '[jonquil.app-bundle-test
+    jonquil.app-linux-test
     jonquil.smoke-test
     jonquil.upstream.syntax-test
     jonquil.theme-test
@@ -28,6 +29,7 @@
     jonquil.file-tree-test
     jonquil.tool-path-test
     jonquil.login-path-test
+    jonquil.main-test
     jonquil.dialect-test
     jonquil.evaluator-test
     jonquil.nrepl.bencode-test
@@ -45,6 +47,7 @@
     jonquil.nrepl.jvm-test
     jonquil.nrepl.jank-eval-test
     jonquil.gtk.ffi-test
+    jonquil.gtk.editor-test
     jonquil.inspect.view-test
     jonquil.inspect-test])
 

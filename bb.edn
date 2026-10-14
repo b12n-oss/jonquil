@@ -110,14 +110,111 @@
        probe: a port taken in between fails loudly in the engine, not
        silently. An explicit port is never scanned (see site:serve)."
       [base]
-      (let [binds? (fn [p addr]
-                     (try (with-open [_ (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName addr))] true)
-                          (catch Exception _ false)))]
-        ;; Both probes: a 127.0.0.1 bind succeeds on macOS even while another
+      (let [binds?     (fn [p addr]
+                         (try (with-open [_ (java.net.ServerSocket. p 1 (java.net.InetAddress/getByName addr))] true)
+                              (catch Exception _ false)))
+            ;; Java binds dual-stack on macOS, so the binds above miss an IPv4
+            ;; wildcard listener (measured with a python one); connecting sees it.
+            listening? (fn [p]
+                         (try (with-open [_ (java.net.Socket. "127.0.0.1" (int p))] true)
+                              (catch Exception _ false)))]
+        ;; All three probes: a 127.0.0.1 bind succeeds on macOS even while another
         ;; process holds *:p (measured: Docker on *:3001), and then localhost
         ;; traffic silently reaches whichever listener the OS prefers.
-        (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1")) p))
+        (some (fn [p] (when (and (binds? p "0.0.0.0") (binds? p "127.0.0.1") (not (listening? p))) p))
               (range base (+ base 21)))))
+
+    (defn linux-arch
+      "The --arch value for the linux: tasks (arm64 or amd64); the host's own
+       architecture when absent. Anything else exits with a message."
+      [args]
+      (let [flag  (drop-while (fn [a] (not (str/starts-with? a "--arch"))) args)
+            asked (when-let [a (first flag)]
+                    (if (= a "--arch")
+                      (or (second flag) "(missing value)")
+                      (str/replace-first a "--arch=" "")))
+            host  (System/getProperty "os.arch")
+            arch  (or asked
+                      (case host
+                        ("aarch64" "arm64") "arm64"
+                        ("x86_64" "amd64") "amd64"
+                        host))]
+        (if (contains? #{"arm64" "amd64"} arch)
+          arch
+          (do (println (str "Unsupported architecture: " arch " (use --arch arm64 or --arch amd64)"))
+              (System/exit 1)))))
+
+    (defn linux-strip-arch
+      "args without the --arch flag: both `--arch A` and `--arch=A`, value included."
+      [args]
+      (loop [in (seq args) out []]
+        (cond
+          (empty? in) out
+          (= (first in) "--arch") (recur (nnext in) out)
+          (str/starts-with? (first in) "--arch=") (recur (next in) out)
+          :else (recur (next in) (conj out (first in))))))
+
+    (defn sh-quote
+      "s as one single-quoted word for a POSIX shell."
+      [s]
+      (str "'" (str/replace s "'" "'\\''") "'"))
+
+    (defn linux-docker
+      "Runs command (a bash string) in the jonquil-linux:<arch> container, on a
+       copy of the read-only checkout at ~/jonquil. out, when given, is a host
+       dir mounted read-write at /out. docker-args are extra `docker run` flags
+       (a name, a published port). Exits with the container's status, or
+       returns it when return-status? is true."
+      [{:keys [arch command out docker-args return-status?]}]
+      (let [copy (str "set -eo pipefail; mkdir -p ~/jonquil; shopt -s dotglob nullglob; "
+                      ;; cp, not tar: under amd64 emulation GNU tar's stat of some files
+                      ;; on the read-only mount fails with ENOSYS (measured), and cp -a
+                      ;; copies the same tree cleanly. The case skips the Mac's builds.
+                      "for e in /src/*; do case ${e#/src/} in "
+                      "jonquil|jonquil.build|Jonquil.app|_site|target) ;; "
+                      "*) cp -a \"$e\" ~/jonquil/ ;; esac; done; cd ~/jonquil; ")
+            argv (concat ["docker" "run" "--rm" "--init" "--platform" (str "linux/" arch)
+                          "-v" (str (fs/cwd) ":/src:ro")]
+                         (when out ["-v" (str out ":/out")])
+                         docker-args
+                         [(str "jonquil-linux:" arch) "bash" "-lc" (str copy command)])
+            res  (apply shell {:continue true} argv)]
+        (if return-status? (:exit res) (System/exit (:exit res)))))
+
+    (defn linux-vnc
+      "Runs the desktop session container (dev/linux/vnc-session.sh) with the
+       noVNC port published on 127.0.0.1:port, and prints the URL once it
+       answers. The container is removed on every exit path: a finally, and a
+       shutdown hook for the signals that skip it."
+      [{:keys [arch port]}]
+      (let [cname   (str "jonquil-vnc-" port)
+            url     (str "http://localhost:" port "/vnc.html")
+            ;; ProcessBuilder, not shell: shell registers a shutdown hook of its own,
+            ;; which throws "Shutdown in progress" inside this one (measured).
+            rm!     (fn [] (-> (ProcessBuilder. ["docker" "rm" "-f" cname])
+                               (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
+                               (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD)
+                               (.start)
+                               (.waitFor)))
+            ;; Twice, a second apart: an interrupt right after start can reach the
+            ;; docker client before the daemon has created the container (measured).
+            cleanup (fn [] (rm!) (Thread/sleep 1000) (rm!))]
+        (.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (cleanup))))
+        (future
+          (loop [tries 0]
+            (let [code (:out (shell {:continue true :out :string :err :null}
+                                    "curl" "-s" "-o" "/dev/null" "-w" "%{http_code}" url))]
+              (cond
+                (= code "200") (println (str "Open " url "?autoconnect=true&resize=scale (Ctrl-C to stop)"))
+                (< tries 600)  (do (Thread/sleep 1000) (recur (inc tries)))
+                :else          (println (str "The desktop did not answer on " url " within 10 minutes."))))))
+        (println (str "Starting the Linux desktop on port " port " (the first start builds Jonquil, about a minute)..."))
+        (let [status (try
+                       (linux-docker {:arch arch :return-status? true
+                                      :docker-args ["--name" cname "-p" (str "127.0.0.1:" port ":6080")]
+                                      :command "dev/linux/vnc-session.sh"})
+                       (finally (cleanup)))]
+          (System/exit status))))
 
     (defn site-task
       "Runs one of the engine's tasks against this project."
@@ -154,8 +251,9 @@
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
      (row "app:bundle" "rebuild ./jonquil, then make ./Jonquil.app from it (macOS)")
-     (row "app:install" "app:bundle, then move to ~/Applications and register it (macOS)")
-     (row "app:icon" "regenerate resources/Jonquil.icns from resources/icon/icon.swift (macOS)")
+     (row "app:install" "install Jonquil: ~/Applications on macOS, ~/.local/share on Linux (macOS and Linux)")
+     (row "app:uninstall" "remove what app:install put in place (macOS and Linux)")
+     (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
@@ -177,6 +275,14 @@
      (row "site:build" "build the documentation site into _site/")
      (row "site:serve [port]" "build, then serve it (first free port from 3000)")
      (row "site:clean" "delete the _site/ build output")
+     (hdr "Linux (local Docker, no CI)")
+     (row "linux:image [--arch A]" "build the jonquil-linux:<arm64|amd64> image (host arch by default)")
+     (row "linux:test [--arch A] [ns...]" "bb test inside the image, on a copy of the checkout")
+     (row "linux:selftest [--arch A]" "bb gtk:selftest inside the image, under Xvfb")
+     (row "linux:build [--arch A]" "bb app:build inside the image; binary lands in target/linux/<A>/")
+     (row "linux:run [--arch A] -- cmd" "run any command in the copied tree inside the image")
+     (row "linux:vnc [--arch A] [--port P]" "a Linux desktop with Jonquil installed, in your browser via noVNC")
+     (row "linux:clean" "remove both jonquil-linux images and target/linux")
      (row "clean:tmp [--dry-run]" "delete temp dirs earlier test runs left in java.io.tmpdir")
      (hdr "Upstream")
      (row "upstream:diff" "list upstream DrClojure commits since the pin, touching src/test")
@@ -193,7 +299,7 @@
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
-  {:doc "Open seven real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory, the seventh runs a jank window against a fake jank process)"
+  {:doc "Open eight real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory, the seventh runs a jank window against a fake jank process, the eighth is launched with file and folder arguments)"
    :task (let [r1 (shell {:continue true} "jolt" "-M:selftest")
                r2 (shell {:continue true} "jolt" "-M:selftest-window")
                r3 (shell {:continue true} "jolt" "-M:selftest-nrepl")
@@ -202,13 +308,15 @@
                r6 (shell {:continue true} "jolt" "-M:selftest-tree")
                r7 (shell {:continue true :extra-env {"JONQUIL_JANK" (str (fs/absolutize "dev/fake-jank"))}}
                          "jolt" "-M:selftest-jank")
+               r8 (shell {:continue true} "jolt" "-M:selftest-args")
                ok1 (zero? (:exit r1))
                ok2 (zero? (:exit r2))
                ok3 (zero? (:exit r3))
                ok4 (zero? (:exit r4))
                ok5 (zero? (:exit r5))
                ok6 (zero? (:exit r6))
-               ok7 (zero? (:exit r7))]
+               ok7 (zero? (:exit r7))
+               ok8 (zero? (:exit r8))]
            (when-not ok1 (println "gtk:selftest: editor/console rows FAILED"))
            (when-not ok2 (println "gtk:selftest: window rows FAILED"))
            (when-not ok3 (println "gtk:selftest: nREPL rows FAILED"))
@@ -216,7 +324,8 @@
            (when-not ok5 (println "gtk:selftest: JVM Clojure rows FAILED"))
            (when-not ok6 (println "gtk:selftest: directory-launch rows FAILED"))
            (when-not ok7 (println "gtk:selftest: jank rows FAILED"))
-           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7) 0 1)))}
+           (when-not ok8 (println "gtk:selftest: file-argument rows FAILED"))
+           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7 ok8) 0 1)))}
   docs:shots
   {:doc "Self-capture docs/images/*.png (+ one GIF): one fresh process per scene"
    ;; P2.T9 round 1: one shared process/window for all 7 scenes let every
@@ -252,11 +361,16 @@
    :depends [app:build]
    :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "bundle")}
   app:install
-  {:doc "app:bundle, then move Jonquil.app to ~/Applications and register it with LaunchServices (macOS)"
-   :depends [app:bundle]
-   :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "install")}
+  {:doc "Install Jonquil: on macOS app:bundle, then move Jonquil.app to ~/Applications and register it; on Linux app:build, then copy the binary, launcher, icon and MIME types under ~/.local/share (macOS and Linux)"
+   :task (do (if (str/includes? (System/getProperty "os.name") "Linux")
+               (run 'app:build)
+               (run 'app:bundle))
+             (shell "jolt" "-M:bundle" "-m" "app-bundle" "install"))}
+  app:uninstall
+  {:doc "Remove what app:install put in place: on Linux the files under ~/.local/share; on macOS it says to drag the app to the Trash (macOS and Linux)"
+   :task (shell "jolt" "-M:bundle" "-m" "app-bundle" "uninstall")}
   app:icon
-  {:doc "Regenerate resources/Jonquil.icns: swift draws a 1024px PNG, sips scales it, iconutil packs it (macOS)"
+  {:doc "Regenerate resources/Jonquil.icns: swift draws a 1024px PNG, sips scales it, iconutil packs it; then sips makes resources/icon/jonquil-256.png for the Linux install (macOS)"
    :task (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-icon-"}))
                set-dir (str tmp "/Jonquil.iconset")
                big (str tmp "/icon-1024.png")]
@@ -267,6 +381,7 @@
                (shell "sips" "-z" (str n) (str n) big "--out" (str set-dir "/icon_" n "x" n ".png"))
                (shell "sips" "-z" (str (* 2 n)) (str (* 2 n)) big "--out" (str set-dir "/icon_" n "x" n "@2x.png")))
              (shell "iconutil" "-c" "icns" set-dir "-o" "resources/Jonquil.icns")
+             (shell "sips" "-s" "format" "png" "-z" "256" "256" "resources/Jonquil.icns" "--out" "resources/icon/jonquil-256.png")
              (finally (fs/delete-tree tmp))))}
   smoke:binary
   {:doc "P2.T10: automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
@@ -388,6 +503,73 @@
   {:doc "Delete the _site/ build output"
    :task (site-task "clean")}
 
+  linux:image
+  {:doc "Build the local Linux check image jonquil-linux:<arch> (--arch arm64|amd64; the host's by default)"
+   :task (let [arch (linux-arch *command-line-args*)]
+           (shell "docker" "build" "--platform" (str "linux/" arch)
+                  "-t" (str "jonquil-linux:" arch) "dev/linux"))}
+  linux:test
+  {:doc "Run bb test [ns...] in the Linux image on a copy of the checkout (--arch arm64|amd64)"
+   :task (let [arch (linux-arch *command-line-args*)
+               nss  (linux-strip-arch *command-line-args*)]
+           (linux-docker {:arch arch
+                          :command (str/join " " (cons "bb test" (map sh-quote nss)))}))}
+  linux:selftest
+  {:doc "Run bb gtk:selftest under Xvfb in the Linux image (--arch arm64|amd64)"
+   :task (let [arch (linux-arch *command-line-args*)
+               ;; Another arch than the host's runs under emulation, several
+               ;; times slower; rows with a time budget widen it (see
+               ;; gtk-selftest's paint-async row).
+               emulated? (not= arch (linux-arch []))]
+           (linux-docker {:arch arch
+                          :command (str (when emulated? "JONQUIL_SELFTEST_EMULATED=1 ")
+                                        "GDK_BACKEND=x11 xvfb-run -a -s "
+                                        (sh-quote "-screen 0 1600x1200x24")
+                                        " bb gtk:selftest")}))}
+  linux:build
+  {:doc "Build the Linux jonquil binary in the image; it lands in target/linux/<arch>/ (--arch arm64|amd64)"
+   :task (let [arch (linux-arch *command-line-args*)
+               out  (str (fs/absolutize (str "target/linux/" arch)))]
+           (fs/create-dirs out)
+           (linux-docker {:arch arch :out out
+                          :command "bb app:build && cp jonquil /out/jonquil"}))}
+  linux:run
+  {:doc "Run a command in the copied tree in the Linux image: bb linux:run [--arch A] -- <command...>"
+   :task (let [args (vec *command-line-args*)
+               [before after] (split-with (fn [a] (not= a "--")) args)
+               cmd  (rest after)
+               arch (linux-arch (vec before))]
+           (if (empty? cmd)
+             (do (println "usage: bb linux:run [--arch arm64|amd64] -- <command...>")
+                 (System/exit 1))
+             (linux-docker {:arch arch :command (str/join " " (map sh-quote cmd))})))}
+  linux:vnc
+  {:doc "A Linux desktop in Docker served through noVNC for a hand check: first free port from 6080, or --port P (refused if busy)"
+   :task (let [args  (vec *command-line-args*)
+               arch  (linux-arch args)
+               rest* (linux-strip-arch args)
+               asked (let [flag (drop-while (fn [a] (not (str/starts-with? a "--port"))) rest*)
+                           a    (first flag)]
+                       (when a (if (= a "--port") (second flag) (str/replace-first a "--port=" ""))))
+               port  (cond
+                       (nil? asked) (free-port 6080)
+                       (re-matches (re-pattern "[0-9]+") asked)
+                       (let [p (parse-long asked)]
+                         (if (= p (free-port p))
+                           p
+                           (do (println (str "Port " p " is busy; pick another or omit --port"))
+                               (System/exit 1))))
+                       :else (do (println (str "--port needs a number, got: " asked)) (System/exit 1)))]
+           (if port
+             (linux-vnc {:arch arch :port port})
+             (do (println "No free port in 6080-6100; pass one: bb linux:vnc --port P")
+                 (System/exit 1))))}
+  linux:clean
+  {:doc "Remove the jonquil-linux images (both arches) and delete target/linux"
+   :task (do (doseq [arch ["arm64" "amd64"]]
+               (shell "docker" "image" "rm" "-f" (str "jonquil-linux:" arch)))
+             (fs/delete-tree "target/linux")
+             (println "removed jonquil-linux images and target/linux"))}
   clean:tmp
   {:doc "Delete the temp files and dirs earlier test and self-test runs left under java.io.tmpdir (--dry-run lists them)"
    ;; Only names this repo's tests and harnesses make: a known prefix
@@ -406,10 +588,10 @@
                          "jonquil-selftest-close-save-" "jonquil-selftest-dirty-"
                          "jonquil-selftest-exec-" "jonquil-selftest-impossible-parent-"
                          "jonquil-selftest-missing-dir-" "jonquil-selftest-readonly-"
-                         "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-appopen-" "jonquil-selftest-tree-" "jonquil-file-tree-test-"
+                         "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-appopen-" "jonquil-selftest-tree-" "jonquil-selftest-args-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-demoshots-jank-" "jonquil-clj-server-" "jonquil-clj-config-"
-                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-"]
+                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-" "jonquil-app-linux-test-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
                              (some (fn [p]

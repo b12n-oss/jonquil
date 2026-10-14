@@ -418,6 +418,9 @@
                          (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
                          {:handled handled :text text :undone undone})))))))
 
+(def ^:private os-name (System/getProperty "os.name"))
+(def ^:private mac? (= "Mac OS X" os-name))
+
 (defn- row-edit-format-selection-macos-cmd-option-f
   "Bug fix (Cmd+Option+F did nothing in the built macOS app): the MEASURED
   macOS triple for Cmd+Option+F, from a pid-driven cgevent probe against
@@ -438,11 +441,18 @@
               (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
               (let [handled (editor/handle-key! ed 0x8f6 3 (bit-or g/META-MASK g/ALT-MASK))
                     text (editor/editor-text ed)]
-                (g/gtk-text-buffer-undo buf)
-                (let [undone (editor/editor-text ed)]
+                (if mac?
+                  (do
+                    (g/gtk-text-buffer-undo buf)
+                    (let [undone (editor/editor-text ed)]
+                      (check :edit-format-selection-macos-cmd-option-f
+                             (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                             {:handled handled :text text :undone undone})))
+                  ;; Off macOS the keycode fallback is off (keycode 37 is
+                  ;; Control_L on X11): the chord must not format.
                   (check :edit-format-selection-macos-cmd-option-f
-                         (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
-                         {:handled handled :text text :undone undone})))))))
+                         (and (= 0 handled) (= original text))
+                         {:handled handled :text text :os os-name})))))))
 
 (defn- row-edit-format-selection-macos-cmd-option-l
   "Same bug, the L chord: MEASURED macOS triple for Cmd+Option+L -- keyval
@@ -457,11 +467,18 @@
               (g/with-iters* buf 15 15 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
               (let [handled (editor/handle-key! ed 0xac 37 (bit-or g/META-MASK g/ALT-MASK))
                     text (editor/editor-text ed)]
-                (g/gtk-text-buffer-undo buf)
-                (let [undone (editor/editor-text ed)]
+                (if mac?
+                  (do
+                    (g/gtk-text-buffer-undo buf)
+                    (let [undone (editor/editor-text ed)]
+                      (check :edit-format-selection-macos-cmd-option-l
+                             (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
+                             {:handled handled :text text :undone undone})))
+                  ;; Off macOS the keycode fallback is off (keycode 37 is
+                  ;; Control_L on X11): the chord must not format.
                   (check :edit-format-selection-macos-cmd-option-l
-                         (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
-                         {:handled handled :text text :undone undone})))))))
+                         (and (= 0 handled) (= original text))
+                         {:handled handled :text text :os os-name})))))))
 
 (defn- row-edit-redo-y [ed]
   (go-row :edit-redo-y check
@@ -541,12 +558,16 @@
   first and the last line, and while it runs the GTK thread answers an
   on-gtk round trip in under 150 ms every time (estimate: one 2,000-span
   chunk is ~8 ms by the measured 4 µs a span; 150 ms leaves room for GTK's
-  own layout passes). The 20 ms tick never repaints a read-only editor."
+  own layout passes). The 20 ms tick never repaints a read-only editor.
+  Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by bb linux:selftest
+  for another arch than the host's) the budget is 5x: x86_64 emulated on
+  arm64 measured 194 ms and 481 ms worst cases, which time the emulator."
   [_ed]
   (go-row :paint-async-keeps-gtk-responsive check
     (with-fresh-editor
       (fn [ed]
-        (let [text (big-text 8000)
+        (let [budget-ms (if (System/getenv "JONQUIL_SELFTEST_EMULATED") 750.0 150.0)
+              text (big-text 8000)
               last-line-start (inc (str/last-index-of text "\n" (- (count text) 2)))
               first-str (inc (str/index-of text "\""))
               last-str (inc (str/index-of text "\"" last-line-start))
@@ -566,8 +587,9 @@
               [a b] (on-gtk [(g/has-tag-at? (:buf ed) first-str string-tag)
                              (g/has-tag-at? (:buf ed) last-str string-tag)])]
           (on-gtk (check :paint-async-keeps-gtk-responsive
-                         (and (:done? @(:paint ed)) a b (< worst 150.0))
-                         {:done (:done? @(:paint ed)) :first a :last b :worst-ms worst})))))))
+                         (and (:done? @(:paint ed)) a b (< worst budget-ms))
+                         {:done (:done? @(:paint ed)) :first a :last b :worst-ms worst
+                          :budget-ms budget-ms})))))))
 
 (defn- row-paint-async-superseded
   "A paint still in flight never lands on newer text: paint text A (all

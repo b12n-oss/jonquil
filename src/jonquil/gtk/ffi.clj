@@ -43,6 +43,8 @@
 
 ;; --- application / main loop -------------------------------------------------
 (ffi/defcfn gtk-application-new "gtk_application_new" [:string :uint] :pointer)
+(ffi/defcfn g-set-prgname "g_set_prgname" [:string] :void)
+(ffi/defcfn g-get-prgname "g_get_prgname" [] :pointer)
 (ffi/defcfn g-application-run "g_application_run" [:pointer :int :pointer] :int :blocking)
 (ffi/defcfn g-application-quit "g_application_quit" [:pointer] :void)
 (ffi/defcfn g-signal-connect-data "g_signal_connect_data"

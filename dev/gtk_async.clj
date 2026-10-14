@@ -20,14 +20,16 @@
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.ffi :as g]))
 
-(ffi/defcfn ^:private pthread-main-np "pthread_main_np" [] :int)
+(ffi/defcfn ^:private g-main-context-default "g_main_context_default" [] :pointer)
+(ffi/defcfn ^:private g-main-context-is-owner "g_main_context_is_owner" [:pointer] :int)
 
 (defn gtk-thread?
-  "True on GTK's thread. On macOS that's the process main thread, because
-  g_application_run is called from -main (spike: activate and every on-gui!
-  thunk ran with pthread_main_np = 1, go bodies with 0)."
+  "True on GTK's thread, the one running g_application_run. It asks GLib
+  who owns the default main context. The spike measured that pthread_main_np
+  exists only on macOS, and planning probe 3 measured this check on both
+  systems: 0 before g_application_run, 1 inside an open handler."
   []
-  (= 1 (pthread-main-np)))
+  (= 1 (g-main-context-is-owner (g-main-context-default))))
 
 (defn gui-ch
   "Runs f on the GTK thread via on-gui! and returns a promise-chan of {:ok v}

@@ -264,11 +264,18 @@
   16)
 
 (defn allocated?
-  "True once the rows view has a real, positive width and height -- a
-  layout pass has run over it. GTK-thread only."
+  "True once a layout pass has run over the pane since it was last shown:
+  the pane's root has a positive width and the rows view a positive width
+  and height. The root is checked because hiding a widget zeroes only its
+  OWN allocation, not its children's, so after a close the rows view
+  still reports its old size; on a reopen that stale size would be
+  measured before GTK lays the panel out at its new width. Callers hide
+  and show the pane through its root. GTK-thread only."
   [pane]
   (let [view (:view pane)]
-    (and (pos? (g/gtk-widget-get-width view)) (pos? (g/gtk-widget-get-height view)))))
+    (and (pos? (g/gtk-widget-get-width (:root pane)))
+         (pos? (g/gtk-widget-get-width view))
+         (pos? (g/gtk-widget-get-height view)))))
 
 (defn measure-when-ready!
   "Calls (f (measure pane)) once the rows view is allocated, or after
@@ -276,8 +283,10 @@
   window makes the root visible and would otherwise measure in that
   SAME callback, before GTK's own layout pass has ever run over it, so
   gtk-widget-get-width/height read 0 and measure's own floors
-  (:cols 20 :rows 5) apply. Already allocated (every open after the
-  first): calls f at once, synchronously. Otherwise polls with a
+  (:cols 20 :rows 5) apply. A reopen after a close waits the same way:
+  the rows view keeps its pre-close size until that pass runs (see
+  allocated?). Already allocated (an open while the panel is already
+  showing): calls f at once, synchronously. Otherwise polls with a
   repeating g_timeout_add -- GTK-thread only, never parks -- and falls
   back to measure's own floors once the cap is reached, so f is always
   called exactly once either way (ruling 9: the caller's in-flight flag

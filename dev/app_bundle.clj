@@ -8,6 +8,7 @@
   linker's ad-hoc signature on the built binary is what macOS needs."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [app-linux]
             [jolt.process :as p]))
 
 (def bundle-id "net.b12n.jonquil")
@@ -138,9 +139,23 @@
       (p/sh "rm" "-rf" here))
     (println (str "installed " dest " (moved from ./" bundle-dir ")"))))
 
+(defn- linux? []
+  (str/includes? (str (System/getProperty "os.name")) "Linux"))
+
 (defn -main [& args]
   (case (or (first args) "bundle")
-    "bundle" (bundle!)
-    "install" (install!)
-    (fail! (str "unknown command " (pr-str (first args)) "; use bundle or install")))
+    "bundle" (if (linux?)
+               (fail! "app:bundle builds a macOS .app; on Linux use bb app:install")
+               (bundle!))
+    "install" (if (linux?)
+                (let [status (app-linux/install! {:home (System/getProperty "user.home")
+                                                  :source "jonquil"
+                                                  :version (git-version)})]
+                  (when-not (zero? status) (System/exit status)))
+                (install!))
+    "uninstall" (if (linux?)
+                  (let [status (app-linux/uninstall! {:home (System/getProperty "user.home")})]
+                    (when-not (zero? status) (System/exit status)))
+                  (println "on macOS, drag ~/Applications/Jonquil.app to the Trash"))
+    (fail! (str "unknown command " (pr-str (first args)) "; use bundle, install or uninstall")))
   (System/exit 0))

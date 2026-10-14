@@ -125,7 +125,7 @@ The O1 spec decision is that Run resets by default: in `:reset` mode, `run-defin
 
 Three `bb` tasks drive the real GTK front end headlessly, without a human at the keyboard:
 
-- `bb gtk:selftest` now opens seven real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection. The fourth (cljd plan P2.T4) opens a window against a throwaway ClojureDart app directory whose `NREPL.lock` names a fake fork server running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no fork checkout and no real app; its rows cover connecting, a quiet load, Run Selection and Run Form switching the session's namespace, quick doc, completion, and Stop's detach, all over that fake connection. The fifth (clj plan P2.T4) opens a window against a throwaway JVM Clojure project whose `.nrepl-port` names a fake JVM nREPL server running in this same process (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its rows cover connecting, Run moving the prompt, a selection against a namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting after the server restarts, quick doc, jump to an external definition, full docs and its Escape, and a close that never sends the server a `close` op. The sixth is launched on a directory (`dev/gtk_selftest_tree.clj`). The seventh (`dev/gtk_selftest_jank.clj`, 10 rows) opens a window on a throwaway `.jank` project with `JONQUIL_JANK` naming `dev/fake-jank`, a script that serves a fake jank nREPL in its working directory, so the real launcher starts a real child process and the rows can check its pid and run directory on disk: the first Run, a REPL line, a selection against a namespace jank hasn't loaded, quick doc, F12 inside the buffer, the inspector's unavailable sentence, Stop and Reset each restarting the process, and a quit that kills it.
+- `bb gtk:selftest` now opens eight real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection. The fourth (cljd plan P2.T4) opens a window against a throwaway ClojureDart app directory whose `NREPL.lock` names a fake fork server running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no fork checkout and no real app; its rows cover connecting, a quiet load, Run Selection and Run Form switching the session's namespace, quick doc, completion, and Stop's detach, all over that fake connection. The fifth (clj plan P2.T4) opens a window against a throwaway JVM Clojure project whose `.nrepl-port` names a fake JVM nREPL server running in this same process (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its rows cover connecting, Run moving the prompt, a selection against a namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting after the server restarts, quick doc, jump to an external definition, full docs and its Escape, and a close that never sends the server a `close` op. The sixth is launched on a directory (`dev/gtk_selftest_tree.clj`). The seventh (`dev/gtk_selftest_jank.clj`, 13 rows) opens a window on a throwaway `.jank` project with `JONQUIL_JANK` naming `dev/fake-jank`, a script that serves a fake jank nREPL in its working directory, so the real launcher starts a real child process and the rows can check its pid and run directory on disk: the first Run, a REPL line, a selection against a namespace jank hasn't loaded, quick doc, F12 inside the buffer, the inspector's unavailable sentence, Stop and Reset each restarting the process, and a quit that kills it. The eighth (`dev/gtk_selftest_args.clj`, 5 rows) is launched with a folder and two files, which reach the window through GApplication's `open` signal; its rows check the tree root, that the launch saves no tree visibility, the two tabs, the active tab and the program name.
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
 All three poll a condition against a deadline rather than sleeping, and all three hand any blocking subprocess call (screenshots, GIF recording, the nREPL window's own child) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
@@ -423,6 +423,9 @@ jank starts leaves no process and no run directory behind.
 
 ## The macOS app: PATH and Open With
 
+The same machinery serves Linux; the section after this one covers what
+differs there.
+
 A Finder or Dock launch has a bare `PATH`, and Open With hands the app files
 through GApplication rather than argv. Three small namespaces and a build
 script cover both.
@@ -471,6 +474,87 @@ script cover both.
   launcher's Mach-O, and `codesign --force` then fails strict validation;
   the linker's ad-hoc signature on the launcher is
   what macOS checks, and the build task verifies it exists.
+
+## Linux
+
+The GTK layer is the same code on both systems. Four places differ, and the
+install is a separate script.
+
+### File arguments go through `open`
+
+`jonquil.main/-main` no longer picks a file or folder out of the arguments.
+It builds `argv` with `gtk-argv` (`"jonquil"`, then every argument made
+absolute against the working directory) and `window/start!` hands that to
+`g_application_run` through `run-application!`, as a NULL-terminated `char**`.
+With more than the program name in it, GApplication emits `open` with the
+files and not `activate`, which is how a terminal launch reaches the same
+handler as Open With. With no arguments `argv` is not passed and `activate`
+fires as before.
+
+Absolute paths are the point. GApplication's option parser sees every
+argument that starts with `-`, so a file named `-x.clj` would be taken for an
+option and `--help` would print GTK's usage. A `--` isn't a separator here;
+it arrives as a file called `--`. An absolute path never starts with a dash.
+`gtk-argv` checks nothing on disk and canonicalises nothing, so an argument
+that names nothing still reaches the `open` handler, which reports it on the
+status line the way it reports a missing file from Finder.
+
+When the `open` is what started the app, `launch-split` makes the first path
+the window's launch option, a folder as `:dir` and anything else as `:file`,
+exactly what the single command-line argument did before. The remaining
+paths go to `open-paths` as tabs. Once a window exists, every path goes to
+`open-paths`.
+
+Linux sets the program name too. On X11 GTK writes `WM_CLASS` from it, and the
+launcher's `StartupWMClass` is the app id, so `run-application!` calls
+`g_set_prgname("net.b12n.jonquil")` before the loop starts. macOS keeps what
+`g_application_run` derives from `argv[0]`.
+
+### Which thread is GTK's
+
+`gtk-thread?` in `dev/gtk_async.clj` used to call `pthread_main_np`, which
+exists only on macOS, where `g_application_run` runs on the process's main
+thread. It now asks GLib instead: `g_main_context_is_owner` on
+`g_main_context_default`. That is 0 before `g_application_run` and 1 inside
+the `open` handler, on both systems.
+
+### The passwd lookup
+
+With `SHELL` unset, `jonquil.tool-path/default-shell` decides which shell the
+`PATH` lookup runs. On macOS it is `/bin/zsh`. Elsewhere `passwd-shell` finds
+the line of `/etc/passwd` whose third field equals the process's uid
+(`getuid()`), and takes its seventh field; a missing line, a blank shell or
+a short line gives `/bin/sh`. It matches by uid because Jolt on Linux has no
+`user.name` property. The file is read directly, with no `getent`, so a user
+who exists only in LDAP or NSS gets `/bin/sh`.
+
+### The keycode fallback
+
+The Alt chords for format selection have a fallback on physical key codes for
+macOS, where Option changes the keyval GDK reports (`MAC-KEYCODE-F`, 3, and
+`MAC-KEYCODE-L`, 37). `keycode-fallback?` takes the OS name and is true only
+on `"Mac OS X"`, because on Linux X11 keycode 37 is Left Control.
+
+### `dev/app_linux.clj`: the install
+
+`app-bundle/-main` dispatches to the `app-linux` namespace on Linux, which
+leaves `dev/app_bundle.clj` unchanged in shape. `app-linux` keeps the pure
+parts apart from the file work. `install-paths` names the four files for a
+home directory, `desktop-entry` and `mime-xml` produce the launcher and the
+shared-mime-info package, and `replaceable?` is the rule that an existing
+launcher is replaced only when it carries the line `X-Jonquil-Install=1`. The
+`Exec` line quotes the binary path by the Desktop Entry rules, with `%F` so a
+file manager can pass files.
+
+`install!` writes the MIME package, the icon and the launcher first and the
+binary last, through a temp name and a rename so a running copy is replaced
+rather than overwritten. A failed step removes the temp file and names what
+was already written. Then it runs `update-mime-database` and
+`update-desktop-database` when they are on `PATH`, and a note replaces each
+that isn't. `uninstall!` deletes the four files and then `~/.local/share/jonquil`,
+the only recursive delete. Both refuse a launcher that isn't Jonquil's.
+`jonquil.app-linux-test` covers the pure parts and the file work against a
+temp home.
 
 ### The inspector: `Inspector`, `jonquil.inspect` and `jonquil.inspect.view`
 
