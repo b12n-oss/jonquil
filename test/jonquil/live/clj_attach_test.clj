@@ -11,13 +11,15 @@
   suite: Jonquil's own evaluator code never starts, stops or signals
   this JVM.
 
-  Every test but the last shares one server (the :once fixture) and
-  makes its own fresh Jvm evaluator against it, so each gets its own
-  clone session; a namespace loaded by one test's Run stays loaded for
-  the whole server (real Clojure semantics), which is why
-  not-loaded-live uses a namespace ('demo.never') nothing else ever
-  touches. The last test, which checks .nrepl-port's fate after stop!,
-  starts and stops its own separate server instead, as does eof-live-1-8."
+  Every test but the two that start their own server shares one server
+  (the :once fixture) and makes its own fresh Jvm evaluator against it,
+  so each gets its own clone session; a namespace loaded by one test's
+  Run stays loaded for the whole server (real Clojure semantics), which
+  is why not-loaded-live uses a namespace ('demo.never') nothing else
+  ever touches. Two tests start and stop their own server instead:
+  eof-live-1-8 needs nREPL 1.8.0 (the shared server runs 1.7.0), and
+  server-stopped-leaves-no-port-file-live stops its server, which would
+  break the shared one for the tests after it."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]

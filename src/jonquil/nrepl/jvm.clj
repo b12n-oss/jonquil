@@ -426,6 +426,9 @@
   ;; (P0.1: 1.7.0 fails it): :waiting? clears and the write goes out. Older
   ;; or unknown servers get the note once per connection and keep waiting.
   ;; One swap-vals! decides both, so quick presses can't double up.
+  ;; A narrow race is accepted: a read that finishes between the swap and
+  ;; the socket write leaves the EOF queued, so the next read in that
+  ;; session sees EOF once. send-input! has the same window.
   (send-eof! [_]
     (let [[old _] (swap-vals! state
                               (fn [st]
