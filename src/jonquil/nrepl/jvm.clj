@@ -18,8 +18,10 @@
   or if it doesn't take, Jonquil detaches and says so. An idle Stop is a
   no-op (ruling 5): there's nothing to interrupt, and the connection is
   cheap to keep, unlike cljd's Stop which always detaches. stdin sends a
-  line through the live session and never closes it (nREPL 1.7.0 fails an
-  empty stdin, so send-eof! is a no-op, P0.1).
+  line through the live session. send-eof! sends an empty stdin, the
+  end-of-input signal, on nREPL 1.8.0 or later while a read waits; an older
+  server fails an empty stdin (P0.1), so it gets a one-time note instead and
+  the read keeps waiting.
 
   The prompt namespace moves on a successful Run (to the buffer's own
   namespace, ruling 4) and on a REPL entry's reply :ns; a selection or a
@@ -420,9 +422,38 @@
       (when (and (:waiting? old) (some? token) (identical? token (get-in @state [:running :token])))
         (call-wait-input! (:on-wait-input (:opts running)) false)))
     nil)
-  ;; P0.1: an empty stdin fails on nREPL 1.7.0, so there's no clean EOF to
-  ;; send. A read just keeps waiting.
-  (send-eof! [_] nil)
+  ;; Only while a read waits. On nREPL 1.8.0 or later an empty stdin is EOF
+  ;; (P0.1: 1.7.0 fails it): :waiting? clears and the write goes out. Older
+  ;; or unknown servers get the note once per connection and keep waiting.
+  ;; One swap-vals! decides both, so quick presses can't double up.
+  ;; A narrow race is accepted: a read that finishes between the swap and
+  ;; the socket write leaves the EOF queued, so the next read in that
+  ;; session sees EOF once. send-input! has the same window.
+  (send-eof! [_]
+    (let [[old _] (swap-vals! state
+                              (fn [st]
+                                (cond
+                                  (not (and (:waiting? st) (:running st))) st
+                                  (clj/stdin-eof? (:nrepl-version st)) (assoc st :waiting? false)
+                                  (not (:eof-noted? st)) (assoc st :eof-noted? true)
+                                  :else st)))
+          {:keys [conn session running nrepl-version]} old
+          token (:token running)]
+      (when (and (:waiting? old) running)
+        (if (clj/stdin-eof? nrepl-version)
+          (do
+            (when (client/open? conn)
+              (future
+                (try
+                  (client/request! conn {:op "stdin" :stdin "" :session session}
+                                   (fn [_] nil))
+                  (catch Throwable _ nil))))
+            (when (and (some? token) (identical? token (get-in @state [:running :token])))
+              (call-wait-input! (:on-wait-input (:opts running)) false)))
+          (when-not (:eof-noted? old)
+            (connection/say! (:on-output (:opts running)) :system
+                             (str (clj/eof-unsupported-message nrepl-version) "\n"))))))
+    nil)
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   ;; Reset on Run is off for :clj: this is the user's own JVM.

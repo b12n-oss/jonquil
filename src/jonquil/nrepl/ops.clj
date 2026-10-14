@@ -25,6 +25,17 @@
   [msgs]
   (into #{} (map name) (keys (some :ops msgs))))
 
+(defn nrepl-version
+  "[major minor] from a describe reply's nrepl version, or nil when msgs
+  has no nrepl entry or either part isn't an integer (or msgs isn't a
+  vector, as request-sync's :timeout isn't)."
+  [msgs]
+  (when (vector? msgs)
+    (let [major (get-in (some :versions msgs) ["nrepl" "major"])
+          minor (get-in (some :versions msgs) ["nrepl" "minor"])]
+      (when (and (integer? major) (integer? minor))
+        [major minor]))))
+
 (defn- category [c]
   (cond (= "special-form" (field c :type)) :special
         (= "clojure.core" (field c :ns)) :builtin

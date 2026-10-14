@@ -46,6 +46,21 @@
 (def interrupt-failed-message
   "; The server didn't stop the evaluation, so Jonquil detached. It may still be running.")
 
+(defn stdin-eof?
+  "True when a server's nREPL version ([major minor], or nil when unknown)
+  is 1.8 or later, the first version whose stdin closes on EOF."
+  [version]
+  (boolean (and version (not (neg? (compare version [1 8]))))))
+
+(defn eof-unsupported-message
+  "The console line for a server whose nREPL can't close stdin. It names
+  the version when the server reported one, and gives the 1.8 rule either way."
+  [version]
+  (if version
+    (let [[major minor] version]
+      (str "; This server runs nREPL " major "." minor ", which can't close stdin. EOF needs nREPL 1.8 or later, so the read keeps waiting for a line."))
+    "; This server runs an nREPL older than 1.8, or one that doesn't report its version, so it can't close stdin. The read keeps waiting for a line."))
+
 (def not-attached-doc
   "No docs: Jonquil isn't attached to the server yet. Run something first.")
 
@@ -71,7 +86,7 @@
 (def limitations
   ["Jonquil attaches to a server you started: it never starts or stops the JVM."
    "Reset on Run isn't available: this is your own JVM, so Jonquil doesn't unload namespaces in it."
-   "Stdin can't be closed: an empty stdin fails on nREPL 1.7.0, so a read waits for a line."
+   "Stdin closes only on nREPL 1.8.0 or later: on older servers a read waits for a line."
    "Output printed from other threads after an evaluation finishes isn't shown."])
 
 ;; --- the connect policy ---
@@ -91,7 +106,10 @@
    ;; (which a restarted server has never heard of). :auto-required?:
    ;; whether this connection has sent .jonquil.edn's :auto-require list
    ;; yet; a restarted server has forgotten it, so every connect resets it.
-   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false}})
+   ;; :eof-noted?: whether the end-of-input note has shown on this
+   ;; connection; a new connection may be a different server, so the note
+   ;; can show again.
+   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false :eof-noted? false}})
 
 ;; --- the buffer's namespace ---
 

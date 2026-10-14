@@ -1,7 +1,8 @@
 (ns jonquil.live.clj-attach-test
   "Drives jonquil.nrepl.jvm against a REAL clojure -M:serve nREPL server
   (clojure-cli.repl-server 0.1.0 on nREPL 1.7.0), started once for this
-  namespace by dev/clj_server.clj. Run with `bb test:clj`, not `bb test`
+  namespace by dev/clj_server.clj, plus one test (eof-live-1-8) on its own
+  nREPL 1.8.0 server. Run with `bb test:clj`, not `bb test`
   (ruling 12): it needs Java 17+, the clojure CLI and, on a first run
   that hasn't cached clojure-cli.repl-server yet, the network.
 
@@ -10,13 +11,15 @@
   suite: Jonquil's own evaluator code never starts, stops or signals
   this JVM.
 
-  Every test but the last shares one server (the :once fixture) and
-  makes its own fresh Jvm evaluator against it, so each gets its own
-  clone session; a namespace loaded by one test's Run stays loaded for
-  the whole server (real Clojure semantics), which is why
-  not-loaded-live uses a namespace ('demo.never') nothing else ever
-  touches. The last test, which checks .nrepl-port's fate after stop!,
-  starts and stops its own separate server instead."
+  Every test but the two that start their own server shares one server
+  (the :once fixture) and makes its own fresh Jvm evaluator against it,
+  so each gets its own clone session; a namespace loaded by one test's
+  Run stays loaded for the whole server (real Clojure semantics), which
+  is why not-loaded-live uses a namespace ('demo.never') nothing else
+  ever touches. Two tests start and stop their own server instead:
+  eof-live-1-8 needs nREPL 1.8.0 (the shared server runs 1.7.0), and
+  server-stopped-leaves-no-port-file-live stops its server, which would
+  break the shared one for the tests after it."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
@@ -188,7 +191,38 @@
     (is (true? (ev/waiting-for-input? e)))
     (is (nil? (ev/send-input! e "typed")))
     (is (= {:status :ok :printed "\"typed\"" :ns 'user} (deref done 2000 :timeout)))
-    (is (false? (ev/waiting-for-input? e)))))
+    (is (false? (ev/waiting-for-input? e)))
+    (is (= [1 7] (:nrepl-version @(:state e))))))
+
+(deftest eof-live-1-8
+  ;; Cmd/Ctrl+D on a real nREPL 1.8.0 server (its own, not the shared 1.7.0
+  ;; one): EOF ends a waiting read-line with nil, leaves no stale EOF
+  ;; queued for the next read, and is a no-op while idle.
+  (let [srv (clj-server/start! {:nrepl "1.8.0"})]
+    (try
+      (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir srv)})
+            start-read (fn []
+                         (let [done (promise)]
+                           (ev/eval! e "(read-line)" {:run? false :on-complete (fn [r] (deliver done r))})
+                           (wait-until! (fn [] (ev/waiting-for-input? e)))
+                           done))]
+        (let [done (start-read)]
+          (is (true? (ev/waiting-for-input? e)))
+          (ev/send-eof! e)
+          (is (= {:status :ok :printed "nil" :ns 'user} (deref done 5000 :timeout)))
+          (is (false? (ev/waiting-for-input? e))))
+        (let [done (start-read)]
+          (is (true? (ev/waiting-for-input? e)))
+          (is (nil? (ev/send-input! e "hello")))
+          (is (= "\"hello\"" (:printed (deref done 5000 :timeout)))))
+        (ev/send-eof! e)
+        (let [done (start-read)]
+          (is (true? (ev/waiting-for-input? e)) "no stale EOF was queued")
+          (is (nil? (ev/send-input! e "again")))
+          (is (= "\"again\"" (:printed (deref done 5000 :timeout)))))
+        ;; The version lands on first connect, so only after the reads above.
+        (is (= [1 8] (:nrepl-version @(:state e)))))
+      (finally (clj-server/stop! srv)))))
 
 (deftest inspect-after-first-run-live
   ;; review focus 1: Cmd/Ctrl+I right after the first Run of a JVM file

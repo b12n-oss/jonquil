@@ -24,6 +24,15 @@
                (strip (client/request-sync conn {:op "eval" :code "(+ 1 2)" :session sid} 2000)))))
       (finally (client/close! conn) (fake/stop! srv)))))
 
+(deftest describe-versions-test
+  ;; default 1.7.0, a chosen version, and :none (no "versions" at all)
+  (doseq [[opts expected] [[nil [1 7]] [{:nrepl-version [1 8 0]} [1 8]] [{:nrepl-version :none} nil]]]
+    (let [srv (if opts (fake/start! opts) (fake/start!))
+          conn (client/connect (:port srv))]
+      (try
+        (is (= expected (ops/nrepl-version (client/request-sync conn {:op "describe"} 2000))))
+        (finally (client/close! conn) (fake/stop! srv))))))
+
 (deftest namespace-not-found-test
   ;; eval :ns "demo.core" before load => exactly one message,
   ;; status ["namespace-not-found" "done" "error"]

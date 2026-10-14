@@ -902,11 +902,23 @@ running sends the same interrupt first, best effort.
 
 `read-line` and other stdin reads work the way they do everywhere else
 in Jonquil: type at the prompt while the status bar reads "Waiting for
-input", and the line goes straight to the program. One thing doesn't
-carry over: Cmd/Ctrl+D can't send end-of-input here, because an empty
-`stdin` op fails on nREPL 1.7.0 rather than answering EOF, so a waiting
-read just keeps waiting for an actual line. nREPL 1.8.0 fixed this, but
-Jonquil doesn't send EOF to a newer server yet either.
+input", and the line goes straight to the program. Cmd/Ctrl+D at that
+prompt sends end-of-input when the server runs nREPL 1.8.0 or later, so
+`read-line` returns nil. It sends only while a read is waiting, because
+1.8.0 queues an early EOF and would end your next read with it. The EOF
+doesn't stick: the next `read-line` waits for a line again.
+
+On an older server nothing is sent and the read keeps waiting for an
+actual line. The console says why, once per connection, the first time
+you press Cmd/Ctrl+D. nREPL 1.7.0 fails an empty `stdin` op rather than
+answering EOF, and the `clojure-cli.repl-server` 0.1.0 release brings in
+1.7.0. To get 1.8.0 from it, add nREPL to the `:serve` alias:
+
+```clojure
+:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version "0.1.0"}
+                     nrepl/nrepl {:mvn/version "1.8.0"}}
+        :main-opts ["-m" "clojure-cli.repl.server"]}
+```
 
 Completion and quick documentation both ask the server, not just this
 buffer. Ctrl+Space merges the server's own candidates in with the
@@ -1152,9 +1164,8 @@ than being surprises you'd otherwise have to rediscover:
   the JVM itself.
 - Reset on Run isn't available for JVM Clojure either: it's your own JVM,
   so Jonquil doesn't unload namespaces in it.
-- No EOF for JVM Clojure's stdin: an empty stdin fails on nREPL 1.7.0, so
-  a waiting `read-line` just keeps waiting for an actual line. nREPL 1.8.0
-  fixed it, and Jonquil doesn't use the fix yet.
+- Stdin closes only on nREPL 1.8.0 or later: on older servers a read
+  waits for a line.
 - Output JVM Clojure prints from a thread other than the one an
   evaluation ran on, after that evaluation finishes, isn't shown.
 - Stop can't end a JVM Clojure loop that never checks for interruption,

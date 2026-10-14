@@ -1,7 +1,8 @@
 (ns clj-server
   "A real clojure -M:serve nREPL server (clojure-cli.repl-server 0.1.0 on
-  nREPL 1.7.0) in a fresh temp project, for bb test:clj's live suite
-  against jonquil.nrepl.jvm. Mirrors jonquil.nrepl.child's shape for a
+  nREPL 1.7.0, or 1.8.0 for the one end-of-input test, via start!'s
+  {:nrepl \"1.8.0\"}) in a fresh temp project, for bb test:clj's live
+  suite against jonquil.nrepl.jvm. Mirrors jonquil.nrepl.child's shape for a
   Jolt child, but launches the real JVM Clojure CLI instead: Jonquil
   itself never starts, stops or signals this JVM (the global
   constraint) -- this namespace plays the human who already has one
@@ -21,6 +22,13 @@
 (def deps-edn-text
   ;; P0.4's :serve alias.
   "{:paths [\"src\"] :aliases {:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version \"0.1.0\"}} :main-opts [\"-m\" \"clojure-cli.repl.server\"]}}}\n")
+
+(defn- deps-edn-with-nrepl
+  "deps-edn-text with nrepl/nrepl pinned to version in the :serve alias's
+  :extra-deps, so the server runs that nREPL instead of the 1.7.0 one
+  clojure-cli.repl-server brings."
+  [version]
+  (str "{:paths [\"src\"] :aliases {:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version \"0.1.0\"} nrepl/nrepl {:mvn/version \"" version "\"}} :main-opts [\"-m\" \"clojure-cli.repl.server\"]}}}\n"))
 
 (def fixture-core-text
   ;; The spike fixture's exact text (its own gitignored planning-store
@@ -99,37 +107,40 @@
   readiness line and reads the port from it. Returns {:proc :pid :port
   :dir :config-dir :log}. Throws ex-info with the log's tail when the
   server exits early or never becomes ready, after ending the process and
-  deleting both temp dirs (the log is kept for the tail's full text)."
-  []
-  (let [uid (str (System/nanoTime) "-" (random-uuid))
-        tmp (System/getProperty "java.io.tmpdir")
-        dir (io/file tmp (str "jonquil-clj-server-" uid))
-        config-dir (io/file tmp (str "jonquil-clj-config-" uid))
-        src (io/file dir "src/demo/core.clj")
-        log (str tmp "/jonquil-clj-server-" uid ".log")]
-    (.mkdirs (.getParentFile src))
-    (.mkdirs config-dir)
-    (spit (io/file dir "deps.edn") deps-edn-text)
-    (spit src fixture-core-text)
-    (let [dir-path (.getCanonicalPath dir)
-          config-path (.getCanonicalPath config-dir)
-          proc (p/process {:dir dir-path :out (io/file log) :err :out
-                           :extra-env {"CLJ_CONFIG" config-path}}
-                          "clojure" "-M:serve")
-          state (wait-ready proc log ready-deadline-ms)]
-      (case state
-        :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port (port-from-log log)
-                :dir dir-path :config-dir config-path :log log}
-        (let [msg (if (= :exited state)
-                    (str "clojure -M:serve exited: " (tail log 20))
-                    (str "clojure -M:serve didn't answer within " ready-deadline-ms " ms: " (tail log 20)))]
-          ;; No server to hand back, so nothing else will clean up: end the
-          ;; process, then delete both temp dirs. The log stays, since the
-          ;; exception names it.
-          (terminate! proc)
-          (delete-tree! dir-path)
-          (delete-tree! config-path)
-          (throw (ex-info msg {:log log})))))))
+  deleting both temp dirs (the log is kept for the tail's full text).
+  Optional opts {:nrepl \"1.8.0\"} pins that nREPL version; with no opts
+  the deps.edn is deps-edn-text byte for byte."
+  ([] (start! {}))
+  ([{:keys [nrepl]}]
+    (let [uid (str (System/nanoTime) "-" (random-uuid))
+          tmp (System/getProperty "java.io.tmpdir")
+          dir (io/file tmp (str "jonquil-clj-server-" uid))
+          config-dir (io/file tmp (str "jonquil-clj-config-" uid))
+          src (io/file dir "src/demo/core.clj")
+          log (str tmp "/jonquil-clj-server-" uid ".log")]
+      (.mkdirs (.getParentFile src))
+      (.mkdirs config-dir)
+      (spit (io/file dir "deps.edn") (if nrepl (deps-edn-with-nrepl nrepl) deps-edn-text))
+      (spit src fixture-core-text)
+      (let [dir-path (.getCanonicalPath dir)
+            config-path (.getCanonicalPath config-dir)
+            proc (p/process {:dir dir-path :out (io/file log) :err :out
+                             :extra-env {"CLJ_CONFIG" config-path}}
+                            "clojure" "-M:serve")
+            state (wait-ready proc log ready-deadline-ms)]
+        (case state
+          :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port (port-from-log log)
+                  :dir dir-path :config-dir config-path :log log}
+          (let [msg (if (= :exited state)
+                      (str "clojure -M:serve exited: " (tail log 20))
+                      (str "clojure -M:serve didn't answer within " ready-deadline-ms " ms: " (tail log 20)))]
+            ;; No server to hand back, so nothing else will clean up: end the
+            ;; process, then delete both temp dirs. The log stays, since the
+            ;; exception names it.
+            (terminate! proc)
+            (delete-tree! dir-path)
+            (delete-tree! config-path)
+            (throw (ex-info msg {:log log}))))))))
 
 (defn stop!
   "Ends the server this namespace started (only the pid at (:proc srv),

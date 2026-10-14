@@ -105,6 +105,15 @@
     (is (= 'user (ev/prompt-ns e)))
     (is (= clj/limitations (ev/limitations e)))))
 
+(deftest connect-keeps-version-test
+  (doseq [[opts expected] [[{} [1 7]] [{:nrepl-version [1 8 0]} [1 8]] [{:nrepl-version :none} nil]]]
+    (with-project opts
+      (fn [_ dir _]
+        (let [e (make dir)]
+          (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))) "connects whatever describe says")
+          (is (= expected (:nrepl-version @(:state e))))
+          (is (false? (:eof-noted? @(:state e)))))))))
+
 (deftest connect-rules-test
   (testing "no project at all: the no-project notice"
     (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir nil})]
@@ -441,10 +450,116 @@
         (is (= {:status :ok :printed "\"typed\"" :ns 'user} (deref done 2000 :timeout)))
         (is (false? (ev/waiting-for-input? e)))
         (is (= [true false] @waits))
-        (is (= "typed\n" (get (last (filter #(= "stdin" (get % "op")) (fake/requests srv))) "stdin")))
+        (is (= "typed\n" (get (last (filter #(= "stdin" (get % "op")) (fake/requests srv))) "stdin")))))))
+
+(defn- start-read!
+  "Starts (read-line) and waits until it blocks. {:done promise :out atom
+  :waits atom}."
+  [e]
+  (let [done (promise) out (atom []) waits (atom [])]
+    (ev/eval! e "(read-line)" {:run? false
+                               :on-output (fn [k s] (swap! out conj [k s]))
+                               :on-wait-input (fn [w] (swap! waits conj w))
+                               :on-complete (fn [r] (deliver done r))})
+    (wait-until! (fn [] (ev/waiting-for-input? e)))
+    {:done done :out out :waits waits}))
+
+(defn- eof-notes
+  "The :system lines about EOF, leaving out the connect progress line."
+  [out]
+  (filter #(str/includes? % "close stdin") (texts out :system)))
+
+(defn- stdin-count [srv] (count (filter #{"stdin"} (fake/ops-seen srv))))
+
+(deftest eof-on-1-8-test
+  (with-project {:nrepl-version [1 8 0]}
+    (fn [srv dir _]
+      (let [e (make dir) {:keys [done waits]} (start-read! e)]
+        (is (true? (ev/waiting-for-input? e)))
+        (is (nil? (ev/send-eof! e)))
+        (is (= {:status :ok :printed "nil" :ns 'user} (deref done 2000 :timeout)))
+        (is (= [true false] @waits))
+        (is (= "" (get (last (filter #(= "stdin" (get % "op")) (fake/requests srv))) "stdin")))
+        (is (false? (ev/waiting-for-input? e)))))))
+
+(deftest eof-twice-sends-once-test
+  (with-project {:nrepl-version [1 8 0]}
+    (fn [srv dir _]
+      (let [e (make dir) {:keys [done]} (start-read! e)]
+        (ev/send-eof! e)
+        (ev/send-eof! e)
+        (is (= :ok (:status (deref done 2000 :timeout))))
+        (Thread/sleep 100)
+        (is (= 1 (stdin-count srv)))))))
+
+(deftest eof-idle-sends-nothing-test
+  (with-project {:nrepl-version [1 8 0]}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))))
         (let [n (count (fake/ops-seen srv))]
           (is (nil? (ev/send-eof! e)))
-          (is (= n (count (fake/ops-seen srv)))))))))
+          (Thread/sleep 100)
+          (is (= n (count (fake/ops-seen srv)))))
+        (let [{:keys [done]} (start-read! e)]
+          (is (true? (ev/waiting-for-input? e)))
+          (ev/send-input! e "x")
+          (is (= "\"x\"" (:printed (deref done 2000 :timeout)))))))))
+
+(deftest eof-on-1-7-test
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir) {:keys [done out]} (start-read! e)]
+        (is (nil? (ev/send-eof! e)))
+        (Thread/sleep 100)
+        (is (zero? (stdin-count srv)))
+        (is (true? (ev/waiting-for-input? e)))
+        (is (= [(str (clj/eof-unsupported-message [1 7]) "\n")] (eof-notes @out)))
+        (ev/send-input! e "typed")
+        (is (= :ok (:status (deref done 2000 :timeout))))))))
+
+(deftest eof-note-once-per-connection-test
+  (with-project {}
+    (fn [_srv dir _]
+      (let [e (make dir) note (str (clj/eof-unsupported-message [1 7]) "\n")
+            r1 (start-read! e)]
+        (ev/send-eof! e)
+        (ev/send-eof! e)
+        (ev/send-input! e "a")
+        (deref (:done r1) 2000 :timeout)
+        (let [r2 (start-read! e)]
+          (ev/send-eof! e)
+          (ev/send-input! e "b")
+          (deref (:done r2) 2000 :timeout)
+          (is (= [note] (eof-notes @(:out r1))) "two presses in one read, one note")
+          (is (empty? (eof-notes @(:out r2))) "a second read on the same connection stays quiet"))
+        (connection/detach! e)
+        (let [r3 (start-read! e)]
+          (ev/send-eof! e)
+          (is (= [note] (eof-notes @(:out r3))) "a fresh connection notes again")
+          (ev/send-input! e "c")
+          (deref (:done r3) 2000 :timeout))))))
+
+(deftest eof-unknown-version-test
+  (with-project {:nrepl-version :none}
+    (fn [srv dir _]
+      (let [e (make dir) {:keys [done out]} (start-read! e)]
+        (ev/send-eof! e)
+        (Thread/sleep 100)
+        (is (zero? (stdin-count srv)))
+        (is (= [(str (clj/eof-unsupported-message nil) "\n")] (eof-notes @out)))
+        (ev/send-input! e "typed")
+        (deref done 2000 :timeout)))))
+
+(deftest eof-closed-conn-test
+  (with-project {:nrepl-version [1 8 0]}
+    (fn [srv dir _]
+      (let [e (make dir) {:keys [done]} (start-read! e)]
+        (fake/drop-connections! srv)
+        (is (nil? (ev/send-eof! e)))
+        (let [r (deref done 2000 :timeout)]
+          (is (not= :timeout r))
+          (is (some? r)))))))
 
 (deftest stop-during-read-test
   (with-project {}

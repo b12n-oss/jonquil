@@ -167,7 +167,9 @@
                     (= :interrupted outcome) (reply {"status" ["done" "interrupted"]})
                     :else
                     (let [line (str/replace (or @stdin-p "") #"\n$" "")]
-                      (reply {"ns" current "value" (pr-str line)})
+                      ;; an empty stdin is end-of-input: nREPL 1.8.0's
+                      ;; read-line answers nil, not "".
+                      (reply {"ns" current "value" (if (= "" @stdin-p) "nil" (pr-str line))})
                       (recur (next fs) current last-value)))))
 
               :else
@@ -246,7 +248,12 @@
     (if-not (live? stop-latch closed)
       :dropped
       (case (get m "op")
-        "describe" (reply {"ops" (zipmap (:ops opts jvm-ops) (repeat {})) "status" ["done"]})
+        "describe" (let [v (:nrepl-version opts [1 7 0])
+                         [major minor incr] (when (vector? v) v)]
+                     (reply (cond-> {"ops" (zipmap (:ops opts jvm-ops) (repeat {})) "status" ["done"]}
+                              (vector? v)
+                              (assoc "versions" {"nrepl" {"major" major "minor" minor "incremental" incr
+                                                          "version-string" (str major "." minor "." incr)}}))))
         "clone" (let [sid (str "fake-session-" (swap! counter inc))]
                   (swap! sessions assoc sid {:ns "user"})
                   (reply {"new-session" sid "status" ["done"]}))
@@ -336,6 +343,8 @@
 (defn start!
   "Starts a fake server on a free loopback port and returns it. opts:
   :ops       the ops describe advertises (default jvm-ops)
+  :nrepl-version [major minor incremental] describe reports under
+             \"versions\" (default [1 7 0]), or :none to leave \"versions\" out
   :answers   {form-pr-str printed-value}
   :fail-on   marker: that form fails with the measured ExceptionInfo
              shape, and the rest of its request is skipped

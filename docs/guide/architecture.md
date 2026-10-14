@@ -354,9 +354,14 @@ sends it and gives the server up to `:interrupt-timeout-ms` (1 s) to
 end it before Jonquil gives up and detaches instead, printing
 `clj/interrupt-failed-message`; without the op, or when it doesn't take
 in time, Jonquil detaches the same way. stdin sends a line through the
-live session and never closes it: nREPL 1.7.0 fails an empty `stdin` op
-with a `ClassCastException` rather than answering EOF, so `send-eof!` is
-a no-op (`clj/limitations`, P0.1 in the arc's own spike).
+live session. `connect!` reads the server's nREPL version from `describe`
+and keeps it in the evaluator state, and `send-eof!` sends an empty
+`stdin` op only when that version is 1.8.0 or later and a read is
+waiting. The waiting rule matters because 1.8.0 queues an EOF that
+arrives early and would end the next read with it. nREPL 1.7.0 fails an
+empty `stdin` op with a `ClassCastException`, so an older server, or one
+that reports no version, gets nothing sent and the console prints a note
+once per connection (`clj/limitations`, P0.1 in the arc's own spike).
 
 `complete` merges the server's own completions into the offline
 candidates, and `lookup` is backed by the server's own `lookup` op, with
