@@ -1038,5 +1038,5 @@
         (is (= :interrupted (:status (deref done 3000 :timeout))))
         (is (not-any? #(= "(+ 1 2)" (get % "code")) (fake/requests srv))
             "the user's request never went out")
-        (is (not-any? #(= (str clj/auto-require-failed-message "\n") %) (eof-notes @out))
+        (is (not-any? #(= (str clj/auto-require-failed-message "\n") %) (texts @out :system))
             "a Stop isn't reported as a failed require")))))
