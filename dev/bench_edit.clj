@@ -138,12 +138,17 @@
   (println (str "bench " measure " lines=" n " ms=" (format "%.1f" (double ms))))
   (flush))
 
-(defn- jump-ms [text]
+(defn- jump-ms
+  "Median jump-target time. Each timed call gets a fresh copy of text, built
+  before the timer starts: the tokenizer caches by identity, so a reused string
+  would time a cache hit, not the tokenise a real jump pays."
+  [text]
   (let [caret (+ 1 (str/last-index-of text (str "(" @jump-name " 1)")))
-        snap {:text text :caret caret :sel-start caret :sel-end caret}]
-    (when-not (help/jump-target snap nil)
+        snap-of (fn [t] {:text t :caret caret :sel-start caret :sel-end caret})]
+    (when-not (help/jump-target (snap-of text) nil)
       (println "bench jump: no target found, the measure is void"))
-    (median (repeatedly 3 (fn [] (timed (fn [] (help/jump-target snap nil))))))))
+    (median (repeatedly 3 (fn [] (let [fresh (str (StringBuilder. ^String text))]
+                                   (timed (fn [] (help/jump-target (snap-of fresh) nil)))))))))
 
 (defn- run-size [n]
   (let [text (text-of n)

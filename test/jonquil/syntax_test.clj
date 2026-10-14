@@ -17,7 +17,9 @@
 
 (deftest tokenize-equal-but-distinct-text-test
   (testing "an equal copy of the text recomputes an equal result"
-    (is (= (syntax/tokenize sample) (syntax/tokenize (String. ^String sample))))))
+    (let [copy (str (StringBuilder. ^String sample))]
+      (is (not (identical? copy sample)))
+      (is (= (syntax/tokenize sample) (syntax/tokenize copy))))))
 
 (deftest tokenize-nil-test
   (testing "nil still tokenises to an empty vector, not a cached value"
