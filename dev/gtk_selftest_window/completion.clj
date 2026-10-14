@@ -106,6 +106,43 @@
                                  {:candidate-count (count (:candidates st0)) :second-sym second-sym
                                   :h1 h1 :index1 (:index st1) :h2 h2 :text text :text-after-undo text-after-undo})))))))
 
+(defn row-completion-arrow-keeps-rows
+  "Open on \"(ma\", Down twice: the GtkListBoxRow at index 0 is the same
+  pointer as before (arrows select, they don't rebuild the list), the
+  selected index is 2 and the doc label names candidate 2. Rows 0 and 1
+  must compare unequal, and row 0 is held with g_object_ref while the keys
+  run: without the ref a rebuild can hand the new row 0 the freed row's
+  address, and the pointer `=` check passes against the old code."
+  [ui]
+  (go-row :completion-arrow-keeps-rows support/check
+    (on-gtk (let [ed (:editor ui) c (:completion ui) lb (:list-box c)]
+              (editor/set-text! ed "(ma")
+              (support/place-cursor! (:buf ed) 3)
+              (editor/handle-key! ed KEY-SPACE g/CONTROL-MASK)
+              (let [st0 (completion/state c)
+                    row0 (g/gtk-list-box-get-row-at-index lb 0)
+                    row1 (g/gtk-list-box-get-row-at-index lb 1)
+                    _ (g/g-object-ref row0)
+                    h1 (editor/handle-key! ed KEY-DOWN 0)
+                    h2 (editor/handle-key! ed KEY-DOWN 0)
+                    st2 (completion/state c)
+                    third-sym (some-> st0 :candidates (nth 2 nil) :symbol)
+                    row0-after (g/gtk-list-box-get-row-at-index lb 0)
+                    selected (g/gtk-list-box-get-selected-row lb)
+                    row2 (g/gtk-list-box-get-row-at-index lb 2)
+                    preview (g/label-text (:doc-label c))]
+                (g/g-object-unref row0)
+                (support/check :completion-arrow-keeps-rows
+                               (and (some? st0) (>= (count (:candidates st0)) 3)
+                                    (not= row0 row1)
+                                    (= 1 h1) (= 1 h2) (= 2 (:index st2))
+                                    (= row0 row0-after) (= selected row2)
+                                    (str/includes? preview (str "clojure.core/" third-sym)))
+                               {:candidate-count (count (:candidates st0)) :h1 h1 :h2 h2
+                                :index (:index st2) :row-distinct (not= row0 row1)
+                                :row0-kept (= row0 row0-after) :third-sym third-sym :preview preview})
+                (completion/close! c))))))
+
 (defn row-completion-tab-commits
   "Open, Tab: commits the selected (first) candidate the same way Enter
   does, and closes the popover."

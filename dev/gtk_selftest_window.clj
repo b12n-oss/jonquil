@@ -165,6 +165,7 @@
    completion/row-completion-single-inserts
    completion/row-completion-no-prefix
    completion/row-completion-navigate-commit
+   completion/row-completion-arrow-keeps-rows
    completion/row-completion-tab-commits
    completion/row-completion-keys-reach-editor
    completion/row-completion-closes-on-space
