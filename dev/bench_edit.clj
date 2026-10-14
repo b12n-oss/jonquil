@@ -7,9 +7,14 @@
     bench <measure> lines=<n> ms=<x>
   plan        median paint/paint-plan over the whole text
   stall-edit  longest single g_main_context_iteration in the 2000 ms after
-              inserting one character inside a symbol at line 10
-  stall-quote the same, inserting a double quote at line 10 (worst case:
-              everything below turns into a string)
+              inserting one character one character into the first defn name
+              in the first 40 lines of the pinned text
+  stall-quote the same, inserting a double quote there (the quote flips
+              string parity from that point on)
+  settle-stall-edit, settle-stall-quote
+              ms from the edit until :painted matches the buffer
+  A stall row whose repaint did not settle in the window prints
+  `bench <measure> lines=<n> VOID: ...` instead of a number.
   jump        median help/jump-target, caret on a use of a top-level name
               defined near the start, at the end of the text"
   (:require [clojure.string :as str]
@@ -95,8 +100,7 @@
 (defn- edit-offset
   "An offset one character into the name of the first (defn within the first
   40 lines: inside a :symbol token, in plain code with no ; earlier on its
-  line. Typing a quote here opens a string that swallows the rest of the
-  file, the worst case. Checked against the tokenizer; exits non-zero when
+  line. Typing a quote here flips string parity from there on. Checked against the tokenizer; exits non-zero when
   the position is not plain code."
   [text]
   (let [head (subs text 0 (line-offset text 40))
@@ -120,23 +124,64 @@
     (println "bench: warning, paint did not finish within 600 s"))
   (settle 500))
 
-(defn- stall
-  "Median over 3 repetitions of: reset to text, settle, place the caret at
-  offset, insert s the way typing does, pump for 2000 ms and take the
-  longest dispatching iteration."
-  [ed text offset s]
+(defn- settled?
+  "True when the baseline the tick keeps (:painted) is the buffer's text."
+  [ed]
+  (= (:text @(:painted ed)) (editor/editor-text ed)))
+
+(defn- stall-rep
+  "One repetition: reset to text, settle, place the caret at offset, insert s
+  the way typing does, then pump until window-ms has passed (and at least
+  until the repaint settles). Returns {:worst ms :settle ms :settled? bool},
+  worst the longest dispatching iteration, settle the time from the edit to
+  :painted matching the buffer."
+  [ed text offset s window-ms]
   (let [buf (:buf ed)]
-    (median
-     (repeatedly 3
-                 (fn []
-                   (fresh! ed text)
-                   (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
-                   (g/gtk-text-buffer-insert-interactive-at-cursor buf s -1 1)
-                   (:worst (pump-until (fn [] false) 2000)))))))
+    (fresh! ed text)
+    (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+    (let [t0 (now-ms)
+          _ (g/gtk-text-buffer-insert-interactive-at-cursor buf s -1 1)
+          r1 (pump-until (fn [] (settled? ed)) window-ms)
+          settle (- (now-ms) t0)
+          r2 (pump-until (fn [] false) (max 0 (- 2000 settle)))]
+      {:worst (max (:worst r1) (:worst r2))
+       :settle settle
+       :settled? (and (not (:timed-out? r1)) (settled? ed))})))
+
+(defn- stall
+  "Median over 3 repetitions of stall-rep. Returns {:worst :settle :settled?},
+  settled? true only when every repetition's repaint landed in the window.
+  Stops at the first repetition that did not settle."
+  [ed text offset s window-ms]
+  (let [reps (loop [acc []]
+               (let [r (stall-rep ed text offset s window-ms)
+                     acc (conj acc r)]
+                 (if (and (:settled? r) (< (count acc) 3)) (recur acc) acc)))]
+    {:worst (median (map :worst reps))
+     :settle (median (map :settle reps))
+     :settled? (every? :settled? reps)}))
 
 (defn- report [measure n ms]
   (println (str "bench " measure " lines=" n " ms=" (format "%.1f" (double ms))))
   (flush))
+
+(defn- report-stall
+  "Runs a stall row, lengthening the window until the repaint settles, and
+  prints the stall and settle rows. A row that never settles prints VOID
+  and no number."
+  [ed n measure text offset s]
+  (let [r (loop [ws [2000 10000 30000]]
+            (let [r (stall ed text offset s (first ws))]
+              (if (or (:settled? r) (empty? (rest ws)))
+                (assoc r :window (first ws))
+                (recur (rest ws)))))]
+    (if (:settled? r)
+      (do (when (> (:window r) 2000)
+            (println (str "bench note: " measure " lines=" n " needed a " (:window r) " ms window")))
+          (report measure n (:worst r))
+          (report (str "settle-" measure) n (:settle r)))
+      (do (println (str "bench " measure " lines=" n " VOID: repaint did not settle in the window"))
+          (flush)))))
 
 (defn- jump-ms
   "Median jump-target time. Each timed call gets a fresh copy of text, built
@@ -160,8 +205,8 @@
     (fresh! ed text)
     (report "plan" n (median (repeatedly (if (> n 5000) 3 5) (fn [] (timed (fn [] (paint/paint-plan text)))))))
     (let [off (edit-offset text)]
-      (report "stall-edit" n (stall ed text off "x"))
-      (report "stall-quote" n (stall ed text off "\"")))
+      (report-stall ed n "stall-edit" text off "x")
+      (report-stall ed n "stall-quote" text off "\""))
     (report "jump" n (jump-ms text))
     (window-destroy* win)
     (settle 200)))
@@ -175,7 +220,7 @@
         ed (editor/make-editor)]
     (g/gtk-window-set-child win (:scroll ed))
     (g/gtk-window-present win)
-    (stall ed text (edit-offset text) "x")
+    (stall ed text (edit-offset text) "x" 2000)
     (window-destroy* win)
     (settle 200)))
 

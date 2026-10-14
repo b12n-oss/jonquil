@@ -427,7 +427,8 @@
   time, each chunk its own on-gui! turn, nearest the caret first so the
   visible region colours first. A later paint-async! or set-text!
   supersedes one still in flight: every turn checks the generation it
-  belongs to. (:paint ed) reads {:gen n :done? bool}. Call it on the GTK
+  belongs to. (:paint ed) reads {:gen n :done? bool :full-gen n :edit-gen n
+  :profile p}. Call it on the GTK
   thread, right after set-text! and placing the caret. A throw is
   reported through set-error-fn!'s reporter as \"; paint: ...\".
 
@@ -448,8 +449,14 @@
   paint is already on its way (full-paint-pending?). An edit while it runs
   supersedes it too, since its spans carry the old text's offsets: the
   rest is dropped, the baseline stays nil and :dirty-at is re-armed, so the
-  next tick repaints."
-  [ed]
+  next tick repaints.
+
+  The first chunk gets its own turn (:defer-first? true), so the colours
+  the paint clears are not on screen for a frame with nothing applied. The
+  tick's fallback passes {:defer-first? false}: typing that supersedes a
+  chunked apply would otherwise show a frame with every colour removed."
+  ([ed] (paint-async! ed {:defer-first? true}))
+  ([ed {:keys [defer-first?]}]
   (let [{:keys [buf]} ed
         text (g/buffer-text buf)
         caret (g/cursor-offset buf)
@@ -484,10 +491,10 @@
                                                      (set-painted! ed text plan)))
                                           :superseded! superseded!
                                           :fail! report
-                                          :defer-first? true}))
+                                          :defer-first? defer-first?}))
                        (catch :default e (report e))))))
         (catch :default e (report e))))
-    nil))
+    nil)))
 
 (defn- full-paint-pending?
   "True while a paint-async! is in flight that will record the baseline
@@ -559,7 +566,7 @@
                  (catch :default e (fail! e))))))
           (catch :default e (on-gui! (fn [] (fail! e)))))))
     (when-not (full-paint-pending? ed)
-      (paint-async! ed))))
+      (paint-async! ed {:defer-first? false}))))
 
 (defn- tick! [ed]
   ;; The g_timeout_add that calls this every 20ms outlives the editor's own
@@ -1049,6 +1056,9 @@
     ;; read 1, 4 and 9; `changed` then read 9 and 6. len is in bytes, so it
     ;; goes unused. Callbacks: (buf, GtkTextIter*, char*, int, data) and
     ;; (buf, GtkTextIter* start, GtkTextIter* end, data).
+    ;; Any other way of inserting into the buffer (insert-paintable,
+    ;; insert-child-anchor) must also narrow :edit-bounds, or the tick
+    ;; repaints the wrong range and colours go wrong.
     (g/g-signal-connect-data buf "insert-text"
                              (callable (fn [_buf iter _text _len _data]
                                          (when @(:edit-bounds ed)

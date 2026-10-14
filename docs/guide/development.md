@@ -348,7 +348,11 @@ size (default 200, 2000, 8000 and 20000 lines of Jonquil's own source,
 cycled) it prints one `bench <measure> lines=<n> ms=<x>` line per measure:
 `plan` (the median `paint-plan` run), `stall-edit` and `stall-quote` (the
 longest single main-loop iteration in the 2 seconds after typing a letter, or
-a double quote, at line 10), and `jump` (the median jump-to-definition). It
+a double quote, one character into the first `defn` name in the first 40
+lines of the pinned text; the quote flips string parity from there on),
+`settle-stall-edit` and `settle-stall-quote` (the time until the repaint has landed; a
+stall row whose repaint did not settle prints `VOID` instead of a number),
+and `jump` (the median jump-to-definition). It
 opens and closes a real GTK window per size, so leave the keyboard alone
 while it runs.
 
