@@ -632,7 +632,8 @@
   test -- with a short plain text. No string tag may ever land on it, and
   the superseded generation must never finish. :done? belongs to the
   current generation, and a later tick paint of the new text may finish, so
-  only :done? on the old generation itself would be a bug."
+  the row polls :paint every 20 ms for a second and fails if :done? is ever
+  true while :gen is still the old generation's."
   [_ed]
   (go-row :read-only-off-supersedes-paint check
     (with-fresh-editor
@@ -647,15 +648,20 @@
                                 (editor/set-read-only! ed false)
                                 (g/gtk-text-buffer-set-text (:buf ed) short-text -1)
                                 g))
-              _ (<! (timeout 1000))
+              old-done? (loop [n 0 seen false]
+                          (if (= n 50)
+                            seen
+                            (let [p (on-gtk @(:paint ed))]
+                              (<! (timeout 20))
+                              (recur (inc n) (or seen (and (= old-gen (:gen p)) (:done? p)))))))
               r (on-gtk {:gen-now (:gen @(:paint ed))
-                         :old-done? (:done? @(:paint ed))
+                         :old-done? old-done?
                          :text (editor/editor-text ed)
                          :str-anywhere (some (fn [o] (g/has-tag-at? (:buf ed) o string-tag))
                                              (range 0 (count short-text)))})]
           (on-gtk (check :read-only-off-supersedes-paint
                          (and (not= old-gen (:gen-now r))
-                              (not (and (= old-gen (:gen-now r)) (:old-done? r)))
+                              (not (:old-done? r))
                               (= short-text (:text r))
                               (not (:str-anywhere r)))
                          (assoc r :old-gen old-gen))))))))
@@ -789,7 +795,9 @@
   edits cover a char inside a symbol, ( typed just before an existing (, a
   \" opening a string, its deletion, a newline, a 200-char paste, an undo,
   a deletion across brackets, a ; commenting out a line, an opened #{, a
-  deletion at offset 0 and an unclosed form typed at the end."
+  deletion at offset 0 and an unclosed form typed at the end. No full
+  repaint may run during the edits (the :full-gen paint-async! records stays
+  put), so the diff path did the work."
   [_ed]
   (go-row :incremental-matches-full check
     (with-fresh-editor
@@ -815,6 +823,7 @@
                      [:unclosed-at-end (fn [] (ins! (count (editor/editor-text ed)) "(foo \"bar"))]]
               _ (on-gtk (editor/set-text! ed text) (editor/paint-async! ed))
               ready? (await-until 5000 20 #(painted-settled? ed))
+              full-gen (on-gtk (:full-gen @(:paint ed)))
               results (loop [es edits acc []]
                         (if-let [[id f] (first es)]
                           (do (on-gtk (f))
@@ -822,14 +831,18 @@
                                     bad (compare-with-full ed (fn [t] (range (count t))))]
                                 (recur (rest es) (conj acc {:edit id :settled settled? :mismatches bad}))))
                           acc))
-              failed (remove (fn [r] (and (:settled r) (empty? (:mismatches r)))) results)]
-          (check :incremental-matches-full (and ready? (empty? failed))
-                 {:ready ready? :edits (count results) :failed (vec failed)}))))))
+              failed (remove (fn [r] (and (:settled r) (empty? (:mismatches r)))) results)
+              full-gen-after (on-gtk (:full-gen @(:paint ed)))]
+          (check :incremental-matches-full (and ready? (empty? failed) (= full-gen full-gen-after))
+                 {:ready ready? :edits (count results) :failed (vec failed)
+                  :full-gen full-gen :full-gen-after full-gen-after}))))))
 
 (defn- row-incremental-supersede
-  "30 chars typed 5 ms apart into a 20,000-line buffer, each landing while
-  earlier repaints may still be in flight. Once settled, the tags match a
-  full repaint at 2,000 sampled offsets and around the caret."
+  "30 chars typed 150 ms apart into a 20,000-line buffer. Each lands after
+  its predecessor's 60 ms debounce but while that tick's plan future
+  (~650 ms) is still in flight, so at least one tick result is dropped
+  (:repaint-drops). Once settled, the tags match a full repaint at 2,000
+  sampled offsets and around the caret."
   [_ed]
   (go-row :incremental-supersede check
     (with-fresh-editor
@@ -840,17 +853,20 @@
               _ (on-gtk (editor/set-text! ed text) (editor/paint-async! ed))
               ready? (await-until 60000 50 #(painted-settled? ed))
               start (line-start text 10)
-              _ (on-gtk (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+              drops0 (on-gtk (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                             @(:repaint-drops ed))
               _ (loop [cs (seq typed)]
                   (when-let [c (first cs)]
                     (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor buf (str c) -1 1))
-                    (<! (timeout 5))
+                    (<! (timeout 150))
                     (recur (rest cs))))
               settled? (await-until 60000 50 #(painted-settled? ed))
               caret (on-gtk (g/cursor-offset buf))
-              bad (compare-with-full ed (sampled-offsets caret))]
-          (check :incremental-supersede (and ready? settled? (empty? bad))
-                 {:ready ready? :settled settled? :typed (count typed) :mismatches bad}))))))
+              bad (compare-with-full ed (sampled-offsets caret))
+              drops (- (on-gtk @(:repaint-drops ed)) drops0)]
+          (check :incremental-supersede (and ready? settled? (pos? drops) (empty? bad))
+                 {:ready ready? :settled settled? :typed (count typed) :drops drops
+                  :mismatches bad}))))))
 
 (defn- row-incremental-open-string
   "A \" typed at line 10 of a 2,000-line buffer turns what follows into
@@ -883,6 +899,40 @@
           (check :incremental-open-string
                  (and ready? first? visible? (<= ms 200) settled? (empty? bad))
                  {:ready ready? :first-chunk first? :visible visible? :visible-ms ms
+                  :settled settled? :mismatches bad}))))))
+
+(defn- row-paint-async-drops-after-edit
+  "An edit while a paint-async! is in flight drops the rest of that paint:
+  its spans carry the old text's offsets. Paints 8,000 lines with the
+  caret at 0, waits for the first chunk, then inserts 3 chars at offset 0
+  in the next turn. 40 ms later, before the edit's 60 ms debounce can
+  start the tick, no :string tag may sit on an offset that is a string
+  only in the old text: GTK moved the tags already applied along with
+  their chars, so a :string there can only come from a stale chunk. Once
+  settled, the tags match a full repaint at the sampled offsets."
+  [_ed]
+  (go-row :paint-async-drops-after-edit check
+    (with-fresh-editor
+      (fn [ed]
+        (let [buf (:buf ed)
+              text (big-text 8000)
+              new-text (str "xx " text)
+              string-tag (get (:tags ed) :string)
+              str-offs (fn [t] (set (mapcat (fn [[k s e]] (when (= k :string) (range s e)))
+                                            (paint/paint-plan t))))
+              old-only (sort (remove (str-offs new-text) (str-offs text)))
+              _ (on-gtk (editor/set-text! ed text)
+                        (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                        (editor/paint-async! ed))
+              first? (await-until 10000 2 #(g/has-tag-at? buf (inc (str/index-of text "\"")) string-tag))
+              _ (on-gtk (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a "xx " -1))))
+              _ (<! (timeout 40))
+              stale (on-gtk (vec (take 5 (filter (fn [o] (g/has-tag-at? buf o string-tag)) old-only))))
+              settled? (await-until 30000 20 #(painted-settled? ed))
+              bad (compare-with-full ed (sampled-offsets 0))]
+          (check :paint-async-drops-after-edit
+                 (and first? (seq old-only) (empty? stale) settled? (empty? bad))
+                 {:first-chunk first? :old-only (count old-only) :stale stale
                   :settled settled? :mismatches bad}))))))
 
 (def ^:private row-fns
@@ -918,7 +968,8 @@
    row-editor-dirty-roundtrip
    row-incremental-matches-full
    row-incremental-supersede
-   row-incremental-open-string])
+   row-incremental-open-string
+   row-paint-async-drops-after-edit])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

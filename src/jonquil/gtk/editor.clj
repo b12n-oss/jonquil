@@ -393,29 +393,33 @@
 (defn- paint-chunked!
   "Removes our own tags over [a b), then applies spans PAINT-CHUNK at a
   time: the first chunk in this same GTK turn, so a small re-tag never
-  shows uncoloured text, and each later chunk in its own on-gui! turn. A
-  later turn first asks (current?), and on false drops the rest and calls
+  shows uncoloured text, and each later chunk in its own on-gui! turn.
+  With :defer-first? the first chunk also gets its own turn, which keeps a
+  full-buffer remove pass and a chunk out of the same turn. A later turn
+  first asks (current?), and on false drops the rest and calls
   (superseded!). (done!) runs in the turn that lands the last chunk. A
   throw in a later turn goes to (fail! e). Shared by paint-async!'s full
   paint and the tick's incremental one. Call it on the GTK thread."
-  [ed [a b] spans {:keys [current? done! superseded! fail!]}]
-  (let [{:keys [buf tags]} ed
-        step (fn step [chunks]
-               (doseq [[k s e] (first chunks)]
-                 (when-let [tag (get tags k)]
-                   (g/with-iters* buf s e (fn [i j] (g/gtk-text-buffer-apply-tag buf tag i j)))))
-               (if-let [more (next chunks)]
-                 (on-gui! (fn []
-                            (try
-                              (if (current?) (step more) (superseded!))
-                              (catch :default e (fail! e)))))
-                 (done!)))]
+  [ed [a b] spans {:keys [current? done! superseded! fail! defer-first?]}]
+  (letfn [(later [chunks]
+            (on-gui! (fn []
+                       (try
+                         (if (current?) (step chunks) (superseded!))
+                         (catch :default e (fail! e))))))
+          (step [chunks]
+            (doseq [[k s e] (first chunks)]
+              (when-let [tag (get (:tags ed) k)]
+                (g/with-iters* (:buf ed) s e (fn [i j] (g/gtk-text-buffer-apply-tag (:buf ed) tag i j)))))
+            (if-let [more (next chunks)]
+              (later more)
+              (done!)))]
     ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
     ;; remove_all_tags -- a tag another namespace applies over the same
     ;; range (jonquil.gtk.find-bar's search-match) must survive a repaint.
-    (doseq [tag (vals tags)]
-      (g/with-iters* buf a b (fn [i j] (g/gtk-text-buffer-remove-tag buf tag i j))))
-    (step (partition-all PAINT-CHUNK spans))))
+    (doseq [tag (vals (:tags ed))]
+      (g/with-iters* (:buf ed) a b (fn [i j] (g/gtk-text-buffer-remove-tag (:buf ed) tag i j))))
+    (let [chunks (partition-all PAINT-CHUNK spans)]
+      (if defer-first? (later chunks) (step chunks)))))
 
 (defn paint-async!
   "Repaints ed without holding the GTK thread for the whole text:
@@ -441,7 +445,10 @@
   baseline when its last chunk lands, unless an edit came in meanwhile
   (:edit-gen moved), since its text would then be stale. (:paint ed) also
   carries :full-gen, :edit-gen and :profile, which tell the tick a full
-  paint is already on its way (full-paint-pending?)."
+  paint is already on its way (full-paint-pending?). An edit while it runs
+  supersedes it too, since its spans carry the old text's offsets: the
+  rest is dropped, the baseline stays nil and :dirty-at is re-armed, so the
+  next tick repaints."
   [ed]
   (let [{:keys [buf]} ed
         text (g/buffer-text buf)
@@ -453,7 +460,12 @@
                                          {:gen n :done? false :full-gen n
                                           :edit-gen edit-gen :profile profile}))))
         len (count text)
-        current? (fn [] (and (= gen (:gen @(:paint ed))) (not @(:destroyed? ed))))
+        current? (fn [] (and (= gen (:gen @(:paint ed)))
+                             (= edit-gen @(:edit-gen ed))
+                             (not @(:destroyed? ed))))
+        ;; An edit, a newer paint or a destroy drops the rest. The baseline
+        ;; is already nil, so re-arming the tick makes it repaint.
+        superseded! (fn [] (reset! (:dirty-at ed) (System/currentTimeMillis)))
         report (fn [e] (on-gui! (fn [] (report-paint-error! ed e))))]
     (forget-painted! ed)
     (future
@@ -462,15 +474,17 @@
               spans (nearest-first caret plan)]
           (on-gui! (fn []
                      (try
-                       (when (current?)
+                       (if-not (current?)
+                         (superseded!)
                          (paint-chunked! ed [0 len] spans
                                          {:current? current?
                                           :done! (fn []
                                                    (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))
                                                    (when (= edit-gen @(:edit-gen ed))
                                                      (set-painted! ed text plan)))
-                                          :superseded! (fn [] nil)
-                                          :fail! report}))
+                                          :superseded! superseded!
+                                          :fail! report
+                                          :defer-first? true}))
                        (catch :default e (report e))))))
         (catch :default e (report e))))
     nil))
@@ -513,7 +527,7 @@
           req (swap! (:repaint-req ed) inc)
           rearm! (fn [] (reset! (:dirty-at ed) (System/currentTimeMillis)))
           fail! (fn [e]
-                  (report-paint-error! ed e)
+                  (when-not @(:destroyed? ed) (report-paint-error! ed e))
                   (forget-painted! ed)
                   (rearm!))
           current? (fn [] (and (= edit-gen @(:edit-gen ed)) (not @(:destroyed? ed))))]
@@ -527,12 +541,13 @@
                (try
                  (cond
                    (not (and (current?) (identical? painted @(:painted ed))))
-                   (when (= req @(:repaint-req ed)) (rearm!))
+                   (do (swap! (:repaint-drops ed) inc)
+                       (when (= req @(:repaint-req ed)) (rearm!)))
 
                    (nil? diff) (set-painted! ed text plan)
 
                    :else
-                   (let [gen (:gen (swap! (:paint ed) (fn [p] {:gen (inc (:gen p)) :done? false})))]
+                   (let [gen (:gen (swap! (:paint ed) (fn [p] (assoc p :gen (inc (:gen p)) :done? false))))]
                      (forget-painted! ed)
                      (paint-chunked! ed (:range diff) spans
                                      {:current? (fn [] (and (current?) (= gen (:gen @(:paint ed)))))
@@ -1000,6 +1015,8 @@
             :edit-gen (atom 0)
             :edit-bounds (atom nil)
             :repaint-req (atom 0)
+            ;; Counts the tick's dropped results; only the self-test reads it.
+            :repaint-drops (atom 0)
             ;; True once view's own "destroy" signal has fired (connected
             ;; once, below). A paint (paint-async!) or the 20ms tick
             ;; (tick!) can outlive the editor's own window -- F12 into a
