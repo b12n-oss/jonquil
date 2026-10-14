@@ -110,9 +110,13 @@
   "True when the buffer's text differs from the last-saved text. Computed
   live against the buffer on every call, never cached, so it is correct
   immediately after set-text!/mark-saved! and can't be fooled by a
-  tag-only repaint."
+  tag-only repaint. A char-count mismatch answers true without copying the
+  buffer, which is what keeps the per-edit tick cheap on large files."
   [ed]
-  (not= (editor-text ed) @(:saved-text ed)))
+  (let [saved @(:saved-text ed)]
+    (if (not= (g/gtk-text-buffer-get-char-count (:buf ed)) (count saved))
+      true
+      (not= (editor-text ed) saved))))
 
 (defn on-dirty-changed!
   "Registers f to be called with the new dirty? value, on the GTK thread,

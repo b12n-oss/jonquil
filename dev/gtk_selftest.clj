@@ -696,6 +696,31 @@
                (and (false? done?) (true? destroyed?))
                {:done done? :destroyed destroyed?})))))
 
+(defn- row-editor-dirty-roundtrip [ed]
+  (go-row :editor-dirty-roundtrip check
+    (let [buf (:buf ed)
+          text "(+ 1 2)"
+          end (count text)
+          place-end! (fn [] (g/with-iters* buf end end (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+          r (on-gtk
+             (editor/set-text! ed text)
+             (place-end!)
+             (g/gtk-text-buffer-insert-interactive-at-cursor buf "x" -1 1)
+             (let [typed (editor/dirty? ed)]
+               (g/with-iters* buf end (inc end) (fn [a b] (g/gtk-text-buffer-delete-interactive buf a b 1)))
+               (let [deleted (editor/dirty? ed)
+                     text-deleted (editor/editor-text ed)]
+                 (place-end!)
+                 (g/gtk-text-buffer-insert-interactive-at-cursor buf "y" -1 1)
+                 (let [retyped (editor/dirty? ed)]
+                   (editor/mark-saved! ed)
+                   {:typed typed :deleted deleted :text-deleted text-deleted
+                    :retyped retyped :saved (editor/dirty? ed)}))))]
+      (on-gtk (check :editor-dirty-roundtrip
+                     (and (true? (:typed r)) (false? (:deleted r))
+                          (true? (:retyped r)) (false? (:saved r)))
+                     r)))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -725,7 +750,8 @@
    row-paint-async-keeps-gtk-responsive
    row-paint-async-superseded
    row-read-only-off-supersedes-paint
-   row-paint-async-stops-on-destroy])
+   row-paint-async-stops-on-destroy
+   row-editor-dirty-roundtrip])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
