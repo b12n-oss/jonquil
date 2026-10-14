@@ -14,6 +14,7 @@
               defined near the start, at the end of the text"
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
+            [jolt.process :as p]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.help :as help]
@@ -28,8 +29,19 @@
   ["src/jonquil/syntax.clj" "src/jonquil/gtk/editor.clj"
    "src/jonquil/gtk/window.clj" "src/jonquil/nrepl/jvm.clj"])
 
+;; Corpus pinned to the commit the "before" numbers were measured on, so the comparison stays like for like.
+(def ^:private corpus-commit "6fd9133")
+
+(defn- corpus-text
+  "Contents of path at corpus-commit, from git."
+  [path]
+  (let [r (p/sh "git" "show" (str corpus-commit ":" path))]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "bench: cannot read " path " at " corpus-commit) {:out (:out r)})))
+    (:out r)))
+
 (def ^:private source-lines
-  (delay (str/split-lines (apply str (map (fn [f] (str (slurp f) "\n")) sources)))))
+  (delay (str/split-lines (apply str (map (fn [f] (str (corpus-text f) "\n")) sources)))))
 
 (def ^:private jump-name
   (delay (some (fn [l] (second (re-find (re-pattern "^\\(defn-? ([^\\s\\[]+)") l)))
