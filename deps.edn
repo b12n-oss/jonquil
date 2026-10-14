@@ -63,6 +63,10 @@
   ;; P1.T4: a launch with file and folder arguments (jonquil.main/gtk-argv).
   :selftest-args {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-args"]}
+  ;; bb bench:edit [sizes...]: editing-stall benchmark on large files (opens
+  ;; a real window per size).
+  :bench {:extra-paths ["dev"]
+          :main-opts ["-m" "bench-edit"]}
   ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
   ;; one GIF) for the guide, driving jonquil.main/start! the same way
   ;; :selftest-window does.

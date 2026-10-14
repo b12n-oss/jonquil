@@ -341,6 +341,17 @@ push, pull request, or schedule trigger; Jonquil is a private repo for now,
 so the workflow only runs when triggered by hand, from the Actions tab or
 `gh workflow run lint.yml`.
 
+## Benchmark
+
+`bb bench:edit [sizes...]` times what typing costs in a large file. For each
+size (default 200, 2000, 8000 and 20000 lines of Jonquil's own source,
+cycled) it prints one `bench <measure> lines=<n> ms=<x>` line per measure:
+`plan` (the median `paint-plan` run), `stall-edit` and `stall-quote` (the
+longest single main-loop iteration in the 2 seconds after typing a letter, or
+a double quote, at line 10), and `jump` (the median jump-to-definition). It
+opens and closes a real GTK window per size, so leave the keyboard alone
+while it runs.
+
 ## Upstream
 
 `bb upstream:diff` lists the upstream DrClojure commits since `UPSTREAM_PIN`

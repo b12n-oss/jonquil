@@ -254,6 +254,7 @@
      (row "app:install" "install Jonquil: ~/Applications on macOS, ~/.local/share on Linux (macOS and Linux)")
      (row "app:uninstall" "remove what app:install put in place (macOS and Linux)")
      (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
+     (row "bench:edit [sizes...]" "time editing stalls on large files (opens a real window per size)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
@@ -296,6 +297,8 @@
             :task (shell "jolt" "-M:test" "--live-clj")}
   test:jank {:doc "Live jank tests: launch a real jank repl (JONQUIL_JANK or any jank on PATH; skips without one)"
              :task (shell "jolt" "-M:test" "--live-jank")}
+  bench:edit {:doc "Benchmark editing stalls on large files; opens a real window per size (default sizes 200 2000 8000 20000)"
+              :task (apply shell "jolt" "-M:bench" *command-line-args*)}
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
