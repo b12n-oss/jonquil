@@ -33,11 +33,7 @@
       "|(\\^[-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#:]+)"            ;; Group 8: metadata tag
       "|([-_a-zA-Z\\p{L}.!$%&*+/<=>?][-_a-zA-Z0-9\\p{L}\\p{N}.!$%&*+/<=>?#]*)"))) ;; Group 9: symbol
 
-(defn tokenize
-  "Scans `text` and returns a vector of tuples `[token-type start end]`.
-   Token types include:
-   `:comment`, `:regex`, `:string`, `:char`, `:keyword`, `:number`,
-   `:bracket`, `:metatag`, `:special-form`, `:builtin`, `:constant`, `:symbol`."
+(defn- tokenize*
   [^String text]
   (if (or (nil? text) (zero? (.length text)))
     []
@@ -66,6 +62,23 @@
           (conj! results [tok-type start end])))
       (persistent! results))))
 
+;; One entry, [text result], for the last string tokenized. Matched by identity.
+(def ^:private tokenize-last (atom nil))
+
+(defn tokenize
+  "Scans `text` and returns a vector of tuples `[token-type start end]`.
+   Token types include:
+   `:comment`, `:regex`, `:string`, `:char`, `:keyword`, `:number`,
+   `:bracket`, `:metatag`, `:special-form`, `:builtin`, `:constant`, `:symbol`.
+   Reuses the last result when called again with the identical string object."
+  [^String text]
+  (let [[last-text last-result] @tokenize-last]
+    (if (and (some? text) (identical? last-text text))
+      last-result
+      (let [result (tokenize* text)]
+        (reset! tokenize-last [text result])
+        result))))
+
 ;; --- Style Definitions ---
 
 
@@ -75,12 +88,7 @@
 (def close->open {\) \(, \] \[, \} \{})
 
 
-(defn compute-brackets
-  "Analyzes brackets in `text`, skipping comments, strings, regexes, and characters.
-   Returns a map with:
-   - `:bracket-tokens`: vector of `[start end depth type]` (:open, :close, :unmatched)
-   - `:matches`: map of `pos -> match-pos`
-   - `:unmatched`: set of unmatched bracket positions"
+(defn- compute-brackets*
   [^String text]
   (if (or (nil? text) (empty? text))
     {:bracket-tokens [] :matches {} :unmatched #{}}
@@ -116,6 +124,24 @@
        :matches (into {} matches)
        :unmatched (into #{} unmatched)})))
 
+
+;; One entry, [text result], for the last text analysed. Matched by identity.
+(def ^:private compute-brackets-last (atom nil))
+
+(defn compute-brackets
+  "Analyzes brackets in `text`, skipping comments, strings, regexes, and characters.
+   Returns a map with:
+   - `:bracket-tokens`: vector of `[start end depth type]` (:open, :close, :unmatched)
+   - `:matches`: map of `pos -> match-pos`
+   - `:unmatched`: set of unmatched bracket positions
+   Reuses the last result when called again with the identical string object."
+  [^String text]
+  (let [[last-text last-result] @compute-brackets-last]
+    (if (and (some? text) (identical? last-text text))
+      last-result
+      (let [result (compute-brackets* text)]
+        (reset! compute-brackets-last [text result])
+        result))))
 
 ;; --- Symbol Analysis & Navigation ---
 
