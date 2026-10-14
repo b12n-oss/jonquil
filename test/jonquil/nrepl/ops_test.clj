@@ -104,3 +104,14 @@
   (is (= "The Jolt runtime exited before this evaluation finished."
          (:error-text (ops/eval-result [{:status ["done" "jonquil-disconnected"]}] false))))
   (is (= "Gone." (:error-text (ops/eval-result [{:status ["done" "jonquil-disconnected"]}] false "Gone.")))))
+
+(deftest nrepl-version-test
+  (let [reply (fn [v] [{:versions {"nrepl" v} :status ["done"]}])]
+    (is (= [1 8] (ops/nrepl-version (reply {"major" 1 "minor" 8 "incremental" 0 "version-string" "1.8.0"}))))
+    (is (= [1 7] (ops/nrepl-version (reply {"major" 1 "minor" 7 "incremental" 0 "version-string" "1.7.0"}))))
+    (is (= [2 0] (ops/nrepl-version (reply {"major" 2 "minor" 0}))))
+    (is (nil? (ops/nrepl-version [{:status ["done"]}])) "no versions")
+    (is (nil? (ops/nrepl-version [{:versions {"clojure" {"major" 1}} :status ["done"]}])) "no nrepl entry")
+    (is (nil? (ops/nrepl-version (reply {"major" "1" "minor" "8"}))) "string values")
+    (is (nil? (ops/nrepl-version (reply {"major" 1}))) "minor missing")
+    (is (nil? (ops/nrepl-version :timeout)) "request-sync's non-vector result")))

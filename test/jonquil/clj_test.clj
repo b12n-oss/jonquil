@@ -16,7 +16,7 @@
   (is (= "Lost the connection to the nREPL server." clj/lost-connection))
   (is (= ["Jonquil attaches to a server you started: it never starts or stops the JVM."
           "Reset on Run isn't available: this is your own JVM, so Jonquil doesn't unload namespaces in it."
-          "Stdin can't be closed: an empty stdin fails on nREPL 1.7.0, so a read waits for a line."
+          "Stdin closes only on nREPL 1.8.0 or later: on older servers a read waits for a line."
           "Output printed from other threads after an evaluation finishes isn't shown."]
          clj/limitations)))
 
@@ -67,3 +67,17 @@
   (is (not (clj/need-input? {:ns "user" :value "3"})))
   (is (= "typed\n" (clj/stdin-line "typed")))
   (is (= "typed\n" (clj/stdin-line "typed\n"))))
+
+(deftest stdin-eof-gate-test
+  (is (true? (clj/stdin-eof? [1 8])))
+  (is (true? (clj/stdin-eof? [1 9])))
+  (is (true? (clj/stdin-eof? [2 0])))
+  (is (false? (clj/stdin-eof? [1 7])))
+  (is (false? (clj/stdin-eof? [0 9])))
+  (is (false? (clj/stdin-eof? nil))))
+
+(deftest eof-unsupported-message-test
+  (is (= "; This server runs nREPL 1.7, which can't close stdin. EOF needs nREPL 1.8 or later, so the read keeps waiting for a line."
+         (clj/eof-unsupported-message [1 7])))
+  (is (= "; This server runs an nREPL older than 1.8, or one that doesn't report its version, so it can't close stdin. The read keeps waiting for a line."
+         (clj/eof-unsupported-message nil))))
