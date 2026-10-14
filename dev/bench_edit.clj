@@ -5,7 +5,7 @@
   Per size (default 200 2000 8000 20000 lines of this repo's own source,
   cycled) it prints one line per measure:
     bench <measure> lines=<n> ms=<x>
-  plan        median paint/paint-plan over the whole text
+  plan        median paint/paint-plan over a fresh copy of the whole text
   stall-edit  longest single g_main_context_iteration in the 2000 ms after
               inserting one character one character into the first defn name
               in the first 40 lines of the pinned text
@@ -125,9 +125,20 @@
   (settle 500))
 
 (defn- settled?
-  "True when the baseline the tick keeps (:painted) is the buffer's text."
+  "True when the baseline the tick keeps (:painted) is the buffer's text. Copies
+  the whole buffer, so it runs once per repetition, after the pump."
   [ed]
   (= (:text @(:painted ed)) (editor/editor-text ed)))
+
+(defn- repainted?
+  "Cheap settle check for inside the pump: :painted is a new baseline (not the
+  one captured before the edit) whose text has the buffer's length. The full
+  text copy would starve the repaint it is waiting for."
+  [ed before]
+  (let [p @(:painted ed)]
+    (boolean (and p
+                  (not (identical? p before))
+                  (= (count (:text p)) (g/gtk-text-buffer-get-char-count (:buf ed)))))))
 
 (defn- stall-rep
   "One repetition: reset to text, settle, place the caret at offset, insert s
@@ -139,9 +150,10 @@
   (let [buf (:buf ed)]
     (fresh! ed text)
     (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
-    (let [t0 (now-ms)
+    (let [before @(:painted ed)
+          t0 (now-ms)
           _ (g/gtk-text-buffer-insert-interactive-at-cursor buf s -1 1)
-          r1 (pump-until (fn [] (settled? ed)) window-ms)
+          r1 (pump-until (fn [] (repainted? ed before)) window-ms)
           settle (- (now-ms) t0)
           r2 (pump-until (fn [] false) (max 0 (- 2000 settle)))]
       {:worst (max (:worst r1) (:worst r2))
@@ -203,7 +215,8 @@
     (g/gtk-window-set-child win (:scroll ed))
     (g/gtk-window-present win)
     (fresh! ed text)
-    (report "plan" n (median (repeatedly (if (> n 5000) 3 5) (fn [] (timed (fn [] (paint/paint-plan text)))))))
+    (report "plan" n (median (repeatedly (if (> n 5000) 3 5) (fn [] (let [fresh (str (StringBuilder. ^String text))]
+                                                               (timed (fn [] (paint/paint-plan fresh))))))))
     (let [off (edit-offset text)]
       (report-stall ed n "stall-edit" text off "x")
       (report-stall ed n "stall-quote" text off "\""))
