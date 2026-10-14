@@ -8,8 +8,9 @@
 
   Every function reads an evaluator's :state atom, whose shape is the
   evaluator record's own: at least :running, :conn, :connecting and
-  :session, plus whatever dialect-specific keys that dialect's connect
-  policy's :on-connect adds on a successful connect (:session-ns and
+  :session (and :ops and :nrepl-version, the describe reply's op names
+  and [major minor] or nil, which every successful connect! sets), plus
+  whatever dialect-specific keys that dialect's connect policy's :on-connect adds on a successful connect (:session-ns and
   :fresh? for cljd).
 
   Connecting happens on demand, when an evaluation finds no live
@@ -153,7 +154,8 @@
                             sid (let [[_ new] (swap-vals! state
                                                           (fn [s] (if (get-in s [:running :stop-requested?])
                                                                     s
-                                                                    (merge (assoc s :conn conn :session sid :ops op-set)
+                                                                    (merge (assoc s :conn conn :session sid :ops op-set
+                                                                                :nrepl-version (ops/nrepl-version d))
                                                                            on-connect))))]
                                   (if (identical? conn (:conn new))
                                     (do (add-watch (:open? conn) ::connection

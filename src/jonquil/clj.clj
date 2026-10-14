@@ -106,7 +106,10 @@
    ;; (which a restarted server has never heard of). :auto-required?:
    ;; whether this connection has sent .jonquil.edn's :auto-require list
    ;; yet; a restarted server has forgotten it, so every connect resets it.
-   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false}})
+   ;; :eof-noted?: whether the end-of-input note has shown on this
+   ;; connection; a new connection may be a different server, so the note
+   ;; can show again.
+   :on-connect {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false :eof-noted? false}})
 
 ;; --- the buffer's namespace ---
 

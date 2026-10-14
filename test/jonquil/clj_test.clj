@@ -21,7 +21,7 @@
          clj/limitations)))
 
 (deftest policy-test
-  (is (= {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false}
+  (is (= {:session-ns nil :inspect-registered? false :prompt-ns 'user :auto-required? false :eof-noted? false}
          (:on-connect clj/connect-policy)))
   (is (= clj/no-project-message (get-in clj/connect-policy [:messages :no-project])))
   (is (= (clj/refused-message 9) ((get-in clj/connect-policy [:messages :refused]) 9))))

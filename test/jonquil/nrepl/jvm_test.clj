@@ -105,6 +105,15 @@
     (is (= 'user (ev/prompt-ns e)))
     (is (= clj/limitations (ev/limitations e)))))
 
+(deftest connect-keeps-version-test
+  (doseq [[opts expected] [[{} [1 7]] [{:nrepl-version [1 8 0]} [1 8]] [{:nrepl-version :none} nil]]]
+    (with-project opts
+      (fn [_ dir _]
+        (let [e (make dir)]
+          (is (= :ok (:status (:result (run e "(+ 1 2)" {:run? false})))) "connects whatever describe says")
+          (is (= expected (:nrepl-version @(:state e))))
+          (is (false? (:eof-noted? @(:state e)))))))))
+
 (deftest connect-rules-test
   (testing "no project at all: the no-project notice"
     (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir nil})]
