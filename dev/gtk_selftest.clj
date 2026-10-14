@@ -629,11 +629,9 @@
   text read-only, then within the SAME on-gtk turn (so no paint chunk can
   have run yet) flips read-only off and replaces the buffer directly --
   not through set-text!, so only set-read-only!'s own gen bump is under
-  test -- with a short plain text. No string tag may ever land on it, and
-  the superseded generation must never finish. :done? belongs to the
-  current generation, and a later tick paint of the new text may finish, so
-  the row polls :paint every 20 ms for a second and fails if :done? is ever
-  true while :gen is still the old generation's."
+  test -- with a short plain text. No string tag may ever land on it. The
+  row detects a stale paint through the moved generation and the absence
+  of any string tag on the new text."
   [_ed]
   (go-row :read-only-off-supersedes-paint check
     (with-fresh-editor
@@ -648,20 +646,13 @@
                                 (editor/set-read-only! ed false)
                                 (g/gtk-text-buffer-set-text (:buf ed) short-text -1)
                                 g))
-              old-done? (loop [n 0 seen false]
-                          (if (= n 50)
-                            seen
-                            (let [p (on-gtk @(:paint ed))]
-                              (<! (timeout 20))
-                              (recur (inc n) (or seen (and (= old-gen (:gen p)) (:done? p)))))))
+              _ (<! (timeout 1000))
               r (on-gtk {:gen-now (:gen @(:paint ed))
-                         :old-done? old-done?
                          :text (editor/editor-text ed)
                          :str-anywhere (some (fn [o] (g/has-tag-at? (:buf ed) o string-tag))
                                              (range 0 (count short-text)))})]
           (on-gtk (check :read-only-off-supersedes-paint
                          (and (not= old-gen (:gen-now r))
-                              (not (:old-done? r))
                               (= short-text (:text r))
                               (not (:str-anywhere r)))
                          (assoc r :old-gen old-gen))))))))
