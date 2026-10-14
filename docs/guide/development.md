@@ -356,6 +356,47 @@ and `jump` (the median jump-to-definition). It
 opens and closes a real GTK window per size, so leave the keyboard alone
 while it runs.
 
+Measured on 2026-10-15 on macOS arm64, all times in milliseconds. "Before" is
+the same harness run against commit 6fd9133, the last commit without the
+background repaint. The old code had no background repaint, so the settle
+rows have no "before".
+
+| Lines  | Measure           | Before | After |
+|--------|-------------------|-------:|------:|
+| 200    | plan              |   11.8 |   6.5 |
+| 200    | stall-edit        |   16.5 |   4.7 |
+| 200    | stall-quote       |   11.4 |   3.9 |
+| 200    | jump              |   16.1 |   6.0 |
+| 200    | settle-stall-edit |      - |  82.6 |
+| 200    | settle-stall-quote|      - |  78.7 |
+| 2,000  | plan              |   67.4 |  38.0 |
+| 2,000  | stall-edit        |  109.1 |  10.1 |
+| 2,000  | stall-quote       |   61.6 |   8.9 |
+| 2,000  | jump              |  130.7 |  40.9 |
+| 2,000  | settle-stall-edit |      - | 149.4 |
+| 2,000  | settle-stall-quote|      - | 129.1 |
+| 8,000  | plan              |  266.0 | 152.6 |
+| 8,000  | stall-edit        |  385.1 |  24.8 |
+| 8,000  | stall-quote       |  340.0 |  21.5 |
+| 8,000  | jump              |  505.3 | 155.3 |
+| 8,000  | settle-stall-edit |      - | 307.3 |
+| 8,000  | settle-stall-quote|      - | 298.0 |
+| 20,000 | plan              |  661.3 | 382.7 |
+| 20,000 | stall-edit        | 1021.7 |  68.6 |
+| 20,000 | stall-quote       |  964.3 |  55.9 |
+| 20,000 | jump              | 1233.4 | 388.1 |
+| 20,000 | settle-stall-edit |      - | 662.8 |
+| 20,000 | settle-stall-quote|      - | 669.9 |
+
+A few things to keep in mind when reading it. The stall-quote row is not a
+worst case, because a quote flips string parity and the repaint after it has
+the same amount of work to do as after a letter. The plan row now times work
+that runs on a background thread, so it is no longer a stall, only the cost of
+one tokenise and plan. Each timed run gets a fresh copy of the text, because
+the tokenizer caches by string identity and a reused string would time a cache
+hit. What remains of the stall at 20,000 lines is the copy of the buffer text
+on the GTK thread, about 50 ms.
+
 ## Upstream
 
 `bb upstream:diff` lists the upstream DrClojure commits since `UPSTREAM_PIN`
