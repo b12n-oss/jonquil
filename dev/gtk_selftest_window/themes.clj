@@ -542,6 +542,23 @@
                                  {:idle? idle? :before before :after after :choice choice})
                   (restore-real-system! ui)))))))
 
+(defn row-auto-poll-nil-keeps-palette
+  "A failed system read (nil) during a poll tick leaves the palette alone:
+  :auto with the fake dark shows :dark, then the fake returns nil and one
+  tick leaves :theme-name* at :dark and returns 1."
+  [ui]
+  (go-row :auto-poll-nil-keeps-palette support/check
+    (on-gtk (let [_ (start-fake-system! ui)]
+              ((:set-theme!* ui) :auto)
+              (let [before ((:theme-name* ui))]
+                ((:system-dark-fn!* ui) (fn [] nil))
+                (let [ret ((:poll-appearance!* ui))
+                      after ((:theme-name* ui))]
+                  (support/check :auto-poll-nil-keeps-palette
+                                 (and (= :dark before) (= :dark after) (= 1 ret))
+                                 {:before before :after after :ret ret})
+                  (restore-real-system! ui)))))))
+
 (defn row-auto-startup-load
   "A settings file holding {:theme :auto} loads through the startup path
   (:load-settings!*): the choice is :auto, the shown theme follows the fake

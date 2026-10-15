@@ -1755,14 +1755,19 @@
   A closing window does nothing, since the app is about to quit and the
   self-test's suppressed close mustn't stop the poll. Otherwise resolves
   the choice against the system and applies it only when it differs from
-  the theme being shown. Never saves, because the saved value is :auto."
+  the theme being shown. A nil from the system fn means the read failed
+  (inside the poll on macOS it can mean nothing else), so the palette is
+  left alone and the tick returns 1; startup and apply-choice! still count
+  nil as light. Never saves, because the saved value is :auto."
   [{:keys [theme-name theme-choice system-dark-fn* closing?] :as theme-ctx}]
   (cond
     (not= :auto @theme-choice) 0
     @closing? 1
-    :else (let [r (theme/resolve-choice :auto ((deref system-dark-fn*)))]
-            (when (not= r @theme-name)
-              (apply-window-theme! theme-ctx r))
+    :else (let [dark? ((deref system-dark-fn*))]
+            (when-not (nil? dark?)
+              (let [r (theme/resolve-choice :auto dark?)]
+                (when (not= r @theme-name)
+                  (apply-window-theme! theme-ctx r))))
             1)))
 
 (defn- apply-choice!

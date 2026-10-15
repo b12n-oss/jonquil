@@ -425,15 +425,15 @@ the status bar says which one it landed on, `Theme: auto (dark)` or
 `Theme: auto (light)`; that text stays as it was if the system flips later,
 though the window itself changes. Off macOS, auto shows light for now.
 
-The choice sticks: it's saved to
-`$XDG_CONFIG_HOME/jonquil/settings.edn` (or `~/.config/jonquil/settings.edn`
-when that variable isn't set) as `{:theme :navy}`, or whichever theme you
-picked (`{:theme :auto}` for auto, which is saved as the choice and not as
-the light or dark it resolved to). A missing settings file starts Jonquil in light, with nothing
-said about it; a file that can't be read, or that names a theme Jonquil
-doesn't know, also starts it in light, but says so once in the console.
-A settings file that's a symlink stays a symlink after Jonquil saves
-through it. To go back to light, delete the file.
+The choice sticks: it's saved to `$XDG_CONFIG_HOME/jonquil/settings.edn` (or
+`~/.config/jonquil/settings.edn` when that variable isn't set) as
+`{:theme :navy}`, or whichever theme you picked (`{:theme :auto}` for auto,
+which is saved as the choice and not as the light or dark it resolved to). A
+missing settings file starts Jonquil in light, with nothing said about it; a
+file that can't be read, or that names a theme Jonquil doesn't know, also
+starts it in light, but says so once in the console. A settings file that's
+a symlink stays a symlink after Jonquil saves through it. To go back to
+light, delete the file.
 
 ## Help
 
