@@ -16,6 +16,7 @@
     jonquil.theme-test
     jonquil.settings-test
     jonquil.paint-test
+    jonquil.syntax-test
     jonquil.docs-test
     jonquil.edit-test
     jonquil.eval-test

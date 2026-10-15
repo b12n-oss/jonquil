@@ -180,6 +180,23 @@
   [c]
   (when (popover/open? c) @(:state c)))
 
+(defn- select!
+  "Selects st's own index row and sets the doc-preview label to help/
+  doc-text for the selected candidate: docs/symbol-doc looked up with st's
+  own :text (the snapshot text open!/refine! saw when they built st --
+  mirroring window.clj's do-quick-doc!/do-jump!, which pass the target
+  symbol's own start as pos) and the prefix's own start. The rows stay as
+  they are, so an arrow key costs one select, not a list rebuild. Nothing
+  scrolls the row into view here, same as render! before it."
+  [c st]
+  (let [{:keys [list-box doc-label doc-fn]} c
+        text (:text st)
+        pos (get-in st [:prefix-info :start])
+        sym (:symbol (help/selected st))]
+    (g/gtk-list-box-select-row list-box (g/gtk-list-box-get-row-at-index list-box (:index st)))
+    (g/gtk-label-set-text doc-label
+                          (help/doc-text sym (doc-fn sym text pos)))))
+
 (defn- render!
   "Rebuilds c's list-box rows from st's candidates (removing every old row
   first -- gtk_list_box_remove_all, 4.12+), selects st's own index, and
@@ -192,19 +209,14 @@
   child when the row is wider than the label's own natural size, which is
   every row here (list-box is LIST-WIDTH wide, a candidate name is not)."
   [c st]
-  (let [{:keys [list-box doc-label doc-fn]} c
-        text (:text st)
-        pos (get-in st [:prefix-info :start])
-        sym (:symbol (help/selected st))]
+  (let [list-box (:list-box c)]
     (g/gtk-list-box-remove-all list-box)
     (doseq [{:keys [symbol category]} (:candidates st)]
       (let [row-label (g/gtk-label-new (str symbol "  " (name category)))]
         (g/gtk-label-set-xalign row-label 0.0)
         (g/gtk-widget-set-halign row-label g/ALIGN-START)
         (g/gtk-list-box-append list-box row-label)))
-    (g/gtk-list-box-select-row list-box (g/gtk-list-box-get-row-at-index list-box (:index st)))
-    (g/gtk-label-set-text doc-label
-                          (help/doc-text sym (doc-fn sym text pos)))))
+    (select! c st)))
 
 (defn close!
   "Hides c's popover (idempotent, same as jonquil.gtk.popover/hide!) and
@@ -244,7 +256,7 @@
   (when-let [st (state c)]
     (let [st2 (help/move st delta)]
       (reset! (:state c) st2)
-      (render! c st2))))
+      (select! c st2))))
 
 (defn- commit! [c]
   (when-let [st (state c)]

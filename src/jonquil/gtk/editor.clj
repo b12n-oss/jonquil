@@ -79,6 +79,29 @@
   (reset! (:dirty-check-needed? ed) true)
   nil)
 
+(defn- set-painted!
+  "Records text and plan as what our tags show now (:painted), and restarts
+  :edit-bounds at text's full length: no edit since. The two always move
+  together, in one GTK-thread step."
+  [ed text plan]
+  (let [n (count text)]
+    (reset! (:painted ed) {:text text :plan plan})
+    (reset! (:edit-bounds ed) {:prefix n :suffix n})))
+
+(defn- forget-painted!
+  "Clears :painted and :edit-bounds: what our tags show is unknown, so the
+  next tick repaints in full."
+  [ed]
+  (reset! (:painted ed) nil)
+  (reset! (:edit-bounds ed) nil))
+
+(defn- narrow-bounds
+  "bounds after an edit that left the first prefix and last suffix chars of
+  the pre-edit text alone. nil stays nil."
+  [bounds prefix suffix]
+  (when bounds
+    {:prefix (min (:prefix bounds) prefix) :suffix (min (:suffix bounds) suffix)}))
+
 (defn set-text!
   "Replaces the whole buffer inside begin/end_irreversible_action, so it
   leaves no undo step, and records s as the saved text in the same call --
@@ -89,9 +112,11 @@
   on). set-text! fully replaces the buffer, so a read-only editor
   (set-read-only!) reapplies its own read-only tag over the new text --
   the tag doesn't survive gtk_text_buffer_set_text, since that leaves no
-  old text for the new text to inherit tags from."
+  old text for the new text to inherit tags from. It also clears the
+  tick's baseline (:painted), so the next repaint is a full one."
   [ed s]
   (swap! (:paint ed) update :gen inc)
+  (forget-painted! ed)
   (let [buf (:buf ed)]
     (g/gtk-text-buffer-begin-irreversible-action buf)
     (g/gtk-text-buffer-set-text buf s -1)
@@ -110,9 +135,13 @@
   "True when the buffer's text differs from the last-saved text. Computed
   live against the buffer on every call, never cached, so it is correct
   immediately after set-text!/mark-saved! and can't be fooled by a
-  tag-only repaint."
+  tag-only repaint. A char-count mismatch answers true without copying the
+  buffer, which is what keeps the per-edit tick cheap on large files."
   [ed]
-  (not= (editor-text ed) @(:saved-text ed)))
+  (let [saved @(:saved-text ed)]
+    (if (not= (g/gtk-text-buffer-get-char-count (:buf ed)) (count saved))
+      true
+      (not= (editor-text ed) saved))))
 
 (defn on-dirty-changed!
   "Registers f to be called with the new dirty? value, on the GTK thread,
@@ -343,25 +372,54 @@
 
 ;; --- repaint + the debounce/dirty tick -------------------------------------
 
-(defn- repaint! [ed]
-  (let [{:keys [buf tags]} ed
-        text (g/buffer-text buf)
-        plan (paint/paint-plan @(:profile ed) text)
-        len (count text)]
-    ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
-    ;; remove_all_tags -- a tag another namespace applies over the same
-    ;; range (jonquil.gtk.find-bar's search-match) must survive a repaint.
-    (doseq [tag (vals tags)]
-      (g/with-iters* buf 0 len (fn [a b] (g/gtk-text-buffer-remove-tag buf tag a b))))
-    (doseq [[k s e] plan]
-      (when-let [tag (get tags k)]
-        (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-apply-tag buf tag a b)))))))
-
 (def ^:private PAINT-CHUNK
   ;; estimate: a full repaint of clojure/core.clj (8,233 lines, 26,816
   ;; spans) measured 383-415 ms, paint-plan alone 280-357 ms, so applying
   ;; tags costs ~4 us a span; 2,000 spans is ~8 ms of GTK time per turn.
   2000)
+
+(defn- nearest-first
+  "spans sorted by how far each starts from caret, nearest first, so the
+  visible region colours first."
+  [caret spans]
+  (sort-by (fn [[_ s _]] (Math/abs (long (- s caret)))) spans))
+
+(defn- report-paint-error!
+  "Reports a paint throw through set-error-fn!'s reporter. GTK thread."
+  [ed e]
+  (when-let [f @(:on-error-fn ed)]
+    (f (str "; paint: " (ex-message e)))))
+
+(defn- paint-chunked!
+  "Removes our own tags over [a b), then applies spans PAINT-CHUNK at a
+  time: the first chunk in this same GTK turn, so a small re-tag never
+  shows uncoloured text, and each later chunk in its own on-gui! turn.
+  With :defer-first? the first chunk also gets its own turn, which keeps a
+  full-buffer remove pass and a chunk out of the same turn. A later turn
+  first asks (current?), and on false drops the rest and calls
+  (superseded!). (done!) runs in the turn that lands the last chunk. A
+  throw in a later turn goes to (fail! e). Shared by paint-async!'s full
+  paint and the tick's incremental one. Call it on the GTK thread."
+  [ed [a b] spans {:keys [current? done! superseded! fail! defer-first?]}]
+  (letfn [(later [chunks]
+            (on-gui! (fn []
+                       (try
+                         (if (current?) (step chunks) (superseded!))
+                         (catch :default e (fail! e))))))
+          (step [chunks]
+            (doseq [[k s e] (first chunks)]
+              (when-let [tag (get (:tags ed) k)]
+                (g/with-iters* (:buf ed) s e (fn [i j] (g/gtk-text-buffer-apply-tag (:buf ed) tag i j)))))
+            (if-let [more (next chunks)]
+              (later more)
+              (done!)))]
+    ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
+    ;; remove_all_tags -- a tag another namespace applies over the same
+    ;; range (jonquil.gtk.find-bar's search-match) must survive a repaint.
+    (doseq [tag (vals (:tags ed))]
+      (g/with-iters* (:buf ed) a b (fn [i j] (g/gtk-text-buffer-remove-tag (:buf ed) tag i j))))
+    (let [chunks (partition-all PAINT-CHUNK spans)]
+      (if defer-first? (later chunks) (step chunks)))))
 
 (defn paint-async!
   "Repaints ed without holding the GTK thread for the whole text:
@@ -369,7 +427,8 @@
   time, each chunk its own on-gui! turn, nearest the caret first so the
   visible region colours first. A later paint-async! or set-text!
   supersedes one still in flight: every turn checks the generation it
-  belongs to. (:paint ed) reads {:gen n :done? bool}. Call it on the GTK
+  belongs to. (:paint ed) reads {:gen n :done? bool :full-gen n :edit-gen n
+  :profile p}. Call it on the GTK
   thread, right after set-text! and placing the caret. A throw is
   reported through set-error-fn!'s reporter as \"; paint: ...\".
 
@@ -380,42 +439,134 @@
   chunk's apply-tag -- would otherwise run against a buffer whose widget
   is already gone. A superseded-by-destroy paint never marks itself
   :done?, the same as any other superseded paint, so nothing but the
-  :destroyed? flag need be read to tell the two apart."
-  [ed]
-  (let [{:keys [buf tags]} ed
-        gen (:gen (swap! (:paint ed) (fn [p] {:gen (inc (:gen p)) :done? false})))
+  :destroyed? flag need be read to tell the two apart.
+
+  Large-file speed T4: the tags are unknown while the paint runs, so it
+  clears the tick's baseline (:painted) at the start, and records the
+  baseline when its last chunk lands, unless an edit came in meanwhile
+  (:edit-gen moved), since its text would then be stale. (:paint ed) also
+  carries :full-gen, :edit-gen and :profile, which tell the tick a full
+  paint is already on its way (full-paint-pending?). An edit while it runs
+  supersedes it too, since its spans carry the old text's offsets: the
+  rest is dropped, the baseline stays nil and :dirty-at is re-armed, so the
+  next tick repaints.
+
+  The first chunk gets its own turn (:defer-first? true), so the colours
+  the paint clears are not on screen for a frame with nothing applied. The
+  tick's fallback passes {:defer-first? false}: typing that supersedes a
+  chunked apply would otherwise show a frame with every colour removed."
+  ([ed] (paint-async! ed {:defer-first? true}))
+  ([ed {:keys [defer-first?]}]
+  (let [{:keys [buf]} ed
         text (g/buffer-text buf)
         caret (g/cursor-offset buf)
         profile @(:profile ed)
+        edit-gen @(:edit-gen ed)
+        gen (:gen (swap! (:paint ed) (fn [p]
+                                       (let [n (inc (:gen p))]
+                                         {:gen n :done? false :full-gen n
+                                          :edit-gen edit-gen :profile profile}))))
         len (count text)
-        current? (fn [] (and (= gen (:gen @(:paint ed))) (not @(:destroyed? ed))))
-        report (fn [e] (on-gui! (fn [] (when-let [f @(:on-error-fn ed)]
-                                         (f (str "; paint: " (ex-message e)))))))]
+        current? (fn [] (and (= gen (:gen @(:paint ed)))
+                             (= edit-gen @(:edit-gen ed))
+                             (not @(:destroyed? ed))))
+        ;; An edit, a newer paint or a destroy drops the rest. The baseline
+        ;; is already nil, so re-arming the tick makes it repaint.
+        superseded! (fn [] (reset! (:dirty-at ed) (System/currentTimeMillis)))
+        report (fn [e] (on-gui! (fn [] (report-paint-error! ed e))))]
+    (forget-painted! ed)
     (future
       (try
-        (let [spans (sort-by (fn [[_ s _]] (Math/abs (long (- s caret))))
-                             (paint/paint-plan profile text))
-              step (fn step [chunks]
-                     (on-gui!
-                      (fn []
-                        (try
-                          (when (current?)
-                            (if-let [c (first chunks)]
-                              (do (doseq [[k s e] c]
-                                    (when-let [tag (get tags k)]
-                                      (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-apply-tag buf tag a b)))))
-                                  (step (rest chunks)))
-                              (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))))
-                          (catch :default e (report e))))))]
+        (let [plan (paint/paint-plan profile text)
+              spans (nearest-first caret plan)]
           (on-gui! (fn []
                      (try
-                       (when (current?)
-                         (doseq [tag (vals tags)]
-                           (g/with-iters* buf 0 len (fn [a b] (g/gtk-text-buffer-remove-tag buf tag a b))))
-                         (step (partition-all PAINT-CHUNK spans)))
+                       (if-not (current?)
+                         (superseded!)
+                         (paint-chunked! ed [0 len] spans
+                                         {:current? current?
+                                          :done! (fn []
+                                                   (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))
+                                                   (when (= edit-gen @(:edit-gen ed))
+                                                     (set-painted! ed text plan)))
+                                          :superseded! superseded!
+                                          :fail! report
+                                          :defer-first? defer-first?}))
                        (catch :default e (report e))))))
         (catch :default e (report e))))
-    nil))
+    nil)))
+
+(defn- full-paint-pending?
+  "True while a paint-async! is in flight that will record the baseline
+  when it lands: nothing has superseded it, and neither the text nor the
+  profile has changed since it started."
+  [ed]
+  (let [p @(:paint ed)]
+    (and (not (:done? p))
+         (= (:gen p) (:full-gen p))
+         (= (:edit-gen p) @(:edit-gen ed))
+         (= (:profile p) @(:profile ed)))))
+
+(defn- repaint!
+  "The tick's repaint (large-file speed T4). With a baseline (:painted), it
+  reads the text, :edit-gen, :edit-bounds and the profile here, on the GTK
+  thread, then computes the plan and paint/plan-diff against the baseline
+  on a future. Back on the GTK thread the result lands only when no edit
+  came in, the editor is alive and the baseline is the same object the
+  future diffed against. A nil diff only moves the baseline. A diff clears
+  our tags over its :range and applies its :apply spans through
+  paint-chunked!, nearest the caret first. While that takes more than one
+  turn the baseline is nil, and it is recorded when the last chunk lands.
+  A dropped result, a superseded chunked apply or a throw re-arms
+  :dirty-at so the next tick tries again; a throw also clears the
+  baseline, so that try is a full repaint. A drop re-arms only when no
+  later tick has started its own future, which will land in its place.
+  Without a baseline it starts paint-async!, unless one is already on its
+  way."
+  [ed]
+  (if-let [painted @(:painted ed)]
+    (let [{:keys [buf]} ed
+          text (g/buffer-text buf)
+          caret (g/cursor-offset buf)
+          edit-gen @(:edit-gen ed)
+          bounds @(:edit-bounds ed)
+          profile @(:profile ed)
+          req (swap! (:repaint-req ed) inc)
+          rearm! (fn [] (reset! (:dirty-at ed) (System/currentTimeMillis)))
+          fail! (fn [e]
+                  (when-not @(:destroyed? ed) (report-paint-error! ed e))
+                  (forget-painted! ed)
+                  (rearm!))
+          current? (fn [] (and (= edit-gen @(:edit-gen ed)) (not @(:destroyed? ed))))]
+      (future
+        (try
+          (let [plan (paint/paint-plan profile text)
+                diff (paint/plan-diff (:text painted) (:plan painted) text plan bounds)
+                spans (nearest-first caret (:apply diff))]
+            (on-gui!
+             (fn []
+               (try
+                 (cond
+                   (not (and (current?) (identical? painted @(:painted ed))))
+                   (do (swap! (:repaint-drops ed) inc)
+                       (when (= req @(:repaint-req ed)) (rearm!)))
+
+                   (nil? diff) (set-painted! ed text plan)
+
+                   :else
+                   (let [gen (:gen (swap! (:paint ed) (fn [p] (assoc p :gen (inc (:gen p)) :done? false))))]
+                     (forget-painted! ed)
+                     (paint-chunked! ed (:range diff) spans
+                                     {:current? (fn [] (and (current?) (= gen (:gen @(:paint ed)))))
+                                      :done! (fn []
+                                               (swap! (:paint ed) assoc :done? true)
+                                               (set-painted! ed text plan))
+                                      :superseded! rearm!
+                                      :fail! fail!})))
+                 (catch :default e (fail! e))))))
+          (catch :default e (on-gui! (fn [] (fail! e)))))))
+    (when-not (full-paint-pending? ed)
+      (paint-async! ed {:defer-first? false}))))
 
 (defn- tick! [ed]
   ;; The g_timeout_add that calls this every 20ms outlives the editor's own
@@ -856,6 +1007,23 @@
             ;; asynchronous paint's generation (paint-async!).
             :read-only? (atom false)
             :paint (atom {:gen 0 :done? true})
+            ;; Large-file speed T4: the tick's incremental repaint (repaint!).
+            ;; :painted is {:text :plan} of what our tags show now, or nil
+            ;; when unknown. :edit-gen is bumped by every `changed`.
+            ;; :edit-bounds is {:prefix m :suffix n}, no edit since :painted
+            ;; touched the first m or last n chars, nil when :painted is.
+            ;; :repaint-req counts the tick's futures, so only the latest
+            ;; dropped result re-arms the debounce. Without it, every result
+            ;; dropped because typing moved :edit-gen would re-arm, and each
+            ;; re-arm starts another tick: another full text copy (~54 ms at
+            ;; 20,000 lines) and another plan future, which is dropped in turn
+            ;; while a newer future is already on its way.
+            :painted (atom nil)
+            :edit-gen (atom 0)
+            :edit-bounds (atom nil)
+            :repaint-req (atom 0)
+            ;; Counts the tick's dropped results; only the self-test reads it.
+            :repaint-drops (atom 0)
             ;; True once view's own "destroy" signal has fired (connected
             ;; once, below). A paint (paint-async!) or the 20ms tick
             ;; (tick!) can outlive the editor's own window -- F12 into a
@@ -876,8 +1044,39 @@
                              (callable (fn [_buf _data]
                                          (reset! (:dirty-at ed) (System/currentTimeMillis))
                                          (reset! (:dirty-check-needed? ed) true)
+                                         (swap! (:edit-gen ed) inc)
                                          nil)
                                        [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; Large-file speed T4: insert-text and delete-range narrow
+    ;; :edit-bounds. Connected without G_CONNECT_AFTER, both run before
+    ;; GTK's default handler, so the iters and the char count are pre-edit.
+    ;; Probe 2026-10-14: inserting "XYé" at 3 into "abcdef" read offset
+    ;; 3, len 4 and char count 6; deleting [1, 4) from the 9-char result
+    ;; read 1, 4 and 9; `changed` then read 9 and 6. len is in bytes, so it
+    ;; goes unused. Callbacks: (buf, GtkTextIter*, char*, int, data) and
+    ;; (buf, GtkTextIter* start, GtkTextIter* end, data).
+    ;; Any other way of inserting into the buffer (insert-paintable,
+    ;; insert-child-anchor) must also narrow :edit-bounds, or the tick
+    ;; repaints the wrong range and colours go wrong.
+    (g/g-signal-connect-data buf "insert-text"
+                             (callable (fn [_buf iter _text _len _data]
+                                         (when @(:edit-bounds ed)
+                                           (let [o (g/gtk-text-iter-get-offset iter)
+                                                 n (g/gtk-text-buffer-get-char-count buf)]
+                                             (swap! (:edit-bounds ed) narrow-bounds o (- n o))))
+                                         nil)
+                                       [:pointer :pointer :pointer :int :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data buf "delete-range"
+                             (callable (fn [_buf start end _data]
+                                         (when @(:edit-bounds ed)
+                                           (let [o (g/gtk-text-iter-get-offset start)
+                                                 e (g/gtk-text-iter-get-offset end)
+                                                 n (g/gtk-text-buffer-get-char-count buf)]
+                                             (swap! (:edit-bounds ed) narrow-bounds o (- n e))))
+                                         nil)
+                                       [:pointer :pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave I2: the buffer's "cursor-position" property notify, in
     ;; place of P3.T5's "mark-set" filtered to the insert mark. An insert or

@@ -75,3 +75,62 @@
                             [(if (= kind :unmatched) :unmatched [:rainbow (mod depth n)]) s e])
                           (:bracket-tokens (syntax/compute-brackets text)))]
        (into tokens brackets)))))
+
+(defn- common-prefix
+  "Length of the longest common prefix of strings a and b."
+  [^String a ^String b]
+  (let [n (min (count a) (count b))]
+    (loop [i 0]
+      (if (and (< i n) (= (nth a i) (nth b i))) (recur (inc i)) i))))
+
+(defn- common-suffix
+  "Length of the longest common suffix of a and b, at most limit."
+  [^String a ^String b limit]
+  (let [la (count a) lb (count b)]
+    (loop [i 0]
+      (if (and (< i limit) (= (nth a (- la 1 i)) (nth b (- lb 1 i)))) (recur (inc i)) i))))
+
+(defn plan-diff
+  "The smallest region to re-tag after an edit. Returns {:range [a b] :apply
+  spans} in new-text offsets, or nil when nothing needs re-tagging. :apply is
+  every span of new-plan that intersects [a b), whole and in plan order, so a
+  front-end clears its tags over :range and applies :apply.
+
+  Old spans before the edit stay, old spans after it shift, and old spans
+  crossing it count as changed. The changed set is the symmetric difference
+  of the new plan and the stayed-or-shifted old spans, plus the crossing
+  spans.
+
+  Comparing texts can't locate an edit: typing ( just before an existing (
+  makes the common prefix one char longer than the real edit start, and GTK
+  gives inherited tags to the char at the real start. So bounds is
+  {:prefix m :suffix n}: no edit since old-text touched the first m chars or
+  the last n chars. nil means unknown and re-tags the whole text. One pass over each plan plus hash sets, so linear in span count."
+  [old-text old-plan new-text new-plan bounds]
+  (let [old-len (count old-text)
+        new-len (count new-text)
+        p (min (common-prefix old-text new-text) (:prefix bounds 0))
+        q (common-suffix old-text new-text
+                         (min (:suffix bounds 0) (- (min old-len new-len) p)))
+        delta (- new-len old-len)
+        old-tail (- old-len q)
+        new-tail (- new-len q)
+        {:keys [kept crossing]}
+        (reduce (fn [acc [k s e :as span]]
+                  (cond (<= e p) (update acc :kept conj! span)
+                        (>= s old-tail) (update acc :kept conj! [k (+ s delta) (+ e delta)])
+                        :else (update acc :crossing conj!
+                                      [(cond (< s p) s (>= s old-tail) (+ s delta) :else p)
+                                       (cond (> e old-tail) (+ e delta) (> e p) new-tail :else e)])))
+                {:kept (transient #{}) :crossing (transient [])}
+                old-plan)
+        kept (persistent! kept)
+        new-set (set new-plan)
+        changed (concat (remove kept new-plan)
+                        (remove new-set kept))
+        spans (concat (map (fn [[_ s e]] [s e]) changed) (persistent! crossing))]
+    (when-not (and (empty? spans) (>= (+ p q) old-len) (>= (+ p q) new-len))
+      (let [a (reduce min p (map first spans))
+            b (reduce max new-tail (map second spans))]
+        {:range [a b]
+         :apply (filterv (fn [[_ s e]] (and (< s b) (> e a))) new-plan)}))))
