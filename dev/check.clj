@@ -25,6 +25,7 @@
     jonquil.nrepl.client
     jonquil.nrepl.connection
     jonquil.tool-path
+    jonquil.save-path
     jonquil.login-path
     jonquil.nrepl.jank-child
     jonquil.nrepl.child

@@ -183,3 +183,23 @@
 (deftest process-options-without-a-path-test
   (with-redefs [lp/path (fn [] nil)]
     (is (not (contains? (child/process-options {:dir "/d" :log "/l"}) :extra-env)))))
+
+(defn- port-file-text [dir]
+  (let [f (io/file dir ".nrepl-port")]
+    (when (.exists f) (str/trim (slurp f)))))
+
+(deftest two-children-in-one-dir-test
+  (let [dir (temp-project)
+        started (atom [])
+        start! (fn [] (let [c (child/start! dir nil)] (swap! started conj c) c))]
+    (spit (io/file dir ".nrepl-port") "1234")
+    (try
+      (let [c1 (start!)
+            c2 (start!)]
+        (is (not= (:port c1) (:port c2)))
+        (is (= (str (:port c2)) (port-file-text dir)))
+        (child/kill! c1)
+        (is (= (str (:port c2)) (port-file-text dir)) "the first child's exit leaves the second's port")
+        (child/kill! c2)
+        (is (= "1234" (port-file-text dir)) "the seeded file is back"))
+      (finally (doseq [c @started] (force-kill! (:proc c)))))))

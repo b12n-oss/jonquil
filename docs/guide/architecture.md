@@ -211,9 +211,13 @@ Four namespaces make up the out-of-process runtime:
   already listening there). Readiness comes from a log line the child
   itself prints once it's listening, never from the connection alone.
   Ending a child kills only the pid this namespace spawned, in order
-  (`SIGTERM`, then `SIGKILL` if it's still alive a second later), and
-  restores whatever `.nrepl-port` held before the child started, or
-  deletes the file if nothing did.
+  (`SIGTERM`, then `SIGKILL` if it's still alive a second later).
+  `.nrepl-port` is handled through one process-wide owner table keyed by
+  project directory: the first child in a directory remembers what the
+  file held, overlapping children share that memory, a child that stops
+  while others run rewrites the file with the newest running child's
+  port, and the last one out restores the original content or deletes the
+  file if there was none.
 - `jonquil.nrepl.client` holds one socket and one reader for the whole
   life of a child. Its `connect` bounds the socket connect itself to 5
   seconds by default, so a port that never answers fails with an
@@ -241,7 +245,10 @@ child instead. `jonquil.runtime-registry` is a fourth, GTK-free namespace
 that every evaluator a window makes joins as soon as it's made, so
 `jonquil.main` can stop every one of them, and wait for any still mid-
 start to settle, before the process exits. No child outlives Jonquil just
-because the window that started it happened to close first.
+because the window that started it happened to close first. `stop-all!`
+also runs from a `jolt.host` shutdown hook that `jonquil.main/-main`
+registers, so SIGTERM, SIGHUP and SIGINT stop the children too. A crash or
+SIGKILL can't run a hook and still leaves them running.
 
 ### jonquil.nrepl.connection: the shared attach lifecycle
 

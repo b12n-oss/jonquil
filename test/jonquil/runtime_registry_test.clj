@@ -98,6 +98,22 @@
         (ev/stop! e)
         (ev/stop! untouched)))))
 
+(deftest stop-all-twice-is-harmless-test
+  ;; A normal quit runs stop-all! from -main and again from the shutdown
+  ;; hook at System/exit.
+  (let [e (make (temp-project))]
+    (try
+      (ev/start! e)
+      (registry/register! e)
+      (let [pid (nrepl/child-pid e)]
+        (is (some? pid) "the child is up before the first stop-all!")
+        (is (nil? (registry/stop-all!)))
+        (is (nil? (registry/stop-all!)) "the second call returns nil without throwing")
+        (is (nil? (nrepl/child-pid e)) "the child is gone"))
+      (finally
+        (registry/unregister! e)
+        (ev/stop! e)))))
+
 (defn- jank-run-dirs []
   (set (filter #(re-matches #"jonquil-jank-\d+" %)
                (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))

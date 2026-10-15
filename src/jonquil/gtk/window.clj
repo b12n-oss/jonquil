@@ -50,6 +50,7 @@
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.runtime-registry :as registry]
+            [jonquil.save-path :as save-path]
             [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.source :as source]
@@ -302,20 +303,6 @@
         name (if i (subs path (inc i)) path)]
     (str dir "." name ".jonquil-tmp-" (System/nanoTime))))
 
-(defn- resolve-target
-  "path's real underlying file (M12 follow-up (a)). .getCanonicalPath
-  follows a symlink to what it points at, and works even when path (or
-  its parent directories) doesn't exist yet -- probed against this Jolt.
-  java.nio.file.Files/move onto a symlink's OWN path replaces the link
-  itself with a regular file and leaves whatever it pointed at untouched
-  (probed: after such a move the link path is no longer a symlink at all,
-  and the file it used to point at is unchanged); moving onto the
-  resolved target instead updates the real file and leaves the link a
-  link, still pointing at the same place, with the new content visible
-  through it."
-  [path]
-  (.getCanonicalPath (java.io.File. ^String path)))
-
 (defn- copy-permissions!
   "Copies target's POSIX permissions onto tmp when target already exists
   (M12 follow-up (b)): a freshly spit temp file gets the process umask's
@@ -345,8 +332,11 @@
   "Writes the editor text to path without ever truncating it in place
   (M12), and without breaking a symlink or dropping the target's
   permissions (M12 follow-up): resolves path to its real underlying file
-  (resolve-target), spits to a temp file in THAT file's directory, copies
-  its POSIX permissions onto the temp file when it already exists
+  (save-path/resolve-target, which follows links by hand because
+  .getCanonicalPath does not follow a dangling one on Jolt), creates the
+  temp file in THAT file's directory with mode rw------- when the target
+  exists (save-path/create-temp!, so the new content is never in a wider
+  file), spits into it, copies the target's POSIX permissions onto it
   (copy-permissions!), then renames the temp file over the RESOLVED
   target with java.nio.file.Files/move + ATOMIC_MOVE (probed against this
   Jolt: see the fix-wave report) so a failure mid-write can't leave a
@@ -357,28 +347,35 @@
   path rather than the hidden temp file or a resolved target that
   differs from it, and never swallowed -- losing the mark that a save
   failed would risk the user believing unsaved work is safe when it
-  isn't -- and the temp file is cleaned up on any failure; the rename
+  isn't -- and the temp file is cleaned up on any failure (a failure to
+  resolve path, such as a symlink loop, is reported the same way, before
+  any temp file exists); the rename
   never runs at all when the write itself fails, so the target is never
   touched. Doesn't touch the title; see open-path!'s docstring."
   [ed cv path-atom path]
-  (let [target (resolve-target path)
-        tmp (temp-path-for target)]
-    (try
-      (spit tmp (editor/editor-text ed))
-      (copy-permissions! target tmp)
-      (java.nio.file.Files/move
-       (.toPath (java.io.File. ^String tmp))
-       (.toPath (java.io.File. ^String target))
-       (into-array java.nio.file.CopyOption
-                   [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                    java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-      (editor/mark-saved! ed)
-      (reset! path-atom path)
-      (catch :default e
-        (let [f (java.io.File. ^String tmp)]
-          (when (.exists f) (.delete f)))
-        (cview/append! cv :error
-                       (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))
+  (let [target (try (save-path/resolve-target path)
+                    (catch :default e
+                      (cview/append! cv :error (str "; save: " (ex-message e) "\n"))
+                      nil))]
+    (when target
+      (let [tmp (temp-path-for target)]
+        (try
+          (save-path/create-temp! tmp target)
+          (spit tmp (editor/editor-text ed))
+          (copy-permissions! target tmp)
+          (java.nio.file.Files/move
+           (.toPath (java.io.File. ^String tmp))
+           (.toPath (java.io.File. ^String target))
+           (into-array java.nio.file.CopyOption
+                       [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                        java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+          (editor/mark-saved! ed)
+          (reset! path-atom path)
+          (catch :default e
+            (let [f (java.io.File. ^String tmp)]
+              (when (.exists f) (.delete f)))
+            (cview/append! cv :error
+                           (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))))
 
 (defn- guarded-open!
   "I4's dirty-discard gate for loading a file into the active tab: when ed
@@ -938,6 +935,7 @@
                   (docs/clear-doc-cache!)
                   (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
+                  (on-gui! (fn [] (cview/note-run-end! cv)))
                   (refresh-prompt! cv ev*)
                   (let [[kind text] (console/result-line result)]
                     (cview/append! cv kind text))
@@ -1015,7 +1013,8 @@
         (if problem
           (do (cview/append! cv :error (str problem "\n"))
               (set-status! status-label "Ready"))
-          (let [warning (ev/eval! @ev* text (opts))]
+          (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                warning (ev/eval! @ev* text (opts))]
             (when warning (cview/append! cv :system warning))))))))
 
 (defn- do-stop!
@@ -1052,7 +1051,8 @@
   (cljd plan P2.T4); the in-process and nREPL evaluators ignore it."
   ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
   ([ed cv ev* status-label text extra-opts]
-   (let [warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+   (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+         warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
                                             extra-opts))]
      (when warning (cview/append! cv :system warning)))))
 
@@ -1285,7 +1285,8 @@
                                 (on-gui! inspect-last-fn))))]
             ((:flash! flash-fns) start end (:caret snap))
             (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-            (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                  warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
           (set-status! status-label "No form at the caret."))))))
 

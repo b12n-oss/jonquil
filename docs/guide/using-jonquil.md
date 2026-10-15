@@ -109,10 +109,11 @@ Cmd/Ctrl+D sends end-of-input while a program is waiting this way, the
 same signal `read-line` would see from a closed pipe on the command line.
 
 One thing worth knowing: whatever you've typed at the prompt but not yet
-sent stays there after the program finishes, and it's then read as an
-ordinary Clojure entry on your next Return rather than as stdin. If you
-typed a partial answer and the program ended before you sent it, clear
-the prompt before typing your next expression.
+sent stays there after the program finishes. If the program ended while
+that text was waiting for it, your next Return doesn't evaluate it. It
+prints "This was typed while the program ran. Press Return again to
+evaluate it." and a second Return evaluates it. Edit the text first and
+Return behaves normally. Nothing is deleted either way.
 
 ## Stop
 
@@ -255,9 +256,14 @@ for a file that already has a path. Either way, the save itself is atomic:
 Jonquil writes to a hidden temporary file next to the target first, then
 renames it into place, so a crash or a full disk mid-write can't leave a
 half-written file behind. Saving through a symlink follows the link and
-updates the file it points to, leaving the link itself in place; saving
-through a symlink that points at nothing yet replaces the link with a
-plain file at that name.
+updates the file it points to, leaving the link itself in place. That
+holds even when the link points at nothing yet: the save creates the file
+the link names, and a relative link is resolved against the real location
+of its folder. A chain of more than 40 links prints "; save: too many
+levels of symbolic links". When the file already exists, the temporary
+file is created private (mode 600) before the new text goes in and only
+then gets the file's own permissions, so a private file's content is never
+written into a more open file.
 
 ![The close prompt: Save, Don't Save and Cancel over unsaved changes](../images/close-prompt.png)
 
@@ -725,9 +731,14 @@ even on a program that would otherwise have interrupted cleanly.
 
 While the child runs, `jolt nrepl-server` writes its port into the
 project's `.nrepl-port`, the file any nREPL-aware editor already looks
-for. Jonquil restores whatever was there before the child started, or
-deletes the file if nothing was, once the child stops, so a project that
-already used that file for something else gets it back exactly as it was.
+for. The first child in a project folder remembers what the file held
+before. If another child starts there while it runs (two windows on one
+project, or switching a project from A to B and back to A quickly), they
+share that memory. Whenever a child stops while others still run, the file
+is rewritten with the newest running child's port. The last one out
+restores whatever was there before, or deletes the file if nothing was, so
+a project that already used that file for something else gets it back
+exactly as it was.
 
 ### ClojureDart (experimental): attaching to a running app
 
@@ -1124,18 +1135,16 @@ than being surprises you'd otherwise have to rediscover:
 - Closing the window, or Cmd/Ctrl+W, while a program runs quits Jonquil
   at once, which ends the program too. It isn't a Stop: nothing is printed,
   and the program gets no chance to finish what it was doing.
-- Text left at the prompt after a program stops waiting on it is read as
-  a Clojure entry on your next Return, not as leftover stdin.
-- Saving through a symlink that points at nothing replaces the link with
-  a regular file.
 - Typing in a very large Definitions pane can lag: repainting the whole
   buffer measured about 29ms at 200 lines, 144ms at 1,000 lines, and 3.4
   seconds at 20,000 lines. Most programs never get close to that size.
 - An unresolved symbol evaluates to an `Unbound` var rather than an error,
   when Jonquil is running Jolt out of process.
-- A hard kill of Jonquil (a signal it can't catch, or a crash) leaves its
-  out-of-process Jolt child running. Ordinary Quit, Cmd/Ctrl+W, and
-  closing the window all stop the child first.
+- A crash or SIGKILL of Jonquil leaves its out-of-process Jolt child
+  running, since neither can run a hook. Ordinary Quit, Cmd/Ctrl+W,
+  closing the window, and SIGTERM, SIGHUP or SIGINT all stop the child
+  first. Exiting can take a while when a child is still starting: stop
+  waits up to about 16 seconds for each start in flight.
 - A wedged out-of-process child can hold a completion or quick-doc lookup
   for up to 300 ms before Jonquil falls back to its own offline answer.
 - Stop against an unresponsive out-of-process child takes about 2.2

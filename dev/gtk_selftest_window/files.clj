@@ -124,6 +124,95 @@
                 (.delete (java.io.File. ^String link))
                 (.delete (java.io.File. ^String real)))))))
 
+(defn row-save-dangling-symlink
+  "Saving through a symlink whose target doesn't exist yet creates the
+  target and leaves the link a link."
+  [ui]
+  (go-row :save-dangling-symlink support/check
+    (on-gtk (let [ed (:editor ui)
+                  dir (str (System/getProperty "java.io.tmpdir")
+                           "/jonquil-selftest-dangling-" (System/currentTimeMillis))
+                  link (str dir "/link.clj")
+                  missing (str dir "/missing.clj")]
+              (.mkdirs (java.io.File. ^String dir))
+              (java.nio.file.Files/createSymbolicLink
+               (.toPath (java.io.File. ^String link))
+               (java.nio.file.Paths/get "missing.clj" (into-array String []))
+               (into-array java.nio.file.attribute.FileAttribute []))
+              (editor/set-text! ed "(+ 5 5)")
+              ((:save-to! ui) link)
+              (let [still-symlink? (java.nio.file.Files/isSymbolicLink (.toPath (java.io.File. ^String link)))
+                    content (when (.exists (java.io.File. ^String missing)) (slurp missing))]
+                (support/check :save-dangling-symlink
+                               (and still-symlink? (= "(+ 5 5)" content))
+                               {:still-symlink still-symlink? :content content})
+                (.delete (java.io.File. ^String link))
+                (.delete (java.io.File. ^String missing))
+                (.delete (java.io.File. ^String dir)))))))
+
+(defn row-save-keeps-private-mode
+  "A rw------- file stays exactly that after a save, and a file saved for
+  the first time doesn't come out rw-------."
+  [ui]
+  (go-row :save-keeps-private-mode support/check
+    (on-gtk (let [ed (:editor ui)
+                  stamp (System/currentTimeMillis)
+                  priv (str (System/getProperty "java.io.tmpdir") "/jonquil-selftest-private-" stamp ".clj")
+                  fresh (str (System/getProperty "java.io.tmpdir") "/jonquil-selftest-fresh-" stamp ".clj")
+                  mode (fn [p] (java.nio.file.attribute.PosixFilePermissions/toString
+                                (java.nio.file.Files/getPosixFilePermissions
+                                 (.toPath (java.io.File. ^String p))
+                                 (into-array java.nio.file.LinkOption []))))]
+              (spit priv "(+ 0 0)")
+              (java.nio.file.Files/setPosixFilePermissions
+               (.toPath (java.io.File. ^String priv))
+               (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
+              (editor/set-text! ed "(+ 6 6)")
+              ((:save-to! ui) priv)
+              (let [priv-mode (mode priv)
+                    priv-content (slurp priv)]
+                (editor/set-text! ed "(+ 7 7)")
+                ((:save-to! ui) fresh)
+                (let [fresh-mode (mode fresh)]
+                  (support/check :save-keeps-private-mode
+                                 (and (= "rw-------" priv-mode) (= "(+ 6 6)" priv-content)
+                                      (not= "rw-------" fresh-mode))
+                                 {:priv-mode priv-mode :priv-content priv-content :fresh-mode fresh-mode})
+                  (.delete (java.io.File. ^String priv))
+                  (.delete (java.io.File. ^String fresh))))))))
+
+(defn row-save-symlink-loop
+  "A symlink loop is reported as a save error in the console, and the
+  editor stays dirty."
+  [ui]
+  (go-row :save-symlink-loop support/check
+    (let [ed (:editor ui)
+          dir (str (System/getProperty "java.io.tmpdir")
+                   "/jonquil-selftest-loop-" (System/currentTimeMillis))
+          a (str dir "/a")
+          b (str dir "/b")
+          mk (fn [from to]
+               (java.nio.file.Files/createSymbolicLink
+                (.toPath (java.io.File. ^String from))
+                (java.nio.file.Paths/get ^String to (into-array String []))
+                (into-array java.nio.file.attribute.FileAttribute [])))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (.mkdirs (java.io.File. ^String dir))
+                         (mk a "b")
+                         (mk b "a")
+                         (editor/set-text! ed "(+ 8 8)")
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+                         ((:save-to! ui) a)
+                         m))
+          shown? (await-until 1000 20 #(str/includes? (support/since ui mark) "too many levels of symbolic links"))]
+      (on-gtk (let [dirty? (editor/dirty? ed)]
+                (support/check :save-symlink-loop
+                               (and shown? dirty?)
+                               {:shown shown? :dirty dirty? :console (support/since ui mark)})
+                (.delete (java.io.File. ^String a))
+                (.delete (java.io.File. ^String b))
+                (.delete (java.io.File. ^String dir)))))))
+
 (defn row-save-executable-keeps-mode
   "M12 follow-up (b): a freshly spit temp file gets the process umask's
   default mode (probed: 644), so the old save-to! silently turned a 755

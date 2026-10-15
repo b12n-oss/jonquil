@@ -62,6 +62,7 @@
    run-repl/row-repl-after-run
    run-repl/row-fast-repl-twice
    run-repl/row-busy-hint-once
+   run-repl/row-typed-ahead-not-evaluated
    run-repl/row-console-history-down-empty
    window-keys/row-escape-yields-when-idle
    window-keys/row-command-chord-capslock
@@ -70,6 +71,9 @@
    files/row-open-invalid-utf8
    files/row-save-atomic
    files/row-save-follows-symlink
+   files/row-save-dangling-symlink
+   files/row-save-keeps-private-mode
+   files/row-save-symlink-loop
    files/row-save-executable-keeps-mode
    files/row-save-failure-leaves-original-intact
    files/row-dialog-dismissed-silent

@@ -313,6 +313,25 @@
   [cv]
   (reset! (:busy-hint-shown? cv) false))
 
+;; Text typed for a program: note-run-start! remembers the input line when an
+;; evaluation begins, note-run-end! flags whatever new text sits there when it
+;; finishes, and handle-return! then asks for a second Return before it runs
+;; that text as Clojure. Both are GTK-thread only.
+(defn note-run-start!
+  "Records the input text as it stands when an evaluation begins. Text
+  already there belongs to the user's Clojure and is never flagged."
+  [cv]
+  (reset! (:run-start-input cv) (subs (input-text cv) 0)))
+
+(defn note-run-end!
+  "Flags the input text as a leftover when it is non-blank and differs from
+  what note-run-start! recorded; clears the flag otherwise."
+  [cv]
+  (let [text (input-text cv)]
+    (reset! (:leftover cv)
+            (when (and (not (str/blank? text)) (not= text @(:run-start-input cv)))
+              (subs text 0)))))
+
 ;; --- P4.T6: the console's own REPL completion registrations ---------------
 
 (defn set-completion-fns!
@@ -627,10 +646,14 @@
           action (console/input-action {:input text
                                         :waiting? ((:waiting? cv))
                                         :evaluating? ((:evaluating? cv))
-                                        :shift? shift?})]
+                                        :shift? shift?
+                                        :leftover @(:leftover cv)})]
+      (reset! (:leftover cv) nil)
       (case action
         :newline 0
         :noop 1
+        :leftover (do (append! cv :system "This was typed while the program ran. Press Return again to evaluate it.\n")
+                      1)
         :busy (do (when (compare-and-set! (:busy-hint-shown? cv) false true)
                     (append! cv :system "A program is running. Press Stop (Esc) to cancel it.\n"))
                   1)
@@ -884,6 +907,8 @@
               :waiting? waiting?
               :evaluating? evaluating?
               :busy-hint-shown? (atom false)
+              :run-start-input (atom "")
+              :leftover (atom nil)
               :preedit-active? (atom false)
               :on-submit on-submit
               :history-prev history-prev
