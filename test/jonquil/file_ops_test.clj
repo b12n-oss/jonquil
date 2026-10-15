@@ -55,6 +55,25 @@
     (testing "never throws on a missing parent"
       (is (string? (:error (ops/create-file! (str dir "/nope") "x.clj")))))))
 
+(deftest create-trims-name-test
+  (let [dir (tree! {})
+        r (ops/create-file! dir "x.clj ")]
+    (is (= (canon (str dir "/x.clj")) (:path r)))
+    (is (.exists (io/file dir "x.clj")))))
+
+(deftest symlink-target-test
+  (let [dir (tree! {"a.clj" "A"})
+        link (io/file dir "link.clj")]
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath link) (.toPath (io/file dir "a.clj"))
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (= "link.clj already exists here."
+           (ops/name-problem {:dir dir :name "link.clj" :old-path (str dir "/a.clj")})))
+    (let [r (ops/rename! (str dir "/a.clj") "link.clj")]
+      (is (= "link.clj already exists here." (:error r)))
+      (is (java.nio.file.Files/isSymbolicLink (.toPath link)))
+      (is (= "A" (slurp (io/file dir "a.clj")))))))
+
 (deftest create-folder-test
   (let [dir (tree! {"taken" "keep"})
         r (ops/create-folder! dir "fresh")]
@@ -113,6 +132,13 @@
       (is (= (str new "/a.clj")
              (ops/retarget (str dir "/src2/../src/a.clj") old new)))
       (is (= new (ops/retarget (str dir "/src2/../src") old new))))
+    (testing "a stale spelling after a case-only rename"
+      (let [d (tree! {"core.clj" "c"})
+            o (str d "/core.clj")
+            n (str d "/Core.clj")]
+        (when (.exists (io/file d "CORE.CLJ"))
+          (is (nil? (:error (ops/rename! o "Core.clj"))))
+          (is (= n (ops/retarget o o n))))))
     (testing "a path that cannot be canonicalised is used as given"
       (is (nil? (ops/retarget "/definitely/not/here" old new))))))
 

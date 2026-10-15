@@ -30,6 +30,15 @@
   (try (boolean (Files/isSameFile (.toPath (io/file a)) (.toPath (io/file b))))
        (catch Exception _ false)))
 
+(defn- case-only?
+  "True when target is old under another spelling of the same name: the same
+  file on disk AND names equal ignoring case. A symlink or hard link to old
+  is the same file too, but its name differs, so it is not a case-only
+  rename and must not be overwritten."
+  [old target]
+  (let [o (io/file old) t (io/file target)]
+    (and (.equalsIgnoreCase (.getName o) (.getName t)) (same-file? o t))))
+
 (defn name-problem
   "Why name can't be used in dir, or nil when it can. old-path is the entry
   being renamed (omit for a new one): the same file under another spelling
@@ -41,7 +50,7 @@
       (str/includes? n "/") "A name can't contain /."
       (#{"." ".."} n) "That name is reserved."
       (let [f (io/file dir n)]
-        (and (.exists f) (not (and old-path (same-file? f old-path)))))
+        (and (.exists f) (not (and old-path (case-only? old-path f)))))
       (str n " already exists here.")
       :else nil)))
 
@@ -55,7 +64,7 @@
 
 (defn- create!
   [create-fn dir name]
-  (let [f (io/file dir name)]
+  (let [f (io/file dir (str/trim (str name)))]
     (try (create-fn (.toPath f) (make-array FileAttribute 0))
          {:path (canonical f)}
          (catch Exception e {:error (failure (.getPath f) e)}))))
@@ -77,11 +86,12 @@
   or {:error msg}. A case-only rename (same file on disk) uses renameTo;
   anything else uses Files/move with no options, so a target that appeared
   after name-problem checked is refused rather than overwritten."
-  [old-path new-name]
-  (let [old (io/file old-path)
+  [old-path new-name']
+  (let [new-name (str/trim (str new-name'))
+        old (io/file old-path)
         target (io/file (.getParentFile (.getAbsoluteFile old)) new-name)]
     (try
-      (if (same-file? old target)
+      (if (case-only? old target)
         (when-not (.renameTo old target)
           (throw (java.io.IOException. "rename failed")))
         (Files/move (.toPath old) (.toPath target) (make-array CopyOption 0)))
@@ -92,14 +102,18 @@
 
 (defn retarget
   "Where path ends up after old was renamed or moved to new: new when path is
-  old itself, new plus the rest when it is under old, else nil. path is
-  canonicalised first (as given when that fails)."
+  old itself, new plus the rest when it is under old, else nil. path matches
+  either as given (a tab's stale spelling after a case-only rename) or in
+  its canonical form (a path reached through .. or a symlink); the first
+  that matches computes the rest."
   [path old new]
-  (let [p (try (canonical path) (catch Exception _ (str path)))]
-    (cond
-      (= p old) new
-      (str/starts-with? p (str old "/")) (str new (subs p (count old)))
-      :else nil)))
+  (let [given (str path)
+        canon (try (canonical path) (catch Exception _ nil))
+        hit (fn [p]
+              (cond
+                (= p old) new
+                (str/starts-with? p (str old "/")) (str new (subs p (count old)))))]
+    (or (hit given) (when canon (hit canon)))))
 
 (defn trash-alert
   "The confirm dialog for trashing name: {:message :buttons}."
