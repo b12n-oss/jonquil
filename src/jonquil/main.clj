@@ -32,7 +32,8 @@
   (login-path/start!)
   ;; A SIGTERM, SIGHUP or SIGINT to Jonquil itself must not orphan the
   ;; runtimes. Probed 2026-10-15: the hook runs on all three signals. A
-  ;; normal quit runs stop-all! above the exit as well, so it runs twice.
+  ;; normal quit also runs stop-all! just before System/exit, so it runs
+  ;; twice, and the second call returns at once.
   (jolt.host/add-shutdown-hook
    (fn []
      (try (registry/stop-all!)
