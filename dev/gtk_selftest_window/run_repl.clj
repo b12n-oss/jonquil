@@ -188,7 +188,8 @@
 (defn row-typed-ahead-not-evaluated
   "Text typed for a program (here, while it waits on read-line) is still on
   the input line when the program is stopped. The first Return prints a hint
-  and evaluates nothing, the text stays, and a second Return evaluates it."
+  and evaluates nothing, the text stays, and a second Return evaluates it.
+  Nothing else runs between the two Returns."
   [ui]
   (go-row :typed-ahead-not-evaluated support/check
     (let [typed "(def leftover-ran 1)"
@@ -206,8 +207,9 @@
                           m))
           hinted? (await-until 1000 20 #(str/includes? (support/since ui mark2) "Press Return again"))
           input-kept (on-gtk (cview/input-text (:console ui)))
-          [probe1? mark3] (support/run-and-await ui probe 3000 #(str/includes? % "V="))
-          undefined? (str/includes? (support/since ui mark3) "\"V=\"")
+          ;; Nothing may evaluate between the two Returns: a probe run would
+          ;; clear :leftover by itself and hide a handle-return! that forgot to.
+          undefined? (not (str/includes? (support/since ui mark2) "#'user/leftover-ran"))
           mark4 (on-gtk (let [m (support/out-end-offset ui)]
                           (cview/handle-return! (:console ui) false)
                           m))
@@ -216,9 +218,9 @@
           defined? (str/includes? (support/since ui mark5) "\"V=1\"")]
       (on-gtk (support/check :typed-ahead-not-evaluated
                              (and waiting? stopped? hinted? (= typed input-kept)
-                                  probe1? undefined? evaluated? probe2? defined?)
+                                  undefined? evaluated? probe2? defined?)
                              {:waiting waiting? :stopped stopped? :hinted hinted?
-                              :input-kept input-kept :probe1 probe1? :undefined undefined?
+                              :input-kept input-kept :undefined undefined?
                               :evaluated evaluated? :probe2 probe2? :defined defined?
                               :console (support/since ui mark)})))))
 
