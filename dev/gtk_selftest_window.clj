@@ -37,6 +37,7 @@
             [gtk-selftest-window.rename-menus :as rename-menus]
             [gtk-selftest-window.run-form :as run-form]
             [gtk-selftest-window.run-repl :as run-repl]
+            [gtk-selftest-window.session-tabs :as session-tabs]
             [gtk-selftest-window.source-pane :as source-pane]
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.tab-widget :as tab-widget]
@@ -329,6 +330,13 @@
    app-open/row-app-open-missing
    app-open/row-app-open-already-open
    app-open/row-app-open-non-local
+   session-tabs/row-session-save-restore
+   session-tabs/row-session-untitled-not-saved
+   session-tabs/row-session-missing-file-named
+   session-tabs/row-session-restore-no-duplicates
+   session-tabs/row-session-restore-symlinked-root
+   session-tabs/row-session-off
+   session-tabs/row-session-bad-file
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
