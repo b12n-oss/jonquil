@@ -1131,7 +1131,7 @@
   (smoke-xdg-config-home -- a single top-level def shared by every
   launch! in this file, so a second launch! below reads back exactly
   what the first one wrote, never the user's real settings), cycles once
-  (theme/theme-names: :light -> :dark), waits for the status text
+  (theme/choice-names: :light -> :dark), waits for the status text
   'Theme: dark' by OCR, then reads the saved settings.edn straight off
   disk and requires it to be exactly {:theme :dark} -- the save
   (window.clj's do-cycle-theme!, settings/save-settings!) and the status

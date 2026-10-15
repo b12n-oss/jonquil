@@ -50,10 +50,28 @@
     :console {:prompt "#82aaff" :result "#c3e88d" :system "#6f7390"}}})
 
 (def theme-names
-  "The cycle order Cmd/Ctrl+Shift+M walks."
+  "The palettes, one per entry in themes."
   [:light :dark :solarized :navy])
 
+(def choice-names
+  "The cycle order Cmd/Ctrl+Shift+M walks. :auto is a choice, not a
+  palette: resolve-choice maps it to :light or :dark."
+  [:light :dark :solarized :navy :auto])
+
 (def default-theme :light)
+
+(defn choice?
+  "True when k is one of choice-names."
+  [k]
+  (boolean (some #{k} choice-names)))
+
+(defn resolve-choice
+  "The palette name a choice k stands for. :auto is :dark when system-dark?
+  is true and :light otherwise. Any other k is returned unchanged."
+  [k system-dark?]
+  (if (= :auto k)
+    (if system-dark? :dark :light)
+    k))
 
 (defn theme
   "The theme map for k, or the default theme's for an unknown k."
@@ -61,14 +79,14 @@
   (get themes k (get themes default-theme)))
 
 (defn next-theme
-  "The theme name after k in theme-names, wrapping. An unknown k starts
+  "The choice name after k in choice-names, wrapping. An unknown k starts
   the cycle from the default theme."
   [k]
-  (let [i (.indexOf ^java.util.List theme-names k)]
+  (let [i (.indexOf ^java.util.List choice-names k)]
     (if (neg? i)
-      (nth theme-names (mod (inc (.indexOf ^java.util.List theme-names default-theme))
-                            (count theme-names)))
-      (nth theme-names (mod (inc i) (count theme-names))))))
+      (nth choice-names (mod (inc (.indexOf ^java.util.List choice-names default-theme))
+                             (count choice-names)))
+      (nth choice-names (mod (inc i) (count choice-names))))))
 
 (defn token-color
   "The foreground for a jonquil.paint token kind."

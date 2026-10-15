@@ -28,6 +28,7 @@
             [jonquil.edit :as edit]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.appearance :as appearance]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
@@ -1746,6 +1747,52 @@
     (reset! theme-name k))
   nil)
 
+(defn- poll-tick!
+  "One tick of the `auto` appearance poll, returned as the GLib source
+  result: 0 drops the timer (the choice is no longer :auto), 1 keeps it.
+  It never touches poll-armed?: only the real GLib callback may clear that
+  (see poll-cb in activate!), because only its return of 0 drops the timer.
+  A closing window does nothing, since the app is about to quit and the
+  self-test's suppressed close mustn't stop the poll. Otherwise resolves
+  the choice against the system and applies it only when it differs from
+  the theme being shown. A nil from the system fn means the read failed
+  (inside the poll on macOS it can mean nothing else), so the palette is
+  left alone and the tick returns 1; startup and apply-choice! still count
+  nil as light. Never saves, because the saved value is :auto."
+  [{:keys [theme-name theme-choice system-dark-fn* closing?] :as theme-ctx}]
+  (cond
+    (not= :auto @theme-choice) 0
+    @closing? 1
+    :else (let [dark? ((deref system-dark-fn*))]
+            (when-not (nil? dark?)
+              (let [r (theme/resolve-choice :auto dark?)]
+                (when (not= r @theme-name)
+                  (apply-window-theme! theme-ctx r))))
+            1)))
+
+(defn- apply-choice!
+  "Sets the theme choice to k (a jonquil.theme choice key, possibly :auto),
+  applies the theme it resolves to (:auto asks the system through
+  system-dark-fn*, nil counting as light) and returns that resolved key.
+  Arms the 1 second appearance poll when k is :auto on macOS; poll-armed?
+  keeps it to one timer however often :auto is chosen."
+  [{:keys [theme-choice system-dark-fn* poll-armed? poll-cb arm-count] :as theme-ctx} k]
+  (reset! theme-choice k)
+  (let [r (theme/resolve-choice k (when (= :auto k) ((deref system-dark-fn*))))]
+    (apply-window-theme! theme-ctx r)
+    (when (and (= :auto k)
+               (= "Mac OS X" (System/getProperty "os.name"))
+               (compare-and-set! poll-armed? false true))
+      ;; If arming throws there is no timer, so the flag must not stay
+      ;; true. The throw continues to the caller.
+      (try
+        (g/g-timeout-add 1000 poll-cb ffi/null)
+        (catch Throwable e
+          (reset! poll-armed? false)
+          (throw e)))
+      (swap! arm-count inc))
+    r))
+
 (defn- load-and-apply-theme!
   "TH.T5: jonquil.settings/load-settings against path, applied with
   apply-window-theme! -- a missing file is silently :light (load-settings'
@@ -1755,13 +1802,13 @@
   can drive the exact same startup path against a synthetic path."
   [{:keys [cv] :as theme-ctx} path]
   (let [{:keys [theme warning]} (settings/load-settings path)]
-    (apply-window-theme! theme-ctx theme)
+    (apply-choice! theme-ctx theme)
     (when warning
       (cview/append! cv :system (str "; settings: " warning "\n")))))
 
 (defn- do-cycle-theme!
   "TH.T5: the chord/:cycle-theme!* action. Advances to the next theme
-  (theme/next-theme, wrapping) and applies it, then saves {:theme k} to
+  (theme/next-theme over the choice, wrapping) and applies it, then saves {:theme k} to
   settings-path -- read at CALL time (not captured once), so a self-test
   row can repoint it via :settings-path!* right before calling this. A
   save error is reported on the console as :system, but the theme switch
@@ -1769,13 +1816,15 @@
   brief): while a program is running, the status label is left alone --
   overwriting a live Running…/Waiting for input would make the status
   lie, so only the idle case gets 'Theme: <name>'."
-  [{:keys [cv theme-name settings-path status-label evaluating?] :as theme-ctx}]
-  (let [k (theme/next-theme @theme-name)]
-    (apply-window-theme! theme-ctx k)
+  [{:keys [cv theme-choice settings-path status-label evaluating?] :as theme-ctx}]
+  (let [k (theme/next-theme @theme-choice)
+        r (apply-choice! theme-ctx k)]
     (when-let [err (settings/save-settings! @settings-path {:theme k})]
       (cview/append! cv :system (str "; settings: " err "\n")))
     (when-not (evaluating?)
-      (set-status! status-label (str "Theme: " (name k))))))
+      (set-status! status-label (if (= :auto k)
+                                  (str "Theme: auto (" (name r) ")")
+                                  (str "Theme: " (name k)))))))
 
 (defn- make-on-submit
   "on-submit is built and handed to make-console-view BEFORE the console
@@ -2496,6 +2545,14 @@
         ;; :code-css* reads the CSS provider itself instead) -- see
         ;; reload-code-css!'s docstring.
         theme-name (atom theme/default-theme)
+        ;; Auto theme: what the user picked (:auto or a theme key), the
+        ;; function that asks the system (repointed by a self-test hook),
+        ;; whether the appearance poll timer is armed, and how many times
+        ;; one was (self-test only).
+        theme-choice (atom theme/default-theme)
+        system-dark-fn* (atom appearance/system-dark?)
+        poll-armed? (atom false)
+        arm-count (atom 0)
         code-css (atom nil)
         ;; P4.T3: this window's own registry of P4 popovers (completion,
         ;; quick doc, rename -- P4.T4-T7 register theirs via
@@ -2633,8 +2690,20 @@
         zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
         theme-ctx {:tabs tabs :cv cv :provider provider :zoom-px zoom-px :theme-name theme-name
                    :code-css code-css :settings-path settings-path* :status-label status-label
-                   :evaluating? evaluating-fn}
-        set-theme-fn (fn [k] (apply-window-theme! theme-ctx k))
+                   :evaluating? evaluating-fn :theme-choice theme-choice
+                   :system-dark-fn* system-dark-fn* :poll-armed? poll-armed?
+                   :arm-count arm-count :closing? closing?}
+        ;; Built once, as the inspector's note-clear timer is, because
+        ;; callbacks keeps every callable for the life of the process.
+        ;; Only this callback clears poll-armed?, when its tick returns 0
+        ;; and GLib drops the timer.
+        poll-cb (callable (fn [_data]
+                            (let [r (poll-tick! theme-ctx)]
+                              (when (zero? r) (reset! poll-armed? false))
+                              r))
+                          [:pointer] :int :on-throw 1)
+        theme-ctx (assoc theme-ctx :poll-cb poll-cb)
+        set-theme-fn (fn [k] (apply-choice! theme-ctx k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
         cycle-theme-fn (fn [] (do-cycle-theme! theme-ctx))
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
@@ -3020,6 +3089,14 @@
                  ;; provider itself instead).
                    :set-theme!* set-theme-fn
                    :theme-name* (fn [] @theme-name)
+                 ;; Auto theme: the choice (:auto or a theme key), repoints
+                 ;; the system-appearance fn, runs one poll tick by hand
+                 ;; (returns its int) and reads how many poll timers were armed.
+                   :theme-choice* (fn [] @theme-choice)
+                   :system-dark-fn!* (fn [f] (reset! system-dark-fn* f))
+                   :poll-appearance!* (fn [] (poll-tick! theme-ctx))
+                   :poll-arm-count* (fn [] @arm-count)
+                   :poll-armed?* (fn [] @poll-armed?)
                    :code-css* (fn [] (g/css-provider-string provider))
                  ;; TH.T5: the chord's own action, the settings path this
                  ;; window reads/writes, and the exact startup-load fn
@@ -3200,6 +3277,7 @@
   :dialect-label :reset-check :window :find-bar :run!*
   :stop!* :open-path! :save-to! :run-selection!* :run-form!* :toggle-focus!*
   :clear-console!* :clear-last-output!* :zoom!* :set-theme!* :theme-name* :code-css*
+  :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count* :poll-armed?*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :full-doc-popover

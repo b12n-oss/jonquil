@@ -37,7 +37,7 @@
     {:theme theme/default-theme
      :warning (str "couldn't read " path ", using " (name theme/default-theme))}
 
-    (and (map? m) (contains? theme/themes (:theme m)))
+    (and (map? m) (theme/choice? (:theme m)))
     {:theme (:theme m)}
 
     :else

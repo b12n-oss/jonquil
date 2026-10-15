@@ -4,7 +4,7 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing, themes, help and dialects work, now including ClojureDart (experimental) and JVM Clojure, each attached to a running server**
+**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work, now including ClojureDart (experimental) and JVM Clojure, each attached to a running server**
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 

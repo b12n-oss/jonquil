@@ -140,6 +140,13 @@
    themes/row-theme-and-zoom-share-css
    themes/row-theme-applies-to-new-text
    themes/row-theme-cycle
+   themes/row-auto-follows-system
+   themes/row-auto-flip-keeps-text
+   themes/row-auto-poll-stops
+   themes/row-auto-poll-single-timer
+   themes/row-auto-poll-nil-keeps-palette
+   themes/row-auto-startup-load
+   themes/row-system-dark-real
    themes/row-theme-chord
    themes/row-theme-chord-needs-shift
    themes/row-settings-isolated

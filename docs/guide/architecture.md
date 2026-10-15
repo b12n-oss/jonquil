@@ -27,8 +27,9 @@ these:
 - `jonquil.commands`: the run-selection text, the form Run Form sends,
   the pre-Run bracket check, next/prev match, replace-current and
   replace-all, the format operations, and the zoom sizes.
-- `jonquil.theme`: the four palettes as data, plus `theme`, `next-theme`
-  and `code-css`.
+- `jonquil.theme`: the four palettes as data, the five choices
+  (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
+  light or dark), `theme`, `next-theme` and `code-css`.
 - `jonquil.settings`: `settings-path`, `load-settings` (never throws) and
   `save-settings!` (atomic, never throws).
 
@@ -133,6 +134,10 @@ All three poll a condition against a deadline rather than sleeping, and all thre
 ### Themes
 
 Applying a theme doesn't rebuild anything: each component's `apply-theme!` retints its existing tags in place, so text, undo history and highlights all survive the switch. The window then reloads its one CSS provider, the same one zoom uses, from `theme/code-css`, and sets `gtk-interface-color-scheme` on GtkSettings to `DARK` or `LIGHT` so GTK's own chrome follows along.
+
+The window keeps two atoms for this. `theme-name` is the palette on screen (always one of the four), and `theme-choice` is what the person picked (one of the five, and the one that gets saved). Every path that changes the choice goes through `apply-choice!`, which resolves it with `theme/resolve-choice` and applies the result. When the choice is `auto`, the answer comes from `jonquil.gtk.appearance/system-dark?`. GTK reports no system preference on macOS (`gtk-interface-color-scheme` reads 0, unsupported), so that namespace asks AppKit through the Objective-C runtime for `NSApplication`'s `effectiveAppearance` name and treats a name containing "Dark" as dark. It returns nil on any failure and off macOS, which resolves to light.
+
+A 1-second GLib timeout runs only while the choice is `auto`. What's installed is the poll callback built in `activate!`, and it calls `poll-tick!`, which re-asks `system-dark?` and applies the palette only if it differs from `theme-name`. A failed read (nil) during the poll leaves the palette as it is. The tick doesn't touch the status bar or the settings file. Picking another choice doesn't stop the timeout directly: its next tick, within about a second, returns 0 and GLib drops it. In the real app the window followed a macOS flip to Light and back to Dark, each within 0.87 s.
 
 Isolation matters here too: self-tests and `bb docs:shots` pass a temp `:settings-path`, and `bb smoke:binary` and `bb smoke:cljd` set `XDG_CONFIG_HOME` to a temp directory, so none of the harnesses ever touches the user's real settings file.
 

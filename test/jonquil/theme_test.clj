@@ -50,8 +50,21 @@
       (is (<= 2.4 (apply min (map #(contrast % bg) (concat (vals (:tokens t)) (:rainbow t) [(:red t)]))))))))
 
 (deftest next-theme-test
-  (is (= [:dark :solarized :navy :light] (mapv theme/next-theme theme/theme-names)))
+  (is (= [:dark :solarized :navy :auto :light] (mapv theme/next-theme theme/choice-names)))
   (is (= :dark (theme/next-theme :bogus))))
+
+(deftest choice-test
+  (is (= [:light :dark :solarized :navy :auto] theme/choice-names))
+  (is (every? theme/choice? theme/choice-names))
+  (is (not (theme/choice? :bogus)))
+  (is (not (theme/choice? nil))))
+
+(deftest resolve-choice-test
+  (is (= :dark (theme/resolve-choice :auto true)))
+  (is (= :light (theme/resolve-choice :auto false)))
+  (is (= :light (theme/resolve-choice :auto nil)))
+  (doseq [k theme/theme-names, d [true false nil]]
+    (is (= k (theme/resolve-choice k d)))))
 
 (deftest theme-fallback-test
   (is (= :light (:name (theme/theme :bogus))))
