@@ -3,7 +3,7 @@
   $XDG_CONFIG_HOME/jonquil/settings.edn, or ~/.config/jonquil/settings.edn
   when XDG_CONFIG_HOME is unset or blank. It stores :theme, :dialect (the
   fallback dialect for a file no project decides) when the user set one by
-  hand, and :file-tree {:visible? :width}. A save merges into what the file
+  hand, and :file-tree {:visible? :width}, and :reopen-tabs? (a boolean). A save merges into what the file
   already holds, so each feature only writes its own keys. Loading never throws: a missing file gives the defaults with no warning,
   and an unreadable file, an unknown theme or an unknown dialect is the
   default plus a :warning. Saving writes
@@ -66,9 +66,20 @@
       {:file-tree (select-keys ft [:visible? :width])}
       :else {:warning (str path " has an unusable :file-tree, ignoring it")})))
 
+(defn- reopen-tabs-part
+  "{:reopen-tabs? b} when m holds a boolean one, {} when it holds none, and
+  {:warning ..} otherwise."
+  [path m]
+  (let [v (when (map? m) (get m :reopen-tabs? ::none))]
+    (cond
+      (= ::none v) {}
+      (boolean? v) {:reopen-tabs? v}
+      :else {:warning (str path " has an unusable :reopen-tabs?, ignoring it")})))
+
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
-  :file-tree when it holds a usable one, and :warning when the file exists
+  :file-tree when it holds a usable one, :reopen-tabs? when it holds a
+  boolean, and :warning when the file exists
   but part of it can't be used. A missing
   file is {:theme theme/default-theme} with no warning."
   [path]
@@ -79,8 +90,10 @@
             t (theme-part path m)
             d (dialect-part path m)
             ft (file-tree-part path m)
-            warnings (remove nil? [(:warning t) (:warning d) (:warning ft)])]
-        (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning))
+            rt (reopen-tabs-part path m)
+            warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt)])]
+        (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning)
+                       (dissoc rt :warning))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
 (defn- resolved-target

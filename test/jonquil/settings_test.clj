@@ -176,3 +176,16 @@
       (is (nil? (:file-tree r)))
       (is (= :navy (:theme r)))
       (is (str/includes? (:warning r) "unusable :file-tree")))))
+
+(deftest reopen-tabs-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :reopen-tabs? false}")
+    (is (false? (:reopen-tabs? (settings/load-settings path)))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light}")
+    (is (not (contains? (settings/load-settings path) :reopen-tabs?))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :reopen-tabs? \"no\"}")
+    (let [r (settings/load-settings path)]
+      (is (not (contains? r :reopen-tabs?)))
+      (is (str/includes? (:warning r) ":reopen-tabs?")))))
