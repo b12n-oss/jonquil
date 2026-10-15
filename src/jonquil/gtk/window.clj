@@ -347,29 +347,35 @@
   path rather than the hidden temp file or a resolved target that
   differs from it, and never swallowed -- losing the mark that a save
   failed would risk the user believing unsaved work is safe when it
-  isn't -- and the temp file is cleaned up on any failure; the rename
+  isn't -- and the temp file is cleaned up on any failure (a failure to
+  resolve path, such as a symlink loop, is reported the same way, before
+  any temp file exists); the rename
   never runs at all when the write itself fails, so the target is never
   touched. Doesn't touch the title; see open-path!'s docstring."
   [ed cv path-atom path]
-  (let [target (save-path/resolve-target path)
-        tmp (temp-path-for target)]
-    (try
-      (save-path/create-temp! tmp target)
-      (spit tmp (editor/editor-text ed))
-      (copy-permissions! target tmp)
-      (java.nio.file.Files/move
-       (.toPath (java.io.File. ^String tmp))
-       (.toPath (java.io.File. ^String target))
-       (into-array java.nio.file.CopyOption
-                   [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                    java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-      (editor/mark-saved! ed)
-      (reset! path-atom path)
-      (catch :default e
-        (let [f (java.io.File. ^String tmp)]
-          (when (.exists f) (.delete f)))
-        (cview/append! cv :error
-                       (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))
+  (let [target (try (save-path/resolve-target path)
+                    (catch :default e
+                      (cview/append! cv :error (str "; save: " (ex-message e) "\n"))
+                      nil))]
+    (when target
+      (let [tmp (temp-path-for target)]
+        (try
+          (save-path/create-temp! tmp target)
+          (spit tmp (editor/editor-text ed))
+          (copy-permissions! target tmp)
+          (java.nio.file.Files/move
+           (.toPath (java.io.File. ^String tmp))
+           (.toPath (java.io.File. ^String target))
+           (into-array java.nio.file.CopyOption
+                       [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                        java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+          (editor/mark-saved! ed)
+          (reset! path-atom path)
+          (catch :default e
+            (let [f (java.io.File. ^String tmp)]
+              (when (.exists f) (.delete f)))
+            (cview/append! cv :error
+                           (str "; save: " (name-user-path (ex-message e) tmp target path) "\n"))))))))
 
 (defn- guarded-open!
   "I4's dirty-discard gate for loading a file into the active tab: when ed

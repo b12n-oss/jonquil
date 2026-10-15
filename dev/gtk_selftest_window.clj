@@ -73,6 +73,7 @@
    files/row-save-follows-symlink
    files/row-save-dangling-symlink
    files/row-save-keeps-private-mode
+   files/row-save-symlink-loop
    files/row-save-executable-keeps-mode
    files/row-save-failure-leaves-original-intact
    files/row-dialog-dismissed-silent

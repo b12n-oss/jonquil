@@ -181,6 +181,38 @@
                   (.delete (java.io.File. ^String priv))
                   (.delete (java.io.File. ^String fresh))))))))
 
+(defn row-save-symlink-loop
+  "A symlink loop is reported as a save error in the console, and the
+  editor stays dirty."
+  [ui]
+  (go-row :save-symlink-loop support/check
+    (let [ed (:editor ui)
+          dir (str (System/getProperty "java.io.tmpdir")
+                   "/jonquil-selftest-loop-" (System/currentTimeMillis))
+          a (str dir "/a")
+          b (str dir "/b")
+          mk (fn [from to]
+               (java.nio.file.Files/createSymbolicLink
+                (.toPath (java.io.File. ^String from))
+                (java.nio.file.Paths/get ^String to (into-array String []))
+                (into-array java.nio.file.attribute.FileAttribute [])))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (.mkdirs (java.io.File. ^String dir))
+                         (mk a "b")
+                         (mk b "a")
+                         (editor/set-text! ed "(+ 8 8)")
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf ed) "z" -1 1)
+                         ((:save-to! ui) a)
+                         m))
+          shown? (await-until 1000 20 #(str/includes? (support/since ui mark) "too many levels of symbolic links"))]
+      (on-gtk (let [dirty? (editor/dirty? ed)]
+                (support/check :save-symlink-loop
+                               (and shown? dirty?)
+                               {:shown shown? :dirty dirty? :console (support/since ui mark)})
+                (.delete (java.io.File. ^String a))
+                (.delete (java.io.File. ^String b))
+                (.delete (java.io.File. ^String dir)))))))
+
 (defn row-save-executable-keeps-mode
   "M12 follow-up (b): a freshly spit temp file gets the process umask's
   default mode (probed: 644), so the old save-to! silently turned a 755
