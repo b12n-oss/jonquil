@@ -316,6 +316,7 @@
    file-tree/row-tree-trash-cancel
    file-tree/row-tree-trash-open-file
    file-tree/row-tree-trash-folder-dirty-tab
+   file-tree/row-tree-trash-symlink
    file-tree/row-tree-new-dotfile-hidden
    file-tree/row-tree-window-keys-reach-tree
    app-open/row-app-open-two-files

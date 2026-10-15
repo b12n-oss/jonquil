@@ -75,8 +75,10 @@
 
 (defn children
   "dir's entries, ignore rules applied, folders first then files, each by
-  lower-cased name: [{:path :name :dir?}]. {:error msg} when dir can't be
-  listed."
+  lower-cased name: [{:path :listed :name :dir?}]. :path is canonical (a
+  symlink's target); :listed is the entry itself, dir plus name, which is
+  what Rename and Move to Trash act on, like Finder. {:error msg} when dir
+  can't be listed."
   [{:keys [ignore]} dir]
   (let [f (io/file dir)
         names (try (.list f) (catch Exception _ nil))]
@@ -87,13 +89,13 @@
                    (let [c (io/file f n)
                          dir? (.isDirectory c)]
                      (when-not (or (ignored? ignore n dir?) (not (.exists c)))
-                       {:path (canonical c) :name n :dir? dir?}))))
+                       {:path (canonical c) :listed (.getAbsolutePath c) :name n :dir? dir?}))))
            (sort-by (fn [{:keys [name dir?]}] [(if dir? 0 1) (str/lower-case name)]))
            vec))))
 
 (defn rows
-  "The visible rows, depth first: [{:path :name :depth :dir? :expanded? :dim?
-  :error?}], depth 0 for the root's children. An expanded folder that can't
+  "The visible rows, depth first: [{:path :listed :name :depth :dir? :expanded?
+  :dim? :error?}] (children for :path and :listed), depth 0 for the root's children. An expanded folder that can't
   be listed shows one \"(can't read)\" row under it; one that no longer
   exists is simply not listed by its parent any more."
   [{:keys [root expanded] :as model}]
@@ -106,9 +108,9 @@
               (let [cs (children model dir)]
                 (if (map? cs)
                   [{:path (str dir "/") :name "(can't read)" :depth depth :dir? false :dim? true :error? true}]
-                  (mapcat (fn [{:keys [path name dir?]}]
+                  (mapcat (fn [{:keys [path listed name dir?]}]
                             (let [open? (and dir? (contains? expanded path) (not (contains? ancestors path)))
-                                  row {:path path :name name :depth depth :dir? dir? :expanded? open?
+                                  row {:path path :listed listed :name name :depth depth :dir? dir? :expanded? open?
                                        :dim? (and (not dir?) (not (clojure-file? name))) :error? false}]
                               (if open? (cons row (walk path (inc depth) (conj ancestors path))) [row])))
                           cs))))]

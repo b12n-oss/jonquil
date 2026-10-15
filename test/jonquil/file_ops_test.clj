@@ -146,7 +146,9 @@
     (testing "a non-canonical path reached through .."
       (is (= (str new "/a.clj")
              (ops/retarget (str dir "/src2/../src/a.clj") old new)))
-      (is (= new (ops/retarget (str dir "/src2/../src") old new))))
+      (is (= new (ops/retarget (str dir "/src2/../src") old new)))
+      (is (= (str new "/x.clj") (ops/retarget (str old "/../src/x.clj") old new))
+          "a given path that starts with old still resolves its .. first"))
     (testing "a stale spelling after a case-only rename"
       (let [d (tree! {"core.clj" "c"})
             o (str d "/core.clj")
@@ -165,11 +167,16 @@
          (ops/trash-alert "src" true))))
 
 (deftest trash-message-test
-  (is (= "; Moved a.clj to the Trash.\n" (ops/trash-message "a.clj" 0)))
+  (is (= "; Moved a.clj to the Trash.\n" (ops/trash-message "a.clj" 0 false)))
   (is (= "; Moved a.clj to the Trash. Its tab is still open; Save writes it back.\n"
-         (ops/trash-message "a.clj" 1)))
+         (ops/trash-message "a.clj" 1 false)))
   (is (= "; Moved a.clj to the Trash. 3 tabs on it are still open; Save writes them back.\n"
-         (ops/trash-message "a.clj" 3))))
+         (ops/trash-message "a.clj" 3 false)))
+  (is (= "; Moved the folder src to the Trash.\n" (ops/trash-message "src" 0 true)))
+  (is (= "; Moved the folder src to the Trash. A tab on a file in it is still open; use Save As to keep it.\n"
+         (ops/trash-message "src" 1 true)))
+  (is (= "; Moved the folder src to the Trash. 2 tabs on files in it are still open; use Save As to keep them.\n"
+         (ops/trash-message "src" 2 true))))
 
 (deftest hidden-message-test
   (is (= "; x.log is hidden in the tree (dotfile or .gitignore).\n"

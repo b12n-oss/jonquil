@@ -110,9 +110,10 @@
 (defn retarget
   "Where path ends up after old was renamed or moved to new: new when path is
   old itself, new plus the rest when it is under old, else nil. path matches
-  either as given (a tab's stale spelling after a case-only rename) or in
-  its canonical form (a path reached through .. or a symlink); the first
-  that matches computes the rest."
+  in its canonical form (a path reached through .. or a symlink) or, failing
+  that, as given (a tab's stale spelling after a case-only rename). The
+  canonical form goes first: a given path like /r/src/../src/x.clj starts
+  with /r/src/ too, and its rest would keep the .. (Task 4 report, concern 2)."
   [path old new]
   (let [given (str path)
         canon (try (canonical path) (catch Exception _ nil))
@@ -120,7 +121,7 @@
               (cond
                 (= p old) new
                 (str/starts-with? p (str old "/")) (str new (subs p (count old)))))]
-    (or (hit given) (when canon (hit canon)))))
+    (or (when canon (hit canon)) (hit given))))
 
 (defn trash-alert
   "The confirm dialog for trashing name: {:message :buttons}."
@@ -132,14 +133,23 @@
 
 (defn trash-message
   "The transcript line after trashing name, n-tabs being how many open tabs
-  were on it. Ends in a newline."
-  [name n-tabs]
-  (str "; Moved " name " to the Trash."
-       (case n-tabs
-         0 ""
-         1 " Its tab is still open; Save writes it back."
-         (str " " n-tabs " tabs on it are still open; Save writes them back."))
-       "\n"))
+  were on it (dir? when name is a folder). Ends in a newline. Save can write
+  a trashed file back, but not a file in a trashed folder (save-to! doesn't
+  create the folder), so the folder wording points at Save As."
+  [name n-tabs dir?]
+  (if dir?
+    (str "; Moved the folder " name " to the Trash."
+         (case n-tabs
+           0 ""
+           1 " A tab on a file in it is still open; use Save As to keep it."
+           (str " " n-tabs " tabs on files in it are still open; use Save As to keep them."))
+         "\n")
+    (str "; Moved " name " to the Trash."
+         (case n-tabs
+           0 ""
+           1 " Its tab is still open; Save writes it back."
+           (str " " n-tabs " tabs on it are still open; Save writes them back."))
+         "\n")))
 
 (defn hidden-message
   "The transcript line when a new entry is hidden by the tree's filters."

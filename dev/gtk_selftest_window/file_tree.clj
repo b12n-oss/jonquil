@@ -259,15 +259,24 @@
 
 (defn- popdown! [ui] (g/gtk-popover-popdown (:popover (pane ui))))
 
-(defn- mac? [] (= "Mac OS X" (System/getProperty "os.name")))
-
-(defn- trashed-copy [name] (io/file (System/getProperty "user.home") ".Trash" name))
-
 (defn- remove-trashed!
-  "Removes this row's own trashed copy, by its literal (unique) name, from
-  ~/.Trash on macOS. Nothing else there is touched."
+  "Removes this row's own trashed copy, by its literal (unique) name: from
+  ~/.Trash on macOS; from ~/.local/share/Trash/files plus its .trashinfo on
+  Linux. Nothing else there is touched, and a symlink is removed as a link."
   [name]
-  (when (mac?) (temp-dirs/delete-tree! (trashed-copy name))))
+  (let [home (System/getProperty "user.home")]
+    (case (System/getProperty "os.name")
+      "Mac OS X" (temp-dirs/delete-tree! (io/file home ".Trash" name))
+      "Linux" (do (temp-dirs/delete-tree! (io/file home ".local/share/Trash/files" name))
+                  (temp-dirs/delete-tree! (io/file home ".local/share/Trash/info" (str name ".trashinfo"))))
+      nil)))
+
+(defn- said-last?
+  "Whether the console output since mark, up to the prompt line, ends with msg."
+  [ui mark msg]
+  (let [s (support/since ui mark)
+        i (str/last-index-of s "\n")]
+    (boolean (and i (str/ends-with? (subs s 0 (inc i)) msg)))))
 
 (defn- unique-name [stem ext] (str "jonquil-tree-trash-" stem "-" (System/nanoTime) ext))
 
@@ -408,11 +417,12 @@
                       ((:trash-choice! ui) f {:index 0})
                       (let [t (tab-on ui f)]
                         {:gone (not (.exists (io/file f))) :tab (some? t)
-                         :text (when t (editor/editor-text (:ed t)))
-                         :row-gone (not-any? (fn [row] (= f (:path row))) (pane/visible-rows (pane ui)))})
+                         :text (when t (editor/editor-text (:ed t)))})
                       (finally (remove-trashed! n))))
-          msg (ops/trash-message n 1)
-          said (await-until 2000 20 #(str/includes? (support/since ui mark) msg))]
+          row-gone (await-until 2000 20 #(not-any? (fn [row] (= f (:path row))) (pane/visible-rows (pane ui))))
+          v (assoc v :row-gone row-gone)
+          msg (ops/trash-message n 1 false)
+          said (await-until 2000 20 #(said-last? ui mark msg))]
       (on-gtk (try
                 (support/check :tree-trash-open-file
                                (and (:gone v) (:tab v) (= "(ns t)\n" (:text v)) (:row-gone v) said)
@@ -429,6 +439,7 @@
           r (on-gtk (let [r (ops-tree! {(str n "/x.clj") "(ns y)\n"})] (root-ops! ui r) r))
           d (str r "/" n)
           f (str d "/x.clj")
+          mark (on-gtk (support/out-end-offset ui))
           v (on-gtk (try
                       ((:open-file! ui) f)
                       (let [t (tab-on ui f)]
@@ -439,10 +450,13 @@
                             {:gone (not (.exists (io/file d))) :tab (some? t2)
                              :text-kept (when t2 (= text (editor/editor-text (:ed t2))))
                              :dirty (when t2 (editor/dirty? (:ed t2)))})))
-                      (finally (remove-trashed! n))))]
+                      (finally (remove-trashed! n))))
+          msg (ops/trash-message n 1 true)
+          said (await-until 2000 20 #(said-last? ui mark msg))]
       (on-gtk (try
                 (support/check :tree-trash-folder-dirty-tab
-                               (and (:gone v) (:tab v) (:text-kept v) (:dirty v)) v)
+                               (and (:gone v) (:tab v) (:text-kept v) (:dirty v) said)
+                               (assoc v :said said :console (support/since ui mark)))
                 (finally (restore! ui original)))))))
 
 (defn row-tree-new-dotfile-hidden
@@ -491,5 +505,38 @@
                                (and (= :name (:before-mode esc)) (= 1 (:handled esc))
                                     (false? (:open? (:after esc)))
                                     (:focused passed) (= [0 0 0 0 0 0] (:keys passed)))
+                               v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-trash-symlink
+  "Fix round 1, Critical 1: the menu on a symlink row records the link as
+  listed, and Move to Trash on it trashes the link, leaving its target (a
+  file outside the project) where it is."
+  [ui]
+  (go-row :tree-trash-symlink support/check
+    (let [original (on-gtk (root ui))
+          n (unique-name "link" ".txt")
+          target (str (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-tree-else-"))) "/notes.txt")
+          _ (spit target "kept")
+          r (on-gtk (let [r (ops-tree!)]
+                      (java.nio.file.Files/createSymbolicLink (.toPath (io/file r n)) (.toPath (io/file target))
+                                                              (make-array java.nio.file.attribute.FileAttribute 0))
+                      (root-ops! ui r)
+                      r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          link (str r "/" n)
+          link-exists? (fn [] (java.nio.file.Files/exists (.toPath (io/file link))
+                                                          (into-array java.nio.file.LinkOption [java.nio.file.LinkOption/NOFOLLOW_LINKS])))
+          v (on-gtk (try
+                      ((:tree-menu!* ui) link)
+                      (let [st ((:tree-menu-state* ui))]
+                        (popdown! ui)
+                        ((:trash-choice! ui) (:listed st) {:index 0})
+                        {:listed (:listed st) :target-path (:target st) :link-gone (not (link-exists?))
+                         :target-kept (= "kept" (slurp target))})
+                      (finally (remove-trashed! n))))]
+      (on-gtk (try
+                (support/check :tree-trash-symlink
+                               (and (= link (:listed v)) (= target (:target-path v)) (:link-gone v) (:target-kept v))
                                v)
                 (finally (popdown! ui) (restore! ui original)))))))

@@ -1952,6 +1952,16 @@
   these three only fires while (:focused? source-keys) is true, so none
   of them touch a key meant for the editor or the console.
 
+  tree-keys ({:focused? :leave! :menu-open? :close-menu!}, each a no-arg
+  fn) is the file tree's: :focused? is true while focus is anywhere in the
+  tree pane (its menu popover and name entry included, since the popover
+  hangs off the pane), :leave! gives focus back to the active editor,
+  :menu-open? reads the pane's menu state and :close-menu! pops the menu
+  down. Escape with the tree focused and its menu open closes the menu;
+  with the tree focused and no menu, it calls :leave!. Both sit ahead of
+  the Stop clause. F2, Delete, Cmd/Ctrl+BackSpace, Shift+F10 and Menu match
+  no clause here, so they reach the tree's own key handler.
+
   Clear Last Output (Cmd/Ctrl+Shift+L, CIDER's C-c C-o): its own clause
   sits directly ABOVE the plain Cmd/Ctrl+L clause, since that one doesn't
   itself exclude Shift -- cond takes the first match, so putting the
@@ -1995,7 +2005,7 @@
           ;; File-ops plan T4: the tree's own menu or name entry closes on
           ;; Escape first; the clause below would otherwise send focus to the
           ;; editor, since the popover sits inside the tree pane.
-          (and (= keyval KEY-ESCAPE) tree-keys ((:menu-open? tree-keys)))
+          (and (= keyval KEY-ESCAPE) tree-keys ((:focused? tree-keys)) ((:menu-open? tree-keys)))
           (do ((:close-menu! tree-keys)) 1)
           (and (= keyval KEY-ESCAPE) tree-keys ((:focused? tree-keys)))
           (do ((:leave! tree-keys)) 1)
@@ -2475,34 +2485,51 @@
           nil))))
 
 (defn- tree-rename!
-  "Rename...: renames old to new-name, then every tab on old (or under it,
-  for a folder) follows to the new path, keeping its text and dirty state.
-  nil, or the error string for the entry."
+  "Rename...: renames old (the entry as listed: a symlink itself, never its
+  target) to new-name, then every tab on old (or under it, for a folder)
+  follows to the new listed path, keeping its text and dirty state. A tab on
+  a symlink's target doesn't move, since the target didn't. The rename runs
+  now; the tab paths (a path change rebuilds the tree through the tab's
+  watch), labels, title and tree wait for the next turn. nil, or the error
+  string for the entry."
   [{:keys [cv tree-pane tabs win active-tab] :as ctx} old new-name]
-  (let [{:keys [path error]} (ops/rename! old new-name)]
+  (let [{:keys [error]} (ops/rename! old new-name)
+        new (.getAbsolutePath (java.io.File. (.getParentFile (java.io.File. ^String old)) (str/trim (str new-name))))]
     (if error
       (tree-failed! ctx "rename" error)
-      (do (doseq [t @tabs]
-            (when-let [p (ops/retarget @(:path t) old path)]
-              (reset! (:path t) p)))
-          (refresh-labels! ctx)
-          (let [t (active-tab)] (update-title! (:ed t) win (:path t)))
-          (tree-later! cv "rename" (fn [] (show-in-tree! tree-pane path)))
+      (do (tree-later! cv "rename"
+                       (fn []
+                         (doseq [t @tabs]
+                           (when-let [p (ops/retarget @(:path t) old new)]
+                             (reset! (:path t) p)))
+                         (refresh-labels! ctx)
+                         (let [t (active-tab)] (update-title! (:ed t) win (:path t)))
+                         (show-in-tree! tree-pane new)))
           nil))))
 
+(defn- listed-dir?
+  "Whether path is a folder itself, not following a symlink: a link to a
+  folder is trashed as a link, so it isn't called a folder."
+  [path]
+  (java.nio.file.Files/isDirectory (.toPath (java.io.File. ^String path))
+                                   (into-array java.nio.file.LinkOption [java.nio.file.LinkOption/NOFOLLOW_LINKS])))
+
 (defn- trash-choice!
-  "The trash alert's decision for path: index 0 moves it to the Trash and
+  "The trash alert's decision for path (the entry as listed, so a symlink
+  goes to the Trash, not its target): index 0 moves it to the Trash and
   says how many open tabs were on it (they stay open, text and all); any
-  other index or a dismissal does nothing. Rows call this with a synthetic
+  other index or a dismissal does nothing. The count is taken before the
+  move, while the path still resolves. Rows call this with a synthetic
   {:index n}, exactly as the alert's completion does."
   [{:keys [cv tabs tree-pane]} path {:keys [index]}]
   (when (= index 0)
     (let [n-tabs (count (filter (fn [t] (ops/retarget @(:path t) path path)) @tabs))
+          dir? (listed-dir? path)
           {:keys [error]} (trash/trash! path)]
       (if error
         (cview/append! cv :error (str "; trash: " error "\n"))
-        (cview/append! cv :system (ops/trash-message (.getName (java.io.File. ^String path)) n-tabs)))
-      (file-tree-pane/refresh! tree-pane))))
+        (cview/append! cv :system (ops/trash-message (.getName (java.io.File. ^String path)) n-tabs dir?)))
+      (tree-later! cv "trash" (fn [] (file-tree-pane/refresh! tree-pane))))))
 
 (defn- tree-trash!
   "Move to Trash: asks first (Cancel is the default), sharing the close
@@ -2512,7 +2539,7 @@
     (reset! alert-pending? true)
     (try
       (let [f (java.io.File. ^String path)]
-        (show-alert! win (ops/trash-alert (.getName f) (.isDirectory f)) TRASH-ALERT
+        (show-alert! win (ops/trash-alert (.getName f) (listed-dir? path)) TRASH-ALERT
                      (fn [result] (trash-choice! ctx path result))))
       (catch :default e
         (reset! alert-pending? false)

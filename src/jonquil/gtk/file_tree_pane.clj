@@ -16,8 +16,11 @@
   :on-rename and :on-trash, and a returned string is shown in the entry's
   problem label. The popover hangs off the pane's :root box, not the list,
   because the list is rebuilt wholesale and a popover parented to it would
-  be torn down with its rows. The target (path and dir?) is recorded when
-  the menu opens, so a refresh in between can't redirect an action.
+  be torn down with its rows. The target (path, listed and dir?) is recorded
+  when the menu opens, so a refresh in between can't redirect an action.
+  Rename and Move to Trash act on the entry as listed (a symlink itself, not
+  its target, like Finder): they pass the row's :listed path, and Rename's
+  name and folder come from it too (file-ops fix round 1, Critical 1).
 
   The list and header carry the jonquil-code CSS class, so the window's
   shared provider gives the tree the theme's colours and the zoomed font."
@@ -168,10 +171,15 @@
 
 ;; --- the menu and name entry -------------------------------------------------
 
-(defn- row-at [pane path]
+(defn- row-at
+  "The row listed as path, else the first whose canonical path is path's (a
+  symlink and its target share one)."
+  [pane path]
   (when path
-    (let [c (canonical path)]
-      (some (fn [r] (when (= c (:path r)) r)) (visible-rows pane)))))
+    (let [c (canonical path)
+          rs (visible-rows pane)]
+      (or (some (fn [r] (when (= path (:listed r)) r)) rs)
+          (some (fn [r] (when (= c (:path r)) r)) rs)))))
 
 (defn- rect-alloc [[x y w h]]
   (let [r (ffi/alloc 16)]
@@ -198,11 +206,12 @@
          (finally (ffi/free r)))))
 
 (defn menu-state
-  "{:open? :mode :menu|:name|nil :heading :problem :target path}."
+  "{:open? :mode :menu|:name|nil :heading :problem :target path :listed path}:
+  :target is the canonical path, :listed the entry as listed."
   [pane]
   (let [{:keys [mode heading problem target]} @(:menu pane)]
     {:open? (boolean (:open? @(:menu pane))) :mode mode :heading heading :problem problem
-     :target (:path target)}))
+     :target (:path target) :listed (:listed target)}))
 
 (defn menu-items
   "The labels the menu currently shows."
@@ -232,8 +241,8 @@
   ([{:keys [popover menu state row-widgets] :as pane} path pt]
   (let [row (when path (row-at pane path))
         root (:root @state)
-        target (cond (nil? path) (when root {:path (canonical root) :dir? true})
-                     (and row (not (:error? row))) (select-keys row [:path :dir?]))]
+        target (cond (nil? path) (when root (let [c (canonical root)] {:path c :listed c :dir? true}))
+                     (and row (not (:error? row))) (select-keys row [:path :listed :dir?]))]
     (when target
       (swap! menu assoc :target target :items (if (nil? path) (vec (take 2 ITEMS)) ITEMS)
              :mode :menu :open? true :problem nil)
@@ -241,16 +250,19 @@
         (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0)))
       (set-problem! pane nil)
       (show-menu-mode! pane :menu)
-      (point-popover-at! pane (when row (:row (get @row-widgets (index-of pane path)))) pt)
+      (point-popover-at! pane (when row (:row (get @row-widgets (.indexOf ^java.util.List (visible-rows pane) row)))) pt)
       (g/gtk-popover-popup popover)
       true))))
 
-(defn- target-name [{:keys [path]}] (.getName (File. ^String path)))
+(defn- listed [{:keys [path listed]}] (or listed path))
+
+(defn- target-name [target] (.getName (File. ^String (listed target))))
 
 (defn- target-dir
-  "The folder a new entry goes in: the target itself for a folder, else its parent."
-  [{:keys [path dir?]}]
-  (if dir? path (.getParent (File. ^String path))))
+  "The folder a new entry goes in: the target itself (canonical) for a
+  folder, else the folder the file is listed in."
+  [{:keys [path dir?] :as target}]
+  (if dir? path (.getParent (File. ^String (listed target)))))
 
 (defn- prefill-selection
   "[start end] to select in name: the part before the last dot of a file's
@@ -285,7 +297,7 @@
     "New File…" (show-name-entry! pane :new-file)
     "New Folder…" (show-name-entry! pane :new-folder)
     "Rename…" (show-name-entry! pane :rename)
-    "Move to Trash" (let [{:keys [path]} (:target @menu)]
+    "Move to Trash" (let [path (listed (:target @menu))]
                       (close-menu! pane)
                       (when-let [problem (when on-trash (on-trash path))]
                         (on-error (str "; trash: " problem))))
@@ -303,22 +315,27 @@
           n (str/trim (str text))
           rename? (= action :rename)
           same? (and rename? (= n (target-name target)))
-          dir (if rename? (.getParent (File. ^String (:path target))) (target-dir target))
+          dir (if rename? (.getParent (File. ^String (listed target))) (target-dir target))
           problem (when-not same?
-                    (ops/name-problem {:dir dir :name text :old-path (when rename? (:path target))}))]
+                    (ops/name-problem {:dir dir :name text :old-path (when rename? (listed target))}))]
       (cond
         same? (close-menu! pane)
         problem (set-problem! pane problem)
         :else (let [f (case action :new-file on-new-file :new-folder on-new-folder on-rename)
-                    err (when f (if rename? (f (:path target) n) (f dir n)))]
+                    err (when f (if rename? (f (listed target) n) (f dir n)))]
                 (if err (set-problem! pane err) (close-menu! pane))))))
   nil)
 
 (defn- command-chord? [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 
-(defn- selected-row [pane]
-  (when-let [p (selected-path pane)] (row-at pane p)))
+(defn- selected-row
+  "The selected row itself (by index, so a symlink's row is never confused
+  with its target's)."
+  [{:keys [list] :as pane}]
+  (let [row (g/gtk-list-box-get-selected-row list)]
+    (when-not (ffi/null? row)
+      (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))))
 
 (defn handle-key!
   "The list's key handler: 1 when keyval (with GDK modifier state) is one the
@@ -332,14 +349,14 @@
     (cond
       (handles-key? pane keyval) (later "tree" (fn [] (on-key pane keyval)))
       (and r (not (:error? r)) (= keyval KEY-F2))
-      (later "rename" (fn [] (when (open-menu! pane (:path r)) (press-item! pane "Rename…"))))
+      (later "rename" (fn [] (when (open-menu! pane (listed r)) (press-item! pane "Rename…"))))
       (and r (not (:error? r))
            (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state))))
-      (later "trash" (fn [] (when-let [problem (when on-trash (on-trash (:path r)))]
+      (later "trash" (fn [] (when-let [problem (when on-trash (on-trash (listed r)))]
                               (on-error (str "; trash: " problem)))))
       (and r (or (= keyval KEY-MENU)
                  (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK))))))
-      (later "menu" (fn [] (open-menu! pane (:path r))))
+      (later "menu" (fn [] (open-menu! pane (listed r))))
       :else 0)))
 
 (defn focus!
@@ -472,7 +489,7 @@
                                                       pt [x y]]
                                                   (if (ffi/null? row)
                                                     (open-menu! pane nil pt)
-                                                    (let [path (:path (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
+                                                    (let [path (listed (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
                                                       (g/gtk-list-box-select-row list row)
                                                       (open-menu! pane path pt)))
                                                   nil)))

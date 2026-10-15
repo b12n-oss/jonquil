@@ -137,3 +137,24 @@
     (is (= cljd (:project-dir (ft/project-selection cljd nil))))
     (is (= :jolt (get-in (ft/project-selection jolt nil) [:profile :id])))
     (is (= jolt (:project-dir (ft/project-selection jolt nil))))))
+
+(deftest listed-symlink-test
+  ;; File-ops fix round 1, Critical 1: :path is the canonical target, :listed
+  ;; the entry itself, for a symlinked file and a symlinked folder.
+  (let [root (tree! {"proj/a.clj" "" "else/notes.txt" "n" "else/vd/v.clj" ""})
+        proj (str root "/proj")
+        link! (fn [n target]
+                (java.nio.file.Files/createSymbolicLink (.toPath (io/file proj n)) (.toPath (io/file target))
+                                                        (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (link! "notes-link.txt" "../else/notes.txt")
+    (link! "vendor" "../else/vd")
+    (let [m (ft/load-model proj)
+          by-name (into {} (map (juxt :name identity)) (ft/children m proj))
+          rs (into {} (map (juxt :name identity)) (ft/rows m))]
+      (is (= (str root "/else/notes.txt") (:path (by-name "notes-link.txt"))))
+      (is (= (str proj "/notes-link.txt") (:listed (by-name "notes-link.txt"))))
+      (is (= (str root "/else/vd") (:path (by-name "vendor"))))
+      (is (= (str proj "/vendor") (:listed (by-name "vendor"))))
+      (is (= (str proj "/a.clj") (:path (by-name "a.clj")) (:listed (by-name "a.clj"))))
+      (is (= (str proj "/vendor") (:listed (rs "vendor"))) "rows carry :listed too")
+      (is (= (str proj "/notes-link.txt") (:listed (rs "notes-link.txt")))))))

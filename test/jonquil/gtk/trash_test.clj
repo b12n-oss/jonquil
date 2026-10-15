@@ -10,7 +10,12 @@
                       "jonquil-trash" (make-array java.nio.file.attribute.FileAttribute 0)))
         name (str "jonquil-trash-" (System/nanoTime) ".txt")
         f (io/file dir name)
-        trashed (io/file (System/getProperty "user.home") ".Trash" name)]
+        home (System/getProperty "user.home")
+        ;; This test's own trashed copy, by its literal name: ~/.Trash on
+        ;; macOS; the freedesktop files/ entry and its .trashinfo on Linux.
+        trashed [(io/file home ".Trash" name)
+                 (io/file home ".local/share/Trash/files" name)
+                 (io/file home ".local/share/Trash/info" (str name ".trashinfo"))]]
     (try
       (spit f "x")
       (let [r (trash/trash! (.getPath f))]
@@ -23,7 +28,7 @@
         (when (= "Mac OS X" (System/getProperty "os.name"))
           (is (:ok r))))
       (finally
-        (when (.exists trashed) (.delete trashed))
+        (doseq [t trashed] (when (.exists t) (.delete t)))
         (.delete f)
         (.delete dir)))))
 
