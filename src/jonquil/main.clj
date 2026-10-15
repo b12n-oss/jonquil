@@ -30,6 +30,15 @@
   ;; Asks the login shell for PATH in the background when launched from
   ;; Finder; self-tests call start! directly and keep the process PATH.
   (login-path/start!)
+  ;; A SIGTERM, SIGHUP or SIGINT to Jonquil itself must not orphan the
+  ;; runtimes. Probed 2026-10-15: the hook runs on all three signals. A
+  ;; normal quit runs stop-all! above the exit as well, so it runs twice.
+  (jolt.host/add-shutdown-hook
+   (fn []
+     (try (registry/stop-all!)
+          (catch Throwable e
+            (binding [*out* *err*]
+              (println "jonquil: stopping every runtime failed:" (ex-message e)))))))
   ;; Every argument goes through GApplication's "open" signal, so several
   ;; files open as tabs and a folder roots the file tree. :cwd roots the
   ;; tree when there's no argument.
