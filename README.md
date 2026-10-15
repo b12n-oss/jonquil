@@ -30,7 +30,7 @@ is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
-A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, and a click opens a file in a tab. Several files can be open at once, one tab each, over one evaluator and one console. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
+A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
 
 Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
 
@@ -81,6 +81,7 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 - `jonquil.eval`: The eval engine with `run-interruptible` Stop, output streaming and REPL history.
 - `jonquil.help`: The decisions behind completion, quick doc, jump to definition and rename.
 - `jonquil.file-tree`: The file tree as plain data: listing a folder, the ignore rules, the visible rows, and which folder to root at.
+- `jonquil.file-ops`: The file tree's disk operations: create, rename and the console sentences for a trash or a hidden new name.
 - `jonquil.tabs`: The window's tabs as plain data: labels, the open-file lookup, the runnable-here check, and alert and banner text.
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.

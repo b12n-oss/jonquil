@@ -392,8 +392,44 @@ The tree doesn't watch the disk. ⟳ in its header re-reads every open
 folder, and opening a folder always reads it fresh. **Open Folder…**, also
 in the header, roots the tree somewhere else; it doesn't open or close any
 tab, and only changes which project the window runs while the window holds
-nothing but one empty Untitled tab. There's no creating, renaming or
-deleting files from the tree yet.
+nothing but one empty Untitled tab.
+
+### Files and folders
+
+Right-click a row for **New File…**, **New Folder…**, **Rename…** and **Move to
+Trash**. Right-click the empty space under the rows for the first two, which
+then go in the tree's root folder. With a row selected, Shift+F10 or the Menu
+key opens the same menu. On a file row, New File and New Folder go in the
+folder that file is listed in. The "(can't read)" row has no menu.
+
+F2 renames the selected row. Delete, or Cmd+Backspace (Ctrl+Backspace on
+Linux), moves it to the Trash. Return still opens a file or toggles a folder.
+
+The menu swaps to a name box. Return accepts the name, while Escape or a
+click outside cancels. Escape on the menu itself closes it. Rename pre-selects the
+part of the name before the extension. A name that won't do keeps the box open
+and says why: it's blank, contains `/`, is `.` or `..`, is already used in
+that folder, or is held by an open tab (a tab can outlive its file after a
+trip to the Trash). Rename never overwrites anything. Changing only the case
+of a name (core.clj to Core.clj) works.
+
+Open tabs follow a rename: a tab on the renamed file, or on a file under a
+renamed folder, now points at the new path, and its unsaved text and dirty
+mark stay as they were. Expanded folders stay expanded. On a link, Rename and
+Move to Trash act on the link itself, the way Finder does, and leave whatever
+it points to alone.
+
+Move to Trash always asks first, with Cancel as the default button, and uses
+the system Trash (`~/.Trash` on macOS, the freedesktop trash on Linux).
+Nothing is ever deleted permanently, so the Trash is the undo. If the move
+fails, the console says so and nothing is deleted. Tabs on a trashed file
+stay open with their text, and the console tells you that Save writes the file
+back. For a trashed folder it says to use Save As instead, because Save can't
+recreate the folder.
+
+A new file whose name the tree hides (a dotfile, or a `.gitignore` match) is
+still created and opened, and the console says it's hidden. Dragging rows to
+move them isn't supported yet.
 
 ## Themes
 
@@ -1080,6 +1116,9 @@ works, for example
 | Cmd/Ctrl+Shift+E | anywhere in the window | Show or hide the file tree |
 | Up/Down, Return | file tree | Move, and open a file or a folder |
 | Right/Left | file tree | Open or close the selected folder |
+| F2 | file tree | Rename the selected row |
+| Delete, Cmd/Ctrl+Backspace | file tree | Move the selected row to the Trash |
+| Shift+F10, Menu | file tree | Open the menu for the selected row |
 | Escape | file tree | Give focus back to the editor |
 | ( [ { " | Definitions editor | Auto-pair the closer, or wrap the selection |
 | Tab | Definitions editor | Indent the line or selection |

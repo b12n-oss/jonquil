@@ -27,6 +27,7 @@
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test
+    jonquil.file-ops-test
     jonquil.file-tree-test
     jonquil.tool-path-test
     jonquil.save-path-test
@@ -50,6 +51,7 @@
     jonquil.nrepl.jvm-test
     jonquil.nrepl.jank-eval-test
     jonquil.gtk.appearance-test
+    jonquil.gtk.trash-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.inspect.view-test

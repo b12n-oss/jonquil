@@ -267,6 +267,15 @@
    file-tree-pane/row-tree-pane-large-folder
    file-tree-pane/row-tree-pane-select-non-canonical
    file-tree-pane/row-tree-pane-deferred-activation-by-path
+   file-tree-pane/row-tree-pane-menu-items
+   file-tree-pane/row-tree-pane-new-file-flow
+   file-tree-pane/row-tree-pane-rename-prefill
+   file-tree-pane/row-tree-pane-callback-error-shown
+   file-tree-pane/row-tree-pane-menu-target-survives-refresh
+   file-tree-pane/row-tree-pane-keys
+   file-tree-pane/row-tree-pane-stale-menu-actions
+   file-tree-pane/row-tree-pane-menu-focus-and-anchor
+   file-tree-pane/row-tree-pane-error-row-no-menu
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip
@@ -300,6 +309,21 @@
    file-tree/row-tree-settings-persist
    file-tree/row-tree-follows-theme
    file-tree/row-tree-escape-returns-focus
+   file-tree/row-tree-new-file-opens-tab
+   file-tree/row-tree-new-folder-selects
+   file-tree/row-tree-rename-open-file
+   file-tree/row-tree-rename-folder-retargets
+   file-tree/row-tree-rename-taken
+   file-tree/row-tree-trash-cancel
+   file-tree/row-tree-trash-open-file
+   file-tree/row-tree-trash-folder-dirty-tab
+   file-tree/row-tree-trash-symlink
+   file-tree/row-tree-new-dotfile-hidden
+   file-tree/row-tree-window-keys-reach-tree
+   file-tree/row-tree-rename-retargets-case-spelling
+   file-tree/row-tree-new-file-stale-tab
+   file-tree/row-tree-rename-stale-tab
+   file-tree/row-tree-rename-keeps-expanded
    app-open/row-app-open-two-files
    app-open/row-app-open-folder
    app-open/row-app-open-missing

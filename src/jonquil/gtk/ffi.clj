@@ -1178,3 +1178,11 @@
 (ffi/defcfn g-file-new-for-uri "g_file_new_for_uri" [:string] :pointer)
 ;; gio/gfile.h:663 char* g_file_get_uri (GFile*); free the result with g_free
 (ffi/defcfn g-file-get-uri* "g_file_get_uri" [:pointer] :pointer)
+
+;; --- file tree operations ---
+;; gio/gfile.h:917 gboolean g_file_trash (GFile*, GCancellable*, GError**)
+(ffi/defcfn g-file-trash "g_file_trash" [:pointer :pointer :pointer] :int)
+;; gtk/gtkgesturesingle.h:61 void gtk_gesture_single_set_button (GtkGestureSingle*, guint)
+(ffi/defcfn gtk-gesture-single-set-button "gtk_gesture_single_set_button" [:pointer :uint] :void)
+;; gtk/gtklistbox.h:192 GtkListBoxRow* gtk_list_box_get_row_at_y (GtkListBox*, gint)
+(ffi/defcfn gtk-list-box-get-row-at-y "gtk_list_box_get_row_at_y" [:pointer :int] :pointer)
