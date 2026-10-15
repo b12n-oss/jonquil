@@ -74,6 +74,21 @@
       (is (java.nio.file.Files/isSymbolicLink (.toPath link)))
       (is (= "A" (slurp (io/file dir "a.clj")))))))
 
+(deftest distinct-link-spelled-like-new-name-test
+  (let [dir (tree! {"a.clj" "A"})]
+    (if (.exists (io/file dir "A.CLJ"))
+      (testing "case-insensitive volume: A.clj cannot exist beside a.clj, so the
+                case-sensitive link scenario can't be built here (not asserted)"
+        (is true))
+      (let [link (io/file dir "A.clj")]
+        (java.nio.file.Files/createSymbolicLink
+         (.toPath link) (.toPath (io/file dir "a.clj"))
+         (make-array java.nio.file.attribute.FileAttribute 0))
+        (is (= "A.clj already exists here."
+               (ops/name-problem {:dir dir :name "A.clj" :old-path (str dir "/a.clj")})))
+        (is (= "A.clj already exists here." (:error (ops/rename! (str dir "/a.clj") "A.clj"))))
+        (is (java.nio.file.Files/isSymbolicLink (.toPath link)))))))
+
 (deftest create-folder-test
   (let [dir (tree! {"taken" "keep"})
         r (ops/create-folder! dir "fresh")]

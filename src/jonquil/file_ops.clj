@@ -34,10 +34,17 @@
   "True when target is old under another spelling of the same name: the same
   file on disk AND names equal ignoring case. A symlink or hard link to old
   is the same file too, but its name differs, so it is not a case-only
-  rename and must not be overwritten."
+  rename and must not be overwritten. On a case-sensitive volume a distinct
+  entry spelled exactly like the new name (A.clj linked to a.clj) is the same
+  hazard, so the parent's listing must not hold that spelling unless it is
+  the old name itself."
   [old target]
-  (let [o (io/file old) t (io/file target)]
-    (and (.equalsIgnoreCase (.getName o) (.getName t)) (same-file? o t))))
+  (let [o (io/file old) t (io/file target)
+        on (.getName o) tn (.getName t)]
+    (and (.equalsIgnoreCase on tn)
+         (same-file? o t)
+         (or (= on tn)
+             (not-any? #{tn} (.list (.getAbsoluteFile (.getParentFile (.getAbsoluteFile t)))))))))
 
 (defn name-problem
   "Why name can't be used in dir, or nil when it can. old-path is the entry
