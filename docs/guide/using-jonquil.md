@@ -320,6 +320,27 @@ use the same evaluator anyway. With only one tab open, opening a file
 from another project switches the window over as it always did, and
 closing tabs until the one left belongs elsewhere switches it too.
 
+### Tabs from last time
+
+When you quit, Jonquil remembers which files had tabs in that window, in
+order, and which one was selected. It keeps that list per project folder,
+the folder the file tree is rooted at, for the 20 most recent folders.
+Start Jonquil again in the same folder without naming a file (`jonquil`
+from that folder, or `jonquil` with the folder as its argument) and those
+tabs come back, with the selected one selected again. A start from the
+Dock or Finder has no folder of its own, so it goes back to the project
+you quit most recently and roots the file tree there.
+
+Only files are remembered. Untitled tabs, and text you didn't save, are
+not: quitting already asks about those, and a file you chose not to save
+reopens as it is on disk. Naming a file at launch (`jonquil core.clj`)
+opens just that file. A remembered file that's been deleted or moved is
+skipped, and the console names it: `; Couldn't reopen notes.clj from last
+time.` The list lives in `sessions.edn`, next to `settings.edn` (see
+[Themes](#themes) for where that is). To turn the whole thing off, put
+`:reopen-tabs? false` in `settings.edn`; Jonquil then neither saves nor
+reopens anything.
+
 ## Opening from Finder and the Dock
 
 With the macOS app installed (see [Getting started](getting-started.md#the-macos-app)),
