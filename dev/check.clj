@@ -42,6 +42,7 @@
     jonquil.file-tree
     jonquil.gtk.ffi
     jonquil.gtk.appearance
+    jonquil.gtk.trash
     jonquil.gtk.callbacks
     jonquil.gtk.popover
     jonquil.gtk.help-popover

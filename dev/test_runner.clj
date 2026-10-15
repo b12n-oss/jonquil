@@ -51,6 +51,7 @@
     jonquil.nrepl.jvm-test
     jonquil.nrepl.jank-eval-test
     jonquil.gtk.appearance-test
+    jonquil.gtk.trash-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.inspect.view-test
