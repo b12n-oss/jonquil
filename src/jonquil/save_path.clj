@@ -5,14 +5,19 @@
 (def ^:private max-hops 40)
 
 (defn- link-step
-  "The path a symlink at p points at, as an absolute normalized Path."
+  "The path a symlink at p points at, as an absolute normalized Path. A
+  relative target is resolved against the link's canonical parent, so a
+  .. in it climbs from the parent's real location, as the OS does, and
+  not from the lexical path that reached the link."
   [p]
-  (let [target (java.nio.file.Files/readSymbolicLink p)]
-    (.normalize (.resolve (.getParent (.toAbsolutePath p)) target))))
+  (let [target (java.nio.file.Files/readSymbolicLink p)
+        parent (.toPath (.getCanonicalFile (.toFile (.getParent (.toAbsolutePath p)))))]
+    (.normalize (.resolve parent target))))
 
 (defn resolve-target
   "The canonical path of the file a save to path must write, following
-  symlinks by hand. .getCanonicalPath alone does not follow a dangling
+  symlinks by hand, each relative link resolved against its parent
+  directory's real location. .getCanonicalPath alone does not follow a dangling
   link on this Jolt (probed: it returns the link's own path), and a rename
   onto the link's own path would replace the link. Walking the links first
   means a link to a missing file resolves to the file it would create.

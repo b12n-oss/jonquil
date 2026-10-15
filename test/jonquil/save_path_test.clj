@@ -49,6 +49,31 @@
       (.mkdir d)
       (is (= (str (canon parent) "/nodir/x.clj")
              (sp/resolve-target (link! d "link.clj" "../nodir/x.clj"))))))
+  (testing "a relative link inside a symlinked dir resolves .. against the real parent"
+    (let [w (temp-dir)
+          top (java.io.File. w "top")
+          real (java.io.File. w "real")
+          deep (java.io.File. real "deep")]
+      (.mkdir top)
+      (.mkdir real)
+      (.mkdir deep)
+      (spit (java.io.File. real "x.clj") "x")
+      (link! top "s" "../real/deep")
+      (link! deep "link.clj" "../x.clj")
+      (is (= (canon (java.io.File. real "x.clj"))
+             (sp/resolve-target (str top "/s/link.clj"))))))
+  (testing "a dangling link inside a symlinked dir resolves under the real parent"
+    (let [w (temp-dir)
+          top (java.io.File. w "top")
+          real (java.io.File. w "real")
+          deep (java.io.File. real "deep")]
+      (.mkdir top)
+      (.mkdir real)
+      (.mkdir deep)
+      (link! top "s" "../real/deep")
+      (link! deep "dangle.clj" "../missing.clj")
+      (is (= (str (canon real) "/missing.clj")
+             (sp/resolve-target (str top "/s/dangle.clj"))))))
   (testing "a link loop throws"
     (let [d (temp-dir)]
       (link! d "b" "a")
