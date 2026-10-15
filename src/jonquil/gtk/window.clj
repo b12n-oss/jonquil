@@ -50,6 +50,7 @@
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.runtime-registry :as registry]
+            [jonquil.save-path :as save-path]
             [jonquil.session]
             [jonquil.settings :as settings]
             [jonquil.source :as source]
@@ -302,20 +303,6 @@
         name (if i (subs path (inc i)) path)]
     (str dir "." name ".jonquil-tmp-" (System/nanoTime))))
 
-(defn- resolve-target
-  "path's real underlying file (M12 follow-up (a)). .getCanonicalPath
-  follows a symlink to what it points at, and works even when path (or
-  its parent directories) doesn't exist yet -- probed against this Jolt.
-  java.nio.file.Files/move onto a symlink's OWN path replaces the link
-  itself with a regular file and leaves whatever it pointed at untouched
-  (probed: after such a move the link path is no longer a symlink at all,
-  and the file it used to point at is unchanged); moving onto the
-  resolved target instead updates the real file and leaves the link a
-  link, still pointing at the same place, with the new content visible
-  through it."
-  [path]
-  (.getCanonicalPath (java.io.File. ^String path)))
-
 (defn- copy-permissions!
   "Copies target's POSIX permissions onto tmp when target already exists
   (M12 follow-up (b)): a freshly spit temp file gets the process umask's
@@ -345,8 +332,11 @@
   "Writes the editor text to path without ever truncating it in place
   (M12), and without breaking a symlink or dropping the target's
   permissions (M12 follow-up): resolves path to its real underlying file
-  (resolve-target), spits to a temp file in THAT file's directory, copies
-  its POSIX permissions onto the temp file when it already exists
+  (save-path/resolve-target, which follows links by hand because
+  .getCanonicalPath does not follow a dangling one on Jolt), creates the
+  temp file in THAT file's directory with mode rw------- when the target
+  exists (save-path/create-temp!, so the new content is never in a wider
+  file), spits into it, copies the target's POSIX permissions onto it
   (copy-permissions!), then renames the temp file over the RESOLVED
   target with java.nio.file.Files/move + ATOMIC_MOVE (probed against this
   Jolt: see the fix-wave report) so a failure mid-write can't leave a
@@ -361,9 +351,10 @@
   never runs at all when the write itself fails, so the target is never
   touched. Doesn't touch the title; see open-path!'s docstring."
   [ed cv path-atom path]
-  (let [target (resolve-target path)
+  (let [target (save-path/resolve-target path)
         tmp (temp-path-for target)]
     (try
+      (save-path/create-temp! tmp target)
       (spit tmp (editor/editor-text ed))
       (copy-permissions! target tmp)
       (java.nio.file.Files/move

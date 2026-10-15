@@ -29,6 +29,7 @@
     jonquil.tabs-test
     jonquil.file-tree-test
     jonquil.tool-path-test
+    jonquil.save-path-test
     jonquil.login-path-test
     jonquil.main-test
     jonquil.dialect-test
