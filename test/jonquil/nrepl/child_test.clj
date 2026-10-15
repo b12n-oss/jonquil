@@ -183,3 +183,72 @@
 (deftest process-options-without-a-path-test
   (with-redefs [lp/path (fn [] nil)]
     (is (not (contains? (child/process-options {:dir "/d" :log "/l"}) :extra-env)))))
+
+(defn- port-file-text [dir]
+  (let [f (io/file dir ".nrepl-port")]
+    (when (.exists f) (str/trim (slurp f)))))
+
+(defn- empty-dir [] (temp-dirs/temp-dir! "jonquil-owner-test-"))
+
+(deftest owner-table-restores-saved-port-file-test
+  (let [dir (empty-dir)]
+    (spit (io/file dir ".nrepl-port") "1234")
+    (let [t (child/claim-dir! dir)]
+      (child/owner-ready! dir t 7950)
+      (is (= "7950" (port-file-text dir)))
+      (child/release-dir! dir t)
+      (is (= "1234" (port-file-text dir))))))
+
+(deftest owner-table-deletes-its-own-port-file-test
+  (let [dir (empty-dir)
+        t (child/claim-dir! dir)]
+    (child/owner-ready! dir t 7950)
+    (child/release-dir! dir t)
+    (is (nil? (port-file-text dir)))))
+
+(deftest owner-table-a-b-a-test
+  (let [dir (empty-dir)
+        t1 (child/claim-dir! dir)]
+    (child/owner-ready! dir t1 7950)
+    (is (= "7950" (port-file-text dir)))
+    (let [t2 (child/claim-dir! dir)]
+      (child/owner-ready! dir t2 7951)
+      (is (= "7951" (port-file-text dir)))
+      ;; Jolt's stop deletes the file when the first child exits.
+      (.delete (io/file dir ".nrepl-port"))
+      (child/release-dir! dir t1)
+      (is (= "7951" (port-file-text dir)))
+      (child/release-dir! dir t2)
+      (is (nil? (port-file-text dir))))))
+
+(deftest owner-table-release-without-a-port-keeps-the-others-test
+  (let [dir (empty-dir)
+        t1 (child/claim-dir! dir)
+        t2 (child/claim-dir! dir)]
+    (child/owner-ready! dir t2 7951)
+    (child/release-dir! dir t1)
+    (is (= "7951" (port-file-text dir)))
+    (child/release-dir! dir t2)))
+
+(deftest owner-table-no-ports-yet-leaves-the-file-test
+  (let [dir (empty-dir)
+        t1 (child/claim-dir! dir)
+        t2 (child/claim-dir! dir)]
+    (spit (io/file dir ".nrepl-port") "5555")
+    (child/release-dir! dir t1)
+    (is (= "5555" (port-file-text dir)))
+    (child/release-dir! dir t2)))
+
+(deftest two-children-in-one-dir-test
+  (let [dir (temp-project)
+        _ (spit (io/file dir ".nrepl-port") "1234")
+        c1 (child/start! dir nil)
+        c2 (child/start! dir nil)]
+    (try
+      (is (not= (:port c1) (:port c2)))
+      (is (= (str (:port c2)) (port-file-text dir)))
+      (child/kill! c1)
+      (is (= (str (:port c2)) (port-file-text dir)) "the first child's exit leaves the second's port")
+      (child/kill! c2)
+      (is (= "1234" (port-file-text dir)) "the seeded file is back")
+      (finally (force-kill! (:proc c1)) (force-kill! (:proc c2))))))

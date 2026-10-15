@@ -12,8 +12,13 @@
 
   jolt nrepl-server writes .nrepl-port into its working directory, the
   user's project, and removes it on SIGTERM. A .nrepl-port that was there
-  before the child started belongs to someone else, so it is read first
-  and written back once the child is gone."
+  before the first child started belongs to someone else, so it is read
+  first and written back once the last child is gone.
+
+  Children for one directory can overlap (project switch A, B, A), and each
+  one's SIGTERM deletes the file whatever it holds. So a process-wide owner
+  table per directory (claim-dir!, owner-ready!, release-dir!) keeps the
+  file pointing at the most recently started child that still runs."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
@@ -117,13 +122,61 @@
   ;; dialects spike; a stopped or wedged child gets SIGKILL after this.
   1000)
 
-(defn- restore-port-file! [{:keys [dir port saved-port-file]}]
-  (let [f (port-file dir)]
-    (try
-      (cond
-        saved-port-file (spit f saved-port-file)
-        (and (.exists f) (= (str port) (str/trim (slurp f)))) (.delete f))
-      (catch Exception _ nil))))
+(defonce ^:private dir-owners
+  ;; canonical dir -> {:saved <.nrepl-port text found by the first claim, or nil>
+  ;;                   :owners [[token port-or-nil] ...] in claim order}
+  (atom {}))
+
+(defonce ^:private owners-lock (Object.))
+
+(defonce ^:private token-counter (atom 0))
+
+(defn claim-dir!
+  "Registers a child about to start in dir and returns its token. The first
+  claim for a directory reads the .nrepl-port that is there into :saved."
+  [dir]
+  (let [dir (.getCanonicalPath (io/file dir))
+        token (swap! token-counter inc)]
+    (locking owners-lock
+      (let [entry (or (get @dir-owners dir) {:saved (read-port-file dir) :owners []})]
+        (swap! dir-owners assoc dir (update entry :owners conj [token nil]))))
+    token))
+
+(defn owner-ready!
+  "Records the port token's child listens on and writes .nrepl-port with it,
+  since an earlier owner's exit may have deleted the file."
+  [dir token port]
+  (let [dir (.getCanonicalPath (io/file dir))]
+    (locking owners-lock
+      (when (get @dir-owners dir)
+        (swap! dir-owners update-in [dir :owners]
+               (fn [owners] (mapv (fn [[t _ :as o]] (if (= t token) [t port] o)) owners)))
+        (try (spit (port-file dir) (str port))
+             (catch Exception _ nil))))))
+
+(defn release-dir!
+  "Drops token's claim. If other owners remain, .nrepl-port is rewritten
+  with the port of the latest-claimed owner that has one (untouched when
+  none has). The last owner out restores the saved .nrepl-port, or deletes
+  the file when it still holds the releasing child's port."
+  [dir token]
+  (let [dir (.getCanonicalPath (io/file dir))]
+    (locking owners-lock
+      (when-let [{:keys [saved owners]} (get @dir-owners dir)]
+        (when-let [[_ port] (first (filter (fn [[t _]] (= t token)) owners))]
+          (let [remaining (vec (remove (fn [[t _]] (= t token)) owners))
+                f (port-file dir)]
+            (try
+              (if (seq remaining)
+                (swap! dir-owners assoc-in [dir :owners] remaining)
+                (swap! dir-owners dissoc dir))
+              (if (seq remaining)
+                (when-let [p (some second (rseq remaining))]
+                  (spit f (str p)))
+                (cond
+                  saved (spit f saved)
+                  (and port (.exists f) (= (str port) (str/trim (slurp f)))) (.delete f)))
+              (catch Exception _ nil))))))))
 
 (defn- terminate!
   "SIGTERM, then SIGKILL after term-grace-ms if proc is still alive (a
@@ -144,11 +197,11 @@
   "Launches the child in dir (made absolute here: a relative :dir makes
   the spawn exit 1 silently, measured) with root's middleware injected, or
   a vanilla server when root is nil. Returns {:proc :pid :port :dir :log
-  :root :saved-port-file}. Throws ex-info with the log's tail when no port
+  :root :token}. Throws ex-info with the log's tail when no port
   in the range works or the child won't answer."
   [dir root]
   (let [dir (.getCanonicalPath (io/file dir))
-        saved (read-port-file dir)]
+        token (claim-dir! dir)]
     (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
       (if-let [port (first ports)]
         (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
@@ -156,34 +209,36 @@
                           (launch-args port root))
               state (wait-ready proc log port ready-deadline-ms)]
           (case state
-            :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
-                    :dir dir :log log :root root :saved-port-file saved}
+            :ready (do (owner-ready! dir token port)
+                       {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
+                        :dir dir :log log :root root :token token})
             :exited (if (str/includes? (tail log 20) "bind() failed")
                       (do (io/delete-file log true)
                           (recur (rest ports)))
                       (let [msg (str "jolt nrepl-server exited: " (tail log 5))]
                         (terminate! proc)
-                        (restore-port-file! {:dir dir :port port :saved-port-file saved})
+                        (release-dir! dir token)
                         ;; The log is left on disk on purpose here, unlike kill!:
                         ;; it's the only post-mortem for a start that never ran.
                         (throw (ex-info msg {:log log}))))
             :timeout (let [msg (str "jolt nrepl-server didn't answer within "
                                     ready-deadline-ms " ms: " (tail log 5))]
                        (terminate! proc)
-                       (restore-port-file! {:dir dir :port port :saved-port-file saved})
+                       (release-dir! dir token)
                        (throw (ex-info msg {:log log})))))
-        (throw (ex-info (str "no free port in " port-base "-" (+ port-base port-span -1)) {}))))))
+        (do (release-dir! dir token)
+            (throw (ex-info (str "no free port in " port-base "-" (+ port-base port-span -1)) {})))))))
 
 (defn alive? [child] (boolean (and child (p/alive? (:proc child)))))
 
 (defn kill!
   "Ends the child: SIGTERM (jolt removes .nrepl-port on it), then SIGKILL
   after term-grace-ms if it's still alive. Only the pid this namespace
-  spawned is signalled. Then restores the .nrepl-port it found and deletes
-  the log. Returns the exit code, or nil when it was already gone."
-  [{:keys [proc log] :as child}]
+  spawned is signalled. Then releases its claim on the directory's
+  .nrepl-port (see release-dir!) and deletes the log. Returns the exit code, or nil when it was already gone."
+  [{:keys [proc log dir token] :as child}]
   (when child
     (let [code (terminate! proc)]
-      (restore-port-file! child)
+      (release-dir! dir token)
       (try (io/delete-file log true) (catch Exception _ nil))
       code)))
