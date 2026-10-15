@@ -308,6 +308,16 @@
    file-tree/row-tree-settings-persist
    file-tree/row-tree-follows-theme
    file-tree/row-tree-escape-returns-focus
+   file-tree/row-tree-new-file-opens-tab
+   file-tree/row-tree-new-folder-selects
+   file-tree/row-tree-rename-open-file
+   file-tree/row-tree-rename-folder-retargets
+   file-tree/row-tree-rename-taken
+   file-tree/row-tree-trash-cancel
+   file-tree/row-tree-trash-open-file
+   file-tree/row-tree-trash-folder-dirty-tab
+   file-tree/row-tree-new-dotfile-hidden
+   file-tree/row-tree-window-keys-reach-tree
    app-open/row-app-open-two-files
    app-open/row-app-open-folder
    app-open/row-app-open-missing

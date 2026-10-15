@@ -34,6 +34,7 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.file-ops :as ops]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
@@ -42,6 +43,7 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.tab :as tab]
+            [jonquil.gtk.trash :as trash]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.login-path :as login-path]
@@ -498,7 +500,7 @@
 
 (defn- register-alert-choice!
   "Tracks on-choice under dialog's own identity: a raw pointer for a real
-  GtkAlertDialog (show-close-dialog!, below), or any comparable value in
+  GtkAlertDialog (show-alert!, below), or any comparable value in
   a self-test row driving complete-alert! directly."
   [dialog on-choice]
   (swap! alert-on-choice-by-dialog assoc dialog on-choice))
@@ -521,23 +523,26 @@
   (callable (fn [src res _data] (complete-alert! src (g/finish-choice src res)) nil)
             [:pointer :pointer :pointer] :void))
 
-(defn- show-close-dialog!
+(defn- show-alert!
   "Builds a fresh GtkAlertDialog (probe 3: g_object_new_with_properties,
   0 properties -- gtk_alert_dialog_new is variadic and is never bound) for
-  THIS close attempt (the message needs the current file name, which can
-  differ between attempts after a Save As), but reuses the ONE retained
-  alert-choose-cb across every attempt. Cancel button 2, default button 0,
-  per the brief."
-  [win {:keys [message buttons]} on-choice]
+  THIS attempt (the message needs the current file name, which can differ
+  between attempts after a Save As), but reuses the ONE retained
+  alert-choose-cb across every attempt. cancel and default are button
+  indexes: the close alerts pass 2 and 0, the tree's trash alert 1 and 1."
+  [win {:keys [message buttons]} {:keys [cancel default]} on-choice]
   (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)]
     (swap! alert-dialog-count inc)
     (register-alert-choice! d on-choice)
     (g/gtk-alert-dialog-set-message d message)
     (ffi/with-c-string-array [labels 4] (conj (vec buttons) nil)
       (g/gtk-alert-dialog-set-buttons d labels))
-    (g/gtk-alert-dialog-set-cancel-button d 2)
-    (g/gtk-alert-dialog-set-default-button d 0)
+    (g/gtk-alert-dialog-set-cancel-button d cancel)
+    (g/gtk-alert-dialog-set-default-button d default)
     (g/gtk-alert-dialog-choose d win ffi/null alert-choose-cb ffi/null)))
+
+(def ^:private CLOSE-ALERT {:cancel 2 :default 0})
+(def ^:private TRASH-ALERT {:cancel 1 :default 1})
 
 (defn- finish-close!
   "Confirms and re-triggers the window's own close-request (probe 3):
@@ -679,8 +684,8 @@
             ;; signal emission. Reset the flag and report it instead; the
             ;; window stays open, since the text is still unsaved.
               (try
-                (show-close-dialog!
-                 win (tabs/close-alert dirty-names)
+                (show-alert!
+                 win (tabs/close-alert dirty-names) CLOSE-ALERT
                  (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
                                               :select! select!}
                                              result)))
@@ -1987,6 +1992,11 @@
           (do ((:close! source-keys)) 1)
           ;; File-tree final review finding 4: Escape in the tree hands focus
           ;; back to the editor, ahead of Stop.
+          ;; File-ops plan T4: the tree's own menu or name entry closes on
+          ;; Escape first; the clause below would otherwise send focus to the
+          ;; editor, since the popover sits inside the tree pane.
+          (and (= keyval KEY-ESCAPE) tree-keys ((:menu-open? tree-keys)))
+          (do ((:close-menu! tree-keys)) 1)
           (and (= keyval KEY-ESCAPE) tree-keys ((:focused? tree-keys)))
           (do ((:leave! tree-keys)) 1)
           (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
@@ -2208,8 +2218,8 @@
       (when-not @alert-pending?
         (reset! alert-pending? true)
         (try
-          (show-close-dialog! win (tabs/close-alert [(if-let [p @path] (file-name p) "Untitled")])
-                              (fn [result] (close-tab-choice! ctx id result)))
+          (show-alert! win (tabs/close-alert [(if-let [p @path] (file-name p) "Untitled")]) CLOSE-ALERT
+                       (fn [result] (close-tab-choice! ctx id result)))
           (catch :default e
             (reset! alert-pending? false)
             (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
@@ -2404,6 +2414,110 @@
           (if error
             {:error error}
             (do (new-tab! ctx {:path path :text text}) nil)))))))
+
+;; --- file operations from the tree (file-ops plan T4) ------------------------
+;; The pane calls these inside its popover's own signal emission (the entry's
+;; activate, a button's clicked). The disk operation runs now, so an error
+;; string can go back to the entry; the tree rebuild and any tab opening wait
+;; for the next main-loop turn (Task 3 review ruling 1), since a rebuild
+;; inside the emission would tear down rows under it. ctx is the window's tab
+;; map (*tab-ctx), which carries :tree-pane.
+
+(defn- tree-later!
+  "Runs f on the next main-loop turn; a throw goes to the console under what."
+  [cv what f]
+  (on-gui! (fn [] (try (f) (catch :default e (cview/append! cv :error (str "; " what ": " (ex-message e) "\n")))))))
+
+(defn- tree-failed!
+  "Reports msg on the console under what, refreshes the tree next turn and
+  returns msg for the name entry."
+  [{:keys [cv tree-pane]} what msg]
+  (cview/append! cv :error (str "; " what ": " msg "\n"))
+  (tree-later! cv what (fn [] (file-tree-pane/refresh! tree-pane)))
+  msg)
+
+(defn- show-in-tree!
+  "Rebuilds the tree with path's folders expanded and selects its row."
+  [tree-pane path]
+  (file-tree-pane/show-model! tree-pane (ft/expand-to (ft/prune @(:state tree-pane)) path))
+  (file-tree-pane/select-path! tree-pane path))
+
+(defn- note-if-hidden!
+  "Says so on the console when the tree's filters hide the new entry at path."
+  [{:keys [cv tree-pane]} path dir?]
+  (let [n (.getName (java.io.File. ^String path))]
+    (when (ft/ignored? (:ignore @(:state tree-pane)) n dir?)
+      (cview/append! cv :system (ops/hidden-message n)))))
+
+(defn- tree-new-file!
+  "New File... in dir: creates name, then shows and selects it and opens it
+  in a tab. nil, or the error string for the entry."
+  [{:keys [cv tree-pane] :as ctx} dir name]
+  (let [{:keys [path error]} (ops/create-file! dir name)]
+    (if error
+      (tree-failed! ctx "new file" error)
+      (do (tree-later! cv "new file" (fn []
+                                       (show-in-tree! tree-pane path)
+                                       (open-file! ctx path)
+                                       (note-if-hidden! ctx path false)))
+          nil))))
+
+(defn- tree-new-folder!
+  "New Folder... in dir: creates name, then shows and selects it. nil, or
+  the error string for the entry."
+  [{:keys [cv tree-pane] :as ctx} dir name]
+  (let [{:keys [path error]} (ops/create-folder! dir name)]
+    (if error
+      (tree-failed! ctx "new folder" error)
+      (do (tree-later! cv "new folder" (fn []
+                                         (show-in-tree! tree-pane path)
+                                         (note-if-hidden! ctx path true)))
+          nil))))
+
+(defn- tree-rename!
+  "Rename...: renames old to new-name, then every tab on old (or under it,
+  for a folder) follows to the new path, keeping its text and dirty state.
+  nil, or the error string for the entry."
+  [{:keys [cv tree-pane tabs win active-tab] :as ctx} old new-name]
+  (let [{:keys [path error]} (ops/rename! old new-name)]
+    (if error
+      (tree-failed! ctx "rename" error)
+      (do (doseq [t @tabs]
+            (when-let [p (ops/retarget @(:path t) old path)]
+              (reset! (:path t) p)))
+          (refresh-labels! ctx)
+          (let [t (active-tab)] (update-title! (:ed t) win (:path t)))
+          (tree-later! cv "rename" (fn [] (show-in-tree! tree-pane path)))
+          nil))))
+
+(defn- trash-choice!
+  "The trash alert's decision for path: index 0 moves it to the Trash and
+  says how many open tabs were on it (they stay open, text and all); any
+  other index or a dismissal does nothing. Rows call this with a synthetic
+  {:index n}, exactly as the alert's completion does."
+  [{:keys [cv tabs tree-pane]} path {:keys [index]}]
+  (when (= index 0)
+    (let [n-tabs (count (filter (fn [t] (ops/retarget @(:path t) path path)) @tabs))
+          {:keys [error]} (trash/trash! path)]
+      (if error
+        (cview/append! cv :error (str "; trash: " error "\n"))
+        (cview/append! cv :system (ops/trash-message (.getName (java.io.File. ^String path)) n-tabs)))
+      (file-tree-pane/refresh! tree-pane))))
+
+(defn- tree-trash!
+  "Move to Trash: asks first (Cancel is the default), sharing the close
+  alerts' alert-pending? guard, so a second alert never opens over one."
+  [{:keys [win cv] :as ctx} path]
+  (when-not @alert-pending?
+    (reset! alert-pending? true)
+    (try
+      (let [f (java.io.File. ^String path)]
+        (show-alert! win (ops/trash-alert (.getName f) (.isDirectory f)) TRASH-ALERT
+                     (fn [result] (trash-choice! ctx path result))))
+      (catch :default e
+        (reset! alert-pending? false)
+        (cview/append! cv :error (str "; trash: " (ex-message e) "\n")))))
+  nil)
 
 ;; --- activate ---------------------------------------------------------------
 
@@ -2731,7 +2845,12 @@
         *folder-result (atom nil)
         tree-pane (file-tree-pane/make-pane {:on-open (fn [p] (open-file! @*tab-ctx p))
                                              :on-open-folder (fn [] (when-let [f @*open-folder] (f)))
-                                             :on-error (fn [msg] (set-status! status-label msg))})
+                                             :on-error (fn [msg] (set-status! status-label msg))
+                                             ;; File-ops plan T4.
+                                             :on-new-file (fn [dir n] (tree-new-file! @*tab-ctx dir n))
+                                             :on-new-folder (fn [dir n] (tree-new-folder! @*tab-ctx dir n))
+                                             :on-rename (fn [p n] (tree-rename! @*tab-ctx p n))
+                                             :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         window-key-fn (on-window-key {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
@@ -2748,7 +2867,9 @@
                                       :new-tab-fn new-tab-fn :step-tab-fn step-tab-fn
                                       :digit-tab-fn digit-tab-fn
                                       :tree-keys {:focused? (fn [] (file-tree-pane/focused? tree-pane win))
-                                                  :leave! (fn [] (editor/focus! (:ed (active-tab))))}
+                                                  :leave! (fn [] (editor/focus! (:ed (active-tab))))
+                                                  :menu-open? (fn [] (:open? (file-tree-pane/menu-state tree-pane)))
+                                                  :close-menu! (fn [] (g/gtk-popover-popdown (:popover tree-pane)))}
                                       :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
                                                               files-btn
                                                               (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))})
@@ -3040,6 +3161,15 @@
                                                files-btn (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                    :file-tree-visible?* (fn [] (pos? (g/gtk-widget-get-visible (:root tree-pane))))
                    :simulate-folder-result! (fn [r] (@*folder-result r))
+                 ;; File-ops plan T4: the tree's menu, as a right click, a
+                 ;; button and Return in the name entry drive it, and the
+                 ;; trash alert's decision with a synthetic {:index n}, as
+                 ;; :close-choice! below.
+                   :tree-menu!* (fn [path] (file-tree-pane/open-menu! tree-pane path))
+                   :tree-press!* (fn [label] (file-tree-pane/press-item! tree-pane label))
+                   :tree-submit!* (fn [text] (file-tree-pane/submit-name! tree-pane text))
+                   :tree-menu-state* (fn [] (file-tree-pane/menu-state tree-pane))
+                   :trash-choice! (fn [path result] (trash-choice! @*tab-ctx path result))
                    :open-paths! (fn [paths] (@current-open-paths paths))
                    :app app
                    :active-tab* active-tab
@@ -3271,7 +3401,8 @@
   self-test/docs-shots/smoke harness must pass its own isolated path so it
   never touches the user's real settings file (TH.T5). ui is {:file-tree
   :files-btn :tree-paned :toggle-file-tree!* :file-tree-visible?*
-  :simulate-folder-result! :notebook
+  :simulate-folder-result! :tree-menu!* :tree-press!* :tree-submit!*
+  :tree-menu-state* :trash-choice! :notebook
   :tabs* :active-tab* :editor
   :console :session :status-label :line-col-label :evaluator* :selection*
   :dialect-label :reset-check :window :find-bar :run!*

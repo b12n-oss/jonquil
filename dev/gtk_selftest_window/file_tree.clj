@@ -13,6 +13,7 @@
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.tabs :as tabs]
             [jolt.ffi :as ffi]
+            [jonquil.file-ops :as ops]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as pane]
@@ -215,3 +216,280 @@
                   (support/check :tree-escape-returns-focus (and in-tree (= 1 h) back back2)
                                  {:in-tree in-tree :handled h :back back :back-after-hide back2}))
                 (finally (restore! ui original)))))))
+
+;; --- file operations from the tree (file-ops plan T4) ------------------------
+;; Each row roots the tree at its own temp project through the simulated Open
+;; Folder result, shows the tree, and drives the menu through the ui hooks
+;; (:tree-menu!* :tree-press!* :tree-submit!* :tree-menu-state*). The trash
+;; rows go through :trash-choice! with a synthetic {:index n}, so no native
+;; alert ever opens. Every row puts the root, the tree's visibility and the
+;; tabs back in a finally.
+
+(defn- ops-tree!
+  "A temp project: a.clj, c.clj, src/x.clj, plus extra (rel -> text); its
+  canonical path."
+  ([] (ops-tree! {}))
+  ([extra]
+   (let [r (temp-dirs/temp-dir! "jonquil-selftest-tree-ops-")]
+     (doseq [[rel text] (merge {"a.clj" "(ns a)\n" "c.clj" "(ns c)\n" "src/x.clj" "(ns x)\n"} extra)]
+       (let [f (io/file r rel)] (io/make-parents f) (spit f text)))
+     (.getCanonicalPath (io/file r)))))
+
+(defn- root-ops!
+  "Roots the tree at r and shows it. GTK-thread only."
+  [ui r]
+  (tabs/occupy-first! ui)
+  ((:simulate-folder-result! ui) {:path r})
+  (when-not (visible? ui) ((:toggle-file-tree!* ui))))
+
+(defn- tree-shown? [ui] (pos? (g/gtk-widget-get-width (:root (pane ui)))))
+
+(defn- active-path [ui] (some-> ((:active-tab* ui)) :path deref))
+
+(defn- tab-on [ui path] (some (fn [t] (when (= path @(:path t)) t)) ((:tabs* ui))))
+
+(defn- name-op!
+  "Opens the menu on path (nil for the root), presses label and submits
+  text; the menu's state after. GTK-thread only."
+  [ui path label text]
+  ((:tree-menu!* ui) path)
+  ((:tree-press!* ui) label)
+  ((:tree-submit!* ui) text)
+  ((:tree-menu-state* ui)))
+
+(defn- popdown! [ui] (g/gtk-popover-popdown (:popover (pane ui))))
+
+(defn- mac? [] (= "Mac OS X" (System/getProperty "os.name")))
+
+(defn- trashed-copy [name] (io/file (System/getProperty "user.home") ".Trash" name))
+
+(defn- remove-trashed!
+  "Removes this row's own trashed copy, by its literal (unique) name, from
+  ~/.Trash on macOS. Nothing else there is touched."
+  [name]
+  (when (mac?) (temp-dirs/delete-tree! (trashed-copy name))))
+
+(defn- unique-name [stem ext] (str "jonquil-tree-trash-" stem "-" (System/nanoTime) ext))
+
+(defn row-tree-new-file-opens-tab
+  "New File... n.clj on the root: the file exists, a tab on it is active,
+  its row is selected."
+  [ui]
+  (go-row :tree-new-file-opens-tab support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          target (str r "/n.clj")
+          st (on-gtk (name-op! ui nil "New File…" "n.clj"))
+          opened (await-until 2000 20 #(= target (active-path ui)))
+          v (on-gtk {:state st :opened opened :exists (.isFile (io/file target))
+                     :active (active-path ui) :selected (pane/selected-path (pane ui))})]
+      (on-gtk (try
+                (support/check :tree-new-file-opens-tab
+                               (and opened (:exists v) (not (:open? st)) (= target (:selected v)))
+                               v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-new-folder-selects
+  "New Folder... d on the root: the folder exists and its row is selected."
+  [ui]
+  (go-row :tree-new-folder-selects support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          target (str r "/d")
+          st (on-gtk (name-op! ui nil "New Folder…" "d"))
+          selected (await-until 2000 20 #(= target (pane/selected-path (pane ui))))
+          v (on-gtk {:state st :selected selected :exists (.isDirectory (io/file target))
+                     :sel (pane/selected-path (pane ui))})]
+      (on-gtk (try
+                (support/check :tree-new-folder-selects (and selected (:exists v) (not (:open? st))) v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-rename-open-file
+  "Rename... a.clj to b.clj while a.clj is open and dirty: the tab follows
+  to b.clj's canonical path and label, keeps its text and stays dirty;
+  a.clj is gone."
+  [ui]
+  (go-row :tree-rename-open-file support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          a (str r "/a.clj")
+          b (str r "/b.clj")
+          text (on-gtk ((:open-file! ui) a)
+                       (let [t ((:active-tab* ui))]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:ed t)) ";x" -1 1)
+                         (editor/editor-text (:ed t))))
+          st (on-gtk (name-op! ui a "Rename…" "b.clj"))
+          moved (await-until 2000 20 #(tab-on ui b))
+          v (on-gtk (let [t (tab-on ui b)]
+                      {:state st :moved moved :a-gone (not (.exists (io/file a))) :b (.isFile (io/file b))
+                       :label (when t (g/label-text (:label t)))
+                       :text-kept (when t (= text (editor/editor-text (:ed t))))
+                       :dirty (when t (editor/dirty? (:ed t)))
+                       :selected (pane/selected-path (pane ui))}))]
+      (on-gtk (try
+                (support/check :tree-rename-open-file
+                               (and moved (:a-gone v) (:b v) (:text-kept v) (:dirty v)
+                                    (some-> (:label v) (str/starts-with? "b.clj"))
+                                    (not (:open? st)))
+                               v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-rename-folder-retargets
+  "Review Focus 1: a tab opened on src/x.clj through a non-canonical
+  spelling (a symlink to the root) follows a rename of src to lib."
+  [ui]
+  (go-row :tree-rename-folder-retargets support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          alias (str (temp-dirs/temp-dir! "jonquil-selftest-tree-alias-") "/proj")
+          _ (java.nio.file.Files/createSymbolicLink (.toPath (io/file alias)) (.toPath (io/file r))
+                                                    (make-array java.nio.file.attribute.FileAttribute 0))
+          spelled (str alias "/src/x.clj")
+          target (str r "/lib/x.clj")
+          opened (on-gtk ((:open-file! ui) spelled) (active-path ui))
+          st (on-gtk (name-op! ui (str r "/src") "Rename…" "lib"))
+          moved (await-until 2000 20 #(tab-on ui target))
+          v (on-gtk {:state st :opened opened :moved moved :paths (mapv (fn [t] @(:path t)) ((:tabs* ui)))
+                     :lib (.isFile (io/file target))})]
+      (on-gtk (try
+                (support/check :tree-rename-folder-retargets
+                               (and (= spelled opened) moved (:lib v) (not (:open? st))) v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-rename-taken
+  "Rename... a.clj to the existing c.clj: the entry shows the problem and
+  neither file changes."
+  [ui]
+  (go-row :tree-rename-taken support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          a (str r "/a.clj")
+          c (str r "/c.clj")]
+      (on-gtk (try
+                (let [st (name-op! ui a "Rename…" "c.clj")
+                      v {:state st :a (slurp a) :c (slurp c)}]
+                  (support/check :tree-rename-taken
+                                 (and (= "c.clj already exists here." (:problem st)) (:open? st)
+                                      (= "(ns a)\n" (:a v)) (= "(ns c)\n" (:c v)))
+                                 v))
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-trash-cancel
+  "The trash alert's Cancel ({:index 1}) leaves the file where it is."
+  [ui]
+  (go-row :tree-trash-cancel support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          a (str r "/a.clj")]
+      (on-gtk (try
+                ((:trash-choice! ui) a {:index 1})
+                ((:trash-choice! ui) a {:error "dismissed"})
+                (support/check :tree-trash-cancel (.isFile (io/file a)) {:exists (.isFile (io/file a))})
+                (finally (restore! ui original)))))))
+
+(defn row-tree-trash-open-file
+  "Move to Trash ({:index 0}) on an open file: gone from the folder, its
+  tab still open with its text, and the console says one tab is open. The
+  row removes its own trashed copy from ~/.Trash (macOS)."
+  [ui]
+  (go-row :tree-trash-open-file support/check
+    (let [original (on-gtk (root ui))
+          n (unique-name "file" ".clj")
+          r (on-gtk (let [r (ops-tree! {n "(ns t)\n"})] (root-ops! ui r) r))
+          f (str r "/" n)
+          mark (on-gtk (support/out-end-offset ui))
+          v (on-gtk (try
+                      ((:open-file! ui) f)
+                      ((:trash-choice! ui) f {:index 0})
+                      (let [t (tab-on ui f)]
+                        {:gone (not (.exists (io/file f))) :tab (some? t)
+                         :text (when t (editor/editor-text (:ed t)))
+                         :row-gone (not-any? (fn [row] (= f (:path row))) (pane/visible-rows (pane ui)))})
+                      (finally (remove-trashed! n))))
+          msg (ops/trash-message n 1)
+          said (await-until 2000 20 #(str/includes? (support/since ui mark) msg))]
+      (on-gtk (try
+                (support/check :tree-trash-open-file
+                               (and (:gone v) (:tab v) (= "(ns t)\n" (:text v)) (:row-gone v) said)
+                               (assoc v :said said :console (support/since ui mark)))
+                (finally (restore! ui original)))))))
+
+(defn row-tree-trash-folder-dirty-tab
+  "Review Focus 4: trashing a folder holding a dirty open file keeps the
+  tab, its text and its dirty state."
+  [ui]
+  (go-row :tree-trash-folder-dirty-tab support/check
+    (let [original (on-gtk (root ui))
+          n (unique-name "dir" "")
+          r (on-gtk (let [r (ops-tree! {(str n "/x.clj") "(ns y)\n"})] (root-ops! ui r) r))
+          d (str r "/" n)
+          f (str d "/x.clj")
+          v (on-gtk (try
+                      ((:open-file! ui) f)
+                      (let [t (tab-on ui f)]
+                        (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:ed t)) ";z" -1 1)
+                        (let [text (editor/editor-text (:ed t))]
+                          ((:trash-choice! ui) d {:index 0})
+                          (let [t2 (tab-on ui f)]
+                            {:gone (not (.exists (io/file d))) :tab (some? t2)
+                             :text-kept (when t2 (= text (editor/editor-text (:ed t2))))
+                             :dirty (when t2 (editor/dirty? (:ed t2)))})))
+                      (finally (remove-trashed! n))))]
+      (on-gtk (try
+                (support/check :tree-trash-folder-dirty-tab
+                               (and (:gone v) (:tab v) (:text-kept v) (:dirty v)) v)
+                (finally (restore! ui original)))))))
+
+(defn row-tree-new-dotfile-hidden
+  "New File... .env: it exists and opens in a tab, and the console says the
+  tree hides it."
+  [ui]
+  (go-row :tree-new-dotfile-hidden support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          target (str r "/.env")
+          mark (on-gtk (support/out-end-offset ui))
+          st (on-gtk (name-op! ui nil "New File…" ".env"))
+          opened (await-until 2000 20 #(= target (active-path ui)))
+          msg (ops/hidden-message ".env")
+          said (await-until 2000 20 #(str/includes? (support/since ui mark) msg))
+          v (on-gtk {:state st :opened opened :said said :exists (.isFile (io/file target))
+                     :console (support/since ui mark)})]
+      (on-gtk (try
+                (support/check :tree-new-dotfile-hidden (and opened said (:exists v)) v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-window-keys-reach-tree
+  "Ruling 2: with the tree's name entry open, the window's Escape closes it
+  (and doesn't hand focus to the editor); with the list focused, F2, Delete,
+  Cmd/Ctrl+BackSpace, Shift+F10 and Menu pass through the window (0)."
+  [ui]
+  (go-row :tree-window-keys-reach-tree support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          key! (fn [kv st] ((:handle-window-key! ui) ffi/null kv 0 st ffi/null))
+          esc (on-gtk ((:tree-menu!* ui) (str r "/a.clj"))
+                      ((:tree-press!* ui) "Rename…")
+                      (let [before ((:tree-menu-state* ui))
+                            h (key! 0xff1b 0)]
+                        {:before-mode (:mode before) :handled h :after ((:tree-menu-state* ui))}))
+          passed (on-gtk (pane/focus! (pane ui))
+                         {:focused (pane/focused? (pane ui) (:window ui))
+                          :keys (mapv (fn [[kv st]] (key! kv st))
+                                      [[0xffbf 0] [0xffff 0] [0xff08 g/META-MASK] [0xff08 g/CONTROL-MASK]
+                                       [0xffc7 g/SHIFT-MASK] [0xff67 0]])})
+          v {:esc esc :passed passed}]
+      (on-gtk (try
+                (support/check :tree-window-keys-reach-tree
+                               (and (= :name (:before-mode esc)) (= 1 (:handled esc))
+                                    (false? (:open? (:after esc)))
+                                    (:focused passed) (= [0 0 0 0 0 0] (:keys passed)))
+                               v)
+                (finally (popdown! ui) (restore! ui original)))))))
