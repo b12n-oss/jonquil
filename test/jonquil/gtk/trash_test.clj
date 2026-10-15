@@ -2,7 +2,8 @@
   "trash! needs GLib only, not an initialised GTK."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.trash :as trash]))
 
 (deftest trash-test
@@ -37,3 +38,8 @@
                              "/jonquil-no-such-" (System/nanoTime)))]
     (is (string? (:error r)))
     (is (nil? (:ok r)))))
+
+(deftest trash-non-exception-throw-test
+  (testing "a throw that isn't an Exception is still an :error, with its message"
+    (with-redefs [g/g-file-new-for-path (fn [_] (throw (AssertionError. "boom")))]
+      (is (= {:error "boom"} (trash/trash! "/nowhere/x.txt"))))))

@@ -2459,11 +2459,23 @@
     (when (ft/ignored? (:ignore @(:state tree-pane)) n dir?)
       (cview/append! cv :system (ops/hidden-message n)))))
 
+(defn- stale-tab-problem
+  "The entry's problem when a tab not in except still holds path, or a path
+  under it (a tab left open on a trashed file), else nil. Making path again
+  would hand that tab a file it never had (final review minor 1)."
+  [tabs path except]
+  (when (some (fn [t] (and (not-any? (fn [x] (identical? x t)) except) (ops/retarget @(:path t) path path))) tabs)
+    (str (.getName (java.io.File. ^String path)) " is open in a tab; close that tab first.")))
+
 (defn- tree-new-file!
   "New File... in dir: creates name, then shows and selects it and opens it
-  in a tab. nil, or the error string for the entry."
-  [{:keys [cv tree-pane] :as ctx} dir name]
-  (let [{:keys [path error]} (ops/create-file! dir name)]
+  in a tab. nil, or the error string for the entry (a tab still on that
+  path is checked before the disk is touched)."
+  [{:keys [cv tree-pane tabs] :as ctx} dir name]
+  (let [target (.getAbsolutePath (java.io.File. ^String dir (str/trim (str name))))
+        {:keys [path error]} (if-let [p (stale-tab-problem @tabs target [])]
+                               {:error p}
+                               (ops/create-file! dir name))]
     (if error
       (tree-failed! ctx "new file" error)
       (do (tree-later! cv "new file" (fn []
@@ -2490,18 +2502,33 @@
   follows to the new listed path, keeping its text and dirty state. A tab on
   a symlink's target doesn't move, since the target didn't. The rename runs
   now; the tab paths (a path change rebuilds the tree through the tab's
-  watch), labels, title and tree wait for the next turn. nil, or the error
-  string for the entry."
+  watch), labels, title and tree wait for the next turn. Which tabs move is
+  decided before the move: a tab spelled differently from old (A.clj for
+  a.clj on a case-insensitive volume) resolves only while old exists (final
+  review Important 2). Expanded folders at or under old stay expanded under
+  the new name (minor 5). A tab still on the new path refuses the rename
+  (minor 1). nil, or the error string for the entry."
   [{:keys [cv tree-pane tabs win active-tab] :as ctx} old new-name]
-  (let [{:keys [error]} (ops/rename! old new-name)
-        new (.getAbsolutePath (java.io.File. (.getParentFile (java.io.File. ^String old)) (str/trim (str new-name))))]
+  (let [new (.getAbsolutePath (java.io.File. (.getParentFile (java.io.File. ^String old)) (str/trim (str new-name))))
+        moves (vec (keep (fn [t] (when-let [p (ops/retarget @(:path t) old new)] [t p])) @tabs))
+        old-canon (.getCanonicalPath (java.io.File. ^String old))
+        {:keys [error path]} (if-let [p (stale-tab-problem @tabs new (map first moves))]
+                               {:error p}
+                               (ops/rename! old new-name))]
     (if error
       (tree-failed! ctx "rename" error)
       (do (tree-later! cv "rename"
                        (fn []
-                         (doseq [t @tabs]
-                           (when-let [p (ops/retarget @(:path t) old new)]
-                             (reset! (:path t) p)))
+                         ;; before the tab paths change, since a path change
+                         ;; rebuilds the tree (pruning the old folders)
+                         (swap! (:state tree-pane) update :expanded
+                                (fn [e] (set (map (fn [d] (cond
+                                                            (= d old-canon) path
+                                                            (str/starts-with? d (str old-canon "/")) (str path (subs d (count old-canon)))
+                                                            :else d))
+                                                  e))))
+                         (doseq [[t p] moves]
+                           (reset! (:path t) p))
                          (refresh-labels! ctx)
                          (let [t (active-tab)] (update-title! (:ed t) win (:path t)))
                          (show-in-tree! tree-pane new)))

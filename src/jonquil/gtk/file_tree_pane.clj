@@ -172,14 +172,17 @@
 ;; --- the menu and name entry -------------------------------------------------
 
 (defn- row-at
-  "The row listed as path, else the first whose canonical path is path's (a
-  symlink and its target share one)."
+  "The row listed as path (an error row, which has no :listed, by its own
+  :path), else the first whose canonical path is path's (a symlink and its
+  target share one). nil for an error row: its \"dir/\" path canonicalises
+  to its parent folder's row (final review Important 1)."
   [pane path]
   (when path
     (let [c (canonical path)
           rs (visible-rows pane)]
-      (or (some (fn [r] (when (= path (:listed r)) r)) rs)
-          (some (fn [r] (when (= c (:path r)) r)) rs)))))
+      (if-let [exact (some (fn [r] (when (= path (or (:listed r) (:path r))) r)) rs)]
+        (when-not (:error? exact) exact)
+        (some (fn [r] (when (= c (:path r)) r)) rs)))))
 
 (defn- rect-alloc [[x y w h]]
   (let [r (ffi/alloc 16)]
@@ -354,8 +357,9 @@
            (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state))))
       (later "trash" (fn [] (when-let [problem (when on-trash (on-trash (listed r)))]
                               (on-error (str "; trash: " problem)))))
-      (and r (or (= keyval KEY-MENU)
-                 (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK))))))
+      (and r (not (:error? r))
+           (or (= keyval KEY-MENU)
+               (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK))))))
       (later "menu" (fn [] (open-menu! pane (listed r))))
       :else 0)))
 
@@ -469,12 +473,13 @@
       (g/gtk-popover-set-child popover content))
     (g/gtk-widget-set-visible name-box 0)
     (g/g-signal-connect-data popover "closed"
-                             (callable (fn [_pop _data]
-                                         (swap! (:menu pane) assoc :open? false :mode nil)
-                                         ;; every close path (Escape, click outside,
-                                         ;; submit) returns focus to the list
-                                         (g/gtk-widget-grab-focus list)
-                                         nil)
+                             (callable (guard "menu"
+                                              (fn [_pop _data]
+                                                (swap! (:menu pane) assoc :open? false :mode nil)
+                                                ;; every close path (Escape, click outside,
+                                                ;; submit) returns focus to the list
+                                                (g/gtk-widget-grab-focus list)
+                                                nil))
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data entry "activate"

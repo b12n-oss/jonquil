@@ -26,6 +26,11 @@
     (is (= "Type a name." (ops/name-problem {:dir dir :name ""})))
     (is (= "Type a name." (ops/name-problem {:dir dir :name "   "})))
     (is (= "Type a name." (ops/name-problem {:dir dir :name nil})))
+    (testing "a NUL anywhere in the name"
+      (is (= "That name has a character that can't be used."
+             (ops/name-problem {:dir dir :name "a\u0000b.clj"})))
+      (is (= "That name has a character that can't be used."
+             (ops/name-problem {:dir dir :name "a.clj\u0000"}))))
     (is (= "A name can't contain /." (ops/name-problem {:dir dir :name "x/y"})))
     (is (= "That name is reserved." (ops/name-problem {:dir dir :name "."})))
     (is (= "That name is reserved." (ops/name-problem {:dir dir :name ".."})))
@@ -156,6 +161,18 @@
         (when (.exists (io/file d "CORE.CLJ"))
           (is (nil? (:error (ops/rename! o "Core.clj"))))
           (is (= n (ops/retarget o o n))))))
+    (testing "retarget runs before the move (final review Important 2)"
+      ;; A tab spelled A.clj for a.clj on a case-insensitive volume resolves
+      ;; to a.clj only while a.clj exists, so the rename's {tab -> new} map
+      ;; is built before ops/rename!; after the move the spelling is stale.
+      (let [d (tree! {"a.clj" "a"})
+            o (str d "/a.clj")
+            n (str d "/b.clj")
+            spelled (str d "/A.clj")]
+        (when (.exists (io/file spelled))
+          (is (= n (ops/retarget spelled o n)) "before the move")
+          (is (nil? (:error (ops/rename! o "b.clj"))))
+          (is (nil? (ops/retarget spelled o n)) "after the move it no longer resolves"))))
     (testing "a path that cannot be canonicalised is used as given"
       (is (nil? (ops/retarget "/definitely/not/here" old new))))))
 

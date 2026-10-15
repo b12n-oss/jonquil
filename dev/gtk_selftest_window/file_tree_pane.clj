@@ -392,3 +392,35 @@
                                       (< ay (+ (:scroll-y anchors) (:scroll-h anchors)))
                                       (= 1 ch) (> cy ay))
                                  v)))))))
+
+(defn row-tree-pane-error-row-no-menu
+  "Final review Important 1: an expanded folder that can't be read shows a
+  \"(can't read)\" row; the menu on that row's path (what a right click on
+  it passes) and Menu with it selected open nothing, rather than the full
+  menu for its parent folder."
+  [_ui]
+  (go-row :tree-pane-error-row-no-menu support/check
+    (with-ops-pane
+      (fn [p root _ _]
+        (let [a (str root "/a")
+              f (io/file a)
+              v (on-gtk (.setReadable f false false)
+                        (try
+                          (pane/show-model! p (ft/toggle (ft/load-model root) a))
+                          (let [err (first (filter :error? (pane/visible-rows p)))
+                                opened (pane/open-menu! p (:path err))
+                                s1 (pane/menu-state p)]
+                            (pane/select-path! p (:path err))
+                            {:err (select-keys err [:path :name]) :opened opened :s1 s1})
+                          (finally (.setReadable f true false))))
+              ;; select-path! canonicalises, so select the error row by index
+              k (on-gtk (let [i (first (keep-indexed (fn [i r] (when (:error? r) i)) (pane/visible-rows p)))]
+                          (g/gtk-list-box-select-row (:list p) (g/gtk-list-box-get-row-at-index (:list p) i))
+                          (pane/handle-key! p 0xff67 0)))
+              _ (Thread/sleep 200)
+              v (assoc v :menu-key k :s2 (on-gtk (pane/menu-state p)))]
+          (on-gtk (support/check :tree-pane-error-row-no-menu
+                                 (and (= "(can't read)" (:name (:err v)))
+                                      (nil? (:opened v)) (false? (:open? (:s1 v)))
+                                      (= 0 (:menu-key v)) (false? (:open? (:s2 v))))
+                                 v)))))))

@@ -540,3 +540,106 @@
                                (and (= link (:listed v)) (= target (:target-path v)) (:link-gone v) (:target-kept v))
                                v)
                 (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-rename-retargets-case-spelling
+  "Final review Important 2: a tab opened through a different-case spelling
+  of a.clj (A.clj, on a case-insensitive volume) follows a rename of a.clj
+  to b.clj. That spelling resolves only while a.clj exists, so the tab map
+  is built before the move. On a case-sensitive volume there is no such
+  spelling and the row passes as skipped."
+  [ui]
+  (go-row :tree-rename-retargets-case-spelling support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree!)] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          a (str r "/a.clj")
+          b (str r "/b.clj")
+          spelled (str r "/A.clj")]
+      (if-not (.exists (io/file spelled))
+        (on-gtk (try (support/check :tree-rename-retargets-case-spelling true {:skipped "case-sensitive volume"})
+                     (finally (restore! ui original))))
+        (let [opened (on-gtk ((:open-file! ui) spelled) (active-path ui))
+              st (on-gtk (name-op! ui a "Rename…" "b.clj"))
+              moved (await-until 2000 20 #(tab-on ui b))
+              v (on-gtk {:state st :opened opened :moved moved
+                         :paths (mapv (fn [t] @(:path t)) ((:tabs* ui)))
+                         :b (.isFile (io/file b))})]
+          (on-gtk (try
+                    (support/check :tree-rename-retargets-case-spelling
+                                   (and (= spelled opened) moved (:b v) (not (:open? st))) v)
+                    (finally (popdown! ui) (restore! ui original)))))))))
+
+(defn- stale-tab-op
+  "Opens a short unique file in a temp project, trashes it with its tab open,
+  then runs (op ui r n) for the menu's state; that, plus whether the file
+  came back and the stale tab's path and text. Removes its own trashed copy."
+  [ui op]
+  (let [;; short, so its tab label doesn't overflow the narrowed notebook
+        n (str "j" (mod (System/nanoTime) 1000000000) ".clj")
+        r (on-gtk (let [r (ops-tree! {n "(ns s)\n"})] (root-ops! ui r) r))
+        _ (await-until 2000 20 #(tree-shown? ui))
+        f (str r "/" n)]
+    (try
+      (let [gone (on-gtk ((:open-file! ui) f)
+                         ((:trash-choice! ui) f {:index 0})
+                         (not (.exists (io/file f))))
+            ;; the trash's deferred refresh lands before the menu opens
+            _ (await-until 2000 20 #(not-any? (fn [row] (= f (:path row))) (pane/visible-rows (pane ui))))]
+        (on-gtk (let [st (op ui r n)
+                      t (tab-on ui f)]
+                  {:n n :r r :gone gone :state st :exists-after (.exists (io/file f))
+                   :tab (some? t) :text (when t (editor/editor-text (:ed t)))})))
+      (finally (remove-trashed! n)))))
+
+(defn- stale-tab-refused? [{:keys [n gone state exists-after tab text]}]
+  (and gone (not exists-after) tab (= "(ns s)\n" text)
+       (= (str n " is open in a tab; close that tab first.") (:problem state)) (:open? state)))
+
+(defn row-tree-new-file-stale-tab
+  "Final review minor 1: after trashing an open file its tab still holds
+  the path, so New File... with that name is refused with the entry's
+  problem before touching the disk; no file is created and the stale tab
+  keeps its path and text."
+  [ui]
+  (go-row :tree-new-file-stale-tab support/check
+    (let [original (on-gtk (root ui))
+          v (stale-tab-op ui (fn [ui _r n] (name-op! ui nil "New File…" n)))]
+      (on-gtk (try
+                (support/check :tree-new-file-stale-tab (stale-tab-refused? v) v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-rename-stale-tab
+  "Final review minor 1, Rename's side: renaming c.clj onto the name a
+  stale tab still holds is refused the same way, and c.clj stays."
+  [ui]
+  (go-row :tree-rename-stale-tab support/check
+    (let [original (on-gtk (root ui))
+          v (stale-tab-op ui (fn [ui r n] (name-op! ui (str r "/c.clj") "Rename…" n)))
+          v (assoc v :c-kept (.isFile (io/file (:r v) "c.clj")))]
+      (on-gtk (try
+                (support/check :tree-rename-stale-tab (and (stale-tab-refused? v) (:c-kept v)) v)
+                (finally (popdown! ui) (restore! ui original)))))))
+
+(defn row-tree-rename-keeps-expanded
+  "Final review minor 5: with p/ and p/q/ expanded, renaming p to s shows
+  s/ and s/q/ still expanded (and q's file)."
+  [ui]
+  (go-row :tree-rename-keeps-expanded support/check
+    (let [original (on-gtk (root ui))
+          r (on-gtk (let [r (ops-tree! {"p/q/y.clj" "(ns y)\n"})] (root-ops! ui r) r))
+          _ (await-until 2000 20 #(tree-shown? ui))
+          _ (on-gtk (activate-name! ui "p") (activate-name! ui "q"))
+          st (on-gtk (name-op! ui (str r "/p") "Rename…" "s"))
+          s (str r "/s")
+          q (str r "/s/q")
+          row (fn [path] (some (fn [row] (when (= path (:path row)) row)) (pane/visible-rows (pane ui))))
+          shown (await-until 2000 20 #(row s))
+          _ (await-until 500 20 #(row q))
+          v (on-gtk {:state st :shown shown
+                     :s (some-> (row s) :expanded?) :q (some-> (row q) :expanded?)
+                     :y (some? (row (str q "/y.clj")))
+                     :names (mapv :name (pane/visible-rows (pane ui)))})]
+      (on-gtk (try
+                (support/check :tree-rename-keeps-expanded
+                               (and shown (true? (:s v)) (true? (:q v)) (:y v) (not (:open? (:state st)))) v)
+                (finally (popdown! ui) (restore! ui original)))))))

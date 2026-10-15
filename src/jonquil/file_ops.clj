@@ -54,6 +54,9 @@
   (let [n (str/trim (str name))]
     (cond
       (str/blank? n) "Type a name."
+      ;; A NUL ends the C string the OS sees, so "a.clj\u0000" would test
+      ;; (and create) a.clj.
+      (str/includes? n "\u0000") "That name has a character that can't be used."
       (str/includes? n "/") "A name can't contain /."
       (#{"." ".."} n) "That name is reserved."
       (let [f (io/file dir n)]

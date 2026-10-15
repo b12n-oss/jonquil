@@ -23,5 +23,7 @@
         (finally
           (g/g-object-unref file)
           (ffi/free slot))))
-    (catch Exception e
+    (catch :default e
+      ;; :default, so a throw that isn't an Exception (an AssertionError)
+      ;; is still an :error, keeping its message.
       {:error (or (ex-message e) "trash failed")})))
