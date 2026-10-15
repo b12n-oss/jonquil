@@ -193,41 +193,49 @@
             (:exit (deref proc term-grace-ms nil)))
         (:exit r)))))
 
+(defn- start-loop!
+  "start!'s port scan. Each spawned proc goes into spawned (an atom) so
+  start! can end it if anything throws."
+  [dir root token spawned]
+  (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
+    (if-let [port (first ports)]
+      (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
+            proc (apply p/process (process-options {:dir dir :log log})
+                        (launch-args port root))
+            _ (reset! spawned proc)
+            state (wait-ready proc log port ready-deadline-ms)]
+        (case state
+          :ready (do (owner-ready! dir token port)
+                     {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
+                      :dir dir :log log :root root :token token})
+          :exited (if (str/includes? (tail log 20) "bind() failed")
+                    (do (io/delete-file log true)
+                        (recur (rest ports)))
+                    ;; The log is left on disk on purpose here, unlike kill!:
+                    ;; it's the only post-mortem for a start that never ran.
+                    (throw (ex-info (str "jolt nrepl-server exited: " (tail log 5)) {:log log})))
+          :timeout (throw (ex-info (str "jolt nrepl-server didn't answer within "
+                                        ready-deadline-ms " ms: " (tail log 5))
+                                   {:log log}))))
+      (throw (ex-info (str "no free port in " port-base "-" (+ port-base port-span -1)) {})))))
+
 (defn start!
   "Launches the child in dir (made absolute here: a relative :dir makes
   the spawn exit 1 silently, measured) with root's middleware injected, or
   a vanilla server when root is nil. Returns {:proc :pid :port :dir :log
   :root :token}. Throws ex-info with the log's tail when no port
-  in the range works or the child won't answer."
+  in the range works or the child won't answer. On any throw the spawned
+  child is ended and the directory claim released."
   [dir root]
   (let [dir (.getCanonicalPath (io/file dir))
-        token (claim-dir! dir)]
-    (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
-      (if-let [port (first ports)]
-        (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
-              proc (apply p/process (process-options {:dir dir :log log})
-                          (launch-args port root))
-              state (wait-ready proc log port ready-deadline-ms)]
-          (case state
-            :ready (do (owner-ready! dir token port)
-                       {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
-                        :dir dir :log log :root root :token token})
-            :exited (if (str/includes? (tail log 20) "bind() failed")
-                      (do (io/delete-file log true)
-                          (recur (rest ports)))
-                      (let [msg (str "jolt nrepl-server exited: " (tail log 5))]
-                        (terminate! proc)
-                        (release-dir! dir token)
-                        ;; The log is left on disk on purpose here, unlike kill!:
-                        ;; it's the only post-mortem for a start that never ran.
-                        (throw (ex-info msg {:log log}))))
-            :timeout (let [msg (str "jolt nrepl-server didn't answer within "
-                                    ready-deadline-ms " ms: " (tail log 5))]
-                       (terminate! proc)
-                       (release-dir! dir token)
-                       (throw (ex-info msg {:log log})))))
-        (do (release-dir! dir token)
-            (throw (ex-info (str "no free port in " port-base "-" (+ port-base port-span -1)) {})))))))
+        token (claim-dir! dir)
+        spawned (atom nil)]
+    (try
+      (start-loop! dir root token spawned)
+      (catch Throwable t
+        (try (when @spawned (terminate! @spawned))
+             (finally (release-dir! dir token)))
+        (throw t)))))
 
 (defn alive? [child] (boolean (and child (p/alive? (:proc child)))))
 
