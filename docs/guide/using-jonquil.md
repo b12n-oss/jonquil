@@ -397,10 +397,10 @@ deleting files from the tree yet.
 
 ## Themes
 
-Cmd/Ctrl+Shift+M cycles through four themes, in order: light (the
-default), dark, solarized, navy. The status bar names the current one,
-`Theme: dark`, say, except while a program is running, when it's busy
-showing that instead.
+Cmd/Ctrl+Shift+M cycles through five choices, in order: light (the
+default), dark, solarized, navy, auto, and then back to light. The status
+bar names the current one, `Theme: dark`, say, except while a program is
+running, when it's busy showing that instead.
 
 ![Jonquil's window in the light theme](../images/theme-light.png)
 ![Jonquil's window in the dark theme](../images/theme-dark.png)
@@ -418,10 +418,18 @@ readable against the highlight.
 Solarized keeps the lower contrast of the a-sibling-cljd-app palette it's
 drawn from. Dark and navy are built for night use.
 
+Auto isn't a palette of its own. On macOS it shows the light theme while the
+system is in Light mode and the dark theme while it's in Dark mode, and it
+follows a change in System Settings within about a second. When you pick it
+the status bar says which one it landed on, `Theme: auto (dark)` or
+`Theme: auto (light)`; that text stays as it was if the system flips later,
+though the window itself changes. Off macOS, auto shows light for now.
+
 The choice sticks: it's saved to
 `$XDG_CONFIG_HOME/jonquil/settings.edn` (or `~/.config/jonquil/settings.edn`
 when that variable isn't set) as `{:theme :navy}`, or whichever theme you
-picked. A missing settings file starts Jonquil in light, with nothing
+picked (`{:theme :auto}` for auto, which is saved as the choice and not as
+the light or dark it resolved to). A missing settings file starts Jonquil in light, with nothing
 said about it; a file that can't be read, or that names a theme Jonquil
 doesn't know, also starts it in light, but says so once in the console.
 A settings file that's a symlink stays a symlink after Jonquil saves
@@ -1098,7 +1106,7 @@ works, for example
 | Return, F3 or Cmd/Ctrl+G | find bar (F3/Cmd+G also from the editor) | Next match |
 | Shift+Return, Shift+F3 or Cmd/Ctrl+Shift+G | find bar | Previous match |
 | Escape | find bar | Close the find bar |
-| Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme |
+| Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, auto) |
 | Return | console prompt | Evaluate, send the line as stdin, or insert a newline for an unfinished multi-line entry |
 | Shift+Return | console prompt | Always insert a newline |
 | Up | console prompt, first line of input | Recall the previous history entry |
