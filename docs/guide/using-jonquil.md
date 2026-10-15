@@ -405,8 +405,8 @@ folder that file is listed in. The "(can't read)" row has no menu.
 F2 renames the selected row. Delete, or Cmd+Backspace (Ctrl+Backspace on
 Linux), moves it to the Trash. Return still opens a file or toggles a folder.
 
-The menu swaps to a name box. Return accepts it, and Escape or a click
-outside cancels, and Escape on the menu closes it too. Rename pre-selects the
+The menu swaps to a name box. Return accepts the name, while Escape or a
+click outside cancels. Escape on the menu itself closes it. Rename pre-selects the
 part of the name before the extension. A name that won't do keeps the box open
 and says why: it's blank, contains `/`, is `.` or `..`, is already used in
 that folder, or is held by an open tab (a tab can outlive its file after a
