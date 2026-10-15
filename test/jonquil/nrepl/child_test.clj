@@ -190,14 +190,16 @@
 
 (deftest two-children-in-one-dir-test
   (let [dir (temp-project)
-        _ (spit (io/file dir ".nrepl-port") "1234")
-        c1 (child/start! dir nil)
-        c2 (child/start! dir nil)]
+        started (atom [])
+        start! (fn [] (let [c (child/start! dir nil)] (swap! started conj c) c))]
+    (spit (io/file dir ".nrepl-port") "1234")
     (try
-      (is (not= (:port c1) (:port c2)))
-      (is (= (str (:port c2)) (port-file-text dir)))
-      (child/kill! c1)
-      (is (= (str (:port c2)) (port-file-text dir)) "the first child's exit leaves the second's port")
-      (child/kill! c2)
-      (is (= "1234" (port-file-text dir)) "the seeded file is back")
-      (finally (force-kill! (:proc c1)) (force-kill! (:proc c2))))))
+      (let [c1 (start!)
+            c2 (start!)]
+        (is (not= (:port c1) (:port c2)))
+        (is (= (str (:port c2)) (port-file-text dir)))
+        (child/kill! c1)
+        (is (= (str (:port c2)) (port-file-text dir)) "the first child's exit leaves the second's port")
+        (child/kill! c2)
+        (is (= "1234" (port-file-text dir)) "the seeded file is back"))
+      (finally (doseq [c @started] (force-kill! (:proc c)))))))
