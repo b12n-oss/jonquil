@@ -27,6 +27,7 @@
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test
+    jonquil.file-ops-test
     jonquil.file-tree-test
     jonquil.tool-path-test
     jonquil.save-path-test
