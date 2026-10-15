@@ -3,10 +3,12 @@
   (:require [clojure.string :as str]
             [gtk-async :refer [on-gtk await-until go-row]]
             [gtk-selftest-window.support :as support]
+            [jonquil.gtk.appearance :as appearance]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
-            [jonquil.settings :as settings]))
+            [jonquil.settings :as settings]
+            [jonquil.theme :as theme]))
 
 ;; --- TH.T4: apply-theme! (retint tags, reload the CSS, flip prefer-dark) --
 ;; Every row here ends by restoring :light and zoom :reset, per the shared
@@ -201,9 +203,12 @@
                 ((:zoom!* ui) :reset))))))
 
 (defn row-theme-cycle
-  "Four :cycle-theme!* calls with no program running walk theme/theme-names
+  "Five :cycle-theme!* calls with no program running walk theme/choice-names
   in order, starting from :light (this harness's own isolated settings
   path has no file yet, so activate!'s startup load defaults to :light).
+  :theme-choice* reads :dark :solarized :navy :auto :light. :theme-name*
+  reads :dark :solarized :navy for the first three; the fake system is
+  light, so the :auto step resolves to :light whatever the Mac is showing.
   After the FIRST call the status label reads \"Theme: dark\" and the
   settings file at (:settings-path* ui) reads back {:theme :dark} through
   jonquil.settings/load-settings itself, not a raw slurp.
@@ -215,23 +220,34 @@
   for, not read once."
   [ui]
   (go-row :theme-cycle support/check
-    (on-gtk ((:cycle-theme!* ui)))
+    (on-gtk ((:system-dark-fn!* ui) (constantly false))
+            ((:cycle-theme!* ui)))
     (let [status1-ok? (await-until 500 20 #(= "Theme: dark" (g/label-text (:status-label ui))))]
-      (on-gtk (let [name1 ((:theme-name* ui))
+      (on-gtk (let [choice1 ((:theme-choice* ui))
+                    name1 ((:theme-name* ui))
                     status1 (g/label-text (:status-label ui))
                     settings1 (settings/load-settings ((:settings-path* ui)))
                     _ ((:cycle-theme!* ui))
+                    choice2 ((:theme-choice* ui))
                     name2 ((:theme-name* ui))
                     _ ((:cycle-theme!* ui))
+                    choice3 ((:theme-choice* ui))
                     name3 ((:theme-name* ui))
                     _ ((:cycle-theme!* ui))
-                    name4 ((:theme-name* ui))]
+                    choice4 ((:theme-choice* ui))
+                    _ ((:cycle-theme!* ui))
+                    choice5 ((:theme-choice* ui))
+                    name5 ((:theme-name* ui))]
                 (support/check :theme-cycle
-                               (and (= :dark name1) (= :solarized name2) (= :navy name3) (= :light name4)
+                               (and (= [:dark :solarized :navy :auto :light] [choice1 choice2 choice3 choice4 choice5])
+                                    (= [:dark :solarized :navy] [name1 name2 name3])
+                                    (= :light name5)
                                     status1-ok? (= :dark (:theme settings1)))
-                               {:name1 name1 :name2 name2 :name3 name3 :name4 name4
+                               {:choices [choice1 choice2 choice3 choice4 choice5]
+                                :names [name1 name2 name3 name5]
                                 :status1 status1 :settings1 settings1})
                 ((:set-theme!* ui) :light)
+                ((:system-dark-fn!* ui) appearance/system-dark?)
                 ((:zoom!* ui) :reset))))))
 
 (defn row-theme-chord
@@ -399,3 +415,159 @@
                               :console (support/since ui mark)})
               ((:set-theme!* ui) :light)
               ((:zoom!* ui) :reset)))))
+
+;; --- auto theme: follows the (faked) system appearance -------------------
+;; Each row starts from :light and a fake system that says dark, and ends by
+;; restoring :light, the real appearance/system-dark? and zoom.
+
+(defn- start-fake-system!
+  "Sets :light and points the window at a fake system. Returns the atom the
+  row flips: true means the fake system is dark."
+  [ui]
+  (let [dark? (atom true)]
+    ((:set-theme!* ui) :light)
+    ((:system-dark-fn!* ui) (fn [] @dark?))
+    dark?))
+
+(defn- restore-real-system! [ui]
+  ((:set-theme!* ui) :light)
+  ((:system-dark-fn!* ui) appearance/system-dark?)
+  ((:zoom!* ui) :reset))
+
+(defn- css-background [k]
+  (let [h (:background (theme/theme k))
+        [r g b] (map #(Integer/parseInt (subs h % (+ % 2)) 16) [1 3 5])]
+    (str "background-color: rgb(" r "," g "," b ");")))
+
+(defn row-auto-follows-system
+  "From :navy, one :cycle-theme!* reaches :auto. With the fake system dark
+  that shows the dark palette (a :keyword tag's foreground, as
+  row-theme-retints-tags reads it), says \"Theme: auto (dark)\" and saves
+  {:theme :auto}. Flipping the fake to light and running one poll tick
+  shows light (tag foreground and the provider's background) and leaves the
+  saved file at :auto."
+  [ui]
+  (go-row :auto-follows-system support/check
+    (let [dark? (on-gtk (let [d (start-fake-system! ui)]
+                          ((:set-theme!* ui) :navy)
+                          ((:cycle-theme!* ui))
+                          d))
+          status-ok? (await-until 500 20 #(= "Theme: auto (dark)" (g/label-text (:status-label ui))))]
+      (on-gtk (let [kw-tag (get (:tags (:editor ui)) :keyword)
+                    choice1 ((:theme-choice* ui))
+                    name1 ((:theme-name* ui))
+                    fg1 (g/rgba-property-hex kw-tag "foreground-rgba")
+                    saved1 (:theme (settings/load-settings ((:settings-path* ui))))
+                    _ (reset! dark? false)
+                    _ ((:poll-appearance!* ui))
+                    name2 ((:theme-name* ui))
+                    fg2 (g/rgba-property-hex kw-tag "foreground-rgba")
+                    css ((:code-css* ui))
+                    saved2 (:theme (settings/load-settings ((:settings-path* ui))))
+                    want-dark (theme/token-color (theme/theme :dark) :keyword)
+                    want-light (theme/token-color (theme/theme :light) :keyword)]
+                (support/check :auto-follows-system
+                               (and (= :auto choice1) (= :dark name1) (= want-dark fg1) status-ok?
+                                    (= :auto saved1)
+                                    (= :light name2) (= want-light fg2)
+                                    (str/includes? css (css-background :light))
+                                    (= :auto saved2))
+                               {:choice1 choice1 :name1 name1 :fg1 fg1 :want-dark want-dark
+                                :status-ok? status-ok? :saved1 saved1 :name2 name2 :fg2 fg2
+                                :want-light want-light :css css :saved2 saved2})
+                (restore-real-system! ui))))))
+
+(defn row-auto-flip-keeps-text
+  "A system flip under :auto never touches buffer text or undo history:
+  after one interactive edit, choosing :auto (fake dark), flipping to light
+  and ticking leaves the text as it was and one undo restores the pre-edit
+  text."
+  [ui]
+  (go-row :auto-flip-keeps-text support/check
+    (on-gtk (let [dark? (start-fake-system! ui)
+                  ed (:editor ui) buf (:buf ed)]
+              (editor/set-text! ed "(def a 1)")
+              (support/place-cursor! buf (count "(def a 1)"))
+              (g/gtk-text-buffer-insert-interactive-at-cursor buf "x" -1 1)
+              ((:set-theme!* ui) :auto)
+              (reset! dark? false)
+              ((:poll-appearance!* ui))
+              (let [text (editor/editor-text ed)
+                    name1 ((:theme-name* ui))
+                    can-undo (not (zero? (g/gtk-text-buffer-get-can-undo buf)))]
+                (g/gtk-text-buffer-undo buf)
+                (let [undone (editor/editor-text ed)]
+                  (support/check :auto-flip-keeps-text
+                                 (and (= "(def a 1)x" text) (= :light name1) can-undo
+                                      (= "(def a 1)" undone))
+                                 {:text text :name1 name1 :can-undo can-undo :undone undone})
+                  (restore-real-system! ui)))))))
+
+(defn row-auto-poll-stops
+  "Once a concrete theme is chosen the poll no longer follows the system:
+  :auto then :solarized, flip the fake to light, tick. :theme-name* stays
+  :solarized and the tick returns 0 (GLib drops the timer)."
+  [ui]
+  (go-row :auto-poll-stops support/check
+    (on-gtk (let [dark? (start-fake-system! ui)]
+              ((:set-theme!* ui) :auto)
+              ((:set-theme!* ui) :solarized)
+              (reset! dark? false)
+              (let [ret ((:poll-appearance!* ui))
+                    name1 ((:theme-name* ui))]
+                (support/check :auto-poll-stops
+                               (and (= :solarized name1) (= 0 ret))
+                               {:name1 name1 :ret ret})
+                (restore-real-system! ui))))))
+
+(defn row-auto-poll-single-timer
+  "Choosing :auto five times in a row arms one poll timer, not five. Every
+  step runs inside one on-gtk block so no timer tick can fire between them.
+  The window counts each real arming (:poll-arm-count*); the count must rise
+  by exactly 1 from :light with the fake dark, then cycle through
+  light..navy back to :auto."
+  [ui]
+  (go-row :auto-poll-single-timer support/check
+    (on-gtk (let [_ (start-fake-system! ui)
+                  before ((:poll-arm-count*  ui))]
+              ((:set-theme!* ui) :auto)
+              (dotimes [_ 5] ((:cycle-theme!* ui)))
+              (let [after ((:poll-arm-count* ui))
+                    choice ((:theme-choice* ui))]
+                (support/check :auto-poll-single-timer
+                               (and (= :auto choice) (= 1 (- after before)))
+                               {:before before :after after :choice choice})
+                (restore-real-system! ui))))))
+
+(defn row-auto-startup-load
+  "A settings file holding {:theme :auto} loads through the startup path
+  (:load-settings!*): the choice is :auto, the shown theme follows the fake
+  dark system, and the console gets no \"; settings:\" line."
+  [ui]
+  (go-row :auto-startup-load support/check
+    (let [[mark tmp] (on-gtk (let [_ (start-fake-system! ui)
+                                   m (support/out-end-offset ui)
+                                   tmp (str (System/getProperty "java.io.tmpdir")
+                                            "/jonquil-selftest-auto-settings-" (System/currentTimeMillis) ".edn")]
+                               (spit tmp (pr-str {:theme :auto}))
+                               ((:load-settings!* ui) tmp)
+                               [m tmp]))]
+      ;; Give any (wrongly) queued console line time to land first.
+      (await-until 300 20 #(str/includes? (support/since ui mark) "; settings:"))
+      (on-gtk (let [choice ((:theme-choice* ui))
+                    name1 ((:theme-name* ui))
+                    console (support/since ui mark)]
+                (support/check :auto-startup-load
+                               (and (= :auto choice) (= :dark name1)
+                                    (not (str/includes? console "; settings:")))
+                               {:choice choice :name1 name1 :console console})
+                (.delete (java.io.File. ^String tmp))
+                (restore-real-system! ui))))))
+
+(defn row-system-dark-real
+  "appearance/system-dark? on the GTK thread of this macOS run is a real
+  boolean, not nil."
+  [ui]
+  (go-row :system-dark-real support/check
+    (on-gtk (let [r (appearance/system-dark?)]
+              (support/check :system-dark-real (boolean? r) {:result r})))))
