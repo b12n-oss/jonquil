@@ -32,12 +32,18 @@
   newline. While the program waits on read-line, the input goes to stdin.
   While a program runs without waiting, the input is held (:busy). Blank
   input does nothing, unbalanced input gets a newline so multi-line forms
-  can be typed, and anything else is evaluated."
-  [{:keys [input waiting? evaluating? shift?]}]
+  can be typed, and anything else is evaluated.
+
+  :leftover is the text that was on the input line when the last run ended
+  and was typed for that program, not for Clojure. Return on that exact text
+  answers :leftover (a hint, no evaluation); once it is edited, or Return
+  has been pressed again, it is ordinary input."
+  [{:keys [input waiting? evaluating? shift? leftover]}]
   (cond
     shift? :newline
     waiting? :send-stdin
     evaluating? :busy
+    (and leftover (= input leftover)) :leftover
     (str/blank? input) :noop
     (seq (:unmatched (syntax/compute-brackets input))) :newline
     :else :eval))

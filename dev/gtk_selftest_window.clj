@@ -62,6 +62,7 @@
    run-repl/row-repl-after-run
    run-repl/row-fast-repl-twice
    run-repl/row-busy-hint-once
+   run-repl/row-typed-ahead-not-evaluated
    run-repl/row-console-history-down-empty
    window-keys/row-escape-yields-when-idle
    window-keys/row-command-chord-capslock

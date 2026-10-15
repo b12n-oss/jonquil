@@ -938,6 +938,7 @@
                   (docs/clear-doc-cache!)
                   (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
+                  (on-gui! (fn [] (cview/note-run-end! cv)))
                   (refresh-prompt! cv ev*)
                   (let [[kind text] (console/result-line result)]
                     (cview/append! cv kind text))
@@ -1015,7 +1016,8 @@
         (if problem
           (do (cview/append! cv :error (str problem "\n"))
               (set-status! status-label "Ready"))
-          (let [warning (ev/eval! @ev* text (opts))]
+          (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                warning (ev/eval! @ev* text (opts))]
             (when warning (cview/append! cv :system warning))))))))
 
 (defn- do-stop!
@@ -1052,7 +1054,8 @@
   (cljd plan P2.T4); the in-process and nREPL evaluators ignore it."
   ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
   ([ed cv ev* status-label text extra-opts]
-   (let [warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+   (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+         warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
                                             extra-opts))]
      (when warning (cview/append! cv :system warning)))))
 
@@ -1285,7 +1288,8 @@
                                 (on-gui! inspect-last-fn))))]
             ((:flash! flash-fns) start end (:caret snap))
             (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-            (let [warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                  warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
           (set-status! status-label "No form at the caret."))))))
 

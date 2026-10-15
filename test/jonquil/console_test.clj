@@ -3,6 +3,18 @@
             [jonquil.console :as console]
             [jonquil.theme :as theme]))
 
+(deftest input-action-leftover-test
+  (testing "the exact leftover text is held for a second Return"
+    (is (= :leftover (console/input-action {:input "y" :leftover "y"})))
+    (is (= :leftover (console/input-action {:input "(foo" :leftover "(foo"}))))
+  (testing "edited text is ordinary input"
+    (is (= :eval (console/input-action {:input "y2" :leftover "y"})))
+    (is (= :eval (console/input-action {:input "y" :leftover nil}))))
+  (testing "stdin, busy and shift still win"
+    (is (= :send-stdin (console/input-action {:input "y" :leftover "y" :waiting? true})))
+    (is (= :busy (console/input-action {:input "y" :leftover "y" :evaluating? true})))
+    (is (= :newline (console/input-action {:input "y" :leftover "y" :shift? true})))))
+
 (deftest input-action-test
   (testing "shift always inserts a newline"
     (is (= :newline (console/input-action {:input "(+ 1 2)" :shift? true}))))

@@ -185,6 +185,43 @@
                               :hinted hinted? :hint-count hint-count :stopped stopped?
                               :console (support/since ui mark)})))))
 
+(defn row-typed-ahead-not-evaluated
+  "Text typed for a program (here, while it waits on read-line) is still on
+  the input line when the program is stopped. The first Return prints a hint
+  and evaluates nothing, the text stays, and a second Return evaluates it."
+  [ui]
+  (go-row :typed-ahead-not-evaluated support/check
+    (let [typed "(def leftover-ran 1)"
+          probe "(str \"V=\" (some-> (resolve 'leftover-ran) deref))"
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(read-line)")
+                         ((:run!* ui))
+                         m))
+          waiting? (await-until 3000 20 #((:waiting? (:console ui))))
+          _ (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:console ui)) typed -1 1))
+          _ (on-gtk ((:stop!* ui)))
+          stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))
+          mark2 (on-gtk (let [m (support/out-end-offset ui)]
+                          (cview/handle-return! (:console ui) false)
+                          m))
+          hinted? (await-until 1000 20 #(str/includes? (support/since ui mark2) "Press Return again"))
+          input-kept (on-gtk (cview/input-text (:console ui)))
+          [probe1? mark3] (support/run-and-await ui probe 3000 #(str/includes? % "V="))
+          undefined? (str/includes? (support/since ui mark3) "\"V=\"")
+          mark4 (on-gtk (let [m (support/out-end-offset ui)]
+                          (cview/handle-return! (:console ui) false)
+                          m))
+          evaluated? (await-until 3000 20 #(str/includes? (support/since ui mark4) "#'user/leftover-ran"))
+          [probe2? mark5] (support/run-and-await ui probe 3000 #(str/includes? % "V="))
+          defined? (str/includes? (support/since ui mark5) "\"V=1\"")]
+      (on-gtk (support/check :typed-ahead-not-evaluated
+                             (and waiting? stopped? hinted? (= typed input-kept)
+                                  probe1? undefined? evaluated? probe2? defined?)
+                             {:waiting waiting? :stopped stopped? :hinted hinted?
+                              :input-kept input-kept :probe1 probe1? :undefined undefined?
+                              :evaluated evaluated? :probe2 probe2? :defined defined?
+                              :console (support/since ui mark)})))))
+
 (defn row-console-history-down-empty
   "I3: eval/history-next returns \"\" for both an empty history and a
   not-currently-browsing index; the window.clj adapter must tell those
