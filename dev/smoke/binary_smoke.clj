@@ -365,6 +365,12 @@
   starts reads and writes settings.edn under this run's own temp dir, never
   the user's real one."
   [& [file dir]]
+  ;; No-file, no-dir launches assume a blank Untitled buffer, but earlier
+  ;; steps' quits save sessions under the repo-root key (this run's shared
+  ;; XDG dir) and a plain launch would restore that tab. So drop the saved
+  ;; sessions first. The session step passes a dir, so it keeps its own state.
+  (when (and (nil? file) (nil? dir))
+    (fs/delete-if-exists (str smoke-xdg-config-home "/jonquil/sessions.edn")))
   (let [log (str out-dir "/.launch-" (System/nanoTime) ".log")
         args (cond-> [(if dir (str (fs/absolutize binary-path)) binary-path)] file (conj file))
         proc (p/process args (cond-> {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree
@@ -1471,7 +1477,9 @@
         quit! (fn [{:keys [proc pid]}]
                 (cg-key! pid "command + w")
                 (let [exit (deref proc 10000 ::timeout)]
-                  (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v))))
+                  (if (= ::timeout exit)
+                    (stop! {:proc proc :pid pid})
+                    (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))
                   exit))]
     (spit file "(def keep 1)\n")
     (let [first-run (launch! file dir)
@@ -1494,7 +1502,9 @@
               (screenshot! pid2 "session-tabs-reopen")
               (check! :session-tabs-reopen ok
                       {:dir dir :titles titles :sessions-edn sessions})
-              (quit! second-run))))))))
+              (let [exit2 (quit! second-run)]
+                (when (= ::timeout exit2)
+                  (check! :session-tabs-quit false {:reason "second process did not exit within 10000ms"}))))))))))
 
 ;; --- driver ----------------------------------------------------------------
 
