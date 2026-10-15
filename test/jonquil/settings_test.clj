@@ -27,6 +27,11 @@
     (testing "no temp file is left behind"
       (is (= ["settings.edn"] (vec (.list (.getParentFile (io/file path)))))))))
 
+(deftest auto-theme-test
+  (let [p (str (temp-dir) "/settings.edn")]
+    (is (nil? (settings/save-settings! p {:theme :auto})))
+    (is (= {:theme :auto} (settings/load-settings p)))))
+
 (deftest missing-file-test
   (is (= {:theme :light} (settings/load-settings (str (temp-dir) "/none.edn")))))
 
