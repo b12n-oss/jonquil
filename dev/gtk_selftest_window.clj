@@ -267,6 +267,12 @@
    file-tree-pane/row-tree-pane-large-folder
    file-tree-pane/row-tree-pane-select-non-canonical
    file-tree-pane/row-tree-pane-deferred-activation-by-path
+   file-tree-pane/row-tree-pane-menu-items
+   file-tree-pane/row-tree-pane-new-file-flow
+   file-tree-pane/row-tree-pane-rename-prefill
+   file-tree-pane/row-tree-pane-callback-error-shown
+   file-tree-pane/row-tree-pane-menu-target-survives-refresh
+   file-tree-pane/row-tree-pane-keys
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip

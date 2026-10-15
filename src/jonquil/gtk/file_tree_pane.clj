@@ -7,9 +7,23 @@
   click activates) or Return on a folder toggles it; on a file it calls
   :on-open. Left collapses and Right expands the selected folder.
 
+  File operations (file-ops plan T3): a right click (or Shift+F10 / Menu) on a
+  row, or on the empty list for the root, opens a popover with New File...,
+  New Folder..., Rename... and Move to Trash (the root gets the first two).
+  The first three swap the popover to a name entry; Return submits it. F2
+  renames the selected row, Delete (or Control/Meta+BackSpace) trashes it.
+  The pane never touches the disk: it calls :on-new-file, :on-new-folder,
+  :on-rename and :on-trash, and a returned string is shown in the entry's
+  problem label. The popover hangs off the pane's :root box, not the list,
+  because the list is rebuilt wholesale and a popover parented to it would
+  be torn down with its rows. The target (path and dir?) is recorded when
+  the menu opens, so a refresh in between can't redirect an action.
+
   The list and header carry the jonquil-code CSS class, so the window's
   shared provider gives the tree the theme's colours and the zoomed font."
-  (:require [jolt.ffi :as ffi]
+  (:require [clojure.string :as str]
+            [jolt.ffi :as ffi]
+            [jonquil.file-ops :as ops]
             [jonquil.file-tree :as ft]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g])
@@ -17,6 +31,14 @@
 
 (def ^:private KEY-LEFT 0xff51)
 (def ^:private KEY-RIGHT 0xff53)
+(def ^:private KEY-F2 0xffbf)
+(def ^:private KEY-DELETE 0xffff)
+(def ^:private KEY-BACKSPACE 0xff08)
+(def ^:private KEY-F10 0xffc7)
+(def ^:private KEY-MENU 0xff67)
+
+(def ^:private ITEMS ["New File…" "New Folder…" "Rename…" "Move to Trash"])
+(def ^:private NAME-WIDTH 260)
 
 (defn visible-rows
   "The rows (jonquil.file-tree/rows) the list shows now, in order."
@@ -144,6 +166,170 @@
   (when-let [r (key-target pane keyval)]
     (rebuild-keeping-selection! pane (ft/toggle @state (:path r)) (:path r))))
 
+;; --- the menu and name entry -------------------------------------------------
+
+(defn- row-at [pane path]
+  (when path
+    (let [c (canonical path)]
+      (some (fn [r] (when (= c (:path r)) r)) (visible-rows pane)))))
+
+(defn- rect-alloc [[x y w h]]
+  (let [r (ffi/alloc 16)]
+    (ffi/write r :int x 0)
+    (ffi/write r :int y 4)
+    (ffi/write r :int w 8)
+    (ffi/write r :int h 12)
+    r))
+
+(defn- point-popover-at!
+  "Points the popover at widget's whole allocation, in :root's coordinates
+  (the popover's parent)."
+  [{:keys [popover root]} widget]
+  (let [[x y] (or (g/compute-point widget root 0 0) [0 0])
+        r (rect-alloc [(Math/round (double x)) (Math/round (double y))
+                       (max 1 (g/gtk-widget-get-width widget)) (max 1 (g/gtk-widget-get-height widget))])]
+    (try (g/gtk-popover-set-pointing-to popover r)
+         (finally (ffi/free r)))))
+
+(defn menu-state
+  "{:open? :mode :menu|:name|nil :heading :problem :target path}."
+  [pane]
+  (let [{:keys [mode heading problem target]} @(:menu pane)]
+    {:open? (boolean (:open? @(:menu pane))) :mode mode :heading heading :problem problem
+     :target (:path target)}))
+
+(defn menu-items
+  "The labels the menu currently shows."
+  [pane]
+  (:items @(:menu pane)))
+
+(defn- close-menu! [{:keys [popover menu]}]
+  (g/gtk-popover-popdown popover)
+  (swap! menu assoc :open? false :mode nil))
+
+(defn- show-menu-mode! [{:keys [items-box name-box]} menu-mode]
+  (g/gtk-widget-set-visible items-box (if (= menu-mode :menu) 1 0))
+  (g/gtk-widget-set-visible name-box (if (= menu-mode :name) 1 0)))
+
+(defn- set-problem! [{:keys [problem-label menu]} text]
+  (swap! menu assoc :problem text)
+  (g/gtk-label-set-text problem-label (or text ""))
+  (g/gtk-widget-set-visible problem-label (if (str/blank? text) 0 1)))
+
+(defn open-menu!
+  "Opens the menu for the row at path, or for the root when path is nil.
+  Records the target now. An error row, a path that isn't shown, or the
+  root of a pane with no folder open opens nothing. GTK-thread only."
+  [{:keys [popover menu state row-widgets list] :as pane} path]
+  (let [row (when path (row-at pane path))
+        root (:root @state)
+        target (cond (nil? path) (when root {:path (canonical root) :dir? true})
+                     (and row (not (:error? row))) (select-keys row [:path :dir?]))]
+    (when target
+      (swap! menu assoc :target target :items (if (nil? path) (vec (take 2 ITEMS)) ITEMS)
+             :mode :menu :open? true :problem nil)
+      (doseq [[label btn] (:buttons pane)]
+        (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0)))
+      (set-problem! pane nil)
+      (show-menu-mode! pane :menu)
+      (point-popover-at! pane (if row (:row (get @row-widgets (index-of pane path))) list))
+      (g/gtk-popover-popup popover))
+    nil))
+
+(defn- target-name [{:keys [path]}] (.getName (File. ^String path)))
+
+(defn- target-dir
+  "The folder a new entry goes in: the target itself for a folder, else its parent."
+  [{:keys [path dir?]}]
+  (if dir? path (.getParent (File. ^String path))))
+
+(defn- prefill-selection
+  "[start end] to select in name: the part before the last dot of a file's
+  name (the whole name when there is no dot, or only a leading one)."
+  [name dir?]
+  (let [i (.lastIndexOf ^String name ".")]
+    [0 (if (or dir? (<= i 0)) (count name) i)]))
+
+(defn- show-name-entry! [{:keys [entry heading-label menu] :as pane} action]
+  (let [{:keys [target]} @menu
+        name (target-name target)
+        heading (case action
+                  :new-file (str "New file in " (.getName (File. ^String (target-dir target))))
+                  :new-folder (str "New folder in " (.getName (File. ^String (target-dir target))))
+                  :rename (str "Rename " name))]
+    (swap! menu assoc :mode :name :action action :heading heading)
+    (g/gtk-label-set-text heading-label heading)
+    (set-problem! pane nil)
+    (g/gtk-editable-set-text entry (if (= action :rename) name ""))
+    (show-menu-mode! pane :name)
+    (g/gtk-widget-grab-focus entry)
+    (when (= action :rename)
+      (let [[a b] (prefill-selection name (:dir? target))]
+        (g/gtk-editable-select-region entry a b)))))
+
+(defn press-item!
+  "What clicking the menu button labelled label does."
+  [{:keys [menu on-trash on-error] :as pane} label]
+  (case label
+    "New File…" (show-name-entry! pane :new-file)
+    "New Folder…" (show-name-entry! pane :new-folder)
+    "Rename…" (show-name-entry! pane :rename)
+    "Move to Trash" (let [{:keys [path]} (:target @menu)]
+                      (close-menu! pane)
+                      (when-let [problem (when on-trash (on-trash path))]
+                        (on-error (str "; trash: " problem))))
+    nil)
+  nil)
+
+(defn submit-name!
+  "Return in the name entry. A problem (jonquil.file-ops/name-problem, or a
+  string the callback returns) is shown and keeps the entry open; the same
+  name on a rename closes without a call; otherwise the callback runs and
+  the menu closes."
+  [{:keys [menu on-new-file on-new-folder on-rename] :as pane} text]
+  (let [{:keys [target action]} @menu
+        n (str/trim (str text))
+        rename? (= action :rename)
+        dir (if rename? (.getParent (File. ^String (:path target))) (target-dir target))
+        problem (when-not (and rename? (= n (target-name target)))
+                  (ops/name-problem {:dir dir :name text :old-path (when rename? (:path target))}))]
+    (cond
+      (not= :name (:mode @menu)) nil
+      (and rename? (= n (target-name target))) (close-menu! pane)
+      problem (set-problem! pane problem)
+      :else (let [f (case action :new-file on-new-file :new-folder on-new-folder on-rename)
+                  err (when f (if rename? (f (:path target) n) (f dir n)))]
+              (if err (set-problem! pane err) (close-menu! pane)))))
+  nil)
+
+(defn- command-chord? [state]
+  (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
+
+(defn- selected-row [pane]
+  (when-let [p (selected-path pane)] (row-at pane p)))
+
+(defn handle-key!
+  "The list's key handler: 1 when keyval (with GDK modifier state) is one the
+  pane acts on, else 0. Left/Right toggle a folder; F2, Delete, Control/Meta+
+  BackSpace, Shift+F10 and Menu act on the selected row. The action runs on
+  the next main-loop turn, since the callbacks can rebuild the rows."
+  [{:keys [on-trash on-error] :as pane} keyval state]
+  (let [guard (:guard pane)
+        r (selected-row pane)
+        later (fn [what f] (on-gui! (guard what f)) 1)]
+    (cond
+      (handles-key? pane keyval) (later "tree" (fn [] (on-key pane keyval)))
+      (and r (not (:error? r)) (= keyval KEY-F2))
+      (later "rename" (fn [] (open-menu! pane (:path r)) (press-item! pane "Rename…")))
+      (and r (not (:error? r))
+           (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state))))
+      (later "trash" (fn [] (when-let [problem (when on-trash (on-trash (:path r)))]
+                              (on-error (str "; trash: " problem)))))
+      (and r (or (= keyval KEY-MENU)
+                 (and (= keyval KEY-F10) (not (zero? (bit-and state g/SHIFT-MASK))))))
+      (later "menu" (fn [] (open-menu! pane (:path r))))
+      :else 0)))
+
 (defn focus!
   "Gives the list keyboard focus."
   [pane]
@@ -157,9 +343,12 @@
 
 (defn make-pane
   "Builds the pane, empty (show-model! fills it). opts is {:on-open (fn
-  [path]) :on-open-folder (fn []) :on-error (fn [msg])}; a throw in any of
-  its callbacks goes to :on-error. GTK-thread only."
-  [{:keys [on-open on-open-folder on-error]}]
+  [path]) :on-open-folder (fn []) :on-error (fn [msg]) and, optionally,
+  :on-new-file (fn [dir name]), :on-new-folder (fn [dir name]), :on-rename
+  (fn [path new-name]), :on-trash (fn [path])}. The last four return nil on
+  success or an error string (the entry shows it); a throw in any callback
+  goes to :on-error. GTK-thread only."
+  [{:keys [on-open on-open-folder on-error on-new-file on-new-folder on-rename on-trash]}]
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         header (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         header-label (g/gtk-label-new "No folder")
@@ -169,13 +358,25 @@
         list (g/gtk-list-box-new)
         body-label (g/gtk-label-new "")
         keyctl (g/gtk-event-controller-key-new)
+        click (g/gtk-gesture-click-new)
+        popover (g/gtk-popover-new)
+        items-box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        name-box (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
+        heading-label (g/gtk-label-new "")
+        entry (g/gtk-entry-new)
+        problem-label (g/gtk-label-new "")
+        buttons (mapv (fn [label] [label (g/gtk-button-new-with-label label)]) ITEMS)
+        guard (fn [what f] (fn [& args]
+                             (try (apply f args)
+                                  (catch :default e (on-error (str "; " what ": " (ex-message e)))))))
         pane {:root root :header-label header-label :refresh-btn refresh-btn
               :open-folder-btn open-folder-btn :list list :body-label body-label
               :state (atom (ft/load-model nil)) :rows (atom []) :row-widgets (atom [])
-              :on-open on-open}
-        guard (fn [what f] (fn [& args]
-                             (try (apply f args)
-                                  (catch :default e (on-error (str "; " what ": " (ex-message e)))))))]
+              :on-open on-open :on-error on-error :guard guard
+              :on-new-file on-new-file :on-new-folder on-new-folder :on-rename on-rename :on-trash on-trash
+              :popover popover :items-box items-box :name-box name-box :heading-label heading-label
+              :entry entry :problem-label problem-label :buttons buttons
+              :menu (atom {:open? false :mode nil :items [] :target nil})}]
     (g/gtk-label-set-xalign header-label 0.0)
     (g/gtk-widget-set-hexpand header-label 1)
     (g/gtk-box-append header header-label)
@@ -203,16 +404,63 @@
                                        [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data keyctl "key-pressed"
-                             (callable (fn [_ctl keyval _kc _state _data]
-                                         ;; Decided now, rebuilt next turn (same reason as
+                             (callable (fn [_ctl keyval _kc state _data]
+                                         ;; Decided now, run next turn (same reason as
                                          ;; row-activated above).
-                                         (try (if (handles-key? pane keyval)
-                                                (do (on-gui! (guard "tree" (fn [] (on-key pane keyval)))) 1)
-                                                0)
+                                         (try (handle-key! pane keyval state)
                                               (catch :default e (on-error (str "; tree: " (ex-message e))) 1)))
                                        [:pointer :uint :uint :uint :pointer] :int)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller list keyctl)
+    ;; The name menu. Parented to root (see the ns docstring), built once.
+    (g/gtk-widget-set-parent popover root)
+    (g/gtk-widget-add-css-class popover "jonquil-popover")
+    (g/gtk-widget-set-halign popover g/ALIGN-START)
+    (g/gtk-popover-set-autohide popover 1)
+    (g/gtk-popover-set-position popover g/POPOVER-POS-BOTTOM)
+    (doseq [[label btn] buttons]
+      (g/gtk-button-set-has-frame btn 0)
+      (g/gtk-box-append items-box btn)
+      (g/g-signal-connect-data btn "clicked"
+                               (callable (guard "menu" (fn [_ _] (press-item! pane label) nil))
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT))
+    (g/gtk-widget-add-css-class heading-label "jonquil-doc")
+    (g/gtk-label-set-xalign heading-label 0.0)
+    (g/gtk-widget-add-css-class problem-label "jonquil-doc")
+    (g/gtk-label-set-xalign problem-label 0.0)
+    (g/gtk-widget-set-visible problem-label 0)
+    (g/gtk-widget-set-size-request entry NAME-WIDTH -1)
+    (g/gtk-box-append name-box heading-label)
+    (g/gtk-box-append name-box entry)
+    (g/gtk-box-append name-box problem-label)
+    (let [content (g/gtk-box-new g/ORIENTATION-VERTICAL 0)]
+      (g/gtk-box-append content items-box)
+      (g/gtk-box-append content name-box)
+      (g/gtk-popover-set-child popover content))
+    (g/gtk-widget-set-visible name-box 0)
+    (g/g-signal-connect-data popover "closed"
+                             (callable (fn [_pop _data] (swap! (:menu pane) assoc :open? false :mode nil) nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data entry "activate"
+                             (callable (guard "name" (fn [e _] (submit-name! pane (g/editable-text e)) nil))
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-gesture-single-set-button click 3)
+    (g/g-signal-connect-data click "pressed"
+                             (callable (guard "menu"
+                                              (fn [_g _n _x y _data]
+                                                (let [row (g/gtk-list-box-get-row-at-y list (int y))]
+                                                  (if (ffi/null? row)
+                                                    (open-menu! pane nil)
+                                                    (let [path (:path (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
+                                                      (g/gtk-list-box-select-row list row)
+                                                      (open-menu! pane path)))
+                                                  nil)))
+                                       [:pointer :int :double :double :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller list click)
     (g/g-signal-connect-data refresh-btn "clicked"
                              (callable (guard "refresh" (fn [_ _] (refresh! pane) nil)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
