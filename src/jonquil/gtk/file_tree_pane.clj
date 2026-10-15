@@ -182,12 +182,18 @@
     r))
 
 (defn- point-popover-at!
-  "Points the popover at widget's whole allocation, in :root's coordinates
-  (the popover's parent)."
-  [{:keys [popover root]} widget]
-  (let [[x y] (or (g/compute-point widget root 0 0) [0 0])
-        r (rect-alloc [(Math/round (double x)) (Math/round (double y))
-                       (max 1 (g/gtk-widget-get-width widget)) (max 1 (g/gtk-widget-get-height widget))])]
+  "Points the popover (parent :root) at a 1px-wide spot: pt, an [x y] in the
+  list's coordinates (a click), else the row's top-left corner and height, else
+  a 1px-high strip at the top of the visible list area (the scrolled
+  window's origin), so a POS-BOTTOM popover never lands below the window."
+  [{:keys [popover root list scroll]} row-widget pt]
+  (let [[x y w h] (cond
+                    pt (let [[x y] (or (g/compute-point list root (first pt) (second pt)) pt)] [x y 1 1])
+                    row-widget (let [[x y] (or (g/compute-point row-widget root 0 0) [0 0])]
+                                 [x y (g/gtk-widget-get-width row-widget) (g/gtk-widget-get-height row-widget)])
+                    :else (let [[x y] (or (g/compute-point scroll root 0 0) [0 0])]
+                            [x y (g/gtk-widget-get-width scroll) 1]))
+        r (rect-alloc [(Math/round (double x)) (Math/round (double y)) (max 1 (long w)) (max 1 (long h))])]
     (try (g/gtk-popover-set-pointing-to popover r)
          (finally (ffi/free r)))))
 
@@ -218,9 +224,12 @@
 
 (defn open-menu!
   "Opens the menu for the row at path, or for the root when path is nil.
-  Records the target now. An error row, a path that isn't shown, or the
-  root of a pane with no folder open opens nothing. GTK-thread only."
-  [{:keys [popover menu state row-widgets list] :as pane} path]
+  Records the target now. pt, an optional [x y] in the list's coordinates,
+  is where a right click landed; the popover points there. An error row, a
+  path that isn't shown, or the root of a pane with no folder open opens
+  nothing. Returns true when it popped up, else nil. GTK-thread only."
+  ([pane path] (open-menu! pane path nil))
+  ([{:keys [popover menu state row-widgets] :as pane} path pt]
   (let [row (when path (row-at pane path))
         root (:root @state)
         target (cond (nil? path) (when root {:path (canonical root) :dir? true})
@@ -232,9 +241,9 @@
         (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0)))
       (set-problem! pane nil)
       (show-menu-mode! pane :menu)
-      (point-popover-at! pane (if row (:row (get @row-widgets (index-of pane path))) list))
-      (g/gtk-popover-popup popover))
-    nil))
+      (point-popover-at! pane (when row (:row (get @row-widgets (index-of pane path)))) pt)
+      (g/gtk-popover-popup popover)
+      true))))
 
 (defn- target-name [{:keys [path]}] (.getName (File. ^String path)))
 
@@ -268,9 +277,11 @@
         (g/gtk-editable-select-region entry a b)))))
 
 (defn press-item!
-  "What clicking the menu button labelled label does."
+  "What clicking the menu button labelled label does. Nothing unless the menu
+  is open and shows that label."
   [{:keys [menu on-trash on-error] :as pane} label]
-  (case label
+  (when (and (:open? @menu) (some #{label} (:items @menu)))
+   (case label
     "New File…" (show-name-entry! pane :new-file)
     "New Folder…" (show-name-entry! pane :new-folder)
     "Rename…" (show-name-entry! pane :rename)
@@ -278,28 +289,29 @@
                       (close-menu! pane)
                       (when-let [problem (when on-trash (on-trash path))]
                         (on-error (str "; trash: " problem))))
-    nil)
+    nil))
   nil)
 
 (defn submit-name!
   "Return in the name entry. A problem (jonquil.file-ops/name-problem, or a
   string the callback returns) is shown and keeps the entry open; the same
   name on a rename closes without a call; otherwise the callback runs and
-  the menu closes."
+  the menu closes. Nothing unless the name entry is showing."
   [{:keys [menu on-new-file on-new-folder on-rename] :as pane} text]
-  (let [{:keys [target action]} @menu
-        n (str/trim (str text))
-        rename? (= action :rename)
-        dir (if rename? (.getParent (File. ^String (:path target))) (target-dir target))
-        problem (when-not (and rename? (= n (target-name target)))
-                  (ops/name-problem {:dir dir :name text :old-path (when rename? (:path target))}))]
-    (cond
-      (not= :name (:mode @menu)) nil
-      (and rename? (= n (target-name target))) (close-menu! pane)
-      problem (set-problem! pane problem)
-      :else (let [f (case action :new-file on-new-file :new-folder on-new-folder on-rename)
-                  err (when f (if rename? (f (:path target) n) (f dir n)))]
-              (if err (set-problem! pane err) (close-menu! pane)))))
+  (when (= :name (:mode @menu))
+    (let [{:keys [target action]} @menu
+          n (str/trim (str text))
+          rename? (= action :rename)
+          same? (and rename? (= n (target-name target)))
+          dir (if rename? (.getParent (File. ^String (:path target))) (target-dir target))
+          problem (when-not same?
+                    (ops/name-problem {:dir dir :name text :old-path (when rename? (:path target))}))]
+      (cond
+        same? (close-menu! pane)
+        problem (set-problem! pane problem)
+        :else (let [f (case action :new-file on-new-file :new-folder on-new-folder on-rename)
+                    err (when f (if rename? (f (:path target) n) (f dir n)))]
+                (if err (set-problem! pane err) (close-menu! pane))))))
   nil)
 
 (defn- command-chord? [state]
@@ -320,7 +332,7 @@
     (cond
       (handles-key? pane keyval) (later "tree" (fn [] (on-key pane keyval)))
       (and r (not (:error? r)) (= keyval KEY-F2))
-      (later "rename" (fn [] (open-menu! pane (:path r)) (press-item! pane "Rename…")))
+      (later "rename" (fn [] (when (open-menu! pane (:path r)) (press-item! pane "Rename…"))))
       (and r (not (:error? r))
            (or (= keyval KEY-DELETE) (and (= keyval KEY-BACKSPACE) (command-chord? state))))
       (later "trash" (fn [] (when-let [problem (when on-trash (on-trash (:path r)))]
@@ -374,7 +386,7 @@
               :state (atom (ft/load-model nil)) :rows (atom []) :row-widgets (atom [])
               :on-open on-open :on-error on-error :guard guard
               :on-new-file on-new-file :on-new-folder on-new-folder :on-rename on-rename :on-trash on-trash
-              :popover popover :items-box items-box :name-box name-box :heading-label heading-label
+              :scroll scroll :popover popover :items-box items-box :name-box name-box :heading-label heading-label
               :entry entry :problem-label problem-label :buttons buttons
               :menu (atom {:open? false :mode nil :items [] :target nil})}]
     (g/gtk-label-set-xalign header-label 0.0)
@@ -440,7 +452,12 @@
       (g/gtk-popover-set-child popover content))
     (g/gtk-widget-set-visible name-box 0)
     (g/g-signal-connect-data popover "closed"
-                             (callable (fn [_pop _data] (swap! (:menu pane) assoc :open? false :mode nil) nil)
+                             (callable (fn [_pop _data]
+                                         (swap! (:menu pane) assoc :open? false :mode nil)
+                                         ;; every close path (Escape, click outside,
+                                         ;; submit) returns focus to the list
+                                         (g/gtk-widget-grab-focus list)
+                                         nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data entry "activate"
@@ -450,13 +467,14 @@
     (g/gtk-gesture-single-set-button click 3)
     (g/g-signal-connect-data click "pressed"
                              (callable (guard "menu"
-                                              (fn [_g _n _x y _data]
-                                                (let [row (g/gtk-list-box-get-row-at-y list (int y))]
+                                              (fn [_g _n x y _data]
+                                                (let [row (g/gtk-list-box-get-row-at-y list (int y))
+                                                      pt [x y]]
                                                   (if (ffi/null? row)
-                                                    (open-menu! pane nil)
+                                                    (open-menu! pane nil pt)
                                                     (let [path (:path (get (visible-rows pane) (g/gtk-list-box-row-get-index row)))]
                                                       (g/gtk-list-box-select-row list row)
-                                                      (open-menu! pane path)))
+                                                      (open-menu! pane path pt)))
                                                   nil)))
                                        [:pointer :int :double :double :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

@@ -7,6 +7,7 @@
             [gtk-async :as gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.file-tree :as ft]
+            [jolt.ffi :as ffi]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as pane]
             [temp-dirs]))
@@ -214,7 +215,9 @@
                 :on-trash (fn [path] (swap! calls conj [:trash path]) nil)}
       (fn [p _]
         (let [root (on-gtk (let [r (ops-tree!)] (pane/show-model! p (ft/load-model r)) r))]
-          (f p root calls result))))))
+          ;; pop down first, so no row closes a window holding a mapped popover
+          (try (f p root calls result)
+               (finally (on-gtk (g/gtk-popover-popdown (:popover p))))))))))
 
 (def ^:private FOUR ["New File…" "New Folder…" "Rename…" "Move to Trash"])
 
@@ -328,4 +331,64 @@
                                  (and renamed (= "Rename b.clj" (:heading s)) (= b (:target s))
                                       trashed later (= [1 1 0 1] (:r v))
                                       (= [[:trash b] [:trash b]] (:calls v)))
+                                 v)))))))
+
+(defn- list-focused?
+  "True when keyboard focus is the pane's list or one of its rows."
+  [p]
+  (let [f (g/gtk-root-get-focus (g/gtk-widget-get-root (:root p)))
+        l (:list p)]
+    (and (not (ffi/null? f))
+         (or (= f l) (not (zero? (g/gtk-widget-is-ancestor f l)))))))
+
+(defn row-tree-pane-stale-menu-actions
+  "F2 whose row vanished before its deferred run opens nothing and calls no
+  stub; press-item! with the menu closed does nothing."
+  [_ui]
+  (go-row :tree-pane-stale-menu-actions support/check
+    (with-ops-pane
+      (fn [p root calls _]
+        (let [b (str root "/b.clj")
+              _ (on-gtk (pane/select-path! p b)
+                        (pane/handle-key! p 0xffbf 0)      ; defers the rename
+                        (.delete (io/file b))
+                        (pane/refresh! p))                  ; the row is gone before the run
+              _ (Thread/sleep 300)
+              s (on-gtk (pane/menu-state p))
+              closed (on-gtk (pane/press-item! p "Rename…")
+                             (pane/press-item! p "Move to Trash")
+                             {:state (pane/menu-state p) :calls @calls})
+              v {:after-f2 s :closed closed :calls @calls}]
+          (on-gtk (support/check :tree-pane-stale-menu-actions
+                                 (and (false? (:open? s)) (nil? (:mode s)) (empty? @calls)
+                                      (nil? (:mode (:state closed))) (empty? (:calls closed)))
+                                 v)))))))
+
+(defn row-tree-pane-menu-focus-and-anchor
+  "After a submit the list has focus again; the root menu points inside the
+  list area (not past the window); a click point is where the popover points."
+  [_ui]
+  (go-row :tree-pane-menu-focus-and-anchor support/check
+    (with-ops-pane
+      (fn [p root _ _]
+        (let [anchors (on-gtk (pane/open-menu! p nil)
+                              (let [a (g/popover-pointing-to (:popover p))
+                                    _ (pane/open-menu! p nil [40 30])
+                                    b (g/popover-pointing-to (:popover p))
+                                    scroll-h (g/gtk-widget-get-height (:scroll p))
+                                    scroll-y (first (rest (g/compute-point (:scroll p) (:root p) 0 0)))]
+                                {:root a :click b :scroll-y (long scroll-y) :scroll-h scroll-h}))
+              _ (on-gtk (pane/open-menu! p (str root "/a")) (pane/press-item! p "New File…")
+                        (pane/submit-name! p "y.clj"))
+              focused (loop [n 0]
+                        (let [ok (on-gtk (list-focused? p))]
+                          (if (or ok (> n 50)) ok (do (Thread/sleep 20) (recur (inc n))))))
+              v {:anchors anchors :focused focused}
+              [_ ay _ ah] (:root anchors)
+              [_ cy _ ch] (:click anchors)]
+          (on-gtk (support/check :tree-pane-menu-focus-and-anchor
+                                 (and focused
+                                      (= (:scroll-y anchors) ay) (= 1 ah)
+                                      (< ay (+ (:scroll-y anchors) (:scroll-h anchors)))
+                                      (= 1 ch) (> cy ay))
                                  v)))))))

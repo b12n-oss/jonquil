@@ -273,6 +273,8 @@
    file-tree-pane/row-tree-pane-callback-error-shown
    file-tree-pane/row-tree-pane-menu-target-survives-refresh
    file-tree-pane/row-tree-pane-keys
+   file-tree-pane/row-tree-pane-stale-menu-actions
+   file-tree-pane/row-tree-pane-menu-focus-and-anchor
    window-keys/row-cursor-listener-throw-others-still-run
    window-keys/row-window-key-throw-contained
    tabs/row-tab-new-shows-strip
