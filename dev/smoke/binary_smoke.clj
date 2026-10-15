@@ -364,11 +364,12 @@
   own :env/:extra-env distinction), so every jonquil process this script
   starts reads and writes settings.edn under this run's own temp dir, never
   the user's real one."
-  [& [file]]
+  [& [file dir]]
   (let [log (str out-dir "/.launch-" (System/nanoTime) ".log")
-        args (cond-> [binary-path] file (conj file))
-        proc (p/process args {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree
-                              :extra-env {"XDG_CONFIG_HOME" smoke-xdg-config-home}})
+        args (cond-> [(if dir (str (fs/absolutize binary-path)) binary-path)] file (conj file))
+        proc (p/process args (cond-> {:out (io/file log) :err (io/file log) :shutdown p/destroy-tree
+                                      :extra-env {"XDG_CONFIG_HOME" smoke-xdg-config-home}}
+                               dir (assoc :dir dir)))
         pid (.pid ^java.lang.Process (:proc proc))]
     (swap! launched conj {:proc proc :pid pid})
     {:proc proc :pid pid :log log}))
@@ -1453,6 +1454,48 @@
             (when-not ok (doseq [k left] (kill-pid! k)))
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v))))))))))
 
+(defn- step-session-tabs!
+  "Tabs come back: launches ./jonquil on keep.clj in a fresh temp project
+  folder (its canonical path is both the file's directory and the cwd, so
+  /var vs /private/var can't change the session key), waits for the title
+  \"keep.clj - Jonquil\", quits with Cmd+W (a clean buffer quits with no
+  alert) and waits for the process to exit. A second launch with no file
+  and the same cwd must then reopen keep.clj, seen as the same window
+  title. Sessions live in sessions.edn beside settings.edn under this run's
+  shared temp XDG_CONFIG_HOME."
+  []
+  (let [dir (str (fs/canonicalize (fs/create-temp-dir {:prefix "jonquil-smoke-session-"})))
+        file (str dir "/keep.clj")
+        title "keep.clj - Jonquil"
+        title-is? (fn [pid] (= title (:name (first (windows-edn! pid)))))
+        quit! (fn [{:keys [proc pid]}]
+                (cg-key! pid "command + w")
+                (let [exit (deref proc 10000 ::timeout)]
+                  (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v))))
+                  exit))]
+    (spit file "(def keep 1)\n")
+    (let [first-run (launch! file dir)
+          pid1 (:pid first-run)]
+      (ensure-window! pid1 8000)
+      (let [titled? (wait-for! 8000 200 #(title-is? pid1))
+            exit1 (if titled? (quit! first-run) (do (stop! first-run) ::no-title))]
+        (if-not (and titled? (map? exit1) (zero? (:exit exit1)))
+          (check! :session-tabs-reopen false
+                  {:reason "first launch did not show the title or did not quit cleanly"
+                   :titled? titled? :exit exit1
+                   :titles (mapv :name (windows-edn! pid1))})
+          (let [second-run (launch! nil dir)
+                pid2 (:pid second-run)]
+            (ensure-window! pid2 8000)
+            (let [ok (wait-for! 8000 200 #(title-is? pid2))
+                  titles (mapv :name (windows-edn! pid2))
+                  sessions (try (slurp (str smoke-xdg-config-home "/jonquil/sessions.edn"))
+                                (catch Exception _ nil))]
+              (screenshot! pid2 "session-tabs-reopen")
+              (check! :session-tabs-reopen ok
+                      {:dir dir :titles titles :sessions-edn sessions})
+              (quit! second-run))))))))
+
 ;; --- driver ----------------------------------------------------------------
 
 (defn- build!
@@ -1494,7 +1537,8 @@
    ["jump" step-jump!]
    ["rename" step-rename!]
    ["context-menu" step-context-menu!]
-   ["nrepl-run-and-close" step-nrepl-run-and-close!]])
+   ["nrepl-run-and-close" step-nrepl-run-and-close!]
+   ["session-tabs" step-session-tabs!]])
 
 (defn -main [& args]
   (let [t0 (System/currentTimeMillis)
