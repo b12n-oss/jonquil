@@ -17,6 +17,7 @@
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.tabs :as tabs]
             [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.window :as window]
             [jonquil.last-session :as last-session]
             [jonquil.settings :as settings]
             [temp-dirs]))
@@ -219,4 +220,38 @@
                         (support/check :session-bad-file
                                        (and named? (= paths0 ps))
                                        {:paths0 paths0 :paths ps :console (support/since ui mark)}))
+                      (finally (restore! ui original)))))))
+
+(defn row-session-throwing-file-skipped
+  "Opening one saved file throws (read-for-tab rebound for that path): the
+  later saved file still opens, the saved active tab is selected, and the
+  throwing file is named on the console."
+  [ui]
+  (go-row :session-throwing-file-skipped support/check
+          (let [original (on-gtk (root ui))
+                orig-read @#'window/read-for-tab
+                [mark p0 a b]
+                (on-gtk (tabs/occupy-first! ui)
+                        (let [p0 (open-paths ui)
+                              [d a b] (project!)
+                              boom (str d "/boom.clj")]
+                          (spit boom "(def boom 3)\n")
+                          ((:simulate-folder-result! ui) {:path d})
+                          (write-sessions! ui [{:root d :tabs [boom a b] :active b}])
+                          (let [m (support/out-end-offset ui)]
+                            (with-redefs [window/read-for-tab
+                                          (fn [cv path]
+                                            (if (= path boom)
+                                              (throw (ex-info "forced open failure" {}))
+                                              (orig-read cv path)))]
+                              ((:restore-session!* ui)))
+                            [m p0 a b])))
+                want "; Couldn't reopen boom.clj from last time.\n"
+                named? (await-until 2000 20 #(str/includes? (support/since ui mark) want))]
+            (on-gtk (try
+                      (let [ps (open-paths ui)]
+                        (support/check :session-throwing-file-skipped
+                                       (and named? (= (conj p0 a b) ps) (= b (active-path ui)))
+                                       {:p0 p0 :paths ps :active (active-path ui) :want want
+                                        :console (support/since ui mark)}))
                       (finally (restore! ui original)))))))

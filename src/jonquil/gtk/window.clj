@@ -2483,10 +2483,10 @@
                         e)
                       (last-session/entry-for sessions root))
               missing (reduce (fn [acc p]
-                                (let [f (java.io.File. ^String p)]
-                                  (if (or (not (.isFile f)) (:error (open-file! ctx p)))
-                                    (conj acc (.getName f))
-                                    acc)))
+                                (let [f (java.io.File. ^String p)
+                                      failed? (try (or (not (.isFile f)) (boolean (:error (open-file! ctx p))))
+                                                   (catch :default _ true))]
+                                  (if failed? (conj acc (.getName f)) acc)))
                               [] (:tabs entry))]
           (when-let [t (and (:active entry)
                             (some (fn [t] (when (= (:active entry) @(:path t)) t)) @tabs))]
