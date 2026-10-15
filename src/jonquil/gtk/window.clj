@@ -1750,13 +1750,15 @@
 (defn- poll-tick!
   "One tick of the `auto` appearance poll, returned as the GLib source
   result: 0 drops the timer (the choice is no longer :auto), 1 keeps it.
+  It never touches poll-armed?: only the real GLib callback may clear that
+  (see poll-cb in activate!), because only its return of 0 drops the timer.
   A closing window does nothing, since the app is about to quit and the
   self-test's suppressed close mustn't stop the poll. Otherwise resolves
   the choice against the system and applies it only when it differs from
   the theme being shown. Never saves, because the saved value is :auto."
-  [{:keys [theme-name theme-choice system-dark-fn* poll-armed? closing?] :as theme-ctx}]
+  [{:keys [theme-name theme-choice system-dark-fn* closing?] :as theme-ctx}]
   (cond
-    (not= :auto @theme-choice) (do (reset! poll-armed? false) 0)
+    (not= :auto @theme-choice) 0
     @closing? 1
     :else (let [r (theme/resolve-choice :auto ((deref system-dark-fn*)))]
             (when (not= r @theme-name)
@@ -1776,8 +1778,14 @@
     (when (and (= :auto k)
                (= "Mac OS X" (System/getProperty "os.name"))
                (compare-and-set! poll-armed? false true))
-      (swap! arm-count inc)
-      (g/g-timeout-add 1000 poll-cb ffi/null))
+      ;; If arming throws there is no timer, so the flag must not stay
+      ;; true. The throw continues to the caller.
+      (try
+        (g/g-timeout-add 1000 poll-cb ffi/null)
+        (catch Throwable e
+          (reset! poll-armed? false)
+          (throw e)))
+      (swap! arm-count inc))
     r))
 
 (defn- load-and-apply-theme!
@@ -2682,7 +2690,13 @@
                    :arm-count arm-count :closing? closing?}
         ;; Built once, as the inspector's note-clear timer is, because
         ;; callbacks keeps every callable for the life of the process.
-        poll-cb (callable (fn [_data] (poll-tick! theme-ctx)) [:pointer] :int :on-throw 1)
+        ;; Only this callback clears poll-armed?, when its tick returns 0
+        ;; and GLib drops the timer.
+        poll-cb (callable (fn [_data]
+                            (let [r (poll-tick! theme-ctx)]
+                              (when (zero? r) (reset! poll-armed? false))
+                              r))
+                          [:pointer] :int :on-throw 1)
         theme-ctx (assoc theme-ctx :poll-cb poll-cb)
         set-theme-fn (fn [k] (apply-choice! theme-ctx k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
@@ -3077,6 +3091,7 @@
                    :system-dark-fn!* (fn [f] (reset! system-dark-fn* f))
                    :poll-appearance!* (fn [] (poll-tick! theme-ctx))
                    :poll-arm-count* (fn [] @arm-count)
+                   :poll-armed?* (fn [] @poll-armed?)
                    :code-css* (fn [] (g/css-provider-string provider))
                  ;; TH.T5: the chord's own action, the settings path this
                  ;; window reads/writes, and the exact startup-load fn
@@ -3257,7 +3272,7 @@
   :dialect-label :reset-check :window :find-bar :run!*
   :stop!* :open-path! :save-to! :run-selection!* :run-form!* :toggle-focus!*
   :clear-console!* :clear-last-output!* :zoom!* :set-theme!* :theme-name* :code-css*
-  :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count*
+  :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count* :poll-armed?*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :full-doc-popover

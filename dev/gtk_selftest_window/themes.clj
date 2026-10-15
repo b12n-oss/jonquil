@@ -525,19 +525,22 @@
   step runs inside one on-gtk block so no timer tick can fire between them.
   The window counts each real arming (:poll-arm-count*); the count must rise
   by exactly 1 from :light with the fake dark, then cycle through
-  light..navy back to :auto."
+  light..navy back to :auto. An earlier :auto row may have left a real
+  timer alive, so the row first sets :light and waits (a real tick within
+  about 1 s drops it) until :poll-armed?* reads false."
   [ui]
   (go-row :auto-poll-single-timer support/check
-    (on-gtk (let [_ (start-fake-system! ui)
-                  before ((:poll-arm-count*  ui))]
-              ((:set-theme!* ui) :auto)
-              (dotimes [_ 5] ((:cycle-theme!* ui)))
-              (let [after ((:poll-arm-count* ui))
-                    choice ((:theme-choice* ui))]
-                (support/check :auto-poll-single-timer
-                               (and (= :auto choice) (= 1 (- after before)))
-                               {:before before :after after :choice choice})
-                (restore-real-system! ui))))))
+    (on-gtk (start-fake-system! ui))
+    (let [idle? (await-until 2500 50 #(not ((:poll-armed?* ui))))]
+      (on-gtk (let [before ((:poll-arm-count* ui))]
+                ((:set-theme!* ui) :auto)
+                (dotimes [_ 5] ((:cycle-theme!* ui)))
+                (let [after ((:poll-arm-count* ui))
+                      choice ((:theme-choice* ui))]
+                  (support/check :auto-poll-single-timer
+                                 (and idle? (= :auto choice) (= 1 (- after before)))
+                                 {:idle? idle? :before before :after after :choice choice})
+                  (restore-real-system! ui)))))))
 
 (defn row-auto-startup-load
   "A settings file holding {:theme :auto} loads through the startup path
@@ -567,7 +570,7 @@
 (defn row-system-dark-real
   "appearance/system-dark? on the GTK thread of this macOS run is a real
   boolean, not nil."
-  [ui]
+  [_ui]
   (go-row :system-dark-real support/check
     (on-gtk (let [r (appearance/system-dark?)]
               (support/check :system-dark-real (boolean? r) {:result r})))))
