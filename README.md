@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/images/logo.svg" alt="Jonquil logo: a yellow jonquil with an orange cup" width="128"></p>
+<p align="center"><img src="docs/images/logo.svg" alt="Jonquil logo: a yellow jonquil with an orange cup" width="160"></p>
 
-# Jonquil
+<h1 align="center">Jonquil</h1>
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
