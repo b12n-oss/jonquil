@@ -277,13 +277,13 @@
                                   ;; actually exist here (doc, find-doc,
                                   ;; apropos, dir -- source and pst do not),
                                   ;; so (doc ...) etc. work at the prompt like
-                                  ;; upstream's DrClojure.eval. NOT
-                                  ;; clojure.pprint: Jolt's pprint ignores the
-                                  ;; bound *out* and writes straight to the
-                                  ;; process's real stdout (known gap).
+                                  ;; upstream's DrClojure.eval. pprint too,
+                                  ;; now that it honours the bound *out*
+                                  ;; (jolt-lang/jolt#1355, Jolt v0.8.22).
                                   (refer-clojure)
-                                  (require 'clojure.repl)
+                                  (require 'clojure.repl 'clojure.pprint)
                                   (refer 'clojure.repl :only '[doc find-doc apropos dir])
+                                  (refer 'clojure.pprint :only '[pprint])
                                   (let [{:keys [value printed]}
                                         (jolt.host/run-interruptible
                                          token (fn []
