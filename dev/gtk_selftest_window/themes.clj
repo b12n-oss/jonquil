@@ -520,8 +520,11 @@
                                {:name1 name1 :ret ret})
                 (restore-real-system! ui))))))
 
+(def ^:private mac? (= "Mac OS X" (System/getProperty "os.name")))
+
 (defn row-auto-poll-single-timer
-  "Choosing :auto five times in a row arms one poll timer, not five. Every
+  "Choosing :auto five times in a row arms one poll timer, not five, and
+  none off macOS, where there's no system appearance to poll. Every
   step runs inside one on-gtk block so no timer tick can fire between them.
   The window counts each real arming (:poll-arm-count*); the count must rise
   by exactly 1 from :light with the fake dark, then cycle through
@@ -538,7 +541,7 @@
                 (let [after ((:poll-arm-count* ui))
                       choice ((:theme-choice* ui))]
                   (support/check :auto-poll-single-timer
-                                 (and idle? (= :auto choice) (= 1 (- after before)))
+                                 (and idle? (= :auto choice) (= (if mac? 1 0) (- after before)))
                                  {:idle? idle? :before before :after after :choice choice})
                   (restore-real-system! ui)))))))
 
@@ -585,9 +588,9 @@
                 (restore-real-system! ui))))))
 
 (defn row-system-dark-real
-  "appearance/system-dark? on the GTK thread of this macOS run is a real
-  boolean, not nil."
+  "appearance/system-dark? on the GTK thread is a real boolean on macOS,
+  and nil elsewhere (auto then resolves to light)."
   [_ui]
   (go-row :system-dark-real support/check
     (on-gtk (let [r (appearance/system-dark?)]
-              (support/check :system-dark-real (boolean? r) {:result r})))))
+              (support/check :system-dark-real (if mac? (boolean? r) (nil? r)) {:result r :mac? mac?})))))
