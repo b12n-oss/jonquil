@@ -401,6 +401,16 @@
     (is (= "{:k 1}" (:printed (first (run-sync ctx "(ex-data *e)")))) "a later success keeps *e")
     (is (= "1" (:printed (first (run-sync ctx "*3")))) "an error doesn't shift *1")))
 
+(deftest stop-leaves-history-vars-alone
+  (let [ctx (sut/make-eval-context) done (promise)]
+    (run-sync ctx "1")
+    (run-sync ctx "(throw (ex-info \"e1\" {}))")
+    (sut/eval-async ctx "(loop [] (recur))" {:on-complete (fn [r] (deliver done r))})
+    (Thread/sleep 200)
+    (sut/stop-eval! ctx)
+    (is (= :interrupted (:status (deref done 2000 :timeout))))
+    (is (= "[1 \"e1\"]" (:printed (first (run-sync ctx "[*1 (ex-message *e)]")))))))
+
 (deftest pprint-referred-and-honours-bound-out
   (let [[r out] (run-sync (sut/make-eval-context) "(pprint {:a 1 :b [1 2 3]})")]
     (is (= :ok (:status r)))

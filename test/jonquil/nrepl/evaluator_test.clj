@@ -398,9 +398,11 @@
   ;; server shifts *1/*2/*3 for it too.
   (let [e (make (temp-project))]
     (try
+      (run e "(throw (ex-info \"boom\" {}))" false)
       (doseq [c ["1" "2" "3"]] (run e c false))
       (run e "(+ 10 20)" true)
       (is (= "[30 3 2]" (:printed (first (run e "[*1 *2 *3]" false)))))
+      (is (= "\"boom\"" (:printed (first (run e "(ex-message *e)" false)))) "the cleanup leaves *e alone")
       (finally (ev/stop! e)))))
 
 (deftest repl-helpers-referred-test
