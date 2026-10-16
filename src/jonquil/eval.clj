@@ -124,6 +124,9 @@
    :closed? (atom false)
    :waiting-input? (atom false)
    :history (atom (create-history))
+   ;; The program's *1, *2, *3 and *e, carried from one evaluation to the
+   ;; next as the REPL does: bound for each run, then shifted by its result.
+   :repl-vars (atom {})
    :running-state (atom idle-state)
    ;; Guards every running-state transition together with the
    ;; on-status-change notification it implies, so Stop's read of :thread
@@ -216,7 +219,7 @@
    waiting on another thread that may itself call eval-async or
    stop-eval! on this context, or the two threads deadlock -- a GUI
    should enqueue that work for later and return, not invoke-and-wait."
-  [{:keys [queue current-rdr closed? waiting-input? running-state lock] :as ctx}
+  [{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
    code
    {:keys [on-output on-wait-input on-status-change on-complete] :as opts}]
   (let [ns-sym (or (:ns-name opts) 'user)]
@@ -269,7 +272,8 @@
                         (try (.interrupt (Thread/currentThread)) (catch :default _ nil)))
                       (when on-status-change (on-status-change :running)))
                     (let [target (or (find-ns ns-sym) (create-ns ns-sym))]
-                      (binding [*out* out-w *err* err-w *in* in-rdr *ns* target]
+                      (binding [*out* out-w *err* err-w *in* in-rdr *ns* target
+                                *1 (:1 @repl-vars) *2 (:2 @repl-vars) *3 (:3 @repl-vars) *e (:e @repl-vars)]
                         (let [r (try
                                   ;; I4: unconditional -- the ns-resolve guard
                                   ;; this replaced was always false on Jolt.
@@ -306,13 +310,18 @@
                                   (catch :default e
                                     (if (interrupted? e)
                                       {:status :interrupted}
-                                      {:status :error :error e})))]
-                          (cond-> (assoc r :ns (ns-name *ns*))
-                            ;; Stop was pressed: whatever the thread interrupt
-                            ;; surfaced as (InterruptedException, EOF on stdin, a
-                            ;; normal return), the user asked for a stop.
-                            @stop-requested (-> (assoc :status :interrupted)
-                                                (dissoc :value :error :printed))))))
+                                      {:status :error :error e})))
+                              r (cond-> (assoc r :ns (ns-name *ns*))
+                                  ;; Stop was pressed: whatever the thread interrupt
+                                  ;; surfaced as (InterruptedException, EOF on stdin, a
+                                  ;; normal return), the user asked for a stop.
+                                  @stop-requested (-> (assoc :status :interrupted)
+                                                      (dissoc :value :error :printed)))]
+                          (case (:status r)
+                            :ok (swap! repl-vars (fn [{v1 :1 v2 :2 :as m}] (assoc m :1 (:value r) :2 v1 :3 v2)))
+                            :error (swap! repl-vars assoc :e (:error r))
+                            nil)
+                          r)))
                     (catch :default e
                       {:status :error :error e :ns ns-sym}))]
               ;; I1: clear any pending Java interrupt before the tail. A

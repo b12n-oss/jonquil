@@ -387,6 +387,20 @@
     (is (= :ok (:status r)))
     (is (str/includes? (apply str (map second @out)) "inc"))))
 
+(deftest history-vars-shift-after-each-value
+  (let [ctx (sut/make-eval-context)]
+    (doseq [c ["1" "2" "3"]] (run-sync ctx c))
+    (is (= "[3 2 1]" (:printed (first (run-sync ctx "[*1 *2 *3]")))))
+    (is (= "[[3 2 1] 3 2]" (:printed (first (run-sync ctx "[*1 *2 *3]")))))))
+
+(deftest star-e-holds-the-last-error
+  (let [ctx (sut/make-eval-context)]
+    (run-sync ctx "1")
+    (is (= :error (:status (first (run-sync ctx "(throw (ex-info \"boom\" {:k 1}))")))))
+    (is (= "{:k 1}" (:printed (first (run-sync ctx "(ex-data *e)")))))
+    (is (= "{:k 1}" (:printed (first (run-sync ctx "(ex-data *e)")))) "a later success keeps *e")
+    (is (= "1" (:printed (first (run-sync ctx "*3")))) "an error doesn't shift *1")))
+
 (deftest pprint-referred-and-honours-bound-out
   (let [[r out] (run-sync (sut/make-eval-context) "(pprint {:a 1 :b [1 2 3]})")]
     (is (= :ok (:status r)))
