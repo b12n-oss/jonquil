@@ -2128,19 +2128,24 @@
 
 (defn- tab-by-id [tabs id] (some (fn [t] (when (= id (:id t)) t)) @tabs))
 
+(declare session-changed!)
+
 (defn- refresh-labels!
   "Sets every tab's label (jonquil.tabs/labels) and shows the strip only
-  while there are two or more tabs."
-  [{:keys [tabs notebook]}]
+  while there are two or more tabs. Every open, close and path change comes
+  through here, so it also saves the tab list (session-changed!)."
+  [{:keys [tabs notebook] :as ctx}]
   (let [ts @tabs]
     (doseq [[t text] (map vector ts (tabs/labels (map (fn [t] {:path @(:path t) :dirty? (editor/dirty? (:ed t))}) ts)))]
       (tab/set-label! t text))
-    (g/gtk-notebook-set-show-tabs notebook (if (> (count ts) 1) 1 0))))
+    (g/gtk-notebook-set-show-tabs notebook (if (> (count ts) 1) 1 0)))
+  (session-changed! ctx))
 
 (defn- on-switch!
   "Makes t the active tab: the window's title, Ln/Col and focus follow it,
-  and every open popover closes (one on a hidden page would be lost)."
-  [{:keys [active-id win line-col-label close-popovers-fn tree-pane]} t]
+  and every open popover closes (one on a hidden page would be lost). The
+  saved tab list records the new active tab (session-changed!)."
+  [{:keys [active-id win line-col-label close-popovers-fn tree-pane] :as ctx} t]
   (reset! active-id (:id t))
   (close-popovers-fn)
   ;; File-tree plan P2.T2: the tree selects the active tab's file (never
@@ -2149,7 +2154,8 @@
   (update-title! (:ed t) win (:path t))
   (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
     (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
-  (editor/focus! (:ed t)))
+  (editor/focus! (:ed t))
+  (session-changed! ctx))
 
 (defn- switch-page-fn
   "The notebook's switch-page handler. Spike §1: the tab is found from the
@@ -2463,6 +2469,29 @@
     (let [path (last-session/sessions-path @settings-path*)]
       (last-session/save-sessions!
        path (last-session/remember (:sessions (last-session/load-sessions path)) (session-snapshot ctx))))))
+
+(defn- session-changed!
+  "Saves the tab list as it changes, not only at quit, so a crash or a
+  force quit keeps it. Does nothing until :session-live? is set, which
+  activate! does once the launch's own tabs are open: before that the
+  first Untitled tab would overwrite the list it's about to reopen. Writes
+  only when the snapshot differs from the last one written (or the state
+  startup ended in), so a label refresh for a dirty mark costs no I/O. With
+  :reopen-tabs? off it does nothing and records nothing, so turning it back
+  on saves at the next change. A failure is said on the console
+  once, until a save works again. ctx without :session-live? (a partial
+  map) does nothing."
+  [{:keys [session-live? session-last session-error cv] :as ctx}]
+  (when (and session-live? @session-live? (reopen-tabs? @(:settings-path* ctx)))
+    (let [snap (session-snapshot ctx)]
+      (when (not= snap @session-last)
+        (let [err (try (save-session! ctx) (catch :default e (ex-message e)))]
+          (if err
+            (when (not= err @session-error)
+              (reset! session-error err)
+              (cview/append! cv :system (str "; sessions: " err "\n")))
+            (do (reset! session-error nil)
+                (reset! session-last snap))))))))
 
 (defn- restore-session!
   "Reopens the tabs sessions.edn holds for the tree's root, in order, and
@@ -3112,7 +3141,10 @@
                                                                     @settings-path*
                                                                     {:file-tree {:visible? true
                                                                                  :width (g/gtk-paned-get-position tree-paned)}})))
-                                                          :save-session! (fn [] (save-session! @*tab-ctx))})
+                                                          ;; Live saving stops first: nothing after the
+                                                          ;; quit's own save may write a shorter list.
+                                                          :save-session! (fn [] (some-> @*tab-ctx :session-live? (reset! false))
+                                                                           (save-session! @*tab-ctx))})
                                        [:pointer :pointer] :int :on-throw 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
@@ -3164,7 +3196,8 @@
                    :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
                    :theme-name theme-name :completion-opts completion-opts
                    :active-id active-id :active-tab active-tab :popovers popovers
-                   :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result}
+                   :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
+                   :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)}
           first-tab (add-tab! tab-ctx {:path file :text (or text "")})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
@@ -3262,6 +3295,13 @@
         (try (restore-session! tab-ctx {:reroot? true})
              (catch :default e
                (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n")))))
+      ;; The launch's tabs are open, so from here on every change to them is
+      ;; saved as it happens (session-changed!). The state the launch ends in
+      ;; isn't written: a launch on one file would otherwise replace the
+      ;; folder's remembered tabs before anything changed. A re-root alone
+      ;; doesn't save either, for the same reason; the next tab change does.
+      (reset! (:session-last tab-ctx) (session-snapshot tab-ctx))
+      (reset! (:session-live? tab-ctx) true)
       ;; P5a: say where the child tools' PATH came from. The wait for the
       ;; lookup is off the GTK thread; the append goes through on-gui!, and
       ;; a window closed meanwhile must not throw out of the future.
@@ -3377,6 +3417,9 @@
                  ;; what a launch with no file restores (without re-rooting).
                    :save-session!* (fn [] (save-session! @*tab-ctx))
                    :restore-session!* (fn [] (restore-session! @*tab-ctx {:reroot? false}))
+                 ;; Live saving on or off, so a row can stand in for a quit
+                 ;; and a new launch (off until that launch's restore).
+                   :session-live!* (fn [on?] (reset! (:session-live? @*tab-ctx) on?))
                  ;; P4.T3: the window's own popover registry -- close-
                  ;; popovers-fn is exactly what the new Escape clause calls;
                  ;; register-popover-fn is how a popover (a self-test row's
@@ -3547,7 +3590,7 @@
   :clear-console!* :clear-last-output!* :zoom!* :set-theme!* :theme-name* :code-css*
   :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count* :poll-armed?*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
-  :save-session!* :restore-session!*
+  :save-session!* :restore-session!* :session-live!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :full-doc-popover
   :rename!* :rename-to!* :rename-popover

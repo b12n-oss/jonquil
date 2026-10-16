@@ -47,10 +47,19 @@
     ((:close-tab! ui) (:id t)))
   ((:select-tab! ui) (:id (first (tab-list ui)))))
 
+(defn- relaunch-tabs!
+  "Closes the extra tabs the way a quit and a new launch leave them: live
+  saving off first (the quit's last save is already written), so the closes
+  don't shorten the saved list. The row turns it back on after its restore."
+  [ui]
+  ((:session-live!* ui) false)
+  (close-extra-tabs! ui))
+
 (defn- restore!
   "Extra tabs closed, first tab selected, tree rooted at original,
   :reopen-tabs? back on, sessions.edn gone. GTK-thread only."
   [ui original]
+  ((:session-live!* ui) true)
   ((:simulate-folder-result! ui) {:path original})
   (close-extra-tabs! ui)
   (settings/save-settings! ((:settings-path* ui)) {:reopen-tabs? true})
@@ -71,9 +80,10 @@
                         ((:open-file! ui) b)
                         ((:select-tab! ui) (:id (some (fn [t] (when (= a @(:path t)) t)) (tab-list ui))))
                         (let [err ((:save-session!* ui))
-                              _ (close-extra-tabs! ui)
+                              _ (relaunch-tabs! ui)
                               closed (open-paths ui)
                               _ ((:restore-session!* ui))
+                              _ ((:session-live!* ui) true)
                               v {:err err :p0 p0 :closed closed :paths (open-paths ui) :active (active-path ui)}]
                           (support/check :session-save-restore
                                          (and (nil? err) (= p0 closed) (= (conj p0 a b) (:paths v)) (= a (:active v)))
@@ -166,10 +176,11 @@
                         ((:simulate-folder-result! ui) {:path d})
                         ((:open-file! ui) a)
                         (let [err ((:save-session!* ui))
-                              _ (close-extra-tabs! ui)
+                              _ (relaunch-tabs! ui)
                               _ ((:simulate-folder-result! ui) {:path link})
                               linked-root (root ui)
                               _ ((:restore-session!* ui))
+                              _ ((:session-live!* ui) true)
                               v {:err err :link link :root linked-root :p0 p0 :paths (open-paths ui)}]
                           (support/check :session-restore-symlinked-root
                                          (and (nil? err) (= d linked-root) (= (conj p0 a) (:paths v)))
@@ -254,4 +265,32 @@
                                        (and named? (= (conj p0 a b) ps) (= b (active-path ui)))
                                        {:p0 p0 :paths ps :active (active-path ui) :want want
                                         :console (support/since ui mark)}))
+                      (finally (restore! ui original)))))))
+
+(defn row-session-saved-live
+  "Without a quit or a :save-session!* call, sessions.edn follows the tabs:
+  opening two files and selecting the first saves both with it active, and
+  closing the second saves the shorter list."
+  [ui]
+  (go-row :session-saved-live support/check
+          (on-gtk (let [original (root ui)]
+                    (try
+                      (tabs/occupy-first! ui)
+                      (let [[d a b] (project!)
+                            p0 (open-paths ui)
+                            entry (fn [] (last-session/entry-for
+                                          (:sessions (last-session/load-sessions (sessions-file ui))) d))
+                            tab-for (fn [p] (some (fn [t] (when (= p @(:path t)) t)) (tab-list ui)))]
+                        ((:simulate-folder-result! ui) {:path d})
+                        ((:open-file! ui) a)
+                        ((:open-file! ui) b)
+                        ((:select-tab! ui) (:id (tab-for a)))
+                        (let [opened (entry)
+                              _ ((:close-tab! ui) (:id (tab-for b)))
+                              closed (entry)
+                              v {:p0 p0 :opened opened :closed closed}]
+                          (support/check :session-saved-live
+                                         (and (= (conj p0 a b) (:tabs opened)) (= a (:active opened))
+                                              (= (conj p0 a) (:tabs closed)) (= a (:active closed)))
+                                         v)))
                       (finally (restore! ui original)))))))

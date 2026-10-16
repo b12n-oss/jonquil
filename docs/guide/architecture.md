@@ -35,10 +35,18 @@ these:
 - `jonquil.last-session`: the tabs to reopen, kept per tree root in
   `sessions.edn` beside the settings file. It's a separate file because
   `settings.edn` is hand-edited and may be a dotfiles symlink, while this one
-  changes on every quit. `load-sessions` and `save-sessions!` never throw, and
-  `remember` and `entry-for` are pure. The window saves in the real-quit branch
-  of its close-request handler, next to the tree's width, and restores at the
-  end of startup when no file was named. Each saved path goes through the same
+  changes whenever the tabs do. `load-sessions` and `save-sessions!` never
+  throw, and `remember` and `entry-for` are pure. The window restores at the
+  end of startup when no file was named, then saves as the tabs change:
+  `refresh-labels!` (every open, close and path change) and `on-switch!` call
+  `session-changed!`, which writes only when the `{:root :tabs :active}`
+  snapshot differs from the last one written. It does nothing until
+  startup's own restore is done, since the first Untitled tab would otherwise
+  overwrite the list it's about to reopen, and the state startup ends in is
+  only recorded, not written, so a launch on one file leaves the folder's
+  list alone until a tab changes. The real-quit
+  branch of the close-request handler turns that off, then saves once more,
+  next to the tree's width. Each saved path goes through the same
   `open-file!` as Open, and a path that fails, or throws, is named on the
   console instead of stopping the rest.
 
