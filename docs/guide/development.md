@@ -9,23 +9,23 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 49 namespaces in under half a second, and it's the fastest
+currently loads 54 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (431 tests, 2193 assertions
+slower. `bb test` runs the full unit suite (500 tests, 3253 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo. On Linux (arm64) the
-same suite runs 431 tests and 2169 assertions: the `desktop-file-validate`
-and `plutil` asserts are gated by OS, so the two systems differ by 24
-assertions.
+same suite runs 500 tests and 3222 assertions: some asserts are gated by
+OS, `desktop-file-validate` and `plutil` among them, so the two systems
+differ by 31 assertions.
 
-`bb test:nrepl` runs a second, separate suite (28 tests, 99 assertions,
-about 32 s): every test in it spawns a real Jolt child over
+`bb test:nrepl` runs a second, separate suite (38 tests, 127 assertions,
+about 40 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
-`bb test:clj` runs a third, separate suite (12 tests, 39 assertions)
+`bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by
 `dev/clj_server.clj` (mirroring `jonquil.nrepl.child`'s shape for a Jolt
 child, but for the real JVM CLI): it needs Java 17+ and the `clojure` CLI,
@@ -49,8 +49,8 @@ others can't.
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
-(`dev/gtk_selftest.clj`, 42 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 242 rows), with its rows split by
+(`dev/gtk_selftest.clj`, 47 rows); the second covers the full application
+window (`dev/gtk_selftest_window.clj`, 286 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
@@ -61,8 +61,12 @@ REPL line, a Run and a slow evaluation), `app_open` (Open With and Dock drops: t
 `g_application_open`, a folder, a missing path, a file already open and a
 non-local URI), `inspector` (the panel widget in
 isolation, then the real window's own panel: opening, in/out, paging
-across a page edge, table/meta toggles, def, Run Form, and Escape), and
-`source_pane` (the source panel widget in isolation). The
+across a page edge, table/meta toggles, def, Run Form, and Escape),
+`source_pane` (the source panel widget in isolation), `tab_widget` (one
+tab's widgets in isolation), `tabs` (new, open, switch and close, Run per
+tab, the close alerts), `session_tabs` (saving and reopening the last
+session's tabs), `file_tree_pane` (the tree widget in isolation) and
+`file_tree` (the tree in the real window, including its file operations). The
 third (`dev/gtk_selftest_nrepl.clj`,
 16 rows) opens against a throwaway project whose `.jonquil.edn` asks for
 `{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
@@ -112,7 +116,7 @@ into absolute paths for `g_application_run`. GApplication then emits `open`
 argument, that a folder launch saves no tree visibility, that the two files
 open as tabs, that the active tab is the last file, and that the program name
 is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). A full run reports
-42, 242, 16, 15, 29, 3, 13 and 5 rows passing, in group order.
+47, 286, 16, 15, 29, 3, 13 and 5 rows passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
@@ -132,7 +136,7 @@ waits a bounded time for it to go away. If it's still open, the run
 records a FAIL and exits 1 instead of hanging.
 
 **`bb smoke:binary`** is the one harness that runs outside the GTK process
-under test. It builds `./jonquil` (skip the build with `--no-build`),
+under test. It builds `target/smoke/jonquil` (skip the build with `--no-build`),
 launches it as a real subprocess, and drives it with `cgevent key --pid`,
 routing every keystroke to that process's own pid so nothing leaks to the
 user's other windows and nothing is ever posted `--global`. It reads results
@@ -141,7 +145,7 @@ screen pixels through OCR (`cgevent ocr-inspect`) plus a per-pixel colour
 check for the theme's text and prompt colours. Every jonquil process the
 script starts is killed on every exit path, success, failure, or Ctrl-C.
 
-**`bb smoke:cljd`** drives the same built binary against a real, running
+**`bb smoke:cljd`** drives a built `./jonquil` against a real, running
 ClojureDart app instead, so it needs one up first: `bb dev:macos` in
 `a-sibling-cljd-app`, on the `nrepl-poc` fork at `199d173d` or later. If the
 app isn't up, or the screen is locked, every step SKIPs and the task exits 0.
@@ -181,8 +185,8 @@ The `jank` scene runs against a real jank, found the way the app finds it
 prints that and exits 0 without writing an image. Retake it with
 `jolt -M:shots jank`.
 
-The four JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`
-and `clj-inspector`) run against a real `clojure -M:serve`, started through
+The five JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`,
+`clj-inspector` and `clj-source`) run against a real `clojure -M:serve`, started through
 `dev/clj_server.clj` in a temp project the same way `bb test:clj` starts
 one, and stopped once the window closes. So they need Java 17+ and the
 `clojure` CLI, and `clj-full-doc`'s first run waits while the server
@@ -240,7 +244,8 @@ check exits non-zero naming it. `bb app:install` runs the bundle task, then
 moves the result to `~/Applications/Jonquil.app` (it replaces an existing
 one only when its plist names `net.b12n.jonquil`), runs `lsregister -f`
 on it. The checkout's `./Jonquil.app` is unregistered and removed, so Open
-With lists Jonquil once. `bb app:icon` regenerates `resources/Jonquil.icns` from
+With lists Jonquil once. `bb app:icon` regenerates `resources/Jonquil.icns`, and the 256 px
+`resources/icon/jonquil-256.png` the Linux install uses, from
 `resources/icon/icon.swift`, so it needs Swift; the `.icns` is committed, so
 you only run it after changing the icon.
 
@@ -248,6 +253,12 @@ The bundle is deliberately not re-signed. `jolt build` appends the program
 image after the launcher's Mach-O, and `codesign --force` then fails strict
 validation. The launcher's own ad-hoc signature from the linker is what
 macOS checks, so the task only verifies it's there.
+
+On Linux, `bb app:install` runs `bb app:build` instead and copies the
+binary, a launcher, the icon and the MIME types under `~/.local/share`
+(`dev/app_linux.clj`, tested by `jonquil.app-linux-test`). `bb app:uninstall`
+removes those files again. On macOS it only says to drag the app to the
+Trash.
 
 The unit suite covers this without touching your Applications folder:
 `jonquil.app-bundle-test` (the `Info.plist` text and the replace-only-Jonquil
@@ -314,7 +325,9 @@ container and frees the port.
 
 `bb lint` runs clj-kondo over `src`, `test`, and `dev` in report mode;
 `bb lint:strict` is the same lint but exits non-zero on any finding (2 for
-warnings, 3 for errors), which is what CI and the hooks gate on.
+warnings, 3 for errors), which is what the manual CI workflow gates on.
+The git hooks block only on clj-kondo errors, so warnings don't stop a
+commit.
 `bb lsp:format` and `bb lsp:format-check` reformat (or dry-run check) with
 clojure-lsp, and `bb lsp:clean-ns`/`bb lsp:clean-ns-check` do the same for
 `ns` forms; `bb lsp:check` runs both dry-run checks together. All four LSP
@@ -322,7 +335,10 @@ tasks scope themselves to `src`, `test`, and every real file under `dev`,
 skipping `dev/smoke/fixtures/*.clj` and `dev/smoke/PixelAt.java`: the
 fixtures are deliberately invalid or minimal Clojure, fed to the built
 binary to exercise unclosed-paren recovery, and clojure-lsp's own parser
-aborts the whole run the moment it meets one.
+aborts the whole run the moment it meets one. They also skip the two
+files lifted from DrClojure-Neo, `src/jonquil/syntax.clj` and
+`test/jonquil/upstream/syntax_test.clj`, so a later re-sync still diffs
+cleanly against upstream.
 
 `bb hooks:install` writes a fast pre-commit hook (clj-kondo errors plus a
 format dry-run, a couple of seconds); `bb hooks:install:full` adds the full
@@ -411,7 +427,7 @@ means and how syncing against it works.
 preview this documentation site: the pages under `docs/guide/`, including
 this one. They shell out to a sibling checkout of
 [jlt-commons/docs-engine](https://github.com/jlt-commons/docs-engine),
-looked up as `$JLT_DOCS_ENGINE`, then `../docs-engine`, then
-`~/dev/jlt-commons/docs-engine`, and print where to `git clone` it if none
+looked up as `$JLT_DOCS_ENGINE`, then `~/dev/jlt-commons/docs-engine`,
+then `../docs-engine` (a sibling there can be an unrelated older fork), and print where to `git clone` it if none
 of those exist. There's no workflow and no GitHub Pages site behind this:
 it's a local preview until the project is open-sourced.

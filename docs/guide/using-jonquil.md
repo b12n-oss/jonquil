@@ -2,8 +2,9 @@
 
 Jonquil is a DrRacket-style IDE for Clojure: a Definitions editor above an
 Interactions console, with a Run button that runs the top pane and a Stop
-that actually stops it. This page walks through the window as it stands
-after Phase 3, the Themes phase, and P4's help features.
+that actually stops it. This page walks through the window, the editor
+and console, the file tree and tabs, themes, the dialects Jonquil can run,
+and the limits that still apply.
 
 ## The window
 
@@ -36,8 +37,8 @@ pane's brackets and refuses to run a broken one; see "The friendly
 unclosed-bracket message" below for what that looks like. If a program is
 already running, Run doesn't queue a second one; it just warns that one is
 running already. Once the brackets check out, the console prints a `;
---- Running Definitions ---` banner (only when nothing else is already
-running), then streams the program's own output as it prints, and
+--- Running core.clj ---` banner, naming the tab's file, or `Definitions`
+for an Untitled tab (only when nothing else is already running), then streams the program's own output as it prints, and
 finishes with the result on its own line: `=> 3`, say, for whatever the
 last form evaluates to. The status label tracks the run and settles back
 on `Ready` when it's done.
@@ -300,7 +301,8 @@ try it on: make an edit, then close the window.
 One window holds as many files as you like, one per tab. Cmd/Ctrl+T opens
 an empty Untitled tab, and Open puts each file in a tab of its own. The
 tab strip only appears once there are two tabs, so a one-file session
-looks exactly as it always did. A tab's label carries a dot while it has
+looks exactly as it always did. A second Untitled tab is labelled
+`Untitled 2`, and so on. A tab's label carries a dot while it has
 unsaved changes. When two open files share a name, each label adds its
 folder (`core.clj · talk`). Cmd/Ctrl+Shift+] and Cmd/Ctrl+Shift+[ step
 through the tabs, wrapping round at either end, and Cmd/Ctrl+1 to 8 jump
@@ -351,7 +353,9 @@ not: quitting already asks about those, and a file you chose not to save
 reopens as it is on disk. Naming a file at launch (`jonquil core.clj`)
 opens just that file. A remembered file that's been deleted or moved is
 skipped, and the console names it: `; Couldn't reopen notes.clj from last
-time.` The list lives in `sessions.edn`, next to `settings.edn` (see
+time.`, or `; Couldn't reopen 3 files from last time:` followed by their
+names. If `sessions.edn` itself can't be read, the console says `;
+Couldn't read sessions.edn, so no tabs were reopened.` The list lives in `sessions.edn`, next to `settings.edn` (see
 [Themes](#themes) for where that is). To turn the whole thing off, put
 `:reopen-tabs? false` in `settings.edn`; Jonquil then neither saves nor
 reopens anything.
@@ -393,7 +397,9 @@ bb app:run ~/dev/my-talk       # from a checkout
 
 The window then runs that folder's project (its `deps.edn`, `pubspec.yaml`
 or `.jonquil.edn` decides the dialect, as it would for a file inside it)
-and starts with one empty Untitled tab. Launched on a file instead, the
+and reopens the tabs you had there last time (see
+[Tabs from last time](#tabs-from-last-time)), or starts with one empty
+Untitled tab when there are none. Launched on a file instead, the
 tree is rooted at that file's project folder, or at the file's own folder
 when it isn't in a project. With no argument from a terminal it's the
 current directory. From Finder or the Dock there's no useful current
@@ -413,8 +419,8 @@ highlighted when its row is showing. Switching tabs never opens folders by
 itself, but saving a file somewhere under the root, or opening one into a
 tab, does: a new file you just saved shows up in the tree right away.
 
-Dotfiles and dot-folders (`.git`, `.cpcache`, `.clj-kondo`…), `target`
-and `node_modules` are hidden, along with whatever the root's `.gitignore`
+Dotfiles and dot-folders (`.git`, `.cpcache`, `.clj-kondo`…) and the
+folders `target` and `node_modules` are hidden, along with whatever the root's `.gitignore`
 names, as long as the line is a plain name (`out`), a `*` pattern (`*.log`)
 or a folder (`classes/`). Lines with `!`, `**` or a `/` in them are left
 out rather than half-applied, and nested `.gitignore` files aren't read.
@@ -444,7 +450,7 @@ Linux), moves it to the Trash. Return still opens a file or toggles a folder.
 The menu swaps to a name box. Return accepts the name, while Escape or a
 click outside cancels. Escape on the menu itself closes it. Rename pre-selects the
 part of the name before the extension. A name that won't do keeps the box open
-and says why: it's blank, contains `/`, is `.` or `..`, is already used in
+and says why: it's blank, contains `/` or a NUL character, is `.` or `..`, is already used in
 that folder, or is held by an open tab (a tab can outlive its file after a
 trip to the Trash). Rename never overwrites anything. Changing only the case
 of a name (core.clj to Core.clj) works.
@@ -701,7 +707,8 @@ bar's dialect label reads `Jolt` most of the time, or `Jolt (nREPL)` when
 this window's Jolt is running out of process rather than inside Jonquil
 itself. For ClojureDart it reads `ClojureDart (attached)` while Jonquil
 holds a live connection to the app, and `ClojureDart (not running)` the
-rest of the time. For jank it reads `jank (running)` while Jonquil's own jank process is
+rest of the time. JVM Clojure reads the same way, `Clojure (JVM) (attached)`
+or `Clojure (JVM) (not running)`. For jank it reads `jank (running)` while Jonquil's own jank process is
 up, and `jank (not running)` until the first evaluation starts one.
 
 ### Choosing a dialect
@@ -1218,9 +1225,10 @@ than being surprises you'd otherwise have to rediscover:
 - Closing the window, or Cmd/Ctrl+W, while a program runs quits Jonquil
   at once, which ends the program too. It isn't a Stop: nothing is printed,
   and the program gets no chance to finish what it was doing.
-- Typing in a very large Definitions pane can lag: repainting the whole
-  buffer measured about 29ms at 200 lines, 144ms at 1,000 lines, and 3.4
-  seconds at 20,000 lines. Most programs never get close to that size.
+- A keystroke in a very large Definitions pane can stall briefly. At
+  20,000 lines the worst stall measured about 69 ms, and the colours catch
+  up within about 0.7 s. At 2,000 lines it's about 10 ms. The benchmark is
+  in [Development](development.md#benchmark).
 - An unresolved symbol evaluates to an `Unbound` var rather than an error,
   when Jonquil is running Jolt out of process.
 - A crash or SIGKILL of Jonquil leaves its out-of-process Jolt child
@@ -1273,9 +1281,6 @@ than being surprises you'd otherwise have to rediscover:
   another client inspects on the same server, it replaces Jonquil's own
   view, and Jonquil's next move in the panel continues from whatever
   that other client left.
-- In-process, the value the inspector opens on is Jonquil's own record of
-  the last result, not a `*1` binding in the program's namespace: typing
-  `*1` at the prompt still doesn't resolve to anything.
 - Resizing the inspector panel doesn't reflow the rows already on
   screen; the new width only takes effect the next time you open it.
 - No inspector for ClojureDart or for Jolt running out of process, in
