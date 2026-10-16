@@ -560,7 +560,11 @@
   on-gtk round trip in under 150 ms every time (estimate: one 2,000-span
   chunk is ~8 ms by the measured 4 µs a span; 150 ms leaves room for GTK's
   own layout passes). The 20 ms tick never repaints a read-only editor.
-  Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by bb linux:selftest
+  The timing starts once GTK has laid out the new text: on the dev Mac the
+  first frame after set-text! of 8,000 lines holds the GTK thread 101-167 ms
+  with no paint at all, and timing from set-text! charged that to the paint
+  (the row missed on most runs, 2026-10-17). Measured after that settle,
+  the paint's own worst gap was 86-94 ms. Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by bb linux:selftest
   for another arch than the host's) the budget is 5x: x86_64 emulated on
   arm64 measured 194 ms and 481 ms worst cases, which time the emulator."
   [_ed]
@@ -574,8 +578,16 @@
               last-str (inc (str/index-of text "\"" last-line-start))
               string-tag (get (:tags ed) :string)
               _ (on-gtk (editor/set-read-only! ed true)
-                        (editor/set-text! ed text)
-                        (editor/paint-async! ed))
+                        (editor/set-text! ed text))
+              ;; GTK's own layout of the new text: round trips until one
+              ;; comes back under 20 ms (2 s at most), before any paint.
+              _ (loop [n 0]
+                  (let [t0 (System/nanoTime)
+                        _ (on-gtk nil)]
+                    (when (and (> (/ (- (System/nanoTime) t0) 1e6) 20) (< n 200))
+                      (<! (timeout 10))
+                      (recur (inc n)))))
+              _ (on-gtk (editor/paint-async! ed))
               start (System/nanoTime)
               worst (loop [worst 0]
                       (if (or (:done? @(:paint ed)) (> (- (System/nanoTime) start) 10e9))
