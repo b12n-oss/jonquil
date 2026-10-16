@@ -76,9 +76,8 @@ or a table, in one file: `server/src/clojure_cli/repl/inspect.clj`.
 The one shape change the lift needed: upstream's functions all close over
 one shared, global `(def view (atom nil))`, since a single terminal
 inspector serves every client of one server. Jonquil's window keeps one
-pane per window instead, so every lifted function now takes that view map
-as an argument and returns the next one, rather than reading and swapping
-the atom itself; the two places that used to read a session's own
+pane per window instead, so every lifted function now takes the view atom
+as its first argument, and reads and swaps that one instead of a global; the two places that used to read a session's own
 bindings (`start`'s `*1`, `def-as`'s `*ns*`) take that value straight from
 their caller in place of the session lookup. Every other line inside the
 lifted functions is unchanged from upstream. `UPSTREAM.md` carries the

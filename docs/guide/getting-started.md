@@ -193,7 +193,8 @@ Jonquil from a terminal, or put the tool in `/usr/local/bin`.
 
 Ctrl is the command key, so the shortcuts the guide writes as Cmd/Ctrl work
 as Ctrl chords. Ctrl+Q is quick doc, as it is on macOS, and it does not quit.
-Closing the window quits. There is no Linux quit chord yet.
+Ctrl+W closes the tab, and on the last tab it closes the window, which
+quits. Closing the window quits too. There's no separate quit chord.
 
 ## Settings
 
@@ -205,15 +206,26 @@ EDN map:
 ```clojure
 {:theme :navy
  :file-tree {:visible? true :width 240}
- :dialect :jolt}
+ :dialect :jolt
+ :reopen-tabs? true}
 ```
 
-- `:theme` is the theme you last picked with Cmd/Ctrl+Shift+M.
+- `:theme` is the theme you last picked with Cmd/Ctrl+Shift+M, one of
+  `:light`, `:dark`, `:solarized`, `:navy` or `:auto` (follow macOS's
+  light or dark setting).
 - `:file-tree` is whether the file tree was showing and how wide it was,
   saved when you toggle it and when you quit.
 - `:dialect` is optional and only written by hand: the dialect an untitled
   buffer or a file outside any project starts in (see
   [Choosing a dialect](using-jonquil.md#choosing-a-dialect)).
+- `:reopen-tabs?` is also only written by hand. Set it to `false` and
+  Jonquil stops saving and reopening the last session's tabs. Leaving it
+  out, or `true`, keeps that on.
+
+The tabs themselves live next door in `sessions.edn`, one entry per
+project folder, newest first, at most 20 (see
+[Using Jonquil](using-jonquil.md)). It changes on every quit, which is why
+it's a separate file from the one you edit by hand.
 
 Loading the file never throws. A missing file starts Jonquil with the
 defaults (the light theme, and the tree hidden unless you opened a folder) and says nothing. A file that
@@ -224,7 +236,8 @@ to overwrite a file it couldn't read, telling you in the console instead,
 so a hand edit with a typo is never thrown away. Saving is atomic: Jonquil
 writes a temp file beside the target and renames it into place, and if the
 settings file is a symlink, the save follows it and the link itself
-survives. To go back to every default, delete the file.
+survives. To go back to every default, delete the file. Deleting
+`sessions.edn` as well forgets the remembered tabs.
 
 See [Using Jonquil](using-jonquil.md) for the rest of the window, and
 [Development](development.md) for the test suite, the self-test harnesses,

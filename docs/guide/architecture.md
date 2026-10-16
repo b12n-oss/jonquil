@@ -21,7 +21,7 @@ flowchart TD
   session --> docs
 ```
 
-Phase 3 and the Themes phase added three more pure namespaces alongside
+Phase 3 and the Themes phase added four more pure namespaces alongside
 these:
 
 - `jonquil.commands`: the run-selection text, the form Run Form sends,
@@ -84,19 +84,19 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 
 ## The GTK layer
 
-`jonquil.gtk.*` is five namespaces, each with one job:
+`jonquil.gtk.*` started as six namespaces, each with one job:
 
 - `jonquil.gtk.ffi`: the raw GTK4/GLib/GObject/pango bindings, plus the low-level GtkTextIter/mark helpers everything else builds on.
 - `jonquil.gtk.callbacks`: the `callable` macro that turns a Clojure function into a retained, `:collect-safe` foreign-callable (GTK invokes callbacks from inside its own blocking main loop, so a collected one would crash it). It also contains every callback: a throw never reaches GTK, where it would end the process, but is reported on stderr while the callback answers a safe value for its return type, or its own `:on-throw` (the editor's dirty-check timer answers 1 to keep running). Handlers people trigger directly also report on the window, the way the editor's and console's key handlers do. The namespace also holds `on-gui!`, the one function safe to call from any thread to hand a thunk to the GTK main thread.
-- `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
+- `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its repaint after an edit keeps a baseline of what its tags show now (`:painted`). On a future, off the GTK thread, it computes the new plan and `paint/plan-diff` against that baseline, then applies only the changed range a chunk per main-loop turn, nearest the caret first. With no baseline it falls back to a full `paint-async!`. `dirty?` compares lengths before it copies the buffer, and `jonquil.syntax/tokenize` reuses its last result when it gets the identical string again, so a 20,000-line file stays responsive while typing. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
 - `jonquil.gtk.find-bar`: the find and replace bar, with its own `handle-key!` and match highlighting through a `search-match` tag.
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
 - `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, Esc, Cmd/Ctrl+R/O/S), the file dialogs, and the wiring between `jonquil.session` and the two views.
 
 P4 added three more, all built on a shared popover base:
 
-- `jonquil.gtk.popover`: a caret-anchored `GtkPopover`, shared by completion, quick doc and rename.
-- `jonquil.gtk.help-popover`: the quick-doc popover and the rename popover, both built on `jonquil.gtk.popover`.
+- `jonquil.gtk.popover`: a caret-anchored `GtkPopover`, shared by completion, quick doc, full doc and rename.
+- `jonquil.gtk.help-popover`: the quick-doc popover, the full-doc popover a second quick-doc press opens, and the rename popover, all built on `jonquil.gtk.popover`.
 - `jonquil.gtk.completion`: the completion popover, one instance per view (the editor and the console's input line), also built on `jonquil.gtk.popover`.
 
 This arc added one more, outside that popover base: `jonquil.gtk.inspector-pane`, the inspector panel widget, covered in its own section below.
@@ -130,7 +130,7 @@ The console reads its busy/waiting state live from the engine (`:evaluating?`/`:
 
 `jonquil.session`'s `InProcess` record holds one window's in-process evaluation state: the eval context, the current mode (`:reset` or `:accumulate`), the prompt namespace, and the namespaces each owner created, a map from owner to a set. It's the original, and still the default, implementation of the `Evaluator` protocol described below. Run and the REPL both call through the same `evaluate!` path into `jonquil.eval/eval-async`, so the engine itself never distinguishes them.
 
-The O1 spec decision is that Run resets by default: in `:reset` mode, `run-definitions!` first removes the namespaces its owner created, then the REPL's, then `user`, and recreates a fresh `user` and evaluates into it. Loaded libraries are never owned, so they stay. An owner is whatever `eval!`'s `:owner` option names: the window passes a tab's id for Run, Run Selection, Run Form and Inspect Form, and a console entry falls back to `:repl`. A tab that closes hands its set to `:repl` (`jonquil.evaluator/Owners`, `release-owner!`), so the next Run from any tab clears it. Unchecking the toolbar's Reset on Run checkbox flips the session to `:accumulate`, and Run stops clearing first, building on whatever earlier evaluations already defined, the same way the REPL prompt always does. The out-of-process nREPL runtime applies the identical rule, just over the wire. Around every evaluation it asks the child for its namespaces and loaded libraries (`ops/ns-snapshot-code`, about 1 ms), and its reset form removes the owner's set on the child instead of on this process. The snapshot prints its data and returns the old `*1`, having pre-shifted `*1` and `*2`, so the server's own history shift leaves `*1`, `*2` and `*3` where the user had them, so Reset on Run means the same thing whichever evaluator is running underneath it.
+The O1 spec decision is that Run resets by default: in `:reset` mode, `run-definitions!` first removes the namespaces its owner created, then the REPL's, then `user`, and recreates a fresh `user` and evaluates into it. Loaded libraries are never owned, so they stay. An owner is whatever `eval!`'s `:owner` option names: the window passes a tab's id for Run, Run Selection, Run Form and Inspect Form, and a console entry falls back to `:repl`. A tab that closes hands its set to `:repl` (`jonquil.evaluator/Owners`, `release-owner!`), so the next Run from any tab clears it. Unchecking the toolbar's Reset on Run checkbox flips the session to `:accumulate`, and Run stops clearing first, building on whatever earlier evaluations already defined, the same way the REPL prompt always does. The out-of-process nREPL runtime applies the identical rule, just over the wire. Around every evaluation it asks the child for its namespaces and loaded libraries (`ops/ns-snapshot-code`, about 1 ms), and its reset form removes the owner's set on the child instead of on this process. The snapshot prints its data and returns the old `*1`, having pre-shifted `*1` and `*2`, so the server's own history shift leaves `*1`, `*2` and `*3` where the user had them. The same eval refers `doc`, `find-doc`, `apropos`, `dir` and `pprint` into the session's namespace, inside its own `try`, the way the in-process engine does. So Reset on Run, the history vars and the helpers mean the same thing whichever evaluator is running underneath them.
 
 ### Self-test harnesses
 
@@ -246,12 +246,15 @@ Four namespaces make up the out-of-process runtime:
   broken or hostile reply can't hang the process trying to read it.
 - `jonquil.nrepl.ops` translates between nREPL's own reply shapes and
   Jonquil's: eval results, completion candidates, doc lookups, and the
-  reset form. That form removes every namespace the child has grown
-  since it started, except loaded libraries and `user`, then recreates
-  `user`, the same rule `jonquil.session`'s reset applies locally, just
-  run as code sent over the wire instead.
+  reset form. That form removes the running owner's namespaces and the
+  REPL's, the ones the snapshots recorded, then removes and recreates
+  `user`. It's the same rule `jonquil.session`'s reset applies locally,
+  just run as code sent over the wire instead. Both the reset form and
+  the namespace snapshot go through `keeping-history`, so the server's
+  own `*1`/`*2`/`*3` shift after these bookkeeping evals leaves the
+  user's history where it was.
 
-`jonquil.nrepl.evaluator`'s `NRepl` record ties those three together
+`jonquil.nrepl.evaluator`'s `NRepl` record ties those four together
 behind the `Evaluator` protocol: `start!` spawns and connects lazily, and
 refuses to spawn at all once `stop!` has run; `eval!` sends a `load-file`
 for Run or an `eval` for the REPL prompt; `stop!` interrupts whatever's
@@ -650,7 +653,7 @@ the running evaluator (opening a second file from the same nREPL project,
 say), and a different one swaps it, interrupting and stopping the old
 evaluator off to the side while a new one joins the registry and starts.
 
-For an attach evaluator, the status-bar label follows its connection too:
+For an attach or jank evaluator, the status-bar label follows its connection too:
 `watch-connection!` registers an `on-connection!` listener the moment
 `apply-selection!` makes one, which hands the label update to the GTK
 thread through `on-gui!` whenever the connection is made or lost, and
@@ -658,9 +661,9 @@ does nothing once the window has moved on to a different evaluator.
 `apply-reset-toggle!` keeps Reset on Run in step with the runtime the
 same way: insensitive with a tooltip for `:attach`, sensitive with none
 for everything else. Run Selection and Run Form both pass the editor's
-whole buffer as `:ns-source` in their eval options, which only the
-attach evaluator reads, to decide whether it needs to switch namespaces
-first.
+whole buffer as `:ns-source` in their eval options. The attach, JVM
+Clojure and jank evaluators read it to decide which namespace to
+evaluate in, and the Jolt ones ignore it.
 
 ### Plug points for more dialects
 
@@ -677,9 +680,9 @@ A few places are still written for Jolt rather than read from a
 profile, though. `child/start!`'s launch args, its port scan, and the log text it
 waits for are all Jolt-specific. The console strings inside `NRepl`
 spell out "Jolt" by hand rather than reading a profile's name. The
-baseline-namespaces eval `start-runtime!` runs, and the reset form's
-`loaded-libs` call, both fail the whole start outright if a future
-dialect happens to lack either, rather than degrading gracefully. And
+namespace snapshot calls `loaded-libs`, and a dialect without it would
+make every snapshot fail. That doesn't stop an evaluation, but its
+namespaces would go unowned, so Reset on Run would stop clearing them. And
 the offline help fallback always resolves against Jolt's own `user`
 namespace, whichever dialect asked. jank didn't reuse that
 launcher: its runtime is `:launch`, with its own `make` method and its

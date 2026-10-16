@@ -30,9 +30,9 @@ is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
-A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console, and quitting remembers them, so starting Jonquil again in the same folder brings the same tabs back. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
+A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console, and quitting remembers them, so starting Jonquil again in the same folder brings the same tabs back. Started from the Dock or Finder, it goes back to the project you quit last. Put `:reopen-tabs? false` in the settings file to turn that off. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
 
-Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
+Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu. At the prompt, `*1`, `*2`, `*3` and `*e` hold the last results and the last error, and `doc`, `find-doc`, `apropos`, `dir` and `pprint` are there without a `require`, whether Jolt runs in process or out of it.
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
@@ -72,7 +72,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus `jonquil.console` and `jonquil.session`. Run `bb test` to verify. As of 2026-10-14, 431 tests pass (2193 assertions on macOS; 2169 on Linux).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-16, 500 tests pass (3253 assertions on macOS; 3222 on Linux).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
@@ -83,6 +83,7 @@ The core runs without GTK: everything below, plus `jonquil.console` and `jonquil
 - `jonquil.file-tree`: The file tree as plain data: listing a folder, the ignore rules, the visible rows, and which folder to root at.
 - `jonquil.file-ops`: The file tree's disk operations: create, rename and the console sentences for a trash or a hidden new name.
 - `jonquil.tabs`: The window's tabs as plain data: labels, the open-file lookup, the runnable-here check, and alert and banner text.
+- `jonquil.last-session`: Which tabs were open in each project at the last quit, kept in `sessions.edn` beside the settings file.
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.
 - `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
@@ -103,7 +104,8 @@ bb linux:test             # bb test in a Linux container (local Docker; also lin
 bb gtk:selftest           # real-window self-tests, opens eight windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
-bb smoke:cljd             # drive the built binary against a running ClojureDart app (start it with bb dev:macos first)
+bb smoke:cljd             # drive the built binary against a running ClojureDart app (start one with bb dev:macos in a-sibling-cljd-app first)
+bb bench:edit             # time editing stalls on large files (opens a real window per size)
 ```
 
 `bb info` (or `jolt info`, since jolt reads this same `bb.edn`) prints the full task list grouped by what it's for, including the quality and git-hook tasks below.
@@ -116,7 +118,7 @@ bb lint:strict          # the same, but exit non-zero if there are any findings
 bb lsp:format-check     # clojure-lsp format, dry run
 bb lsp:clean-ns-check   # clojure-lsp clean-ns, dry run
 bb lsp:check            # the two dry runs together
-bb verify               # lint (report) + test (must pass): the pre-commit gate
+bb verify               # lint (report) + test + test:nrepl (must pass): the pre-commit gate
 bb hooks:install        # a fast pre-commit hook: lint errors + format --dry
 bb hooks:install:full   # the same, plus the test suite (slower)
 bb hooks:uninstall      # remove the git pre-commit hook
