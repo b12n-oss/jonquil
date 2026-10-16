@@ -338,6 +338,7 @@
    session-tabs/row-session-off
    session-tabs/row-session-bad-file
    session-tabs/row-session-throwing-file-skipped
+   session-tabs/row-session-saved-live
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

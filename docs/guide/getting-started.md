@@ -224,7 +224,7 @@ EDN map:
 
 The tabs themselves live next door in `sessions.edn`, one entry per
 project folder, newest first, at most 20 (see
-[Using Jonquil](using-jonquil.md)). It changes on every quit, which is why
+[Using Jonquil](using-jonquil.md)). It changes as you open and close tabs, which is why
 it's a separate file from the one you edit by hand.
 
 Loading the file never throws. A missing file starts Jonquil with the

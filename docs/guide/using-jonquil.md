@@ -339,8 +339,10 @@ closing tabs until the one left belongs elsewhere switches it too.
 
 ### Tabs from last time
 
-When you quit, Jonquil remembers which files had tabs in that window, in
-order, and which one was selected. It keeps that list per project folder,
+Jonquil remembers which files have tabs in the window, in order, and
+which one is selected. It saves that list each time you open, close or
+switch a tab, and again when you quit, so a crash or a force quit
+doesn't lose it. It keeps that list per project folder,
 the folder the file tree is rooted at, for the 20 most recent folders.
 Start Jonquil again in the same folder without naming a file (`jonquil`
 from that folder, or `jonquil` with the folder as its argument) and those

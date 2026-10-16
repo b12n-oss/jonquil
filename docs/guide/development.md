@@ -50,7 +50,7 @@ front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 47 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 286 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 287 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
@@ -116,7 +116,7 @@ into absolute paths for `g_application_run`. GApplication then emits `open`
 argument, that a folder launch saves no tree visibility, that the two files
 open as tabs, that the active tab is the last file, and that the program name
 is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). A full run reports
-47, 286, 16, 15, 29, 3, 13 and 5 rows passing, in group order.
+47, 287, 16, 15, 29, 3, 13 and 5 rows passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
