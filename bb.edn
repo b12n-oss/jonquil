@@ -606,7 +606,7 @@
                del! (fn del! [^java.io.File f]
                       (when (and (.isDirectory f) (not (java.nio.file.Files/isSymbolicLink (.toPath f))))
                         (doseq [c (.listFiles f)] (del! c)))
-                      (try (java.nio.file.Files/deleteIfExists (.toPath f)) (catch Exception _ nil)))
+                      (.delete f))
                tmp (java.io.File. (System/getProperty "java.io.tmpdir"))
                hits (keep (fn [f] (when-let [p (prefix-of f)] [p f])) (.listFiles tmp))]
            (doseq [[p fs] (sort-by key (group-by first hits))]
