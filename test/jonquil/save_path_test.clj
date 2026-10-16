@@ -1,12 +1,13 @@
 (ns jonquil.save-path-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
-            [jonquil.save-path :as sp]))
+            [jonquil.save-path :as sp]
+            [temp-dirs]))
 
-(defn- temp-dir []
-  (.toFile (java.nio.file.Files/createTempDirectory
-            "jonquil-save-path"
-            (into-array java.nio.file.attribute.FileAttribute []))))
+(use-fixtures :once temp-dirs/fixture)
+
+(defn- temp-dir [] (io/file (temp-dirs/temp-dir! "jonquil-save-path")))
 
 (defn- canon [^java.io.File f] (.getCanonicalPath f))
 

@@ -211,3 +211,17 @@
 (deftest process-options-without-a-path-test
   (with-redefs [lp/path (fn [] nil)]
     (is (not (contains? (jank/process-options {:dir "/d" :log "/l"}) :extra-env)))))
+
+(deftest delete-tree-keeps-a-symlinked-dirs-target
+  (let [dir (io/file (temp-dirs/temp-dir! "jonquil-jank-child-test-"))
+        outside (io/file (temp-dirs/temp-dir! "jonquil-jank-child-test-"))
+        keep (io/file outside "keep.txt")]
+    (spit keep "x")
+    (spit (io/file dir "a.txt") "x")
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath (io/file dir "linked"))
+     (.toPath outside)
+     (into-array java.nio.file.attribute.FileAttribute []))
+    (#'jank/delete-tree! dir)
+    (is (not (.exists dir)))
+    (is (.exists keep))))

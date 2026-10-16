@@ -85,10 +85,14 @@
 
 (defn alive? [child] (boolean (and child (p/alive? (:proc child)))))
 
-(defn- delete-tree! [dir]
+(defn- delete-tree!
+  "Deletes dir and everything under it. A symlinked directory is removed as
+  a link, never recursed into, so its target outside the run dir survives."
+  [dir]
   (let [f (io/file dir)]
-    (when (.isDirectory f) (doseq [c (.listFiles f)] (delete-tree! c)))
-    (try (java.nio.file.Files/deleteIfExists (.toPath f)) (catch Exception _ nil))))
+    (when (and (.isDirectory f) (not (java.nio.file.Files/isSymbolicLink (.toPath f))))
+      (doseq [c (.listFiles f)] (delete-tree! c)))
+    (.delete f)))
 
 (defn kill!
   "Kills the child's process tree first, then closes its stdin (closing it
