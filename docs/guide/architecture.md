@@ -32,6 +32,15 @@ these:
   light or dark), `theme`, `next-theme` and `code-css`.
 - `jonquil.settings`: `settings-path`, `load-settings` (never throws) and
   `save-settings!` (atomic, never throws).
+- `jonquil.last-session`: the tabs to reopen, kept per tree root in
+  `sessions.edn` beside the settings file. It's a separate file because
+  `settings.edn` is hand-edited and may be a dotfiles symlink, while this one
+  changes on every quit. `load-sessions` and `save-sessions!` never throw, and
+  `remember` and `entry-for` are pure. The window saves in the real-quit branch
+  of its close-request handler, next to the tree's width, and restores at the
+  end of startup when no file was named. Each saved path goes through the same
+  `open-file!` as Open, and a path that fails, or throws, is named on the
+  console instead of stopping the rest.
 
 P4 added a fourth: `jonquil.help`, the decisions behind completion, quick
 doc, jump to definition and rename, covered in its own section below.

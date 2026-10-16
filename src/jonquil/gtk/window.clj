@@ -46,6 +46,7 @@
             [jonquil.gtk.trash :as trash]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
+            [jonquil.last-session :as last-session]
             [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach :as attach]
             [jonquil.nrepl.connection :as connection]
@@ -667,8 +668,12 @@
 
   D1.T4: ev* is stopped (ev/stop!, guarded) right before g_application_
   quit, in the real-quit branch only -- never in the suppress-close?
-  self-test branch, which doesn't actually quit anything."
-  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select! save-tree-width!]}]
+  self-test branch, which doesn't actually quit anything.
+
+  Session-tabs plan Task 2: save-session! (the open tabs, for the next
+  launch) runs in the real-quit branch only, beside save-tree-width!."
+  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select! save-tree-width!
+           save-session!]}]
   (fn [_win _data]
     ;; Tabs plan P2.T5: one alert naming every dirty tab, in tab order.
     (let [ts @tabs
@@ -709,6 +714,13 @@
                          (catch :default e
                            (binding [*out* *err*]
                              (println "jonquil: saving the file tree's width failed:" (ex-message e))))))
+                  (when save-session!
+                    (try (when-let [err (save-session!)]
+                           (binding [*out* *err*]
+                             (println "jonquil: saving the session failed:" err)))
+                         (catch :default e
+                           (binding [*out* *err*]
+                             (println "jonquil: saving the session failed:" (ex-message e))))))
                   (try (ev/stop! @ev*)
                        (catch :default e
                        ;; The window is going away, so the console can't show
@@ -2425,6 +2437,65 @@
             {:error error}
             (do (new-tab! ctx {:path path :text text}) nil)))))))
 
+;; --- last session's tabs (session-tabs plan Task 2) --------------------------
+;; ctx is the window's tab map (tab-ctx), which carries :tree-pane,
+;; :tree-saved! and :folder-result* (the atom holding Open Folder's result
+;; handler, set once activate! has built it).
+
+(defn- reopen-tabs?
+  "False only when the settings file holds :reopen-tabs? false."
+  [settings-path]
+  (not (false? (:reopen-tabs? (settings/load-settings settings-path)))))
+
+(defn- session-snapshot
+  "{:root :tabs :active} for sessions.edn: the tree's root, every tab's
+  path in tab order (Untitled ones left out), and the active tab's path."
+  [{:keys [tabs tree-pane active-tab]}]
+  {:root (:root @(:state tree-pane))
+   :tabs (vec (keep (fn [t] @(:path t)) @tabs))
+   :active (some-> (active-tab) :path deref)})
+
+(defn- save-session!
+  "Remembers the open tabs for the tree's root in sessions.edn. nil, or an
+  error string when saving failed; does nothing when :reopen-tabs? is off."
+  [{:keys [settings-path*] :as ctx}]
+  (when (reopen-tabs? @settings-path*)
+    (let [path (last-session/sessions-path @settings-path*)]
+      (last-session/save-sessions!
+       path (last-session/remember (:sessions (last-session/load-sessions path)) (session-snapshot ctx))))))
+
+(defn- restore-session!
+  "Reopens the tabs sessions.edn holds for the tree's root, in order, and
+  selects the one that was active. With reroot? and no root, takes the
+  most recent entry and roots the tree at its folder when that exists.
+  Files that are gone (or can't be opened) are named on the console. Does
+  nothing when :reopen-tabs? is off."
+  [{:keys [cv tabs tree-pane settings-path* folder-result* tree-saved!] :as ctx} {:keys [reroot?]}]
+  (when (reopen-tabs? @settings-path*)
+    (let [{:keys [sessions warning]} (last-session/load-sessions (last-session/sessions-path @settings-path*))]
+      (if warning
+        (cview/append! cv :system (str "; " warning "\n"))
+        (let [root (:root @(:state tree-pane))
+              entry (if (and reroot? (nil? root))
+                      (let [e (last-session/entry-for sessions nil)]
+                        (when (and (:root e) (.isDirectory (java.io.File. ^String (:root e))))
+                          (@folder-result* {:path (:root e)}))
+                        e)
+                      (last-session/entry-for sessions root))
+              missing (reduce (fn [acc p]
+                                (let [f (java.io.File. ^String p)
+                                      failed? (try (or (not (.isFile f)) (boolean (:error (open-file! ctx p))))
+                                                   (catch :default _ true))]
+                                  (if failed? (conj acc (.getName f)) acc)))
+                              [] (:tabs entry))]
+          (when-let [t (and (:active entry)
+                            (some (fn [t] (when (= (:active entry) @(:path t)) t)) @tabs))]
+            (select-tab! ctx (:id t))
+            (tree-saved! t))
+          (when-let [line (last-session/missing-line missing)]
+            (cview/append! cv :system line))))
+      nil)))
+
 ;; --- file operations from the tree (file-ops plan T4) ------------------------
 ;; The pane calls these inside its popover's own signal emission (the entry's
 ;; activate, a button's clicked). The disk operation runs now, so an error
@@ -3040,7 +3111,8 @@
                                                                    (settings/save-settings!
                                                                     @settings-path*
                                                                     {:file-tree {:visible? true
-                                                                                 :width (g/gtk-paned-get-position tree-paned)}})))})
+                                                                                 :width (g/gtk-paned-get-position tree-paned)}})))
+                                                          :save-session! (fn [] (save-session! @*tab-ctx))})
                                        [:pointer :pointer] :int :on-throw 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
@@ -3092,7 +3164,7 @@
                    :open-replace-fn open-replace-fn :tabs tabs :next-id next-id :notebook notebook
                    :theme-name theme-name :completion-opts completion-opts
                    :active-id active-id :active-tab active-tab :popovers popovers
-                   :tree-pane tree-pane :tree-saved! tree-saved!}
+                   :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result}
           first-tab (add-tab! tab-ctx {:path file :text (or text "")})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
@@ -3184,6 +3256,12 @@
         (catch :default e
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       (start-and-report! cv status-label @ev* @sel*)
+      ;; Session-tabs plan Task 2: a launch that named no file reopens the
+      ;; tabs open at the last quit in this project.
+      (when-not file
+        (try (restore-session! tab-ctx {:reroot? true})
+             (catch :default e
+               (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n")))))
       ;; P5a: say where the child tools' PATH came from. The wait for the
       ;; lookup is off the GTK thread; the append goes through on-gui!, and
       ;; a window closed meanwhile must not throw out of the future.
@@ -3191,9 +3269,10 @@
         (try (when-let [line (login-path/console-line)]
                (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
              (catch :default _ nil)))
-      (update-title! (:ed first-tab) win (:path first-tab))
-      (g/gtk-window-present win)
-      (editor/focus! (:ed first-tab)))
+      (let [t (active-tab)]
+        (update-title! (:ed t) win (:path t))
+        (g/gtk-window-present win)
+        (editor/focus! (:ed t))))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
       ;; objects, so every existing row keeps working unchanged; rows that
@@ -3294,6 +3373,10 @@
                  ;; save can be forced to fail without touching the real
                  ;; settings file or racing the filesystem.
                    :settings-path!* (fn [p] (reset! settings-path* p))
+                 ;; Session-tabs plan Task 2: what the real quit saves and
+                 ;; what a launch with no file restores (without re-rooting).
+                   :save-session!* (fn [] (save-session! @*tab-ctx))
+                   :restore-session!* (fn [] (restore-session! @*tab-ctx {:reroot? false}))
                  ;; P4.T3: the window's own popover registry -- close-
                  ;; popovers-fn is exactly what the new Escape clause calls;
                  ;; register-popover-fn is how a popover (a self-test row's
@@ -3464,6 +3547,7 @@
   :clear-console!* :clear-last-output!* :zoom!* :set-theme!* :theme-name* :code-css*
   :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count* :poll-armed?*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
+  :save-session!* :restore-session!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :full-doc-popover
   :rename!* :rename-to!* :rename-popover

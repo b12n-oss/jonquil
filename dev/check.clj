@@ -39,6 +39,7 @@
     jonquil.source
     jonquil.tabs
     jonquil.file-ops
+    jonquil.last-session
     jonquil.file-tree
     jonquil.gtk.ffi
     jonquil.gtk.appearance

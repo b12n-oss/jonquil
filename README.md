@@ -30,7 +30,7 @@ is in [Using Jonquil](docs/guide/using-jonquil.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
-A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
+A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console, and quitting remembers them, so starting Jonquil again in the same folder brings the same tabs back. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
 
 Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu.
 
