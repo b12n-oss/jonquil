@@ -77,10 +77,11 @@
   (let [code (ops/reset-code '[tabs.a tabs.b])
         form (read-string code)]
     (is (str/includes? code "'[tabs.a tabs.b]"))
-    (is (str/includes? code "(remove-ns 'user) (create-ns 'user) nil"))
+    (is (str/includes? code "(clojure.core/remove-ns 'user) (clojure.core/create-ns 'user)"))
+    (is (str/includes? code "(var clojure.core/*1)") "keeps the user's *1, *2 and *3")
     (is (seq? form)))
   (testing "an empty owner set still resets user"
-    (is (str/includes? (ops/reset-code []) "(remove-ns 'user) (create-ns 'user) nil"))))
+    (is (str/includes? (ops/reset-code []) "(clojure.core/remove-ns 'user) (clojure.core/create-ns 'user)"))))
 
 (deftest ns-snapshot-code-test
   ;; One form, printing the snapshot and returning the old *1 (final

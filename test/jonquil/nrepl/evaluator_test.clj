@@ -393,6 +393,28 @@
       (is (= "5" (:printed (first (run e "*1" false)))) "a Run's value is *1 afterwards")
       (finally (ev/stop! e)))))
 
+(deftest history-vars-survive-reset-on-run-test
+  ;; Reset on Run's cleanup is one more eval on the user's session, and the
+  ;; server shifts *1/*2/*3 for it too.
+  (let [e (make (temp-project))]
+    (try
+      (run e "(throw (ex-info \"boom\" {}))" false)
+      (doseq [c ["1" "2" "3"]] (run e c false))
+      (run e "(+ 10 20)" true)
+      (is (= "[30 3 2]" (:printed (first (run e "[*1 *2 *3]" false)))))
+      (is (= "\"boom\"" (:printed (first (run e "(ex-message *e)" false)))) "the cleanup leaves *e alone")
+      (finally (ev/stop! e)))))
+
+(deftest repl-helpers-referred-test
+  (let [e (make (temp-project))]
+    (try
+      (is (= [[:out "{:a 1}\n"]] (second (run e "(pprint {:a 1})" true))) "in a Run")
+      (is (str/includes? (apply str (map second (second (run e "(doc inc)" false)))) "clojure.core/inc")
+          "at the prompt")
+      (is (= ":mine" (:printed (first (run e "(defn dir [& _] :mine) (dir)" false))))
+          "a program's own definition wins")
+      (finally (ev/stop! e)))))
+
 (deftest release-owner-over-nrepl-test
   ;; Final review finding 2: a closed tab's namespaces go to :repl, so the
   ;; next Run clears them.
