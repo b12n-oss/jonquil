@@ -268,7 +268,7 @@ tools, and the numbers below come from Docker Desktop on an Apple Silicon Mac.
 
 | Task | What it does | Measured |
 |---|---|---|
-| `bb linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.21, babashka) | arm64 11 min 30 s, 1.76 GB; amd64 6 min 36 s, 1.75 GB |
+| `bb linux:image` | builds `jonquil-linux:<arch>` (Ubuntu 26.04, GTK 4, Xvfb, Jolt v0.8.22, babashka) | arm64 11 min 30 s, 1.76 GB; amd64 6 min 36 s, 1.75 GB |
 | `bb linux:test [ns...]` | `bb test` on a copy of the checkout | arm64 47 s; amd64 64 s |
 | `bb linux:selftest` | `bb gtk:selftest` under Xvfb | arm64 70 to 86 s; amd64 106 to 110 s |
 | `bb linux:build` | `bb app:build`; the binary lands in `target/linux/<arch>/` | arm64 about 23 s; amd64 46 s |
