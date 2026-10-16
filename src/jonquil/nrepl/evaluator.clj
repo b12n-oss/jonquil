@@ -109,7 +109,8 @@
   ;; session in user and the next REPL entry would lose the Run's namespace.
   ;; The data comes back on :out; the value is the old *1 (see
   ;; ops/ns-snapshot-code), so the server's own *1/*2/*3 shift puts the
-  ;; user's history back where it was (final review finding 1).
+  ;; user's history back where it was (final review finding 1). The same
+  ;; eval refers the REPL helpers into the session's namespace.
   (try
     (let [r (client/request-sync conn {:op "eval" :code ops/ns-snapshot-code :session sid} request-timeout-ms)
           res (when (vector? r) (ops/eval-result r false))]

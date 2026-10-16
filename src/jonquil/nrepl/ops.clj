@@ -111,33 +111,55 @@
              {:status :ok :printed (or (last (keep :value msgs)) "nil")})]
      (cond-> r ns-str (assoc :ns (symbol ns-str))))))
 
-(defn reset-code
-  "Code for the child that removes each namespace in names that exists,
-  then `user`, and recreates `user`: the in-process Reset on Run's rule
-  (jonquil.session/reset-namespaces!) run where the program lives. names
-  is the running owner's namespaces plus the REPL's (tabs spec)."
-  [names]
-  (str "(do (doseq [n '" (pr-str (vec names)) "] (when (find-ns n) (remove-ns n)))"
-       " (remove-ns 'user) (create-ns 'user) nil)"))
-
-(def ns-snapshot-code
-  "Code that prints [namespace-names loaded-libs] in the child on :out:
-  read before and after an evaluation to learn which namespaces it created
-  (jonquil.session/namespaces-created). Fully qualified, since it runs in
-  whatever namespace the session is in.
+(defn- keeping-history
+  "Wraps body, code for an eval Jonquil sends on the user's session for its
+  own bookkeeping, so the user's *1, *2 and *3 come out unchanged.
 
   The server shifts *3 <- *2, *2 <- *1, *1 <- value after every successful
   eval (jolt.nrepl, alter-var-root on the global vars). So this pre-shifts
   *2 <- *3 and *1 <- *2 and returns the old *1: after the server's own
   shift the user's *1, *2 and *3 are exactly what they were (final review
-  finding 1). The cost is printing the old *1 as this eval's value."
+  finding 1). The cost is printing the old *1 as this eval's value.
+  Fully qualified, since it runs in whatever namespace the session is in."
+  [body]
   (str "(clojure.core/let [o1 clojure.core/*1 o2 clojure.core/*2 o3 clojure.core/*3]"
-       " (clojure.core/print (clojure.core/pr-str [(clojure.core/mapv clojure.core/ns-name (clojure.core/all-ns))"
-       " (clojure.core/vec (clojure.core/loaded-libs))]))"
-       " (clojure.core/flush)"
+       " " body
        " (clojure.core/alter-var-root (var clojure.core/*2) (clojure.core/constantly o3))"
        " (clojure.core/alter-var-root (var clojure.core/*1) (clojure.core/constantly o2))"
        " o1)"))
+
+(defn reset-code
+  "Code for the child that removes each namespace in names that exists,
+  then `user`, and recreates `user`: the in-process Reset on Run's rule
+  (jonquil.session/reset-namespaces!) run where the program lives. names
+  is the running owner's namespaces plus the REPL's (tabs spec). Leaves
+  the user's *1, *2 and *3 alone (see keeping-history)."
+  [names]
+  (keeping-history
+   (str "(clojure.core/doseq [n '" (pr-str (vec names)) "]"
+        " (clojure.core/when (clojure.core/find-ns n) (clojure.core/remove-ns n)))"
+        " (clojure.core/remove-ns 'user) (clojure.core/create-ns 'user)")))
+
+(def ^:private refer-helpers-code
+  ;; The REPL helpers the in-process engine refers before each evaluation
+  ;; (jonquil.eval), referred here into the session's current namespace.
+  ;; In its own try, so a failure never costs the namespace snapshot.
+  (str "(try (clojure.core/require 'clojure.repl 'clojure.pprint)"
+       " (clojure.core/refer 'clojure.repl :only '[doc find-doc apropos dir])"
+       " (clojure.core/refer 'clojure.pprint :only '[pprint])"
+       " (catch :default _ nil))"))
+
+(def ns-snapshot-code
+  "Code that prints [namespace-names loaded-libs] in the child on :out:
+  read before and after an evaluation to learn which namespaces it created
+  (jonquil.session/namespaces-created). It also refers the REPL helpers
+  into the session's namespace first, as the in-process engine does, and
+  leaves the user's *1, *2 and *3 alone (see keeping-history)."
+  (keeping-history
+   (str refer-helpers-code
+        " (clojure.core/print (clojure.core/pr-str [(clojure.core/mapv clojure.core/ns-name (clojure.core/all-ns))"
+        " (clojure.core/vec (clojure.core/loaded-libs))]))"
+        " (clojure.core/flush)")))
 
 (def ^:private stdin-names
   #{"read-line" "read" "*in*" "clojure.core/read-line" "clojure.core/read" "clojure.core/*in*"})
