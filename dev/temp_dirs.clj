@@ -23,18 +23,15 @@
 
 (defn delete-tree!
   "Deletes dir and everything under it, without following a symlinked
-  directory. A missing dir is fine. Goes
-  through Files/deleteIfExists, which removes a symlink itself: Jolt's
-  File.delete returns false for a dangling link and leaves it (measured
-  on v0.8.15), where the JVM's deletes it."
+  directory. A missing dir is fine, and a dangling link is removed like
+  any file (Jolt from v0.8.22 on, as on the JVM)."
   [dir]
   (let [f ^java.io.File (io/file dir)]
     ;; Never follow a symlinked directory: that would delete the link's
     ;; target, outside this tree. The link itself goes, like any file.
     (when (and (.isDirectory f) (not (java.nio.file.Files/isSymbolicLink (.toPath f))))
       (doseq [c (.listFiles f)] (delete-tree! c)))
-    (try (java.nio.file.Files/deleteIfExists (.toPath f))
-         (catch Exception _ nil))))
+    (.delete f)))
 
 (defn delete-made!
   "Deletes every directory temp-dir! has made and not yet deleted."
