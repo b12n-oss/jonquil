@@ -87,6 +87,13 @@ last Run left behind. That's what makes it useful for poking at a program
 you just ran: define a function with Run, then call it a few different
 ways at the prompt without re-running anything.
 
+A few REPL helpers are there without a `require` in the namespace the
+prompt shows: `doc`, `find-doc`, `apropos` and `dir` from `clojure.repl`,
+and `pprint` from `clojure.pprint`, whose output lands in the console like
+any `println`. A program that defines its own `pprint` or `doc` keeps its
+own. A file that starts with its own `ns` form gets a fresh namespace,
+though, so it requires them the way it would under `clj`.
+
 Up and Down recall earlier entries, but only from the first or last line
 of what you're typing. On a multi-line entry, Up and Down move the caret
 around inside it instead, the way you'd expect from any text editor.
@@ -782,6 +789,10 @@ seconds shows nothing for those ten seconds and then everything at once.
 And jump to definition can't leave the buffer, because the wire op it
 would need for that (`info`) isn't there yet, only `lookup`, which
 carries no file or line to jump to.
+
+The REPL helpers aren't referred out of process either, so `(doc inc)` or
+`(pprint x)` needs `(require '[clojure.repl :refer [doc]])` or
+`(require '[clojure.pprint :refer [pprint]])` first.
 
 ### The jolt-lang/nrepl checkout
 

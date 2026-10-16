@@ -50,17 +50,18 @@ upstream.
 Two reader bugs blocked the console's `(read)` outright: `(read)` from
 stdin failed on Jolt through `LineNumberingPushbackReader`, filed as
 jolt-lang/jolt#1133 (merged in PR #1134) and #1137 (merged in PR #1138,
-2026-09-25). This project's pinned Jolt, v0.8.15, carries both; the fixes
+2026-09-25). Every Jolt from v0.8.15 on carries both; the fixes
 landed well before that release, back when the getting-started
 requirement still named an exact `main` commit rather than a tagged
 version.
 
-One more is filed but not blocking: `clojure.pprint/pprint` ignores a bound
-`*out*` and writes to the process's real stdout instead, so Jonquil doesn't
-refer it into the program namespace at all. It's a filing candidate for
-Jolt itself rather than something Jonquil can work around locally, and it
-was still true as of `v0.8.12-30-gc9808c39` when last re-checked, on
-2026-09-25.
+`clojure.pprint/pprint` used to ignore a bound `*out*` and write to the
+process's real stdout, so Jonquil left it out of the program namespace.
+The cause was that the one-argument `pprint` and `(cl-format true ...)`
+called `clojure.core/print` while `*out*` was still pprint's own buffer.
+That was filed as jolt-lang/jolt#1354 and fixed in #1355, which shipped in
+Jolt v0.8.22. Jonquil now needs v0.8.22, and `pprint` is referred into the
+prompt's namespace the same way `doc` is.
 
 ## The clojure-cli.repl lift: the inspector's view code
 

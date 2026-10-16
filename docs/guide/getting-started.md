@@ -2,10 +2,12 @@
 
 ## Requirements
 
-- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.15 or later. It
+- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.22 or later. It
   carries the reader fixes from jolt-lang/jolt#1134 and #1138 that
-  `(read)` from the console needs, and the closed-socket fix from
-  jolt-lang/jolt#1183 that the ClojureDart attach connection relies on. Building Jolt from source needs a
+  `(read)` from the console needs, the closed-socket fix from
+  jolt-lang/jolt#1183 that the ClojureDart attach connection relies on,
+  and the fix from jolt-lang/jolt#1355 that sends `pprint` output to the
+  console. Building Jolt from source needs a
   threaded Chez Scheme 10.x on `PATH`; if you don't already have one,
   Jolt's own `make` provisions Chez 10.4.1 for you, so there's usually
   nothing to install separately.
@@ -14,7 +16,7 @@
   and pango at startup rather than linking against them. On Linux they come
   from your distribution; see [Linux](#linux).
 
-Jonquil was most recently tested on Jolt v0.8.21.
+Jonquil was most recently tested on Jolt v0.8.22.
 
 Each dialect other than in-process Jolt needs one more thing, and only when
 you use it:
@@ -128,7 +130,7 @@ and checked by hand in a noVNC desktop.
   and `libpango-1.0-0`, plus `adwaita-icon-theme` for the icon theme. Jonquil loads the shared libraries by
   name at startup (`libgtk-4.so.1`, `libpango-1.0.so.0`, and so on), so
   nothing is linked at build time.
-- **Jolt** v0.8.15 or later, as above. On x86_64 take the binary from Jolt's
+- **Jolt** v0.8.22 or later, as above. On x86_64 take the binary from Jolt's
   release page. Jolt publishes no Linux arm64 binary, so there you build it
   from source (`make` provisions its own Chez Scheme).
 - A desktop session. The checks so far ran under X11 (Xvfb, openbox and

@@ -387,6 +387,11 @@
     (is (= :ok (:status r)))
     (is (str/includes? (apply str (map second @out)) "inc"))))
 
+(deftest pprint-referred-and-honours-bound-out
+  (let [[r out] (run-sync (sut/make-eval-context) "(pprint {:a 1 :b [1 2 3]})")]
+    (is (= :ok (:status r)))
+    (is (= [[:out "{:a 1, :b [1 2 3]}\n"]] @out))))
+
 (deftest p2-stop-leaves-a-finishing-worker-alone
   (let [ctx (sut/make-eval-context)
         flag (atom false)]
