@@ -51,8 +51,8 @@
   (is (= {:status :error :error-text "Lost the connection to the nREPL server."}
          (clj/eval-result [{:status ["done" "jonquil-disconnected"]}] false)))
   (is (= :interrupted (:status (clj/eval-result [{:status ["done" "interrupted"]}] false))))
-  (is (= "Error: class java.lang.ArithmeticException"
-         (:error-text (clj/eval-result [{:err "Execution error ...\nDivide by zero\n"}
+  (is (= "Error: Divide by zero"
+         (:error-text (clj/eval-result [{:err "Execution error (ArithmeticException) at (REPL:1).\nDivide by zero\n"}
                                         {:ex "class java.lang.ArithmeticException" :status ["eval-error"]}
                                         {:status ["done"]}] false)))))
 

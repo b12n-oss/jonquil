@@ -83,6 +83,28 @@
 (defn- first-line [s]
   (first (str/split-lines (str/trim (str s)))))
 
+(def ^:private err-header
+  "A header line of clojure.main's err->msg, each phase's (checked against
+  clojure.main 1.12.5 and Jolt's port): the message follows on the next
+  line. JVM nREPL, and jolt-lang/nrepl since its #11, send that text as err
+  before eval-error, and their ex is then only the class name. Not anchored
+  to a line start, since *err* output with no newline can come right
+  before it, so it needs the header's own ending, \" at <location>).\", to
+  tell it from a message that merely starts the same way. \\r? for a
+  server on Windows."
+  #"(?:(?:Execution|Syntax|Unexpected) error|Error (?:printing return value|reading eval result))[^\n]* at [^\n]*\)\.\r?\n")
+
+(defn- error-message
+  "An eval-error's message: the first non-blank line after the last err->msg
+  header in the err text (the last, so the program's own *err* output
+  before it isn't taken), else ex, else the err text."
+  [msgs]
+  (let [err (apply str (keep :err msgs))
+        header (last (re-seq err-header err))
+        after (when header (subs err (+ (str/last-index-of err header) (count header))))]
+    (or (not-empty (first-line after))
+        (first-line (or (some :ex msgs) err)))))
+
 (defn eval-result
   "jonquil.eval's result shape for one request's replies: {:status
   :ok|:error|:interrupted} plus :printed (the server's printed value) for
@@ -104,8 +126,7 @@
 
              (st "eval-error")
              {:status :error
-              :error-text (str "Error: " (first-line (or (some :ex msgs)
-                                                         (apply str (keep :err msgs)))))}
+              :error-text (str "Error: " (error-message msgs))}
 
              :else
              {:status :ok :printed (or (last (keep :value msgs)) "nil")})]
