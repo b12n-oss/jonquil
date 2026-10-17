@@ -28,6 +28,8 @@ window on the first Run (`brew install jank-lang/jank/jank`, or set
 `JONQUIL_JANK`). A short list of limits for each runtime
 is in [Using Jonquil](docs/guide/using-jonquil.md).
 
+An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate, run a file, check brackets, doc, completion, project info) over MCP on stdio, with no window. See [Driving Jonquil from an agent (MCP)](docs/guide/using-jonquil.md#driving-jonquil-from-an-agent-mcp).
+
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
 A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console, and Jonquil remembers them as they change, so starting it again in the same folder brings the same tabs back. Started from the Dock or Finder, it goes back to the project you quit last. Put `:reopen-tabs? false` in the settings file to turn that off. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
@@ -72,7 +74,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-16, 501 tests pass (3275 assertions on macOS; 3244 on Linux).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-17, 546 tests pass (3382 assertions on macOS; 3351 on Linux).
 
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.

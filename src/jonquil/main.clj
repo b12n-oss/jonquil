@@ -4,7 +4,10 @@
   (:require [clojure.java.io :as io]
             [jonquil.gtk.window :as window]
             [jonquil.login-path :as login-path]
-            [jonquil.runtime-registry :as registry]))
+            [jonquil.mcp :as mcp]
+            [jonquil.mcp.tools :as mcp-tools]
+            [jonquil.runtime-registry :as registry]
+            [jonquil.settings :as settings]))
 
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
@@ -26,10 +29,40 @@
                        (if (.isAbsolute f) a (.getAbsolutePath (io/file cwd a)))))
              args)))
 
+(defn mcp-args
+  "{:dir abs-dir} when the first arg is \"--mcp\" (the optional second arg made
+  absolute against the working directory, else the working directory itself),
+  else nil. Pure apart from reading user.dir."
+  [args]
+  (when (= "--mcp" (first args))
+    (let [cwd (System/getProperty "user.dir")
+          d (second args)]
+      {:dir (cond
+              (nil? d) cwd
+              (.isAbsolute (io/file d)) d
+              :else (.getAbsolutePath (io/file cwd d)))})))
+
+(defn- serve-mcp!
+  "Headless MCP over stdio. JSON-RPC owns the real stdout, so the root *out*
+  is pointed at stderr first: a runtime thread's println then lands on
+  stderr, and only :write-line (bound to the saved writer) reaches stdout."
+  [{:keys [dir]}]
+  (let [real-out *out*]
+    (alter-var-root #'*out* (constantly *err*))
+    (login-path/start!)
+    (binding [*out* *err*]
+      (println "jonquil: MCP server on stdio, default directory" dir))
+    (mcp/serve! {:tools (mcp-tools/make-tools {:dir dir :settings-path (settings/settings-path)})
+                 :read-line (fn [] (read-line))
+                 :write-line (fn [line]
+                               (binding [*out* real-out]
+                                 (println line)
+                                 (flush)))})))
+
 (defn -main [& args]
   ;; Asks the login shell for PATH in the background when launched from
   ;; Finder; self-tests call start! directly and keep the process PATH.
-  (login-path/start!)
+  (when-not (mcp-args args) (login-path/start!))
   ;; A SIGTERM, SIGHUP or SIGINT to Jonquil itself must not orphan the
   ;; runtimes. Probed 2026-10-15: the hook runs on all three signals. A
   ;; normal quit also runs stop-all! just before System/exit, so it runs
@@ -43,8 +76,10 @@
   ;; Every argument goes through GApplication's "open" signal, so several
   ;; files open as tabs and a folder roots the file tree. :cwd roots the
   ;; tree when there's no argument.
-  (let [cwd (System/getProperty "user.dir")]
-    (start! {:cwd cwd :argv (gtk-argv args cwd)}))
+  (if-let [m (mcp-args args)]
+    (serve-mcp! m)
+    (let [cwd (System/getProperty "user.dir")]
+      (start! {:cwd cwd :argv (gtk-argv args cwd)})))
   ;; The GTK loop has ended by the time g-application-run (inside start!)
   ;; returns, so blocking here is fine -- unlike ev/stop! (jonquil.nrepl.
   ;; evaluator), which never blocks the GTK thread. registry/stop-all!

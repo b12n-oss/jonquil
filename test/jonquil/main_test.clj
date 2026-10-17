@@ -15,3 +15,11 @@
     (is (= {:launch {:dir "/d"} :rest ["/x.clj" "/y.clj"]} (window/launch-split ["/d" "/x.clj" "/y.clj"] dir?)))
     (is (= {:launch {:file "/f.clj"} :rest ["/d"]} (window/launch-split ["/f.clj" "/d"] dir?)))
     (is (= {:launch {:file "/missing.clj"} :rest []} (window/launch-split ["/missing.clj"] dir?)))))
+
+(deftest mcp-args-test
+  (let [cwd (System/getProperty "user.dir")]
+    (is (= {:dir cwd} (main/mcp-args ["--mcp"])))
+    (is (= {:dir (str cwd "/proj")} (main/mcp-args ["--mcp" "proj"])))
+    (is (= {:dir "/abs/p"} (main/mcp-args ["--mcp" "/abs/p"])))
+    (is (nil? (main/mcp-args ["a.clj"])))
+    (is (nil? (main/mcp-args [])))))
