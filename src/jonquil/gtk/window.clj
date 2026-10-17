@@ -973,15 +973,32 @@
                                  (cview/append! cv :system (str msg "\n")))))))})
 
 (defn- refuse-foreign!
-  "Tabs plan P2.T4: true, after printing why, when tab belongs to another
-  project or dialect than the window (jonquil.tabs/runnable-here?), so Run,
-  Run Selection and Run Form evaluate nothing there."
+  "Tabs plan P2.T4: the refusal message (truthy), after printing it, when
+  tab belongs to another project or dialect than the window
+  (jonquil.tabs/runnable-here?), so Run, Run Selection and Run Form
+  evaluate nothing there."
   [{:keys [tab cv sel*]}]
   (let [tsel @(:project tab)]
     (when-not (tabs/runnable-here? @sel* tsel)
-      (cview/append! cv :system (tabs/refusal-message {:file (file-name @(:path tab)) :tab-sel tsel
-                                                       :window-sel @sel*}))
-      true)))
+      (let [msg (tabs/refusal-message {:file (file-name @(:path tab)) :tab-sel tsel
+                                       :window-sel @sel*})]
+        (cview/append! cv :system msg)
+        msg))))
+
+(defn- notifying-opts
+  "base (make-eval-opts' map) with both callbacks chained so an MCP hook
+  hears the evaluation: :on-output also collects each chunk into out (an
+  atom of strings), and :on-complete, after the base's own handling, calls
+  (notify {:done {:result r :output <all collected output>}}). The base's
+  :on-output arity is kept ([kind s])."
+  [base out notify]
+  (assoc base
+         :on-output (fn [kind s]
+                      ((:on-output base) kind s)
+                      (swap! out conj s))
+         :on-complete (fn [result]
+                        ((:on-complete base) result)
+                        (notify {:done {:result result :output (apply str @out)}}))))
 
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).
@@ -1013,27 +1030,43 @@
   only Run Selection/Run Form do): cview/mark-entry-start! is queued right
   before the banner itself is queued, so it resolves (on the console's own
   next drain) right where the banner's own text lands -- never on the busy
-  path above, which prints no banner at all."
-  [{:keys [tab cv ev* status-label] :as ctx}]
-  (let [{ed :ed path-atom :path id :id} tab
-        opts (fn [] (assoc (make-eval-opts ed cv ev* status-label true) :run? true :path @path-atom :owner id))]
-    (cond
-      (refuse-foreign! ctx) nil
-      (ev/evaluating? @ev*)
-      (let [warning (ev/eval! @ev* (editor/editor-text ed) (opts))]
-        (when warning (cview/append! cv :system warning)))
-      :else
-      (let [text (editor/editor-text ed)
-            problem (commands/pre-run-problem text)]
-        (cview/mark-entry-start! cv)
-      ;; Tabs plan ruling 5: a saved tab's banner names its file.
-        (cview/append! cv :system (tabs/run-banner @path-atom))
-        (if problem
-          (do (cview/append! cv :error (str problem "\n"))
-              (set-status! status-label "Ready"))
-          (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                warning (ev/eval! @ev* text (opts))]
-            (when warning (cview/append! cv :system warning))))))))
+  path above, which prints no banner at all.
+
+  MCP2: with notify (a fn of one map), exactly one call reports how the Run
+  went -- {:refused msg}, {:busy warning}, {:problem text}, or, from the
+  eval worker, {:done {:result r :output s}} -- and the return value is a
+  reader, (fn [] output-so-far); without it this returns nil as before."
+  ([ctx] (do-run! ctx nil))
+  ([{:keys [tab cv ev* status-label] :as ctx} notify]
+   (let [{ed :ed path-atom :path id :id} tab
+         out (atom [])
+         refused (refuse-foreign! ctx)
+         opts (fn [] (let [base (assoc (make-eval-opts ed cv ev* status-label true)
+                                       :run? true :path @path-atom :owner id)]
+                       (if notify (notifying-opts base out notify) base)))]
+     (cond
+       refused (when notify (notify {:refused refused}))
+       (ev/evaluating? @ev*)
+       (let [warning (ev/eval! @ev* (editor/editor-text ed) (opts))]
+         (when warning
+           (cview/append! cv :system warning)
+           (when notify (notify {:busy warning}))))
+       :else
+       (let [text (editor/editor-text ed)
+             problem (commands/pre-run-problem text)]
+         (cview/mark-entry-start! cv)
+         ;; Tabs plan ruling 5: a saved tab's banner names its file.
+         (cview/append! cv :system (tabs/run-banner @path-atom))
+         (if problem
+           (do (cview/append! cv :error (str problem "\n"))
+               (set-status! status-label "Ready")
+               (when notify (notify {:problem problem})))
+           (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                 warning (ev/eval! @ev* text (opts))]
+             (when warning
+               (cview/append! cv :system warning)
+               (when notify (notify {:busy warning})))))))
+     (when notify (fn [] (apply str @out))))))
 
 (defn- do-stop!
   "Fix round 2, finding B: a running Stop's detached line comes from that
@@ -1095,6 +1128,50 @@
       (when-not (refuse-foreign! ctx)
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)})))))
+
+;; --- MCP hooks (mcp2): run/eval/run-selection that report back ---------------
+
+(defn- mcp-eval!
+  "A REPL entry at the console for the MCP server: echoes text, then
+  evaluates it like do-repl-eval! (run? false, owner :repl unless
+  extra-opts says otherwise), with notifying-opts chained on. notify gets
+  exactly one map: {:busy warning} (the warning is also appended after the
+  echo, as for a typed entry) or, later, {:done ...}. Returns the output
+  reader, (fn [] output-so-far)."
+  [{:keys [tab cv ev* status-label]} text extra-opts notify]
+  (let [ed (:ed tab)
+        out (atom [])
+        opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+                                    out notify)
+                    extra-opts)]
+    (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
+    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+          warning (ev/eval! @ev* text opts)]
+      (when warning
+        (cview/append! cv :system warning)
+        (notify {:busy warning})))
+    (fn [] (apply str @out))))
+
+(defn- mcp-run-selection!
+  "Selects start..end (clamped to the buffer) in the active tab, then takes
+  the do-run-selection! path: {:none s} for a blank range, {:refused msg}
+  for a foreign tab, else echo + eval with :ns-source and the tab's :id as
+  :owner. Returns the output reader, (fn [] \"\") on the no-eval paths."
+  [{:keys [tab] :as ctx} start end notify]
+  (let [ed (:ed tab)
+        buf (:buf ed)
+        n (g/gtk-text-buffer-get-char-count buf)
+        clamp (fn [x] (max 0 (min n x)))
+        a (clamp start)
+        b (clamp end)
+        _ (g/with-iters* buf a b (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+        snap (editor/snapshot ed)]
+    (if-let [text (commands/run-selection-text snap)]
+      (if-let [msg (refuse-foreign! ctx)]
+        (do (notify {:refused msg}) (fn [] ""))
+        (mcp-eval! ctx text {:ns-source (:text snap) :owner (:id tab)} notify))
+      (do (notify {:none (str "Nothing to run: the range " a ".." b " is blank.")})
+          (fn [] "")))))
 
 ;; --- Run Form (cljd plan P3.T2) ---------------------------------------------
 
@@ -3454,6 +3531,19 @@
                    :reset-check reset-chk
                    :find-bar fb
                    :run!* run-fn :stop!* stop-fn
+                 ;; mcp2: notifying hooks for the MCP server, each calls
+                 ;; notify once and returns an output reader.
+                   :mcp-run!* (fn [notify]
+                                (do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                          :status-label status-label}
+                                         notify))
+                   :mcp-eval!* (fn [text notify]
+                                 (mcp-eval! {:tab (active-tab) :cv cv :ev* ev* :status-label status-label}
+                                            text nil notify))
+                   :mcp-run-selection!* (fn [start end notify]
+                                          (mcp-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                                               :status-label status-label}
+                                                              start end notify))
                    :open-path! (fn [p]
                                  (let [{ed :ed path :path :keys [discard-warned?]} (active-tab)]
                                    (guarded-open! ed cv discard-warned?
