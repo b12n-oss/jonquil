@@ -15,7 +15,7 @@
             [jonquil.mcp :as mcp]
             [jonquil.mcp.window :as mcp-window])
   (:import (java.lang ProcessHandle)
-           (java.net InetAddress ServerSocket)))
+           (java.net InetAddress ServerSocket Socket)))
 
 ;; --- registry ----------------------------------------------------------------
 
@@ -159,3 +159,75 @@
         (throw e)))
     (future (accept-loop! ss {:ui ui :dir dir :gui gui} stop!))
     {:port port :stop! stop!}))
+
+;; --- discovery and the --mcp-attach bridge -----------------------------------
+
+(defn- canonical [dir]
+  (.getCanonicalPath (io/file dir)))
+
+(defn- window-list
+  "\"<dir> (port N), ...\" for every entry."
+  [entries]
+  (str/join ", " (map (fn [e] (str (:dir e) " (port " (:port e) ")")) entries)))
+
+(defn pick-entry
+  "Chooses the window to attach to: {:entry e} or {:error sentence}. With a
+  dir, the entries whose canonical dir equals the canonical dir (the newest
+  by :file-mtime if several). Without one, the only entry. No match, no
+  entry, or several with no dir gives an error sentence that lists each live
+  window's dir and port."
+  [entries dir]
+  (let [hits (if dir
+               (let [d (canonical dir)]
+                 (filter #(= d (canonical (:dir %))) entries))
+               (when (= 1 (count entries)) entries))]
+    (cond
+      (seq hits) {:entry (apply max-key :file-mtime hits)}
+      (empty? entries) {:error "no Jonquil window is listening. Open one with :mcp-listen? true in settings.edn."}
+      dir {:error (str "no Jonquil window has " (canonical dir) " open. Open windows: " (window-list entries))}
+      :else {:error (str "several Jonquil windows are listening, so name a directory: "
+                         (window-list entries))})))
+
+(defn discover
+  "pick-entry over the registry's live entries."
+  [settings-path dir]
+  (pick-entry (live-entries settings-path) dir))
+
+(defn bridge!
+  "Relays stdio lines to a listening window and back. Returns the exit code:
+  1 (sentence on *err*) when no window can be found or connected, else 0 once
+  either side reaches EOF. Both pumps run on daemon threads and either end
+  releases the wait, so the bridge cannot hang on one dead side; the socket
+  is closed on the way out."
+  [{:keys [read-line write-line settings-path dir]}]
+  (let [{:keys [entry error]} (try (discover settings-path dir)
+                                   (catch Exception e {:error (str "cannot read the window registry: " (ex-message e))}))
+        sock (when entry
+               (try (Socket. (InetAddress/getByName "127.0.0.1") (int (:port entry)))
+                    (catch Exception e
+                      (binding [*out* *err*]
+                        (println (str "jonquil: cannot connect to the window on port " (:port entry)
+                                      ": " (ex-message e))))
+                      nil)))]
+    (cond
+      error (do (binding [*out* *err*] (println (str "jonquil: " error))) 1)
+      (nil? sock) 1
+      :else
+      (let [done (promise)
+            in (io/reader (.getInputStream ^Socket sock) :encoding "UTF-8")
+            out (io/writer (.getOutputStream ^Socket sock) :encoding "UTF-8")
+            pump (fn [f] (doto (Thread. ^Runnable (fn [] (try (f) (catch Throwable _ nil) (finally (deliver done 0)))))
+                           (.setDaemon true)
+                           (.start)))]
+        (pump (fn [] (loop []
+                       (when-let [l (read-line)]
+                         (.write ^java.io.Writer out (str l "\n"))
+                         (.flush ^java.io.Writer out)
+                         (recur)))))
+        (pump (fn [] (loop []
+                       (when-let [l (.readLine ^java.io.BufferedReader in)]
+                         (write-line l)
+                         (recur)))))
+        @done
+        (try (.close ^Socket sock) (catch Throwable _ nil))
+        0))))

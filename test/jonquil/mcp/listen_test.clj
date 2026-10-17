@@ -164,3 +164,109 @@
           (is (str/includes? (str err) "accept boom"))
           (is (str/includes? (str err) "giving up"))
           (is (thrown? ConnectException (connect (:port l)))))))))
+
+;; --- discovery and the --mcp-attach bridge -----------------------------------
+
+(defn- canon [p] (.getCanonicalPath (io/file p)))
+
+(deftest pick-entry-matches-canonical-dir
+  (let [e {:dir (canon "/tmp") :port 1 :pid 1 :file-mtime 5}
+        r (listen/pick-entry [e {:dir "/nowhere/else" :port 2 :pid 2 :file-mtime 9}] "/tmp/../tmp")]
+    (is (= e (:entry r)))))
+
+(deftest pick-entry-newest-of-two-matches
+  (let [old {:dir "/d" :port 1 :pid 1 :file-mtime 5}
+        new {:dir "/d" :port 2 :pid 2 :file-mtime 9}]
+    (is (= new (:entry (listen/pick-entry [old new] "/d"))))
+    (is (= new (:entry (listen/pick-entry [new old] "/d"))))))
+
+(deftest pick-entry-no-dir-single-wins
+  (let [e {:dir "/d" :port 1 :pid 1 :file-mtime 5}]
+    (is (= e (:entry (listen/pick-entry [e] nil))))))
+
+(deftest pick-entry-no-dir-zero-entries-errors
+  (let [r (listen/pick-entry [] nil)]
+    (is (string? (:error r)))
+    (is (nil? (:entry r)))))
+
+(deftest discover-ambiguous-lists
+  (let [r (listen/pick-entry [{:dir "/proj/a" :port 4111 :pid 1 :file-mtime 1}
+                              {:dir "/proj/b" :port 4222 :pid 2 :file-mtime 2}] nil)
+        s (:error r)]
+    (is (str/includes? s "/proj/a"))
+    (is (str/includes? s "4111"))
+    (is (str/includes? s "/proj/b"))
+    (is (str/includes? s "4222"))))
+
+(deftest pick-entry-dir-without-match-lists-windows
+  (let [s (:error (listen/pick-entry [{:dir "/proj/a" :port 4111 :pid 1 :file-mtime 1}] "/other"))]
+    (is (str/includes? s "/proj/a"))
+    (is (str/includes? s "4111"))))
+
+(deftest discover-reads-the-registry
+  (let [sp (settings-path)]
+    (listen/write-entry! sp {:dir (canon "/tmp") :port 77 :pid (own-pid)})
+    (is (= 77 (get-in (listen/discover sp "/tmp") [:entry :port])))
+    (is (= 77 (get-in (listen/discover sp nil) [:entry :port])))))
+
+(defn- lines-fn
+  "A :read-line fn over a fixed seq of lines; nil at the end."
+  [lines]
+  (let [q (atom (seq lines))]
+    (fn [] (let [l (first @q)] (swap! q next) l))))
+
+(deftest bridge-discovery-error-returns-1
+  (let [err (java.io.StringWriter.)
+        out (atom [])
+        code (binding [*err* err]
+               (listen/bridge! {:read-line (lines-fn []) :write-line #(swap! out conj %)
+                                :settings-path (settings-path) :dir nil}))]
+    (is (= 1 code))
+    (is (str/includes? (str err) "no Jonquil window"))
+    (is (empty? @out))))
+
+(deftest bridge-relays-both-ways-and-stdin-eof-returns-0
+  (let [sp (settings-path)
+        ss (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
+        got (promise)
+        out (atom [])
+        ;; a one-shot echo server: replies "echo:<line>" per line
+        srv (future
+              (with-open [s (.accept ss)]
+                (let [in (io/reader (.getInputStream s))
+                      w (io/writer (.getOutputStream s))]
+                  (loop [acc []]
+                    (if-let [l (.readLine ^java.io.BufferedReader in)]
+                      (do (.write ^java.io.Writer w (str "echo:" l "\n"))
+                          (.flush ^java.io.Writer w)
+                          (recur (conj acc l)))
+                      (deliver got acc))))))]
+    (try
+      (listen/write-entry! sp {:dir (canon "/tmp") :port (.getLocalPort ss) :pid (own-pid)})
+      (let [fin (promise)
+            ;; stdin gives two lines, then waits for both echoes before EOF
+            n (atom 0)
+            read-line (let [rl (lines-fn ["a" "b"])]
+                        (fn [] (or (rl) (do (deref fin 5000 nil) nil))))
+            code (listen/bridge! {:read-line read-line
+                                  :write-line (fn [s] (swap! out conj s)
+                                                (when (= 2 (swap! n inc)) (deliver fin true)))
+                                  :settings-path sp :dir "/tmp"})]
+        (is (= 0 code))
+        (is (= ["echo:a" "echo:b"] @out))
+        (is (= ["a" "b"] (deref got 5000 :timeout))))
+      (finally (.close ss) (future-cancel srv)))))
+
+(deftest bridge-socket-eof-returns-0
+  (let [sp (settings-path)
+        ss (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
+        srv (future (.close (.accept ss)))]
+    (try
+      (listen/write-entry! sp {:dir (canon "/tmp") :port (.getLocalPort ss) :pid (own-pid)})
+      (let [block (promise)
+            code (listen/bridge! {:read-line (fn [] (deref block 20000 nil))
+                                  :write-line (fn [_] nil)
+                                  :settings-path sp :dir "/tmp"})]
+        (is (= 0 code))
+        (deliver block nil))
+      (finally (.close ss) (future-cancel srv)))))

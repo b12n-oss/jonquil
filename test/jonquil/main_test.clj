@@ -26,3 +26,12 @@
     (is (nil? (main/mcp-args ["--window"])))
     (is (nil? (main/mcp-args ["a.clj"])))
     (is (nil? (main/mcp-args [])))))
+
+(deftest attach-args-test
+  (let [cwd (System/getProperty "user.dir")]
+    (is (= {:dir nil} (main/attach-args ["--mcp-attach"])))
+    (is (= {:dir (str cwd "/proj")} (main/attach-args ["--mcp-attach" "proj"])))
+    (is (= {:dir "/abs/p"} (main/attach-args ["--mcp-attach" "/abs/p"])))
+    (is (nil? (main/attach-args ["proj" "--mcp-attach"])))
+    (is (nil? (main/attach-args ["--mcp"])))
+    (is (nil? (main/attach-args [])))))
