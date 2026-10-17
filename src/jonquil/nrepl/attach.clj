@@ -1,6 +1,6 @@
 (ns jonquil.nrepl.attach
   "The ClojureDart attach evaluator: Jonquil connects to the nREPL server a
-  running app already started (the nrepl-poc fork's, which writes its port
+  running app already started (the ClojureDart nREPL fork's, which writes its port
   to NREPL.lock in the app directory) and never starts, stops or signals
   that app.
 

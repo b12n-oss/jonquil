@@ -840,11 +840,11 @@ file, then evaluate forms one at a time from a `(comment ...)` block.
 Jonquil never starts the app, stops it, or sends it any signal at all.
 
 Attaching needs the app running under `bb dev:macos` (or
-`clj -M:cljd flutter`), on the `nrepl-poc` ClojureDart fork at
-`199d173d` or later. That fork writes its port to `NREPL.lock` in the
-app directory, which is how Jonquil finds it; upstream ClojureDart
+`clj -M:cljd flutter`), on a ClojureDart fork that adds an nREPL
+server. That fork writes its port to `NREPL.lock` in the app
+directory, which is how Jonquil finds it; upstream ClojureDart
 carries no nREPL server of its own, so there's nothing there for
-Jonquil to attach to.
+Jonquil to attach to (upstreaming the server is planned).
 
 Jonquil connects the first time you Run, or on any evaluation while it
 holds no live connection, and prints "; Connecting to the app on port
@@ -894,9 +894,9 @@ special forms and built-ins, never anything the running app itself
 knows about. Quick documentation does ask the app, and answers one of
 four ways: the symbol's own docs when the app has them, "Not attached;
 Run first" with no live connection, "No docs: the app didn't answer in
-time" once its own budget runs out, or, only on a fork older than
-`199d173d`, "No docs for ClojureDart symbols yet (the app's ClojureDart
-fork doesn't answer lookup)".
+time" once its own budget runs out, or, only on a fork build that
+predates symbol lookup, "No docs for ClojureDart symbols yet (the app's
+ClojureDart fork doesn't answer lookup)".
 
 ### JVM Clojure: attaching to your own nREPL server
 
@@ -1391,8 +1391,8 @@ than being surprises you'd otherwise have to rediscover:
 - Stop against a ClojureDart app detaches instead of interrupting: the
   app keeps whatever it already has.
 - No stdin, for the ClojureDart dialect.
-- ClojureDart needs the `nrepl-poc` fork at `199d173d` or later; upstream
-  ClojureDart carries no nREPL server to attach to.
+- ClojureDart needs the fork that adds an nREPL server; upstream
+  ClojureDart carries none to attach to.
 - `println` output arrives for ClojureDart too, but is lost once the form
   that printed it throws.
 - Jonquil never re-sends what you ran against ClojureDart: only

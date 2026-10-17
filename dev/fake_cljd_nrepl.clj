@@ -1,6 +1,6 @@
 (ns fake-cljd-nrepl
   "A fake ClojureDart nREPL server for jonquil.nrepl.attach's tests and the
-  cljd self-test window. It imitates the nrepl-poc fork's replies as they
+  cljd self-test window. It imitates the ClojureDart nREPL fork's replies as they
   were measured against a running app on 2026-09-28:
 
   - describe advertises the fork's eight ops; clone answers :new-session.

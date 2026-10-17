@@ -64,7 +64,7 @@
 
 (def ^:private cljd-special-forms
   ;; ClojureDart's own forms, added to Jolt's set for the :cljd profile.
-  ;; Read from the nrepl-poc fork (a private ClojureDart fork at
+  ;; Read from the ClojureDart nREPL fork (compiler sources at
   ;; 573781a2), 2026-09-28:
   ;; - clj/src/cljd/compiler.cljc, `emit`'s special-form `case`: every
   ;;   user-facing special Jolt's set lacks (the starred internals like

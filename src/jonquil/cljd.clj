@@ -5,7 +5,8 @@
   jonquil.nrepl.attach hands in text and reply vectors (jonquil.nrepl.client
   messages, top-level keys keywords).
 
-  Reply shapes are the C0 spike's, measured against the nrepl-poc fork on
+  Reply shapes are the C0 spike's, measured against the ClojureDart
+  nREPL fork on
   2026-09-28: a load-file answers one :value per top-level form, an :ns
   message after each, and stops at the first form that fails with :err and
   an eval-error status."
