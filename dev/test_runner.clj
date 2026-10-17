@@ -57,6 +57,7 @@
     jonquil.fake-jank-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.nrepl.jvm-test
+    jonquil.nrepl.shadow-test
     jonquil.nrepl.jank-eval-test
     jonquil.gtk.appearance-test
     jonquil.gtk.trash-test
