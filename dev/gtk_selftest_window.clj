@@ -16,7 +16,7 @@
   The rows themselves live in the gtk-selftest-window.* namespaces under
   dev/gtk_selftest_window/, one per feature area (support, run-form,
   run-repl, files, find-replace, close-prerun, window-keys, themes,
-  popovers-quickdoc, completion, rename-menus, dialects). This file keeps
+  popovers-quickdoc, completion, rename-menus, dialects, mcp). This file keeps
   only row-fns (the ordered list every row runs in -- the last row really
   closes the window, so order matters), the driver, and -main."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
@@ -32,6 +32,7 @@
             [gtk-selftest-window.file-tree-pane :as file-tree-pane]
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.inspector :as inspector]
+            [gtk-selftest-window.mcp :as mcp]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.prompt :as prompt]
             [gtk-selftest-window.rename-menus :as rename-menus]
@@ -339,6 +340,20 @@
    session-tabs/row-session-bad-file
    session-tabs/row-session-throwing-file-skipped
    session-tabs/row-session-saved-live
+   ;; MCP hooks (mcp2)
+   mcp/row-mcp-eval-done
+   mcp/row-mcp-eval-busy
+   mcp/row-mcp-run-done
+   mcp/row-mcp-run-problem
+   mcp/row-mcp-run-refused
+   mcp/row-mcp-run-selection-done
+   mcp/row-mcp-tools-open-read-select
+   mcp/row-mcp-tools-replace-save
+   mcp/row-mcp-tools-run-eval-console
+   mcp/row-mcp-tools-run-selection
+   mcp/row-mcp-tools-timeout-stop
+   mcp/row-mcp-tools-waiting-input
+   mcp/row-mcp-tools-doc-complete-brackets-project
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

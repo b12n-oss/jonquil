@@ -18,8 +18,11 @@
 
 (deftest mcp-args-test
   (let [cwd (System/getProperty "user.dir")]
-    (is (= {:dir cwd} (main/mcp-args ["--mcp"])))
-    (is (= {:dir (str cwd "/proj")} (main/mcp-args ["--mcp" "proj"])))
-    (is (= {:dir "/abs/p"} (main/mcp-args ["--mcp" "/abs/p"])))
+    (is (= {:dir cwd :window? false} (main/mcp-args ["--mcp"])))
+    (is (= {:dir (str cwd "/proj") :window? false} (main/mcp-args ["--mcp" "proj"])))
+    (is (= {:dir "/abs/p" :window? false} (main/mcp-args ["--mcp" "/abs/p"])))
+    (is (= {:dir cwd :window? true} (main/mcp-args ["--mcp" "--window"])))
+    (is (= {:dir (str cwd "/proj") :window? true} (main/mcp-args ["--mcp" "--window" "proj"])))
+    (is (nil? (main/mcp-args ["--window"])))
     (is (nil? (main/mcp-args ["a.clj"])))
     (is (nil? (main/mcp-args [])))))

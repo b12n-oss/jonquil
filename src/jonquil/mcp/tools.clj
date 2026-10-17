@@ -79,7 +79,9 @@
       (update (dialect/select dialect/profiles nil nil nil) :warnings conj
               (str "couldn't read the project: " (ex-message e))))))
 
-(defn- absolute [dir path]
+(defn absolute
+  "path made absolute against dir."
+  [dir path]
   (let [f (io/file path)]
     (.getPath (if (.isAbsolute f) f (io/file dir path)))))
 
@@ -110,7 +112,9 @@
 
 ;; --- evaluation --------------------------------------------------------------
 
-(defn- result-text [output result]
+(defn result-text
+  "Collected output, then the result line, as one string."
+  [output result]
   (let [[_ line] (console/result-line result)
         sep (if (or (str/blank? output) (str/ends-with? output "\n")) "" "\n")]
     (str output sep (str/replace (str line) #"\n+$" ""))))
@@ -145,15 +149,46 @@
           {:text (result-text (output) r)
            :error? (= :error (:status r))})))))
 
-(defn- timeout-of [args]
+(defn timeout-of
+  "The call's timeout_ms when a positive number, else the 30000 ms default."
+  [args]
   (let [t (get args "timeout_ms")]
     (if (and (number? t) (pos? t)) (long t) default-timeout-ms)))
 
-(defn- required-string [args k]
+(defn required-string
+  "args' non-blank string at k; throws naming k otherwise."
+  [args k]
   (let [v (get args k)]
     (if (and (string? v) (not (str/blank? v)))
       v
       (throw (ex-info (str "Missing required argument: " k) {})))))
+
+(defn brackets-result
+  "The check_brackets tool's answer for args (\"text\" or \"path\", the path
+  relative to dir): {:text .. :error? false}. Throws when given neither or the
+  file is missing."
+  [dir args]
+  (let [text (cond
+               (string? (get args "text")) (get args "text")
+               (string? (get args "path"))
+               (let [p (absolute dir (get args "path"))]
+                 (if (.isFile (io/file p))
+                   (slurp p)
+                   (throw (ex-info (str "No such file: " p) {}))))
+               :else (throw (ex-info "Give text or path." {})))]
+    {:text (or (commands/pre-run-problem text) "ok") :error? false}))
+
+(defn selection-text
+  "The project tool's report for a dialect selection."
+  [sel]
+  (str/join
+   "\n"
+   (concat
+    [(str "Dialect: " (dialect/label sel))
+     (str "Runtime: " (dialect/runtime-name (:runtime sel)))
+     (str "Project directory: " (or (:project-dir sel) "none"))
+     (str "Chosen by: " (name (:source sel)))]
+    (map #(str "Warning: " %) (:warnings sel)))))
 
 ;; --- the tools ---------------------------------------------------------------
 
@@ -187,16 +222,7 @@
                        (let [text (slurp f)]
                          (with-ev p
                            (fn [_ e] (run! p e text {:run? true :path p :owner :run} (timeout-of args))))))))
-        tool-brackets (fn [args]
-                        (let [text (cond
-                                     (string? (get args "text")) (get args "text")
-                                     (string? (get args "path"))
-                                     (let [p (absolute dir (get args "path"))]
-                                       (if (.isFile (io/file p))
-                                         (slurp p)
-                                         (throw (ex-info (str "No such file: " p) {}))))
-                                     :else (throw (ex-info "Give text or path." {})))]
-                          {:text (or (commands/pre-run-problem text) "ok") :error? false}))
+        tool-brackets (fn [args] (brackets-result dir args))
         tool-doc (fn [args]
                    (let [sym (required-string args "symbol")]
                      (with-ev (get args "path")
@@ -217,16 +243,8 @@
                                          (str "No completions for " prefix "."))
                                  :error? false})))))
         tool-project (fn [args]
-                       (let [sel (selection ctx (get args "path"))]
-                         {:text (str/join
-                                 "\n"
-                                 (concat
-                                  [(str "Dialect: " (dialect/label sel))
-                                   (str "Runtime: " (dialect/runtime-name (:runtime sel)))
-                                   (str "Project directory: " (or (:project-dir sel) "none"))
-                                   (str "Chosen by: " (name (:source sel)))]
-                                  (map #(str "Warning: " %) (:warnings sel))))
-                          :error? false}))
+                       {:text (selection-text (selection ctx (get args "path")))
+                        :error? false})
         handlers {"jonquil_eval" tool-eval
                   "jonquil_run_file" tool-run
                   "jonquil_check_brackets" tool-brackets

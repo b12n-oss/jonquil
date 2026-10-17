@@ -1,7 +1,9 @@
 ;; Smoke of `jonquil --mcp` over real stdio. A babashka script (cheshire and
 ;; babashka.process are built in); it never touches the jolt process from the
 ;; inside. Run via `bb mcp:smoke` (a checkout, `jolt -M -m jonquil.main --mcp
-;; DIR`) or `bb mcp:smoke --bin ./jonquil` (the built binary).
+;; DIR`) or `bb mcp:smoke --bin ./jonquil` (the built binary). With --window it
+;; drives `--mcp --window` instead: a REAL window opens and takes focus, so
+;; nobody should type while it runs.
 ;;
 ;; Every response is read with a deadline, so a hang fails a check instead of
 ;; blocking. stderr is inherited, so a hang or a crash is diagnosable. Every
@@ -26,10 +28,14 @@
         i (.indexOf ^java.util.List (vec args) "--bin")]
     (when (>= i 0) (nth args (inc i)))))
 
+(defn- window? []
+  (boolean (some #{"--window"} *command-line-args*)))
+
 (defn- command [dir]
-  (if-let [bin (bin-arg)]
-    [(str (fs/absolutize bin)) "--mcp" dir]
-    ["jolt" "-M" "-m" "jonquil.main" "--mcp" dir]))
+  (let [mode (if (window?) ["--mcp" "--window"] ["--mcp"])]
+    (if-let [bin (bin-arg)]
+      (into [(str (fs/absolutize bin))] (conj mode dir))
+      (into ["jolt" "-M" "-m" "jonquil.main"] (conj mode dir)))))
 
 (defn- launch! [dir xdg]
   (let [proc (p/process (command dir)
@@ -141,4 +147,90 @@
       (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
       (System/exit (if (zero? fails) 0 1)))))
 
-(main)
+(def ^:private window-tool-names
+  #{"jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop" "jonquil_open"
+    "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
+    "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
+    "jonquil_check_brackets" "jonquil_project"})
+
+(defn- ends-with? [r suffix]
+  (and (string? (:text r)) (str/ends-with? (str/trim (:text r)) suffix)))
+
+(defn- window-main []
+  (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
+        xdg (str tmp "/xdg")
+        proj (str tmp "/proj")
+        a (str proj "/a.clj")]
+    (fs/create-dirs proj)
+    (spit (str proj "/deps.edn") "{}")
+    (spit a "(ns demo.a) (def y 7) y")
+    (let [srv (launch! proj xdg)
+          pid (.pid ^java.lang.Process (:proc (:proc srv)))]
+      (try
+        (handshake! srv "window")
+        (let [r (request! srv "tools/list" {} 60000)
+              names (set (map #(get % "name") (get-in r ["result" "tools"])))]
+          (check! "tools/list has exactly the fifteen window tools"
+                  (and (= 15 (count (get-in r ["result" "tools"]))) (= window-tool-names names))
+                  r))
+        (let [r (tool! srv "jonquil_open" {"path" a} 60000)]
+          (check! "open a.clj" (and (string? (:text r)) (not (:error? r))) r))
+        (let [r (tool! srv "jonquil_run" {} 60000)]
+          (check! "run => 7" (ends-with? r "=> 7") r))
+        (let [r (tool! srv "jonquil_replace_text" {"text" "(def z 9) z"} 30000)
+              t (tool! srv "jonquil_tabs" {} 30000)]
+          (check! "replace_text makes the tab dirty"
+                  (and (not (:fail r)) (string? (:text t)) (str/includes? (:text t) " dirty ")
+                       (str/includes? (:text t) a))
+                  {:r r :t t}))
+        (let [r (tool! srv "jonquil_save" {} 30000)
+              disk (slurp a)]
+          (check! "save writes the new bytes to disk"
+                  (and (not (:fail r)) (not (:error? r)) (= "(def z 9) z" disk))
+                  {:r r :disk disk}))
+        (let [r (tool! srv "jonquil_run" {} 60000)]
+          (check! "run after save => 9" (ends-with? r "=> 9") r))
+        (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
+          (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
+        (let [r (tool! srv "jonquil_console" {"since" 0} 30000)]
+          (check! "console since 0 starts with mark and has the banner"
+                  (and (string? (:text r))
+                       (str/starts-with? (:text r) "mark ")
+                       (str/includes? (:text r) "; --- Running a.clj ---"))
+                  r))
+        (let [t0 (System/currentTimeMillis)
+              r (tool! srv "jonquil_eval" {"code" "(loop [] (recur))" "timeout_ms" 500} 10000)
+              dt (- (System/currentTimeMillis) t0)]
+          (check! "runaway eval times out as isError within 10 s"
+                  (and (not (:fail r)) (:error? r) (str/includes? (str (:text r)) "Timed out after") (< dt 10000))
+                  {:r r :ms dt}))
+        (let [r (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 60000)]
+          (check! "eval after the timeout => 4" (ends-with? r "=> 4") r))
+        ;; dirty EOF: an unsaved edit, then stdin closes; the quit discards it
+        (let [r (tool! srv "jonquil_replace_text" {"text" "(def w 1) w"} 30000)
+              before (slurp a)
+              dirty (tool! srv "jonquil_tabs" {} 30000)]
+          (check! "unsaved edit is pending before EOF"
+                  (and (not (:fail r)) (str/includes? (str (:text dirty)) " dirty "))
+                  {:r r :t dirty})
+          (.close ^java.io.Writer (:in srv))
+          (let [x (deref (:proc srv) 20000 ::timeout)]
+            (check! "window exits within 20 s after stdin closes"
+                    (and (not= x ::timeout) (zero? (:exit x)))
+                    (if (= x ::timeout) "still running after 20 s" (:exit x)))
+            (when (= x ::timeout) (p/destroy-tree (:proc srv))))
+          (Thread/sleep 500)
+          (check! "no jolt child remains" (empty? (children pid)) (children pid))
+          (check! "the discard really discarded: bytes on disk unchanged"
+                  (= before (slurp a) "(def z 9) z") {:before before :after (slurp a)}))
+        (check! "every stdout line is JSON"
+                (every? (fn [l] (try (json/parse-string l) true (catch Exception _ false)))
+                        @(:lines srv))
+                @(:lines srv))
+        (finally (p/destroy-tree (:proc srv)))))
+    (fs/delete-tree tmp)
+    (let [fails (count (remove true? @results))]
+      (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
+      (System/exit (if (zero? fails) 0 1)))))
+
+(if (window?) (window-main) (main))
