@@ -95,9 +95,13 @@ the server a `close` op. Its source rows open definitions from a fixture
 jar and from files inside and outside the project, follow and go back,
 open a project file in the window, and share the slot with the inspector.
 
-The sixth group (`dev/gtk_selftest_tree.clj`, 3 rows) launches on a
-directory: the tree is rooted there and showing, the window runs that
-directory's project, and the one tab is Untitled.
+The sixth group (`dev/gtk_selftest_tree.clj`, 4 rows) launches on a
+directory whose `sessions.edn` remembers two of its files and one that's
+gone. The tree is rooted there and showing, the window runs that
+directory's project, and the one tab is Untitled when the window is first
+shown. The remembered tabs then open in order, with the right one selected
+and the gone file named on the console, and `sessions.edn` isn't
+rewritten.
 
 The seventh group (`dev/gtk_selftest_jank.clj`, 13 rows) opens a window on a
 throwaway `.jank` project. `bb gtk:selftest` sets `JONQUIL_JANK` to
@@ -116,7 +120,7 @@ into absolute paths for `g_application_run`. GApplication then emits `open`
 argument, that a folder launch saves no tree visibility, that the two files
 open as tabs, that the active tab is the last file, and that the program name
 is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). A full run reports
-47, 287, 16, 15, 29, 3, 13 and 5 rows passing, in group order.
+47, 287, 16, 15, 29, 4, 13 and 5 rows passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in

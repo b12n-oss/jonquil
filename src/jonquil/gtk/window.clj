@@ -2493,37 +2493,74 @@
             (do (reset! session-error nil)
                 (reset! session-last snap))))))))
 
+(defn- session-entry!
+  "The sessions.edn entry for the tree's root, or nil when :reopen-tabs? is
+  off or the file can't be read (said on the console). With reroot? and
+  no root, takes the most recent entry and roots the tree at its folder
+  when that exists."
+  [{:keys [cv tree-pane settings-path* folder-result*]} {:keys [reroot?]}]
+  (when (reopen-tabs? @settings-path*)
+    (let [{:keys [sessions warning]} (last-session/load-sessions (last-session/sessions-path @settings-path*))
+          root (:root @(:state tree-pane))]
+      (cond
+        warning (do (cview/append! cv :system (str "; " warning "\n")) nil)
+        (and reroot? (nil? root))
+        (let [e (last-session/entry-for sessions nil)]
+          (when (and (:root e) (.isDirectory (java.io.File. ^String (:root e))))
+            (@folder-result* {:path (:root e)}))
+          e)
+        :else (last-session/entry-for sessions root)))))
+
+(defn- reopen-failed?
+  "Opens path as a tab; true when it's gone or couldn't be opened."
+  [ctx path]
+  (try (or (not (.isFile (java.io.File. ^String path))) (boolean (:error (open-file! ctx path))))
+       (catch :default _ true)))
+
+(defn- finish-reopen!
+  "Selects the tab entry had active and names the missing files (their
+  base names) on the console."
+  [{:keys [cv tabs tree-saved!] :as ctx} entry missing]
+  (when-let [t (and (:active entry)
+                    (some (fn [t] (when (= (:active entry) @(:path t)) t)) @tabs))]
+    (select-tab! ctx (:id t))
+    (tree-saved! t))
+  (when-let [line (last-session/missing-line missing)]
+    (cview/append! cv :system line)))
+
 (defn- restore-session!
   "Reopens the tabs sessions.edn holds for the tree's root, in order, and
-  selects the one that was active. With reroot? and no root, takes the
-  most recent entry and roots the tree at its folder when that exists.
-  Files that are gone (or can't be opened) are named on the console. Does
-  nothing when :reopen-tabs? is off."
-  [{:keys [cv tabs tree-pane settings-path* folder-result* tree-saved!] :as ctx} {:keys [reroot?]}]
-  (when (reopen-tabs? @settings-path*)
-    (let [{:keys [sessions warning]} (last-session/load-sessions (last-session/sessions-path @settings-path*))]
-      (if warning
-        (cview/append! cv :system (str "; " warning "\n"))
-        (let [root (:root @(:state tree-pane))
-              entry (if (and reroot? (nil? root))
-                      (let [e (last-session/entry-for sessions nil)]
-                        (when (and (:root e) (.isDirectory (java.io.File. ^String (:root e))))
-                          (@folder-result* {:path (:root e)}))
-                        e)
-                      (last-session/entry-for sessions root))
-              missing (reduce (fn [acc p]
-                                (let [f (java.io.File. ^String p)
-                                      failed? (try (or (not (.isFile f)) (boolean (:error (open-file! ctx p))))
-                                                   (catch :default _ true))]
-                                  (if failed? (conj acc (.getName f)) acc)))
-                              [] (:tabs entry))]
-          (when-let [t (and (:active entry)
-                            (some (fn [t] (when (= (:active entry) @(:path t)) t)) @tabs))]
-            (select-tab! ctx (:id t))
-            (tree-saved! t))
-          (when-let [line (last-session/missing-line missing)]
-            (cview/append! cv :system line))))
-      nil)))
+  selects the one that was active (session-entry! picks the entry and does
+  any re-root). Files that are gone (or can't be opened) are named on the
+  console. Does nothing when :reopen-tabs? is off."
+  [ctx opts]
+  (when-let [entry (session-entry! ctx opts)]
+    (finish-reopen! ctx entry
+                    (reduce (fn [acc p] (if (reopen-failed? ctx p) (conj acc (.getName (java.io.File. ^String p))) acc))
+                            [] (:tabs entry))))
+  nil)
+
+(defn- reopen-later!
+  "Startup's reopen, once the window is up: one tab per main-loop turn, so
+  the window shows, and answers, while they load. Then done! runs. A throw
+  goes on the console and still runs done!. Stops without done! once
+  :session-restoring? goes false, which a quit does."
+  [{:keys [cv session-restoring?] :as ctx} entry done!]
+  (letfn [(step [paths missing]
+            (when @session-restoring?
+              (when (= :done (try
+                               (if-let [p (first paths)]
+                                 (let [missing (if (reopen-failed? ctx p) (conj missing (.getName (java.io.File. ^String p))) missing)]
+                                   (on-gui! (fn [] (step (rest paths) missing)))
+                                   :more)
+                                 (do (finish-reopen! ctx entry missing) :done))
+                               (catch :default e
+                                 (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
+                                 :done)))
+                (reset! session-restoring? false)
+                (done!))))]
+    (reset! session-restoring? true)
+    (on-gui! (fn [] (step (:tabs entry) [])))))
 
 ;; --- file operations from the tree (file-ops plan T4) ------------------------
 ;; The pane calls these inside its popover's own signal emission (the entry's
@@ -3143,8 +3180,14 @@
                                                                                  :width (g/gtk-paned-get-position tree-paned)}})))
                                                           ;; Live saving stops first: nothing after the
                                                           ;; quit's own save may write a shorter list.
-                                                          :save-session! (fn [] (some-> @*tab-ctx :session-live? (reset! false))
-                                                                           (save-session! @*tab-ctx))})
+                                                          ;; A quit before startup's reopen is done
+                                                          ;; stops it and saves nothing, since the
+                                                          ;; tabs open are only part of the list.
+                                                          :save-session! (fn [] (let [c @*tab-ctx
+                                                                                      restoring? (some-> c :session-restoring? deref)]
+                                                                                  (some-> c :session-live? (reset! false))
+                                                                                  (some-> c :session-restoring? (reset! false))
+                                                                                  (when-not restoring? (save-session! c))))})
                                        [:pointer :pointer] :int :on-throw 1)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; P3 fix wave C3: without an application "quit" action, GTK's macOS
@@ -3197,7 +3240,8 @@
                    :theme-name theme-name :completion-opts completion-opts
                    :active-id active-id :active-tab active-tab :popovers popovers
                    :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
-                   :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)}
+                   :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
+                   :session-restoring? (atom false)}
           first-tab (add-tab! tab-ctx {:path file :text (or text "")})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
@@ -3290,29 +3334,42 @@
           (cview/append! cv :error (str "; project: " (ex-message e) "\n"))))
       (start-and-report! cv status-label @ev* @sel*)
       ;; Session-tabs plan Task 2: a launch that named no file reopens the
-      ;; tabs open at the last quit in this project.
-      (when-not file
-        (try (restore-session! tab-ctx {:reroot? true})
-             (catch :default e
-               (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n")))))
-      ;; The launch's tabs are open, so from here on every change to them is
-      ;; saved as it happens (session-changed!). The state the launch ends in
-      ;; isn't written: a launch on one file would otherwise replace the
-      ;; folder's remembered tabs before anything changed. A re-root alone
-      ;; doesn't save either, for the same reason; the next tab change does.
-      (reset! (:session-last tab-ctx) (session-snapshot tab-ctx))
-      (reset! (:session-live? tab-ctx) true)
-      ;; P5a: say where the child tools' PATH came from. The wait for the
-      ;; lookup is off the GTK thread; the append goes through on-gui!, and
-      ;; a window closed meanwhile must not throw out of the future.
-      (future
-        (try (when-let [line (login-path/console-line)]
-               (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
-             (catch :default _ nil)))
-      (let [t (active-tab)]
-        (update-title! (:ed t) win (:path t))
-        (g/gtk-window-present win)
-        (editor/focus! (:ed t))))
+      ;; tabs open at the last quit in this project. The entry, and any
+      ;; re-root, come now, so the tree shows its folder from the first
+      ;; frame. The files open after the window is up (reopen-later!).
+      (let [entry (when-not file
+                    (try (session-entry! tab-ctx {:reroot? true})
+                         (catch :default e
+                           (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
+                           nil)))
+            ;; The launch's tabs are open, so from here on every change to
+            ;; them is saved as it happens (session-changed!). The state the
+            ;; launch ends in isn't written: a launch on one file would
+            ;; otherwise replace the folder's remembered tabs before
+            ;; anything changed. A re-root alone doesn't save either, for the
+            ;; same reason; the next tab change does.
+            live! (fn []
+                    (reset! (:session-last tab-ctx) (session-snapshot tab-ctx))
+                    (reset! (:session-live? tab-ctx) true))]
+        ;; P5a: say where the child tools' PATH came from. The wait for the
+        ;; lookup is off the GTK thread; the append goes through on-gui!, and
+        ;; a window closed meanwhile must not throw out of the future.
+        (future
+          (try (when-let [line (login-path/console-line)]
+                 (on-gui! (fn [] (cview/append! cv :system (str line "\n")))))
+               (catch :default _ nil)))
+        (let [t (active-tab)]
+          (update-title! (:ed t) win (:path t))
+          (g/gtk-window-present win)
+          (editor/focus! (:ed t)))
+        (if (seq (:tabs entry))
+          (reopen-later! tab-ctx entry
+                         (fn []
+                           (live!)
+                           (let [t (active-tab)]
+                             (update-title! (:ed t) win (:path t))
+                             (editor/focus! (:ed t)))))
+          (live!))))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
       ;; objects, so every existing row keeps working unchanged; rows that

@@ -36,12 +36,17 @@ these:
   `sessions.edn` beside the settings file. It's a separate file because
   `settings.edn` is hand-edited and may be a dotfiles symlink, while this one
   changes whenever the tabs do. `load-sessions` and `save-sessions!` never
-  throw, and `remember` and `entry-for` are pure. The window restores at the
-  end of startup when no file was named, then saves as the tabs change:
+  throw, and `remember` and `entry-for` are pure. When no file was named,
+  startup picks the entry (and re-roots the tree) before the window is
+  shown, then `reopen-later!` opens the files after it's up, one per
+  main-loop turn, so the window appears without waiting for them. A quit
+  before that's done stops it and saves nothing, since the tabs open then
+  are only part of the list. After the reopen the window saves as the tabs
+  change:
   `refresh-labels!` (every open, close and path change) and `on-switch!` call
   `session-changed!`, which writes only when the `{:root :tabs :active}`
   snapshot differs from the last one written. It does nothing until
-  startup's own restore is done, since the first Untitled tab would otherwise
+  startup's own reopen is done, since the first Untitled tab would otherwise
   overwrite the list it's about to reopen, and the state startup ends in is
   only recorded, not written, so a launch on one file leaves the folder's
   list alone until a tab changes. The real-quit

@@ -346,7 +346,8 @@ doesn't lose it. It keeps that list per project folder,
 the folder the file tree is rooted at, for the 20 most recent folders.
 Start Jonquil again in the same folder without naming a file (`jonquil`
 from that folder, or `jonquil` with the folder as its argument) and those
-tabs come back, with the selected one selected again. A start from the
+tabs come back, with the selected one selected again. The window shows
+straight away and the tabs open into it. A start from the
 Dock or Finder has no folder of its own, so it goes back to the project
 you quit most recently and roots the file tree there.
 
