@@ -270,3 +270,63 @@
         (is (= 0 code))
         (deliver block nil))
       (finally (.close ss) (future-cancel srv)))))
+
+(deftest pick-entry-nil-dir-entry-never-matches-a-dir-query
+  (let [good {:dir (canon "/tmp") :port 1 :pid 1 :file-mtime 5}
+        bad {:dir nil :port 2 :pid 2 :file-mtime 9}]
+    (is (= good (:entry (listen/pick-entry [bad good] "/tmp"))))
+    (is (= bad (:entry (listen/pick-entry [bad] nil))))
+    (is (str/includes? (:error (listen/pick-entry [bad] "/other")) "(no folder)"))))
+
+(deftest unusable-entries-are-skipped
+  (let [sp (settings-path)
+        d (io/file (listen/registry-dir sp))]
+    (.mkdirs d)
+    (spit (io/file d "junk.edn") "{:pid")
+    (spit (io/file d "neg.edn") (pr-str {:dir "/d" :port 1 :pid -1}))
+    (spit (io/file d "zero.edn") (pr-str {:dir "/d" :port 1 :pid 0}))
+    (listen/write-entry! sp {:dir "/e" :port 2 :pid (own-pid)})
+    (is (= [(own-pid)] (map :pid (listen/live-entries sp))))
+    (listen/housekeep! sp)))
+
+(defn- one-shot-server
+  "Accepts one client and runs (f socket); returns {:ss ss :srv future}."
+  [f]
+  (let [ss (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))]
+    {:ss ss :srv (future (with-open [s (.accept ss)] (f s)))}))
+
+(deftest bridge-relay-failure-logs-but-eof-detach-does-not
+  (let [sp (settings-path)
+        err (java.io.StringWriter.)
+        ;; failure: the server sends a line, the write-line throws
+        {:keys [ss srv]} (one-shot-server
+                          (fn [s]
+                            (let [w (io/writer (.getOutputStream s))]
+                              (.write ^java.io.Writer w "hello\n")
+                              (.flush ^java.io.Writer w)
+                              (Thread/sleep 300))))]
+    (try
+      (listen/write-entry! sp {:dir (canon "/tmp") :port (.getLocalPort ss) :pid (own-pid)})
+      (let [block (promise)
+            code (binding [*err* err]
+                   (listen/bridge! {:read-line (fn [] (deref block 20000 nil))
+                                    :write-line (fn [_] (throw (ex-info "pipe broke" {})))
+                                    :settings-path sp :dir "/tmp"}))]
+        (deliver block nil)
+        (is (= 0 code))
+        (is (str/includes? (str err) "jonquil: the attach relay failed: pipe broke")))
+      (finally (.close ss) (future-cancel srv))))
+  (let [sp (settings-path)
+        err (java.io.StringWriter.)
+        {:keys [ss srv]} (one-shot-server (fn [_] nil))]
+    (try
+      (listen/write-entry! sp {:dir (canon "/tmp") :port (.getLocalPort ss) :pid (own-pid)})
+      (let [block (promise)
+            code (binding [*err* err]
+                   (listen/bridge! {:read-line (fn [] (deref block 20000 nil))
+                                    :write-line (fn [_] nil)
+                                    :settings-path sp :dir "/tmp"}))]
+        (deliver block nil)
+        (is (= 0 code))
+        (is (not (str/includes? (str err) "relay failed")) (str err)))
+      (finally (.close ss) (future-cancel srv)))))

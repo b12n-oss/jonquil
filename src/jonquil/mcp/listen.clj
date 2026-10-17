@@ -48,7 +48,7 @@
 (defn- read-entry [^java.io.File f]
   (try
     (let [m (edn/read-string (slurp f))]
-      (when (and (map? m) (integer? (:pid m)))
+      (when (and (map? m) (integer? (:pid m)) (pos? (:pid m)))
         (assoc m :file-mtime (.lastModified f))))
     (catch Exception _ nil)))
 
@@ -139,7 +139,9 @@
   "Binds 127.0.0.1 on an OS-picked port, writes this process's registry
   entry, runs housekeeping, and accepts clients one at a time on a future.
   Returns {:port p :stop! (fn [])}; stop! closes the socket (ending the
-  accept loop) and deletes the entry, and is safe to call twice. If a step
+  accept loop) and deletes the entry, and is safe to call twice; a connection already being
+  served outlives stop! (the entry is gone but the session runs on) and ends
+  with its client or the process. If a step
   after the bind throws, the socket is closed and the exception rethrown. If
   the accept loop gives up, it closes the socket and deletes the entry too.
   :dir defaults to user.dir; :gui is the enqueue fn handed to
@@ -168,7 +170,7 @@
 (defn- window-list
   "\"<dir> (port N), ...\" for every entry."
   [entries]
-  (str/join ", " (map (fn [e] (str (:dir e) " (port " (:port e) ")")) entries)))
+  (str/join ", " (map (fn [e] (str (or (:dir e) "(no folder)") " (port " (:port e) ")")) entries)))
 
 (defn pick-entry
   "Chooses the window to attach to: {:entry e} or {:error sentence}. With a
@@ -179,7 +181,7 @@
   [entries dir]
   (let [hits (if dir
                (let [d (canonical dir)]
-                 (filter #(= d (canonical (:dir %))) entries))
+                 (filter #(and (:dir %) (= d (canonical (:dir %)))) entries))
                (when (= 1 (count entries)) entries))]
     (cond
       (seq hits) {:entry (apply max-key :file-mtime hits)}
@@ -214,9 +216,16 @@
       (nil? sock) 1
       :else
       (let [done (promise)
+            closing (atom false)
+            err *err*
             in (io/reader (.getInputStream ^Socket sock) :encoding "UTF-8")
             out (io/writer (.getOutputStream ^Socket sock) :encoding "UTF-8")
-            pump (fn [f] (doto (Thread. ^Runnable (fn [] (try (f) (catch Throwable _ nil) (finally (deliver done 0)))))
+            pump (fn [f] (doto (Thread. ^Runnable (fn [] (try (f)
+                                                              (catch Throwable e
+                                                                (when-not @closing
+                                                                  (binding [*out* err]
+                                                                    (println "jonquil: the attach relay failed:" (or (ex-message e) (str e))))))
+                                                              (finally (deliver done 0)))))
                            (.setDaemon true)
                            (.start)))]
         (pump (fn [] (loop []
@@ -229,5 +238,6 @@
                          (write-line l)
                          (recur)))))
         @done
+        (reset! closing true)
         (try (.close ^Socket sock) (catch Throwable _ nil))
         0))))

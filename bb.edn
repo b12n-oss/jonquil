@@ -598,7 +598,7 @@
                          "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-appopen-" "jonquil-selftest-tree-" "jonquil-selftest-args-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-demoshots-jank-" "jonquil-clj-server-" "jonquil-clj-config-"
-                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-" "jonquil-app-linux-test-" "jonquil-save-path" "jonquil-jank-child-test-" "jonquil-mcp-test-" "jonquil-mcp-smoke-" "jonquil-mcp-listen-test-"]
+                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-" "jonquil-app-linux-test-" "jonquil-save-path" "jonquil-jank-child-test-" "jonquil-mcp-test-" "jonquil-mcp-smoke-" "jonquil-mcp-listen-test-" "jonquil-selftest-mcp-" "jonquil-selftest-mcp-dir-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
                              (some (fn [p]

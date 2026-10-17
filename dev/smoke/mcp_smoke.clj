@@ -46,19 +46,19 @@
 (defn- launch!
   ([dir xdg] (launch! dir xdg (if (window?) ["--mcp" "--window"] ["--mcp"])))
   ([dir xdg mode]
-  (let [proc (p/process (command mode dir)
-                        {:err :inherit
-                         :extra-env {"XDG_CONFIG_HOME" xdg}
-                         :shutdown p/destroy-tree})
-        q (LinkedBlockingQueue.)
-        reader (io/reader (:out proc))]
-    (future
-      (try (loop []
-             (when-let [l (.readLine ^java.io.BufferedReader reader)]
-               (.put q l) (recur)))
-           (catch Exception _ nil)
-           (finally (.put q ::eof))))
-    {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom [])})))
+   (let [proc (p/process (command mode dir)
+                         {:err :inherit
+                          :extra-env {"XDG_CONFIG_HOME" xdg}
+                          :shutdown p/destroy-tree})
+         q (LinkedBlockingQueue.)
+         reader (io/reader (:out proc))]
+     (future
+       (try (loop []
+              (when-let [l (.readLine ^java.io.BufferedReader reader)]
+                (.put q l) (recur)))
+            (catch Exception _ nil)
+            (finally (.put q ::eof))))
+     {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom [])})))
 
 (defn- send! [{:keys [^java.io.Writer in]} msg]
   (.write in (str (json/generate-string msg) "\n"))
