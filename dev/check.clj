@@ -13,6 +13,7 @@
     jonquil.edit
     jonquil.eval
     jonquil.console
+    jonquil.mcp.json
     jonquil.evaluator
     jonquil.session
     jonquil.inspect.view

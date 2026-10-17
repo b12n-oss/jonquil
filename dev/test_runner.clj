@@ -22,6 +22,7 @@
     jonquil.eval-test
     jonquil.registry-test
     jonquil.console-test
+    jonquil.mcp.json-test
     jonquil.session-test
     jonquil.commands-test
     jonquil.help-test
