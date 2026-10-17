@@ -18,8 +18,8 @@ count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (it last read 546 tests and 3351
-assertions, 31 fewer, before the MCP window tests; not re-measured since).
+reports fewer assertions than macOS (574 tests and 3414 assertions, 31
+fewer, measured 2026-10-17).
 
 `bb test:nrepl` runs a second, separate suite (38 tests, 127 assertions,
 about 40 s): every test in it spawns a real Jolt child over
