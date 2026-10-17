@@ -1,7 +1,9 @@
 ;; Smoke of `jonquil --mcp` over real stdio. A babashka script (cheshire and
 ;; babashka.process are built in); it never touches the jolt process from the
 ;; inside. Run via `bb mcp:smoke` (a checkout, `jolt -M -m jonquil.main --mcp
-;; DIR`) or `bb mcp:smoke --bin ./jonquil` (the built binary). With --window it
+;; DIR`) or `bb mcp:smoke --bin ./jonquil` (the built binary). With --attach it
+;; starts a normal window with the listener on plus `--mcp-attach` bridges to
+;; it (two processes, both destroyed on every exit path). With --window it
 ;; drives `--mcp --window` instead: a REAL window opens and takes focus, so
 ;; nobody should type while it runs.
 ;;
@@ -31,14 +33,20 @@
 (defn- window? []
   (boolean (some #{"--window"} *command-line-args*)))
 
-(defn- command [dir]
-  (let [mode (if (window?) ["--mcp" "--window"] ["--mcp"])]
-    (if-let [bin (bin-arg)]
-      (into [(str (fs/absolutize bin))] (conj mode dir))
-      (into ["jolt" "-M" "-m" "jonquil.main"] (conj mode dir)))))
+(defn- attach? []
+  (boolean (some #{"--attach"} *command-line-args*)))
 
-(defn- launch! [dir xdg]
-  (let [proc (p/process (command dir)
+(defn- command
+  "The argv for a Jonquil process: mode flags (may be empty) then dir."
+  [mode dir]
+  (if-let [bin (bin-arg)]
+    (into [(str (fs/absolutize bin))] (conj mode dir))
+    (into ["jolt" "-M" "-m" "jonquil.main"] (conj mode dir))))
+
+(defn- launch!
+  ([dir xdg] (launch! dir xdg (if (window?) ["--mcp" "--window"] ["--mcp"])))
+  ([dir xdg mode]
+  (let [proc (p/process (command mode dir)
                         {:err :inherit
                          :extra-env {"XDG_CONFIG_HOME" xdg}
                          :shutdown p/destroy-tree})
@@ -50,7 +58,7 @@
                (.put q l) (recur)))
            (catch Exception _ nil)
            (finally (.put q ::eof))))
-    {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom [])}))
+    {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom [])})))
 
 (defn- send! [{:keys [^java.io.Writer in]} msg]
   (.write in (str (json/generate-string msg) "\n"))
@@ -233,4 +241,98 @@
       (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
       (System/exit (if (zero? fails) 0 1)))))
 
-(if (window?) (window-main) (main))
+;; --attach: a real normal window with the listener on, plus bridges to it.
+(defn- alive? [^java.lang.Process jp] (.isAlive jp))
+
+(defn- json-lines? [srv]
+  (every? (fn [l] (try (json/parse-string l) true (catch Exception _ false)))
+          @(:lines srv)))
+
+(defn- bridge-exit!
+  "Closes the bridge's stdin; returns its exit map, or ::timeout (destroyed)."
+  [bridge]
+  (.close ^java.io.Writer (:in bridge))
+  (let [r (deref (:proc bridge) 10000 ::timeout)]
+    (when (= r ::timeout) (p/destroy-tree (:proc bridge)))
+    r))
+
+(defn- await-registry
+  "The first *.edn under dir within ms, or nil."
+  [dir ms]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (loop []
+      (let [f (when (fs/exists? dir) (first (fs/glob dir "*.edn")))]
+        (cond f (str f)
+              (> (System/currentTimeMillis) end) nil
+              :else (do (Thread/sleep 250) (recur)))))))
+
+(defn- attach-main []
+  (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
+        xdg (str tmp "/xdg")
+        proj (str tmp "/proj")
+        reg-dir (str xdg "/jonquil/mcp")
+        procs (atom [])
+        track! (fn [srv] (swap! procs conj (:proc srv)) srv)]
+    (fs/create-dirs proj)
+    (fs/create-dirs (str xdg "/jonquil"))
+    (spit (str proj "/deps.edn") "{}")
+    (spit (str xdg "/jonquil/settings.edn") "{:mcp-listen? true}")
+    (try
+      (let [win (track! (launch! proj xdg []))
+            wjp ^java.lang.Process (:proc (:proc win))
+            wpid (.pid wjp)
+            reg (await-registry reg-dir 30000)]
+        (check! "the window registers under the temp XDG within 30 s" reg
+                {:dir reg-dir :files (when (fs/exists? reg-dir) (mapv str (fs/list-dir reg-dir)))})
+        (when reg
+          (let [b1 (track! (launch! proj xdg ["--mcp-attach"]))]
+            (handshake! b1 "bridge 1")
+            (let [r (request! b1 "tools/list" {} 60000)
+                  names (set (map #(get % "name") (get-in r ["result" "tools"])))]
+              (check! "tools/list has exactly the fifteen window tools"
+                      (and (= 15 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+            (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
+              (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
+            (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]
+              (check! "console since 0 starts with mark"
+                      (and (string? (:text r)) (str/starts-with? (:text r) "mark ")) r))
+            (let [x (bridge-exit! b1)]
+              (check! "bridge 1 exits 0 within 10 s of stdin closing"
+                      (and (not= x ::timeout) (zero? (:exit x)))
+                      (if (= x ::timeout) "still running after 10 s" (:exit x))))
+            (check! "bridge 1 stdout is all JSON" (json-lines? b1) @(:lines b1))
+            (check! "the window process survives the detach" (alive? wjp) {:pid wpid}))
+          (let [b2 (track! (launch! proj xdg ["--mcp-attach"]))]
+            (handshake! b2 "bridge 2")
+            (let [r (tool! b2 "jonquil_eval" {"code" "(* 6 7)"} 60000)]
+              (check! "second bridge eval (* 6 7) => 42" (ends-with? r "=> 42") r))
+            (let [x (bridge-exit! b2)]
+              (check! "bridge 2 exits 0 within 10 s of stdin closing"
+                      (and (not= x ::timeout) (zero? (:exit x)))
+                      (if (= x ::timeout) "still running after 10 s" (:exit x))))
+            (check! "bridge 2 stdout is all JSON" (json-lines? b2) @(:lines b2))
+            (check! "the window process survives the second detach" (alive? wjp) {:pid wpid})))
+        ;; SIGTERM the window we launched
+        (let [kids-before (children wpid)]
+          (.destroy wjp)
+          (let [x (deref (:proc win) 20000 ::timeout)]
+            (check! "window exits within 20 s of SIGTERM" (not= x ::timeout)
+                    "still running after 20 s")
+            (Thread/sleep 500)
+            (check! "no window child remains"
+                    (empty? (filter (fn [k] (zero? (:exit @(p/process ["kill" "-0" k] {:err :string :out :string}))))
+                                    kids-before))
+                    kids-before)
+            (check! "the registry file is gone"
+                    (not (and reg (fs/exists? reg)))
+                    {:reg reg :left (when (fs/exists? reg-dir) (mapv str (fs/list-dir reg-dir)))}))))
+      (finally
+        (doseq [pr @procs] (try (p/destroy-tree pr) (catch Throwable _ nil)))
+        (fs/delete-tree tmp)))
+    (let [fails (count (remove true? @results))]
+      (println (str "[mcp-smoke] " (- (count @results) fails) "/" (count @results) " passed"))
+      (System/exit (if (zero? fails) 0 1)))))
+
+(cond (attach?) (attach-main)
+      (window?) (window-main)
+      :else (main))

@@ -256,7 +256,7 @@
      (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
      (row "bench:edit [sizes...]" "time editing stalls on large files (opens a real window per size)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
-     (row "mcp:smoke [--bin PATH] [--window]" "smoke of `jonquil --mcp` over real stdio; --window drives a real window (checkout, or the built binary)")
+     (row "mcp:smoke [--bin PATH] [--window|--attach]" "smoke of `jonquil --mcp` over real stdio; --window drives a real window, --attach bridges to a listening one (checkout, or the built binary)")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
      (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
