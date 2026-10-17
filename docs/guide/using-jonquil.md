@@ -1101,7 +1101,7 @@ Jonquil picks the build in this order:
 
 When `.jonquil.edn` names none and `shadow-cljs.edn` has several builds, or
 none, the Run ends with a notice that names them: "; Several shadow-cljs
-builds: app test. Pick one with {:cljs {:shadow-build :app}} in
+builds: :app :test. Pick one with {:cljs {:shadow-build :app}} in
 .jonquil.edn." `shadow-cljs.edn` is read again on every connect, so an edit
 there takes effect on the next one, while a `.jonquil.edn` edit takes effect
 when the file is reopened.
