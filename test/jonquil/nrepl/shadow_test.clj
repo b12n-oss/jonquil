@@ -79,7 +79,7 @@
   (testing "no port file: the not-running notice"
     (let [[dir _] (temp-project nil) e (make dir)]
       (try
-        (is (= {:status :notice :text (cljs/not-running-message dir)} (first (run e "1" {:run? false}))))
+        (is (= {:status :notice :text (cljs/not-running-message dir :app)} (first (run e "1" {:run? false}))))
         (finally (temp-dirs/delete-tree! dir)))))
   (testing "no project"
     (let [e (shadow/make-shadow {:profile dialect/cljs :runtime :attach :project-dir nil})]
@@ -143,6 +143,18 @@
         (is (= 2 (count (filter #(= (cljs/select-code :app) (get % "code")) (fake/requests srv))))
             "the next evaluation tries to select again")))))
 
+(deftest dropped-connection-reselects-test
+  (with-project {}
+    (fn [srv _ e]
+      (run e "(+ 1 2)" {:run? false})
+      (is (= 1 (count (filter #(= (cljs/select-code :app) (get % "code")) (fake/requests srv)))))
+      (fake/drop-connections! srv)
+      (is (until #(not (connection/connected? e))))
+      (is (= :ok (:status (first (run e "(+ 1 2)" {:run? false})))))
+      (is (= 2 (count (filter #(= (cljs/select-code :app) (get % "code")) (fake/requests srv))))
+          "the new connection's session selects again (:on-connect reset :selected?)")
+      (is (true? (:selected? @(:state e)))))))
+
 (deftest repl-entry-test
   (with-project {:value "7"}
     (fn [srv _ e]
@@ -152,6 +164,9 @@
       (testing "a selection names the buffer's ns"
         (run e "(+ 3 4)" {:run? false :ns-source "(ns some.where)\n"})
         (is (= "some.where" (get (last (fake/requests srv)) "ns"))))
+      (testing "an exception before the last form still makes the entry an error"
+        (let [[r _] (run e "(throw (js/Error. \"x\")) 1" {:run? false})]
+          (is (= :error (:status r)))))
       (testing "a throw is an error result built from :err"
         (let [[r out] (run e "(throw (js/Error. \"boom\"))" {:run? false})]
           (is (= {:status :error :error-text "Error: boom"} r))

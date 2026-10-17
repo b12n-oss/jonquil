@@ -54,8 +54,10 @@
   [ev]
   (connection/stop-requested? ev))
 
-(def ^:private cljs-policy
-  {:messages {:no-project cljs/no-project-message :not-running cljs/not-running-message
+(defn- cljs-policy
+  "The connect policy for one connect, its :not-running sentence naming build."
+  [build]
+  {:messages {:no-project cljs/no-project-message :not-running (fn [dir] (cljs/not-running-message dir build))
               :bad-port-file cljs/bad-port-file-message :refused cljs/refused-message
               :not-server cljs/not-server-message :connecting cljs/connecting-message}
    :on-connect {:session-ns "shadow.user" :selected? false}
@@ -129,7 +131,7 @@
     (if (:notice resolved)
       {:status :notice :text (:notice resolved)}
       (do (swap! state assoc :build (:build resolved))
-          (or (connection/connect! ev on-output cljs-policy)
+          (or (connection/connect! ev on-output (cljs-policy (:build resolved)))
               (when-not (stop-requested? ev)
                 (when-not (:selected? @state) (select! ev (:build resolved) on-output))))))))
 
@@ -163,7 +165,7 @@
     (cond
       (st ops/disconnected) (lost-result ev)
       (some cljs/no-runtime? (keep :err msgs)) {:status :notice :text cljs/no-runtime-message}
-      (cljs/exception-value? (last values)) {:status :error :error-text (cljs/error-line (err-text msgs))}
+      (some cljs/exception-value? values) {:status :error :error-text (cljs/error-line (err-text msgs))}
       :else (do (quit! ev msgs)
                 (ops/eval-result msgs false lost-connection)))))
 

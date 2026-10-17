@@ -107,10 +107,6 @@
   (swap! results conj {:step step :ok (boolean ok) :detail detail})
   (println (str "[cljs-smoke] " (name step) " " (if ok "PASS" "FAIL") " " (pr-str detail))))
 
-(defn- skip! [step reason]
-  (swap! results conj {:step step :ok :skip :detail {:reason reason}})
-  (println (str "[cljs-smoke] " (name step) " SKIP " reason)))
-
 ;; --- cgevent wrappers (cljd_smoke.clj's shape) -----------------------------
 
 (def ^:private cgevent-timeout-ms 10000)
@@ -425,6 +421,12 @@
   (let [made-config? (and build-kw (not (fs/exists? jonquil-edn)))]
     (when made-config?
       (spit jonquil-edn (pr-str {:cljs {:shadow-build build-kw}})))
+    ;; A SIGINT/SIGTERM to bb skips the finally below, so the JVM's shutdown
+    ;; hook removes the same files (deleting one that's gone is a no-op).
+    (.addShutdownHook (Runtime/getRuntime)
+                      (Thread. (fn []
+                                 (doseq [f [scratch-ok scratch-err]] (io/delete-file f true))
+                                 (when made-config? (io/delete-file jonquil-edn true)))))
     (try
       (let [s1 (launch! scratch-ok)]
         (ensure-window! (:pid s1) 8000)

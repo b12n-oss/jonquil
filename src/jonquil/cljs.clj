@@ -14,10 +14,11 @@
   "; Detached from the shadow-cljs server. The watch and the app weren't touched.")
 
 (def no-project-message
-  "; This file isn't in a project, so there's no shadow-cljs.edn to read. Save it inside the project that has .jonquil.edn.")
+  "; This file isn't in a project, so there's no shadow-cljs.edn to read. Save it inside the project that has shadow-cljs.edn.")
 
-(defn not-running-message [dir]
-  (str "; No shadow-cljs server here. Start one in " dir " with npx shadow-cljs watch <build>."))
+(defn not-running-message [dir build]
+  (str "; No shadow-cljs server here. Start one in " dir " with npx shadow-cljs watch "
+       (if (keyword? build) (name build) "<build>") "."))
 
 (def bad-port-file-message
   "; .shadow-cljs/nrepl.port doesn't hold a port number, so Jonquil can't reach the server.")

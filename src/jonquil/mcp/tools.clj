@@ -13,9 +13,12 @@
             [jonquil.evaluator :as ev]
             [jonquil.file-tree :as ft]
             [jonquil.help :as help]
+            [jonquil.nrepl.attach]
             [jonquil.nrepl.connection]
             [jonquil.nrepl.evaluator]
             [jonquil.nrepl.jank]
+            [jonquil.nrepl.jvm]
+            [jonquil.nrepl.shadow]
             [jonquil.runtime-registry :as registry]
             [jonquil.session]
             [jonquil.settings :as settings]))

@@ -5,8 +5,9 @@
 (deftest sentences-test
   (is (= "; ClojureScript support is experimental. Jonquil connects to the shadow-cljs nREPL server on the first Run." cljs/experimental-message))
   (is (= "; Detached from the shadow-cljs server. The watch and the app weren't touched." cljs/detached-message))
-  (is (= "; No shadow-cljs server here. Start one in /p with npx shadow-cljs watch <build>." (cljs/not-running-message "/p")))
-  (is (re-find #"shadow-cljs\.edn" cljs/no-project-message))
+  (is (= "; No shadow-cljs server here. Start one in /p with npx shadow-cljs watch <build>." (cljs/not-running-message "/p" nil)))
+  (is (= "; No shadow-cljs server here. Start one in /p with npx shadow-cljs watch app." (cljs/not-running-message "/p" :app)))
+  (is (re-find #"project that has shadow-cljs\.edn\.$" cljs/no-project-message))
   (is (re-find #"\.shadow-cljs/nrepl\.port" cljs/bad-port-file-message))
   (is (re-find #"port 7" (cljs/refused-message 7)))
   (is (re-find #"Port 7" (cljs/not-server-message 7)))

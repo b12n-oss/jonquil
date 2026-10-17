@@ -192,6 +192,10 @@
 
 (def requests "Every request the server has received (string keys, no :id), in order." core/requests)
 
+(def drop-connections!
+  "Closes every open client connection; the server keeps listening."
+  core/drop-connections!)
+
 (def stop!
   "Stops the server and waits for its connection threads (fake-nrepl-core)."
   core/stop!)
