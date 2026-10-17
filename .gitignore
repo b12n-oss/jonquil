@@ -14,12 +14,12 @@
 .env.*
 /.remember/
 /.superpowers/
-# agent guides live in the planning store and are symlinked in
-/AGENTS.md
-/CLAUDE.md
 .DS_Store
 
 # clojure-lsp copies dependency lint configs into .clj-kondo/imports/ on every run;
 # only the jolt export (clj-kondo --lint ~/dev/jolt --dependencies --copy-configs) is kept.
 /.clj-kondo/imports/*
 !/.clj-kondo/imports/jolt-lang/
+
+# Per-machine config for the cljd smoke (names a local app checkout)
+*.local.edn

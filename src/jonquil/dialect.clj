@@ -72,7 +72,7 @@
   ;; - clj/src/cljd/core.cljd: the public macros clojure.core doesn't have
   ;;   (the -map-lit/-set-lit/-vec-lit reader targets are left out).
   ;; - clj/src/cljd/flutter.cljd: its public macros, bare and under the
-  ;;   `f` alias, because every one of a-sibling-cljd-app's 10 files that
+  ;;   `f` alias, because every one of the reference deck app's 10 files that
   ;;   requires cljd.flutter writes [cljd.flutter :as f].
   #{"." "new" "letfn"
     "dart/is?" "dart/await" "dart/async-barrier" "dart/run-zoned" "dart/assert" "dart/type-like"

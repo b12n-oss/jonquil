@@ -1,6 +1,6 @@
 (ns jonquil.theme
-  "Jonquil's colour themes as data. Pure. The four palettes are
-  a-sibling-cljd-app's (src/demo/deck/theme.cljd, palettes and
+  "Jonquil's colour themes as data. Pure. The four palettes come from
+  a sibling ClojureDart deck app's theme (palettes and
   syntax-palettes, read 2026-09-25): each Jonquil token kind takes the
   colour of the slides class its tokenizer uses for the same text. The
   rainbow, :red, :find-highlight, :selection and :caret values are

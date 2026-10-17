@@ -106,7 +106,7 @@ bb linux:test             # bb test in a Linux container (local Docker; also lin
 bb gtk:selftest           # real-window self-tests, opens eight windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
-bb smoke:cljd             # drive the built binary against a running ClojureDart app (start one with bb dev:macos in a-sibling-cljd-app first)
+bb smoke:cljd             # drive the built binary against a running ClojureDart app (start your ClojureDart app first; see the development guide)
 bb bench:edit             # time editing stalls on large files (opens a real window per size)
 ```
 

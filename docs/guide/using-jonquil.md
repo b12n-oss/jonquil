@@ -496,7 +496,7 @@ both count as dark for that purpose. Inside a find match, the text keeps
 the theme's plain text colour instead of its syntax colour, so it stays
 readable against the highlight.
 
-Solarized keeps the lower contrast of the a-sibling-cljd-app palette it's
+Solarized keeps the lower contrast of the deck-app palette it's
 drawn from. Dark and navy are built for night use.
 
 Auto isn't a palette of its own. On macOS it shows the light theme while the

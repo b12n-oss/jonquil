@@ -1,6 +1,6 @@
 ;; P4.T3 automated: drives the BUILT Jonquil binary, via cgevent --pid, to
 ;; smoke the ClojureDart attach dialect against the user's REAL, running
-;; a-sibling-cljd-app app (`bb dev:macos`). Run via `bb smoke:cljd` (see
+;; ClojureDart app (named by dev/smoke/cljd_app.local.edn). Run via `bb smoke:cljd` (see
 ;; bb.edn); a plain babashka script, not a jolt namespace, exactly like
 ;; dev/smoke/binary_smoke.clj -- it never touches the app or Jonquil from
 ;; the inside, only from outside via cgevent, a raw TCP connect check, and
@@ -95,8 +95,27 @@
 
 (def ^:private out-dir "target/smoke")
 (def ^:private binary-path "./jonquil")
-(def ^:private app-dir (str (System/getProperty "user.home") "/dev-apps/a-sibling-cljd-app"))
-(def ^:private drive-file (str app-dir "/dev/demo/deck/drive.cljd"))
+(def ^:private app-config-path "dev/smoke/cljd_app.local.edn")
+
+(defn- read-app-config!
+  "Reads {:dir <abs path to the app> :main-ns <the ns Run loads>} from the
+  gitignored app-config-path. A missing or unreadable file, or one without
+  both keys as strings, prints one sentence and exits 1."
+  []
+  (let [cfg (try (edn/read-string (slurp app-config-path)) (catch Exception _ nil))]
+    (if (and (map? cfg) (string? (:dir cfg)) (string? (:main-ns cfg)))
+      cfg
+      (do (binding [*out* *err*]
+            (println (str "[cljd-smoke] create " app-config-path " holding {:dir \"<abs path to your ClojureDart app>\" :main-ns \"<the ns Run loads>\"} first.")))
+          (System/exit 1)))))
+
+(def ^:private app-config (read-app-config!))
+(def ^:private app-dir (:dir app-config))
+(def ^:private main-ns (:main-ns app-config))
+;; The main ns's source under the app's dev/ tree: dots become slashes and
+;; dashes become underscores.
+(def ^:private drive-file
+  (str app-dir "/dev/" (str/replace (str/replace main-ns "." "/") "-" "_") ".cljd"))
 (def ^:private nrepl-lock (str app-dir "/NREPL.lock"))
 ;; window.clj's own title format for a clean buffer, "<filename> - Jonquil"
 ;; (a dirty one gets a leading "* "); this script only ever opens drive-file,
@@ -436,7 +455,7 @@
   looser substring check for the same reason."
   [pid]
   (cg-key! pid "f5")
-  (let [{:keys [ok last]} (wait-for-ocr! pid 60000 "Loaded demo.deck.drive")
+  (let [{:keys [ok last]} (wait-for-ocr! pid 60000 (str "Loaded " main-ns))
         has-form-count (boolean (re-find #"\(\d+ forms?\)" (str/replace last "\n" " ")))
         {attached-ok :ok attached-last :last} (wait-for-ocr! pid 5000 "attached")
         no-closure (not (str/includes? (ocr-text! pid) "Closure"))]
@@ -765,7 +784,7 @@
         (System/exit 1))
       (build!))
     (println "[cljd-smoke] this drives your OWN, freshly-launched Jonquil window against")
-    (println "[cljd-smoke] your running a-sibling-cljd-app app. Please don't type for the")
+    (println "[cljd-smoke] your running ClojureDart app. Please don't type for the")
     (println "[cljd-smoke] next few minutes -- a stray keystroke can land in the wrong window.")
     (Thread/sleep 3000)
     (try

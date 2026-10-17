@@ -13,7 +13,7 @@
 ;; setting, 13 remain — the rest are genuine indentation differences, not
 ;; this rule. One setting instead of a 34-file churn commit.
 ;;
-;; No :project-specs override: unlike a-private-sibling's AppKit/UIKit siblings,
+;; No :project-specs override: unlike AppKit/UIKit sibling projects,
 ;; deps.edn here has no :deps map (jolt.ffi is a runtime builtin, not a
 ;; resolved dependency) and no :local/root sibling checkout, so the default
 ;; classpath heuristic resolves cleanly on its own.
