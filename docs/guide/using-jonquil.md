@@ -1432,3 +1432,11 @@ than being surprises you'd otherwise have to rediscover:
   screen; the new width only takes effect the next time you open it.
 - No inspector for ClojureDart or for Jolt running out of process, in
   this version.
+- An MCP eval, run or run-selection against a window that is already
+  evaluating answers busy instead of queueing. `jonquil_run_selection`
+  still moves the visible selection first, by design.
+- A listening window (`:mcp-listen?`) serves one MCP client at a time:
+  a second attach waits until the first detaches.
+- `--mcp-attach` matches a window by the folder it was launched on.
+  Open Folder re-roots the window but not its registration, so attach
+  keeps matching the launch folder.
