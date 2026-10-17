@@ -84,20 +84,24 @@
   (first (str/split-lines (str/trim (str s)))))
 
 (def ^:private err-header
-  "clojure.main's err->msg header line, and the message line after it. JVM
-  nREPL, and jolt-lang/nrepl since its #11, send that text as err before
-  eval-error, and their ex is then only the class name."
-  #"(?m)^(?:Execution|Syntax) error [^\n]*\n([^\n]+)")
+  "A header line of clojure.main's err->msg, each phase's (checked against
+  clojure.main 1.12.5 and Jolt's port): the message follows on the next
+  line. JVM nREPL, and jolt-lang/nrepl since its #11, send that text as err
+  before eval-error, and their ex is then only the class name. Not anchored
+  to a line start, since *err* output with no newline can come right
+  before it."
+  #"(?:(?:Execution|Syntax|Unexpected) error|Error (?:printing return value|reading eval result))[^\n]*\.\n")
 
 (defn- error-message
-  "An eval-error's message: the line after the last err->msg header in the
-  err text (the last, so the program's own *err* output before it isn't
-  taken), else ex, else the err text."
+  "An eval-error's message: the first non-blank line after the last err->msg
+  header in the err text (the last, so the program's own *err* output
+  before it isn't taken), else ex, else the err text."
   [msgs]
-  (let [err (apply str (keep :err msgs))]
-    (first-line (or (second (last (re-seq err-header err)))
-                    (some :ex msgs)
-                    err))))
+  (let [err (apply str (keep :err msgs))
+        header (last (re-seq err-header err))
+        after (when header (subs err (+ (str/last-index-of err header) (count header))))]
+    (or (not-empty (first-line after))
+        (first-line (or (some :ex msgs) err)))))
 
 (defn eval-result
   "jonquil.eval's result shape for one request's replies: {:status

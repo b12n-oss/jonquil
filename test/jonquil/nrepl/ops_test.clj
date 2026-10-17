@@ -82,6 +82,31 @@
                                             {:err "Execution error (ExceptionInfo) at (REPL:1).\nboom\n"}
                                             {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error"]}
                                             {:status ["done"]}] false)))))
+    (testing "every clojure.main err->msg phase"
+      (doseq [[err want] [["Unexpected error (ClassCastException) compiling at (REPL:1:1).\ncast\n" "cast"]
+                          ["Unexpected error (NullPointerException) macroexpanding m at (REPL:1:1).\nnil\n" "nil"]
+                          ["Syntax error macroexpanding let at (REPL:1:1).\nbad binding" "bad binding"]
+                          ["Syntax error compiling at (REPL:1:1).\nUnable to resolve symbol: x\n" "Unable to resolve symbol: x"]
+                          ["Error printing return value (ArithmeticException) at clojure.lang.Numbers/divide (Numbers.java:190).\nDivide by zero\n" "Divide by zero"]
+                          ["Error reading eval result (IOException) at x/y (x.clj:1).\nclosed\n" "closed"]
+                          ["Execution error - invalid arguments to f at (REPL:1).\nspec text\n" "spec text"]]]
+        (is (= (str "Error: " want)
+               (:error-text (ops/eval-result [{:err err} {:ex "class X" :status ["eval-error" "done"]}] false)))
+            err)))
+    (testing "a header right after *err* output with no newline"
+      (is (= "Error: Divide by zero"
+             (:error-text (ops/eval-result [{:err "step 1..."}
+                                            {:err "Execution error (ArithmeticException) at (REPL:1).\nDivide by zero\n"}
+                                            {:ex "class java.lang.ArithmeticException" :status ["eval-error" "done"]}] false)))))
+    (testing "a blank message falls back to ex, not an earlier header's message"
+      (is (= "Error: class clojure.lang.ExceptionInfo"
+             (:error-text (ops/eval-result [{:err "Execution error (ExceptionInfo) at (REPL:1).\nolder\n"}
+                                            {:err "Execution error (ExceptionInfo) at (REPL:2).\n\n"}
+                                            {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error" "done"]}] false)))))
+    (testing "a message whose first line is blank shows its first real line"
+      (is (= "Error: real text"
+             (:error-text (ops/eval-result [{:err "Execution error (ExceptionInfo) at (REPL:1).\n\nreal text\n"}
+                                            {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error" "done"]}] false)))))
     (testing "with no header, ex is used as before"
       (is (= "Error: class java.lang.ArithmeticException"
              (:error-text (ops/eval-result [{:ex "class java.lang.ArithmeticException" :status ["eval-error" "done"]}] false))))))
