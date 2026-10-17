@@ -2,6 +2,9 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.dialect :as dialect]
+            [jonquil.evaluator :as ev]
+            [jonquil.file-tree :as ft]
             [jonquil.mcp.tools :as tools]
             [jonquil.runtime-registry :as registry]
             [temp-dirs]))
@@ -48,6 +51,37 @@
     (is (:error? r))
     (is (str/includes? (:text r) "300"))
     (is (= "=> 2" (:text (call "jonquil_eval" {"code" "(+ 1 1)"}))))))
+
+(deftest eval-print-without-newline
+  (is (= "x\n=> 1" (:text (call "jonquil_eval" {"code" "(print \"x\") 1"})))))
+
+(deftest stuck-evaluation-is-evicted
+  (let [d (temp-dirs/temp-dir! "jonquil-mcp-test-")
+        _ (spit (io/file d "deps.edn") "{}")
+        k (dialect/selection-key (ft/project-selection d nil))
+        stopped (atom false)
+        fake (reify ev/Evaluator
+               (eval! [_ _ _] nil)
+               (start! [_] nil)
+               (evaluating? [_] true)
+               (waiting-for-input? [_] false)
+               (send-input! [_ _] nil)
+               (send-eof! [_] nil)
+               (history [_] nil)
+               (prompt-ns [_] 'user)
+               (set-mode! [_ _] nil)
+               (complete [_ _ _ _ _] [])
+               (lookup [_ _ _ _] nil)
+               (limitations [_] [])
+               (interrupt! [_] nil)
+               (stop! [_] (reset! stopped true) nil))
+        tt (tools/make-tools {:dir d :cache (atom {k fake}) :grace-ms 200
+                              :settings-path (str (io/file d "s.edn"))})
+        r ((:call tt) "jonquil_eval" {"code" "(+ 1 1)" "timeout_ms" 100})]
+    (is (:error? r))
+    (is (str/includes? (:text r) "fresh one will be started"))
+    (is @stopped)
+    (is (= "=> 2" (:text ((:call tt) "jonquil_eval" {"code" "(+ 1 1)"}))))))
 
 (deftest eval-needs-code
   (is (thrown? Throwable (call "jonquil_eval" {}))))

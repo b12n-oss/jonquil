@@ -111,12 +111,13 @@
 ;; --- evaluation --------------------------------------------------------------
 
 (defn- result-text [output result]
-  (let [[_ line] (console/result-line result)]
-    (str output (str/replace (str line) #"\n+$" ""))))
+  (let [[_ line] (console/result-line result)
+        sep (if (or (str/blank? output) (str/ends-with? output "\n")) "" "\n")]
+    (str output sep (str/replace (str line) #"\n+$" ""))))
 
 (defn- run-eval!
   "Evaluates code on e and blocks for the result: {:text :error?}."
-  [e code opts timeout-ms]
+  [e code opts timeout-ms grace-ms evict!]
   (let [out (atom [])
         done (promise)
         warning (ev/eval! e code
@@ -130,10 +131,15 @@
             r (deref done timeout-ms ::timeout)]
         (if (= ::timeout r)
           (do (ev/interrupt! e)
-              (let [r2 (deref done interrupt-grace-ms ::timeout)]
+              (let [r2 (deref done grace-ms ::timeout)
+                    stuck? (= ::timeout r2)]
+                (when stuck?
+                  (evict!)
+                  (try (ev/stop! e) (catch :default _ nil)))
                 {:text (str (output)
-                            (if (= ::timeout r2)
-                              (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped.")
+                            (if stuck?
+                              (str "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped."
+                                   " The runtime was stopped; a fresh one will be started on the next call.")
                               (str "Timed out after " timeout-ms " ms; interrupted.")))
                  :error? true}))
           {:text (result-text (output) r)
@@ -154,17 +160,23 @@
 (defn make-tools
   "The tool table for default directory :dir (absolute) and settings file
   :settings-path. Evaluators are cached per project selection in the
-  returned table's closure and registered with jonquil.runtime-registry, so
+  returned table's closure (or in :cache, an atom, for tests; :grace-ms
+  overrides the 5000 ms wait after an interrupt) and registered with jonquil.runtime-registry, so
   registry/stop-all! stops them."
-  [{:keys [dir] :as ctx}]
-  (let [cache (atom {})
+  [{:keys [dir cache grace-ms] :as ctx}]
+  (let [cache (or cache (atom {}))
+        grace-ms (or grace-ms interrupt-grace-ms)
         with-ev (fn [path f]
                   (let [sel (selection ctx path)]
                     (f sel (evaluator-for! cache sel))))
+        run! (fn [path e code opts timeout-ms]
+               (let [k (dialect/selection-key (selection ctx path))]
+                 (run-eval! e code opts timeout-ms grace-ms
+                            (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m)))))))
         tool-eval (fn [args]
                     (let [code (required-string args "code")]
                       (with-ev (get args "path")
-                        (fn [_ e] (run-eval! e code {:run? false :owner :repl} (timeout-of args))))))
+                        (fn [_ e] (run! (get args "path") e code {:run? false :owner :repl} (timeout-of args))))))
         tool-run (fn [args]
                    (let [p (absolute dir (required-string args "path"))
                          f (io/file p)]
@@ -174,7 +186,7 @@
                        :else
                        (let [text (slurp f)]
                          (with-ev p
-                           (fn [_ e] (run-eval! e text {:run? true :path p :owner :run} (timeout-of args))))))))
+                           (fn [_ e] (run! p e text {:run? true :path p :owner :run} (timeout-of args))))))))
         tool-brackets (fn [args]
                         (let [text (cond
                                      (string? (get args "text")) (get args "text")
