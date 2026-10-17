@@ -26,6 +26,7 @@
     jonquil.mcp.json-test
     jonquil.mcp.tools-test
     jonquil.mcp.window-test
+    jonquil.mcp.listen-test
     jonquil.session-test
     jonquil.commands-test
     jonquil.help-test

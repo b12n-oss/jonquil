@@ -197,3 +197,16 @@
       (let [r (settings/load-settings path)]
         (is (not (contains? r :reopen-tabs?)) text)
         (is (not (str/includes? (str (:warning r)) ":reopen-tabs?")) text)))))
+
+(deftest mcp-listen-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :mcp-listen? true}")
+    (is (true? (:mcp-listen? (settings/load-settings path)))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light}")
+    (is (not (contains? (settings/load-settings path) :mcp-listen?))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :mcp-listen? \"yes\"}")
+    (let [r (settings/load-settings path)]
+      (is (not (contains? r :mcp-listen?)))
+      (is (str/includes? (:warning r) ":mcp-listen?")))))
