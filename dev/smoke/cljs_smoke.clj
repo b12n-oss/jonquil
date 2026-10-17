@@ -59,6 +59,10 @@
 (def ^:private jonquil-edn (str app-dir "/.jonquil.edn"))
 (def ^:private scratch-ns "jonquil.smoke.scratch")
 
+;; OCR reads the dots in the ns as commas or spaces ("Ran jonquil,smoke
+;; scratch", measured), so summary lines are matched up to the first segment.
+(def ^:private summary-needle "Ran jonquil")
+
 ;; Strings built with str so the OCR needles below (jq-printed, jq-boom,
 ;; jq-after, 4187) appear only in the console output, never in the source
 ;; text that stays visible in the editor pane.
@@ -308,7 +312,7 @@
   Returns {:ok :last}."
   [pid]
   (cg-key! pid "f5")
-  (wait-for-ocr! pid 60000 (str "Ran " scratch-ns)))
+  (wait-for-ocr! pid 60000 summary-needle))
 
 (defn- step-run!
   [pid]
@@ -353,21 +357,21 @@
   waits for its summary line (up to 60s), which only appears after a fresh
   connect. The count of summary lines must go up."
   [pid]
-  (let [before (count-of (ocr-text! pid) (str "Ran " scratch-ns))
+  (let [before (count-of (ocr-text! pid) summary-needle)
         _ (cg-key! pid "f5")
         grew? (wait-for! 60000 500
                          (fn []
-                           (> (count-of (ocr-text! pid) (str "Ran " scratch-ns)) before)))
+                           (> (count-of (ocr-text! pid) summary-needle) before)))
         {:keys [last]} (wait-for-ocr! pid 1000 "Connecting")]
     (screenshot! pid "cljs-step5-rerun")
     (check! :rerun-reconnects grew?
-            {:summaries-before before :summaries-after (count-of last (str "Ran " scratch-ns))
+            {:summaries-before before :summaries-after (count-of last summary-needle)
              :console last})))
 
 (defn- step-error-buffer!
   [pid]
   (cg-key! pid "f5")
-  (let [{:keys [ok last]} (wait-for-ocr! pid 60000 (str "Ran " scratch-ns))
+  (let [{:keys [ok last]} (wait-for-ocr! pid 60000 summary-needle)
         {err-ok :ok err-last :last} (wait-for-ocr! pid 5000 "jq-boom")
         {sum-ok :ok sum-last :last} (wait-for-ocr! pid 5000 "1 error; an error doesn't stop the rest of the file")
         {aft-ok :ok aft-last :last} (wait-for-ocr! pid 5000 "jq-after")]
