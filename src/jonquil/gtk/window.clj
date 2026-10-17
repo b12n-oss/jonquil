@@ -2528,6 +2528,14 @@
   (when-let [line (last-session/missing-line missing)]
     (cview/append! cv :system line)))
 
+(defn- reopen-entry!
+  "Opens entry's tabs in order, then selects its active one and names the
+  files that couldn't be opened."
+  [ctx entry]
+  (finish-reopen! ctx entry
+                  (reduce (fn [acc p] (if (reopen-failed? ctx p) (conj acc (.getName (java.io.File. ^String p))) acc))
+                          [] (:tabs entry))))
+
 (defn- restore-session!
   "Reopens the tabs sessions.edn holds for the tree's root, in order, and
   selects the one that was active (session-entry! picks the entry and does
@@ -2535,32 +2543,52 @@
   console. Does nothing when :reopen-tabs? is off."
   [ctx opts]
   (when-let [entry (session-entry! ctx opts)]
-    (finish-reopen! ctx entry
-                    (reduce (fn [acc p] (if (reopen-failed? ctx p) (conj acc (.getName (java.io.File. ^String p))) acc))
-                            [] (:tabs entry))))
+    (reopen-entry! ctx entry))
   nil)
 
+(def ^:private FIRST-FRAME-FALLBACK-MS
+  "How long after-first-frame! waits for a frame before running anyway (a
+  window that starts minimized may not paint)."
+  1000)
+
+(defn- after-first-frame!
+  "Runs f on a later main-loop turn, once win's first frame has been
+  painted, or after FIRST-FRAME-FALLBACK-MS when no frame comes. Call it
+  after gtk_window_present, since the frame clock exists only once the
+  window is realized."
+  [win f]
+  (let [done? (atom false)
+        handler (atom nil)
+        clock (g/gtk-widget-get-frame-clock win)
+        once! (fn []
+                (when (compare-and-set! done? false true)
+                  (when (and @handler (not (ffi/null? clock)))
+                    (g/g-signal-handler-disconnect clock @handler))
+                  (on-gui! f)))]
+    (when-not (ffi/null? clock)
+      (reset! handler (g/g-signal-connect-data clock "after-paint"
+                                               (callable (fn [_clock _data] (once!) nil) [:pointer :pointer] :void)
+                                               ffi/null ffi/null g/CONNECT-DEFAULT)))
+    (g/g-timeout-add FIRST-FRAME-FALLBACK-MS (callable (fn [_data] (once!) 0) [:pointer] :int :on-throw 0) ffi/null)))
+
 (defn- reopen-later!
-  "Startup's reopen, once the window is up: one tab per main-loop turn, so
-  the window shows, and answers, while they load. Then done! runs. A throw
-  goes on the console and still runs done!. Stops without done! once
-  :session-restoring? goes false, which a quit does."
-  [{:keys [cv session-restoring?] :as ctx} entry done!]
-  (letfn [(step [paths missing]
-            (when @session-restoring?
-              (when (= :done (try
-                               (if-let [p (first paths)]
-                                 (let [missing (if (reopen-failed? ctx p) (conj missing (.getName (java.io.File. ^String p))) missing)]
-                                   (on-gui! (fn [] (step (rest paths) missing)))
-                                   :more)
-                                 (do (finish-reopen! ctx entry missing) :done))
-                               (catch :default e
-                                 (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))
-                                 :done)))
-                (reset! session-restoring? false)
-                (done!))))]
-    (reset! session-restoring? true)
-    (on-gui! (fn [] (step (:tabs entry) [])))))
+  "Startup's reopen, once the window has painted its first frame: every
+  tab in one main-loop turn, so nothing the user does can land between
+  two of them. Then done! runs, even when the reopen threw (said on the
+  console). Does nothing if :session-restoring? went false first, which a
+  quit does."
+  [{:keys [cv win session-restoring?] :as ctx} entry done!]
+  (reset! session-restoring? true)
+  (after-first-frame!
+   win
+   (fn []
+     (when @session-restoring?
+       (reset! session-restoring? false)
+       (try
+         (reopen-entry! ctx entry)
+         (catch :default e
+           (cview/append! cv :error (str "; reopen tabs: " (ex-message e) "\n"))))
+       (done!)))))
 
 ;; --- file operations from the tree (file-ops plan T4) ------------------------
 ;; The pane calls these inside its popover's own signal emission (the entry's
@@ -3365,10 +3393,11 @@
         (if (seq (:tabs entry))
           (reopen-later! tab-ctx entry
                          (fn []
-                           (live!)
-                           (let [t (active-tab)]
-                             (update-title! (:ed t) win (:path t))
-                             (editor/focus! (:ed t)))))
+                           (try
+                             (let [t (active-tab)]
+                               (update-title! (:ed t) win (:path t))
+                               (editor/focus! (:ed t)))
+                             (finally (live!)))))
           (live!))))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's

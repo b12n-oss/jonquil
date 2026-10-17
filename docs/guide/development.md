@@ -101,7 +101,7 @@ gone. The tree is rooted there and showing, the window runs that
 directory's project, and the one tab is Untitled when the window is first
 shown. The remembered tabs then open in order, with the right one selected
 and the gone file named on the console, and `sessions.edn` isn't
-rewritten.
+rewritten until a tab switch after the reopen saves it.
 
 The seventh group (`dev/gtk_selftest_jank.clj`, 13 rows) opens a window on a
 throwaway `.jank` project. `bb gtk:selftest` sets `JONQUIL_JANK` to

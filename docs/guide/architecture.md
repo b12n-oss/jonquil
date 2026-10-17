@@ -38,10 +38,12 @@ these:
   changes whenever the tabs do. `load-sessions` and `save-sessions!` never
   throw, and `remember` and `entry-for` are pure. When no file was named,
   startup picks the entry (and re-roots the tree) before the window is
-  shown, then `reopen-later!` opens the files after it's up, one per
-  main-loop turn, so the window appears without waiting for them. A quit
-  before that's done stops it and saves nothing, since the tabs open then
-  are only part of the list. After the reopen the window saves as the tabs
+  shown. `reopen-later!` then waits for the window's first painted frame
+  (the frame clock's `after-paint`, or one second if no frame comes) and
+  opens them all in one main-loop turn, so the window appears without
+  waiting for them and nothing the user does can land between two of
+  them. A quit before then cancels it and saves nothing, since the tabs
+  open are only part of the list. After the reopen the window saves as the tabs
   change:
   `refresh-labels!` (every open, close and path change) and `on-switch!` call
   `session-changed!`, which writes only when the `{:root :tabs :active}`

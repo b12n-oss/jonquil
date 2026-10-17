@@ -71,7 +71,8 @@
 
 (defn- row-tree-dir-launch-reopen
   "The remembered tabs open in order, core.clj is selected, gone.clj is
-  named on the console, and the reopen wrote nothing to sessions.edn."
+  named on the console, and the reopen wrote nothing to sessions.edn. Then
+  live saving is on: selecting README.md writes it as the active tab."
   [ui]
   (go-row :tree-dir-launch-reopen support/check
     (let [d @fixture*
@@ -82,10 +83,15 @@
           done? (await-until 5000 20 (fn [] (and (= want (paths)) (named?))))
           v (on-gtk {:paths (paths)
                      :active @(:path ((:active-tab* ui)))
-                     :sessions-same? (= @sessions-text* (slurp (last-session/sessions-path ((:settings-path* ui)))))})]
+                     :sessions-same? (= @sessions-text* (slurp (last-session/sessions-path ((:settings-path* ui)))))})
+          saved-active (fn [] (:active (last-session/entry-for
+                                        (:sessions (last-session/load-sessions (last-session/sessions-path ((:settings-path* ui)))))
+                                        d)))
+          _ (on-gtk ((:select-tab! ui) (:id (second ((:tabs* ui))))))
+          live? (await-until 2000 20 (fn [] (= (second want) (saved-active))))]
       (support/check :tree-dir-launch-reopen
-                     (and done? (= (first want) (:active v)) (:sessions-same? v))
-                     v))))
+                     (and done? (= (first want) (:active v)) (:sessions-same? v) live?)
+                     (assoc v :live? live?)))))
 
 (defn- row-tree-dir-launch-project
   "The window runs the fixture's project."
