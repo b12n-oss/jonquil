@@ -79,7 +79,7 @@
         text (or (get m "file") (get m "code") "")
         forms (try (read-forms text) (catch Exception _ ::unreadable))
         {:keys [cljs? last-id]} (get @sessions sid)
-        cur (fn [] (get-in @sessions [sid :ns] "user"))]
+        cur (fn [] (get-in @sessions [sid :ns] "shadow.user"))]
     (cond
       (= ::unreadable forms)
       (do (reply {"err" "Syntax error reading source"}) (reply {"status" ["done"]}))
@@ -136,7 +136,7 @@
         "describe" (reply {"ops" (zipmap (if (:bare-ops? opts) bare-ops shadow-ops) (repeat {}))
                            "status" ["done"]})
         "clone" (let [new-sid (str "fake-shadow-session-" (swap! counter inc))]
-                  (swap! sessions assoc new-sid {:ns "user" :cljs? false})
+                  (swap! sessions assoc new-sid {:ns "shadow.user" :cljs? false})
                   (raw-reply {"new-session" new-sid "session" new-sid "status" ["done"]}))
         ("eval" "load-file") (do (evaluate! srv reply raw-reply m)
                                  (when sid (swap! sessions assoc-in [sid :last-id] (get m "id"))))
