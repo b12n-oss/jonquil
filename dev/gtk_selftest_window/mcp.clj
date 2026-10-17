@@ -10,8 +10,8 @@
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
-            [jonquil.gtk.editor :as editor]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.mcp.window :as window]
             [jonquil.tabs :as tabs]
@@ -284,8 +284,8 @@
                                             (str/starts-with? first-line "mark ")
                                             (str/includes? body "(+ 1 2)")
                                             (str/includes? body "; --- Running ")
-                                            (str/includes? body "=> 3")
-                                            (str/includes? body "=> 7"))
+                                            (str/includes? body "\n=> 3")
+                                            (str/includes? body "\n=> 7"))
                                        {:mark mark :ev ev :run run :c1 c1})))
               (finally (on-gtk (close-extra-tabs! ui)))))))
 
@@ -309,7 +309,7 @@
             (on-gtk (support/check :mcp-tools-timeout-stop
                                    (and (= "Nothing is running." (:text stop)) (not (:error? stop))
                                         (< elapsed 6000) (:error? to)
-                                        (str/includes? (:text to) "300")
+                                        (str/includes? (:text to) "Timed out after 300 ms")
                                         (not (:error? after)) (str/ends-with? (:text after) "=> 4"))
                                    {:stop stop :elapsed elapsed :to to :after after})))))
 
@@ -322,7 +322,7 @@
                 elapsed (- (System/currentTimeMillis) t0)
                 _ (ev/send-input! ((:evaluator* ui)) "hi")
                 idle? (await-until 5000 20 #(support/idle? ui))
-                echoed? (await-until 3000 20 #(str/includes? (support/since ui mark) "=> \"hi\""))]
+                echoed? (await-until 3000 20 #(str/includes? (support/since ui mark) "\n=> \"hi\""))]
             (on-gtk (support/check :mcp-tools-waiting-input
                                    (and (< elapsed 5000) (not (:error? r))
                                         (str/includes? (:text r) "waiting for console input")
