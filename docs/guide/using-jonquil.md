@@ -1235,6 +1235,49 @@ the serve loop writes a line to stderr and closes the window the same way.
 The trust boundary is the headless server's, plus the files the window can
 reach: the agent can open, edit and save any file you can.
 
+### Attaching to a window that is already open
+
+`--window` starts a new window for each agent session. To hand an agent the
+window you already have, with its tabs and its console, turn listening on in
+`settings.edn`:
+
+```edn
+{:mcp-listen? true}
+```
+
+A window started with that setting serves the same fifteen tools on a socket
+bound to 127.0.0.1, on a port the operating system picks, to one client at a
+time. It publishes the port in `mcp/<pid>.edn` inside the settings directory
+(next to `settings.edn`), one file per window. Then register the bridge:
+
+```bash
+claude mcp add jonquil -- jonquil --mcp-attach /path/to/project
+```
+
+`jonquil --mcp-attach [DIR]` finds the live window whose registered folder
+matches `DIR` and relays JSON-RPC lines between its own stdio and that window.
+Left bare, `jonquil --mcp-attach` attaches when exactly one window is
+listening. With none, or with several and no `DIR` to choose between them, it
+refuses and says why, listing the live windows when there is more than one.
+
+The folder a window registers is the one it opened on. A window with no file
+tree root registers its working directory. The registration is static: if you
+use Open Folder to re-root the window later, the entry keeps the launch folder,
+so attach still matches that one.
+
+Detaching leaves the window running, with its tabs and unsaved edits as they
+were, which is the difference from `--window`, where EOF closes the window. If
+the relay loses its connection mid-stream it writes one line to stderr and
+exits. The window removes its entry when it quits, and an entry left behind by
+a crash is recognized by its dead pid and skipped. `bb mcp:smoke --attach`
+exercises all of this end to end.
+
+**Trust.** While `:mcp-listen?` is on, any local process that can reach the
+loopback interface gets unauthenticated code execution in your account, plus
+the window's file reach. That is the same family of exposure as running any
+local nREPL server. The default is off, and nothing listens unless you turn it
+on.
+
 ### Trust boundary
 
 Whoever can start `jonquil --mcp` can run code as you. Evaluating is the point

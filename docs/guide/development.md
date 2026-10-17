@@ -11,15 +11,15 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 58 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (574 tests, 3445 assertions
+slower. `bb test` runs the full unit suite (599 tests, 3508 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (574 tests and 3414 assertions, 31
-fewer, measured 2026-10-17).
+reports fewer assertions than macOS (31 fewer when last measured, on
+574 tests, 2026-10-17; not re-measured at 599).
 
 `bb test:nrepl` runs a second, separate suite (38 tests, 127 assertions,
 about 40 s): every test in it spawns a real Jolt child over
@@ -62,6 +62,16 @@ unsaved edit pending, closing stdin must end the process within 20 s, leave no
 Jolt child, and leave the file on disk unchanged. Every stdout line must parse
 as JSON. It prints 16 checks, and `--bin PATH` works with it too.
 
+`bb mcp:smoke --attach` smokes the other half: it starts a real window with
+`:mcp-listen? true` under a temp `XDG_CONFIG_HOME`, so your own settings are
+untouched (don't type while it runs), waits for its registry entry, and runs
+`jonquil --mcp-attach` against it over real stdio. It checks the handshake,
+exactly the fifteen window tools, an evaluation and the console mark, that
+closing stdin ends the bridge within 10 s with the window still running, and
+that a second bridge then attaches and evaluates. It ends by sending SIGTERM
+to the window, which must exit within 20 s and remove its registry file. Every
+bridge stdout line must parse as JSON. It prints 16 checks.
+
 ## Self-test and docs: eight windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
@@ -72,11 +82,11 @@ front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 47 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 300 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 303 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
-`console_layout`, `dialects`, `mcp` (the window hooks and the fifteen tools driven in process), `contained` (a forced throw in each find-bar,
+`console_layout`, `dialects`, `mcp` (the window hooks, the fifteen tools and the listener driven in process), `contained` (a forced throw in each find-bar,
 toolbar and file-dialog handler is reported and the app carries on),
 `prompt` (the namespace prompt following a
 REPL line, a Run and a slow evaluation), `app_open` (Open With and Dock drops: two files through a real
@@ -142,7 +152,7 @@ into absolute paths for `g_application_run`. GApplication then emits `open`
 argument, that a folder launch saves no tree visibility, that the two files
 open as tabs, that the active tab is the last file, and that the program name
 is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). A full run reports
-47, 300, 16, 15, 29, 4, 13 and 5 rows passing, in group order.
+47, 303, 16, 15, 29, 4, 13 and 5 rows passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
