@@ -413,7 +413,7 @@ opens and closes a real GTK window per size, so leave the keyboard alone
 while it runs.
 
 Measured on 2026-10-15 on macOS arm64, all times in milliseconds. "Before" is
-the same harness run against commit 6fd9133, the last commit without the
+the same harness run against commit d9011d1, the last commit without the
 background repaint. The old code had no background repaint, so the settle
 rows have no "before".
 
