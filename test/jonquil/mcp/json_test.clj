@@ -30,3 +30,10 @@
 
 (deftest decode-invalid-throws
   (is (thrown? Exception (json/decode "{not json"))))
+
+(deftest round-trip-literal-backslash-u-text
+  (let [x {"s" "\\ud83d \\\\u0041"}]
+    (is (= x (json/decode (json/encode x))))))
+
+(deftest decode-ordinary-escapes-pass-through
+  (is (= {"a" "A\n\t\\"} (json/decode "{\"a\":\"\\u0041\\n\\t\\\\\"}"))))
