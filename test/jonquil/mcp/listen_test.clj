@@ -7,8 +7,9 @@
             [jonquil.mcp.json :as json]
             [jonquil.mcp.listen :as listen]
             [temp-dirs])
-  (:import (java.lang ProcessHandle)
-           (java.net ConnectException InetAddress Socket)))
+  (:import (java.io IOException)
+           (java.lang ProcessHandle)
+           (java.net ConnectException InetAddress ServerSocket Socket)))
 
 (use-fixtures :once temp-dirs/fixture)
 
@@ -136,3 +137,30 @@
     ((:stop! l))
     (is (not (.exists entry)))
     (is (thrown? ConnectException (connect (:port l))))))
+
+(deftest start-failure-releases-the-port
+  (let [seen (atom nil)]
+    (with-redefs [listen/write-entry! (fn [_ e]
+                                        (reset! seen (:port e))
+                                        (throw (ex-info "no registry" {})))]
+      (is (thrown? Exception (start!))))
+    (is (some? @seen))
+    (.close (ServerSocket. (int @seen) 50 (InetAddress/getByName "127.0.0.1")))))
+
+(deftest accept-failure-gives-up-and-unregisters
+  (let [sp (settings-path)
+        entry (io/file (listen/registry-dir sp) (str (own-pid) ".edn"))
+        err (java.io.StringWriter.)
+        t0 (System/nanoTime)]
+    (binding [*err* err]
+      (with-redefs [listen/accept-conn (fn [_] (throw (IOException. "accept boom")))]
+        (let [l (listen/start-listener! {:ui (fake-ui) :dir "/tmp" :gui (fn [f] (f)) :settings-path sp})]
+          (loop []
+            (when (and (.exists entry) (< (/ (- (System/nanoTime) t0) 1e6) 5000))
+              (Thread/sleep 20)
+              (recur)))
+          (is (not (.exists entry)))
+          (is (< (/ (- (System/nanoTime) t0) 1e6) 5000))
+          (is (str/includes? (str err) "accept boom"))
+          (is (str/includes? (str err) "giving up"))
+          (is (thrown? ConnectException (connect (:port l)))))))))
