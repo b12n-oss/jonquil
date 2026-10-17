@@ -90,3 +90,63 @@
       (is (contains? (rs 1) "id"))
       (is (nil? (get (rs 1) "id")))
       (is (= "yo" (get-in rs [2 "result" "content" 0 "text"]))))))
+
+(defn- serve-lines [tools lines]
+  (let [in (atom (vec lines))
+        out (atom [])]
+    (mcp/serve! {:tools tools
+                 :read-line (fn [] (let [l (first @in)] (swap! in (comp vec rest)) l))
+                 :write-line (fn [s] (swap! out conj s))})
+    (mapv json/decode @out)))
+
+(def ^:private throwing-defs-tools
+  {:defs (map (fn [_] (throw (ex-info "defs broke" {}))) [1])
+   :call (fn [_ _] nil)})
+
+(deftest handler-throw-answers-internal-error-and-loop-continues
+  (let [rs (serve-lines throwing-defs-tools
+                        [(json/encode (req 7 "tools/call" {"name" "echo"}))
+                         (json/encode (req 8 "ping" nil))])]
+    (is (= 2 (count rs)))
+    (is (= 7 (get (rs 0) "id")))
+    (is (= -32603 (get-in rs [0 "error" "code"])))
+    (is (= {} (get-in rs [1 "result"])))))
+
+(deftest handler-throw-on-notification-is-silent
+  (is (= [] (serve-lines throwing-defs-tools
+                         [(json/encode {"jsonrpc" "2.0" "method" "tools/call"
+                                        "params" {"name" "x"}})]))))
+
+(deftest unencodable-response-does-not-end-loop
+  (let [bad {:defs [{"name" "bad" "x" (fn [] 1)}] :call (fn [_ _] nil)}
+        rs (serve-lines bad [(json/encode (req 3 "tools/list" nil))
+                             (json/encode (req 4 "ping" nil))])]
+    (is (= 2 (count rs)))
+    (is (= 3 (get (rs 0) "id")))
+    (is (= -32603 (get-in rs [0 "error" "code"])))
+    (is (= 4 (get (rs 1) "id")))))
+
+(deftest notifications-to-known-methods-get-no-reply
+  (doseq [m ["ping" "tools/list" "tools/call" "initialize"]]
+    (is (nil? (mcp/handle-message tools {"jsonrpc" "2.0" "method" m
+                                         "params" {"name" "echo"}})))))
+
+(deftest id-zero-is-a-request
+  (is (= 0 (get (mcp/handle-message tools (req 0 "ping" nil)) "id"))))
+
+(deftest nil-returning-tool-is-an-error
+  (let [t {:defs stub-defs :call (fn [_ _] nil)}
+        r (get (mcp/handle-message t (req 1 "tools/call" {"name" "echo"})) "result")]
+    (is (true? (get r "isError")))
+    (is (string? (get-in r ["content" 0 "text"])))))
+
+(deftest nil-text-becomes-a-string
+  (let [t {:defs stub-defs :call (fn [_ _] {:text nil :error? false})}
+        r (get (mcp/handle-message t (req 1 "tools/call" {"name" "echo"})) "result")]
+    (is (= "" (get-in r ["content" 0 "text"])))))
+
+(deftest throw-without-message
+  (let [t {:defs stub-defs :call (fn [_ _] (throw (ex-info nil {})))}
+        r (get (mcp/handle-message t (req 1 "tools/call" {"name" "echo"})) "result")]
+    (is (true? (get r "isError")))
+    (is (not= "Error: " (get-in r ["content" 0 "text"])))))

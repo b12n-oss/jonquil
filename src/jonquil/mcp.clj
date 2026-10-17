@@ -39,10 +39,12 @@
       (rpc-result
        id
        (try
-         (let [{:keys [text error?]} ((:call tools) tname args)]
-           (text-result text error?))
+         (let [r ((:call tools) tname args)]
+           (if (map? r)
+             (text-result (str (:text r)) (:error? r))
+             (text-result (str "Error: tool returned " (pr-str r)) true)))
          (catch Throwable e
-           (text-result (str "Error: " (ex-message e)) true)))))))
+           (text-result (str "Error: " (or (ex-message e) (str e))) true)))))))
 
 (def ^:private handlers
   {"initialize" initialize
@@ -52,27 +54,47 @@
    "tools/call" tools-call})
 
 (defn handle-message
-  "Decoded request -> response map, or nil for a notification. A non-map
-  envelope (a batch array or a bare scalar) gets -32600 with a null id."
+  "Decoded request -> response map, or nil when there is nothing to answer:
+  a message without an \"id\" is a notification and never gets a reply. A
+  non-map envelope (a batch array or a bare scalar) gets -32600 with a null
+  id."
   [tools msg]
-  (if-not (map? msg)
-    (rpc-error nil -32600 "Invalid Request")
-    (if-let [h (get handlers (get msg "method"))]
-      (h tools msg)
-      (when (contains? msg "id")
-        (rpc-error (get msg "id") -32601 "Method not found")))))
+  (cond
+    (not (map? msg)) (rpc-error nil -32600 "Invalid Request")
+    (not (contains? msg "id")) nil
+    :else (if-let [h (get handlers (get msg "method"))]
+            (h tools msg)
+            (rpc-error (get msg "id") -32601 "Method not found"))))
 
-(def ^:private parse-error-response
-  (rpc-error nil -32700 "Parse error"))
+(defn- respond
+  "Response map for one input line, or nil. Decode failure is -32700 with a
+  null id; a throw inside dispatch is -32603 with the request's id, and no
+  reply when the message had none."
+  [tools line]
+  (let [decoded (try {:msg (json/decode line)}
+                     (catch Throwable _ nil))]
+    (if-not decoded
+      (rpc-error nil -32700 "Parse error")
+      (let [msg (:msg decoded)]
+        (try (handle-message tools msg)
+             (catch Throwable _
+               (when (and (map? msg) (contains? msg "id"))
+                 (rpc-error (get msg "id") -32603 "Internal error"))))))))
+
+(defn- encode-response [resp]
+  (try (json/encode resp)
+       (catch Throwable _
+         (json/encode (rpc-error (get resp "id") -32603 "Internal error")))))
 
 (defn serve!
   "Reads one JSON-RPC message per line via :read-line until it returns nil,
-  writing each response with :write-line. Blank lines are skipped."
+  writing each response with :write-line. Blank lines are skipped. A bad
+  request never ends the loop. A :write-line failure (a broken pipe) is not
+  caught: nobody is listening, so the loop ends with it."
   [{:keys [tools read-line write-line]}]
   (loop []
     (when-let [line (read-line)]
       (when-not (str/blank? line)
-        (let [resp (try (handle-message tools (json/decode line))
-                        (catch Throwable _ parse-error-response))]
-          (when resp (write-line (json/encode resp)))))
+        (when-let [resp (respond tools line)]
+          (write-line (encode-response resp))))
       (recur))))
