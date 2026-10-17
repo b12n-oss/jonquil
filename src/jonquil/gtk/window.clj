@@ -2560,14 +2560,17 @@
   (let [done? (atom false)
         handler (atom nil)
         clock (g/gtk-widget-get-frame-clock win)
-        once! (fn []
-                (when (compare-and-set! done? false true)
-                  (when (and @handler (not (ffi/null? clock)))
-                    (g/g-signal-handler-disconnect clock @handler))
-                  (on-gui! f)))]
+        once! (fn [] (when (compare-and-set! done? false true) (on-gui! f)))]
     (when-not (ffi/null? clock)
+      ;; Disconnected only from inside its own emission, where the clock is
+      ;; alive. After the timeout wins it stays connected and does nothing,
+      ;; since the timeout may fire after the window, and its clock, is gone.
       (reset! handler (g/g-signal-connect-data clock "after-paint"
-                                               (callable (fn [_clock _data] (once!) nil) [:pointer :pointer] :void)
+                                               (callable (fn [clk _data]
+                                                           (when @handler (g/g-signal-handler-disconnect clk @handler))
+                                                           (once!)
+                                                           nil)
+                                                         [:pointer :pointer] :void)
                                                ffi/null ffi/null g/CONNECT-DEFAULT)))
     (g/g-timeout-add FIRST-FRAME-FALLBACK-MS (callable (fn [_data] (once!) 0) [:pointer] :int :on-throw 0) ffi/null)))
 
