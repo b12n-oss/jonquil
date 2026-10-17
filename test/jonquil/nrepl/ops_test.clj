@@ -98,6 +98,17 @@
              (:error-text (ops/eval-result [{:err "step 1..."}
                                             {:err "Execution error (ArithmeticException) at (REPL:1).\nDivide by zero\n"}
                                             {:ex "class java.lang.ArithmeticException" :status ["eval-error" "done"]}] false)))))
+    (testing "a message that starts like a header is the message, not a header"
+      (doseq [msg ["Unexpected error occurred." "Syntax error: bad token." "Execution error." "Error printing return value."
+                   "Error reading eval result failed."]]
+        (is (= (str "Error: " msg)
+               (:error-text (ops/eval-result [{:err (str "Execution error (ExceptionInfo) at (REPL:1).\n" msg "\n")}
+                                              {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error" "done"]}] false)))
+            msg)))
+    (testing "CRLF line ends, from a Windows server"
+      (is (= "Error: boom"
+             (:error-text (ops/eval-result [{:err "Execution error (ExceptionInfo) at (REPL:1).\r\nboom\r\n"}
+                                            {:ex "class X" :status ["eval-error" "done"]}] false)))))
     (testing "a blank message falls back to ex, not an earlier header's message"
       (is (= "Error: class clojure.lang.ExceptionInfo"
              (:error-text (ops/eval-result [{:err "Execution error (ExceptionInfo) at (REPL:1).\nolder\n"}

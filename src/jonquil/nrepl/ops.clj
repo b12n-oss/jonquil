@@ -89,8 +89,10 @@
   line. JVM nREPL, and jolt-lang/nrepl since its #11, send that text as err
   before eval-error, and their ex is then only the class name. Not anchored
   to a line start, since *err* output with no newline can come right
-  before it."
-  #"(?:(?:Execution|Syntax|Unexpected) error|Error (?:printing return value|reading eval result))[^\n]*\.\n")
+  before it, so it needs the header's own ending, \" at <location>).\", to
+  tell it from a message that merely starts the same way. \\r? for a
+  server on Windows."
+  #"(?:(?:Execution|Syntax|Unexpected) error|Error (?:printing return value|reading eval result))[^\n]* at [^\n]*\)\.\r?\n")
 
 (defn- error-message
   "An eval-error's message: the first non-blank line after the last err->msg
