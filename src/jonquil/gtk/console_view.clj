@@ -735,8 +735,8 @@
 (def ^:private KEY-SPACE 0x020)
 
 (defn- command-chord?
-  "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
-  works on Linux and macOS."
+  "A command chord is Control or Meta, so the same shortcut works on
+  Linux and macOS."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 
@@ -840,7 +840,7 @@
 
 (defn make-console-view
   "Builds the console: an editable, monospace GtkTextView with an 8px left /
-  4px top margin (global.md), inside a GtkScrolledWindow, starting as a bare
+  4px top margin, inside a GtkScrolledWindow, starting as a bare
   default-prompt (`user=> `) with an empty input after it. set-prompt!
   (below) rewrites it once an evaluator reports its session's namespace.
 

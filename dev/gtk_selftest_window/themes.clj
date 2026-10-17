@@ -254,7 +254,7 @@
   "The window's own key dispatch, driven directly (never a synthesized
   keystroke): 0x04d (uppercase M, as Shift+m arrives) + CONTROL-MASK +
   SHIFT-MASK, then 0x06d (lowercase m) + META-MASK + SHIFT-MASK -- both
-  Control and Meta count as the command chord (gtk-keys.md), so this
+  Control and Meta count as the command chord, so this
   covers Linux and macOS. Each call must return 1 and advance the theme
   one step from wherever the previous call (or an earlier row) left it."
   [ui]

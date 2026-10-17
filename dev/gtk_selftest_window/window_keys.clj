@@ -140,7 +140,7 @@
                              (and (= 1 handled) status-ok?)
                              {:handled handled :status (g/label-text (:status-label ui))})))))
 
-;; gtk-keys.md's shared table -- window.clj's own copy is private.
+;; The shared key table (gdkkeysyms.h) -- window.clj's own copy is private.
 (def ^:private KEY-W 0x77)
 (defn row-command-chord-close
   "Closes WHILE a program is running, not idle, since the eval worker's

@@ -248,8 +248,9 @@
 
 (defn- wait-for!
   "Polls (pred?) every interval-ms, up to a total of deadline-ms, sleeping
-  between checks -- global.md/AGENTS.md's own rule for GTK self-tests,
-  applied here to an external process instead of an in-process poll."
+  between checks -- the same never-a-fixed-sleep rule the GTK self-tests
+  follow, applied here to an external process instead of an in-process
+  poll."
   [deadline-ms interval-ms pred?]
   (let [t0 (System/currentTimeMillis)]
     (loop []
@@ -413,8 +414,8 @@
 
 (defn- format-code-via-jolt!
   "The text jonquil.syntax/format-code produces for whatever is on disk at
-  path right now, computed by shelling a real `jolt -M -e` (AGENTS.md:
-  `jolt -e` ignores deps.edn; `-M` loads the project classpath) -- never
+  path right now, computed by shelling a real `jolt -M -e` (`jolt -e`
+  ignores deps.edn; `-M` loads the project classpath) -- never
   hand-written, per this task's own instructions, so a future change to
   the formatter's own rules can't silently desync this step from the code
   it claims to check. Throws on a non-zero exit, naming jolt's own stderr:
@@ -440,8 +441,8 @@
   caret, or 0; the next \\n at/after the caret, or the text's own
   length) -- not itself the formatter under test, just locating where
   that one line starts and ends; the real formatting comes from a live
-  `jolt -M -e` call into jonquil.syntax/format-selection-text (AGENTS.md:
-  `jolt -e` ignores deps.edn; `-M` loads the project classpath), never
+  `jolt -M -e` call into jonquil.syntax/format-selection-text (`jolt -e`
+  ignores deps.edn; `-M` loads the project classpath), never
   hand-written, same reasoning as format-code-via-jolt!. Throws on a
   non-zero exit, naming jolt's own stderr."
   [path]
@@ -461,7 +462,7 @@
 (defn- candidates-via-jolt!
   "P4.T8: the exact :symbol list jonquil.docs/candidates returns for
   prefix/text/pos in the 'user namespace -- computed via a live `jolt -M
-  -e` call (AGENTS.md: `jolt -e` ignores deps.edn; `-M` loads the project
+  -e` call (`jolt -e` ignores deps.edn; `-M` loads the project
   classpath), never hand-written, same reasoning as format-code-via-
   jolt!/format-selection-via-jolt! above. 'user is never a guess: every
   process this file launches is fresh (jonquil.session/make-session's own
@@ -964,9 +965,9 @@
   responsive. Measured live: this fixture prints fast enough that by the
   time OCR runs, \"; interrupted\" itself can already have scrolled out of
   the console's visible viewport, pushed up by more \"tick\" lines that
-  were already queued (AGENTS.md's own GTK fact: \"the result line is
-  queued after the status flips\", so a burst of already-buffered output
-  can still land after it) -- a first version of this step asserted on
+  were already queued (the result line is queued after the status flips,
+  so a burst of already-buffered output can still land after it) -- a
+  first version of this step asserted on
   seeing \"interrupted\" in the OCR text and failed on exactly that,
   correctly-behaving run. The status label (a separate widget, never part
   of the scrolling console, always fully visible) doesn't have this

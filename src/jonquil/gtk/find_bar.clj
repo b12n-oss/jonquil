@@ -39,7 +39,7 @@
             [jonquil.syntax :as syntax]
             [jonquil.theme :as theme]))
 
-;; --- keys (gtk-keys.md, values from gdkkeysyms.h 2026-09-24) --------------
+;; --- keys (values from gdkkeysyms.h 2026-09-24) ---------------------------
 
 (def ^:private KEY-ESCAPE 0xff1b)
 (def ^:private KEY-RETURN 0xff0d)
@@ -47,7 +47,7 @@
 (def ^:private KEY-G 0x067)
 
 (defn- command-chord?
-  "A command chord is Control or Meta (gtk-keys.md), duplicated here since
+  "A command chord is Control or Meta, duplicated here since
   it's private in jonquil.gtk.window/jonquil.gtk.editor too."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))

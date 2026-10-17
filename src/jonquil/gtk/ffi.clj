@@ -5,7 +5,8 @@
   numbers, signal handlers are :collect-safe foreign-callables because GTK
   invokes them from inside the :blocking g_application_run loop.
 
-  ABI rule (AGENTS.md): no variadic C functions. That excludes
+  ABI rule: no variadic C functions (the FFI layer is fixed-arity
+  only). That excludes
   g_object_set and gtk_text_buffer_create_tag — properties go through the
   fixed-arity GValue path (g_value_init/set_string +
   g_object_set_property), fonts/colors through a CSS provider.
@@ -574,8 +575,9 @@
 
 ;; gtk_text_buffer_remove_tag: gtktextbuffer.h:363-366 (same signature shape
 ;; as the already-bound gtk_text_buffer_apply_tag above). Not in the
-;; brief's enumerated P3.T4 list or in spike.p3-ffi -- added here (per
-;; AGENTS.md: "cite the header line for any you write yourself") because
+;; brief's enumerated P3.T4 list or in spike.p3-ffi -- added here (this
+;; file's convention: any binding you add yourself cites its header line)
+;; because
 ;; gtk_text_buffer_remove_all_tags would strip the editor's own syntax tags
 ;; too wherever a match happens to overlap them; this removes only the
 ;; search-match tag, so recomputing/closing never touches paint/syntax
@@ -653,7 +655,8 @@
 ;; g_object_new_with_properties: gobject/gobject.h:436-439 (probe 3;
 ;; jonquil.gtk.ffi didn't have this yet, spike.p3-ffi did). The fixed-arity
 ;; GtkAlertDialog constructor -- gtk_alert_dialog_new is variadic (printf-
-;; style) and is never bound (AGENTS.md).
+;; style) and is never bound (the no-variadic ABI rule in the ns
+;; docstring).
 (ffi/defcfn g-object-new-with-properties "g_object_new_with_properties"
   [:size_t :uint :pointer :pointer] :pointer)
 ;; gtkalertdialog.h (gtk4 4.22.4, GDK_AVAILABLE_IN_4_10): gtk_alert_dialog_get_type

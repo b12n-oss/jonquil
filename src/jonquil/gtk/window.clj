@@ -5,7 +5,7 @@
   jonquil.evaluator (jonquil.session's in-process record by default) to the
   two views: Run and the REPL both go through it.
 
-  Lock caller rule (global.md, jonquil.eval's docstring): on-output,
+  Lock caller rule (jonquil.eval's docstring): on-output,
   on-wait-input, on-status-change and on-complete all run on the eval worker
   thread, never the GTK thread. Every one of them here only enqueues, via
   jonquil.gtk.console-view/append! (safe from any thread) or
@@ -61,7 +61,7 @@
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
 
-;; --- keys (gtk-keys.md; KEY-R is a P2.T7 addition the table doesn't carry)
+;; --- keys (values from gdkkeysyms.h; KEY-R is a P2.T7 addition)
 ;; ----------------------------------------------------------------------
 
 (def ^:private KEY-F5 0xffc2)
@@ -70,7 +70,7 @@
 (def ^:private KEY-O 0x6f)
 (def ^:private KEY-S 0x73)
 (def ^:private KEY-W 0x77)
-;; P3.T3 additions (gtk-keys.md, values read from gdkkeysyms.h 2026-09-24).
+;; P3.T3 additions (values read from gdkkeysyms.h 2026-09-24).
 (def ^:private KEY-F6 0xffc3)
 (def ^:private KEY-E 0x065)
 (def ^:private KEY-L 0x06c)
@@ -98,8 +98,8 @@
 (def ^:private KEY-9 0x039)
 
 (defn- command-chord?
-  "A command chord is Control or Meta (gtk-keys.md), so the same shortcut
-  works on Linux and macOS."
+  "A command chord is Control or Meta, so the same shortcut works on
+  Linux and macOS."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 
@@ -904,8 +904,9 @@
     (refresh-prompt! cv ev*)))
 
 (defn- make-eval-opts
-  "The opts run-definitions!/submit-repl! share (global.md: every one of
-  these runs on the eval worker thread and must only enqueue).
+  "The opts run-definitions!/submit-repl! share (the lock-caller rule:
+  every one of these runs on the eval worker thread and must only
+  enqueue).
 
   I2: the console's :evaluating?/:waiting? are wired at construction to
   read live from the engine (see activate!), not mirrored by callbacks
@@ -1356,8 +1357,8 @@
   passing a second :on-complete through do-repl-eval!'s extra-opts, which
   would just replace the window's own): after make-eval-opts' own
   completion handling runs, an :ok result calls inspect-last! through
-  on-gui! -- :on-complete runs on the eval worker thread (global.md: must
-  only enqueue), and inspect-last! reaches GTK.
+  on-gui! -- :on-complete runs on the eval worker thread (the lock-caller
+  rule: must only enqueue), and inspect-last! reaches GTK.
 
   Ruling 9: a press while an inspect! request is already pending does
   nothing at all, not even the eval -- the same drop inspect-last!/
@@ -1393,7 +1394,7 @@
 ;; --- window commands (P3.T3): F6 focus toggle, clear console, zoom --------
 
 (defn- do-toggle-focus!
-  "F6 (gtk-keys.md, Jonquil's own key): moves focus between the editor and
+  "F6 (Jonquil's own key): moves focus between the editor and
   console panes. Compares gtk_root_get_focus's FOCUS WIDGET pointer, not
   gtk_widget_has_focus -- the P3 probe (findings #1) measured has_focus
   reading false on a window that isn't the OS key window, which a

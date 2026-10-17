@@ -222,7 +222,7 @@
               :after-idle after-idle :after-edit @(:dirty-check-count ed)}))))
 
 ;; --- P3.T2: handle-key! dispatch rows --------------------------------------
-;; gtk-keys.md's key table -- editor.clj's own copy is private, same pattern
+;; Key values from gdkkeysyms.h -- editor.clj's own copy is private, same pattern
 ;; gtk_selftest_window.clj already uses for its own KEY-ESCAPE/KEY-S-CAPS/
 ;; KEY-W. Every row calls editor/handle-key! directly with a synthetic
 ;; keyval/state, never a synthesized OS keystroke.

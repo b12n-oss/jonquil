@@ -33,8 +33,8 @@
 
   cgevent's screenshot/record-gif both block for real wall-clock time, so
   both run on their own thread (gtk-async/sh's a/thread), never the GTK
-  thread (the lock-caller rule in global.md/AGENTS.md extends to any
-  blocking subprocess call). A scene's GTK, editor and console actions run
+  thread (the lock-caller rule -- see jonquil.gtk.callbacks -- extends
+  to any blocking subprocess call). A scene's GTK, editor and console actions run
   through on-gtk, one main-loop iteration at a time, and the scene's own
   thread parks there until each one's done. No keystroke is ever
   synthesized -- console input is inserted the same way dev/gtk_selftest_

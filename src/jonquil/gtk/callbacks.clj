@@ -3,7 +3,7 @@
   that turns a Clojure fn into a retained, :collect-safe foreign-callable,
   and on-gui!, which lets any thread ask the GTK main thread to run a thunk.
 
-  ABI rule (AGENTS.md / global.md): every foreign-callable must be
+  ABI rule: every foreign-callable must be
   :collect-safe and kept alive in an atom for the process lifetime, or GTK's
   own event loop can invoke a callback jolt has already garbage-collected.
   Engine callbacks that run on a worker thread (P2.T6's eval output, for

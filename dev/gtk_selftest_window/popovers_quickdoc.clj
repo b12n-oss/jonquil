@@ -184,7 +184,7 @@
 
 ;; --- P4.T4: quick doc and jump to definition -------------------------------
 
-;; gtk-keys.md's shared table, this file's own private copies (measured
+;; The shared key table, this file's own private copies (measured
 ;; against gdkkeysyms.h, same values editor.clj's own KEY-Q/KEY-B/KEY-F1/
 ;; KEY-F12 use).
 (def ^:private KEY-B 0x062)

@@ -1,7 +1,7 @@
 (ns jonquil.gtk.editor
   "The Definitions editor: an editable, monospace GtkTextView owned by GTK,
   wired to jonquil.paint for live highlighting and jonquil.edit for smart
-  Enter (global.md: the native widget owns the text; the core only ever
+  Enter (the native widget owns the text; the core only ever
   sees a snapshot and returns edits, applied back to front inside one
   gtk_text_buffer_begin/end_user_action).
 
@@ -607,14 +607,14 @@
 (def ^:private KEY-KP-ENTER 0xff8d)
 
 (defn- plain-return?
-  "Return or KP-Enter with none of Shift, Control or Meta held (gtk-keys.md:
-  a command chord is Control or Meta; Shift+Return is left alone so GTK
-  inserts a plain newline, per global.md)."
+  "Return or KP-Enter with none of Shift, Control or Meta held (a command
+  chord is Control or Meta; Shift+Return is left alone so GTK inserts a
+  plain newline)."
   [keyval state]
   (and (contains? #{KEY-RETURN KEY-KP-ENTER} keyval)
        (zero? (bit-and state (bit-or g/SHIFT-MASK g/CONTROL-MASK g/META-MASK)))))
 
-;; --- keys: the rest of the dispatch (P3.T2, gtk-keys.md) --------------------
+;; --- keys: the rest of the dispatch (P3.T2) ---------------------------------
 
 (def ^:private KEY-PARENLEFT 0x028)
 (def ^:private KEY-PARENRIGHT 0x029)
@@ -670,7 +670,7 @@
   {KEY-PARENRIGHT \) KEY-BRACKETRIGHT \] KEY-BRACERIGHT \}})
 
 (defn- command-chord?
-  "A command chord is Control or Meta (gtk-keys.md), as in Phase 2
+  "A command chord is Control or Meta, as in Phase 2
   (jonquil.gtk.window/command-chord?, duplicated here since it's private
   there too)."
   [state]
@@ -786,14 +786,14 @@
       (and (< keyval 0x1000) (keycode-fallback? OS-NAME keycode state))))
 
 (defn handle-key!
-  "The editor's key dispatch (P3.T2 gtk-keys.md), first match wins. Returns
+  "The editor's key dispatch (P3.T2), first match wins. Returns
   1 when it handled the key, 0 otherwise -- the key controller (on-key,
   below) only calls this, so self-test rows can call the exact same
   function with a synthetic keyval/keycode/state, never a synthesized OS
   keystroke. Yields (0) on every key while a preedit is active (I5), not
   just Return, since GTK/the IM context need every key while composing.
   keyval0 is normalised with gdk_keyval_to_lower before every comparison
-  (M4, gtk-keys.md: same reason window.clj's on-window-key does it -- Caps
+  (M4: same reason window.clj's on-window-key does it -- Caps
   Lock reports the uppercase keyval with no Shift bit set).
 
   Two arities: the 3-arg form (no keycode) is every pre-existing caller,

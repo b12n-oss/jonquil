@@ -318,7 +318,7 @@
                                (and produced? (= "user=> abc" text) (= "abc" input))
                                {:produced produced? :text text :input input}))))))
 
-;; gtk-keys.md's shared table -- window.clj's own copy is private.
+;; The shared key table (gdkkeysyms.h) -- window.clj's own copy is private.
 (def ^:private KEY-L 0x06c)
 
 (defn row-clear-last-two-entries

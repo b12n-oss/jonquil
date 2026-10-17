@@ -329,7 +329,7 @@
 
 ;; --- P3: find bar caret and key routing ----------------------------------
 
-;; gtk-keys.md's shared table (gdkkeysyms.h) -- the product's copies are private.
+;; The shared key table (gdkkeysyms.h) -- the product's copies are private.
 (def ^:private KEY-F3 0xffc0)
 (def ^:private KEY-G 0x067)
 
