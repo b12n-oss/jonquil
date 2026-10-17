@@ -119,6 +119,26 @@
       (is (not-any? #{"interrupt"} (fake/ops-seen srv)))
       (finally (client/close! conn) (fake/stop! srv)))))
 
+(deftest select-inside-cljs-fails-test
+  (let [srv (fake/start!)
+        conn (client/connect (:port srv))
+        sid (clone! conn)]
+    (try
+      (ev conn sid select-app)
+      (let [msgs (strip (ev conn sid select-app))]
+        (is (re-find #"No such namespace: shadow\.cljs\.devtools\.api" (:err (first msgs))))
+        (is (= [{:ns "cljs.user" :printed-value 1 :value "nil"} {:status ["done"]}] (rest msgs))))
+      (finally (client/close! conn) (fake/stop! srv)))))
+
+(deftest interrupt-stops-nothing-test
+  (let [srv (fake/start!)
+        conn (client/connect (:port srv))
+        sid (clone! conn)]
+    (try
+      (is (= [{:status ["done" "session-idle"]}]
+             (strip (client/request-sync conn {:op "interrupt" :session sid} 5000))))
+      (finally (client/close! conn) (fake/stop! srv)))))
+
 (deftest complete-and-eldoc-test
   (let [srv (fake/start!)
         conn (client/connect (:port srv))

@@ -5,7 +5,7 @@
 
   - describe advertises eval, load-file, clone, complete, info and eldoc
     (:bare-ops? gives only eval, load-file, clone and describe).
-  - A session starts as CLJ (ns user). Evaluating
+  - A session starts as CLJ (ns shadow.user). Evaluating
     (shadow.cljs.devtools.api/nrepl-select :<build>) selects the configured
     :build (the banner as :out, then {:ns cljs.user :value [:selected ...]}),
     or fails with \"watch for build not running\" when the build differs or
@@ -42,6 +42,12 @@
 
 (def watch-err
   "Execution error (ExceptionInfo) at shadow.cljs.devtools.server.nrepl-impl/repl-init (nrepl_impl.clj:30).\nwatch for build not running\n")
+
+(def select-in-cljs-err
+  (str "------ WARNING - :undeclared-ns ------------------------------------------------\n"
+       " Resource: <eval>:1:2\n"
+       " No such namespace: shadow.cljs.devtools.api, could not locate shadow/cljs/devtools/api.cljs, shadow/cljs/devtools/api.cljc, or JavaScript source providing \"shadow.cljs.devtools.api\"\n"
+       "--------------------------------------------------------------------------------\n\n"))
 
 (def candidates
   [{"candidate" "map" "ns" "cljs.core" "type" "function"}
@@ -83,6 +89,13 @@
     (cond
       (= ::unreadable forms)
       (do (reply {"err" "Syntax error reading source"}) (reply {"status" ["done"]}))
+
+      ;; Measured: inside a cljs session the select form compiles as cljs,
+      ;; where shadow.cljs.devtools.api doesn't exist.
+      (and cljs? (= 1 (count forms)) (select-form? (first forms)))
+      (do (reply {"err" select-in-cljs-err})
+          (reply {"ns" (cur) "printed-value" 1 "value" "nil"})
+          (reply {"status" ["done"]}))
 
       (and (= 1 (count forms)) (select-form? (first forms)))
       (select! srv reply sid (first forms))
@@ -151,6 +164,8 @@
                  (reply {"ns" "cljs.core" "name" "map" "arglists-str" "([f] [f coll])"
                          "doc" map-doc "status" ["done"]})
                  (reply {"status" ["done" "no-info"]}))
+        ;; Measured: interrupt stops nothing; the work lives in the JS runtime.
+        "interrupt" (reply {"status" ["done" "session-idle"]})
         "close" (reply {"status" ["done"]})
         (reply {"err" (str "Unknown op: " op) "status" ["done" "unknown-op"]})))
     (finally (swap! busy dec))))
