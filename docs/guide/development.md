@@ -11,13 +11,13 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 54 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (501 tests, 3255 assertions
+slower. `bb test` runs the full unit suite (501 tests, 3259 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo. On Linux (arm64) the
-same suite runs 501 tests and 3224 assertions: some asserts are gated by
+same suite runs 501 tests and 3228 assertions: some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so the two systems
 differ by 31 assertions.
 

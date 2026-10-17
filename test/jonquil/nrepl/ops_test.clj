@@ -65,6 +65,26 @@
     (is (= "Error: EOF while reading"
            (:error-text (ops/eval-result [{:ex "EOF while reading\n  trace:\n    nrepl.middleware.caught/strip-config (x.clj:111)\n"
                                            :status ["eval-error" "done"]}] false)))))
+  (testing "JVM nREPL's shape: the message is the line after err's header, not ex's class"
+    (is (= "Error: Divide by zero"
+           (:error-text (ops/eval-result [{:err "Execution error (ArithmeticException) at (REPL:1).\nDivide by zero\n"}
+                                          {:ex "class java.lang.ArithmeticException"
+                                           :root-ex "class java.lang.ArithmeticException" :status ["eval-error"]}
+                                          {:status ["done"]}] false))))
+    (is (= "Error: EOF while reading"
+           (:error-text (ops/eval-result [{:err "Syntax error reading source at (REPL:1:17).\nEOF while reading\n"}
+                                          {:ex "class java.lang.RuntimeException" :status ["eval-error"]}
+                                          {:status ["done"]}] false))))
+    (testing "the last header wins, so the program's own *err* output before it isn't taken"
+      (is (= "Error: boom"
+             (:error-text (ops/eval-result [{:err "warning: Execution error looks like this\n"}
+                                            {:err "Execution error (ExceptionInfo) at user/f (REPL:3).\nfirst\n"}
+                                            {:err "Execution error (ExceptionInfo) at (REPL:1).\nboom\n"}
+                                            {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error"]}
+                                            {:status ["done"]}] false)))))
+    (testing "with no header, ex is used as before"
+      (is (= "Error: class java.lang.ArithmeticException"
+             (:error-text (ops/eval-result [{:ex "class java.lang.ArithmeticException" :status ["eval-error" "done"]}] false))))))
   (is (= {:status :interrupted} (ops/eval-result [{:status ["interrupted" "done"]}] false)))
   (is (= {:status :error :error-text "The Jolt runtime exited before this evaluation finished."}
          (ops/eval-result [{:status ["done" "jonquil-disconnected"]}] false)))
