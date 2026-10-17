@@ -54,7 +54,7 @@
                 (let [reply (fn [kv]
                               (when (and (not (:mute? opts)) (live? stop-latch closed))
                                 (locking lock
-                                  (.write ^java.io.OutputStream out ^bytes (bencode/encode (assoc kv "id" (get m "id"))))
+                                  (.write ^java.io.OutputStream out ^bytes (bencode/encode (merge {"id" (get m "id")} kv)))
                                   (.flush ^java.io.OutputStream out))))
                       result (handle! srv sock stop-latch closed reply m)]
                   (when (and (not= :dropped result) (live? stop-latch closed))
