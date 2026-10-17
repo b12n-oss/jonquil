@@ -21,6 +21,7 @@
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]
             [jonquil.cljd :as cljd]
+            [jonquil.cljs :as cljs]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
@@ -48,11 +49,12 @@
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.login-path :as login-path]
-            [jonquil.nrepl.attach :as attach]
+            [jonquil.nrepl.attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
+            [jonquil.nrepl.shadow]
             [jonquil.runtime-registry :as registry]
             [jonquil.save-path :as save-path]
             [jonquil.session]
@@ -1089,12 +1091,14 @@
   that's what closes the connection; connected? would read false after."
   [ev* cv]
   (let [e @ev*
-        idle-detach? (and (instance? jonquil.nrepl.attach.Attach e)
-                          (attach/connected? e)
+        detached (cond (instance? jonquil.nrepl.attach.Attach e) cljd/detached-message
+                       (instance? jonquil.nrepl.shadow.Shadow e) cljs/detached-message)
+        idle-detach? (and detached
+                          (connection/connected? e)
                           (not (ev/evaluating? e)))]
     (ev/interrupt! e)
     (when idle-detach?
-      (cview/append! cv :system (str cljd/detached-message "\n"))))
+      (cview/append! cv :system (str detached "\n"))))
   nil)
 
 ;; --- REPL: the console's on-submit, and the history adapters ---------------
