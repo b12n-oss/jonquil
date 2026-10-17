@@ -26,6 +26,8 @@ code don't cover on their own.
 5. **[Porting and attribution](porting-and-attribution.md)**: what came
    from DrClojure, what Jonquil rebuilt instead, and the Jolt fixes this
    project needed along the way.
+6. **[Contributing](contributing.md)**: the local setup a change needs,
+   the gates it must pass, and how to send it.
 
 `ROADMAP.md` holds the phase-by-phase status and the parked items for each
 one. `UPSTREAM.md` holds the file-by-file provenance table that the last
