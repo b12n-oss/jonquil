@@ -121,7 +121,11 @@
 ;; (a dirty one gets a leading "* "); this script only ever opens drive-file,
 ;; so this is the one exact string title-clean? trusts.
 (def ^:private clean-window-title "drive.cljd - Jonquil")
-(def ^:private min-fork-sha "199d173d")
+;; Optional in cljd_app.local.edn: :fork-sha, a prefix the app's own
+;; deps.edn :git/sha pin must start with. The app's nREPL fork moves with
+;; the user's own builds, so a pin in tracked code goes stale; without the
+;; key the version check is skipped.
+(def ^:private want-fork-sha (:fork-sha app-config))
 
 ;; TH.T5-style isolation (binary_smoke.clj's own smoke-xdg-config-home): one
 ;; XDG_CONFIG_HOME temp dir for this run, handed to launch! via :extra-env,
@@ -423,14 +427,17 @@
         app-up (and lock-exists port listening)
         sha-match (re-find #":git/sha \"([0-9a-f]+)\"" (slurp (str app-dir "/deps.edn")))
         sha (second sha-match)
-        fork-ok (and sha (str/starts-with? sha min-fork-sha))
+        fork-ok (or (nil? want-fork-sha)
+                    (and sha (str/starts-with? sha want-fork-sha)))
         pre-git (:out (p/shell {:out :string :err :string :continue true}
                                "git" "-C" app-dir "status" "--short"))]
     (check! :preflight-display (not locked?)
             {:screen-locked locked? :on-console (:on-console? console-info)})
     (check! :preflight-app-up app-up
             {:lock-exists lock-exists :port port :listening listening})
-    (check! :preflight-fork-version fork-ok {:sha sha :want-prefix min-fork-sha})
+    (if want-fork-sha
+      (check! :preflight-fork-version fork-ok {:sha sha :want-prefix want-fork-sha})
+      (skip! :preflight-fork-version "no :fork-sha in cljd_app.local.edn"))
     {:ok (and app-up fork-ok (not locked?))
      :pre-git-status pre-git}))
 

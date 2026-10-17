@@ -184,7 +184,9 @@ script starts is killed on every exit path, success, failure, or Ctrl-C.
 **`bb smoke:cljd`** drives a built `./jonquil` against a real, running
 ClojureDart app instead, so it needs one up first, built with nREPL
 support. The gitignored `dev/smoke/cljd_app.local.edn` names it, with `:dir`
-(the app's absolute path) and `:main-ns` (the namespace Run loads). Without
+(the app's absolute path) and `:main-ns` (the namespace Run loads); an
+optional `:fork-sha` pins a prefix the app's own `deps.edn` `:git/sha` must
+start with, and without the key the version check is skipped. Without
 that file the task prints how to create it and exits 1. If the
 app isn't up, or the screen is locked, every step SKIPs and the task exits 0.
 One Jonquil process stays open for the whole run, since every step shares
