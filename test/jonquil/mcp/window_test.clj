@@ -142,8 +142,7 @@
 
 (deftest stop-not-yet-stopped
   (let [t (tools-for {:evaluator* (fn [] (evaluator {:evaluating? true}))
-                      :stop!* (fn [] nil)}
-                     :stop-wait-ms 100)]
+                      :stop!* (fn [] nil)})]
     (is (= {:text "Interrupt requested; the evaluation has not stopped yet." :error? false}
            (call t "jonquil_stop" {})))))
 
@@ -194,3 +193,18 @@
     (is (= 1 @closes))
     (is (empty? @choices))
     (is (str/includes? (str log) "/some/dir"))))
+
+(deftest no-active-tab-is-a-plain-error
+  (let [t (tools-for {:tabs* (fn [] []) :active-tab* (fn [] nil)})]
+    (is (= {:text "No active tab." :error? true} (call t "jonquil_save" {})))
+    (is (= {:text "No active tab." :error? true} (call t "jonquil_read_tab" {})))
+    (is (= {:text "No active tab." :error? true} (call t "jonquil_replace_text" {"text" "x"})))))
+
+(deftest serve-window-quit-failure-is-logged
+  (let [log (java.io.StringWriter.)]
+    (binding [*err* log]
+      (w/serve-window! {:ui {:tabs* (fn [] (throw (ex-info "tabs broke" {})))
+                             :request-close!* (fn [] nil)}
+                        :dir "/d" :read-line (fn [] nil) :write-line (fn [_] nil)
+                        :gui sync-gui}))
+    (is (str/includes? (str log) "tabs broke"))))

@@ -184,6 +184,10 @@
   or the timeout path (stop through a gui turn, then up to grace-ms more)."
   [{:keys [ui gui fire timeout-ms grace-ms]}]
   (let [p (promise)
+        ;; Accepted property of the bounded deref: if this turn outlives its
+        ;; deadline the tool throws, but the queued thunk may still run later
+        ;; and start an evaluation whose notify delivers into this dead
+        ;; promise; the next call then sees busy.
         reader (gui-call gui (fn [] (fire (partial deliver p))) gui-deadline-ms)
         deadline (+ (now-ms) timeout-ms)]
     (loop []
@@ -194,6 +198,10 @@
           (ev/waiting-for-input? ((:evaluator* ui)))
           {:text (str (reader) "\n; waiting for console input (a person can type in the window, or call jonquil_stop)")
            :error? false}
+
+          ;; the notify may land between the slice's deref and here
+          (and (>= (now-ms) deadline) (realized? p))
+          (notify->result @p)
 
           (>= (now-ms) deadline)
           (do (gui-call gui (fn [] ((:stop!* ui))) gui-deadline-ms)
@@ -291,16 +299,17 @@
                     (let [id (number-arg args "id")]
                       (turn (fn []
                               (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
-                                (if t
-                                  {:text (editor/editor-text (:ed t)) :error? false}
-                                  (no-tab id)))))))
+                                (cond
+                                  t {:text (editor/editor-text (:ed t)) :error? false}
+                                  id (no-tab id)
+                                  :else {:text "No active tab." :error? true}))))))
         tool-replace (fn [args]
                        (let [text (required-text args "text")
                              id (number-arg args "id")]
                          (turn (fn []
                                  (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
                                    (if-not t
-                                     (no-tab id)
+                                     (if id (no-tab id) {:text "No active tab." :error? true})
                                      (let [ed (:ed t)]
                                        (if (editor/apply-op! ed (replace-op (editor/editor-text ed) text))
                                          {:text (str "Replaced the text of tab " (:id t) ".") :error? false}
@@ -310,9 +319,11 @@
                                      (tools/absolute dir (tools/required-string args "path")))]
                       (turn (fn []
                               (let [t ((:active-tab* ui))
-                                    p (or arg-path @(:path t))]
-                                (if-not p
-                                  {:text "The active tab is Untitled; give a path." :error? true}
+                                    p (or arg-path (some-> t :path deref))]
+                                (cond
+                                  (not t) {:text "No active tab." :error? true}
+                                  (not p) {:text "The active tab is Untitled; give a path." :error? true}
+                                  :else
                                   (do ((:save-to! ui) p)
                                       (if (editor/dirty? (:ed t))
                                         {:text "The save failed; the console names the reason." :error? true}
@@ -386,4 +397,8 @@
                     (when dirty?
                       ((:close-choice! ui) {:index 1}))))
                 gui-deadline-ms)
-      (catch Throwable _ nil))))
+      (catch Throwable e
+        ;; a timeout means the window is already gone; anything else is a bug
+        ;; worth a line on stderr
+        (binding [*out* *err*]
+          (println "jonquil: the quit turn failed:" (or (ex-message e) (str e))))))))
