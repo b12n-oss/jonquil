@@ -2,24 +2,34 @@
   "File-tree plan P2.T3: opens the REAL Jonquil window launched on a
   directory (jonquil.main/start! with :dir, as `jonquil ~/dev/project`
   does) and checks the tree is rooted there and showing, the window runs
-  that directory's project, and the one tab is Untitled. A group of its
-  own (plan ruling 2): the window group starts with no argument and every
-  one of its rows relies on that.
+  that directory's project, and the one tab is Untitled when the window
+  first shows. A group of its own (plan ruling 2): the window group starts
+  with no argument and every one of its rows relies on that.
+
+  sessions.edn remembers two of the fixture's files and one that's gone,
+  so the launch also reopens tabs, after the window is up.
 
   Mirrors gtk-selftest-cljd's driver; the last row fires the app's quit
   action."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
             [clojure.java.io :as io]
-            [gtk-async :as ga :refer [go-row on-gtk]]
+            [clojure.string :as str]
+            [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as pane]
+            [jonquil.last-session :as last-session]
             [jonquil.main :as main]
             [temp-dirs]))
 
 (defonce ^:private fixture* (atom nil))
+;; The open tabs' paths and the tree's rows when on-ready ran, right after
+;; the window was shown. Later the reopened core.clj expands src/demo.
+(defonce ^:private at-show* (atom nil))
+;; sessions.edn as written before the launch.
+(defonce ^:private sessions-text* (atom nil))
 
 (defn- fixture!
   "A temp project: deps.edn, src/demo/core.clj, README.md, a .gitignore of
@@ -31,24 +41,57 @@
       (let [f (io/file d rel)] (io/make-parents f) (spit f text)))
     (reset! fixture* (.getCanonicalPath (io/file d)))))
 
+(defn- write-sessions!
+  "sessions.edn beside settings-path: the fixture's core.clj, README.md and
+  a gone.clj that doesn't exist, with core.clj active."
+  [settings-path]
+  (let [d @fixture*
+        core (str d "/src/demo/core.clj")
+        text (pr-str {:version 1
+                      :sessions [{:root d :tabs [core (str d "/README.md") (str d "/gone.clj")] :active core}]})]
+    (spit (last-session/sessions-path settings-path) text)
+    (reset! sessions-text* text)))
+
 (defn- row-tree-dir-launch-root
   "The tree is showing, its header names the fixture folder, its rows are
-  src, deps.edn, README.md (.gitignore and x.log hidden), and the one tab
-  is Untitled."
+  src, deps.edn, README.md (.gitignore and x.log hidden), and its one tab
+  was Untitled, all as the window was shown: the remembered tabs open
+  after that."
   [ui]
   (go-row :tree-dir-launch-root support/check
     (on-gtk (let [p (:file-tree ui)
-                  ts ((:tabs* ui))
                   v {:visible ((:file-tree-visible?* ui))
                      :header (g/label-text (:header-label p))
-                     :names (mapv :name (pane/visible-rows p))
-                     :tabs (count ts)
-                     :tab-path @(:path (first ts))}]
+                     :at-show @at-show*}]
               (support/check :tree-dir-launch-root
                              (and (:visible v) (= (.getName (io/file @fixture*)) (:header v))
-                                  (= ["src" "deps.edn" "README.md"] (:names v))
-                                  (= 1 (:tabs v)) (nil? (:tab-path v)))
+                                  (= ["src" "deps.edn" "README.md"] (:names (:at-show v)))
+                                  (= [nil] (:tabs (:at-show v))))
                              v)))))
+
+(defn- row-tree-dir-launch-reopen
+  "The remembered tabs open in order, core.clj is selected, gone.clj is
+  named on the console, and the reopen wrote nothing to sessions.edn. Then
+  live saving is on: selecting README.md writes it as the active tab."
+  [ui]
+  (go-row :tree-dir-launch-reopen support/check
+    (let [d @fixture*
+          want [(str d "/src/demo/core.clj") (str d "/README.md")]
+          paths (fn [] (vec (map (fn [t] @(:path t)) ((:tabs* ui)))))
+          ;; The line for gone.clj comes last, after the active tab is selected.
+          named? (fn [] (str/includes? (support/console-text ui) "; Couldn't reopen gone.clj from last time."))
+          done? (await-until 5000 20 (fn [] (and (= want (paths)) (named?))))
+          v (on-gtk {:paths (paths)
+                     :active @(:path ((:active-tab* ui)))
+                     :sessions-same? (= @sessions-text* (slurp (last-session/sessions-path ((:settings-path* ui)))))})
+          saved-active (fn [] (:active (last-session/entry-for
+                                        (:sessions (last-session/load-sessions (last-session/sessions-path ((:settings-path* ui)))))
+                                        d)))
+          _ (on-gtk ((:select-tab! ui) (:id (second ((:tabs* ui))))))
+          live? (await-until 2000 20 (fn [] (= (second want) (saved-active))))]
+      (support/check :tree-dir-launch-reopen
+                     (and done? (= (first want) (:active v)) (:sessions-same? v) live?)
+                     (assoc v :live? live?)))))
 
 (defn- row-tree-dir-launch-project
   "The window runs the fixture's project."
@@ -76,6 +119,7 @@
 
 (def ^:private row-fns
   [row-tree-dir-launch-root
+   row-tree-dir-launch-reopen
    row-tree-dir-launch-project
    row-tree-dir-launch-no-save
    row-tree-dir-launch-close])
@@ -113,12 +157,16 @@
 
 (defn -main [& _]
   (let [dir (fixture!)
+        settings-path (support/fresh-settings-path)
         driver-done (a/promise-chan)]
+    (write-sessions! settings-path)
     (main/start!
      {:dir dir
       :cwd dir
-      :settings-path (support/fresh-settings-path)
+      :settings-path settings-path
       :on-ready (fn [ui]
+                  (reset! at-show* {:tabs (mapv (fn [t] @(:path t)) ((:tabs* ui)))
+                                    :names (mapv :name (pane/visible-rows (:file-tree ui)))})
                   (g/g-signal-connect-data (:window ui) "destroy"
                                            (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                         [:pointer :pointer] :void)

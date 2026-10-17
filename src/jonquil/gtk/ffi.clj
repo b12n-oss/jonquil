@@ -1186,3 +1186,10 @@
 (ffi/defcfn gtk-gesture-single-set-button "gtk_gesture_single_set_button" [:pointer :uint] :void)
 ;; gtk/gtklistbox.h:192 GtkListBoxRow* gtk_list_box_get_row_at_y (GtkListBox*, gint)
 (ffi/defcfn gtk-list-box-get-row-at-y "gtk_list_box_get_row_at_y" [:pointer :int] :pointer)
+
+;; --- SESSION: reopen after the first frame ---
+;; gtk_widget_get_frame_clock is NULL until the widget is realized, so it's
+;; read after gtk_window_present. Its "after-paint" signal is how startup
+;; tells the window's first frame has been drawn.
+(ffi/defcfn gtk-widget-get-frame-clock "gtk_widget_get_frame_clock" [:pointer] :pointer)
+(ffi/defcfn g-signal-handler-disconnect "g_signal_handler_disconnect" [:pointer :ulong] :void)
