@@ -1157,8 +1157,10 @@ claude mcp add jonquil -- jonquil --mcp /path/to/project
 claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
 ```
 
-Six tools, each taking an optional `path` (a file or directory) that selects
-the project, defaulting to `DIR`:
+Six tools. Most take an optional `path` (a file or directory) that selects
+the project, defaulting to `DIR`. `jonquil_run_file` requires its file `path`,
+and `jonquil_check_brackets` takes either `text` or a `path` naming the file
+to check:
 
 | Tool | What it does |
 |---|---|

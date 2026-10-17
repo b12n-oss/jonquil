@@ -77,7 +77,7 @@
 
 (defn- children [pid]
   (let [{:keys [out]} @(p/process ["pgrep" "-P" (str pid)] {:out :string :err :string})]
-    (set (str/split-lines (str/trim out)))))
+    (set (remove str/blank? (str/split-lines out)))))
 
 (defn- handshake! [srv label]
   (let [r (request! srv "initialize" {"protocolVersion" "2025-06-18" "capabilities" {}
@@ -133,7 +133,7 @@
           (let [r (tool! srv "jonquil_eval" {"code" "(+ 5 5)"} 60000)]
             (check! "nrepl eval (+ 5 5) => 10" (and (string? (:text r)) (str/includes? (:text r) "=> 10")) r))
           (let [kids (children pid)]
-            (check! "nrepl run started a child" (seq kids) kids)
+            (check! (str "nrepl run started a child (pid " (str/join "," kids) ")") (seq kids) kids)
             (stop! srv "nrepl")
             (Thread/sleep 500)
             (let [alive (filter (fn [k] (zero? (:exit @(p/process ["kill" "-0" k] {:err :string :out :string})))) kids)]
