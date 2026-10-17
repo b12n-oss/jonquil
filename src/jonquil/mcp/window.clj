@@ -204,7 +204,11 @@
           (notify->result @p)
 
           (>= (now-ms) deadline)
-          (do (gui-call gui (fn [] ((:stop!* ui))) gui-deadline-ms)
+          (do (gui-call gui
+                        ;; as tool-stop: never interrupt an idle evaluator (an
+                        ;; attach evaluator would detach)
+                        (fn [] (when (ev/evaluating? ((:evaluator* ui))) ((:stop!* ui))))
+                        gui-deadline-ms)
               (let [r2 (deref p grace-ms ::pending)]
                 (if (= ::pending r2)
                   {:text (str (reader) "Timed out after " timeout-ms " ms; interrupted, but the evaluation has not stopped.")

@@ -997,8 +997,13 @@
                       ((:on-output base) kind s)
                       (swap! out conj s))
          :on-complete (fn [result]
-                        ((:on-complete base) result)
-                        (notify {:done {:result result :output (apply str @out)}}))))
+                        ;; notify in finally: a throw in the base handling (a
+                        ;; malformed result map) must not lose the MCP call's
+                        ;; only wake-up. The rethrow still reaches the
+                        ;; evaluator's own guard.
+                        (try ((:on-complete base) result)
+                             (finally
+                               (notify {:done {:result result :output (apply str @out)}}))))))
 
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).

@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.window :as gw]
             [jonquil.help :as help]
             [jonquil.mcp.tools :as tools]
             [jonquil.mcp.window :as w]))
@@ -221,3 +222,25 @@
                         :gui sync-gui}))
     (is (str/includes? (str log) "stdin broke"))
     (is (= 1 @closes))))
+
+(deftest eval-timeout-already-idle-does-not-interrupt
+  (let [stopped (atom 0)
+        calls (atom 0)
+        ;; busy for the waiting check, idle by the time the stop turn looks
+        t (tools-for {:mcp-eval!* (fn [_ _] (fn [] "late"))
+                      :evaluator* (fn [] (evaluator {:evaluating? (fn [] (< (swap! calls inc) 1))
+                                                     :waiting? false}))
+                      :stop!* (fn [] (swap! stopped inc))})
+        r (call t "jonquil_eval" {"code" "x" "timeout_ms" 100})]
+    (is (zero? @stopped))
+    (is (:error? r))))
+
+(deftest notifying-opts-notifies-when-base-on-complete-throws
+  (let [out (atom [])
+        got (atom nil)
+        base {:on-output (fn [_ _] nil)
+              :on-complete (fn [_] (throw (ex-info "malformed" {})))}
+        opts (#'gw/notifying-opts base out (fn [m] (reset! got m)))]
+    ((:on-output opts) :out "hi")
+    (is (thrown? Throwable ((:on-complete opts) {:status :weird})))
+    (is (= {:done {:result {:status :weird} :output "hi"}} @got))))
