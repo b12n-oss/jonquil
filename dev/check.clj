@@ -15,6 +15,7 @@
     jonquil.console
     jonquil.mcp
     jonquil.mcp.json
+    jonquil.mcp.tools
     jonquil.evaluator
     jonquil.session
     jonquil.inspect.view
