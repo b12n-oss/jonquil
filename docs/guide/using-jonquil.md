@@ -799,14 +799,15 @@ starts for the new project, and the console says something like
 happens if the new file's project asks for a different runtime, or none
 at all.
 
-Three limits are worth knowing going in. There's no stdin: a program that
-calls `read-line` or `read` gets nil or an EOF straight away. Output
-appears only once an evaluation finishes rather than as it prints
-(the jolt-lang/nrepl middleware sends it at the end), so a program that prints once a second for ten
-seconds shows nothing for those ten seconds and then everything at once.
-And jump to definition can't leave the buffer, because the wire op it
-would need for that (`info`) isn't there yet, only `lookup`, which
-carries no file or line to jump to.
+Two limits are worth knowing going in. There's no stdin: a program that
+calls `read-line` or `read` gets nil or an EOF straight away. And jump
+to definition can't leave the buffer, because the wire op it would need
+for that (`info`) isn't there yet, only `lookup`, which carries no file
+or line to jump to. A third was lifted upstream: output streams as it
+prints on a jolt-lang/nrepl checkout at v0.4.0 or later, while an older
+checkout sends it all at once when the evaluation finishes, so a
+program that prints once a second for ten seconds and then shows
+everything in one burst is the sign to update the checkout.
 
 ### The jolt-lang/nrepl checkout
 
@@ -815,7 +816,8 @@ jolt-lang/nrepl checkout when it starts the child, found at
 `$JONQUIL_JOLT_NREPL`, or `~/dev/jolt-lang/nrepl` when that variable isn't
 set. Without either one in place, the child runs a vanilla nREPL server
 with neither op, so Stop always falls back to killing and restarting it,
-even on a program that would otherwise have interrupted cleanly.
+even on a program that would otherwise have interrupted cleanly. Keep
+the checkout at v0.4.0 or later so output streams as it prints.
 
 ### `.nrepl-port`
 
