@@ -59,6 +59,7 @@
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
     jonquil.gtk.window
+    jonquil.mcp.window
     jonquil.main])
 
 (defn -main [& _]
