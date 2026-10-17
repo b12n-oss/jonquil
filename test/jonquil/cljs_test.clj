@@ -12,7 +12,11 @@
   (is (re-find #"Port 7" (cljs/not-server-message 7)))
   (is (re-find #"port 7" (cljs/connecting-message 7)))
   (is (= "; The build isn't loaded in any JS runtime. Open the app (or run the node script) and Run again." cljs/no-runtime-message))
-  (is (= ":repl/quit" cljs/quit-value)))
+  (is (cljs/quit-value? ":repl/quit"))
+  (is (cljs/quit-value? ":cljs/quit"))
+  (is (not (cljs/quit-value? "42")))
+  (is (cljs/quit-err? "Exited CLJS session. You are now in CLJ again.\n"))
+  (is (not (cljs/quit-err? "boom"))))
 
 (deftest select-test
   (is (= "(shadow.cljs.devtools.api/nrepl-select :app)" (cljs/select-code :app)))
@@ -32,6 +36,9 @@
   (is (= "Error: boom" (cljs/error-line "\nExecution error (Error) at (<cljs repl>:1).\nboom\n")))
   (is (= "Error: second" (cljs/error-line "Execution error (Error) at a.\nfirst\nExecution error (Error) at b.\nsecond\n")))
   (is (= "just some text" (cljs/error-line "  just some text\n")))
+  (is (= "Error" (cljs/error-line "")))
+  (is (= "Error" (cljs/error-line nil)))
+  (is (= "Error" (cljs/error-line " \n ")))
   (is (cljs/no-runtime? "No available JS runtime.\nSee https://x"))
   (is (not (cljs/no-runtime? "boom"))))
 

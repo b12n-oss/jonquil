@@ -34,7 +34,16 @@
 (def no-runtime-message
   "; The build isn't loaded in any JS runtime. Open the app (or run the node script) and Run again.")
 
-(def quit-value ":repl/quit")
+(defn quit-value?
+  "True for the :value a ClojureScript session answers with when it exits
+  to CLJ (:repl/quit, or :cljs/quit as the select banner tells users)."
+  [v]
+  (contains? #{":repl/quit" ":cljs/quit"} v))
+
+(defn quit-err?
+  "True when err-text is shadow's notice that the session left CLJS."
+  [err-text]
+  (str/starts-with? (or err-text "") "Exited CLJS session"))
 
 ;; --- picking the build ---
 
@@ -77,7 +86,7 @@
 (defn error-line
   "The one-line error for a measured :err, like 'Error: boom': the type
   from the last Execution error header and the first non-blank line after
-  it. Without a header, the whole trimmed text."
+  it. Without a header, the whole trimmed text, or \"Error\" when that's blank."
   [err-text]
   (let [text (or err-text "")
         lines (str/split-lines text)
@@ -86,7 +95,7 @@
       (if-let [[_ t] (re-find #"^Execution error \(([^)]*)\)" (nth lines idx))]
         (str t ": " (str/trim msg))
         (str/trim msg))
-      (str/trim text))))
+      (let [t (str/trim text)] (if (str/blank? t) "Error" t)))))
 
 (defn no-runtime?
   "True when err-text says the build has no JS runtime connected."

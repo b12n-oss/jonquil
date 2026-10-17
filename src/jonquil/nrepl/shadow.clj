@@ -133,8 +133,12 @@
               (when-not (stop-requested? ev)
                 (when-not (:selected? @state) (select! ev (:build resolved) on-output))))))))
 
-(defn- quit! [{:keys [state]} values]
-  (when (some #{cljs/quit-value} values)
+(defn- quit!
+  "Marks the session as no longer selected when msgs show it left CLJS: the
+  quit value, or shadow's \"Exited CLJS session\" notice on :err."
+  [{:keys [state]} msgs]
+  (when (or (some cljs/quit-value? (keep :value msgs))
+            (some cljs/quit-err? (keep :err msgs)))
     (swap! state assoc :selected? false)))
 
 (defn- run-result
@@ -148,7 +152,7 @@
       (st ops/disconnected) (lost-result ev)
       (some cljs/no-runtime? errs) {:status :notice :text cljs/no-runtime-message}
       (st "eval-error") {:status :error :error-text (cljs/error-line (err-text msgs))}
-      :else (do (quit! ev values)
+      :else (do (quit! ev msgs)
                 {:status :notice :text (cljs/run-summary (:session-ns @state) values)}))))
 
 (defn- entry-result
@@ -160,7 +164,7 @@
       (st ops/disconnected) (lost-result ev)
       (some cljs/no-runtime? (keep :err msgs)) {:status :notice :text cljs/no-runtime-message}
       (cljs/exception-value? (last values)) {:status :error :error-text (cljs/error-line (err-text msgs))}
-      :else (do (quit! ev values)
+      :else (do (quit! ev msgs)
                 (ops/eval-result msgs false lost-connection)))))
 
 (defn- run-worker!

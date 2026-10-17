@@ -14,7 +14,7 @@
     per form, preceded by the stale {:status [\"state\"]} message that carries
     the previous request's id (none on a session's first eval). A throw form
     answers {:err ...} then {:value \":repl/exception!\"} and the later forms
-    still run. :repl/quit leaves the session in CLJ (ns shadow.user).
+    still run. :repl/quit and :cljs/quit leave the session in CLJ (ns shadow.user).
   - :no-runtime? answers shadow's \"No available JS runtime\" for every eval.
   - complete and eldoc answer from canned data; info answers cider's keys.
 
@@ -22,7 +22,7 @@
   \"42\"), \"#'ns/name\" for def and defn, and \"nil\" for ns. Every request is
   kept (ops-seen, requests), so a test can assert what a client sent."
   (:require [clojure.string :as str]
-            [fake-nrepl-core :as core :refer [head read-forms]]))
+            [fake-nrepl-core :as core :refer [head live? read-forms wait!]]))
 
 (def shadow-ops
   ;; The ops the evaluator and the doc and completion gates read.
@@ -32,7 +32,8 @@
   ["eval" "load-file" "clone" "describe"])
 
 (def quit-err
-  (str "Exited CLJS session. You are now in CLJ again.\n"))
+  (str "Exited CLJS session. You are now in CLJ again.\n"
+       "You can rejoin the CLJS REPL via \n    (shadow.cljs.devtools.api/repl :dev)\n"))
 
 (def no-runtime-err
   "No available JS runtime.\nSee https://shadow-cljs.github.io/docs/UsersGuide.html#repl-troubleshooting")
@@ -80,13 +81,17 @@
 (defn- evaluate!
   "Answers one eval or load-file request. reply sends one message map
   (string keys) carrying the request's id and session."
-  [{:keys [opts sessions] :as srv} reply raw-reply m]
+  [{:keys [opts sessions] :as srv} stop-latch closed reply raw-reply m]
   (let [sid (get m "session")
         text (or (get m "file") (get m "code") "")
         forms (try (read-forms text) (catch Exception _ ::unreadable))
         {:keys [cljs? last-id]} (get @sessions sid)
         cur (fn [] (get-in @sessions [sid :ns] "shadow.user"))]
+    (when-let [ms (some (fn [[marker ms]] (when (str/includes? text marker) ms)) (:slow opts))]
+      (wait! stop-latch closed ms))
     (cond
+      (not (live? stop-latch closed)) nil
+
       (= ::unreadable forms)
       (do (reply {"err" "Syntax error reading source"}) (reply {"status" ["done"]}))
 
@@ -113,10 +118,10 @@
               (cond
                 (nil? fs) (reply {"status" ["done"]})
 
-                (= :repl/quit f)
+                (#{:repl/quit :cljs/quit} f)
                 (do (swap! sessions update sid assoc :cljs? false :ns "shadow.user")
                     (reply {"err" quit-err})
-                    (reply {"ns" "shadow.user" "printed-value" 1 "value" ":repl/quit"})
+                    (reply {"ns" "shadow.user" "printed-value" 1 "value" (str f)})
                     (reply {"status" ["done"]}))
 
                 (= 'throw (head f))
@@ -138,7 +143,7 @@
 (defn- handle!
   "Answers one request, incrementing srv's :busy count for its duration so
   stop! can wait for every in-flight reply."
-  [{:keys [opts sessions log counter busy] :as srv} _sock _stop-latch _closed raw-reply m]
+  [{:keys [opts sessions log counter busy] :as srv} _sock stop-latch closed raw-reply m]
   (swap! log conj (dissoc m "id"))
   (swap! busy inc)
   (try
@@ -151,7 +156,7 @@
         "clone" (let [new-sid (str "fake-shadow-session-" (swap! counter inc))]
                   (swap! sessions assoc new-sid {:ns "shadow.user" :cljs? false})
                   (raw-reply {"new-session" new-sid "session" new-sid "status" ["done"]}))
-        ("eval" "load-file") (do (evaluate! srv reply raw-reply m)
+        ("eval" "load-file") (do (evaluate! srv stop-latch closed reply raw-reply m)
                                  (when sid (swap! sessions assoc-in [sid :last-id] (get m "id"))))
         "complete" (let [prefix (or (get m "prefix") (get m "symbol") "")]
                      (reply {"completions" (filterv (fn [c] (str/starts-with? (get c "candidate") prefix)) candidates)
@@ -174,6 +179,9 @@
   "Starts a fake server on a free loopback port and returns it. opts:
   :build          the build nrepl-select accepts (default :app)
   :watch-running? false: selecting any build fails (default true)
+  :slow           {marker ms}: a request whose code holds marker answers after
+                  ms, waking early (and answering nothing) when the connection
+                  drops
   :no-runtime?    a selected session's evals answer shadow's no-runtime error
   :value          the printed value of an ordinary form (default \"42\")
   :bare-ops?      describe advertises only eval, load-file, clone, describe"

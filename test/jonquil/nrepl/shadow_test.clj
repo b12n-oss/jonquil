@@ -224,3 +224,72 @@
             (ev/full-doc e "map" "" (fn [r] (deliver got r)))
             (is (= {:status :no-op} (deref got 2000 :timeout))))
           (is (= before (count (fake/ops-seen srv))) "nothing was sent"))))))
+
+(deftest cljs-quit-reselects-test
+  (with-project {}
+    (fn [srv _ e]
+      (run e "(+ 1 2)" {:run? false})
+      (is (true? (:selected? @(:state e))))
+      (let [[r out] (run e ":cljs/quit" {:run? false})]
+        (is (= :ok (:status r)))
+        (is (some #(str/starts-with? % "Exited CLJS session") (texts out :err))))
+      (is (false? (:selected? @(:state e))))
+      (is (= 'shadow.user (ev/prompt-ns e)))
+      (let [[r _] (run e "(+ 1 2)" {:run? false})]
+        (is (= {:status :ok :printed "42" :ns 'cljs.user} r) "evaluated as cljs again"))
+      (is (= 2 (count (filter #(= (cljs/select-code :app) (get % "code")) (fake/requests srv))))
+          "the fake saw a second select"))))
+
+(deftest blank-err-exception-test
+  (with-project {}
+    (fn [_ _ e]
+      (with-redefs [fake/throw-err ""]
+        (let [[r _] (run e "(throw (js/Error. \"boom\"))" {:run? false})]
+          (is (= {:status :error :error-text "Error"} r)))))))
+
+(defn- stop-in-flight
+  "Starts an evaluation of code, waits for the fake to receive a request
+  holding marker, then Stops. [result output]."
+  [e srv code marker]
+  (let [done (promise) out (atom [])]
+    (ev/eval! e code {:run? false
+                      :on-output (fn [k s] (swap! out conj [k s]))
+                      :on-complete (fn [r] (deliver done r))})
+    (until #(some (fn [m] (str/includes? (str (get m "code")) marker)) (fake/requests srv)))
+    (ev/interrupt! e)
+    [(deref done 3000 :timeout) @out]))
+
+(defn- selects [srv]
+  (count (filter #(= (cljs/select-code :app) (get % "code")) (fake/requests srv))))
+
+(deftest stop-during-select-test
+  (with-project {:slow {"nrepl-select" 1500}}
+    (fn [srv _ e]
+      (let [[r out] (stop-in-flight e srv "(+ 1 2)" "nrepl-select")]
+        (is (= {:status :interrupted} r))
+        (is (some #{(str cljs/detached-message "\n")} (texts out :system)))
+        (is (false? (:selected? @(:state e))))
+        (is (not (connection/connected? e)))
+        (is (not (ev/evaluating? e))))
+      (is (= 1 (selects srv)))
+      (testing "the next evaluation reconnects and selects once more"
+        (is (= :ok (:status (first (run e "(+ 1 2)" {:run? false})))))
+        (is (= 2 (selects srv)))
+        (is (true? (:selected? @(:state e)))))
+      (is (not-any? #{"interrupt"} (fake/ops-seen srv))))))
+
+(deftest stop-during-eval-test
+  (with-project {:slow {"(slow)" 5000}}
+    (fn [srv _ e]
+      (run e "(+ 1 2)" {:run? false})
+      (is (= 1 (selects srv)))
+      (let [[r out] (stop-in-flight e srv "(slow)" "(slow)")]
+        (is (= {:status :interrupted} r))
+        (is (some #{(str cljs/detached-message "\n")} (texts out :system)))
+        (is (false? (:selected? @(:state e))))
+        (is (not (connection/connected? e))))
+      (testing "the next evaluation reconnects and selects exactly once more"
+        (is (= :ok (:status (first (run e "(+ 1 2)" {:run? false})))))
+        (is (= 2 (selects srv)))
+        (is (true? (:selected? @(:state e)))))
+      (is (not-any? #{"interrupt"} (fake/ops-seen srv))))))
