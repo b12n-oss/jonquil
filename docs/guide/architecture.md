@@ -91,6 +91,32 @@ An edit operation returns data for the front-end to apply:
 
 The front-end applies each edit in reverse order within one `gtk_text_buffer_begin/end_user_action` call, so undo sees one step.
 
+## MCP: `jonquil --mcp`
+
+Three namespaces, none of which requires a `jonquil.gtk` one, so the headless
+entry never opens a window:
+
+- `jonquil.mcp.json` is the JSON codec (`decode`, `encode`, string keys both
+  ways) over `org.clojure/data.json`, plus the small pre-pass that reads
+  surrogate-pair escapes.
+- `jonquil.mcp` is the protocol. `handle-message` turns one decoded request
+  into a response map or nil, and `serve!` loops over a line reader and a line
+  writer it is handed, skipping blank lines and guarding every message so one
+  bad request never ends the loop or mislabels its error.
+- `jonquil.mcp.tools` holds the six tool definitions and `make-tools`, which
+  keeps one evaluator per project selection (the same `.jonquil.edn` choice the
+  window makes) and registers each with `jonquil.runtime-registry`, so
+  `registry/stop-all!` stops them. An evaluation that passes its deadline is
+  interrupted, and a dead one can't wedge its project.
+
+**The stdout rule.** JSON-RPC owns the real stdout, and nothing else may write
+to it. `jonquil.main/-main` branches on `mcp-args` before `start!`, saves the
+real `*out*`, then points the root `*out*` at `*err*` with `alter-var-root`, so
+a `println` from any runtime thread lands on stderr. Only the `:write-line`
+function passed to `serve!` rebinds `*out*` to the saved writer, prints one
+line and flushes. The shutdown hook that calls `registry/stop-all!` covers this
+path as well as the window's.
+
 ## GTK is not everywhere
 
 GTK4 is required only from `jonquil.main`. All of the pure core (tokenization, parsing, syntax highlighting, edit operations, the eval engine) runs without GTK or any GUI dependencies. This design lets the core be tested independently and potentially reused by a second front-end later.

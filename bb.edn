@@ -256,6 +256,7 @@
      (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
      (row "bench:edit [sizes...]" "time editing stalls on large files (opens a real window per size)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
+     (row "mcp:smoke [--bin PATH]" "smoke of `jonquil --mcp` over real stdio (checkout, or the built binary)")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
      (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
@@ -389,6 +390,9 @@
   smoke:binary
   {:doc "P2.T10: automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
    :task (apply shell "bb" "dev/smoke/binary_smoke.clj" *command-line-args*)}
+  mcp:smoke
+  {:doc "Smoke of `jonquil --mcp` over real stdio (a checkout; pass --bin PATH for the built binary)"
+   :task (apply shell "bb" "dev/smoke/mcp_smoke.clj" *command-line-args*)}
   smoke:cljd
   {:doc "P4.T3 automated: smokes the ClojureDart attach dialect against your running a-sibling-cljd-app app (bb dev:macos) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
    :task (apply shell "bb" "dev/smoke/cljd_smoke.clj" *command-line-args*)}

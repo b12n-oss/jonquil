@@ -9,15 +9,15 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 54 namespaces in well under a second, and it's the fastest
+currently loads 57 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (501 tests, 3275 assertions
+slower. `bb test` runs the full unit suite (545 tests, 3377 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo. On Linux (arm64) the
-same suite runs 501 tests and 3244 assertions: some asserts are gated by
+same suite runs 545 tests and 3346 assertions: some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so the two systems
 differ by 31 assertions.
 
@@ -39,6 +39,18 @@ that self-contained on purpose, which is why the live suites are separate
 tasks rather than tags inside the same one. `bb verify` is the pre-commit
 gate: clj-kondo in report mode, then `bb test` followed by `bb
 test:nrepl`, both of which must pass.
+
+`bb mcp:smoke` smokes `jonquil --mcp` over real stdio: it starts the
+server from the checkout (`jolt -M -m jonquil.main --mcp DIR`), speaks
+JSON-RPC to it from babashka, and prints one PASS or FAIL line per check:
+the handshake, six tools listed, an evaluation, a background `println` that
+must not reach stdout, a bracket check, then a second project with
+`.jonquil.edn` `{:runtime :nrepl}` that starts a real Jolt child, and a clean
+exit with no child left once stdin closes. Every response is read with a
+deadline, so a hang fails a check instead of blocking. `bb mcp:smoke --bin
+./jonquil` runs the same checks against the binary `bb app:build` made, which
+is what proves `jolt build` links the MCP namespaces. It takes about 3 s from
+a checkout and needs the jolt-lang/nrepl checkout for the nREPL step.
 
 ## Self-test and docs: eight windows, one binary, one camera
 

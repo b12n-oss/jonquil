@@ -1143,6 +1143,50 @@ that follows a `when` in the loop body, fail with
 works, for example
 `(loop [i 0] (if (< i n) (recur (inc i)) i))`.
 
+## Driving Jonquil from an agent (MCP)
+
+`jonquil --mcp [DIR]` runs Jonquil with no window as an MCP server on stdio,
+one JSON-RPC message per line. An agent evaluates code, runs files and looks
+things up in the same runtime a person would get in the IDE. `DIR` is the
+default project directory (the working directory when you leave it out).
+Register it with Claude Code:
+
+```bash
+claude mcp add jonquil -- jonquil --mcp /path/to/project
+# from a checkout:
+claude mcp add jonquil -- jolt -M -m jonquil.main --mcp /path/to/project
+```
+
+Six tools, each taking an optional `path` (a file or directory) that selects
+the project, defaulting to `DIR`:
+
+| Tool | What it does |
+|---|---|
+| `jonquil_eval` | Evaluates code as a REPL line; definitions persist between calls |
+| `jonquil_run_file` | Runs a file's text the way the Run button does |
+| `jonquil_check_brackets` | Checks brackets in text or a file; names the first unclosed or unmatched one |
+| `jonquil_doc` | Documentation for a symbol in the project's runtime |
+| `jonquil_complete` | Up to 50 completion candidates for a prefix |
+| `jonquil_project` | The dialect, runtime and directory the other tools would use; starts nothing |
+
+The dialect and runtime come from the IDE's own choice: the file's extension
+and the project's `.jonquil.edn` (see [Choosing a dialect](#choosing-a-dialect)
+and [`.jonquil.edn`](#jonquil-edn)), so a project with `{:runtime :nrepl}`
+evaluates in a Jolt child and one with `{:dialect :clj}` attaches to its nREPL
+server. `jonquil_eval` and `jonquil_run_file` take a `timeout_ms`; the default
+deadline is 30 s, after which the evaluation is interrupted and the tool
+answers with an error. Closing stdin ends the server and stops every runtime
+it started.
+
+### Trust boundary
+
+Whoever can start `jonquil --mcp` can run code as you. Evaluating is the point
+of the tools, and nothing authenticates the caller. That is the model of MCP
+over stdio: the client controls what it spawns, so you already decide who gets
+to launch the server. It is also the same reach `bb nrepl` gives today. Don't
+put it behind anything that lets someone else choose its command line or feed
+its stdin.
+
 ## Keys
 
 | Key | Where | Does |
