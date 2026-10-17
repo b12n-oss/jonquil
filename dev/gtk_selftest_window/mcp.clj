@@ -11,7 +11,9 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.editor :as editor]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
+            [jonquil.mcp.window :as window]
             [jonquil.tabs :as tabs]
             [temp-dirs]))
 
@@ -164,3 +166,181 @@
                                         (string? (:none m2)) (not (str/blank? (:none m2))))
                                    {:msg m :shown shown? :sel sel :m2 m2
                                     :console (support/since ui mark)})))))
+
+;; --- the tool table over the live window (Task 3) -----------------------------
+;; Tool calls block (promise derefs with deadlines): they run on the row
+;; thread, never inside on-gtk. Reads of GTK state still go through on-gtk.
+
+(defn- tools-for
+  "A fresh window tool table over the live ui; its :call is (fn [name args])."
+  [ui]
+  (window/make-window-tools {:ui ui :dir (temp-dirs/temp-dir! "jonquil-selftest-mcp-dir-")}))
+
+(defn- call
+  "Calls tool tname with string-keyed args on the row thread."
+  ([t tname] (call t tname {}))
+  ([t tname args] ((:call t) tname args)))
+
+(defn- file!
+  "A file named name holding text in a fresh temp dir; its path."
+  [name text]
+  (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-mcp-") name)]
+    (io/make-parents f)
+    (spit f text)
+    (.getPath f)))
+
+(defn- occupy-first!
+  "Gives the first tab text so jonquil_open adds a tab. GTK-thread only."
+  [ui]
+  (editor/set-text! (:ed (first ((:tabs* ui)))) ";; mcp\n"))
+
+(defn- tab-id [open-text]
+  (some->> open-text (re-find #"Opened tab (\d+) ") second parse-long))
+
+(defn- tab-line-of [t id]
+  (->> (str/split-lines (:text (call t "jonquil_tabs")))
+       (filter #(str/starts-with? % (str id " ")))
+       first))
+
+(defn- console-mark [t]
+  (parse-long (second (re-find #"^mark (\d+)" (:text (call t "jonquil_console"))))))
+
+(defn row-mcp-tools-open-read-select [ui]
+  (go-row :mcp-tools-open-read-select support/check
+          (let [t (tools-for ui)
+                p1 (file! "one.clj" "(def one 1)\n")
+                p2 (file! "two.clj" "(def two 2)\n")]
+            (on-gtk (occupy-first! ui))
+            (try
+              (let [o1 (call t "jonquil_open" {"path" p1})
+                    id1 (tab-id (:text o1))
+                    read (call t "jonquil_read_tab")
+                    line1 (tab-line-of t id1)
+                    o2 (call t "jonquil_open" {"path" p2})
+                    id2 (tab-id (:text o2))
+                    line2 (tab-line-of t id2)
+                    sel (call t "jonquil_select_tab" {"id" id1})
+                    line1b (tab-line-of t id1)
+                    line2b (tab-line-of t id2)
+                    bad (call t "jonquil_select_tab" {"id" 9999})]
+                (on-gtk (support/check :mcp-tools-open-read-select
+                                       (and id1 id2 (not= id1 id2)
+                                            (not (:error? o1)) (str/includes? (:text o1) p1)
+                                            (= "(def one 1)\n" (:text read))
+                                            (= (str id1 " * saved " p1) line1)
+                                            (= (str id2 " * saved " p2) line2)
+                                            (not (:error? sel))
+                                            (= (str id1 " * saved " p1) line1b)
+                                            (= (str id2 " - saved " p2) line2b)
+                                            (:error? bad)
+                                            (= "No tab with id 9999." (:text bad)))
+                                       {:o1 o1 :o2 o2 :read read :line1 line1 :line2 line2
+                                        :sel sel :line1b line1b :line2b line2b :bad bad})))
+              (finally (on-gtk (close-extra-tabs! ui)))))))
+
+(defn row-mcp-tools-replace-save [ui]
+  (go-row :mcp-tools-replace-save support/check
+          (let [t (tools-for ui)
+                p (file! "rs.clj" "(def old 1)\n")
+                new-text "(def fresh 2)\n"]
+            (on-gtk (occupy-first! ui))
+            (try
+              (let [id (tab-id (:text (call t "jonquil_open" {"path" p})))
+                    r (call t "jonquil_replace_text" {"text" new-text})
+                    dirty-line (tab-line-of t id)
+                    ed-text (on-gtk (editor/editor-text (:ed ((:active-tab* ui)))))
+                    s (call t "jonquil_save")
+                    disk (slurp p)
+                    saved-line (tab-line-of t id)]
+                (on-gtk (support/check :mcp-tools-replace-save
+                                       (and id (not (:error? r))
+                                            (= (str id " * dirty " p) dirty-line)
+                                            (= new-text ed-text)
+                                            (not (:error? s))
+                                            (= new-text disk)
+                                            (= (str id " * saved " p) saved-line))
+                                       {:r r :dirty-line dirty-line :ed-text ed-text :s s
+                                        :disk disk :saved-line saved-line})))
+              (finally (on-gtk (close-extra-tabs! ui)))))))
+
+(defn row-mcp-tools-run-eval-console [ui]
+  (go-row :mcp-tools-run-eval-console support/check
+          (let [t (tools-for ui)
+                p (file! "run.clj" "(def y 7) y")
+                c0 (call t "jonquil_console")
+                mark (parse-long (second (re-find #"^mark (\d+)\n" (str (:text c0) "\n"))))]
+            (on-gtk (occupy-first! ui))
+            (try
+              (let [ev (call t "jonquil_eval" {"code" "(+ 1 2)"})
+                    _ (call t "jonquil_open" {"path" p})
+                    run (call t "jonquil_run")
+                    c1 (call t "jonquil_console" {"since" mark})
+                    first-line (first (str/split-lines (:text c1)))
+                    body (:text c1)]
+                (on-gtk (support/check :mcp-tools-run-eval-console
+                                       (and (= (str "mark " mark) (first (str/split-lines (:text c0))))
+                                            (not (:error? ev)) (str/ends-with? (:text ev) "=> 3")
+                                            (not (:error? run)) (str/ends-with? (:text run) "=> 7")
+                                            (str/starts-with? first-line "mark ")
+                                            (str/includes? body "(+ 1 2)")
+                                            (str/includes? body "; --- Running ")
+                                            (str/includes? body "=> 3")
+                                            (str/includes? body "=> 7"))
+                                       {:mark mark :ev ev :run run :c1 c1})))
+              (finally (on-gtk (close-extra-tabs! ui)))))))
+
+(defn row-mcp-tools-run-selection [ui]
+  (go-row :mcp-tools-run-selection support/check
+          (let [t (tools-for ui)]
+            (on-gtk (editor/set-text! (:editor ui) "(+ 1 1)\n(+ 2 2)"))
+            (let [r (call t "jonquil_run_selection" {"start" 8 "end" 15})]
+              (on-gtk (support/check :mcp-tools-run-selection
+                                     (and (not (:error? r)) (str/ends-with? (:text r) "=> 4"))
+                                     {:r r}))))))
+
+(defn row-mcp-tools-timeout-stop [ui]
+  (go-row :mcp-tools-timeout-stop support/check
+          (let [t (tools-for ui)
+                stop (call t "jonquil_stop")
+                t0 (System/currentTimeMillis)
+                to (call t "jonquil_eval" {"code" "(loop [] (recur))" "timeout_ms" 300})
+                elapsed (- (System/currentTimeMillis) t0)
+                after (call t "jonquil_eval" {"code" "(+ 2 2)"})]
+            (on-gtk (support/check :mcp-tools-timeout-stop
+                                   (and (= "Nothing is running." (:text stop)) (not (:error? stop))
+                                        (< elapsed 6000) (:error? to)
+                                        (str/includes? (:text to) "300")
+                                        (not (:error? after)) (str/ends-with? (:text after) "=> 4"))
+                                   {:stop stop :elapsed elapsed :to to :after after})))))
+
+(defn row-mcp-tools-waiting-input [ui]
+  (go-row :mcp-tools-waiting-input support/check
+          (let [t (tools-for ui)
+                mark (console-mark t)
+                t0 (System/currentTimeMillis)
+                r (call t "jonquil_eval" {"code" "(read-line)" "timeout_ms" 10000})
+                elapsed (- (System/currentTimeMillis) t0)
+                _ (ev/send-input! ((:evaluator* ui)) "hi")
+                idle? (await-until 5000 20 #(support/idle? ui))
+                echoed? (await-until 3000 20 #(str/includes? (support/since ui mark) "=> \"hi\""))]
+            (on-gtk (support/check :mcp-tools-waiting-input
+                                   (and (< elapsed 5000) (not (:error? r))
+                                        (str/includes? (:text r) "waiting for console input")
+                                        idle? echoed?)
+                                   {:r r :elapsed elapsed :idle idle? :echoed echoed?
+                                    :console (support/since ui mark)})))))
+
+(defn row-mcp-tools-doc-complete-brackets-project [ui]
+  (go-row :mcp-tools-doc-complete-brackets-project support/check
+          (let [t (tools-for ui)
+                doc (call t "jonquil_doc" {"symbol" "map"})
+                comp (call t "jonquil_complete" {"prefix" "ma"})
+                brackets (call t "jonquil_check_brackets" {"text" "(+ 1"})
+                project (call t "jonquil_project")]
+            (on-gtk (support/check :mcp-tools-doc-complete-brackets-project
+                                   (and (str/includes? (:text doc) "map") (str/includes? (:text doc) "[")
+                                        (some #{"map"} (str/split-lines (:text comp)))
+                                        (not (:error? brackets)) (not= "ok" (str/trim (:text brackets)))
+                                        (str/includes? (:text brackets) "(")
+                                        (str/includes? (:text project) "Dialect: "))
+                                   {:doc doc :comp comp :brackets brackets :project project})))))

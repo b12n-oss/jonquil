@@ -347,6 +347,13 @@
    mcp/row-mcp-run-problem
    mcp/row-mcp-run-refused
    mcp/row-mcp-run-selection-done
+   mcp/row-mcp-tools-open-read-select
+   mcp/row-mcp-tools-replace-save
+   mcp/row-mcp-tools-run-eval-console
+   mcp/row-mcp-tools-run-selection
+   mcp/row-mcp-tools-timeout-stop
+   mcp/row-mcp-tools-waiting-input
+   mcp/row-mcp-tools-doc-complete-brackets-project
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
