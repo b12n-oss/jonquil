@@ -141,14 +141,34 @@
    :port-file ".nrepl-port"
    :reset-tooltip "This is your own JVM, so Jonquil doesn't unload namespaces in it."})
 
+(def cljs
+  {:id :cljs
+   :name "ClojureScript (shadow-cljs)"
+   :extensions #{"cljs"}
+   :reader-features #{:cljs}
+   :special-forms (:special-forms jolt)
+   :builtins (:builtins jolt)
+   :project-markers ["shadow-cljs.edn"]
+   ;; Attach-only: Jonquil connects to the shadow-cljs nREPL server, found
+   ;; through :port-file in the project directory, and never starts it.
+   :evaluator :attach
+   :runtimes #{:attach}
+   :port-file ".shadow-cljs/nrepl.port"
+   :experimental true
+   ;; The same text as jonquil.cljs/experimental-message (dialect can't
+   ;; require cljs); a test keeps the two equal.
+   :experimental-message "; ClojureScript support is experimental. Jonquil connects to the shadow-cljs nREPL server on the first Run."
+   :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
+
 (def profiles
   "Every known profile. Order matters only as the last resort in select:
   Jolt first, so a file neither profile's extension claims (bb.edn in a
   ClojureDart app) stays Jolt's.
 
   clj joined this list in P2.T4, once the window required jonquil.nrepl.jvm
-  and could reach make-attached :clj (ruling 3)."
-  [jolt cljd clj jank])
+  and could reach make-attached :clj (ruling 3). cljs goes last: nothing
+  else claims .cljs."
+  [jolt cljd clj jank cljs])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
@@ -197,11 +217,12 @@
                     (pr-str v) ", so it is ignored")]))
 
 (defn parse-config
-  "{:dialect k? :runtime k? :auto-require [sym]? :warnings [str]} from
-  .jonquil.edn's text. Never throws: unreadable text, a non-map, a
-  non-keyword value or a malformed :auto-require is a warning, and the bad
-  part is ignored. :auto-require is present only when it names at least
-  one namespace."
+  "{:dialect k? :runtime k? :auto-require [sym]? :cljs map? :warnings [str]}
+  from .jonquil.edn's text. Never throws: unreadable text, a non-map, a
+  non-keyword value, a malformed :auto-require or a non-map :cljs is a
+  warning, and the bad part is ignored. :auto-require is present only when
+  it names at least one namespace. :cljs is present only when it is a map
+  (an empty one counts)."
   [text read-error]
   (let [bad (fn [msg] {:warnings [(str ".jonquil.edn " msg ", so it is ignored")]})]
     (cond
@@ -221,9 +242,13 @@
                                      :else [nil (str ".jonquil.edn " k " should be a keyword, not " (pr-str v))])))
                 [d dw] (kw-or-warn :dialect)
                 [r rw] (kw-or-warn :runtime)
-                [ar arw] (auto-require-part (get m :auto-require))]
-            (cond-> {:dialect d :runtime r :warnings (vec (remove nil? [dw rw arw]))}
-              ar (assoc :auto-require ar))))))))
+                [ar arw] (auto-require-part (get m :auto-require))
+                cl (get m :cljs)
+                clw (when-not (or (nil? cl) (map? cl))
+                      ".jonquil.edn :cljs should be a map, like {:shadow-build :app}")]
+            (cond-> {:dialect d :runtime r :warnings (vec (remove nil? [dw rw arw clw]))}
+              ar (assoc :auto-require ar)
+              (map? cl) (assoc :cljs cl))))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."
@@ -245,12 +270,13 @@
   the file's path or nil; default is the settings :dialect or nil.
   Returns {:profile p :runtime k :project-dir dir-or-nil :source k
   :warnings [str]}, plus :auto-require [sym] when the project's config
-  names one and the dialect is :clj, :source one of :config :marker :extension :settings
+  names one and the dialect is :clj, plus :cljs {map} when it names one and
+  the dialect is :cljs, :source one of :config :marker :extension :settings
   :fallback. A settings default naming a marker-less profile (in practice
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
-  (let [{:keys [dialect runtime auto-require warnings]} (if project
+  (let [{:keys [dialect runtime auto-require cljs warnings]} (if project
                                              (parse-config (:config project) (:config-error project))
                                              {:warnings []})
         by-config (when dialect (profile profiles dialect))
@@ -292,13 +318,20 @@
         clj? (= :clj (:id p))
         w3 (if (and auto-require (not clj?))
              [(str ".jonquil.edn :auto-require only applies to JVM Clojure, not " (:name p) ", so it is ignored")]
+             [])
+        ;; Only ClojureScript reads :cljs (the build choice); elsewhere it's
+        ;; ignored.
+        cljs? (= :cljs (:id p))
+        w4 (if (and cljs (not cljs?))
+             [(str ".jonquil.edn :cljs only applies to ClojureScript, not " (:name p) ", so it is ignored")]
              [])]
     (cond-> {:profile p
              :runtime (if rt-ok? runtime (:evaluator p))
              :project-dir (:dir project)
              :source source
-             :warnings (-> (vec warnings) (into w1) (into w2) (into w3))}
-      (and auto-require clj?) (assoc :auto-require auto-require))))
+             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4))}
+      (and auto-require clj?) (assoc :auto-require auto-require)
+      (and cljs cljs?) (assoc :cljs cljs))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
