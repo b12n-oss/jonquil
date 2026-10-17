@@ -19,10 +19,12 @@
   (is (cljs/selected-value? :app "[:selected :app]"))
   (is (not (cljs/selected-value? :app "[:selected :dev]")))
   (is (not (cljs/selected-value? :app nil)))
-  (is (= "; watch for build not running. Start it with npx shadow-cljs watch :dev."
+  (is (= "; watch for build not running. Start it with npx shadow-cljs watch dev."
          (cljs/select-failed-message "Execution error (ExceptionInfo) at shadow.cljs.devtools.server.nrepl-impl/repl-init (nrepl_impl.clj:30).\nwatch for build not running\n" :dev)))
-  (is (= "; plain failure. Start it with npx shadow-cljs watch :dev."
-         (cljs/select-failed-message "\nplain failure\nmore\n" :dev))))
+  (is (= "; plain failure. Start it with npx shadow-cljs watch dev."
+         (cljs/select-failed-message "\nplain failure\nmore\n" :dev)))
+  (is (= "; ends in a period. Start it with npx shadow-cljs watch dev."
+         (cljs/select-failed-message "ends in a period.\n" :dev))))
 
 (deftest error-line-test
   (is (cljs/exception-value? ":repl/exception!"))
@@ -56,5 +58,7 @@
          (cljs/shadow-build nil "{:builds {:app")))
   (is (= {:notice "; No build found in shadow-cljs.edn. Name one with {:cljs {:shadow-build :app}} in .jonquil.edn."}
          (cljs/shadow-build nil nil)))
+  (is (= {:notice "; No build found in shadow-cljs.edn. Name one with {:cljs {:shadow-build :app}} in .jonquil.edn."}
+         (cljs/shadow-build nil "{:builds [:app]}")))
   (is (= {:notice "; .jonquil.edn :cljs :shadow-build should be a keyword, like :app."}
          (cljs/shadow-build {:shadow-build "app"} "{:builds {:app {}}}"))))

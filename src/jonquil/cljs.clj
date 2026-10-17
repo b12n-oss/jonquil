@@ -64,7 +64,8 @@
   [err-text build]
   (let [line (or (first-line-after-header err-text)
                  (first (remove str/blank? (map str/trim (str/split-lines (or err-text ""))))))]
-    (str "; " (str/trim (or line "")) ". Start it with npx shadow-cljs watch " build ".")))
+    (str "; " (str/replace (str/trim (or line "")) #"\.+$" "")
+         ". Start it with npx shadow-cljs watch " (if (keyword? build) (name build) build) ".")))
 
 ;; --- replies ---
 
@@ -124,7 +125,8 @@
       :else
       (let [parsed (try (edn/read-string {:default (fn [_tag v] v)} (or shadow-edn-text ""))
                         (catch Exception _ nil))
-            ks (when (map? parsed) (keys (:builds parsed)))]
+            builds (when (map? parsed) (:builds parsed))
+            ks (when (map? builds) (keys builds))]
         (case (count ks)
           0 {:notice no-build-notice}
           1 {:build (first ks)}
