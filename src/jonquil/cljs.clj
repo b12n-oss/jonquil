@@ -122,7 +122,8 @@
       (keyword? configured) {:build configured}
       (some? configured) {:notice "; .jonquil.edn :cljs :shadow-build should be a keyword, like :app."}
       :else
-      (let [parsed (try (edn/read-string (or shadow-edn-text "")) (catch Exception _ nil))
+      (let [parsed (try (edn/read-string {:default (fn [_tag v] v)} (or shadow-edn-text ""))
+                        (catch Exception _ nil))
             ks (when (map? parsed) (keys (:builds parsed)))]
         (case (count ks)
           0 {:notice no-build-notice}

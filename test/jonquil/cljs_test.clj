@@ -47,6 +47,7 @@
   (is (= {:build :web} (cljs/shadow-build {:shadow-build :web} nil)))
   (is (= {:build :app} (cljs/shadow-build nil "{:builds {:app {}}}")))
   (is (= {:build :app} (cljs/shadow-build {} "{:deps true #_ {:x 1} :builds {:app {}}}")))
+  (is (= {:build :app} (cljs/shadow-build nil "{:dev-http {8080 #shadow/env \"PUBLIC\"} :builds {:app {}}}")))
   (is (= {:notice "; Several shadow-cljs builds: :app :web. Pick one with {:cljs {:shadow-build :app}} in .jonquil.edn."}
          (cljs/shadow-build nil "{:builds {:web {} :app {}}}")))
   (is (= {:notice "; No build found in shadow-cljs.edn. Name one with {:cljs {:shadow-build :app}} in .jonquil.edn."}
