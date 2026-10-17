@@ -6,13 +6,16 @@
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each.
   A hook runs on the GTK thread through on-gtk; the row thread then derefs
   the notify promise with a deadline, never inside on-gtk."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.mcp.json :as json]
+            [jonquil.mcp.listen :as listen]
             [jonquil.mcp.window :as window]
             [jonquil.tabs :as tabs]
             [temp-dirs]))
@@ -344,3 +347,105 @@
                                         (str/includes? (:text brackets) "(")
                                         (str/includes? (:text project) "Dialect: "))
                                    {:doc doc :comp comp :brackets brackets :project project})))))
+
+;; --- the listener over the live window (mcp3 Task 3) ---------------------------
+;; Socket IO runs on the row thread, never inside on-gtk; every read has a
+;; socket timeout. Each row owns its listener and stops it in finally.
+
+(defn- connect [port]
+  (let [s (java.net.Socket. (java.net.InetAddress/getByName "127.0.0.1") (int port))]
+    (.setSoTimeout s DEADLINE-MS)
+    {:socket s
+     :in (io/reader (.getInputStream s) :encoding "UTF-8")
+     :out (io/writer (.getOutputStream s) :encoding "UTF-8")}))
+
+(defn- close-client! [c]
+  (try (.close ^java.net.Socket (:socket c)) (catch Throwable _ nil)))
+
+(defn- rpc!
+  "Sends one JSON-RPC request and reads one response line (nil on timeout)."
+  [c id method params]
+  (.write ^java.io.Writer (:out c)
+          (str (json/encode {"jsonrpc" "2.0" "id" id "method" method "params" params}) "\n"))
+  (.flush ^java.io.Writer (:out c))
+  (try (some-> (.readLine ^java.io.BufferedReader (:in c)) json/decode)
+       (catch java.net.SocketTimeoutException _ nil)))
+
+(defn- initialize! [c]
+  (rpc! c 1 "initialize" {"protocolVersion" "2024-11-05" "capabilities" {}
+                          "clientInfo" {"name" "selftest" "version" "0"}}))
+
+(defn- tool-text [resp]
+  (get-in resp ["result" "content" 0 "text"]))
+
+(defn- call-tool! [c id tname args]
+  (tool-text (rpc! c id "tools/call" {"name" tname "arguments" args})))
+
+(defn- listener! [ui]
+  (let [sp (support/fresh-settings-path)]
+    [sp (listen/start-listener! {:ui ui :dir (temp-dirs/temp-dir! "jonquil-selftest-mcp-dir-")
+                                 :settings-path sp})]))
+
+(defn- registry-files [sp]
+  (vec (.listFiles (io/file (listen/registry-dir sp)))))
+
+(defn row-mcp-listen-serves-and-registers [ui]
+  (go-row :mcp-listen-serves-and-registers support/check
+          (let [[sp l] (listener! ui)
+                mark (on-gtk (support/out-end-offset ui))
+                c (atom nil)]
+            (try
+              (reset! c (connect (:port l)))
+              (let [init (initialize! @c)
+                    ev (call-tool! @c 2 "jonquil_eval" {"code" "(+ 1 2)"})
+                    files (registry-files sp)
+                    entry (some-> (first files) slurp edn/read-string)
+                    echoed? (await-until 3000 20 #(let [t (support/since ui mark)]
+                                                    (and (str/includes? t "(+ 1 2)")
+                                                         (str/includes? t "\n=> 3"))))]
+                (on-gtk (support/check :mcp-listen-serves-and-registers
+                                       (and (some? (get-in init ["result" "serverInfo"]))
+                                            (string? ev) (str/ends-with? ev "=> 3")
+                                            (= 1 (count files))
+                                            (= (:port l) (:port entry))
+                                            echoed?)
+                                       {:init init :ev ev :files (map str files) :entry entry
+                                        :echoed echoed? :console (support/since ui mark)})))
+              (finally
+                (when @c (close-client! @c))
+                ((:stop! l)))))))
+
+(defn row-mcp-listen-detach-leaves-window [ui]
+  (go-row :mcp-listen-detach-leaves-window support/check
+          (let [[_ l] (listener! ui)
+                c1 (connect (:port l))
+                c2 (atom nil)]
+            (try
+              (initialize! c1)
+              (close-client! c1)
+              (let [idle? (await-until 3000 20 #(support/idle? ui))
+                    read (on-gtk (some? (editor/editor-text (:ed ((:active-tab* ui))))))
+                    _ (reset! c2 (connect (:port l)))
+                    _ (initialize! @c2)
+                    tabs (call-tool! @c2 2 "jonquil_tabs" {})]
+                (on-gtk (support/check :mcp-listen-detach-leaves-window
+                                       (and idle? read (string? tabs) (not (str/blank? tabs)))
+                                       {:idle idle? :read read :tabs tabs})))
+              (finally
+                (close-client! c1)
+                (when @c2 (close-client! @c2))
+                ((:stop! l)))))))
+
+(defn row-mcp-listen-stop-cleans [ui]
+  (go-row :mcp-listen-stop-cleans support/check
+          (let [[sp l] (listener! ui)]
+            (try
+              (let [before (count (registry-files sp))
+                    _ ((:stop! l))
+                    after (count (registry-files sp))
+                    refused? (try (close-client! (connect (:port l))) false
+                                  (catch java.io.IOException _ true))]
+                (on-gtk (support/check :mcp-listen-stop-cleans
+                                       (and (= 1 before) (zero? after) refused?)
+                                       {:before before :after after :refused refused?})))
+              (finally ((:stop! l)))))))
