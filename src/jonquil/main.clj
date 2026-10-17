@@ -6,6 +6,7 @@
             [jonquil.login-path :as login-path]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.tools :as mcp-tools]
+            [jonquil.mcp.window :as mcp-window]
             [jonquil.runtime-registry :as registry]
             [jonquil.settings :as settings]))
 
@@ -30,14 +31,17 @@
              args)))
 
 (defn mcp-args
-  "{:dir abs-dir} when the first arg is \"--mcp\" (the optional second arg made
-  absolute against the working directory, else the working directory itself),
-  else nil. Pure apart from reading user.dir."
+  "{:dir abs-dir :window? bool} when the first arg is \"--mcp\", else nil. An
+  optional \"--window\" next selects the live-window server; the optional
+  directory after it is made absolute against the working directory, else the
+  working directory itself. Pure apart from reading user.dir."
   [args]
   (when (= "--mcp" (first args))
     (let [cwd (System/getProperty "user.dir")
-          d (second args)]
-      {:dir (cond
+          window? (= "--window" (second args))
+          d (nth args (if window? 2 1) nil)]
+      {:window? window?
+       :dir (cond
               (nil? d) cwd
               (.isAbsolute (io/file d)) d
               :else (.getAbsolutePath (io/file cwd d)))})))
@@ -59,6 +63,28 @@
                                  (println line)
                                  (flush)))})))
 
+;; The window variant: the real stdout is kept for JSON-RPC, the root *out* goes
+;; to stderr, and the server runs on its own thread once the window is up. The
+;; GTK loop owns this thread; it ends when the EOF quit closes the window.
+(defn- serve-mcp-window!
+  [{:keys [dir]}]
+  (let [real-out *out*
+        cwd (System/getProperty "user.dir")]
+    (alter-var-root #'*out* (constantly *err*))
+    (login-path/start!)
+    (start! {:cwd cwd
+             :argv (gtk-argv [dir] cwd)
+             :on-ready (fn [ui]
+                         (future
+                           (mcp-window/serve-window!
+                            {:ui ui
+                             :dir dir
+                             :read-line (fn [] (read-line))
+                             :write-line (fn [line]
+                                           (binding [*out* real-out]
+                                             (println line)
+                                             (flush)))})))})))
+
 (defn -main [& args]
   ;; Asks the login shell for PATH in the background when launched from
   ;; Finder; self-tests call start! directly and keep the process PATH.
@@ -77,7 +103,7 @@
   ;; files open as tabs and a folder roots the file tree. :cwd roots the
   ;; tree when there's no argument.
   (if-let [m (mcp-args args)]
-    (serve-mcp! m)
+    (if (:window? m) (serve-mcp-window! m) (serve-mcp! m))
     (let [cwd (System/getProperty "user.dir")]
       (start! {:cwd cwd :argv (gtk-argv args cwd)})))
   ;; The GTK loop has ended by the time g-application-run (inside start!)
