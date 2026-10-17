@@ -123,6 +123,16 @@ slow or abandoned call can't block the worker. The window keeps its one
 evaluator; the tools never stop or swap it. The stdout rule below holds in
 window mode unchanged.
 
+**Listener and bridge.** `jonquil.mcp.listen` lets a window that has
+`:mcp-listen? true` serve those same fifteen tools to a socket client. It binds
+127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
+`serve!` over it, and it records the port in a per-window registry file
+(`<settings-dir>/mcp/<pid>.edn`) that `stop!` removes and that startup
+housekeeping reaps when the pid is dead. `jonquil --mcp-attach [DIR]` is the
+other half: `discover` picks the live entry whose folder matches `DIR` (or the
+only live one), and `bridge!` copies lines between stdio and the socket without
+re-encoding them. Neither side touches `jonquil.gtk`.
+
 **The stdout rule.** JSON-RPC owns the real stdout, and nothing else may write
 to it. `jonquil.main/-main` branches on `mcp-args` before `start!`, saves the
 real `*out*`, then points the root `*out*` at `*err*` with `alter-var-root`, so

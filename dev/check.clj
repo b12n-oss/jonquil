@@ -60,6 +60,7 @@
     jonquil.gtk.file-tree-pane
     jonquil.gtk.window
     jonquil.mcp.window
+    jonquil.mcp.listen
     jonquil.main])
 
 (defn -main [& _]

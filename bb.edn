@@ -256,7 +256,7 @@
      (row "app:icon" "regenerate resources/Jonquil.icns and the 256 px Linux PNG from resources/icon/icon.swift (macOS)")
      (row "bench:edit [sizes...]" "time editing stalls on large files (opens a real window per size)")
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
-     (row "mcp:smoke [--bin PATH] [--window]" "smoke of `jonquil --mcp` over real stdio; --window drives a real window (checkout, or the built binary)")
+     (row "mcp:smoke [--bin PATH] [--window|--attach]" "smoke of `jonquil --mcp` over real stdio; --window drives a real window, --attach bridges to a listening one (checkout, or the built binary)")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
      (hdr "Self-test and docs")
      (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
@@ -598,7 +598,7 @@
                          "jonquil-selftest-source-" "jonquil-selftest-tabs-" "jonquil-selftest-appopen-" "jonquil-selftest-tree-" "jonquil-selftest-args-" "jonquil-file-tree-test-"
                          "jonquil-selftest-symlink-link-" "jonquil-selftest-symlink-real-"
                          "jonquil-demoshots-settings-" "jonquil-demoshots-tabs-" "jonquil-demoshots-tree-" "jonquil-demoshots-jank-" "jonquil-clj-server-" "jonquil-clj-config-"
-                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-" "jonquil-app-linux-test-" "jonquil-save-path" "jonquil-jank-child-test-" "jonquil-mcp-test-" "jonquil-mcp-smoke-"]
+                         "jonquil-smoke-xdg-" "jonquil-cljd-smoke-xdg-" "jonquil-login-path-test-" "jonquil-app-bundle-test-" "jonquil-app-linux-test-" "jonquil-save-path" "jonquil-jank-child-test-" "jonquil-mcp-test-" "jonquil-mcp-smoke-" "jonquil-mcp-listen-test-" "jonquil-selftest-mcp-" "jonquil-selftest-mcp-dir-"]
                prefix-of (fn [^java.io.File f]
                            (let [n (.getName f)]
                              (some (fn [p]

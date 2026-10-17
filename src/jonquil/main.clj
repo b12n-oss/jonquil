@@ -5,6 +5,7 @@
             [jonquil.gtk.window :as window]
             [jonquil.login-path :as login-path]
             [jonquil.mcp :as mcp]
+            [jonquil.mcp.listen :as listen]
             [jonquil.mcp.tools :as mcp-tools]
             [jonquil.mcp.window :as mcp-window]
             [jonquil.runtime-registry :as registry]
@@ -46,6 +47,60 @@
               (.isAbsolute (io/file d)) d
               :else (.getAbsolutePath (io/file cwd d)))})))
 
+(defn attach-args
+  "{:dir abs-dir-or-nil} when the first arg is \"--mcp-attach\", else nil. The
+  optional directory after it is made absolute against the working directory;
+  without one :dir is nil (attach to the only listening window)."
+  [args]
+  (when (= "--mcp-attach" (first args))
+    (let [cwd (System/getProperty "user.dir")
+          d (second args)]
+      {:dir (cond
+              (nil? d) nil
+              (.isAbsolute (io/file d)) d
+              :else (.getAbsolutePath (io/file cwd d)))})))
+
+(defn- attach-mcp!
+  "Bridges stdio to a listening window and returns the exit code. Like
+  serve-mcp!, the root *out* goes to stderr and only :write-line reaches the
+  real stdout. Runs before anything GTK."
+  [{:keys [dir]}]
+  (let [real-out *out*]
+    (alter-var-root #'*out* (constantly *err*))
+    (listen/bridge! {:dir dir
+                     :settings-path (settings/settings-path)
+                     :read-line (fn [] (read-line))
+                     :write-line (fn [line]
+                                   (binding [*out* real-out]
+                                     (println line)
+                                     (flush)))})))
+
+(defonce ^:private listener (atom nil))
+
+(defn- stop-listener!
+  "Stops the MCP listener if one runs (idempotent), so its registry entry
+  dies with the process."
+  []
+  (when-let [l (first (reset-vals! listener nil))]
+    (try ((:stop! l))
+         (catch Throwable e
+           (binding [*out* *err*]
+             (println "jonquil: stopping the MCP listener failed:" (ex-message e)))))))
+
+(defn- start-listener-when-enabled!
+  "The launch's :on-ready: starts the MCP listener when :mcp-listen? is on.
+  Reads the tree root in this turn (the GTK thread). A failure is said on
+  stderr and the window carries on."
+  [ui]
+  (try
+    (let [sp (settings/settings-path)]
+      (when (:mcp-listen? (settings/load-settings sp))
+        (let [root (some-> (:root @(:state (:file-tree ui))) io/file .getCanonicalPath)]
+          (reset! listener (listen/start-listener! {:ui ui :dir root :settings-path sp})))))
+    (catch Throwable e
+      (binding [*out* *err*]
+        (println "jonquil: MCP listener not started:" (ex-message e))))))
+
 (defn- serve-mcp!
   "Headless MCP over stdio. JSON-RPC owns the real stdout, so the root *out*
   is pointed at stderr first: a runtime thread's println then lands on
@@ -86,6 +141,8 @@
                                              (flush)))})))})))
 
 (defn -main [& args]
+  (when-let [m (attach-args args)]
+    (System/exit (attach-mcp! m)))
   ;; Asks the login shell for PATH in the background when launched from
   ;; Finder; self-tests call start! directly and keep the process PATH.
   (when-not (mcp-args args) (login-path/start!))
@@ -95,6 +152,7 @@
   ;; twice, and the second call returns at once.
   (jolt.host/add-shutdown-hook
    (fn []
+     (stop-listener!)
      (try (registry/stop-all!)
           (catch Throwable e
             (binding [*out* *err*]
@@ -105,7 +163,7 @@
   (if-let [m (mcp-args args)]
     (if (:window? m) (serve-mcp-window! m) (serve-mcp! m))
     (let [cwd (System/getProperty "user.dir")]
-      (start! {:cwd cwd :argv (gtk-argv args cwd)})))
+      (start! {:cwd cwd :argv (gtk-argv args cwd) :on-ready start-listener-when-enabled!})))
   ;; The GTK loop has ended by the time g-application-run (inside start!)
   ;; returns, so blocking here is fine -- unlike ev/stop! (jonquil.nrepl.
   ;; evaluator), which never blocks the GTK thread. registry/stop-all!
@@ -113,6 +171,7 @@
   ;; any start still in flight to finish tearing itself down, so
   ;; System/exit below can't cut that off mid-flight and orphan a child.
   ;; Guarded so a throw here can't skip the exit.
+  (stop-listener!)
   (try (registry/stop-all!)
        (catch Throwable e
          (binding [*out* *err*]

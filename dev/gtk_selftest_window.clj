@@ -354,6 +354,10 @@
    mcp/row-mcp-tools-timeout-stop
    mcp/row-mcp-tools-waiting-input
    mcp/row-mcp-tools-doc-complete-brackets-project
+   ;; MCP listener (mcp3)
+   mcp/row-mcp-listen-serves-and-registers
+   mcp/row-mcp-listen-detach-leaves-window
+   mcp/row-mcp-listen-stop-cleans
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------
