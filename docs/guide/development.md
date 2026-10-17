@@ -9,7 +9,7 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 58 namespaces in well under a second, and it's the fastest
+currently loads 59 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
 slower. `bb test` runs the full unit suite (599 tests, 3508 assertions
 on macOS) with nothing outside the process, or pass namespace
@@ -18,8 +18,8 @@ count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's and the JVM's), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (31 fewer when last measured, on
-574 tests, 2026-10-17; not re-measured at 599).
+reports fewer assertions than macOS (599 tests and 3477 assertions, 31
+fewer, measured 2026-10-17).
 
 `bb test:nrepl` runs a second, separate suite (38 tests, 127 assertions,
 about 40 s): every test in it spawns a real Jolt child over
