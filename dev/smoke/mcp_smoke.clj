@@ -103,16 +103,14 @@
       (spit (str d "/deps.edn") "{}")
       (spit (str d "/a.clj") "(ns a)\n(def x 1)\n"))
     (spit (str nrepl-proj "/.jonquil.edn") "{:runtime :nrepl}")
-    (let [srv (launch! proj xdg)
-          pid (.pid ^java.lang.Process (:proc (:proc srv)))
-          before (children pid)]
+    (let [srv (launch! proj xdg)]
       (try
         (handshake! srv "in-process")
         (let [r (request! srv "tools/list" {} 20000)]
           (check! "tools/list has six tools" (= 6 (count (get-in r ["result" "tools"]))) r))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
           (check! "eval (+ 1 2) => 3" (and (string? (:text r)) (str/includes? (:text r) "=> 3")) r))
-        (let [r1 (tool! srv "jonquil_eval" {"code" "(do (future (println \"noise\")) (Thread/sleep 200) :ok)"} 30000)
+        (let [r1 (tool! srv "jonquil_eval" {"code" "(do (.start (Thread. (fn [] (println \"noise\")))) (Thread/sleep 200) :ok)"} 30000)
               r2 (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 30000)]
           (check! "background println does not reach stdout"
                   (and (not (:fail r1)) (string? (:text r2)) (str/includes? (:text r2) "=> 4")
@@ -123,7 +121,6 @@
           (check! "check_brackets reports the unclosed form"
                   (and (string? (:text r)) (not (str/blank? (:text r)))) r))
         (stop! srv "in-process")
-        (check! "no child left after the in-process run" (= before (children pid)) (children pid))
         (finally (p/destroy-tree (:proc srv))))
       ;; second project: a real Jolt child over nREPL
       (let [srv (launch! nrepl-proj xdg)

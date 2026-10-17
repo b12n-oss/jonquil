@@ -150,3 +150,13 @@
         r (get (mcp/handle-message t (req 1 "tools/call" {"name" "echo"})) "result")]
     (is (true? (get r "isError")))
     (is (not= "Error: " (get-in r ["content" 0 "text"])))))
+
+(deftest unencodable-id-does-not-end-the-loop
+  (let [rs (serve-lines throwing-defs-tools
+                        ["{\"jsonrpc\":\"2.0\",\"id\":1e400,\"method\":\"ping\"}"
+                         (json/encode (req 9 "ping" nil))])]
+    (is (= 2 (count rs)))
+    (is (contains? #{-32603 -32600} (get-in rs [0 "error" "code"])))
+    (is (nil? (get (rs 0) "id")))
+    (is (= 9 (get (rs 1) "id")))
+    (is (= {} (get-in rs [1 "result"])))))

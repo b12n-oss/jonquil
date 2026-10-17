@@ -84,7 +84,11 @@
 (defn- encode-response [resp]
   (try (json/encode resp)
        (catch Throwable _
-         (json/encode (rpc-error (get resp "id") -32603 "Internal error")))))
+         ;; the id may be what failed to encode (1e400 reads as ##Inf), so
+         ;; the last resort carries a null id, which always encodes
+         (try (json/encode (rpc-error (get resp "id") -32603 "Internal error"))
+              (catch Throwable _
+                (json/encode (rpc-error nil -32603 "Internal error")))))))
 
 (defn serve!
   "Reads one JSON-RPC message per line via :read-line until it returns nil,

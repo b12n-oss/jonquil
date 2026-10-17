@@ -1178,7 +1178,10 @@ evaluates in a Jolt child and one with `{:dialect :clj}` attaches to its nREPL
 server. `jonquil_eval` and `jonquil_run_file` take a `timeout_ms`; the default
 deadline is 30 s, after which the evaluation is interrupted and the tool
 answers with an error. Closing stdin ends the server and stops every runtime
-it started.
+it started. On a project with an out-of-process runtime, `jonquil_doc` and
+`jonquil_complete` answer from the editor's offline tables until the first
+evaluation has started the runtime, so evaluate once first to get
+project-aware answers.
 
 ### Trust boundary
 
