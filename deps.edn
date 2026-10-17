@@ -65,6 +65,11 @@
   ;; File-tree plan P2.T3: a window launched on a directory.
   :selftest-tree {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-tree"]}
+  ;; The ClojureScript window rows -- a real window on throwaway shadow-cljs
+  ;; projects whose .shadow-cljs/nrepl.port names fake shadow servers in the
+  ;; same process (dev/fake_shadow_nrepl.clj). No real shadow-cljs is involved.
+  :selftest-cljs {:extra-paths ["dev"]
+                  :main-opts ["-m" "gtk-selftest-cljs"]}
   ;; P1.T4: a launch with file and folder arguments (jonquil.main/gtk-argv).
   :selftest-args {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-args"]}
