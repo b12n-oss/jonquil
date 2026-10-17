@@ -93,7 +93,7 @@ The front-end applies each edit in reverse order within one `gtk_text_buffer_beg
 
 ## MCP: `jonquil --mcp`
 
-Three namespaces, none of which requires a `jonquil.gtk` one, so the headless
+Three namespaces for the headless server, none of which requires a `jonquil.gtk` one, so the headless
 entry never opens a window:
 
 - `jonquil.mcp.json` is the JSON codec (`decode`, `encode`, string keys both
@@ -108,6 +108,20 @@ entry never opens a window:
   window makes) and registers each with `jonquil.runtime-registry`, so
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
   interrupted, and a dead one can't wedge its project.
+
+**Window mode.** `jonquil.mcp.window` sits beside these and builds the fifteen
+tools for `jonquil --mcp --window`. It never requires `jonquil.gtk.window`:
+it receives the window's `ui` map (the `:on-ready` map) and touches it only
+through `gui-call`, a thunk handed to the GTK thread with a bounded deref, so
+the serve thread never calls GTK itself. The window gives it three notifying
+hooks, `do-run!` (with an optional `notify`), `mcp-eval!` and
+`mcp-run-selection!`. Each takes a `notify` function and calls it exactly once
+with `{:refused msg}`, `{:busy warning}`, `{:problem text}`, `{:none s}` or,
+from the eval worker, `{:done {:result r :output s}}`, and returns a reader
+`(fn [] output-so-far)`. A `notify` callback only delivers a promise, so a
+slow or abandoned call can't block the worker. The window keeps its one
+evaluator; the tools never stop or swap it. The stdout rule below holds in
+window mode unchanged.
 
 **The stdout rule.** JSON-RPC owns the real stdout, and nothing else may write
 to it. `jonquil.main/-main` branches on `mcp-args` before `start!`, saves the

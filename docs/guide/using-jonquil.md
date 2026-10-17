@@ -1183,6 +1183,58 @@ it started. On a project with an out-of-process runtime, `jonquil_doc` and
 evaluation has started the runtime, so evaluate once first to get
 project-aware answers.
 
+### Window mode
+
+`jonquil --mcp --window [DIR]` opens the normal window and serves the same
+protocol on stdio, so you watch the agent work. Register it the same way:
+
+```bash
+claude mcp add jonquil -- jonquil --mcp --window /path/to/project
+# from a checkout:
+claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/project
+```
+
+Headless `jonquil --mcp` keeps its six tools unchanged. With `--window` the
+server offers fifteen, and they act on the live window rather than on private
+evaluators:
+
+| Tool | What it does |
+|---|---|
+| `jonquil_eval` | Evaluates code as a REPL entry at the console prompt: echoed, visible, with `*1` and history as if you had typed it |
+| `jonquil_run` | Runs the active tab the way the Run button does: banner, bracket check, reset-on-run as configured |
+| `jonquil_run_selection` | Takes `start` and `end` character offsets, selects that range in the active tab (visibly) and runs it as Cmd/Ctrl+E does |
+| `jonquil_stop` | Interrupts the running evaluation and reports whether it stopped within 5 s |
+| `jonquil_open` | Opens a file as a tab, or selects the tab already showing it; it becomes the active tab |
+| `jonquil_tabs` | One line per tab: id, an active marker, dirty or saved, the path or Untitled |
+| `jonquil_select_tab` | Makes the tab with the given `id` active |
+| `jonquil_read_tab` | The tab's full text (the active tab when you leave `id` out) |
+| `jonquil_replace_text` | Replaces the tab's text as one undoable edit; the tab reads dirty until saved |
+| `jonquil_save` | Saves the active tab to `path`, or to its own path |
+| `jonquil_console` | First line `mark <N>`, then the console output since the `since` mark (pass back the last `N` to read only what is new) |
+| `jonquil_doc` | Documentation for a symbol, from the window's evaluator |
+| `jonquil_complete` | Completion candidates for a prefix, one per line, at most 50 |
+| `jonquil_check_brackets` | "ok", or the sentence naming the first problem, for `text` or a file `path` |
+| `jonquil_project` | The window's live dialect selection: label, runtime, project directory, source, warnings |
+
+`jonquil_eval`, `jonquil_run` and `jonquil_run_selection` take a `timeout_ms`
+(default 30000) and interrupt the evaluation when it expires. A program that
+stops to read from stdin makes the call return early with what it printed so
+far, and you can type into the console yourself or call `jonquil_stop`.
+
+The window serves its launch project. Tabs from a foreign project open and
+edit like any others, but Run on one is refused with the window's usual
+message, so the agent can't quietly evaluate in the wrong runtime. A
+`jonquil_run_selection` call moves the visible selection even when the run is
+then refused or busy, because the selection is applied first by design.
+
+When the client disconnects (EOF on stdin), the window closes and any unsaved
+edits are discarded, so have the agent call `jonquil_save` first. A failure in
+the serve loop writes a line to stderr and closes the window the same way.
+`bb mcp:smoke --window` exercises all of this end to end.
+
+The trust boundary is the headless server's, plus the files the window can
+reach: the agent can open, edit and save any file you can.
+
 ### Trust boundary
 
 Whoever can start `jonquil --mcp` can run code as you. Evaluating is the point
