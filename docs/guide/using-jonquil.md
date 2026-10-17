@@ -846,7 +846,7 @@ Attaching needs the app running under `bb dev:macos` (or
 server. That fork writes its port to `NREPL.lock` in the app
 directory, which is how Jonquil finds it; upstream ClojureDart
 carries no nREPL server of its own, so there's nothing there for
-Jonquil to attach to (upstreaming the server is planned).
+Jonquil to attach to. The fork isn't published yet.
 
 Jonquil connects the first time you Run, or on any evaluation while it
 holds no live connection, and prints "; Connecting to the app on port
