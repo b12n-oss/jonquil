@@ -381,14 +381,20 @@
   the window, discarding unsaved edits: one gui turn that, when any tab is
   dirty, requests the close and answers the save prompt with index 1
   (Discard), else just requests the close. A gui timeout there is swallowed:
-  the window may already be gone."
+  the window may already be gone. A throw out of the serve loop (stdin
+  failing, say) is logged on stderr and takes the same quit path, so the window
+  closes instead of sitting there with no server."
   [{:keys [ui dir read-line write-line gui]}]
   (let [gui (or gui cb/on-gui!)]
     (binding [*out* *err*]
       (println "jonquil: MCP server driving the window on stdio, default directory" dir))
-    (mcp/serve! {:tools (make-window-tools {:ui ui :dir dir :gui gui})
-                 :read-line read-line
-                 :write-line write-line})
+    (try
+      (mcp/serve! {:tools (make-window-tools {:ui ui :dir dir :gui gui})
+                   :read-line read-line
+                   :write-line write-line})
+      (catch Throwable e
+        (binding [*out* *err*]
+          (println "jonquil: the MCP serve loop failed:" (or (ex-message e) (str e))))))
     (try
       (gui-call gui
                 (fn []

@@ -208,3 +208,16 @@
                         :dir "/d" :read-line (fn [] nil) :write-line (fn [_] nil)
                         :gui sync-gui}))
     (is (str/includes? (str log) "tabs broke"))))
+
+(deftest serve-window-loop-failure-is-logged-and-quits
+  (let [closes (atom 0)
+        log (java.io.StringWriter.)]
+    (binding [*err* log]
+      (w/serve-window! {:ui {:tabs* (fn [] [])
+                             :request-close!* (fn [] (swap! closes inc))
+                             :close-choice! (fn [_] nil)}
+                        :dir "/d" :read-line (fn [] (throw (ex-info "stdin broke" {})))
+                        :write-line (fn [_] nil)
+                        :gui sync-gui}))
+    (is (str/includes? (str log) "stdin broke"))
+    (is (= 1 @closes))))
