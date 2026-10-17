@@ -1,8 +1,9 @@
 (ns jonquil.gtk.ffi
-  "Raw GTK4/GLib/GObject/pango bindings for Jonquil. Lifted from liquid-jlt's liq.gtk.ffi and extended by the P0 S2/S4 spikes and the P2 plan probe.
-  layer patterned on glimmer's glimmer.ffi (same idioms: pointers are jolt
+  "Raw GTK4/GLib/GObject/pango bindings for Jonquil, lifted from a sibling
+  Jolt project's GTK FFI and extended by the P0 S2/S4 spikes and the P2
+  plan probe. The layer keeps that sibling's idioms: pointers are jolt
   numbers, signal handlers are :collect-safe foreign-callables because GTK
-  invokes them from inside the :blocking g_application_run loop).
+  invokes them from inside the :blocking g_application_run loop.
 
   ABI rule (AGENTS.md): no variadic C functions. That excludes
   g_object_set and gtk_text_buffer_create_tag — properties go through the
