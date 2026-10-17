@@ -4,7 +4,7 @@
   .shadow-cljs/nrepl.port) and never starts, stops or signals it.
 
   A fresh session is CLJ. The first evaluation after a connect (and the
-  first after :repl/quit) selects the build with
+  first after :repl/quit or :cljs/quit) selects the build with
   (shadow.cljs.devtools.api/nrepl-select :build), which moves the session to
   cljs.user. The build is resolved on every connect attempt from
   .jonquil.edn's :cljs :shadow-build or the project's shadow-cljs.edn, so an
