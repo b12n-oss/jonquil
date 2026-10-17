@@ -182,14 +182,16 @@ check for the theme's text and prompt colours. Every jonquil process the
 script starts is killed on every exit path, success, failure, or Ctrl-C.
 
 **`bb smoke:cljd`** drives a built `./jonquil` against a real, running
-ClojureDart app instead, so it needs one up first: `bb dev:macos` in
-`a-sibling-cljd-app`, on the `nrepl-poc` fork at `199d173d` or later. If the
+ClojureDart app instead, so it needs one up first, built with nREPL
+support. The gitignored `dev/smoke/cljd_app.local.edn` names it, with `:dir`
+(the app's absolute path) and `:main-ns` (the namespace Run loads). Without
+that file the task prints how to create it and exits 1. If the
 app isn't up, or the screen is locked, every step SKIPs and the task exits 0.
 One Jonquil process stays open for the whole run, since every step shares
 the same attached session. In order, it:
 
 1. opens the app's `drive.cljd` and checks the label and the experimental line
-2. runs it and waits for `Loaded demo.deck.drive`
+2. runs it and waits for `Loaded <main-ns>`
 3. reads `(where)`
 4. sends `(next!)` once and `(prev!)` once, checking the deck moved exactly one step and came back
 5. types a two-line `let` for Run Form, then undoes it
