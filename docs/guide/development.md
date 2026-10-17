@@ -47,7 +47,8 @@ the handshake, six tools listed, an evaluation, a background `println` that
 must not reach stdout, a bracket check, then a second project with
 `.jonquil.edn` `{:runtime :nrepl}` that starts a real Jolt child, and a clean
 exit with no child left once stdin closes. Every response is read with a
-deadline, so a hang fails a check instead of blocking. `bb mcp:smoke --bin
+deadline, so a hang fails a check instead of blocking. It prints 11
+checks. `bb mcp:smoke --bin
 ./jonquil` runs the same checks against the binary `bb app:build` made, which
 is what proves `jolt build` links the MCP namespaces. It takes about 3 s from
 a checkout and needs the jolt-lang/nrepl checkout for the nREPL step.
