@@ -14,9 +14,6 @@
 .env.*
 /.remember/
 /.superpowers/
-# agent guides live in the planning store and are symlinked in
-/AGENTS.md
-/CLAUDE.md
 .DS_Store
 
 # clojure-lsp copies dependency lint configs into .clj-kondo/imports/ on every run;
