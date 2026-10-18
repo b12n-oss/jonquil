@@ -13,7 +13,8 @@
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
-            [jonquil.inspect.view :as view]))
+            [jonquil.inspect.view :as view]
+            [jonquil.project-roots :as roots]))
 
 (declare run-definitions! submit-repl! set-mode!)
 
@@ -75,7 +76,11 @@
                (atom {:mode :reset :prompt-ns 'user :created {}
                       :inspect-view (atom nil)})))
 
-(defmethod ev/make :in-process [_] (make-session))
+(defmethod ev/make :in-process [selection]
+  ;; The project's source folders, so a project kept in process can require
+  ;; its own namespaces (jonquil.project-roots).
+  (roots/use-project! (:project-dir selection))
+  (make-session))
 
 (defn- ns-names [] (set (map ns-name (all-ns))))
 
