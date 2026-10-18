@@ -153,29 +153,74 @@
                (str/split-lines (slurp log)))
          (catch Throwable _ nil))))
 
-(defn- spawn-with-fallback!
-  "spawn-runtime! with child/middleware-source. A git source whose fetch
-  fails (offline on the first start, no git, a refused proxy: jolt exits
-  saying \"git dep: ...\") gets one retry with no middleware, a plain
-  server, and the :runtime map keeps jolt's line as :fetch-error. The
-  evaluator remembers that line in :fetch-error, so a later restart (a
-  plain server's Stop restarts it) goes straight to the plain server
-  instead of paying for the fetch again; a new window tries again. Any
-  other failure, and any failure of a checkout (the user's own to see),
-  is thrown as before, and so is a retry after stop! ran."
+(defn- log-error-line
+  "jolt's own error line from a failed child start's log (its \"Unhandled
+  exception: ...\" line, prefix dropped), else the exception's message."
+  [e]
+  (or (when-let [log (:log (ex-data e))]
+        (try (some (fn [l] (when (str/starts-with? l "Unhandled exception:")
+                             (str/trim (subs l (count "Unhandled exception:")))))
+                   (str/split-lines (slurp log)))
+             (catch Throwable _ nil)))
+      (ex-message e)
+      (str (class e))))
+
+(defn- exited?
+  "True when child/start! threw because the child exited before listening."
+  [e]
+  (boolean (some-> (ex-message e) (str/starts-with? "jolt nrepl-server exited"))))
+
+(defn- attempt-source
+  "The child/start! source for the next attempt: child/middleware-source,
+  or none once a fetch has failed, plus :inspect, child/inspect-root's
+  folder, unless loading or writing the inspector has failed. [source
+  inspect-error-or-nil]: a write failure is recorded, not fatal."
   [ev]
-  (let [known (:fetch-error @(:state ev))
-        source (child/middleware-source)]
-    (if (and known (:git source))
-      (assoc (spawn-runtime! ev nil) :fetch-error known)
-      (try
-        (spawn-runtime! ev source)
-        (catch Throwable e
-          (let [line (when (:git source) (fetch-error-line e))]
-            (if (and line (not (:stopped? @(:state ev))))
-              (do (swap! (:state ev) assoc :fetch-error line)
-                  (assoc (spawn-runtime! ev nil) :fetch-error line))
-              (throw e))))))))
+  (let [{:keys [fetch-error inspect-error]} @(:state ev)
+        source (when-not fetch-error (child/middleware-source))]
+    (if inspect-error
+      [source nil]
+      (let [[root err] (try [(child/inspect-root) nil]
+                            (catch Throwable e
+                              [nil (str "couldn't write Jonquil's inspector files: "
+                                        (or (ex-message e) (str (class e))))]))]
+        (when err (swap! (:state ev) assoc :inspect-error err))
+        [(cond-> source root (assoc :inspect root)) err]))))
+
+(defn- spawn-with-fallback!
+  "spawn-runtime! with attempt-source, falling back step by step. Each
+  failure the evaluator can route around is remembered in its state for
+  the evaluator's life, so a later restart (a plain server's Stop restarts
+  it) skips straight past it; a new window tries again. Each lands on the
+  :runtime map for limitations to name.
+
+  - A git source whose fetch fails (offline on the first start, no git, a
+    refused proxy: jolt exits saying \"git dep: ...\") is retried with no
+    nREPL middleware, a plain server: :fetch-error, jolt's line.
+  - A child that loaded the inspector and exited before it listened is
+    retried without it (jolt requires every :nrepl/middleware namespace
+    before it binds, so an inspector that won't load would otherwise stop
+    Jolt starting at all): :inspect-error, jolt's line. A timeout isn't
+    retried, since a load failure exits rather than hangs.
+  - Anything else is thrown as before: a checkout's own failure (the
+    user's to see), a failure with nothing left to drop, or any failure
+    after stop! ran."
+  [ev]
+  (loop []
+    (let [[source _] (attempt-source ev)
+          result (try {:rt (spawn-runtime! ev source)}
+                      (catch Throwable e {:e e}))]
+      (if-let [rt (:rt result)]
+        (merge rt (select-keys @(:state ev) [:fetch-error :inspect-error]))
+        (let [e (:e result)
+              fetch-line (when (:git source) (fetch-error-line e))]
+          (cond
+            (:stopped? @(:state ev)) (throw e)
+            fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line) (recur))
+            (and (:inspect source) (exited? e)) (do (swap! (:state ev) assoc :inspect-error
+                                         (str "the Jolt child couldn't load Jonquil's inspector: " (log-error-line e)))
+                                  (recur))
+            :else (throw e)))))))
 
 (defn- start-runtime!
   "Launches and connects a child if none is live. nil, or a sentence.
@@ -402,7 +447,8 @@
       (cond-> ["No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead."
                "Jump to definition stays in this buffer: lookup reports no file or line."]
         (and (live? this) (not (contains? (:ops rt) "inspect-start")))
-        (conj "No inspector: this child couldn't load Jonquil's inspector files; {:runtime :in-process} has one.")
+        (conj (str "No inspector" (when-let [why (:inspect-error rt)] (str ": " why))
+                   ". {:runtime :in-process} has one."))
         (and (live? this) (:fetch-error rt))
         (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)
                    ") couldn't be fetched, so this is a plain nREPL server; a new window tries again. Jolt said: "
@@ -420,10 +466,14 @@
   (inspect! [this op args on-view]
     (future
       (try
-        (let [{:keys [conn session ops]} (runtime this)
+        (let [{:keys [conn session ops] :as rt} (runtime this)
               result
               (cond
-                (not (live? this)) {:error inspect-not-running}
+                (nil? rt) {:error inspect-not-running}
+                ;; I2's shape, as jvm.clj answers it: a runtime that was
+                ;; live and dropped (child gone or socket closed) is lost,
+                ;; which disables the panel; never-started is not-running.
+                (not (live? this)) {:error inspect-lost :lost? true}
                 (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
                 :else
                 (let [req (cond-> (assoc (inspect/request op args) :session session)
@@ -438,10 +488,12 @@
           (try (on-view {:error (or (ex-message e) (str (class e)))})
                (catch Throwable _)))))
     nil)
-  ;; true until the child is live (inspect! then says it isn't running yet),
-  ;; and after that only when the child advertised the inspector's ops.
+  ;; true before any runtime (inspect! then says it isn't running yet),
+  ;; and after that when the child advertised the inspector's ops (a lost
+  ;; one still did: inspect! then answers lost, which disables the panel).
   (inspectable? [this]
-    (or (not (live? this)) (contains? (:ops (runtime this)) "inspect-start"))))
+    (let [rt (runtime this)]
+      (or (nil? rt) (contains? (:ops rt) "inspect-start")))))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

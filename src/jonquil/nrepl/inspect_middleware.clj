@@ -49,11 +49,30 @@
 
 (defonce ^:private state (atom nil))
 
+(def ^:private op-set (set ops))
+
+(defn answer!
+  "Answers request on a future of its own, one inspector op at a time
+  (locking state), and returns that future. jolt.nrepl calls a handler on
+  the connection's reader thread, and rendering a view realises part of
+  *1, so a slow or endless value must not stop that thread reading Run,
+  completion or Stop's interrupt (review finding 3). A throw becomes a
+  done reply carrying its message, so the client never waits on nothing."
+  [state request]
+  (future
+    (try
+      (server/respond request (locking state (handle state request)))
+      (catch Throwable e
+        (try (server/respond request {"status" ["done" "error"]
+                                      "view" (pr-str {:path "" :info "" :header ""
+                                                      :note (or (ex-message e) (str (class e)))})})
+             (catch Throwable _ nil))))))
+
 (defn inspect
   "The middleware: answers the inspect-* ops, hands everything else on."
   [handler]
   (apply server/register-ops! ops)
   (fn [request]
-    (if-let [response (handle state request)]
-      (server/respond request response)
+    (if (op-set (get request "op"))
+      (do (answer! state request) nil)
       (handler request))))

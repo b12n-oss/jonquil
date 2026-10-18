@@ -76,13 +76,15 @@
   :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P,
   where COORD is {:local/root R} for {:local R} or the git coordinate for
   {:git coord}. With a nil source, a plain jolt nrepl-server P.
-  inspect-root, when given, is jonquil.nrepl.inspect-files' folder: it joins
-  the deps as jonquil/nrepl-inspect and its middleware goes last, so even a
-  plain server answers the inspector's ops.
+  source's :inspect (or inspect-root, in the three-argument form), when set,
+  is jonquil.nrepl.inspect-files' folder: it joins the deps as
+  jonquil/nrepl-inspect and its middleware goes last, so even a plain
+  server answers the inspector's ops. A source of just {:inspect root} is a
+  plain server with the inspector.
   The program is jolt's absolute path found on login-path's PATH (jolt.process
   resolves a bare name against Jonquil's own PATH, which a Finder launch has
   too bare), or the bare \"jolt\" when none is found."
-  ([port source] (launch-args port source nil))
+  ([port source] (launch-args port (dissoc source :inspect) (:inspect source)))
   ([port {:keys [local git]} inspect-root]
    (let [program (or (tool-path/resolve-program "jolt" (login-path/path)
                                                 login-path/executable-file?)
@@ -103,8 +105,9 @@
        [program "nrepl-server" (str port)]))))
 
 (defn inspect-root
-  "The inspector's folder for a child about to start, or nil (no inspector).
-  A var of its own so tests can stand in for the cache folder."
+  "The inspector's folder for a child about to start (the evaluator puts it
+  on the source as :inspect), or nil for none; throws when it can't be
+  written. A var of its own so tests can stand in for the cache folder."
   []
   (inspect-files/ensure-root!))
 
@@ -237,7 +240,7 @@
     (if-let [port (first ports)]
       (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
             proc (apply p/process (process-options {:dir dir :log log})
-                        (launch-args port source (inspect-root)))
+                        (launch-args port source))
             _ (reset! spawned proc)
             state (wait-ready proc log port ready-deadline-ms)]
         (case state

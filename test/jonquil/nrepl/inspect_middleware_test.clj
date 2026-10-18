@@ -49,6 +49,27 @@
     (is (= {:k 42} @(ns-resolve target 'picked)))
     (remove-ns 'jonquil.nrepl.inspect-middleware-test.target)))
 
+(deftest answers-off-the-callers-thread
+  ;; A *1 that never finishes realising: the caller (jolt's reader thread)
+  ;; gets control back at once, and the reply never comes.
+  (let [state (atom nil)
+        replies (atom [])
+        req {"op" "inspect-start" "rows" 10 "cols" 40
+             :reply (fn [m] (swap! replies conj m))}
+        t0 (System/currentTimeMillis)
+        f (binding [*1 (lazy-seq (Thread/sleep 3000) [1])] (mw/answer! state req))]
+    (is (< (- (System/currentTimeMillis) t0) 1000) "answer! returned at once")
+    (is (= [] @replies))
+    (future-cancel f)))
+
+(deftest answer-replies-through-the-request
+  (let [replies (promise)
+        f (binding [*1 [1 2]]
+            (mw/answer! (atom nil) {"op" "inspect-start" "rows" 10 "cols" 40
+                                    :reply (fn [m] (deliver replies m))}))]
+    @f
+    (is (= 2 (:total (edn/read-string (get (deref replies 5000 {}) "view")))))))
+
 (deftest def-without-a-known-ns-uses-user
   (let [state (atom nil)]
     (binding [*1 7]

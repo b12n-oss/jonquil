@@ -47,27 +47,41 @@
 (defn- delete-tree! [f]
   (doseq [x (reverse (file-seq (io/file f)))] (.delete x)))
 
+(defn- write-tmp!
+  "A fresh sibling of dir holding every file, ready to rename into place."
+  [dir]
+  (let [tmp (io/file (.getParentFile (io/file dir)) (str (.getName (io/file dir)) ".tmp-" (System/nanoTime)))]
+    (doseq [[rel text] sources]
+      (let [f (io/file tmp "src" rel)]
+        (io/make-parents f)
+        (spit f text)))
+    (spit (io/file tmp "deps.edn") "{:paths [\"src\"]}\n")
+    tmp))
+
 (defn ensure-root!
   "The folder under base holding this Jonquil's inspector files, written
-  first when it isn't there: into a temp sibling, then renamed, so a child
-  never reads half a file. A lost rename race uses the winner's copy. The
-  folder is named by a hash of the text, so a newer Jonquil writes its own.
-  nil when anything fails: the child then starts without an inspector."
+  first when it isn't there. The files go into a temp sibling that is then
+  renamed into place, so a child never reads half a file. A rename onto a
+  folder that exists fails (macOS and Linux both refuse a non-empty
+  target), and nothing deletes a complete folder: when another window won
+  the race, its copy is used. Only a folder whose files differ (a crash
+  mid-write, or another Jonquil whose files hash the same) is moved aside
+  and deleted before the rename is tried again. Named by a hash of the
+  text, so a newer Jonquil writes its own. Throws when it can't be written;
+  the evaluator then starts the child without an inspector and says why."
   ([] (ensure-root! (cache-base (System/getenv) (System/getProperty "user.home"))))
   ([base]
-   (try
-     (let [dir (io/file base (folder-name))]
-       (if (complete? dir)
-         (.getCanonicalPath dir)
-         (let [tmp (io/file base (str (folder-name) ".tmp-" (System/nanoTime)))]
-           (try
-             (doseq [[rel text] sources]
-               (let [f (io/file tmp "src" rel)]
-                 (io/make-parents f)
-                 (spit f text)))
-             (spit (io/file tmp "deps.edn") "{:paths [\"src\"]}\n")
-             (when (.exists dir) (delete-tree! dir))
-             (.renameTo tmp dir)
-             (when (complete? dir) (.getCanonicalPath dir))
-             (finally (when (.exists tmp) (delete-tree! tmp)))))))
-     (catch Throwable _ nil))))
+   (let [dir (io/file base (folder-name))]
+     (if (complete? dir)
+       (.getCanonicalPath dir)
+       (let [tmp (write-tmp! dir)]
+         (try
+           (when-not (.renameTo tmp dir)
+             (when (and (.exists dir) (not (complete? dir)))
+               (let [aside (io/file base (str (.getName dir) ".stale-" (System/nanoTime)))]
+                 (when (.renameTo dir aside) (delete-tree! aside))))
+             (.renameTo tmp dir))
+           (if (complete? dir)
+             (.getCanonicalPath dir)
+             (throw (ex-info (str "couldn't write " (.getPath dir)) {:dir (.getPath dir)})))
+           (finally (when (.exists tmp) (delete-tree! tmp)))))))))

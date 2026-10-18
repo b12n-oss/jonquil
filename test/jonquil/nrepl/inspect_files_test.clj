@@ -26,10 +26,33 @@
       (is (= stamp (.lastModified (io/file root "src/jonquil/inspect/view.clj"))) "not rewritten"))
     (is (= [(.getName (io/file root))] (vec (.list (io/file base)))) "no temp folder left behind")))
 
-(deftest a-folder-that-cant-be-written-gives-nil
+(deftest a-folder-that-cant-be-written-throws
   (let [f (io/file (temp-dirs/temp-dir! "jonquil-inspect-files-") "a-file")]
     (spit f "not a folder")
-    (is (nil? (files/ensure-root! (.getPath f))))))
+    (is (thrown? Throwable (files/ensure-root! (.getPath f))))))
+
+(deftest a-complete-folder-from-another-window-is-kept
+  ;; The race: this window's first look finds nothing, another window's
+  ;; rename lands, then this window's rename fails onto it.
+  (let [base (temp-dirs/temp-dir! "jonquil-inspect-files-")
+        root (files/ensure-root! base)
+        marker (io/file root "kept-marker")
+        real @#'files/complete?
+        looks (atom 0)]
+    (spit marker "x")
+    (with-redefs [files/complete? (fn [d] (if (= 1 (swap! looks inc)) false (real d)))]
+      (is (= root (files/ensure-root! base))))
+    (is (< 1 @looks) "it looked again after the failed rename")
+    (is (.exists marker) "the winner's folder was neither deleted nor rewritten")
+    (is (= [(.getName (io/file root))] (vec (.list (io/file base)))) "its own temp copy is gone")))
+
+(deftest an-incomplete-folder-is-replaced
+  (let [base (temp-dirs/temp-dir! "jonquil-inspect-files-")
+        root (files/ensure-root! base)]
+    (spit (io/file root "src/jonquil/inspect/view.clj") "(ns half")
+    (is (= root (files/ensure-root! base)))
+    (is (= (get files/sources "jonquil/inspect/view.clj") (slurp (io/file root "src/jonquil/inspect/view.clj"))))
+    (is (= [(.getName (io/file root))] (vec (.list (io/file base)))) "nothing left aside")))
 
 (deftest cache-base-follows-xdg
   (is (= "/x/cache/jonquil/nrepl-inspect" (files/cache-base {"XDG_CACHE_HOME" "/x/cache"} "/home/u")))

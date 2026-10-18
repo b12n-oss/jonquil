@@ -235,7 +235,8 @@
                                  (throw (ex-info "jolt nrepl-server didn't answer within 15000 ms" {})))]
       (let [e (make (temp-project))]
         (is (str/starts-with? (ev/start! e) "Couldn't start Jolt over nREPL: jolt nrepl-server didn't answer"))
-        (is (= [{:git child/nrepl-git-coord}] @sources) "a timeout isn't retried as a plain server")
+        (is (= [{:git child/nrepl-git-coord}] (map #(dissoc % :inspect) @sources))
+            "a timeout isn't retried, as a plain server or without the inspector")
         (ev/stop! e)))))
 
 (deftest no-fallback-after-stop-test
@@ -251,19 +252,19 @@
   (let [sources (atom [])
         real-start child/start!]
     (with-redefs [child/middleware-source (constantly {:git child/nrepl-git-coord})
-                  child/start! (fn [d source] (swap! sources conj source)
-                                 (if source (throw (fetch-failure)) (real-start d source)))]
+                  child/start! (fn [d source] (swap! sources conj (dissoc source :inspect))
+                                 (if (:git source) (throw (fetch-failure)) (real-start d source)))]
       (let [e (make (temp-project))]
         (try
           (is (nil? (ev/start! e)))
-          (is (= [{:git child/nrepl-git-coord} nil] @sources))
+          (is (= [{:git child/nrepl-git-coord} {}] @sources) "then a plain server, with the inspector")
           (let [pid (nrepl/child-pid e) done (promise)]
             (ev/eval! e "(loop [] (recur))" {:run? false :on-complete (fn [r] (deliver done r))})
             (wait-for-eval-id e)
             (ev/interrupt! e)
             (is (= :interrupted (:status (deref done 5000 :timeout))))
             (is (wait-until (fn [] (let [p (nrepl/child-pid e)] (and p (not= p pid)))) 10000) "Stop restarted the plain server"))
-          (is (= [{:git child/nrepl-git-coord} nil nil] @sources) "the restart skipped the fetch")
+          (is (= [{:git child/nrepl-git-coord} {} {}] @sources) "the restart skipped the fetch")
           (is (some #(str/includes? % "Jolt said: git dep:") (ev/limitations e)) "the line survives the restart")
           (finally (ev/stop! e)))))))
 
@@ -299,6 +300,47 @@
         (run e "[:x :y]" false)
         (is (= 2 (:total (inspect e :start {:rows 10 :cols 40}))))
         (finally (ev/stop! e))))))
+
+(deftest an-inspector-that-wont-load-still-starts-jolt-test
+  (let [broken (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "ins")
+        sources (atom [])
+        real-start child/start!]
+    (.mkdirs (io/file broken "src/jonquil/nrepl"))
+    (spit (io/file broken "deps.edn") "{:paths [\"src\"]}")
+    (spit (io/file broken "src/jonquil/nrepl/inspect_middleware.clj")
+          "(ns jonquil.nrepl.inspect-middleware) (throw (ex-info \"broken on purpose\" {}))")
+    (with-redefs [child/inspect-root (constantly (.getCanonicalPath broken))
+                  child/start! (fn [d source] (swap! sources conj (some? (:inspect source))) (real-start d source))]
+      (let [e (make (temp-project))]
+        (try
+          (is (nil? (ev/start! e)) "Jolt starts without the inspector")
+          (is (= [true false] @sources))
+          (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
+          (is (not (ev/inspectable? e)))
+          (is (some #(and (str/includes? % "couldn't load Jonquil's inspector")
+                          (str/includes? % "broken on purpose"))
+                    (ev/limitations e))
+              "names jolt's own error")
+          (finally (ev/stop! e)))))))
+
+(deftest an-unwritable-inspector-folder-is-named-test
+  (with-redefs [child/inspect-root (fn [] (throw (ex-info "couldn't write /nope/nrepl-inspect/x" {})))]
+    (let [e (make (temp-project))]
+      (try
+        (is (nil? (ev/start! e)))
+        (is (some #(str/includes? % "couldn't write Jonquil's inspector files: couldn't write /nope") (ev/limitations e)))
+        (finally (ev/stop! e))))))
+
+(deftest a-dead-child-is-lost-test
+  (let [e (make (temp-project))]
+    (try
+      (ev/start! e)
+      (run e "[1 2]" false)
+      (is (= 2 (:total (inspect e :start {:rows 10 :cols 40}))))
+      (shell/sh "kill" "-9" (str (nrepl/child-pid e)))
+      (is (wait-until (fn [] (not (child/alive? (:child (:runtime @(:state e)))))) 5000))
+      (is (= {:error nrepl/inspect-lost :lost? true} (inspect e :in {:idx 0})))
+      (finally (ev/stop! e)))))
 
 (deftest no-inspector-files-means-unavailable-test
   (with-redefs [child/inspect-root (constantly nil)]
