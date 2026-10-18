@@ -60,8 +60,10 @@ process's real stdout, so Jonquil left it out of the program namespace.
 The cause was that the one-argument `pprint` and `(cl-format true ...)`
 called `clojure.core/print` while `*out*` was still pprint's own buffer.
 That was filed as jolt-lang/jolt#1354 and fixed in #1355, which shipped in
-Jolt v0.8.22. Jonquil now needs v0.8.22, and `pprint` is referred into the
-prompt's namespace the same way `doc` is.
+Jolt v0.8.22, and `pprint` is referred into the prompt's namespace the
+same way `doc` is. `pp` was an empty stub until jolt-lang/jolt#1389 made it
+expand to `(pprint *1)`, as on the JVM. That shipped in Jolt v0.8.23, which
+Jonquil now needs, and `pp` is referred next to `pprint`.
 
 ## The clojure-cli.repl lift: the inspector's view code
 
