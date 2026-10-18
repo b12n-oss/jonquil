@@ -88,12 +88,14 @@
       (is (= "fresh" (deref f 2000 :timeout))))))
 
 (deftest an-interrupt-drops-what-was-queued
-  (let [[e f replies] (reading (fn [] (try (read-line) (catch Throwable t (ex-data t)))))]
-    (is (wait-for #(seq @replies)))
-    (.offer ^java.util.concurrent.LinkedBlockingQueue (:queue e) "racing line\n")
+  ;; A line that reached the queue just as Stop's interrupt did: the
+  ;; interrupt clears it, so it can't answer a later read. Set up without a
+  ;; live reader, which would take the line first and race the check.
+  (let [e (mw/entry)]
+    (reset! (:waiting? e) true)
+    (mw/offer! e "racing line\n")
     (mw/interrupt! e)
-    (is (= {:jolt/interrupted true} (deref f 2000 :timeout)) "the interrupt wins over a line already queued")
-    (is (zero? (.size ^java.util.concurrent.LinkedBlockingQueue (:queue e))))))
+    (is (= [::mw/interrupt] (vec (.toArray ^java.util.concurrent.LinkedBlockingQueue (:queue e)))))))
 
 (deftest a-new-eval-drops-leftover-text
   (let [[e f replies] (reading read-line)]

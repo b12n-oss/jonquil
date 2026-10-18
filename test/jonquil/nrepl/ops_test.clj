@@ -172,3 +172,34 @@
     (is (nil? (ops/nrepl-version (reply {"major" "1" "minor" "8"}))) "string values")
     (is (nil? (ops/nrepl-version (reply {"major" 1}))) "minor missing")
     (is (nil? (ops/nrepl-version :timeout)) "request-sync's non-vector result")))
+
+(deftest error-line-without-a-header-test
+  ;; babashka's eval-error (measured 2026-10-18): no clojure.main header,
+  ;; and :ex holds only the class.
+  (is (= "Error: java.lang.ArithmeticException: Divide by zero user REPL:1:1"
+         (:error-text (ops/eval-result [{:err "java.lang.ArithmeticException: Divide by zero user REPL:1:1\n"}
+                                        {:ex "class java.lang.ArithmeticException"
+                                         :root-ex "class java.lang.ArithmeticException" :status ["eval-error"]}
+                                        {:status ["done"]}] false))))
+  (testing "earlier stderr that names the class isn't taken"
+    (is (= "Error: clojure.lang.ExceptionInfo: boom user REPL:1:1"
+           (:error-text (ops/eval-result [{:err "retrying after clojure.lang.ExceptionInfo\n"}
+                                          {:err "clojure.lang.ExceptionInfo: boom user REPL:1:1\n"}
+                                          {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "an :ex that is a message, not a class, is taken as is"
+    (is (= "Error: EOF while reading"
+           (:error-text (ops/eval-result [{:err "something about EOF while reading\n"}
+                                          {:ex "EOF while reading" :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "the program's own stderr before the error isn't taken"
+    (is (= "Error: clojure.lang.ExceptionInfo: boom user REPL:1:1"
+           (:error-text (ops/eval-result [{:err "a warning first\n"}
+                                          {:err "clojure.lang.ExceptionInfo: boom user REPL:1:1\n"}
+                                          {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error"]}
+                                          {:status ["done"]}] false))))))
+
+(deftest doc-info-blank-file-test
+  (is (not (contains? (ops/doc-info "map" [{:name "map" :ns "clojure.core" :file "" :status ["done"]}]) :file))
+      "babashka's empty :file is no file")
+  (is (= "/x.clj" (:file (ops/doc-info "f" [{:name "f" :ns "u" :file "/x.clj" :line 3}])))))

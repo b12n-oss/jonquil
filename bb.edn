@@ -246,6 +246,7 @@
      (row "test:nrepl" "live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)")
      (row "test:clj" "live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)")
      (row "test:jank" "live jank tests: launch a real jank repl (JONQUIL_JANK or any jank on PATH; skips without one)")
+     (row "test:bb" "live nREPL-dialect tests: start a real bb nrepl-server (need bb on PATH; skips without one)")
      (row "verify" "lint (report) + test + test:nrepl (must pass) — pre-commit gate")
      (hdr "Run and build")
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
@@ -297,6 +298,8 @@
               :task (shell "jolt" "-M:test" "--live")}
   test:clj {:doc "Live JVM tests: start a real clojure -M:serve (need java 17+ and the clojure CLI)"
             :task (shell "jolt" "-M:test" "--live-clj")}
+  test:bb {:doc "Live nREPL-dialect tests: start a real bb nrepl-server (need bb on PATH; skips without one)"
+           :task (shell "jolt" "-M:test" "--live-bb")}
   test:jank {:doc "Live jank tests: launch a real jank repl (JONQUIL_JANK or any jank on PATH; skips without one)"
              :task (shell "jolt" "-M:test" "--live-jank")}
   bench:edit {:doc "Benchmark editing stalls on large files; opens a real window per size (default sizes 200 2000 8000 20000)"

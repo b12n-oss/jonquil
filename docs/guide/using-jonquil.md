@@ -723,9 +723,10 @@ count, and paging still works over everything up to the cap.
 ## Dialects and runtimes
 
 Jonquil evaluates through a dialect profile: what a language's files look
-like, how they're painted, and which evaluator runs them. Five profiles
+like, how they're painted, and which evaluator runs them. Six profiles
 exist today: Jolt, ClojureDart (experimental), JVM Clojure, ClojureScript
-(experimental) and jank (experimental). The way Jonquil picks a profile, and the evaluator
+(experimental), jank (experimental) and nREPL, which attaches to any nREPL
+server you started. The way Jonquil picks a profile, and the evaluator
 protocol under it, are general enough to take more. The status
 bar's dialect label reads `Jolt` most of the time, or `Jolt (nREPL)` when
 this window's Jolt is running out of process rather than inside Jonquil
@@ -735,7 +736,8 @@ rest of the time. JVM Clojure reads the same way, `Clojure (JVM) (attached)`
 or `Clojure (JVM) (not running)`, and ClojureScript reads
 `ClojureScript (shadow-cljs) (attached)` or `ClojureScript (shadow-cljs)
 (not running)`. For jank it reads `jank (running)` while Jonquil's own jank process is
-up, and `jank (not running)` until the first evaluation starts one.
+up, and `jank (not running)` until the first evaluation starts one. The
+nREPL dialect reads `nREPL (attached)` or `nREPL (not running)`.
 
 ### Choosing a dialect
 
@@ -781,6 +783,12 @@ jank has no project marker either. A `.jank` file opens as jank by its
 extension, and a project can name it with `{:dialect :jank}` in its
 `.jonquil.edn`, the same way as JVM Clojure.
 
+The nREPL dialect has neither a marker nor an extension, so only
+`{:dialect :nrepl}` in a project's `.jonquil.edn` picks it. A babashka
+project with a `bb.edn` stays Jolt's until you say so, since the dialect
+needs a server you start yourself (see
+[Any nREPL server](#any-nrepl-server-babashka-other-clojures-other-hosts)).
+
 ### `.jonquil.edn`
 
 A `.jonquil.edn` at the project root pins the dialect and, for Jolt,
@@ -798,6 +806,11 @@ next rule as though the file weren't there at all.
 
 `{:dialect :jank}` pins jank for a project whose files aren't all `.jank`
 (see [jank](#jank-experimental)).
+
+`{:dialect :nrepl}` attaches to any nREPL server, and `:nrepl` says where
+it is: `{:port 1667}`, `{:host "box" :port 1667}`, or `{:port-file
+"path/to/port"}` (see
+[Any nREPL server](#any-nrepl-server-babashka-other-clojures-other-hosts)).
 
 `{:dialect :clj}` is the only way to reach JVM Clojure: a project with
 just that one line in its `.jonquil.edn` attaches to its own nREPL server
@@ -1189,6 +1202,52 @@ include compiles but never loads into the runtime, so its first use throws a
 ReferenceError. Keep the requires of a file you Run within the build.
 Namespaces the buffer itself defines are fine.
 
+### Any nREPL server: babashka, other Clojures, other hosts
+
+`{:dialect :nrepl}` in a project's `.jonquil.edn` attaches to an nREPL
+server you started, whatever language it runs: babashka, a Clojure that
+isn't on the JVM, or a server on another machine. Jonquil connects on the
+first Run and never starts or stops the server. It assumes nothing about
+the server beyond what its `describe` reply says, so a feature works when
+the server offers the op behind it and the start lines say which ones it
+lacks.
+
+`:nrepl` in the same file says where to connect:
+
+```clojure
+{:dialect :nrepl :nrepl {:port 1667}}                 ; this machine
+{:dialect :nrepl :nrepl {:host "box" :port 1667}}     ; another one
+{:dialect :nrepl :nrepl {:port-file "tmp/nrepl.port"}} ; read the port from a file
+```
+
+With no `:port`, Jonquil reads the port from `:port-file`, or from
+`.nrepl-port` in the project when that's left out too. The host is
+`127.0.0.1` unless `:host` names another. A value Jonquil can't use, such
+as a port outside 1-65535 or an absolute `:port-file`, is a warning in the
+console, and that key falls back to its default.
+
+For babashka, start the server in the project and name its port, since
+`bb nrepl-server` writes no port file:
+
+```bash
+bb nrepl-server 1667
+```
+
+Measured against babashka's server, here's what to expect. Run, the REPL,
+quick docs and completion all work (Jonquil keeps only completion names
+that start with what you typed, since babashka's matching is looser). Its server has no `interrupt` op, so Stop
+can't end a running evaluation: it disconnects instead, the evaluation
+keeps running inside babashka, and the next Run connects a fresh session.
+It has no `stdin` op either, so a `read-line` waits until Stop; the console
+says so before the evaluation starts. Jump to definition stays in the
+buffer for library functions, because babashka names a file that isn't on
+this disk, and Jonquil only follows a `:file` it can open.
+
+A server on another host is the same unauthenticated code execution as
+one on this machine, now reachable over the network. Keep it on a network
+you trust, or tunnel it: `ssh -L 1667:localhost:1667 box`, then
+`{:port 1667}` here.
+
 ### jank (experimental)
 
 Jonquil supports jank as an experimental dialect. Unlike ClojureDart and JVM Clojure, you don't start
@@ -1551,6 +1610,10 @@ than being surprises you'd otherwise have to rediscover:
 - Stop against ClojureScript detaches instead of interrupting: the
   shadow-cljs interrupt stops nothing, since the work is in the JS runtime,
   and the runtime keeps running what it has.
+- The nREPL dialect does what the server offers: with no `interrupt` op,
+  Stop disconnects and leaves the evaluation running in the server; with
+  no `stdin` op, a read waits until Stop. Reset on Run isn't available, and
+  jump to definition follows only a file that exists on this machine.
 - No stdin, for the ClojureScript dialect.
 - Reset on Run isn't available for ClojureScript.
 - `js/console.log` output goes to the JS runtime's own console, not

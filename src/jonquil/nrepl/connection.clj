@@ -128,16 +128,11 @@
   [{:keys [state timings] :as ev} on-output {:keys [messages on-connect] :as policy}]
   (let [stop? (or (:stop-requested? policy) stop-requested?)]
     (when-not (connected? ev)
-      (let [f (if-let [pf (:port-file policy)] (pf ev) (port-file ev))]
-        (cond
-          (nil? f) {:status :notice :text (message-text messages :no-project nil)}
-          (not (.exists ^java.io.File f))
-          {:status :notice :text (message-text messages :not-running (:project-dir (:selection ev)))}
-          :else
-          (if-let [port (parse-port (try (slurp f) (catch Exception _ nil)))]
-            (do
+      (let [ep (when-let [e (:endpoint policy)] (e ev))
+            host (or (:host ep) "127.0.0.1")
+            attach! (fn [port]
               (say! on-output :system (str (message-text messages :connecting port) "\n"))
-              (if-let [conn (try (client/connect port) (catch Exception _ nil))]
+              (if-let [conn (try (client/connect-to host port) (catch Exception _ nil))]
                 (let [[_ new] (swap-vals! state (fn [s] (if (get-in s [:running :stop-requested?])
                                                           s
                                                           (assoc s :connecting conn))))]
@@ -174,6 +169,15 @@
                             :else (do (client/close! conn)
                                       {:status :notice :text (message-text messages :not-server port)})))))))
                 {:status :notice :text (message-text messages :refused port)}))
+            f (when-not (:port ep) (if-let [pf (:port-file policy)] (pf ev) (port-file ev)))]
+        (cond
+          (:port ep) (attach! (:port ep))
+          (nil? f) {:status :notice :text (message-text messages :no-project nil)}
+          (not (.exists ^java.io.File f))
+          {:status :notice :text (message-text messages :not-running (:project-dir (:selection ev)))}
+          :else
+          (if-let [port (parse-port (try (slurp f) (catch Exception _ nil)))]
+            (attach! port)
             {:status :notice :text (message-text messages :bad-port-file nil)}))))))
 
 (defn detach!

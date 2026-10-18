@@ -57,6 +57,7 @@
             [jonquil.inspect :as inspect]
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.connection :as connection]
+            [jonquil.nrepl.generic :as generic]
             [jonquil.nrepl.ops :as ops]))
 
 (def default-timings
@@ -113,6 +114,16 @@
   ;; every guard connect! checks, not only the calls run-worker! makes
   ;; directly.
   (assoc clj/connect-policy :stop-requested? (fn [ev] (stop-requested? ev))))
+
+(defn- generic? [ev] (= :nrepl (:id (:profile (:selection ev)))))
+
+(defn- policy-for
+  "The connect policy for ev's dialect: the nREPL dialect's names its
+  host and reads .jonquil.edn's :nrepl endpoint (jonquil.nrepl.generic)."
+  [ev]
+  (if (generic? ev)
+    (assoc (generic/connect-policy (:selection ev)) :stop-requested? (fn [e] (stop-requested? e)))
+    connect-policy))
 
 (defn- finish!
   "Ends the running evaluation: clears :running and :waiting? (a Stop or a
@@ -192,7 +203,7 @@
   [{:keys [state] :as ev} code {:keys [run? path ns-source on-output on-wait-input on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
-    (if-let [problem (connection/connect! ev on-output connect-policy)]
+    (if-let [problem (connection/connect! ev on-output (policy-for ev))]
       (finish! ev opts problem)
       (if (stop-requested? ev)
         ;; Stop landed after connect! published a live session but before
@@ -208,7 +219,10 @@
           ;; user's request goes out.
           (if (stop-requested? ev)
             (finish! ev opts {:status :interrupted})
-            (let [watch (stdin-watch state on-wait-input)
+            (let [_ (when (and (generic? ev) (ops/reads-stdin? code)
+                               (not (contains? (:ops @state) "stdin")))
+                      (connection/say! on-output :system generic/stdin-notice))
+                  watch (stdin-watch state on-wait-input)
                   do-request! (fn [msg] (connection/request! ev msg {:on-output on-output
                                                                      :still-waiting nil
                                                                      :on-message watch}))]
@@ -454,18 +468,29 @@
   ;; on the GTK thread. Any throw, a timeout or no connection falls back
   ;; to offline alone. Never docs/candidates, which would list Jolt-
   ;; process namespaces instead of the attached server's own.
-  (complete [_ prefix text pos extra-context]
+  (complete [this prefix text pos extra-context]
     (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
                        (catch Throwable _ []))]
       (try
-        (let [{:keys [conn session ops prompt-ns]} @state]
-          (if (and (client/open? conn) (contains? ops "completions"))
-            (let [r (client/request-sync conn {:op "completions" :prefix prefix
+        ;; "completions" (nREPL's own), else "complete" (cider's), same
+        ;; reply shape. For the nREPL dialect only names with the prefix are
+        ;; merged: babashka's answers are fuzzy from either op, and it
+        ;; doesn't always offer the same ones (measured, both v1.13.220: the
+        ;; spike's describe listed only complete, bb test:bb's connection
+        ;; also lists completions; why isn't known). JVM
+        ;; Clojure keeps every name, compliment's c.s/jo ->
+        ;; clojure.string/join among them.
+        (let [{:keys [conn session ops prompt-ns]} @state
+              op (cond (contains? ops "completions") "completions"
+                       (contains? ops "complete") "complete")]
+          (if (and (client/open? conn) op)
+            (let [r (client/request-sync conn {:op op :prefix prefix
                                                :ns (clj/help-ns text prompt-ns)
                                                :session session}
                                          (:help-timeout-ms timings))]
               (if (vector? r)
-                (ops/merge-candidates prefix offline (ops/candidates r))
+                (ops/merge-candidates prefix offline
+                                      (cond->> (ops/candidates r) (generic? this) (generic/with-prefix prefix)))
                 offline))
             offline))
         (catch Throwable _ offline))))
@@ -475,11 +500,12 @@
   ;; hasn't loaded yet errors instead of answering info (resolve-lookup!'s
   ;; own ns1), so this falls back to the prompt namespace once before
   ;; giving up as not-loaded.
-  (lookup [_ sym text _pos]
+  (lookup [this sym text _pos]
     (try
       (let [{:keys [conn session ops prompt-ns]} @state
             found (fn [r] (when-let [d (ops/doc-info sym r)]
-                            (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d))))))]
+                            (let [d (cond-> d (and (generic? this) (not (generic/local-file? (:file d)))) (dissoc :file :line))]
+                              (cond-> d (:file d) (assoc :location (help/location-line (:file d) (:line d)))))))]
         (cond
           (not (client/open? conn)) (cljd/no-docs sym clj/not-attached-doc)
           (not (contains? ops "lookup")) (cljd/no-docs sym clj/no-lookup-doc)
@@ -494,7 +520,10 @@
               ;; nil here for :ok's plain not-found (as today).
               (found (:reply res))))))
       (catch Throwable _ nil)))
-  (limitations [_] clj/limitations)
+  (limitations [this]
+    (if (generic? this)
+      (generic/limitations (:ops @state) (connection/live? this))
+      clj/limitations))
 
   ev/FullDoc
   ;; P3.T2: backed by the server's own "doc" op, in a future (never on the
@@ -609,3 +638,8 @@
           (merge default-timings timings))))
 
 (defmethod connection/make-attached :clj [selection] (make-jvm selection))
+
+;; The nREPL dialect (any server you started) is the same record:
+;; everything JVM-specific in it already degrades by the server's ops, and
+;; jonquil.nrepl.generic supplies where to connect and what to say.
+(defmethod connection/make-attached :nrepl [selection] (make-jvm selection))

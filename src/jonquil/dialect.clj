@@ -166,6 +166,26 @@
    :experimental-message "; ClojureScript support is experimental. Jonquil connects to the shadow-cljs nREPL server on the first Run."
    :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
 
+(def nrepl
+  {:id :nrepl
+   :name "nREPL"
+   ;; Any nREPL server you started: babashka, a non-JVM Clojure, one on
+   ;; another host. Clojure highlighting; nothing JVM-specific assumed.
+   :extensions #{}
+   :reader-features #{:clj}
+   :special-forms (:special-forms jolt)
+   :builtins (:builtins jolt)
+   ;; No markers and no extension: only .jonquil.edn {:dialect :nrepl}
+   ;; selects it (a bb project needs a server Jonquil can't start).
+   :project-markers []
+   :evaluator :attach
+   :runtimes #{:attach}
+   ;; Where the port is found when .jonquil.edn's :nrepl names none.
+   ;; babashka writes no port file (spike, 2026-10-18), so a project
+   ;; usually gives {:nrepl {:port N}}.
+   :port-file ".nrepl-port"
+   :reset-tooltip "This is a server you started, so Jonquil doesn't unload namespaces in it."})
+
 (def profiles
   "Every known profile. Order matters only as the last resort in select:
   Jolt first, so a file neither profile's extension claims (bb.edn in a
@@ -174,7 +194,7 @@
   clj joined this list in P2.T4, once the window required jonquil.nrepl.jvm
   and could reach make-attached :clj (ruling 3). cljs goes last: nothing
   else claims .cljs."
-  [jolt cljd clj jank cljs])
+  [jolt cljd clj jank cljs nrepl])
 
 (defn profile
   "The profile with id k in profiles (default: every known one), or nil."
@@ -222,8 +242,34 @@
     :else [nil (str ".jonquil.edn :auto-require should be a vector of namespace symbols, like [my.app.core], not "
                     (pr-str v) ", so it is ignored")]))
 
+(defn- nrepl-part
+  "[map-or-nil warnings] for .jonquil.edn's :nrepl: {:host :port
+  :port-file}, every key optional. A bad value is a warning and only that
+  key is dropped; a non-map is a warning and nil."
+  [v]
+  (cond
+    (nil? v) [nil []]
+    (not (map? v)) [nil [".jonquil.edn :nrepl should be a map, like {:port 1667} or {:host \"box\" :port 1667}"]]
+    :else
+    (let [{:keys [host port port-file]} v
+          checks [[:host host (and (string? host) (not (str/blank? host))
+                                   ;; a port goes in :port; an IPv6 literal is fine
+                                   (or (not (str/includes? host ":")) (>= (count (re-seq #":" host)) 2)))
+                   ":host should be a host name or address without a port, like \"localhost\" (the port goes in :port)"]
+                  [:port port (and (integer? port) (<= 1 port 65535))
+                   ":port should be a port number from 1 to 65535"]
+                  [:port-file port-file (and (string? port-file) (not (str/blank? port-file))
+                                             (not (str/starts-with? port-file "/")))
+                   ":port-file should be a path relative to the project, like \".nrepl-port\""]]]
+      (reduce (fn [[m ws] [k val ok? msg]]
+                (cond (nil? val) [m ws]
+                      ok? [(assoc m k val) ws]
+                      :else [m (conj ws (str ".jonquil.edn :nrepl " msg ", so it is ignored"))]))
+              [{} []] checks))))
+
 (defn parse-config
-  "{:dialect k? :runtime k? :auto-require [sym]? :cljs map? :warnings [str]}
+  "{:dialect k? :runtime k? :auto-require [sym]? :cljs map? :nrepl map?
+  :warnings [str]}
   from .jonquil.edn's text. Never throws: unreadable text, a non-map, a
   non-keyword value, a malformed :auto-require or a non-map :cljs is a
   warning, and the bad part is ignored. :auto-require is present only when
@@ -251,10 +297,12 @@
                 [ar arw] (auto-require-part (get m :auto-require))
                 cl (get m :cljs)
                 clw (when-not (or (nil? cl) (map? cl))
-                      ".jonquil.edn :cljs should be a map, like {:shadow-build :app}")]
-            (cond-> {:dialect d :runtime r :warnings (vec (remove nil? [dw rw arw clw]))}
+                      ".jonquil.edn :cljs should be a map, like {:shadow-build :app}")
+                [nr nrw] (nrepl-part (get m :nrepl))]
+            (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw])) nrw)}
               ar (assoc :auto-require ar)
-              (map? cl) (assoc :cljs cl))))))))
+              (map? cl) (assoc :cljs cl)
+              nr (assoc :nrepl nr))))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."
@@ -282,7 +330,7 @@
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
-  (let [{:keys [dialect runtime auto-require cljs warnings]} (if project
+  (let [{:keys [dialect runtime auto-require cljs nrepl warnings]} (if project
                                              (parse-config (:config project) (:config-error project))
                                              {:warnings []})
         by-config (when dialect (profile profiles dialect))
@@ -333,21 +381,29 @@
         cljs? (= :cljs (:id p))
         w4 (if (and cljs (not cljs?))
              [(str ".jonquil.edn :cljs only applies to ClojureScript, not " (:name p) ", so it is ignored")]
+             [])
+        nrepl? (= :nrepl (:id p))
+        w5 (if (and nrepl (not nrepl?))
+             [(str ".jonquil.edn :nrepl only applies to the nREPL dialect, not " (:name p) ", so it is ignored")]
              [])]
     (cond-> {:profile p
              :runtime (if rt-ok? runtime default-rt)
              :project-dir (:dir project)
              :source source
-             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4))}
+             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5))}
       (and auto-require clj?) (assoc :auto-require auto-require)
-      (and cljs cljs?) (assoc :cljs cljs))))
+      (and cljs cljs?) (assoc :cljs cljs)
+      (and nrepl nrepl?) (assoc :nrepl nrepl))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
   runtime, and for an out-of-process runtime the project it runs in. Equal
-  keys keep the window's evaluator when another file opens."
-  [{:keys [profile runtime project-dir]}]
-  [(:id profile) runtime (when (not= :in-process runtime) project-dir)])
+  keys keep the window's evaluator when another file opens. The nREPL
+  dialect's :nrepl endpoint is part of it, so a changed host or port gets
+  a new connection."
+  [{:keys [profile runtime project-dir nrepl]}]
+  (cond-> [(:id profile) runtime (when (not= :in-process runtime) project-dir)]
+    (= :nrepl (:id profile)) (conj nrepl)))
 
 (defn reset-toggle
   "How the Reset on Run checkbox looks for selection sel. state is the

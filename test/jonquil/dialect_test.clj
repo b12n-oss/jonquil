@@ -183,7 +183,8 @@
     (let [added (set/difference (:special-forms dialect/cljd) (:special-forms dialect/jolt))]
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
-  (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank dialect/cljs] dialect/profiles) "clj joined in P2.T4, jank in D3 P1.T1, cljs last"))
+  (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank dialect/cljs dialect/nrepl] dialect/profiles)
+      "clj joined in P2.T4, jank in D3 P1.T1, cljs next, then nrepl (claims no extension or marker)"))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
@@ -452,3 +453,36 @@
       (is (= :jolt (:id (:profile s))))
       (is (not (contains? s :cljs)))
       (is (= [".jonquil.edn :cljs only applies to ClojureScript, not Jolt, so it is ignored"] (:warnings s))))))
+
+(deftest nrepl-config-test
+  (testing "a valid :nrepl map is kept"
+    (is (= {:host "box" :port 1667 :port-file "tmp/port"}
+           (:nrepl (dialect/parse-config "{:dialect :nrepl :nrepl {:host \"box\" :port 1667 :port-file \"tmp/port\"}}" nil))))
+    (is (= [] (:warnings (dialect/parse-config "{:nrepl {:port 7}}" nil)))))
+  (testing "a bad value is a warning, and only that key is dropped"
+    (let [r (dialect/parse-config "{:nrepl {:host \"\" :port 70000 :port-file \"/abs\"}}" nil)]
+      (is (= {} (:nrepl r)))
+      (is (= 3 (count (:warnings r))))
+      (is (every? #(str/includes? % ".jonquil.edn :nrepl") (:warnings r)))))
+  (testing "a non-map :nrepl is a warning"
+    (let [r (dialect/parse-config "{:nrepl 1667}" nil)]
+      (is (nil? (:nrepl r)))
+      (is (= [".jonquil.edn :nrepl should be a map, like {:port 1667} or {:host \"box\" :port 1667}"] (:warnings r))))))
+
+(deftest nrepl-select-test
+  (let [s (dialect/select dialect/profiles (proj #{"bb.edn"} "{:dialect :nrepl :nrepl {:port 1667}}") "/p/a.clj" nil)]
+    (is (= [:nrepl :config :attach "/p" []] [(:id (:profile s)) (:source s) (:runtime s) (:project-dir s) (:warnings s)]))
+    (is (= {:port 1667} (:nrepl s))))
+  (testing "no project still selects it, from .jonquil.edn alone"
+    (is (= :nrepl (:id (:profile (dialect/select dialect/profiles (proj #{} "{:dialect :nrepl}") "/p/a.bb" nil))))))
+  (testing "nothing selects it without .jonquil.edn"
+    (is (not= :nrepl (:id (:profile (dialect/select dialect/profiles nil "/tmp/a.clj" nil)))))
+    (is (not= :nrepl (:id (:profile (dialect/select dialect/profiles (proj #{"bb.edn"} nil) "/p/a.bb" nil))))))
+  (testing ":nrepl for another dialect is a warning"
+    (let [s (dialect/select dialect/profiles (proj #{"deps.edn"} "{:dialect :clj :nrepl {:port 1}}") "/p/a.clj" nil)]
+      (is (nil? (:nrepl s)))
+      (is (= [".jonquil.edn :nrepl only applies to the nREPL dialect, not Clojure (JVM), so it is ignored"] (:warnings s)))))
+  (testing "another endpoint needs another evaluator"
+    (let [k (fn [cfg] (dialect/selection-key (dialect/select dialect/profiles (proj #{} cfg) "/p/a.clj" nil)))]
+      (is (not= (k "{:dialect :nrepl :nrepl {:port 1}}") (k "{:dialect :nrepl :nrepl {:port 2}}")))
+      (is (= (k "{:dialect :nrepl :nrepl {:port 1}}") (k "{:dialect :nrepl :nrepl {:port 1}}"))))))
