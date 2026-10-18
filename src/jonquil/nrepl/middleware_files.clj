@@ -1,6 +1,7 @@
-(ns jonquil.nrepl.inspect-files
-  "The out-of-process inspector's source files, carried inside Jonquil and
-  written where a Jolt child can load them as a :local/root dep.
+(ns jonquil.nrepl.middleware-files
+  "Jonquil's own nREPL middleware for an out-of-process Jolt child (the
+  inspector and stdin) as source files, carried inside Jonquil and written
+  where the child can load them as a :local/root dep.
 
   The installed app is a compiled binary with no source tree, and
   io/resource of a source file is nil there at runtime, so embedded-text
@@ -17,23 +18,29 @@
 (def sources
   "Classpath-relative path -> text, for every file the child loads."
   {"jonquil/inspect/view.clj" (embedded-text "jonquil/inspect/view.clj")
-   "jonquil/nrepl/inspect_middleware.clj" (embedded-text "jonquil/nrepl/inspect_middleware.clj")})
+   "jonquil/nrepl/inspect_middleware.clj" (embedded-text "jonquil/nrepl/inspect_middleware.clj")
+   "jonquil/nrepl/stdin_middleware.clj" (embedded-text "jonquil/nrepl/stdin_middleware.clj")})
 
-(def middleware
-  "The middleware symbol for :nrepl/middleware."
+(def inspect-middleware
+  "The inspector's :nrepl/middleware symbol: last, after jolt-lang/nrepl's."
   'jonquil.nrepl.inspect-middleware/inspect)
+
+(def stdin-middleware
+  "stdin's :nrepl/middleware symbol: first, outside jolt-lang/nrepl's
+  session middleware, whose clone it has to wrap."
+  'jonquil.nrepl.stdin-middleware/stdin)
 
 (def lib
   "The dep name the root is added under in the child's -Sdeps."
-  'jonquil/nrepl-inspect)
+  'jonquil/nrepl-middleware)
 
 (defn cache-base
-  "$XDG_CACHE_HOME/jonquil/nrepl-inspect, or ~/.cache/jonquil/nrepl-inspect
+  "$XDG_CACHE_HOME/jonquil/nrepl-middleware, or ~/.cache/jonquil/nrepl-middleware
   when that is unset, blank or relative (the XDG rule settings.clj follows)."
   [env home]
   (let [xdg (get env "XDG_CACHE_HOME")]
     (str (if (and xdg (str/starts-with? xdg "/")) xdg (str home "/.cache"))
-         "/jonquil/nrepl-inspect")))
+         "/jonquil/nrepl-middleware")))
 
 (defn- folder-name []
   (format "%08x" (bit-and (hash (apply str (sort sources))) 0xffffffff)))

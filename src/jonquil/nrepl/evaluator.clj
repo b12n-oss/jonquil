@@ -13,6 +13,7 @@
   the connection's reader thread, on-status-change and on-complete from
   this evaluation's own worker future."
   (:require [clojure.string :as str]
+            [jonquil.clj :as clj]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
@@ -51,6 +52,8 @@
   "The connection to Jolt was lost.")
 
 (def stdin-notice
+  ;; Only when the live server lacks the stdin op: a plain server, or a
+  ;; child that couldn't load Jonquil's middleware.
   "; This runtime has no stdin: read-line returns nil and read fails with EOF.\n")
 
 (defn- runtime [ev] (:runtime @(:state ev)))
@@ -172,20 +175,21 @@
 
 (defn- attempt-source
   "The child/start! source for the next attempt: child/middleware-source,
-  or none once a fetch has failed, plus :inspect, child/inspect-root's
-  folder, unless loading or writing the inspector has failed. [source
-  inspect-error-or-nil]: a write failure is recorded, not fatal."
+  or none once a fetch has failed, plus :jonquil, child/jonquil-root's
+  folder (Jonquil's own middleware: the inspector, and stdin with the
+  nREPL source), unless loading or writing it has failed. [source
+  jonquil-error-or-nil]: a write failure is recorded, not fatal."
   [ev]
-  (let [{:keys [fetch-error inspect-error]} @(:state ev)
+  (let [{:keys [fetch-error jonquil-error]} @(:state ev)
         source (when-not fetch-error (child/middleware-source))]
-    (if inspect-error
+    (if jonquil-error
       [source nil]
-      (let [[root err] (try [(child/inspect-root) nil]
+      (let [[root err] (try [(child/jonquil-root) nil]
                             (catch Throwable e
-                              [nil (str "couldn't write Jonquil's inspector files: "
+                              [nil (str "couldn't write Jonquil's nREPL middleware files: "
                                         (or (ex-message e) (str (class e))))]))]
-        (when err (swap! (:state ev) assoc :inspect-error err))
-        [(cond-> source root (assoc :inspect root)) err]))))
+        (when err (swap! (:state ev) assoc :jonquil-error err))
+        [(cond-> source root (assoc :jonquil root)) err]))))
 
 (defn- spawn-with-fallback!
   "spawn-runtime! with attempt-source, falling back step by step. Each
@@ -197,29 +201,34 @@
   - A git source whose fetch fails (offline on the first start, no git, a
     refused proxy: jolt exits saying \"git dep: ...\") is retried with no
     nREPL middleware, a plain server: :fetch-error, jolt's line.
-  - A child that loaded the inspector and exited before it listened is
-    retried without it (jolt requires every :nrepl/middleware namespace
-    before it binds, so an inspector that won't load would otherwise stop
-    Jolt starting at all): :inspect-error, jolt's line. A timeout isn't
+  - A child that loaded Jonquil's middleware and exited before it listened
+    is retried without it (jolt requires every :nrepl/middleware namespace
+    before it binds, so middleware that won't load would otherwise stop
+    Jolt starting at all): :jonquil-error, jolt's line. A timeout isn't
     retried, since a load failure exits rather than hangs.
   - Anything else is thrown as before: a checkout's own failure (the
     user's to see), a failure with nothing left to drop, or any failure
     after stop! ran."
   [ev]
-  (loop []
+  ;; At most three attempts: each retry first records one more failure to
+  ;; route around (the fetch, then Jonquil's middleware), so a third failure
+  ;; has nothing left to drop. The cap keeps a mistake in that bookkeeping
+  ;; from spinning forever.
+  (loop [attempts 1]
     (let [[source _] (attempt-source ev)
           result (try {:rt (spawn-runtime! ev source)}
                       (catch Throwable e {:e e}))]
       (if-let [rt (:rt result)]
-        (merge rt (select-keys @(:state ev) [:fetch-error :inspect-error]))
+        (merge rt (select-keys @(:state ev) [:fetch-error :jonquil-error]))
         (let [e (:e result)
               fetch-line (when (:git source) (fetch-error-line e))]
           (cond
             (:stopped? @(:state ev)) (throw e)
-            fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line) (recur))
-            (and (:inspect source) (exited? e)) (do (swap! (:state ev) assoc :inspect-error
-                                         (str "the Jolt child couldn't load Jonquil's inspector: " (log-error-line e)))
-                                  (recur))
+            (>= attempts 3) (throw e)
+            fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line) (recur (inc attempts)))
+            (and (:jonquil source) (exited? e)) (do (swap! (:state ev) assoc :jonquil-error
+                                         (str "the Jolt child couldn't load Jonquil's nREPL middleware: " (log-error-line e)))
+                                  (recur (inc attempts)))
             :else (throw e)))))))
 
 (defn- start-runtime!
@@ -266,6 +275,48 @@
   (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
   (try (when on-complete (on-complete result)) (catch Throwable _ nil)))
 
+(defn- call-wait-input!
+  "Calls the running evaluation's on-wait-input with waiting?; never throws
+  (it runs on the client's reader thread)."
+  [running waiting?]
+  (when-let [f (:on-wait-input (:opts running))]
+    (try (f waiting?) (catch Throwable _ nil))))
+
+(defn- stdin-watch!
+  "For each reply to the main eval: need-input (jonquil.nrepl.stdin-
+  middleware asking for a line) marks the evaluation waiting and says so;
+  a reply that ends it (done, interrupted) while still marked waiting
+  clears it. Output doesn't: a future printing while the read waits would
+  otherwise take the console out of input mode with the read still
+  blocked (review). send-stdin! clears it on a send, and the flag lives on
+  :running, so finish! clears it too."
+  [ev m]
+  (let [state (:state ev)
+        ends? (some #{"done" "interrupted"} (:status m))]
+    (cond
+      (clj/need-input? m)
+      (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :waiting?] true))))]
+        (when (and (:running old) (not (get-in old [:running :waiting?])))
+          (call-wait-input! (:running old) true)))
+      ends?
+      (let [[old _] (swap-vals! state (fn [s] (cond-> s (get-in s [:running :waiting?]) (assoc-in [:running :waiting?] false))))]
+        (when (get-in old [:running :waiting?])
+          (call-wait-input! (:running old) false))))))
+
+(defn- send-stdin!
+  "Answers a waiting read with text (\"\" is end of input), clearing the
+  flag at once so waiting-for-input? follows the press; the socket write
+  goes out on a future, as interrupt!'s does. Nothing when no read waits."
+  [ev text]
+  (let [[old _] (swap-vals! (:state ev) (fn [s] (cond-> s (get-in s [:running :waiting?]) (assoc-in [:running :waiting?] false))))
+        running (:running old)
+        {:keys [conn session]} (:runtime old)]
+    (when (and (:waiting? running) (client/open? conn))
+      (future
+        (try (client/request! conn {:op "stdin" :stdin text :session session} (fn [_] nil))
+             (catch Throwable _ nil)))
+      (call-wait-input! running false))))
+
 (defn- send-main!
   "Sends the Run's load-file or the REPL entry's eval, feeding :out and
   :err to on-output as they arrive. A promise of all its replies.
@@ -288,6 +339,7 @@
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
+                              (stdin-watch! ev m)
                               (when on-output
                                 (when-let [o (:out m)] (on-output :out o))
                                 (when-let [e (:err m)] (on-output :err e)))
@@ -315,7 +367,8 @@
         (do
           (when (and on-output had-runtime? (not was-live?))
             (on-output :system "; The Jolt runtime had exited, so a new one was started.\n"))
-          (when (and on-output (ops/reads-stdin? code)) (on-output :system stdin-notice))
+          (when (and on-output (ops/reads-stdin? code) (not (contains? (:ops (runtime ev)) "stdin")))
+            (on-output :system stdin-notice))
           (let [{:keys [conn session]} (runtime ev)
                 owner (:owner opts (if run? :run :repl))]
             (when (and run? (= :reset (:mode @(:state ev))))
@@ -417,9 +470,9 @@
                        (catch Throwable _ nil)))))))))
     nil)
   (evaluating? [_] (some? (:running @state)))
-  (waiting-for-input? [_] false)
-  (send-input! [_ _] nil)
-  (send-eof! [_] nil)
+  (waiting-for-input? [_] (boolean (get-in @state [:running :waiting?])))
+  (send-input! [this text] (send-stdin! this (clj/stdin-line (str text))) nil)
+  (send-eof! [this] (send-stdin! this "") nil)
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
@@ -444,10 +497,11 @@
       (catch Throwable _ nil)))
   (limitations [this]
     (let [rt (runtime this)]
-      (cond-> ["No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead."
-               "Jump to definition stays in this buffer: lookup reports no file or line."]
+      (cond-> ["Jump to definition stays in this buffer: lookup reports no file or line."]
+        (and (live? this) (not (contains? (:ops rt) "stdin")))
+        (conj "No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead.")
         (and (live? this) (not (contains? (:ops rt) "inspect-start")))
-        (conj (str "No inspector" (when-let [why (:inspect-error rt)] (str ": " why))
+        (conj (str "No inspector" (when-let [why (:jonquil-error rt)] (str ": " why))
                    ". {:runtime :in-process} has one."))
         (and (live? this) (:fetch-error rt))
         (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)

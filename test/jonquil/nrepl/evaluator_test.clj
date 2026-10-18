@@ -8,6 +8,7 @@
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.inspect :as inspect]
+            [jonquil.nrepl.middleware-files :as middleware-files]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
             [jonquil.nrepl.client :as client]
@@ -64,7 +65,7 @@
   (let [e (make (temp-project))]
     (is (instance? jonquil.nrepl.evaluator.NRepl e))
     (is (nil? (nrepl/child-pid e)) "not started until asked")
-    (is (= 2 (count (ev/limitations e))) "stdin and jump; the inspector line only when a live child lacks it")))
+    (is (= 1 (count (ev/limitations e))) "jump; the stdin and inspector lines only when a live child lacks them")))
 
 (deftest run-repl-and-help-test
   (let [dir (temp-project) e (make dir)]
@@ -158,15 +159,6 @@
           (is (some (fn [[k s]] (and (= :system k) (str/includes? s "had exited"))) out))))
       (finally (ev/stop! e)))))
 
-(deftest stdin-notice-test
-  (let [e (make (temp-project))]
-    (try
-      (let [[r out] (run e "(read-line)" false)]
-        (is (= "nil" (:printed r)))
-        (is (= [[:system nrepl/stdin-notice]] out)))
-      (is (= [] (second (run e "(read-string \"1\")" false))))
-      (finally (ev/stop! e)))))
-
 (deftest stop-kills-its-own-child-only-test
   (let [dir (temp-project)
         _ (spit (io/file dir ".nrepl-port") "4242\n")
@@ -235,7 +227,7 @@
                                  (throw (ex-info "jolt nrepl-server didn't answer within 15000 ms" {})))]
       (let [e (make (temp-project))]
         (is (str/starts-with? (ev/start! e) "Couldn't start Jolt over nREPL: jolt nrepl-server didn't answer"))
-        (is (= [{:git child/nrepl-git-coord}] (map #(dissoc % :inspect) @sources))
+        (is (= [{:git child/nrepl-git-coord}] (map #(dissoc % :jonquil) @sources))
             "a timeout isn't retried, as a plain server or without the inspector")
         (ev/stop! e)))))
 
@@ -252,7 +244,7 @@
   (let [sources (atom [])
         real-start child/start!]
     (with-redefs [child/middleware-source (constantly {:git child/nrepl-git-coord})
-                  child/start! (fn [d source] (swap! sources conj (dissoc source :inspect))
+                  child/start! (fn [d source] (swap! sources conj (dissoc source :jonquil))
                                  (if (:git source) (throw (fetch-failure)) (real-start d source)))]
       (let [e (make (temp-project))]
         (try
@@ -307,28 +299,32 @@
         real-start child/start!]
     (.mkdirs (io/file broken "src/jonquil/nrepl"))
     (spit (io/file broken "deps.edn") "{:paths [\"src\"]}")
+    ;; stdin's file is the real one, so the failure jolt reports is the
+    ;; inspector's planted throw.
+    (spit (io/file broken "src/jonquil/nrepl/stdin_middleware.clj")
+          (get middleware-files/sources "jonquil/nrepl/stdin_middleware.clj"))
     (spit (io/file broken "src/jonquil/nrepl/inspect_middleware.clj")
           "(ns jonquil.nrepl.inspect-middleware) (throw (ex-info \"broken on purpose\" {}))")
-    (with-redefs [child/inspect-root (constantly (.getCanonicalPath broken))
-                  child/start! (fn [d source] (swap! sources conj (some? (:inspect source))) (real-start d source))]
+    (with-redefs [child/jonquil-root (constantly (.getCanonicalPath broken))
+                  child/start! (fn [d source] (swap! sources conj (some? (:jonquil source))) (real-start d source))]
       (let [e (make (temp-project))]
         (try
           (is (nil? (ev/start! e)) "Jolt starts without the inspector")
           (is (= [true false] @sources))
           (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
           (is (not (ev/inspectable? e)))
-          (is (some #(and (str/includes? % "couldn't load Jonquil's inspector")
+          (is (some #(and (str/includes? % "couldn't load Jonquil's nREPL middleware")
                           (str/includes? % "broken on purpose"))
                     (ev/limitations e))
               "names jolt's own error")
           (finally (ev/stop! e)))))))
 
 (deftest an-unwritable-inspector-folder-is-named-test
-  (with-redefs [child/inspect-root (fn [] (throw (ex-info "couldn't write /nope/nrepl-inspect/x" {})))]
+  (with-redefs [child/jonquil-root (fn [] (throw (ex-info "couldn't write /nope/nrepl-middleware/x" {})))]
     (let [e (make (temp-project))]
       (try
         (is (nil? (ev/start! e)))
-        (is (some #(str/includes? % "couldn't write Jonquil's inspector files: couldn't write /nope") (ev/limitations e)))
+        (is (some #(str/includes? % "couldn't write Jonquil's nREPL middleware files: couldn't write /nope") (ev/limitations e)))
         (finally (ev/stop! e))))))
 
 (deftest a-dead-child-is-lost-test
@@ -343,7 +339,7 @@
       (finally (ev/stop! e)))))
 
 (deftest no-inspector-files-means-unavailable-test
-  (with-redefs [child/inspect-root (constantly nil)]
+  (with-redefs [child/jonquil-root (constantly nil)]
     (let [e (make (temp-project))]
       (try
         (ev/start! e)
@@ -352,14 +348,73 @@
         (is (some #(str/includes? % "No inspector") (ev/limitations e)))
         (finally (ev/stop! e))))))
 
-(deftest limitations-name-the-way-back-test
+(deftest limitations-with-the-full-middleware-test
   (let [e (make (temp-project))]
     (try
       (ev/start! e)
-      (let [ls (ev/limitations e)]
-        (is (not-any? #(str/includes? % "Output appears when") ls) "nREPL v0.4.0 streams")
-        (is (some #(str/includes? % "{:runtime :in-process}") ls)))
+      (is (= ["Jump to definition stays in this buffer: lookup reports no file or line."] (ev/limitations e))
+          "streaming, stdin and the inspector all work, so only the jump limit is left")
       (finally (ev/stop! e)))))
+
+(defn- eval-with-input
+  "Evaluates code and, each time it asks for input, answers with the next
+  of answers (a string for send-input!, :eof for send-eof!). [result
+  wait-calls], wait-calls being every on-wait-input argument in order."
+  [e code answers]
+  (let [done (promise) waits (atom []) answers (atom answers)]
+    (ev/eval! e code {:run? false :on-output (fn [_ _])
+                      :on-wait-input (fn [w] (swap! waits conj w)
+                                       (when w
+                                         (let [[a & more] @answers]
+                                           (reset! answers more)
+                                           (future (case a
+                                                     :eof (ev/send-eof! e)
+                                                     ;; answer once the ticks are done and the wait survived them
+                                                     :after-ticks (do (Thread/sleep 800)
+                                                                      (when (ev/waiting-for-input? e) (ev/send-input! e "late")))
+                                                     (ev/send-input! e a))))))
+                      :on-complete (fn [r] (deliver done r))})
+    [(deref done 10000 :timeout) @waits]))
+
+(deftest stdin-over-nrepl-test
+  (let [e (make (temp-project))]
+    (try
+      (ev/start! e)
+      (testing "read-line waits, then gets the typed line"
+        (let [[r waits] (eval-with-input e "(read-line)" ["hello"])]
+          (is (= "\"hello\"" (:printed r)))
+          (is (= [true false] waits))))
+      (testing "two reads ask twice"
+        (is (= "[\"a\" \"b\"]" (:printed (first (eval-with-input e "[(read-line) (read-line)]" ["a" "b"]))))))
+      (testing "end of input"
+        (is (= "nil" (:printed (first (eval-with-input e "(read-line)" [:eof])))))
+        (is (= ":the-end" (:printed (first (eval-with-input e "(read {:eof :the-end} *in*)" [:eof]))))))
+      (is (not (ev/waiting-for-input? e)) "nothing waits once it finished")
+      (testing "output from another thread doesn't end the wait"
+        (let [[r waits] (eval-with-input e "(future (dotimes [_ 6] (println \"tick\") (Thread/sleep 100))) (Thread/sleep 50) (read-line)"
+                                         [:after-ticks])]
+          (is (= [true false] waits) "one wait, ended by the answer, not by the ticks")
+          (is (= "\"late\"" (:printed r)))))
+      (testing "Stop frees a waiting read"
+        (let [done (promise)]
+          (ev/eval! e "(read-line)" {:run? false :on-complete (fn [r] (deliver done r))})
+          (is (wait-until #(ev/waiting-for-input? e) 5000))
+          (ev/interrupt! e)
+          (is (= :interrupted (:status (deref done 5000 :timeout))))
+          (is (not (ev/waiting-for-input? e)))
+          (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the session answers again")))
+      (finally (ev/stop! e)))))
+
+(deftest a-plain-server-has-no-stdin-test
+  (with-redefs [child/middleware-source (constantly nil)]
+    (let [e (make (temp-project))]
+      (try
+        (ev/start! e)
+        (is (some #(str/includes? % "No stdin") (ev/limitations e)))
+        (let [[r out] (run e "(read-line)" false)]
+          (is (= "nil" (:printed r)) "returns nil at once, never waiting")
+          (is (some #(str/includes? (second %) "no stdin") out) "the console says so"))
+        (finally (ev/stop! e))))))
 
 (deftest stop-during-start-leaves-no-child-test
   (let [dir (temp-project) e (make dir)

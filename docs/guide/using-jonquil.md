@@ -123,11 +123,13 @@ question, waits, and prints the answer back once you press Return.
 Cmd/Ctrl+D sends end-of-input while a program is waiting this way, the
 same signal `read-line` would see from a closed pipe on the command line.
 
-This needs Jolt running in process: a loose file, or a project whose
-`.jonquil.edn` says `{:runtime :in-process}`, the way `docs/demos` does.
-In a `deps.edn` project Jolt runs out of process by default, and there
-`read-line` returns nil straight away (see
-[Running Jolt out of process](#running-jolt-out-of-process)).
+This works with Jolt in process and out of process. Out of process,
+Jonquil's own nREPL middleware in the Jolt child asks for each line, a
+`print`ed prompt shows before the wait, and Stop frees a read that's
+waiting (see [Running Jolt out of process](#running-jolt-out-of-process)).
+One difference: in process, Cmd/Ctrl+D closes input for the rest of the
+run; out of process it ends only the read that's waiting, and the next
+`read-line` waits again, as JVM nREPL does.
 
 One thing worth knowing: whatever you've typed at the prompt but not yet
 sent stays there after the program finishes. If the program ended while
@@ -831,17 +833,18 @@ starts for the new project, and the console says something like
 happens if the new file's project asks for a different runtime, or none
 at all.
 
-Two limits are worth knowing going in. There's no stdin: a program that
-calls `read-line` or `read` gets nil or an EOF straight away, and the
-start lines in the console name the `{:runtime :in-process}` way back.
-And jump to definition can't leave the buffer, because the wire op it
-would need for that (`info`) isn't there yet, only `lookup`, which carries
-no file or line to jump to. The inspector works: Jonquil writes its
-inspector files under `~/.cache/jonquil/nrepl-inspect` (or
-`$XDG_CACHE_HOME/jonquil/nrepl-inspect`) and the child loads them from
-there, so it works on a plain nREPL server too. If that folder can't be
-written, or the child can't load what's in it, Jolt starts without the
-inspector and the start lines say why.
+One limit is worth knowing going in: jump to definition can't leave the
+buffer, because the wire op it would need for that (`info`) isn't there
+yet, only `lookup`, which carries no file or line to jump to. stdin and
+the inspector both work, through Jonquil's own nREPL middleware: Jonquil
+writes it under `~/.cache/jonquil/nrepl-middleware` (or
+`$XDG_CACHE_HOME/jonquil/nrepl-middleware`) and the child loads it from
+there. A plain nREPL server, the fallback when jolt-lang/nrepl couldn't be
+fetched, gets the inspector but not stdin, since it runs each evaluation
+on the thread that would have to read your input; `read-line` there
+returns nil and the console says so. If that folder can't be written, or
+the child can't load what's in it, Jolt starts without either and the
+start lines say why; `{:runtime :in-process}` is the way back.
 Output streams as the program prints, with jolt-lang/nrepl v0.4.0 or
 later; an older checkout sends it all at once when the evaluation
 finishes, so a program that prints once a second for ten seconds and

@@ -65,7 +65,8 @@
     jonquil.gtk.editor-test
     jonquil.inspect.view-test
     jonquil.nrepl.inspect-middleware-test
-    jonquil.nrepl.inspect-files-test
+    jonquil.nrepl.stdin-middleware-test
+    jonquil.nrepl.middleware-files-test
     jonquil.inspect-test])
 
 (def live-namespaces
