@@ -739,9 +739,9 @@ server, not in this process.
 Out-of-process Jolt answers those same ops from its own child.
 `jonquil.nrepl.inspect-middleware` is nREPL middleware over
 `jonquil.inspect.view/run-op`. Nothing in Jonquil requires it: `jonquil.
-nrepl.inspect-files` embeds its text and `view.clj`'s with a macro when
+nrepl.middleware-files` embeds its text and `view.clj`'s with a macro when
 Jonquil is compiled (the installed binary has no source tree to read), and
-`ensure-root!` writes both under `$XDG_CACHE_HOME/jonquil/nrepl-inspect/
+`ensure-root!` writes both under `$XDG_CACHE_HOME/jonquil/nrepl-middleware/
 <hash>` or `~/.cache/...`, through a temp sibling and a rename. `jonquil.
 nrepl.child` then adds that folder as a `:local/root` dep and puts the
 middleware last in `:nrepl/middleware`, after jolt-lang/nrepl's, or alone
@@ -756,7 +756,23 @@ every client of it, as clojure-cli.repl's server shares its own; a second
 editor attached through `.nrepl-port` would see the same panel state.
 If the child can't load the middleware (jolt requires every middleware
 namespace before it binds), `jonquil.nrepl.evaluator` starts it again
-without the inspector and names jolt's error in the start lines.
+without Jonquil's middleware and names jolt's error in the start lines.
+
+The same folder carries `jonquil.nrepl.stdin-middleware`, which goes first
+in `:nrepl/middleware`, outside jolt-lang/nrepl's. That position is the
+whole trick: the session middleware starts each session's worker thread
+with `bound-fn` while it handles `clone`, and `jolt.nrepl/evaluate` rebinds
+`*out*` and `*err*` but not `*in*`, so binding `*in*` around the clone
+gives every eval in that session Jonquil's reader. The reader speaks JVM
+nREPL's protocol, the one `jonquil.nrepl.jvm` already uses: with nothing
+buffered it sends `need-input` on the session's current eval and blocks on
+a queue that `stdin` ops feed, `""` ending one read only. A read blocked on
+that queue isn't one of Chez's safe points, so the middleware also sees
+`interrupt` and wakes a waiting read, which throws the
+`{:jolt/interrupted true}` the session reports as interrupted. `NRepl`'s
+`send-input!` and `send-eof!` send the `stdin` op; a plain server gets the
+inspector alone, since it evaluates on the reader thread a waiting read
+would block.
 `NRepl`'s `inspect!` shares `jonquil.inspect/request` with `Jvm`, so both
 send the same wire ops.
 
