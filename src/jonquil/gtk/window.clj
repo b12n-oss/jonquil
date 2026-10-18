@@ -2296,7 +2296,7 @@
       (let [[only & more] @tabs
             osel (when only @(:project only))]
         (when (and only (not more) osel
-                   (not= (dialect/selection-key osel) (dialect/selection-key @sel*)))
+                   (not (tabs/runnable-here? @sel* osel)))
           (try (apply-selection! sel-ctx osel)
                (catch :default e
                  (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))))
@@ -2447,7 +2447,10 @@
                      (reset! (:project t) tsel)
                                           ;; Ruling 1: with one tab the window follows, as it always
                      ;; did; with two or more its project is fixed.
-                     (try (when (= 1 (count @tabs)) (apply-selection! sel-ctx tsel))
+                     ;; A loose Jolt file keeps the window's own Jolt, as
+                     ;; it does when tabs close down to it (keeps-window-jolt?).
+                     (try (when (and (= 1 (count @tabs)) (not (tabs/keeps-window-jolt? @sel* tsel)))
+                            (apply-selection! sel-ctx tsel))
                           (catch :default e
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
                           (finally (editor/set-profile! ed (:profile tsel))

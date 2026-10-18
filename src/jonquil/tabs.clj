@@ -45,13 +45,31 @@
   [{:keys [path text]}]
   (and (nil? path) (= "" text)))
 
+(defn loose-jolt?
+  "A Jolt file outside any project: it has no project folder of its own to
+  run in, so any Jolt the window runs will do."
+  [sel]
+  (and (= :jolt (:id (:profile sel))) (nil? (:project-dir sel))))
+
+(defn keeps-window-jolt?
+  "True when a window whose selection is window-sel keeps its own Jolt for
+  a lone tab whose selection becomes tab-sel (Save As, a rename, Open into
+  an untouched Untitled tab) instead of following it: a loose Jolt file in
+  a Jolt window, whose evaluator it can run in already (runnable-here?)."
+  [window-sel tab-sel]
+  (boolean (and (loose-jolt? tab-sel) (= :jolt (:id (:profile window-sel))))))
+
 (defn runnable-here?
   "Whether a tab whose own selection is tab-sel may run in a window whose
-  selection is window-sel: an Untitled tab (nil) always may; otherwise the
-  two need the same evaluator (dialect/selection-key), the same test that
-  decides whether opening a file switches the window's evaluator."
+  selection is window-sel: an Untitled tab (nil) always may, and so may a
+  loose Jolt file in any Jolt window (a scratch file next to a deps.edn
+  project's tabs runs in that project's Jolt child). Otherwise the two need
+  the same evaluator (dialect/selection-key). Closing tabs down to one asks
+  this too, so a loose file left alone doesn't switch the window away from
+  its project's Jolt."
   [window-sel tab-sel]
   (or (nil? tab-sel)
+      (and (loose-jolt? tab-sel) (= :jolt (:id (:profile window-sel))))
       (= (dialect/selection-key window-sel) (dialect/selection-key tab-sel))))
 
 (defn- home-relative [path]

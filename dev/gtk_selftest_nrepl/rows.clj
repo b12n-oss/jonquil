@@ -63,16 +63,19 @@
       (reset! fixture* result)
       result)))
 
-(defn- loose-fixture!
-  "A file with no project markers above it and no .jonquil.edn -- so
-  dialect/select falls through to the extension alone, which picks the
-  Jolt profile's own default runtime, :in-process.
+(defn- in-process-project-fixture!
+  "A file in a project kept in process: a .jonquil.edn {:runtime
+  :in-process} and no deps.edn, so dialect/select picks in-process Jolt
+  with that folder as the project. Opening it in this nREPL window has to
+  switch evaluators, where a loose file (no project at all) now runs in the
+  window's own child instead (jonquil.tabs/keeps-window-jolt?).
 
   I2: unique dir name, same reasoning as fixture!'s own docstring above."
   []
-  (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-loose-"))
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-inproc-"))
         f (io/file d "scratch.clj")]
     (.mkdirs d)
+    (spit (io/file d ".jonquil.edn") "{:runtime :in-process}\n")
     (spit f "(+ 1 2)\n")
     (.getCanonicalPath f)))
 
@@ -400,15 +403,15 @@
                               :text (support/since ui mark2)})))))
 
 (defn row-nrepl-open-switches-evaluator
-  "Opening a loose file (no markers, no .jonquil.edn) swaps the window off
-  the nREPL evaluator onto the in-process one and kills the old child;
+  "Opening a file from a project kept in process swaps the window off the
+  nREPL evaluator onto the in-process one and kills the old child;
   opening the nREPL project's own fixture file again swaps back and
   starts a fresh one."
   [ui]
   (go-row :nrepl-open-switches-evaluator support/check
     (let [old-pid (own-child-pid ui)
           mark (on-gtk (let [m (support/out-end-offset ui)]
-                         ((:open-path! ui) (loose-fixture!))
+                         ((:open-path! ui) (in-process-project-fixture!))
                          m))
           switched1? (await-until 5000 20 #(str/includes? (support/since ui mark)
                                                           "; Switched to Jolt. The previous session is gone."))
@@ -456,6 +459,31 @@
       (on-gtk (try
                 (support/check :nrepl-two-tabs-owner-reset (and ok1 ok2 ok3)
                                {:ok1 ok1 :ok2 ok2 :ok3 ok3 :third (support/since ui m3)})
+                (finally (close-extra-tabs! ui)))))))
+
+(defn row-nrepl-loose-file-runs-in-the-child
+  "A Jolt file outside any project, opened as a second tab in this deps.edn
+  window, Runs in the window's own Jolt child (jonquil.tabs/runnable-here?'s
+  loose-file rule): it prints the child's pid, not Jonquil's, and the
+  window keeps the same evaluator. (Closing down to the loose tab alone
+  isn't driven here: the next row quits through the first tab's editor.
+  tabs-test pins the rule that close path asks.)"
+  [ui]
+  (go-row :nrepl-loose-file-runs-in-the-child support/check
+    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-loose-") "scratch.clj")
+          _ (spit f "(.pid (java.lang.ProcessHandle/current))\n")
+          [before loose] (on-gtk (let [b (evaluator ui)]
+                                   ((:open-file! ui) (.getCanonicalPath f))
+                                   [b (last ((:tabs* ui)))]))
+          [ran? m] (<! (tabs/run-tab ui loose nil 20000 #(re-find #"=> \d+" %)))
+          [out pid] (on-gtk [(support/since ui m) (nrepl/child-pid (evaluator ui))])
+          printed (some-> (re-find #"=> (\d+)" out) second parse-long)
+          kept? (on-gtk (identical? before (evaluator ui)))]
+      (on-gtk (try
+                (support/check :nrepl-loose-file-runs-in-the-child
+                               (and ran? (some? pid) (= pid printed) kept?
+                                    (not (str/includes? out "can't run here")))
+                               {:out out :child-pid pid :printed printed :kept kept?})
                 (finally (close-extra-tabs! ui)))))))
 
 (defn row-nrepl-close-kills-child

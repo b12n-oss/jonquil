@@ -337,10 +337,16 @@ A window belongs to one project, the one its first file came from. Open a
 file from somewhere else and it still gets a tab you can edit and save,
 but Run, Run Selection, Run Form and Inspect Form refuse in that tab, and
 the console says which project the file belongs to and which one the
-window runs. In-process Jolt files run wherever they live, since they'd
-use the same evaluator anyway. With only one tab open, opening a file
-from another project switches the window over as it always did, and
-closing tabs until the one left belongs elsewhere switches it too.
+window runs. A Jolt file outside any project is the exception: it runs in
+whatever Jolt the window has, so a scratch file opened next to a `deps.edn`
+project's tabs runs in that project's Jolt process, with its classpath,
+and a relative path or `load` in it resolves from the project folder
+rather than the file's own.
+With only one tab open, opening a file from another project switches the
+window over as it always did, and closing tabs until the one left belongs
+elsewhere switches it too. A loose Jolt file keeps the window's Jolt even
+on its own: when tabs close down to it, and when the only tab is saved
+under a new name outside any project.
 
 ### Tabs from last time
 
