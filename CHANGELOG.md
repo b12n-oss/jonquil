@@ -11,6 +11,16 @@ All notable changes to this project are documented here.
 - The inspector (Cmd/Ctrl+I) works for Jolt running out of process: Jonquil loads its inspector code into the Jolt child as nREPL middleware, written under `~/.cache/jonquil/nrepl-middleware`, so stepping through a value leaves `*1`, `*2` and `*3` alone, on a plain nREPL server too.
 - ClojureScript dialect (experimental): Jonquil attaches to a running shadow-cljs nREPL server, selects the build from `.jonquil.edn` or `shadow-cljs.edn`, and Runs a `.cljs` buffer in the JS runtime that has the build loaded; see the ClojureScript section of the using guide. `bb smoke:cljs` drives it against a live app.
 
+### Fixed
+
+- JVM Clojure: output from another thread while `read-line` waits no longer takes the console out of input mode.
+- Find and replace: Return on a focused Replace or Replace All button presses it, instead of moving to the next match.
+- Format All and Format Selection keep the caret on the same code and scroll it into view.
+- The inspector's `d` does nothing while the panel's actions are disabled, and a runtime switch that hides a focused inspector or source panel moves focus to the editor.
+- F12 inside the source panel on a definition in the window's own file moves the window's caret there, instead of loading that file into the panel.
+- `--mcp-attach DIR` follows a listening window after Open Folder re-roots it.
+- Old `~/.cache/jonquil/nrepl-middleware` folders from other Jonquil versions are pruned after a day unused.
+
 ### Changed
 
 - A Jolt file outside any project runs in the window's own Jolt, out of process in a `deps.edn` project window, instead of refusing to run there while other tabs are open; closing tabs down to that file, or saving the window's only tab as one, no longer switches the window to in-process Jolt.

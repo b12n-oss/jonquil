@@ -6,6 +6,7 @@
             [jonquil.mcp :as mcp]
             [jonquil.mcp.json :as json]
             [jonquil.mcp.listen :as listen]
+            [jonquil.mcp.window]
             [temp-dirs])
   (:import (java.io IOException)
            (java.lang ProcessHandle)
@@ -127,6 +128,60 @@
                 (finally (.close (:socket c2))))
               (is (str/includes? (str err) "boom from serve")))
             (finally ((:stop! l)))))))))
+
+(defn- entry [sp] (read-string (slurp (io/file (listen/registry-dir sp) (str (own-pid) ".edn")))))
+
+(deftest set-dir-rewrites-the-entry-and-the-next-client
+  (let [sp (settings-path)
+        dirs (atom [])
+        real jonquil.mcp.window/make-window-tools
+        l (listen/start-listener! {:ui (fake-ui) :dir "/tmp" :gui (fn [f] (f)) :settings-path sp})]
+    (with-redefs [jonquil.mcp.window/make-window-tools (fn [opts] (swap! dirs conj (:dir opts)) (real opts))]
+      (try
+        (is (= "/tmp" (:dir (entry sp))))
+        ((:set-dir! l) "/elsewhere")
+        (is (= {:dir "/elsewhere" :port (:port l) :pid (own-pid)} (entry sp)) "same port and pid, new folder")
+        (let [c (connect (:port l))]
+          (send! c init-msg)
+          (recv! c)
+          (.close (:socket c)))
+        (is (= ["/elsewhere"] @dirs) "a client after the move is served the new folder")
+        (finally ((:stop! l)))))))
+
+(deftest set-dir-after-stop-writes-nothing
+  (let [sp (settings-path)
+        l (listen/start-listener! {:ui (fake-ui) :dir "/tmp" :gui (fn [f] (f)) :settings-path sp})
+        f (io/file (listen/registry-dir sp) (str (own-pid) ".edn"))]
+    ((:stop! l))
+    ((:set-dir! l) "/elsewhere")
+    (is (not (.exists f)))))
+
+(deftest follow-root-calls-set-dir-on-a-re-root
+  (let [tree (atom {:root "/a"})
+        calls (atom [])
+        d (temp-dirs/temp-dir! "jonquil-mcp-listen-test-")]
+    (listen/follow-root! tree {:set-dir! (fn [x] (swap! calls conj x))})
+    (swap! tree assoc :expanded #{})
+    (is (= [] @calls) "no re-root, no call")
+    (swap! tree assoc :root d)
+    (is (= [(.getCanonicalPath (io/file d))] @calls))))
+
+(deftest follow-root-can-be-undone
+  (let [tree (atom {:root "/a"})
+        calls (atom [])
+        unfollow! (listen/follow-root! tree {:set-dir! (fn [x] (swap! calls conj x))})]
+    (unfollow!)
+    (swap! tree assoc :root "/b")
+    (is (= [] @calls))))
+
+(deftest a-rewritten-entry-is-whole-and-leaves-no-temp
+  (let [sp (settings-path)
+        l (listen/start-listener! {:ui (fake-ui) :dir "/tmp" :gui (fn [f] (f)) :settings-path sp})]
+    (try
+      (dotimes [i 20] ((:set-dir! l) (str "/d" i)))
+      (is (= "/d19" (:dir (entry sp))))
+      (is (= [(str (own-pid) ".edn")] (vec (.list (io/file (listen/registry-dir sp))))) "no temp file left")
+      (finally ((:stop! l))))))
 
 (deftest stop-deletes-entry-and-refuses
   (let [sp (settings-path)

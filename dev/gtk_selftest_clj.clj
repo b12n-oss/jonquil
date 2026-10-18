@@ -40,6 +40,7 @@
    rows/row-clj-inspect-lost-idle
    source/row-clj-source-jar
    source/row-clj-source-own-file
+   source/row-clj-source-jump-to-own-file
    source/row-clj-source-follow-and-back
    source/row-clj-source-open-in-window
    source/row-clj-source-outside-read-only

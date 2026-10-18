@@ -835,6 +835,15 @@
     (when was-hidden?
       (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
 
+(defn- focus-within?
+  "True when keyboard focus is widget or inside it."
+  [widget]
+  (let [root (g/gtk-widget-get-root widget)]
+    (when-not (ffi/null? root)
+      (let [f (g/gtk-root-get-focus root)]
+        (and (not (ffi/null? f))
+             (or (= f widget) (pos? (g/gtk-widget-is-ancestor f widget))))))))
+
 (defn- hide-right-panel!
   "Hides which's root, and the slot once neither root is showing. Hiding
   :source also cancels any re-scroll settling still in flight for it
@@ -877,7 +886,7 @@
   (apply-reset-toggle!), and the label is set last, from the evaluator the
   window ends up with, so opening another file of the same app keeps
   reading \"attached\"."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state right inspector-state]} sel]
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state right inspector-state active-ed]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
@@ -888,8 +897,14 @@
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label cv)
         (reset! ev* new)
-        (hide-right-panel! right :inspector)
-        (hide-right-panel! right :source)
+        ;; Focus inside a panel this hides would go nowhere, so it moves to
+        ;; the active tab's editor, as closing the inspector does.
+        (let [focus-in-panel? (or (focus-within? (:inspector-root right))
+                                  (focus-within? (:source-root right)))]
+          (hide-right-panel! right :inspector)
+          (hide-right-panel! right :source)
+          (when (and focus-in-panel? active-ed)
+            (when-let [ed (active-ed)] (editor/focus! ed))))
         (reset! inspector-state nil)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
@@ -1603,9 +1618,11 @@
   "F12/Ctrl+B inside the source panel: the same lookup on the panel
   editor's own snapshot, so the namespace comes from the panel file's ns
   form. A definition in the panel's file moves the panel caret (history
-  kept); one elsewhere loads into the panel; none says so on the footer.
-  ctx as do-jump!'s."
-  [{:keys [ev* sp sel*] :as ctx}]
+  kept); one in the window's own file moves the window's caret to it and
+  focuses the window's editor, as do-jump! does (it used to load the
+  window's file into the panel); one elsewhere loads into the panel; none
+  says so on the footer. ctx as do-jump!'s."
+  [{:keys [ev* sp sel* ed path status-label] :as ctx}]
   (try
     (let [snap (editor/snapshot (:editor sp))]
       (if-let [{:keys [symbol start]} (help/target snap)]
@@ -1615,6 +1632,11 @@
                     (source/location (:doc target) {:project-dir (:project-dir @sel*)}))]
           (cond
             (= :buffer (:kind target)) (source-pane/move-to-offset! sp (:offset target))
+            (and (:path loc) path @path (source/same-path? (:path loc) @path))
+            (let [text (editor/editor-text ed)]
+              (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
+              (editor/focus! ed)
+              (set-status! status-label (str "Jumped to " symbol ".")))
             loc (show-source! ctx loc)
             :else (source-pane/report! sp (str "No source found for " symbol "."))))
         (source-pane/report! sp "No symbol at the caret.")))
@@ -3338,6 +3360,7 @@
                       (fn [f] (cview/on-focus-lost! cv f)))
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
                    :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
+                   :active-ed (fn [] (:ed (active-tab)))
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}
           ;; A file argument that doesn't exist opens an empty editor with
           ;; the path remembered anyway, so Save creates it -- unlike the

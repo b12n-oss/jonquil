@@ -112,6 +112,7 @@
    find-replace/row-find-hangul
    find-replace/row-find-survives-repaint
    find-replace/row-find-preedit-yields
+   find-replace/row-find-return-on-a-button-yields
    find-replace/row-find-prefill-selects
    close-prerun/row-line-col
    close-prerun/row-close-clean
@@ -219,6 +220,7 @@
    dialects/row-selection-throw-still-paints-new-profile
    inspector/row-pane-renders-view
    inspector/row-pane-keys-step
+   inspector/row-pane-d-respects-disabled
    inspector/row-pane-leaf
    inspector/row-pane-measure
    inspector/row-pane-note-clears

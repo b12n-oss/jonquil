@@ -97,6 +97,29 @@
                              (and jumped? (not (:panel v)) (= text (:text v)))
                              (assoc v :jumped jumped?))))))
 
+(defn row-clj-source-jump-to-own-file
+  "F12 inside the panel on a use of greet, whose lookup names the window's
+  own core.clj, moves the WINDOW's caret to greet's line 4 and focuses the
+  window's editor, rather than loading core.clj into the panel: the
+  panel keeps util.clj."
+  [ui]
+  (go-row :clj-source-jump-to-own-file support/check
+    (on-gtk (jump-on! ui "(helper2)" "helper2"))
+    (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
+          _ (on-gtk (let [ed (:editor ui)]
+                      (editor/set-text! ed rows/fixture-core-text)
+                      (support/place-cursor! (:buf ed) 0)
+                      (panel-caret-on! ui "greet" "(greet")
+                      ((:source-jump!* ui))))
+          jumped? (await-until 2000 20 #(= "Jumped to greet." (g/label-text (:status-label ui))))
+          v (on-gtk {:window-line (inc (first (g/cursor-line-col (:buf (:editor ui)))))
+                     :header (header ui)
+                     :window-focused (= (:view (:editor ui)) (g/gtk-root-get-focus (:window ui)))})]
+      (on-gtk (support/check :clj-source-jump-to-own-file
+                             (and opened? jumped? (= 4 (:window-line v)) (= "util.clj" (:header v))
+                                  (:window-focused v))
+                             (assoc v :opened opened? :jumped jumped?))))))
+
 (defn row-clj-source-follow-and-back
   "F12 on helper2 opens util.clj on line 3. In the panel, F12 on helper (line
   4) moves to line 6 in the same file; F12 on outside-fn (line 7) loads

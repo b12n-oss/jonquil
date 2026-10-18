@@ -231,7 +231,8 @@ Return, F3 or Cmd/Ctrl+G moves to the next match; Shift+Return, Shift+F3
 or Cmd/Ctrl+Shift+G moves to the previous one. F3 and Cmd/Ctrl+G also
 work with focus back in the editor, not just while the find bar has it.
 Replace swaps the current match and Replace All swaps every one, and
-each of those is a single undo step. Escape closes the bar, but only
+each of those is a single undo step. With Tab moved onto either button,
+Return presses it. Escape closes the bar, but only
 while the bar itself has focus; with focus somewhere else, Escape keeps
 its usual job of stopping a running program.
 
@@ -1392,9 +1393,9 @@ listening. With none, or with several and no `DIR` to choose between them, it
 refuses and says why, listing the live windows when there is more than one.
 
 The folder a window registers is the one it opened on. A window with no file
-tree root registers its working directory. The registration is static: if you
-use Open Folder to re-root the window later, the entry keeps the launch folder,
-so attach still matches that one.
+tree root registers its working directory. Open Folder re-roots the window and
+its registration together, so attach matches the folder the window shows now,
+and a client that attaches after the move is served that folder.
 
 Detaching leaves the window running, with its tabs and unsaved edits as they
 were, which is the difference from `--window`, where EOF closes the window. If
@@ -1486,7 +1487,7 @@ its stdin.
 | Page Up/Page Down | inspector panel | Page |
 | m | inspector panel | Toggle metadata |
 | v | inspector panel | Toggle between the table and the list |
-| d | inspector panel | Open the def prompt |
+| d | inspector panel | Open the def prompt (nothing while the panel's actions are disabled, after a lost connection) |
 | Escape | inspector panel | Close the panel and focus the editor |
 | Cmd/Ctrl+[ | Source panel | Back to where the panel was |
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
@@ -1582,6 +1583,3 @@ than being surprises you'd otherwise have to rediscover:
   still moves the visible selection first, by design.
 - A listening window (`:mcp-listen?`) serves one MCP client at a time:
   a second attach waits until the first detaches.
-- `--mcp-attach` matches a window by the folder it was launched on.
-  Open Folder re-roots the window but not its registration, so attach
-  keeps matching the launch folder.

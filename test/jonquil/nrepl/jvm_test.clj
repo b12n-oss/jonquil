@@ -452,6 +452,26 @@
         (is (= [true false] @waits))
         (is (= "typed\n" (get (last (filter #(= "stdin" (get % "op")) (fake/requests srv))) "stdin")))))))
 
+(deftest output-during-a-read-keeps-it-waiting-test
+  ;; A future printing while (read-line) waits used to take the console out
+  ;; of input mode with the read still blocked: any reply cleared :waiting?.
+  (let [state (atom {})
+        waits (atom [])
+        watch (#'jonquil.nrepl.jvm/stdin-watch state (fn [w] (swap! waits conj w)))]
+    (watch {:status ["need-input"]})
+    (watch {:out "tick\n"})
+    (watch {:err "warn\n"})
+    (is (true? (:waiting? @state)) "output doesn't end the wait")
+    (is (= [true] @waits))
+    (watch {:value "\"typed\""})
+    (is (true? (:waiting? @state)) "nor does a value on its own")
+    (watch {:status ["done"]})
+    (is (false? (:waiting? @state)) "done does")
+    (is (= [true false] @waits))
+    (watch {:status ["need-input"]})
+    (watch {:status ["interrupted" "done"]})
+    (is (false? (:waiting? @state)) "and so does an interrupt")))
+
 (defn- start-read!
   "Starts (read-line) and waits until it blocks. {:done promise :out atom
   :waits atom}."

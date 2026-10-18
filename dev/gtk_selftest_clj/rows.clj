@@ -64,14 +64,18 @@
 
 (def util-text
   ;; demo.util, inside the project: helper2 calls helper (line 4), helper
-  ;; calls outside-fn (line 7).
+  ;; calls outside-fn (line 7), and uses-greet calls demo.core's greet
+  ;; (line 10), whose lookup names the window's own core.clj.
   (str "(ns demo.util)\n"
        "\n"
        "(defn helper2 []\n"
        "  (helper))\n"
        "\n"
        "(defn helper []\n"
-       "  (outside-fn))\n"))
+       "  (outside-fn))\n"
+       "\n"
+       "(defn uses-greet []\n"
+       "  (greet \"x\"))\n"))
 
 (def outside-text "(ns other.place)\n(defn outside-fn [] :outside)\n")
 

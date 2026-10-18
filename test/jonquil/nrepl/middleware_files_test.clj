@@ -54,6 +54,39 @@
     (is (= (get files/sources "jonquil/inspect/view.clj") (slurp (io/file root "src/jonquil/inspect/view.clj"))))
     (is (= [(.getName (io/file root))] (vec (.list (io/file base)))) "nothing left aside")))
 
+(deftest old-versions-folders-are-pruned
+  (let [base (temp-dirs/temp-dir! "jonquil-middleware-files-")
+        mk (fn [n age-ms] (let [d (io/file base n)]
+                            (.mkdirs (io/file d "src"))
+                            (spit (io/file d "deps.edn") "{}")
+                            (.setLastModified d (- (System/currentTimeMillis) age-ms))
+                            d))
+        old (mk "deadbeef" (* 2 files/prune-age-ms))
+        recent (mk "cafebabe" 1000)
+        in-flight (mk "deadbeef.tmp-123" (* 2 files/prune-age-ms))
+        other (mk "not-a-hash" (* 2 files/prune-age-ms))
+        target (let [d (io/file (temp-dirs/temp-dir! "jonquil-middleware-files-") "keep")]
+                 (.mkdirs d) (spit (io/file d "precious") "x") d)
+        link (let [l (io/file base "0badf00d")]
+               (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath target)
+                                                        (make-array java.nio.file.attribute.FileAttribute 0))
+               l)
+        root (files/ensure-root! base)]
+    (is (not (.exists old)) "another version's folder, unused for two days")
+    (is (.exists recent) "used a second ago: kept")
+    (is (.exists in-flight) "a temp folder: never ours to take")
+    (is (.exists other) "not a hash: not ours")
+    (is (.exists (io/file target "precious")) "a hash-named symlink's target is never touched")
+    (is (.exists link))
+    (is (.exists (io/file root)))))
+
+(deftest a-folder-in-use-is-marked-used
+  (let [base (temp-dirs/temp-dir! "jonquil-middleware-files-")
+        root (io/file (files/ensure-root! base))]
+    (.setLastModified root (- (System/currentTimeMillis) (* 2 files/prune-age-ms)))
+    (files/ensure-root! base)
+    (is (< (- (System/currentTimeMillis) (.lastModified root)) 60000) "touched, so no other Jonquil prunes it")))
+
 (deftest cache-base-follows-xdg
   (is (= "/x/cache/jonquil/nrepl-middleware" (files/cache-base {"XDG_CACHE_HOME" "/x/cache"} "/home/u")))
   (is (= "/home/u/.cache/jonquil/nrepl-middleware" (files/cache-base {} "/home/u")))

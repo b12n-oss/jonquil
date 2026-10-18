@@ -134,8 +134,12 @@
 
 (defn- stdin-watch
   "connection/request!'s :on-message hook for one evaluation: a need-input
-  reply marks state waiting and says so; any later reply, while state is
-  still marked waiting, clears it and says so. A second need-input (the
+  reply marks state waiting and says so; a reply that ends the evaluation
+  (done, interrupted) while state is still marked waiting clears it and
+  says so. Output doesn't: a future printing while the read waits would
+  otherwise take the console out of input mode with the read still
+  blocked (found reviewing the Jolt stdin middleware, 2026-10-18).
+  send-input!/send-eof! clear it on a send. A second need-input (the
   measured double reply after the stdin op's own done) re-marks it the
   same way, harmlessly."
   [state on-wait-input]
@@ -144,7 +148,7 @@
       (clj/need-input? m)
       (do (swap! state assoc :waiting? true)
           (call-wait-input! on-wait-input true))
-      (:waiting? @state)
+      (and (:waiting? @state) (some #{"done" "interrupted"} (:status m)))
       (do (swap! state assoc :waiting? false)
           (call-wait-input! on-wait-input false)))))
 
