@@ -133,19 +133,42 @@
         (child/kill! @ch)
         (throw e)))))
 
+(defn fetch-error-line
+  "The line where jolt says a git dependency couldn't be resolved (\"git
+  dep: could not list URL (git ls-remote exited 128 ...)\", measured
+  2026-10-18 for an unreachable URL and a refused proxy), from the log a
+  failed child start left (child/start!'s ex-data :log), or nil when the
+  start failed some other way."
+  [e]
+  (when-let [log (:log (ex-data e))]
+    (try (some (fn [l] (when (str/includes? l "git dep:")
+                         (str/trim (str/replace l #"^Unhandled exception:\s*" ""))))
+               (str/split-lines (slurp log)))
+         (catch Throwable _ nil))))
+
 (defn- spawn-with-fallback!
-  "spawn-runtime! with child/middleware-source. A git source that fails
-  (offline on the first start, no git) gets one retry with no middleware,
-  a plain server, and the :runtime map records why as :fetch-error. A
-  checkout that fails is the user's own to see, so it isn't retried."
+  "spawn-runtime! with child/middleware-source. A git source whose fetch
+  fails (offline on the first start, no git, a refused proxy: jolt exits
+  saying \"git dep: ...\") gets one retry with no middleware, a plain
+  server, and the :runtime map keeps jolt's line as :fetch-error. The
+  evaluator remembers that line in :fetch-error, so a later restart (a
+  plain server's Stop restarts it) goes straight to the plain server
+  instead of paying for the fetch again; a new window tries again. Any
+  other failure, and any failure of a checkout (the user's own to see),
+  is thrown as before, and so is a retry after stop! ran."
   [ev]
-  (let [source (child/middleware-source)]
-    (try
-      (spawn-runtime! ev source)
-      (catch Throwable e
-        (if (:git source)
-          (assoc (spawn-runtime! ev nil) :fetch-error (ex-message e))
-          (throw e))))))
+  (let [known (:fetch-error @(:state ev))
+        source (child/middleware-source)]
+    (if (and known (:git source))
+      (assoc (spawn-runtime! ev nil) :fetch-error known)
+      (try
+        (spawn-runtime! ev source)
+        (catch Throwable e
+          (let [line (when (:git source) (fetch-error-line e))]
+            (if (and line (not (:stopped? @(:state ev))))
+              (do (swap! (:state ev) assoc :fetch-error line)
+                  (assoc (spawn-runtime! ev nil) :fetch-error line))
+              (throw e))))))))
 
 (defn- start-runtime!
   "Launches and connects a child if none is live. nil, or a sentence.
@@ -374,7 +397,8 @@
                "Jump to definition stays in this buffer: lookup reports no file or line."]
         (and (live? this) (:fetch-error rt))
         (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)
-                   ") couldn't be fetched, so this is a plain nREPL server; the next start tries again."))
+                   ") couldn't be fetched, so this is a plain nREPL server; a new window tries again. Jolt said: "
+                   (:fetch-error rt)))
         (and (live? this) (not (contains? (:ops rt) "interrupt")))
         (conj "Stop restarts the runtime: this server has no interrupt op."))))
   ev/Owners

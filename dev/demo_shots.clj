@@ -733,6 +733,9 @@
     (let [dir (io/file (temp-dirs/temp-dir! "jonquil-demoshots-tree-") "my-talk")
           put! (fn [rel text] (let [f (io/file dir rel)] (io/make-parents f) (spit f text)))
           _ (do (put! "deps.edn" "{:paths [\"src\"]}\n")
+                ;; In process, so the shot keeps its "Jolt" label and the
+                ;; scene's short waits don't race a first child start.
+                (put! ".jonquil.edn" "{:runtime :in-process}\n")
                 (put! "src/talk/core.clj" "(ns talk.core)\n\n(defn hello [] \"hi\")\n")
                 (put! "src/talk/demo.clj" "(ns talk.demo\n  (:require [talk.core :as c]))\n\n(c/hello)\n")
                 (put! "dev/user.clj" "(ns user)\n")
