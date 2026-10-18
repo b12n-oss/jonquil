@@ -85,8 +85,8 @@ bb app:install   # the same, then moves it to ~/Applications/Jonquil.app and reg
 `Info.plist` whose identifier is `net.b12n.jonquil`, and the binary inside.
 The short version string comes from `git describe --tags --always` and the
 build number from `git rev-list --count HEAD`. The bundle declares two
-document types, Clojure source (`clj`, `cljc`, `cljd`, `jank`, `edn` and
-`bb`) and Folder, both as Alternate. That means they show up under Open
+document types, Clojure source (`clj`, `cljc`, `cljd`, `cljs`, `jank`, `edn`
+and `bb`) and Folder, both as Alternate. That means they show up under Open
 With and as Dock drop targets, but Jonquil never becomes the default app for
 anything. `bb app:install` replaces an existing `~/Applications/Jonquil.app`
 only when it is a Jonquil bundle, and refuses otherwise.
@@ -166,7 +166,7 @@ bb app:uninstall   # takes it out again
 | `~/.local/share/mime/packages/net.b12n.jonquil.xml` | the MIME types |
 
 The MIME package defines `text/x-clojure` (`*.clj`, `*.cljc`, `*.cljd`,
-`*.bb`), `application/edn` (`*.edn`) and `text/x-jank` (`*.jank`), each a
+`*.cljs`, `*.bb`), `application/edn` (`*.edn`) and `text/x-jank` (`*.jank`), each a
 kind of `text/plain`. The launcher lists those three types, so Jonquil
 appears in a file manager's Open With list. Nothing outside `~/.local/share`
 is touched, and Jonquil is never made the default app for anything. Afterwards

@@ -14,7 +14,7 @@
 
 (def mime-types
   "The types Jonquil registers and offers to open: [type comment globs]."
-  [["text/x-clojure" "Clojure source" ["*.clj" "*.cljc" "*.cljd" "*.bb"]]
+  [["text/x-clojure" "Clojure source" ["*.clj" "*.cljc" "*.cljd" "*.cljs" "*.bb"]]
    ["application/edn" "EDN data" ["*.edn"]]
    ["text/x-jank" "jank source" ["*.jank"]]])
 
