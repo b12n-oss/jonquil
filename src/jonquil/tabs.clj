@@ -51,6 +51,14 @@
   [sel]
   (and (= :jolt (:id (:profile sel))) (nil? (:project-dir sel))))
 
+(defn keeps-window-jolt?
+  "True when a window whose selection is window-sel keeps its own Jolt for
+  a lone tab whose selection becomes tab-sel (Save As, a rename, Open into
+  an untouched Untitled tab) instead of following it: a loose Jolt file in
+  a Jolt window, whose evaluator it can run in already (runnable-here?)."
+  [window-sel tab-sel]
+  (boolean (and (loose-jolt? tab-sel) (= :jolt (:id (:profile window-sel))))))
+
 (defn runnable-here?
   "Whether a tab whose own selection is tab-sel may run in a window whose
   selection is window-sel: an Untitled tab (nil) always may, and so may a

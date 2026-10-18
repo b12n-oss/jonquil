@@ -63,16 +63,19 @@
       (reset! fixture* result)
       result)))
 
-(defn- loose-fixture!
-  "A file with no project markers above it and no .jonquil.edn -- so
-  dialect/select falls through to the extension alone, which picks the
-  Jolt profile's own default runtime, :in-process.
+(defn- in-process-project-fixture!
+  "A file in a project kept in process: a .jonquil.edn {:runtime
+  :in-process} and no deps.edn, so dialect/select picks in-process Jolt
+  with that folder as the project. Opening it in this nREPL window has to
+  switch evaluators, where a loose file (no project at all) now runs in the
+  window's own child instead (jonquil.tabs/keeps-window-jolt?).
 
   I2: unique dir name, same reasoning as fixture!'s own docstring above."
   []
-  (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-loose-"))
+  (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-inproc-"))
         f (io/file d "scratch.clj")]
     (.mkdirs d)
+    (spit (io/file d ".jonquil.edn") "{:runtime :in-process}\n")
     (spit f "(+ 1 2)\n")
     (.getCanonicalPath f)))
 
@@ -400,15 +403,15 @@
                               :text (support/since ui mark2)})))))
 
 (defn row-nrepl-open-switches-evaluator
-  "Opening a loose file (no markers, no .jonquil.edn) swaps the window off
-  the nREPL evaluator onto the in-process one and kills the old child;
+  "Opening a file from a project kept in process swaps the window off the
+  nREPL evaluator onto the in-process one and kills the old child;
   opening the nREPL project's own fixture file again swaps back and
   starts a fresh one."
   [ui]
   (go-row :nrepl-open-switches-evaluator support/check
     (let [old-pid (own-child-pid ui)
           mark (on-gtk (let [m (support/out-end-offset ui)]
-                         ((:open-path! ui) (loose-fixture!))
+                         ((:open-path! ui) (in-process-project-fixture!))
                          m))
           switched1? (await-until 5000 20 #(str/includes? (support/since ui mark)
                                                           "; Switched to Jolt. The previous session is gone."))

@@ -33,6 +33,15 @@
     (is (not (tabs/runnable-here? (assoc jolt :runtime :nrepl) (assoc jolt :runtime :nrepl :project-dir "/b"))))
     (is (not (tabs/runnable-here? jolt (assoc jolt :profile dialect/cljd :runtime :attach))))))
 
+(deftest a-lone-loose-tab-keeps-the-windows-jolt
+  (let [project {:profile dialect/jolt :runtime :nrepl :project-dir "/p"}
+        loose {:profile dialect/jolt :runtime :in-process :project-dir nil}]
+    (is (tabs/keeps-window-jolt? project loose) "Save As of the lone tab to a loose path")
+    (is (not (tabs/keeps-window-jolt? project (assoc loose :project-dir "/q"))) "into another project: follow it")
+    (is (not (tabs/keeps-window-jolt? loose project)) "a loose window follows its tab into a project")
+    (is (not (tabs/keeps-window-jolt? {:profile dialect/cljd :runtime :attach :project-dir "/app"} loose))
+        "a ClojureDart window follows its tab to Jolt")))
+
 (deftest a-loose-jolt-file-runs-in-any-jolt-window
   (let [project {:profile dialect/jolt :runtime :nrepl :project-dir "/p"}
         loose {:profile dialect/jolt :runtime :in-process :project-dir nil}]
