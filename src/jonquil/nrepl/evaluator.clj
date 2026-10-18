@@ -285,14 +285,20 @@
 (defn- stdin-watch!
   "For each reply to the main eval: need-input (jonquil.nrepl.stdin-
   middleware asking for a line) marks the evaluation waiting and says so;
-  any other reply while still marked waiting clears it, as jvm.clj's
-  stdin-watch does. The flag lives on :running, so finish! clears it too."
+  a reply that ends it (done, interrupted) while still marked waiting
+  clears it. Output doesn't: a future printing while the read waits would
+  otherwise take the console out of input mode with the read still
+  blocked (review). send-stdin! clears it on a send, and the flag lives on
+  :running, so finish! clears it too."
   [ev m]
-  (let [state (:state ev)]
-    (if (clj/need-input? m)
+  (let [state (:state ev)
+        ends? (some #{"done" "interrupted"} (:status m))]
+    (cond
+      (clj/need-input? m)
       (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :waiting?] true))))]
         (when (and (:running old) (not (get-in old [:running :waiting?])))
           (call-wait-input! (:running old) true)))
+      ends?
       (let [[old _] (swap-vals! state (fn [s] (cond-> s (get-in s [:running :waiting?]) (assoc-in [:running :waiting?] false))))]
         (when (get-in old [:running :waiting?])
           (call-wait-input! (:running old) false))))))

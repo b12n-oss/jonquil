@@ -367,7 +367,12 @@
                                        (when w
                                          (let [[a & more] @answers]
                                            (reset! answers more)
-                                           (future (if (= :eof a) (ev/send-eof! e) (ev/send-input! e a))))))
+                                           (future (case a
+                                                     :eof (ev/send-eof! e)
+                                                     ;; answer once the ticks are done and the wait survived them
+                                                     :after-ticks (do (Thread/sleep 800)
+                                                                      (when (ev/waiting-for-input? e) (ev/send-input! e "late")))
+                                                     (ev/send-input! e a))))))
                       :on-complete (fn [r] (deliver done r))})
     [(deref done 10000 :timeout) @waits]))
 
@@ -385,6 +390,11 @@
         (is (= "nil" (:printed (first (eval-with-input e "(read-line)" [:eof])))))
         (is (= ":the-end" (:printed (first (eval-with-input e "(read {:eof :the-end} *in*)" [:eof]))))))
       (is (not (ev/waiting-for-input? e)) "nothing waits once it finished")
+      (testing "output from another thread doesn't end the wait"
+        (let [[r waits] (eval-with-input e "(future (dotimes [_ 6] (println \"tick\") (Thread/sleep 100))) (Thread/sleep 50) (read-line)"
+                                         [:after-ticks])]
+          (is (= [true false] waits) "one wait, ended by the answer, not by the ticks")
+          (is (= "\"late\"" (:printed r)))))
       (testing "Stop frees a waiting read"
         (let [done (promise)]
           (ev/eval! e "(read-line)" {:run? false :on-complete (fn [r] (deliver done r))})

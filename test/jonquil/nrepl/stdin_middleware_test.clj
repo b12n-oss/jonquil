@@ -63,6 +63,55 @@
       (mw/offer! e "fine\n")
       (is (= "fine" (deref f 2000 :timeout))))))
 
+(deftest output-is-flushed-before-asking
+  (let [e (mw/entry)
+        out (java.io.StringWriter.)
+        order (atom [])
+        _ (reset! (:reply e) (fn [_] (swap! order conj [:asked (str out)])))
+        w (proxy [java.io.Writer] []
+            (write ([x] (.write out (str x))) ([x off len] (.write out (subs (str x) off (+ off len)))))
+            (flush [] (swap! order conj [:flushed (str out)])))
+        f (future (binding [*out* w *in* (LineNumberingPushbackReader. (mw/reader e))]
+                    (print "Name: ") (read-line)))]
+    (is (wait-for #(some (fn [[k]] (= :asked k)) @order)))
+    (is (= [:flushed "Name: "] (first @order)) "the prompt is flushed before need-input goes out")
+    (mw/offer! e "Ann\n")
+    (is (= "Ann" (deref f 2000 :timeout)))))
+
+(deftest text-with-no-read-waiting-is-dropped
+  (let [e (mw/entry)]
+    (is (false? (mw/offer! e "stale\n")))
+    (reset! (:reply e) (fn [_]))
+    (let [f (future (binding [*in* (LineNumberingPushbackReader. (mw/reader e))] (read-line)))]
+      (is (wait-for #(mw/waiting? e)) "the read waits instead of taking the stale line")
+      (mw/offer! e "fresh\n")
+      (is (= "fresh" (deref f 2000 :timeout))))))
+
+(deftest an-interrupt-drops-what-was-queued
+  (let [[e f replies] (reading (fn [] (try (read-line) (catch Throwable t (ex-data t)))))]
+    (is (wait-for #(seq @replies)))
+    (.offer ^java.util.concurrent.LinkedBlockingQueue (:queue e) "racing line\n")
+    (mw/interrupt! e)
+    (is (= {:jolt/interrupted true} (deref f 2000 :timeout)) "the interrupt wins over a line already queued")
+    (is (zero? (.size ^java.util.concurrent.LinkedBlockingQueue (:queue e))))))
+
+(deftest a-new-eval-drops-leftover-text
+  (let [[e f replies] (reading read-line)]
+    (is (wait-for #(seq @replies)))
+    (mw/offer! e "one\ntwo\n")
+    (is (= "one" (deref f 2000 :timeout)))
+    (mw/new-eval! e (fn [_]))
+    (let [g (future (binding [*in* (LineNumberingPushbackReader. (mw/reader e))] (read-line)))]
+      (is (wait-for #(mw/waiting? e)) "\"two\" from the last eval doesn't answer this one")
+      (mw/offer! e "three\n")
+      (is (= "three" (deref g 2000 :timeout))))))
+
+(deftest close-forgets-the-session
+  (let [sessions (atom {"s1" (mw/entry)})
+        h (mw/handler sessions (fn [_] nil))]
+    (h {"op" "close" "session" "s1" :reply (fn [_])})
+    (is (= {} @sessions))))
+
 (deftest the-handler-routes-by-op
   (let [sessions (atom {})
         seen (atom [])
@@ -85,6 +134,7 @@
     (testing "stdin answers done, and an unknown session says so"
       (h {"op" "stdin" "session" "s1" "stdin" "x\n" :reply (fn [m] (swap! replies conj m))})
       (h {"op" "stdin" "session" "nope" "stdin" "x\n" :reply (fn [m] (swap! replies conj m))})
-      (is (= [{"status" ["done"]} {"status" ["done" "error"]}] @replies)))
+      (is (= [{"status" ["done" "not-waiting"]} {"status" ["done" "error"]}] @replies)
+          "no read waits in s1, so the text is dropped and the reply says so"))
     (h {"op" "interrupt" "session" "s1" :reply (fn [_])})
     (is (= ["clone" "eval" "interrupt"] @seen) "stdin is ours; interrupt is also handed on")))

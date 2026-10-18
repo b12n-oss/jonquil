@@ -34,20 +34,42 @@
 (defn waiting? [e] @(:waiting? e))
 
 (defn offer!
-  "Queues text for the session's reads; \"\" is end of input for one read."
+  "Hands text to the read waiting in this session; \"\" is end of input for
+  that read. true when a read was waiting. Text that arrives with no read
+  waiting is dropped, as the in-process engine starts each run with an
+  empty queue: kept, it would answer some later, unrelated read (review:
+  a Return racing a Stop could leave the typed line for the next eval)."
   [e text]
-  (.offer ^LinkedBlockingQueue (:queue e) (if (= "" text) ::eof text)))
+  (boolean (when (waiting? e)
+             (.offer ^LinkedBlockingQueue (:queue e) (if (= "" text) ::eof text)))))
 
 (defn interrupt!
   "Wakes a read waiting in this session so it throws Jolt's interrupted
-  signal. Does nothing when no read waits: a marker left in the queue
-  would interrupt the next, unrelated read."
+  signal, after dropping anything queued or half read. Does nothing when no
+  read waits: a marker left in the queue would interrupt the next,
+  unrelated read."
   [e]
-  (when (waiting? e) (.offer ^LinkedBlockingQueue (:queue e) ::interrupt)))
+  (when (waiting? e)
+    (.clear ^LinkedBlockingQueue (:queue e))
+    (reset! (:current e) (StringReader. ""))
+    (.offer ^LinkedBlockingQueue (:queue e) ::interrupt)))
+
+(defn new-eval!
+  "A new evaluation in this session: its reply is the one reads ask on, and
+  text the last one left unread (a line past the one it read) doesn't
+  carry over, matching the in-process engine's per-run reader."
+  [e reply]
+  (reset! (:reply e) reply)
+  (reset! (:current e) (StringReader. ""))
+  (.clear ^LinkedBlockingQueue (:queue e)))
 
 (defn reader
-  "A java.io.Reader over e: buffered text first; with none, need-input on
-  the current eval's reply, then a blocking take."
+  "A java.io.Reader over e: buffered text first; with none, flush *out* (the
+  eval's own writer, which jolt only sends on a flush, so a print of a
+  prompt shows before the wait), mark the read waiting, need-input on the
+  current eval's reply, then a blocking take. Waiting is set before
+  need-input goes out, so a stdin or an interrupt answering it always
+  finds the read waiting."
   [{:keys [queue reply current waiting?]}]
   (proxy [Reader] []
     (close [] nil)
@@ -59,8 +81,9 @@
        (loop []
          (let [n (.read ^StringReader @current cbuf off len)]
            (if (neg? n)
-             (do (when-let [r @reply] (r {"status" ["need-input"]}))
-                 (let [item (try (reset! waiting? true)
+             (do (try (flush) (catch Throwable _ nil))
+                 (reset! waiting? true)
+                 (let [item (try (when-let [r @reply] (r {"status" ["need-input"]}))
                                  (.take ^LinkedBlockingQueue queue)
                                  (finally (reset! waiting? false)))]
                    (cond
@@ -84,14 +107,18 @@
                                             (swap! sessions assoc new-sid e))
                                           ((:reply request) m))))))
         ("eval" "load-file")
-        (do (when-let [e (get @sessions sid)] (reset! (:reply e) (:reply request)))
+        (do (when-let [e (get @sessions sid)] (new-eval! e (:reply request)))
             (next request))
         "stdin"
         (let [e (get @sessions sid)]
-          (when e (offer! e (str (get request "stdin"))))
-          (server/respond request {"status" (if e ["done"] ["done" "error"])}))
+          (server/respond request {"status" (cond (nil? e) ["done" "error"]
+                                                  (offer! e (str (get request "stdin"))) ["done"]
+                                                  :else ["done" "not-waiting"])}))
         "interrupt"
         (do (when-let [e (get @sessions sid)] (interrupt! e))
+            (next request))
+        "close"
+        (do (swap! sessions dissoc sid)
             (next request))
         (next request)))))
 
