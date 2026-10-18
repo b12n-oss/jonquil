@@ -283,11 +283,13 @@
                                   ;; so (doc ...) etc. work at the prompt like
                                   ;; upstream's DrClojure.eval. pprint too,
                                   ;; now that it honours the bound *out*
-                                  ;; (jolt-lang/jolt#1355, Jolt v0.8.22).
+                                  ;; (jolt-lang/jolt#1355, Jolt v0.8.22),
+                                  ;; and pp, which prints *1 since
+                                  ;; jolt-lang/jolt#1389 (Jolt v0.8.23).
                                   (refer-clojure)
                                   (require 'clojure.repl 'clojure.pprint)
                                   (refer 'clojure.repl :only '[doc find-doc apropos dir])
-                                  (refer 'clojure.pprint :only '[pprint])
+                                  (refer 'clojure.pprint :only '[pprint pp])
                                   (let [{:keys [value printed]}
                                         (jolt.host/run-interruptible
                                          token (fn []

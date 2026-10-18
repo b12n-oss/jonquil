@@ -416,6 +416,13 @@
     (is (= :ok (:status r)))
     (is (= [[:out "{:a 1, :b [1 2 3]}\n"]] @out))))
 
+(deftest pp-referred-and-prints-the-last-value
+  (let [ctx (sut/make-eval-context)]
+    (run-sync ctx "{:a 1 :b [1 2 3]}")
+    (let [[r out] (run-sync ctx "(pp)")]
+      (is (= :ok (:status r)))
+      (is (= [[:out "{:a 1, :b [1 2 3]}\n"]] @out)))))
+
 (deftest p2-stop-leaves-a-finishing-worker-alone
   (let [ctx (sut/make-eval-context)
         flag (atom false)]

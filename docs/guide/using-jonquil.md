@@ -90,8 +90,8 @@ ways at the prompt without re-running anything.
 
 A few REPL helpers are there without a `require` in the namespace the
 prompt shows: `doc`, `find-doc`, `apropos` and `dir` from `clojure.repl`,
-and `pprint` from `clojure.pprint`, whose output lands in the console like
-any `println`. A program that defines its own `pprint` or `doc` keeps its
+and `pprint` and `pp` from `clojure.pprint`, whose output lands in the
+console like any `println`. `(pp)` pretty-prints `*1`, the last value. A program that defines its own `pprint` or `doc` keeps its
 own. A file that starts with its own `ns` form gets a fresh namespace,
 though, so it requires them the way it would under `clj`.
 
@@ -100,8 +100,7 @@ error, so `(ex-data *e)` right after a failure shows what it carried. A
 Run counts as well as a prompt entry, the way an nREPL editor's load-file
 does, for Jolt in process and out of process. In process, a Stop leaves
 them as they were. Out of process, a Stop that has to restart Jolt clears
-them along with every definition. `clojure.pprint/pp` doesn't print `*1` yet, because
-Jolt's own `pp` is still an empty stub, so use `(pprint *1)` instead.
+them along with every definition.
 
 Up and Down recall earlier entries, but only from the first or last line
 of what you're typing. On a multi-line entry, Up and Down move the caret
