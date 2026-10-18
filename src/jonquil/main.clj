@@ -82,7 +82,8 @@
   dies with the process."
   []
   (when-let [l (first (reset-vals! listener nil))]
-    (try ((:stop! l))
+    (try (when-let [unfollow! (:unfollow! l)] (unfollow!))
+         ((:stop! l))
          (catch Throwable e
            (binding [*out* *err*]
              (println "jonquil: stopping the MCP listener failed:" (ex-message e)))))))
@@ -97,8 +98,7 @@
       (when (:mcp-listen? (settings/load-settings sp))
         (let [root (some-> (:root @(:state (:file-tree ui))) io/file .getCanonicalPath)
               l (listen/start-listener! {:ui ui :dir root :settings-path sp})]
-          (reset! listener l)
-          (listen/follow-root! (:state (:file-tree ui)) l))))
+          (reset! listener (assoc l :unfollow! (listen/follow-root! (:state (:file-tree ui)) l))))))
     (catch Throwable e
       (binding [*out* *err*]
         (println "jonquil: MCP listener not started:" (ex-message e))))))

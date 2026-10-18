@@ -65,11 +65,19 @@
         recent (mk "cafebabe" 1000)
         in-flight (mk "deadbeef.tmp-123" (* 2 files/prune-age-ms))
         other (mk "not-a-hash" (* 2 files/prune-age-ms))
+        target (let [d (io/file (temp-dirs/temp-dir! "jonquil-middleware-files-") "keep")]
+                 (.mkdirs d) (spit (io/file d "precious") "x") d)
+        link (let [l (io/file base "0badf00d")]
+               (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath target)
+                                                        (make-array java.nio.file.attribute.FileAttribute 0))
+               l)
         root (files/ensure-root! base)]
     (is (not (.exists old)) "another version's folder, unused for two days")
     (is (.exists recent) "used a second ago: kept")
     (is (.exists in-flight) "a temp folder: never ours to take")
     (is (.exists other) "not a hash: not ours")
+    (is (.exists (io/file target "precious")) "a hash-named symlink's target is never touched")
+    (is (.exists link))
     (is (.exists (io/file root)))))
 
 (deftest a-folder-in-use-is-marked-used

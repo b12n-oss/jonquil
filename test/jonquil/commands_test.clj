@@ -49,7 +49,12 @@
         (is (= 2 (c/carry-caret "a\n\nb" "a\n\nb" 2)) "a blank line keeps its place")
         (is (= 4 (c/carry-caret "a\n   b" "a\n  b" 5)) "column 3 of a 3-space indent lands at the end of the new 2-space one")
         (is (= 3 (c/carry-caret "a\n   b" "a\n  b" 3)) "column 1 stays at column 1")))
-    (is (= 3 (c/carry-caret "abc" "abc" 3)) "unchanged text, unchanged caret")))
+    (is (= 3 (c/carry-caret "abc" "abc" 3)) "unchanged text, unchanged caret")
+    (testing "between two forms on a line it keeps its side of the space"
+      (let [o "(defn f [x]\n(let [y 1] (inc x)))"
+            n "(defn f [x]\n  (let [y 1] (inc x)))"]
+        (is (= (str/index-of n "(inc") (c/carry-caret o n (str/index-of o "(inc"))) "before (inc")
+        (is (= (dec (str/index-of n "(inc")) (c/carry-caret o n (dec (str/index-of o "(inc")))) "before the space")))))
 
 (deftest format-ops-carry-the-caret-test
   (let [text "(defn f [x]\n(let [y 1]\n(inc x)))"

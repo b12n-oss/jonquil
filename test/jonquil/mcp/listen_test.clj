@@ -166,6 +166,23 @@
     (swap! tree assoc :root d)
     (is (= [(.getCanonicalPath (io/file d))] @calls))))
 
+(deftest follow-root-can-be-undone
+  (let [tree (atom {:root "/a"})
+        calls (atom [])
+        unfollow! (listen/follow-root! tree {:set-dir! (fn [x] (swap! calls conj x))})]
+    (unfollow!)
+    (swap! tree assoc :root "/b")
+    (is (= [] @calls))))
+
+(deftest a-rewritten-entry-is-whole-and-leaves-no-temp
+  (let [sp (settings-path)
+        l (listen/start-listener! {:ui (fake-ui) :dir "/tmp" :gui (fn [f] (f)) :settings-path sp})]
+    (try
+      (dotimes [i 20] ((:set-dir! l) (str "/d" i)))
+      (is (= "/d19" (:dir (entry sp))))
+      (is (= [(str (own-pid) ".edn")] (vec (.list (io/file (listen/registry-dir sp))))) "no temp file left")
+      (finally ((:stop! l))))))
+
 (deftest stop-deletes-entry-and-refuses
   (let [sp (settings-path)
         l (listen/start-listener! {:ui (fake-ui) :dir "/tmp" :gui (fn [f] (f)) :settings-path sp})

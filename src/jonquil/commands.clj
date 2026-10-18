@@ -159,7 +159,11 @@
                                    (recur (inc j))
                                    j)))]
           (cond
-            (not blank-before?) i
+            ;; mid-line: step over the same spaces and tabs the caret had
+            ;; after its code (format never changes space inside a line)
+            (not blank-before?) (let [gap (count (take-while #{\space \tab} (reverse before)))
+                                      start i]
+                                  (skip (fn [j] (>= (- j start) gap))))
             at-code? (skip (constantly false))
             :else (skip (fn [j] (>= (- j line-start) col)))))
         (>= i n) n

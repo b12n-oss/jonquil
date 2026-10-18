@@ -82,6 +82,8 @@
     (doseq [f (or (.listFiles (io/file base)) [])]
       (let [n (.getName ^java.io.File f)]
         (when (and (.isDirectory ^java.io.File f)
+                   ;; a symlink's tree belongs to its target: never ours
+                   (not (java.nio.file.Files/isSymbolicLink (.toPath ^java.io.File f)))
                    (re-matches #"[0-9a-f]{8}" n)
                    (not= n keep-name)
                    (> (- now-ms (.lastModified ^java.io.File f)) prune-age-ms))
@@ -113,6 +115,9 @@
   ([] (ensure-root! (cache-base (System/getenv) (System/getProperty "user.home"))))
   ([base]
    (let [dir (io/file base (folder-name))]
+     ;; marked used before it's checked, so another version's prune can't
+     ;; take it between the check and the child loading it
+     (when (.exists dir) (.setLastModified dir (System/currentTimeMillis)))
      (if (complete? dir)
        (in-use! base dir)
        (let [tmp (write-tmp! dir)]

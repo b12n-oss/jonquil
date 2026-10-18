@@ -742,9 +742,15 @@
   whole-buffer replace the layout isn't valid yet, and scroll_mark_onscreen
   scrolls by it at once (measured: the caret stayed 5,000 px below a
   300 px view), while scroll_to_mark waits for the layout. No alignment,
-  so it scrolls only as far as it has to."
+  so it scrolls only as far as it has to. Once more from an idle turn,
+  too: on a slow first run the deferred scroll still used estimated line
+  heights and stopped short (measured: 300 px of the 5,304 it needed), and
+  GTK validates the text layout at a higher priority than an idle, so the
+  second scroll sees real heights."
   [ed]
-  (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 0 0.0 0.0))
+  (let [scroll! (fn [] (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 0 0.0 0.0))]
+    (scroll!)
+    (on-gui! scroll!)))
 
 (defn- formatted!
   "apply-edit! for a format op, then the caret scrolled into view when the

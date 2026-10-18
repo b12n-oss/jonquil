@@ -30,9 +30,15 @@
 (defn write-entry!
   "Writes <pid>.edn in the registry, creating the directory."
   [settings-path {:keys [dir port pid]}]
-  (let [f (entry-file settings-path pid)]
+  ;; Through a temp file and a rename, so an --mcp-attach reading while
+  ;; set-dir! rewrites the entry never sees half of it.
+  (let [f (entry-file settings-path pid)
+        tmp (io/file (.getParentFile f) (str "." pid ".edn.tmp"))]
     (.mkdirs (.getParentFile f))
-    (spit f (pr-str {:dir dir :port port :pid pid}))))
+    (spit tmp (pr-str {:dir dir :port port :pid pid}))
+    (when-not (.renameTo tmp f)
+      (.delete tmp)
+      (spit f (pr-str {:dir dir :port port :pid pid})))))
 
 (defn delete-entry!
   "Deletes pid's entry; a missing one is fine."
@@ -176,7 +182,8 @@
   "Keeps listener l's folder on the window's tree root: watches tree-state
   (the file tree's state atom, whose :root an Open Folder re-root changes)
   and calls l's set-dir! with the new root's canonical path. A failure is
-  said on stderr; the window carries on."
+  said on stderr; the window carries on. Returns a fn that removes the
+  watch."
   [tree-state l]
   (add-watch tree-state ::follow-root
              (fn [_ _ old new]
@@ -184,7 +191,8 @@
                  (when (and r (not= (:root old) r))
                    (try ((:set-dir! l) (.getCanonicalPath (io/file r)))
                         (catch Throwable e
-                          (log "couldn't follow the new folder:" (or (ex-message e) (str e))))))))))
+                          (log "couldn't follow the new folder:" (or (ex-message e) (str e)))))))))
+  (fn [] (remove-watch tree-state ::follow-root)))
 
 ;; --- discovery and the --mcp-attach bridge -----------------------------------
 
