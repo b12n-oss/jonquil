@@ -167,7 +167,7 @@
   ;; In its own try, so a failure never costs the namespace snapshot.
   (str "(try (clojure.core/require 'clojure.repl 'clojure.pprint)"
        " (clojure.core/refer 'clojure.repl :only '[doc find-doc apropos dir])"
-       " (clojure.core/refer 'clojure.pprint :only '[pprint])"
+       " (clojure.core/refer 'clojure.pprint :only '[pprint pp])"
        " (catch :default _ nil))"))
 
 (def ns-snapshot-code

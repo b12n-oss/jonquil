@@ -413,6 +413,8 @@
           "at the prompt")
       (is (= ":mine" (:printed (first (run e "(defn dir [& _] :mine) (dir)" false))))
           "a program's own definition wins")
+      (run e "{:a 1}" false)
+      (is (= [[:out "{:a 1}\n"]] (second (run e "(pp)" false))) "pp prints *1")
       (finally (ev/stop! e)))))
 
 (deftest release-owner-over-nrepl-test
