@@ -2,7 +2,7 @@
   "nREPL middleware for an out-of-process Jolt child: the inspector's ops,
   over the same jonquil.inspect.view code the in-process inspector runs.
 
-  Nothing in Jonquil requires this namespace. jonquil.nrepl.inspect-files
+  Nothing in Jonquil requires this namespace. jonquil.nrepl.middleware-files
   embeds its text and view.clj's when Jonquil is compiled, writes both to a
   cache folder, and the child loads them from there as a :local/root dep
   whose middleware sits after jolt-lang/nrepl's in :nrepl/middleware.

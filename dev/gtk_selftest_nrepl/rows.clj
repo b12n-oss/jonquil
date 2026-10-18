@@ -153,7 +153,8 @@
       (on-gtk (support/check :nrepl-starts-and-reports
                              (and started? (= "Jolt (nREPL)" label)
                                   (some? pid) (= pid reported-pid)
-                                  (str/includes? text "; Limit: No stdin")
+                                  ;; stdin works, so no limit line for it
+                                  (not (str/includes? text "No stdin"))
                                   ;; the child loaded the inspector, so no limit line for it
                                   (not (str/includes? text "No inspector"))
                                   (not (str/includes? text "Output appears when"))
@@ -244,18 +245,36 @@
                                   (instance? jonquil.nrepl.evaluator.NRepl (evaluator ui)))
                              {:text1 text1 :text2 text2})))))
 
-(defn row-nrepl-stdin-notice
-  "No input-forwarding middleware exists (D2 overview, measured): the
-  console gets the static stdin notice instead of ever waiting for input."
+(defn row-nrepl-stdin-roundtrip
+  "read-line in the child waits for the prompt (jonquil.nrepl.stdin-
+  middleware): the console goes into input mode, the typed line answers
+  it, and no no-stdin notice is printed. Then Stop during a second read
+  ends it as interrupted and the console leaves input mode."
   [ui]
-  (go-row :nrepl-stdin-notice support/check
-    (let [[ok? mark] (run-and-await ui "(read-line)" 5000 #(str/includes? % "=> nil"))]
-      (on-gtk (let [text (support/since ui mark)]
-                (support/check :nrepl-stdin-notice
-                               (and ok?
-                                    (str/includes? text nrepl/stdin-notice)
-                                    (not (ev/waiting-for-input? (evaluator ui))))
-                               {:text text}))))))
+  (go-row :nrepl-stdin-roundtrip support/check
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(let [n (read-line)] (str \"Hello, \" n))")
+                         ((:run!* ui))
+                         m))
+          waiting? (await-until 5000 20 #((:waiting? (:console ui))))
+          _ (on-gtk (let [cv (:console ui)]
+                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "World" -1 1)
+                      (cview/handle-return! cv false)))
+          answered? (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> \"Hello, World\"")))
+          text1 (on-gtk (support/since ui mark))
+          mark2 (on-gtk (let [m (support/out-end-offset ui)]
+                          (editor/set-text! (:editor ui) "(read-line)")
+                          ((:run!* ui))
+                          m))
+          waiting2? (await-until 5000 20 #((:waiting? (:console ui))))
+          _ (on-gtk ((:stop!* ui)))
+          interrupted? (await-until 5000 20 #(str/includes? (support/since ui mark2) "; interrupted"))
+          cleared? (await-until 2000 20 #(not ((:waiting? (:console ui)))))]
+      (on-gtk (support/check :nrepl-stdin-roundtrip
+                             (and waiting? answered? (not (str/includes? text1 "no stdin"))
+                                  waiting2? interrupted? cleared? (idle? ui))
+                             {:waiting waiting? :answered answered? :text text1
+                              :waiting2 waiting2? :interrupted interrupted? :cleared cleared?})))))
 
 (defn row-nrepl-completion-from-child
   "After Running fixture-core, \"(gre\" with the caret at 4 completes to

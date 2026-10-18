@@ -59,7 +59,7 @@
    rows/row-nrepl-inspect-last
    rows/row-nrepl-error-is-text
    rows/row-nrepl-reset-clears-child
-   rows/row-nrepl-stdin-notice
+   rows/row-nrepl-stdin-roundtrip
    rows/row-nrepl-completion-from-child
    rows/row-nrepl-quick-doc-from-child
    rows/row-nrepl-stop-interrupts
