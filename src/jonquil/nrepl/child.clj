@@ -78,8 +78,8 @@
   {:git coord}. With a nil source, a plain jolt nrepl-server P.
   source's :jonquil (or jonquil-root, in the three-argument form), when set,
   is jonquil.nrepl.middleware-files' folder: it joins the deps as
-  jonquil/nrepl-middleware. The inspector's middleware goes last, so even a
-  plain server answers its ops; stdin's goes first, around
+  jonquil/nrepl-middleware. The inspector's middleware and jonquil-info's go
+  last, so even a plain server answers their ops; stdin's goes first, around
   jolt-lang/nrepl's session middleware, and only with it: a plain server
   runs evals on the reader thread, where a waiting read would starve the
   stdin op. A source of just {:jonquil root} is a plain server with the
@@ -100,7 +100,8 @@
          middleware (cond-> []
                       (and coord jonquil-root) (conj (str middleware-files/stdin-middleware))
                       coord (conj "nrepl.middleware/default-middleware")
-                      jonquil-root (conj (str middleware-files/inspect-middleware)))]
+                      jonquil-root (conj (str middleware-files/inspect-middleware)
+                                         (str middleware-files/info-middleware)))]
      (if (seq deps)
        [program "-Sdeps"
         (str "{:deps {" (str/join " " deps) "}"

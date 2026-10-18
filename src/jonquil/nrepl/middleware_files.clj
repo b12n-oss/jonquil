@@ -1,6 +1,6 @@
 (ns jonquil.nrepl.middleware-files
   "Jonquil's own nREPL middleware for an out-of-process Jolt child (the
-  inspector and stdin) as source files, carried inside Jonquil and written
+  inspector, stdin and jonquil-info) as source files, carried inside Jonquil and written
   where the child can load them as a :local/root dep.
 
   The installed app is a compiled binary with no source tree, and
@@ -19,11 +19,17 @@
   "Classpath-relative path -> text, for every file the child loads."
   {"jonquil/inspect/view.clj" (embedded-text "jonquil/inspect/view.clj")
    "jonquil/nrepl/inspect_middleware.clj" (embedded-text "jonquil/nrepl/inspect_middleware.clj")
+   "jonquil/nrepl/info_middleware.clj" (embedded-text "jonquil/nrepl/info_middleware.clj")
    "jonquil/nrepl/stdin_middleware.clj" (embedded-text "jonquil/nrepl/stdin_middleware.clj")})
 
 (def inspect-middleware
   "The inspector's :nrepl/middleware symbol: last, after jolt-lang/nrepl's."
   'jonquil.nrepl.inspect-middleware/inspect)
+
+(def info-middleware
+  "jonquil-info's :nrepl/middleware symbol: last, beside the inspector's, so
+  a plain server answers it too."
+  'jonquil.nrepl.info-middleware/jonquil-info)
 
 (def stdin-middleware
   "stdin's :nrepl/middleware symbol: first, outside jolt-lang/nrepl's

@@ -65,14 +65,14 @@
       (is (= ["jolt" "-Sdeps"
               (str "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"} jonquil/nrepl-middleware {:local/root \"/c/ins\"}}"
                    " :nrepl/middleware [jonquil.nrepl.stdin-middleware/stdin nrepl.middleware/default-middleware"
-                   " jonquil.nrepl.inspect-middleware/inspect]}")
+                   " jonquil.nrepl.inspect-middleware/inspect jonquil.nrepl.info-middleware/jonquil-info]}")
               "nrepl-server" "7950"]
              (child/launch-args 7950 {:local "/r/nrepl"} "/c/ins")))
       (is (= ["jolt" "-Sdeps"
-              "{:deps {jonquil/nrepl-middleware {:local/root \"/c/ins\"}} :nrepl/middleware [jonquil.nrepl.inspect-middleware/inspect]}"
+              "{:deps {jonquil/nrepl-middleware {:local/root \"/c/ins\"}} :nrepl/middleware [jonquil.nrepl.inspect-middleware/inspect jonquil.nrepl.info-middleware/jonquil-info]}"
               "nrepl-server" "7951"]
              (child/launch-args 7951 nil "/c/ins"))
-          "a plain server still gets the inspector, but not stdin")
+          "a plain server still gets the inspector and jonquil-info, but not stdin")
       (is (= (child/launch-args 7952 {:local "/r/nrepl"}) (child/launch-args 7952 {:local "/r/nrepl"} nil))))))
 
 (deftest child-uses-resolved-jolt-test

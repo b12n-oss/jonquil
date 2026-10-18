@@ -488,16 +488,23 @@
         (catch Throwable _ offline))))
   (lookup [this sym text pos]
     (try
+      ;; jonquil-info (Jonquil's own middleware) answers the var's file and
+      ;; line as well, for jump to definition; jolt-lang/nrepl's lookup
+      ;; has neither. Both replies are ops/doc-info's.
       (or (let [{:keys [child conn ops]} (runtime this)
-                r (when (and (child/alive? child) (client/open? conn) (contains? ops "lookup"))
-                    (client/request-sync conn {:op "lookup" :sym sym :ns (str (:prompt-ns @state))}
+                op (cond (contains? ops "jonquil-info") "jonquil-info"
+                         (contains? ops "lookup") "lookup")
+                r (when (and (child/alive? child) (client/open? conn) op)
+                    (client/request-sync conn {:op op :sym sym :ns (str (:prompt-ns @state))}
                                          (ev/help-timeout help-timeout-ms)))]
             (when (vector? r) (ops/doc-info sym r)))
           (docs/symbol-doc 'user sym text pos))
       (catch Throwable _ nil)))
   (limitations [this]
     (let [rt (runtime this)]
-      (cond-> ["Jump to definition stays in this buffer: lookup reports no file or line."]
+      (cond-> []
+        (and (live? this) (not (contains? (:ops rt) "jonquil-info")))
+        (conj "Jump to definition stays in this buffer: lookup reports no file or line.")
         (and (live? this) (not (contains? (:ops rt) "stdin")))
         (conj "No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead.")
         (and (live? this) (not (contains? (:ops rt) "inspect-start")))

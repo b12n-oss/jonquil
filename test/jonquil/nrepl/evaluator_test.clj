@@ -65,7 +65,7 @@
   (let [e (make (temp-project))]
     (is (instance? jonquil.nrepl.evaluator.NRepl e))
     (is (nil? (nrepl/child-pid e)) "not started until asked")
-    (is (= 1 (count (ev/limitations e))) "jump; the stdin and inspector lines only when a live child lacks them")))
+    (is (= [] (ev/limitations e)) "the jump, stdin and inspector lines only when a live child lacks them")))
 
 (deftest run-repl-and-help-test
   (let [dir (temp-project) e (make dir)]
@@ -83,7 +83,7 @@
       (testing "help: the server's names merged with offline ones"
         (is (some #{"greet"} (map :symbol (ev/complete e "gre" "(gre" 4 nil))))
         (is (= "Says hi." (:doc (ev/lookup e "greet" "(greet 1)" 1))))
-        (is (nil? (:line (ev/lookup e "greet" "(greet 1)" 1))) "lookup has no line")
+        (is (nil? (:file (ev/lookup e "greet" "(greet 1)" 1))) "the Run's text isn't on disk, so no file")
         (is (= :found (:status (ev/lookup e "if" "(if x y)" 1))) "a special form falls back to the offline doc"))
       (testing "busy"
         (let [done (promise)]
@@ -91,6 +91,26 @@
           (is (= nrepl/busy-warning (ev/eval! e "1" {:run? false})))
           (is (ev/evaluating? e))
           (deref done 5000 :timeout)))
+      (finally (ev/stop! e)))))
+
+(deftest jump-to-definition-in-another-file-test
+  ;; jonquil-info, Jonquil's own middleware: a var from a namespace file the
+  ;; child loaded comes with that file's absolute path and the var's line.
+  (let [dir (temp-project) e (make dir)
+        util (io/file dir "src/demo/util.clj")]
+    (.mkdirs (.getParentFile util))
+    (spit util "(ns demo.util)\n\n(defn helper\n  \"Helps.\"\n  [x]\n  (inc x))\n")
+    (try
+      (is (nil? (ev/start! e)))
+      (is (= :ok (:status (first (run e "(require 'demo.util)" false)))))
+      (let [d (ev/lookup e "demo.util/helper" "(demo.util/helper 1)" 1)]
+        (is (= "Helps." (:doc d)))
+        (is (= (.getCanonicalPath util) (:file d)))
+        (is (= 3 (:line d))))
+      (testing "a var built into Jolt has no file to jump to"
+        (let [d (ev/lookup e "map" "(map inc [1])" 1)]
+          (is (= "clojure.core" (:ns d)))
+          (is (nil? (:file d)))))
       (finally (ev/stop! e)))))
 
 (deftest reset-on-run-clears-the-child-test
@@ -352,8 +372,8 @@
   (let [e (make (temp-project))]
     (try
       (ev/start! e)
-      (is (= ["Jump to definition stays in this buffer: lookup reports no file or line."] (ev/limitations e))
-          "streaming, stdin and the inspector all work, so only the jump limit is left")
+      (is (= [] (ev/limitations e))
+          "streaming, stdin, the inspector and jump to definition all work")
       (finally (ev/stop! e)))))
 
 (defn- eval-with-input
