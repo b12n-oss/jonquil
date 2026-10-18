@@ -668,11 +668,14 @@ it into view, when Jonquil can find one in the buffer. It checks the
 nearest enclosing local binding first (a function parameter, a `let`, or
 anything else that can shadow a name), then a top-level `def`, `defn`, or
 similar form anywhere in the file. When neither turns up but the symbol
-resolves to a definition in another file, which JVM Clojure's server can
+resolves to a definition in another file, which JVM Clojure's server, Jolt
+out of process, and an nREPL server whose files are on this machine can
 tell Jonquil, that file opens in a read-only source panel on the right,
 with the caret on the definition. In other runtimes, which don't say
-where a definition lives, jump shows the var's documentation in the
-quick-doc popup instead. When nothing matches at all, the status bar
+where a definition lives (Jolt in process, ClojureDart, ClojureScript,
+jank), jump shows the var's documentation in the quick-doc popup instead.
+Functions built into Jolt itself, `clojure.core`'s among them, have no
+source file to open, so they show their documentation too. When nothing matches at all, the status bar
 says so.
 
 <details>
@@ -962,14 +965,13 @@ starts for the new project, and the console says something like
 happens if the new file's project asks for a different runtime, or none
 at all.
 
-One limit is worth knowing going in: jump to definition can't leave the
-buffer, because the wire op it would need for that (`info`) isn't there
-yet, only `lookup`, which carries no file or line to jump to. stdin and
-the inspector both work, through Jonquil's own nREPL middleware: Jonquil
+stdin, the inspector, and jump to definition into the project's other
+files and its jar dependencies all work, through Jonquil's own nREPL
+middleware: Jonquil
 writes it under `~/.cache/jonquil/nrepl-middleware` (or
 `$XDG_CACHE_HOME/jonquil/nrepl-middleware`) and the child loads it from
 there. A plain nREPL server, the fallback when jolt-lang/nrepl couldn't be
-fetched, gets the inspector but not stdin, since it runs each evaluation
+fetched, gets the inspector and jump to definition but not stdin, since it runs each evaluation
 on the thread that would have to read your input; `read-line` there
 returns nil and the console says so. If that folder can't be written, or
 the child can't load what's in it, Jolt starts without either and the

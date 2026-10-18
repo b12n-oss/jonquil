@@ -65,6 +65,7 @@
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.inspect.view-test
+    jonquil.nrepl.info-middleware-test
     jonquil.nrepl.inspect-middleware-test
     jonquil.nrepl.generic-test
     jonquil.nrepl.stdin-middleware-test

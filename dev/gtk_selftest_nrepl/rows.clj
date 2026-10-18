@@ -59,6 +59,8 @@
     (spit (io/file d ".jonquil.edn") "{:runtime :nrepl}")
     (spit (io/file d ".nrepl-port") "4242\n")
     (spit f fixture-core)
+    ;; row-nrepl-jump-to-another-file's target: helper on line 3
+    (spit (io/file d "src/demo/util.clj") "(ns demo.util)\n\n(defn helper\n  \"Helps.\"\n  [x]\n  (inc x))\n")
     (let [result {:dir (.getCanonicalPath d) :file (.getCanonicalPath f)}]
       (reset! fixture* result)
       result)))
@@ -158,7 +160,8 @@
                                   ;; the child loaded the inspector, so no limit line for it
                                   (not (str/includes? text "No inspector"))
                                   (not (str/includes? text "Output appears when"))
-                                  (str/includes? text "no file or line")
+                                  ;; the child answers jonquil-info, so no jump limit line
+                                  (not (str/includes? text "no file or line"))
                                   ready?)
                              {:started started? :label label :pid pid
                               :reported-pid reported-pid :ready? ready?})))))
@@ -291,6 +294,35 @@
                 (support/check :nrepl-completion-from-child
                                (= "(greet" (editor/editor-text ed))
                                {:text (editor/editor-text ed)}))))))
+
+(defn row-nrepl-jump-to-another-file
+  "F12 on demo.util/helper after the child has required demo.util: the
+  child's jonquil-info names src/demo/util.clj and line 3, so the source
+  panel opens on that file there (jump to definition used to stay in the
+  buffer for out-of-process Jolt)."
+  [ui]
+  (go-row :nrepl-jump-to-another-file support/check
+    (let [cv (:console ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(require 'demo.util)" -1 1)
+                         (cview/handle-return! cv false)
+                         m))
+          required? (await-until 10000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> nil")))
+          sp (:source-pane ui)]
+      (on-gtk (let [ed (:editor ui) text "(demo.util/helper 1)"]
+                (editor/set-text! ed text)
+                (support/place-cursor! (:buf ed) (+ 1 (str/index-of text "helper")))
+                ((:jump!* ui))))
+      (let [shown? (await-until 5000 20 #(pos? (g/gtk-widget-get-visible (:root sp))))
+            v (on-gtk {:header (g/label-text (:header sp))
+                       :line (inc (first (g/cursor-line-col (:buf (:editor sp)))))
+                       :text (editor/editor-text (:editor sp))
+                       :status (g/label-text (:status-label ui))})]
+        (on-gtk (support/check :nrepl-jump-to-another-file
+                               (and required? shown? (str/includes? (:header v) "util.clj")
+                                    (= 3 (:line v)) (str/includes? (:text v) "(defn helper"))
+                               (assoc (dissoc v :text) :required required? :shown shown?))
+                ((:source-close!* ui)))))))
 
 (defn row-nrepl-quick-doc-from-child
   "(greet 1), caret 2, quick doc: the popover's text can only have come

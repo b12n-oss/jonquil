@@ -22,6 +22,7 @@
     jonquil.inspect
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
+    jonquil.nrepl.info-middleware
     jonquil.nrepl.inspect-middleware
     jonquil.nrepl.generic
     jonquil.nrepl.stdin-middleware

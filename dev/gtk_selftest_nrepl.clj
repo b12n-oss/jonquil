@@ -62,6 +62,7 @@
    rows/row-nrepl-stdin-roundtrip
    rows/row-nrepl-completion-from-child
    rows/row-nrepl-quick-doc-from-child
+   rows/row-nrepl-jump-to-another-file
    rows/row-nrepl-stop-interrupts
    rows/row-nrepl-stop-unresponsive-restarts
    rows/row-nrepl-child-dies-mid-eval
