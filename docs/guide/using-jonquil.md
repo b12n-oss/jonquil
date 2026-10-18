@@ -703,15 +703,17 @@ count, and paging still works over everything up to the cap.
 
 Jonquil evaluates through a dialect profile: what a language's files look
 like, how they're painted, and which evaluator runs them. Four profiles
-exist today: Jolt, ClojureDart (experimental), JVM Clojure and jank
-(experimental). The way Jonquil picks a profile, and the evaluator
+exist today: Jolt, ClojureDart (experimental), JVM Clojure, ClojureScript
+(experimental) and jank (experimental). The way Jonquil picks a profile, and the evaluator
 protocol under it, are general enough to take more. The status
 bar's dialect label reads `Jolt` most of the time, or `Jolt (nREPL)` when
 this window's Jolt is running out of process rather than inside Jonquil
 itself. For ClojureDart it reads `ClojureDart (attached)` while Jonquil
 holds a live connection to the app, and `ClojureDart (not running)` the
 rest of the time. JVM Clojure reads the same way, `Clojure (JVM) (attached)`
-or `Clojure (JVM) (not running)`. For jank it reads `jank (running)` while Jonquil's own jank process is
+or `Clojure (JVM) (not running)`, and ClojureScript reads
+`ClojureScript (shadow-cljs) (attached)` or `ClojureScript (shadow-cljs)
+(not running)`. For jank it reads `jank (running)` while Jonquil's own jank process is
 up, and `jank (not running)` until the first evaluation starts one.
 
 ### Choosing a dialect
@@ -744,6 +746,15 @@ default can still choose JVM Clojure, but only for a loose or unsaved
 file with no project at all; inside a project, a marker-less default like
 this one is skipped, and selection falls through to whichever rule comes
 next.
+
+ClojureScript's marker is `shadow-cljs.edn`, and a `.cljs` file selects it
+by its extension as well. That is a change from earlier versions: a `.cljs`
+file outside a shadow-cljs project (a loose file, or a figwheel or
+`cljs.main` project with no `shadow-cljs.edn`) used to fall back to
+in-process Jolt. It now selects ClojureScript, and Run explains that there
+is no shadow-cljs project or build to attach to. `{:dialect :cljs}` in a
+project's `.jonquil.edn` forces the dialect for files with other
+extensions.
 
 jank has no project marker either. A `.jank` file opens as jank by its
 extension, and a project can name it with `{:dialect :jank}` in its
@@ -1054,6 +1065,88 @@ resolve tells you so again in the status bar, rather than asking the
 server for a doc it already knows nothing useful about.
 
 ![Full documentation for map after a second quick-doc press, with ClojureDocs' examples](../images/clj-full-doc.png)
+
+### ClojureScript (experimental): attaching to a shadow-cljs build
+
+ClojureScript support is experimental. It attaches the way ClojureDart and
+JVM Clojure do: Jonquil never starts shadow-cljs, never starts a JS runtime,
+and never signals either one. You start the watch yourself, and Jonquil
+connects to the nREPL server it already runs.
+
+Start `npx shadow-cljs watch <build>` in the project, then load the build in
+a JS runtime: open the app in a browser, or run the node script the build
+writes. Shadow-cljs writes its port to `.shadow-cljs/nrepl.port`, which is
+how Jonquil finds the server. Open a `.cljs` file under the project and
+press Run. Jonquil connects on the first Run, or on any evaluation while it
+holds no live connection, prints "; Connecting to the shadow-cljs nREPL
+server on port N..." while it does, and then selects the build with
+`nrepl-select`, which moves the session from Clojure to ClojureScript.
+Typing `:cljs/quit` or `:repl/quit` at the prompt leaves the ClojureScript
+session; the next entry selects the build again.
+
+A `.cljs` file selects this dialect by its extension and by the
+`shadow-cljs.edn` project marker, and `{:dialect :cljs}` in `.jonquil.edn`
+forces it (see [Choosing a dialect](#choosing-a-dialect), which also covers
+the one behavior change that came with this dialect).
+
+Jonquil picks the build in this order:
+
+1. `{:cljs {:shadow-build :app}}` in the project's `.jonquil.edn`.
+2. The only build in `shadow-cljs.edn`.
+
+```clojure
+;; .jonquil.edn
+{:cljs {:shadow-build :app}}
+```
+
+When `.jonquil.edn` names none and `shadow-cljs.edn` has several builds, or
+none, the Run ends with a notice that names them: "; Several shadow-cljs
+builds: :app :test. Pick one with {:cljs {:shadow-build :app}} in
+.jonquil.edn." `shadow-cljs.edn` is read again on every connect, so an edit
+there takes effect on the next one, while a `.jonquil.edn` edit takes effect
+when the file is reopened.
+
+If nothing's listening yet, the console says so: "; No shadow-cljs server
+here. Start one in `<dir>` with npx shadow-cljs watch app." A stale
+`.shadow-cljs/nrepl.port` naming a port nothing answers gets
+"; .shadow-cljs/nrepl.port says port N, but nothing answers there. The
+server may have stopped.", and a port that answers but isn't a shadow-cljs
+nREPL server gets "; Port N isn't a shadow-cljs nREPL server Jonquil can
+use." A file with no project around it gets "; This file isn't in a
+project, so there's no shadow-cljs.edn to read. Save it inside the project
+that has shadow-cljs.edn." Jonquil only ever reads
+`.shadow-cljs/nrepl.port`; it never writes to the file or deletes it.
+
+When the server is up but no JS runtime has loaded the build, Run says so:
+"; The build isn't loaded in any JS runtime. Open the app (or run the node
+script) and Run again."
+
+Run sends the whole buffer as one evaluation, so every form runs, and the
+console ends with one line, "; Ran <ns> (N forms)". An error in one form
+doesn't stop the rest of the file: the errors stream to the console as they
+happen, and the summary then reads "; Ran <ns> (N forms, M errors; an error
+doesn't stop the rest of the file)". Run Selection and Run Form
+(Cmd/Ctrl+E and Cmd/Ctrl+Enter) evaluate in the buffer's own namespace.
+
+Completion and quick documentation come from the server's cider ops when it
+has them (shadow-cljs bundles cider-nrepl), and from Jonquil's offline
+tables when it doesn't. Jump to definition stays inside the buffer.
+
+Stop detaches rather than interrupting anything. Shadow-cljs's interrupt
+stops nothing, because the work is running in the JS runtime, so Jonquil
+closes the connection and prints "; Detached from the shadow-cljs server.
+The watch and the app weren't touched." The runtime keeps running whatever
+it already had, and the next evaluation reconnects and selects the build
+again. Reset on Run is unticked and greyed out, as for the other attach
+dialects.
+
+Two things behave differently from what a JVM habit suggests. First,
+`js/console.log` output goes to the JS runtime's own console (the browser's
+devtools, or the node process's stdout), not to Jonquil's; `println` does
+reach Jonquil. Second, requiring a namespace that the watched build doesn't
+include compiles but never loads into the runtime, so its first use throws a
+ReferenceError. Keep the requires of a file you Run within the build.
+Namespaces the buffer itself defines are fine.
 
 ### jank (experimental)
 
@@ -1411,6 +1504,21 @@ than being surprises you'd otherwise have to rediscover:
   file.
 - JVM Clojure attaches to a server you started, and never starts or stops
   the JVM itself.
+- ClojureScript attaches to a shadow-cljs server you started, and never
+  starts or stops the watch or the JS runtime.
+- Stop against ClojureScript detaches instead of interrupting: the
+  shadow-cljs interrupt stops nothing, since the work is in the JS runtime,
+  and the runtime keeps running what it has.
+- No stdin, for the ClojureScript dialect.
+- Reset on Run isn't available for ClojureScript.
+- `js/console.log` output goes to the JS runtime's own console, not
+  Jonquil's. `println` does reach Jonquil.
+- A namespace the watched build doesn't include can be required and
+  compiles, but never loads into the runtime, so its first use throws a
+  ReferenceError. Keep a Run'd file's requires within the build; namespaces
+  the buffer itself defines are fine.
+- With no JS runtime connected, Run says the build isn't loaded in any JS
+  runtime.
 - Reset on Run isn't available for JVM Clojure either: it's your own JVM,
   so Jonquil doesn't unload namespaces in it.
 - Stdin closes only on nREPL 1.8.0 or later: on older servers a read
@@ -1432,8 +1540,8 @@ than being surprises you'd otherwise have to rediscover:
   that other client left.
 - Resizing the inspector panel doesn't reflow the rows already on
   screen; the new width only takes effect the next time you open it.
-- No inspector for ClojureDart or for Jolt running out of process, in
-  this version.
+- No inspector for ClojureDart, ClojureScript or Jolt running out of
+  process, in this version.
 - An MCP eval, run or run-selection against a window that is already
   evaluating answers busy instead of queueing. `jonquil_run_selection`
   still moves the visible selection first, by design.

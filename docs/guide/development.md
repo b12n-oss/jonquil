@@ -11,15 +11,17 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 59 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (599 tests, 3508 assertions
+slower. `bb test` runs the full unit suite (633 tests, 3703 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
-in-process fake server for each (ClojureDart's and the JVM's), so there's
+in-process fake server for each (ClojureDart's, the JVM's and
+ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
+`jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (599 tests and 3477 assertions, 31
-fewer, measured 2026-10-17).
+reports fewer assertions than macOS (633 tests and 3672 assertions, 31
+fewer, measured 2026-10-18).
 
 `bb test:nrepl` runs a second, separate suite (38 tests, 127 assertions,
 about 40 s): every test in it spawns a real Jolt child over
@@ -73,12 +75,12 @@ that a second bridge then attaches and evaluates. It ends by sending SIGTERM
 to the window, which must exit within 20 s and remove its registry file. Every
 bridge stdout line must parse as JSON. It prints 16 checks.
 
-## Self-test and docs: eight windows, one binary, one camera
+## Self-test and docs: nine windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens eight real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens nine real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
@@ -152,8 +154,12 @@ into absolute paths for `g_application_run`. GApplication then emits `open`
 (and not `activate`), and the rows check that the tree is rooted at the folder
 argument, that a folder launch saves no tree visibility, that the two files
 open as tabs, that the active tab is the last file, and that the program name
-is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). A full run reports
-47, 303, 16, 15, 29, 4, 13 and 5 rows passing, in group order.
+is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gtk_selftest_cljs.clj`, 10 rows) opens against a
+throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
+shadow-cljs nREPL server running in this same process
+(`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
+browser. A full run reports 47, 303, 16, 15, 29, 4, 13, 5 and 10 rows
+passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
@@ -212,6 +218,16 @@ it recorded at the start. Quitting and restarting the app stay manual
 checks, so those two steps always SKIP. If a close runs past 3 s, it saves
 a screenshot and a stack sample under `target/smoke/`.
 
+**`bb smoke:cljs`** drives a built `./jonquil` against a real, running
+shadow-cljs app, so it needs the watch and a JS runtime up first (`npx
+shadow-cljs watch <build>`, then the browser tab or the node script). The
+gitignored `dev/smoke/cljs_app.local.edn` names the app with
+`{:dir "..." :build :dev}`. It never starts or stops the watch or the
+runtime. When the app has several builds it writes a temporary untracked
+`.jonquil.edn` into the app directory to name one, and removes it on every
+exit path, Ctrl-C included. It prints 18 checks. Without the config file
+the task prints how to create it.
+
 **`bb docs:shots`** self-captures every `docs/images/*.png` and the one GIF
 the guide pages embed. Rather than one shared window walking through every
 scene, it launches a fresh `jolt -M:shots <scene-id>` process per scene, so
@@ -237,7 +253,7 @@ Cmd/Ctrl+I, then in on one of its rows so the panel's table view shows.
 
 Every harness isolates the user's own settings from the app it's
 driving. The window self-tests and `docs:shots` pass a temp `:settings-path`
-into `jonquil.main/start!`, and both smokes point `XDG_CONFIG_HOME` at a
+into `jonquil.main/start!`, and the smokes point `XDG_CONFIG_HOME` at a
 fresh temp directory for every process they launch. Neither the self-tests
 nor the smoke ever reads or writes `~/.config/jonquil/settings.edn`.
 
@@ -251,7 +267,7 @@ names these harnesses make; `bb clean:tmp --dry-run` lists them first.
 ### Traps
 
 - **Don't type while a self-test window has focus.** `bb gtk:selftest`,
-  `bb docs:shots` and both smokes open real windows that take real keyboard focus; a stray
+  `bb docs:shots` and the smokes open real windows that take real keyboard focus; a stray
   keystroke lands in the window under test and fails a row that has nothing
   to do with what was typed.
 - **A phantom second display can attach at scale 1.0**, unrelated to any

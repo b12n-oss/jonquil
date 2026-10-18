@@ -49,12 +49,15 @@
     jonquil.nrepl.ops-test
     jonquil.cljd-test
     jonquil.clj-test
+    jonquil.cljs-test
     jonquil.jank-test
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
+    jonquil.fake-shadow-nrepl-test
     jonquil.fake-jank-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.nrepl.jvm-test
+    jonquil.nrepl.shadow-test
     jonquil.nrepl.jank-eval-test
     jonquil.gtk.appearance-test
     jonquil.gtk.trash-test

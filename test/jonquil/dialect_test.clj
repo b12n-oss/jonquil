@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.cljd :as cljd]
+            [jonquil.cljs :as cljs]
             [jonquil.dialect :as dialect]
             [jonquil.syntax :as syntax]
             [temp-dirs]))
@@ -165,7 +166,7 @@
     (let [added (set/difference (:special-forms dialect/cljd) (:special-forms dialect/jolt))]
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
-  (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank] dialect/profiles) "clj joined in P2.T4, jank in D3 P1.T1"))
+  (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank dialect/cljs] dialect/profiles) "clj joined in P2.T4, jank in D3 P1.T1, cljs last"))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
@@ -372,4 +373,64 @@
   (doseq [p dialect/profiles :when (:experimental p)]
     (is (string? (:experimental-message p)) (str (:id p))))
   ;; dialect can't require cljd, so the text lives in both places.
-  (is (= cljd/experimental-message (:experimental-message dialect/cljd))))
+  (is (= cljd/experimental-message (:experimental-message dialect/cljd)))
+  (is (= cljs/experimental-message (:experimental-message dialect/cljs))))
+
+;; The :cljs profile, attached to a shadow-cljs nREPL server.
+(def ^:private all5 [dialect/jolt dialect/cljd dialect/clj dialect/jank dialect/cljs])
+
+(deftest cljs-profile-test
+  (is (= dialect/cljs (dialect/profile :cljs)))
+  (is (= :cljs (:id dialect/cljs)))
+  (is (= #{"cljs"} (:extensions dialect/cljs)))
+  (is (= ["shadow-cljs.edn"] (:project-markers dialect/cljs)))
+  (is (= [:attach #{:attach} ".shadow-cljs/nrepl.port"]
+         [(:evaluator dialect/cljs) (:runtimes dialect/cljs) (:port-file dialect/cljs)]))
+  (is (= (:special-forms dialect/jolt) (:special-forms dialect/cljs))))
+
+(deftest cljs-selection-test
+  (let [dir (temp-project {"shadow-cljs.edn" "{}" "src/a.cljs" "(ns a)\n" "src/b.clj" "(ns b)\n"})
+        sel-of (fn [path]
+                 (dialect/select all5 (dialect/find-project all5 path) path nil))]
+    (try
+      (testing "a .cljs file in a shadow-cljs.edn project: cljs by marker"
+        (let [sel (sel-of (str dir "/src/a.cljs"))]
+          (is (= [:cljs :marker :attach] [(:id (:profile sel)) (:source sel) (:runtime sel)]))))
+      (testing "the marker alone doesn't take a .clj file"
+        (is (not= :cljs (:id (:profile (sel-of (str dir "/src/b.clj")))))))
+      (testing "select with :markers #{shadow-cljs.edn}"
+        (is (= :cljs (:id (:profile (dialect/select all5 (proj #{"shadow-cljs.edn"} nil) "/p/a.cljs" nil))))))
+      (testing ".jonquil.edn {:dialect :cljs} selects it"
+        (let [s (dialect/select all5 (proj #{} "{:dialect :cljs}") "/p/a.clj" nil)]
+          (is (= [:cljs :config] [(:id (:profile s)) (:source s)]))))
+      (finally (temp-dirs/delete-tree! dir)))))
+
+(deftest cljs-config-test
+  (testing "a map is carried through"
+    (is (= {:shadow-build :app} (:cljs (dialect/parse-config "{:dialect :cljs :cljs {:shadow-build :app}}" nil)))))
+  (testing "nil and absent say nothing"
+    (is (= {:dialect :cljs :runtime nil :warnings []} (dialect/parse-config "{:dialect :cljs :cljs nil}" nil)))
+    (is (= {:dialect :cljs :runtime nil :warnings []} (dialect/parse-config "{:dialect :cljs}" nil))))
+  (testing "an empty map is carried"
+    (is (= {} (:cljs (dialect/parse-config "{:cljs {}}" nil)))))
+  (testing "another shape is a warning and dropped"
+    (let [r (dialect/parse-config "{:dialect :cljs :cljs 5}" nil)]
+      (is (not (contains? r :cljs)))
+      (is (= [".jonquil.edn :cljs should be a map, like {:shadow-build :app}"] (:warnings r))))))
+
+(deftest cljs-config-selection-test
+  (testing "a :cljs project's map reaches the selection"
+    (let [s (dialect/select all5 (proj #{} "{:dialect :cljs :cljs {:shadow-build :app}}") "/p/a.cljs" nil)]
+      (is (= {:shadow-build :app} (:cljs s)))
+      (is (= [] (:warnings s)))))
+  (testing "an empty map is carried"
+    (is (= {} (:cljs (dialect/select all5 (proj #{} "{:dialect :cljs :cljs {}}") "/p/a.cljs" nil)))))
+  (testing "nil carries nothing and warns nothing"
+    (let [s (dialect/select all5 (proj #{} "{:dialect :cljs :cljs nil}") "/p/a.cljs" nil)]
+      (is (not (contains? s :cljs)))
+      (is (= [] (:warnings s)))))
+  (testing "any other dialect ignores it, with a warning"
+    (let [s (dialect/select all5 (proj #{"deps.edn"} "{:cljs {:shadow-build :app}}") "/p/a.clj" nil)]
+      (is (= :jolt (:id (:profile s))))
+      (is (not (contains? s :cljs)))
+      (is (= [".jonquil.edn :cljs only applies to ClojureScript, not Jolt, so it is ignored"] (:warnings s))))))

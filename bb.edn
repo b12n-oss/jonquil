@@ -258,6 +258,7 @@
      (row "smoke:binary" "automated smoke of the BUILT ./jonquil binary via cgevent")
      (row "mcp:smoke [--bin PATH] [--window|--attach]" "smoke of `jonquil --mcp` over real stdio; --window drives a real window, --attach bridges to a listening one (checkout, or the built binary)")
      (row "smoke:cljd" "automated smoke of the ClojureDart dialect against your running app")
+     (row "smoke:cljs" "automated smoke of the ClojureScript dialect against your running shadow-cljs app")
      (hdr "Self-test and docs")
      (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
      (row "docs:shots" "self-capture docs/images/*.png (+ one GIF), one process per scene")
@@ -303,7 +304,7 @@
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
-  {:doc "Open eight real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory, the seventh runs a jank window against a fake jank process, the eighth is launched with file and folder arguments)"
+  {:doc "Open nine real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory, the seventh runs a jank window against a fake jank process, the eighth is launched with file and folder arguments, the ninth attaches to a fake shadow-cljs server)"
    :task (let [r1 (shell {:continue true} "jolt" "-M:selftest")
                r2 (shell {:continue true} "jolt" "-M:selftest-window")
                r3 (shell {:continue true} "jolt" "-M:selftest-nrepl")
@@ -313,6 +314,7 @@
                r7 (shell {:continue true :extra-env {"JONQUIL_JANK" (str (fs/absolutize "dev/fake-jank"))}}
                          "jolt" "-M:selftest-jank")
                r8 (shell {:continue true} "jolt" "-M:selftest-args")
+               r9 (shell {:continue true} "jolt" "-M:selftest-cljs")
                ok1 (zero? (:exit r1))
                ok2 (zero? (:exit r2))
                ok3 (zero? (:exit r3))
@@ -320,7 +322,8 @@
                ok5 (zero? (:exit r5))
                ok6 (zero? (:exit r6))
                ok7 (zero? (:exit r7))
-               ok8 (zero? (:exit r8))]
+               ok8 (zero? (:exit r8))
+               ok9 (zero? (:exit r9))]
            (when-not ok1 (println "gtk:selftest: editor/console rows FAILED"))
            (when-not ok2 (println "gtk:selftest: window rows FAILED"))
            (when-not ok3 (println "gtk:selftest: nREPL rows FAILED"))
@@ -329,7 +332,8 @@
            (when-not ok6 (println "gtk:selftest: directory-launch rows FAILED"))
            (when-not ok7 (println "gtk:selftest: jank rows FAILED"))
            (when-not ok8 (println "gtk:selftest: file-argument rows FAILED"))
-           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7 ok8) 0 1)))}
+           (when-not ok9 (println "gtk:selftest: ClojureScript rows FAILED"))
+           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7 ok8 ok9) 0 1)))}
   docs:shots
   {:doc "Self-capture docs/images/*.png (+ one GIF): one fresh process per scene"
    ;; P2.T9 round 1: one shared process/window for all 7 scenes let every
@@ -396,6 +400,9 @@
   smoke:cljd
   {:doc "P4.T3 automated: smokes the ClojureDart attach dialect against your running ClojureDart app (dev/smoke/cljd_app.local.edn names it) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
    :task (apply shell "bb" "dev/smoke/cljd_smoke.clj" *command-line-args*)}
+  smoke:cljs
+  {:doc "Smokes the ClojureScript attach dialect against your running shadow-cljs app (dev/smoke/cljs_app.local.edn names it; start the watch and the node script first) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
+   :task (apply shell "bb" "dev/smoke/cljs_smoke.clj" *command-line-args*)}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
    :task (let [dir (or (System/getenv "DRCLOJURE_DIR")

@@ -24,6 +24,7 @@
     jonquil.nrepl.ops
     jonquil.cljd
     jonquil.clj
+    jonquil.cljs
     jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection
@@ -35,6 +36,7 @@
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach
     jonquil.nrepl.jvm
+    jonquil.nrepl.shadow
     jonquil.nrepl.jank
     jonquil.runtime-registry
     jonquil.commands
