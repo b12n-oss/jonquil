@@ -3,7 +3,7 @@
   JVM project directory whose .nrepl-port names a fake nREPL server
   running in this process (dev/fake_jvm_nrepl.clj). Nothing here reads or
   connects to a real project's own .nrepl-port."
-  (:require [clojure.core.async :refer [<!]]
+  (:require [clojure.core.async :refer [<! timeout]]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [fake-jvm-nrepl :as fake]
@@ -712,3 +712,34 @@
       (on-gtk (support/check :clj-slow-jump-in-buffer
                              (and (< ms QUICK-HANDLER-MS) (= "Jumped to foo." (:status r)) (= 6 (:caret r)))
                              (assoc r :handler-ms ms))))))
+
+(defn row-clj-slow-quick-doc-tab-closed
+  "A slow quick doc in a second tab that closes before the answer lands:
+  the answer touches nothing of the closed tab (review finding 4),
+  nothing is shown, the status doesn't stay on Looking up, and the window
+  still answers."
+  [ui]
+  (go-row :clj-slow-quick-doc-tab-closed support/check
+    (reset! slow-server {"lookup" SLOW-MS})
+    (let [t2 (on-gtk (let [t2 ((:new-tab!* ui))
+                           ed (:ed t2)]
+                       (editor/set-text! ed "(greet \"x\")")
+                       (support/place-cursor! (:buf ed) 2)
+                       ;; the second tab's own quick doc (ui's is the first tab's)
+                       ((:quick-doc! (:actions t2)))
+                       t2))
+          asked (on-gtk (g/label-text (:status-label ui)))]
+      (on-gtk (close-extra-tabs! ui))
+      (<! (timeout (+ SLOW-MS 700)))
+      (reset! slow-server {})
+      (on-gtk (let [status (g/label-text (:status-label ui))
+                    ed (:editor ui)]
+                (editor/set-text! ed "(+ 1 2)")
+                (support/check :clj-slow-quick-doc-tab-closed
+                               (and (= "Looking up greet..." asked)
+                                    @(:destroyed? (:ed t2))
+                                    (not (popover/open? (:help-pop t2)))
+                                    (not= "Looking up greet..." status)
+                                    (= "(+ 1 2)" (editor/editor-text ed)))
+                               {:asked asked :destroyed @(:destroyed? (:ed t2))
+                                :open (popover/open? (:help-pop t2)) :status status}))))))

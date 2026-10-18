@@ -1485,9 +1485,16 @@
   \"Looking up <sym>...\" and runs (on-doc doc) on the GTK thread when it
   lands, but only while the window still has that evaluator and (still?)
   holds (the caret is on the same symbol in the active tab); else the
-  status goes back to Ready. label names the feature in an error line."
+  status goes back to Ready, unless something newer has replaced the
+  Looking up line. label names the feature in an error line, also used
+  when the lookup itself threw (ev/help-error)."
   [{:keys [ev* status-label]} sym text pos still? label on-doc]
-  (let [e @ev*]
+  (let [e @ev*
+        looking (str "Looking up " sym "...")
+        answer! (fn [doc]
+                  (if-let [msg (ev/help-error doc)]
+                    (set-status! status-label (str "; " label ": " msg))
+                    (on-doc doc)))]
     (if-not (ev/server-help? e)
       (on-doc (ev/lookup e sym text pos))
       (let [[k doc] (ev/ask-help! ev/help-grace-ms (fn [] (ev/lookup e sym text pos))
@@ -1495,19 +1502,26 @@
                                     (on-gui!
                                      (fn []
                                        (try
-                                         (set-status! status-label "Ready")
+                                         (when (= looking (g/label-text status-label))
+                                           (set-status! status-label "Ready"))
                                          (when (and (identical? e @ev*) (still?))
-                                           (on-doc doc))
+                                           (answer! doc))
                                          (catch :default ex
                                            (set-status! status-label (str "; " label ": " (ex-message ex)))))))))]
         (if (= k :now)
-          (on-doc doc)
-          (set-status! status-label (str "Looking up " sym "...")))))))
+          (answer! doc)
+          (set-status! status-label looking))))))
 
 (defn- same-target?
   "Whether snap's help/target is still id ({:symbol :start})."
   [id snap]
   (= id (select-keys (help/target snap) [:symbol :start])))
+
+(defn- live-editor?
+  "False once ed has been destroyed (its tab closed): a late answer must
+  not read its buffer then (review finding 4)."
+  [ed]
+  (not @(:destroyed? ed)))
 
 (defn- do-quick-doc!
   "Ctrl+Q/Shift+F1 (P4.T4), the ui's own :quick-doc!*: help/target on ed's
@@ -1583,7 +1597,7 @@
                                     (catch :default e
                                       (set-status! status-label (str "; full doc: " (ex-message e))))))))))
             (ask-lookup! {:ev* ev* :status-label status-label} symbol (:text snap) start
-                         (fn [] (and (active?) (same-target? id (editor/snapshot ed))))
+                         (fn [] (and (active?) (live-editor? ed) (same-target? id (editor/snapshot ed))))
                          "quick doc"
                          (fn [doc]
                            (reset! last-shown id)
@@ -1626,11 +1640,13 @@
         (let [local (help/jump-target snap nil)]
           (if (= :buffer (:kind local))
             (jump-to! ctx symbol local)
+            ;; A late answer is placed against the text as it is then, not
+            ;; as it was when F12 was pressed (review finding 5).
             (ask-lookup! ctx symbol (:text snap) start
-                         (fn [] (and ((:active? ctx (constantly true)))
+                         (fn [] (and ((:active? ctx (constantly true))) (live-editor? ed)
                                      (same-target? (select-keys t [:symbol :start]) (editor/snapshot ed))))
                          "jump"
-                         (fn [doc] (jump-to! ctx symbol (help/jump-target snap doc))))))
+                         (fn [doc] (jump-to! ctx symbol (help/jump-target (editor/snapshot ed) doc))))))
         (set-status! status-label "No symbol at the caret.")))
     (catch :default e
       (set-status! status-label (str "; jump: " (ex-message e))))))
@@ -1676,10 +1692,13 @@
         (let [local (help/jump-target snap nil)]
           (if (= :buffer (:kind local))
             (source-jump-to! ctx symbol local)
+            ;; Only while the panel still shows (review finding 4), and
+            ;; placed against its text as it is then (finding 5).
             (ask-lookup! ctx symbol (:text snap) start
-                         (fn [] (same-target? (select-keys t [:symbol :start]) (editor/snapshot (:editor sp))))
+                         (fn [] (and (pos? (g/gtk-widget-get-visible (:source-root (:right ctx))))
+                                     (same-target? (select-keys t [:symbol :start]) (editor/snapshot (:editor sp)))))
                          "jump"
-                         (fn [doc] (source-jump-to! ctx symbol (help/jump-target snap doc))))))
+                         (fn [doc] (source-jump-to! ctx symbol (help/jump-target (editor/snapshot (:editor sp)) doc))))))
         (source-pane/report! sp "No symbol at the caret.")))
     (catch :default e
       (source-pane/report! sp (str "; jump: " (ex-message e))))))

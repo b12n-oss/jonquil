@@ -38,6 +38,7 @@
    rows/row-clj-slow-quick-doc
    rows/row-clj-slow-quick-doc-moved-on
    rows/row-clj-slow-jump-in-buffer
+   rows/row-clj-slow-quick-doc-tab-closed
    rows/row-clj-inspect-after-run
    rows/row-clj-inspect-in-out
    rows/row-clj-inspect-lost-connection

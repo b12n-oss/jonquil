@@ -87,7 +87,9 @@
   "Runs (f) on a worker thread, with *help-timeout-ms* bound to
   async-help-timeout-ms, and waits up to grace-ms for it. [:now r] when it
   answered in time; else [:later], and (on-later r) runs on a worker
-  thread once it does. Exactly one of the two gets r, nil when f threw."
+  thread once it does. Exactly one of the two gets r. When f throws, r is
+  {::error message}, which help-error reads, so a caller can say so
+  rather than show nothing (review finding 1)."
   [grace-ms f on-later]
   ;; st: ::waiting until one side settles it. The worker stores its answer
   ;; only while the caller still waits; once the caller has given up
@@ -96,7 +98,7 @@
         st (atom ::waiting)]
     (future
       (let [r (try (binding [*help-timeout-ms* async-help-timeout-ms] (f))
-                   (catch Throwable _ nil))]
+                   (catch Throwable e {::error (or (ex-message e) (str (class e)))}))]
         (when-not (compare-and-set! st ::waiting [::done r])
           (try (on-later r) (catch Throwable _ nil)))
         (deliver p true)))
@@ -104,6 +106,11 @@
     (if (compare-and-set! st ::waiting ::later)
       [:later]
       [:now (second @st)])))
+
+(defn help-error
+  "The message of an ask-help! answer whose f threw, else nil."
+  [r]
+  (when (map? r) (::error r)))
 
 (defprotocol Owners
   "Tabs plan, final review finding 2: evaluators that track which owner

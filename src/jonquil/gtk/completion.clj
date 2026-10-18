@@ -201,15 +201,36 @@
 
 (defn- server-ev [c] (when-let [f (:server-ev c)] (f)))
 
+(defn- gone?
+  "True once c's editor has been destroyed (its tab closed); a late answer
+  must not read its buffer then. The console's instance has no :ed and
+  lives as long as the window."
+  [c]
+  (boolean (some-> (:ed c) :destroyed? deref)))
+
+(defn- current?
+  "Whether a late answer from evaluator e for token (from gen-key) still
+  applies: the newest request, from the window's current evaluator, to an
+  open popup whose editor is still there (review findings 2 and 4)."
+  [c gen-key token e]
+  (and (= token @(gen-key c)) (identical? e (server-ev c)) (not (gone? c)) (popover/open? c)))
+
+(defn- doc-label-text
+  "help/doc-text for doc, or the error line when the request threw."
+  [sym doc]
+  (if-let [msg (ev/help-error doc)]
+    (str "; docs: " msg)
+    (help/doc-text sym doc)))
+
 (defn- doc-arrived!
   "A late doc-preview answer, on the GTK thread: shown only while it's
   still the newest doc request and sym is still the selected name of an
   open popup."
-  [c token sym doc]
+  [c e token sym doc]
   (try
-    (when (and (= token @(:doc-gen c)) (popover/open? c)
+    (when (and (current? c :doc-gen token e)
                (= sym (:symbol (help/selected (state c)))))
-      (g/gtk-label-set-text (:doc-label c) (help/doc-text sym doc)))
+      (g/gtk-label-set-text (:doc-label c) (doc-label-text sym doc)))
     (catch :default e
       ((:on-error c) (str "; complete: " (ex-message e))))))
 
@@ -233,13 +254,17 @@
       (g/gtk-label-set-text doc-label waiting-text)
       (do
         (g/gtk-list-box-select-row list-box (g/gtk-list-box-get-row-at-index list-box (:index st)))
-        (if-let [e (server-ev c)]
-          (let [token (swap! (:doc-gen c) inc)
-                [k doc] (ev/ask-help! ev/help-grace-ms (fn [] (ev/lookup e sym text pos))
-                                      (fn [doc] (on-gui! (fn [] (doc-arrived! c token sym doc)))))]
-            (g/gtk-label-set-text doc-label (if (= k :now) (help/doc-text sym doc) (loading-text sym))))
-          (g/gtk-label-set-text doc-label
-                                (help/doc-text sym (doc-fn sym text pos))))))))
+        (let [token (swap! (:doc-gen c) inc)]
+          (if-let [e (server-ev c)]
+            ;; A request a newer one superseded before it went out is
+            ;; skipped, so a slow connection doesn't queue stale lookups
+            ;; ahead of the current one (review finding 3).
+            (let [[k doc] (ev/ask-help! ev/help-grace-ms
+                                        (fn [] (when (= token @(:doc-gen c)) (ev/lookup e sym text pos)))
+                                        (fn [doc] (on-gui! (fn [] (doc-arrived! c e token sym doc)))))]
+              (g/gtk-label-set-text doc-label (if (= k :now) (doc-label-text sym doc) (loading-text sym))))
+            (g/gtk-label-set-text doc-label
+                                  (help/doc-text sym (doc-fn sym text pos)))))))))
 
 (defn- render!
   "Rebuilds c's list-box rows from st's candidates (removing every old row
@@ -293,17 +318,25 @@
 (defn- same-snapshot? [a b]
   (and a b (= (:text a) (:text b)) (= (:caret a) (:caret b))))
 
+(defn- offline-on-error
+  "cands, or, when the request threw (ev/help-error), offline after saying
+  so through :on-error (review finding 1)."
+  [c offline cands]
+  (if-let [msg (ev/help-error cands)]
+    (do ((:on-error c) (str "; complete: " msg)) offline)
+    (or cands offline)))
+
 (defn- arrived!
   "A late candidates answer, on the GTK thread: merged into the open popup
   (help/arrive, the selected name kept) only while it's still the newest
   request, the popup is still open and the text and caret are snapshot's.
   An answer with no names closes the popup; nil (the request threw) keeps
   what's showing, unless that's nothing."
-  [c token snapshot cands]
+  [c e token snapshot cands]
   (try
-    (when (and (= token @(:gen c)) (popover/open? c)
+    (when (and (current? c :gen token e)
                (same-snapshot? snapshot ((:snapshot-fn c))))
-      (let [st (help/arrive (state c) (or cands (:candidates (state c))))]
+      (let [st (help/arrive (state c) (offline-on-error c (:candidates (state c)) cands))]
         (if (empty? (:candidates st))
           (close! c)
           (do (reset! (:state c) st)
@@ -316,10 +349,16 @@
   cands] when they land within the grace wait, else [:later], and the
   late answer goes to arrived! on the GTK thread."
   [c e snapshot p]
-  (let [token (swap! (:gen c) inc)]
-    (ev/ask-help! ev/help-grace-ms
-                  (fn [] (ev/complete e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot)))
-                  (fn [cands] (on-gui! (fn [] (arrived! c token snapshot cands)))))))
+  (let [token (swap! (:gen c) inc)
+        offline (fn [] (ev/offline-candidates e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot)))
+        [k cands] (ev/ask-help! ev/help-grace-ms
+                                ;; skipped when superseded before it went out (finding 3)
+                                (fn [] (when (= token @(:gen c))
+                                         (ev/complete e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot))))
+                                (fn [cands] (on-gui! (fn [] (arrived! c e token snapshot cands)))))]
+    (if (= k :now)
+      [:now (offline-on-error c (offline) cands)]
+      [:later])))
 
 (defn open!
   "help/prefix-at on snapshot; nil does nothing. Otherwise docs/candidates
@@ -342,8 +381,9 @@
           (show-or-commit! c snapshot (help/open-state p cands))
           (show! c snapshot (help/waiting-state p (ev/offline-candidates e (:prefix p) (:text snapshot) (:end p)
                                                                          (:extra-context snapshot))))))
-      (show-or-commit! c snapshot (help/open-state p ((:candidates-fn c) (:prefix p) (:text snapshot) (:end p)
-                                                                         (:extra-context snapshot))))))
+      (do (swap! (:gen c) inc)
+          (show-or-commit! c snapshot (help/open-state p ((:candidates-fn c) (:prefix p) (:text snapshot) (:end p)
+                                                                             (:extra-context snapshot)))))))
   nil)
 
 (defn- move! [c delta]
@@ -425,8 +465,9 @@
         (let [e (server-ev c)
               st2 (cond
                     (not e)
-                    (help/refine st snap ((:candidates-fn c) (:prefix p) (:text snap) (:end p)
-                                                             (:extra-context snap)))
+                    (do (swap! (:gen c) inc)
+                        (help/refine st snap ((:candidates-fn c) (:prefix p) (:text snap) (:end p)
+                                                                 (:extra-context snap))))
                     (not (help/still-valid? st snap)) nil
                     :else
                     (let [[k cands] (ask-candidates! c e snap p)]

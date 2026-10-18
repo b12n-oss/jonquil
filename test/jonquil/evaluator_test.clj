@@ -101,10 +101,13 @@
     (let [got (promise)]
       (is (= [:later] (ev/ask-help! 10 (fn [] (Thread/sleep 150) (ev/help-timeout 300)) (fn [r] (deliver got r)))))
       (is (= ev/async-help-timeout-ms (deref got 2000 :timeout)))))
-  (testing "a throw is a nil answer"
+  (testing "a throw is an answer help-error reads, late and now"
     (let [got (promise)]
-      (ev/ask-help! 10 (fn [] (Thread/sleep 50) (throw (ex-info "boom" {}))) (fn [r] (deliver got [:got r])))
-      (is (= [:got nil] (deref got 2000 :timeout)))))
+      (ev/ask-help! 10 (fn [] (Thread/sleep 50) (throw (ex-info "boom" {}))) (fn [r] (deliver got r)))
+      (is (= "boom" (ev/help-error (deref got 2000 :timeout)))))
+    (is (= "bang" (ev/help-error (second (ev/ask-help! 1000 (fn [] (throw (ex-info "bang" {}))) (fn [_] nil))))))
+    (is (nil? (ev/help-error [{:symbol "map"}])) "a candidate list isn't an error")
+    (is (nil? (ev/help-error {:status :found :name "map"})) "nor is a doc"))
   (testing "every request settles exactly once, whichever side wins"
     (let [later (atom 0)
           nows (count (filter #(= :now (first %))
