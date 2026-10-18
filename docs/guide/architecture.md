@@ -61,7 +61,7 @@ P4 added a fourth: `jonquil.help`, the decisions behind completion, quick
 doc, jump to definition and rename, covered in its own section below.
 
 - `jonquil.file-tree`: the file tree's model as plain data: `{:root :expanded :ignore}`, listing one folder (ignore rules, folders first), flattening the expanded tree into rows (a symlink back to an ancestor shows collapsed instead of recursing), `expand-to` for a saved file, the launch root (`root-for`), and a directory's own project selection (`project-selection`, since `dialect/find-project` starts at a path's parent).
-- `jonquil.tabs`: the window's tabs as plain data: the strip's labels, finding a file that's already open (compared canonically), whether a tab may run in the window's evaluator (`dialect/selection-key` equality), and the text of the refusal, the unsaved-changes alert and the Run banner.
+- `jonquil.tabs`: the window's tabs as plain data: the strip's labels, finding a file that's already open (compared canonically), whether a tab may run in the window's evaluator (`runnable-here?`: the same `dialect/selection-key`, or a Jolt file outside any project in any Jolt window), whether a lone tab keeps the window's Jolt instead of switching it (`keeps-window-jolt?`), and the text of the refusal, the unsaved-changes alert and the Run banner.
 - `jonquil.source`: where a definition outside the buffer lives and its text, from a lookup's `:file` (an absolute path or a `jar:file:…!/entry` URL, read locally with `java.util.zip.ZipFile`), whether it can be edited (a plain file under the project), line arithmetic, and the source panel's bounded history.
 
 This arc added two more: `jonquil.inspect.view`, the inspector's view
@@ -288,10 +288,14 @@ flowchart LR
 
 ### `jonquil.nrepl.*`: Jolt out of process
 
-Four namespaces make up the out-of-process runtime:
+Four namespaces make up the out-of-process runtime, with Jonquil's own
+nREPL middleware (below, under the inspector) loaded into each child:
 
 - `jonquil.nrepl.child` launches `jolt nrepl-server` in the project
-  directory, scanning ports `7950`-`7999` for one that binds on both the
+  directory, with its middleware from `middleware-source`: a jolt-lang/nrepl
+  checkout (`$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl`), else a git
+  dependency on jolt-lang/nrepl v0.4.0 (`nrepl-git-coord`), else none (a
+  plain server); Jonquil's own middleware folder joins it either way, scanning ports `7950`-`7999` for one that binds on both the
   loopback and the wildcard address before trusting the child's own bind
   as the real attempt (a bare TCP connect can't rule out something else
   already listening there). Readiness comes from a log line the child
@@ -741,8 +745,11 @@ Out-of-process Jolt answers those same ops from its own child.
 `jonquil.inspect.view/run-op`. Nothing in Jonquil requires it: `jonquil.
 nrepl.middleware-files` embeds its text and `view.clj`'s with a macro when
 Jonquil is compiled (the installed binary has no source tree to read), and
-`ensure-root!` writes both under `$XDG_CACHE_HOME/jonquil/nrepl-middleware/
-<hash>` or `~/.cache/...`, through a temp sibling and a rename. `jonquil.
+`ensure-root!` writes the three files (the stdin middleware is the third,
+below) under `$XDG_CACHE_HOME/jonquil/nrepl-middleware/<hash>` or
+`~/.cache/...`, through a temp sibling and a rename. Each start marks its
+folder used and removes other hash-named folders untouched for a day
+(`prune-old!`), never following a symlink. `jonquil.
 nrepl.child` then adds that folder as a `:local/root` dep and puts the
 middleware last in `:nrepl/middleware`, after jolt-lang/nrepl's, or alone
 on a plain server. They're middleware ops rather than evals on purpose:
@@ -794,8 +801,12 @@ opened with. An `add-watch` on the window's own path atom re-runs `select`
 every time Open or Save As changes it, and `apply-selection!` compares the
 new selection's `selection-key` against the old one: an equal key keeps
 the running evaluator (opening a second file from the same nREPL project,
-say), and a different one swaps it, interrupting and stopping the old
-evaluator off to the side while a new one joins the registry and starts.
+say), and a different one swaps it: the old evaluator is interrupted and
+stopped off to the side while a new one joins the registry and starts. A
+loose Jolt file in a Jolt window is the exception and keeps the window's
+Jolt (`tabs/keeps-window-jolt?`). A swap hides the inspector and source
+panels, and when focus was inside one of them it moves to the active
+tab's editor.
 
 For an attach or jank evaluator, the status-bar label follows its connection too:
 `watch-connection!` registers an `on-connection!` listener the moment

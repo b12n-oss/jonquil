@@ -9,9 +9,9 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 59 namespaces in well under a second, and it's the fastest
+currently loads 64 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (633 tests, 3703 assertions
+slower. `bb test` runs the full unit suite (672 tests, 3847 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -20,11 +20,11 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (633 tests and 3672 assertions, 31
+reports fewer assertions than macOS (672 tests and 3816 assertions, 31
 fewer, measured 2026-10-18).
 
-`bb test:nrepl` runs a second, separate suite (38 tests, 127 assertions,
-about 40 s): every test in it spawns a real Jolt child over
+`bb test:nrepl` runs a second, separate suite (53 tests, 189 assertions,
+about 50 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
 `bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
@@ -53,7 +53,9 @@ deadline, so a hang fails a check instead of blocking. It prints 11
 checks. `bb mcp:smoke --bin
 ./jonquil` runs the same checks against the binary `bb app:build` made, which
 is what proves `jolt build` links the MCP namespaces. It takes about 3 s from
-a checkout and needs the jolt-lang/nrepl checkout for the nREPL step.
+a checkout. Its nREPL step uses a jolt-lang/nrepl checkout when there is one,
+and otherwise fetches v0.4.0 as a git dependency (git and the network, the
+first time).
 
 `bb mcp:smoke --window` smokes `jonquil --mcp --window` the same way, but it
 opens a real window, so don't type while it runs. It checks the handshake,
@@ -84,8 +86,8 @@ others can't.
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 The first window covers the Definitions editor and the Interactions console
-(`dev/gtk_selftest.clj`, 47 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 303 rows), with its rows split by
+(`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
+window (`dev/gtk_selftest_window.clj`, 305 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
@@ -103,10 +105,12 @@ tab, the close alerts), `session_tabs` (saving and reopening the last
 session's tabs), `file_tree_pane` (the tree widget in isolation) and
 `file_tree` (the tree in the real window, including its file operations). The
 third (`dev/gtk_selftest_nrepl.clj`,
-16 rows) opens against a throwaway project whose `.jonquil.edn` asks for
+18 rows) opens against a throwaway project whose `.jonquil.edn` asks for
 `{:runtime :nrepl}`, so a real Jolt child runs behind it, and its rows
-cover starting, running, Stop, help, and closing over that live
-connection; it needs the jolt-lang/nrepl checkout the same way
+cover starting, running, the inspector on the child's `*1`, a `read-line`
+round trip and Stop during a read, help, a loose file running in the
+child, a runtime switch (and where focus lands after it), and closing over
+that live connection; it needs the jolt-lang/nrepl checkout the same way
 `bb test:nrepl` does, and records a single failing row rather than
 opening anything if that checkout isn't there. The fourth
 (`dev/gtk_selftest_cljd.clj`, 15 rows) opens against a throwaway
@@ -116,7 +120,7 @@ fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, Stop's detach, and the inspector's unavailable sentence, over
 that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 29 rows) opens against a throwaway JVM Clojure project whose
+(`dev/gtk_selftest_clj.clj`, 30 rows) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
 (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its
@@ -158,7 +162,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. A full run reports 47, 303, 16, 15, 29, 4, 13, 5 and 10 rows
+browser. A full run reports 48, 305, 18, 15, 30, 4, 13, 5 and 10 rows
 passing, in group order.
 
 Each row is a core.async go block that reads top to bottom instead of a

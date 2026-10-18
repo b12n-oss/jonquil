@@ -32,6 +32,10 @@ you use it:
 - **ClojureDart** (experimental): a running app built with the ClojureDart
   fork that serves nREPL. See
   [ClojureDart](using-jonquil.md#clojuredart-experimental-attaching-to-a-running-app).
+- **ClojureScript** (experimental): a shadow-cljs project
+  (`shadow-cljs.edn`) with `npx shadow-cljs watch <build>` running and a
+  JS runtime that has the build loaded. See
+  [ClojureScript](using-jonquil.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
 - **Jolt out of process**, the default in a project with a `deps.edn`:
   `git` on `PATH` and a network connection the first time, when Jonquil
   fetches jolt-lang/nrepl's middleware, or a checkout of jolt-lang/nrepl.
@@ -223,6 +227,10 @@ EDN map:
 - `:reopen-tabs?` is also only written by hand. Set it to `false` and
   Jonquil stops saving and reopening the last session's tabs. Leaving it
   out, or `true`, keeps that on.
+- `:mcp-listen?` is only written by hand too. Set it to `true` and each
+  window serves Jonquil's MCP tools on a loopback socket, so an agent can
+  attach to a window that's already open with `jonquil --mcp-attach` (see
+  [Driving Jonquil from an agent](using-jonquil.md#driving-jonquil-from-an-agent-mcp)).
 
 The tabs themselves live next door in `sessions.edn`, one entry per
 project folder, newest first, at most 20 (see

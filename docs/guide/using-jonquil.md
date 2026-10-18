@@ -202,6 +202,8 @@ comments on the line or selection. Cmd/Ctrl+Shift+F formats the whole
 file, and Cmd/Ctrl+Option+F (Alt+F on Linux and Windows keyboards) or the
 +L equivalent formats just the selection or the current line. A format is
 one undo step, so a single Cmd/Ctrl+Z puts the file back the way it was.
+The caret stays on the same code it was on, wherever the new indentation
+moves it, and the view scrolls to it.
 Cmd/Ctrl+Z undoes more generally; Cmd/Ctrl+Shift+Z, GTK's own binding,
 and Cmd/Ctrl+Y both redo.
 
@@ -594,7 +596,10 @@ quick-doc popup instead. When nothing matches at all, the status bar
 says so.
 
 Inside the source panel, F12 or Ctrl+B follows a definition again, in
-the same file or into another, and Cmd/Ctrl+[ goes back. Escape closes
+the same file or into another, and Cmd/Ctrl+[ goes back. A definition in
+the window's own file is the exception: F12 moves the window's caret to
+it and puts focus back in the editor, rather than loading that file into
+the panel. Escape closes
 the panel, and Cmd/Ctrl+I swaps it for the inspector. Library code from
 a jar, and any file outside your project, is read-only. A file in your
 project has an **Open in window** button (Cmd/Ctrl+Shift+O while the panel
@@ -718,7 +723,7 @@ count, and paging still works over everything up to the cap.
 ## Dialects and runtimes
 
 Jonquil evaluates through a dialect profile: what a language's files look
-like, how they're painted, and which evaluator runs them. Four profiles
+like, how they're painted, and which evaluator runs them. Five profiles
 exist today: Jolt, ClojureDart (experimental), JVM Clojure, ClojureScript
 (experimental) and jank (experimental). The way Jonquil picks a profile, and the evaluator
 protocol under it, are general enough to take more. The status
@@ -1304,7 +1309,7 @@ to check:
 
 The dialect and runtime come from the IDE's own choice: the file's extension
 and the project's `.jonquil.edn` (see [Choosing a dialect](#choosing-a-dialect)
-and [`.jonquil.edn`](#jonquil-edn)), so a Jolt project with a `deps.edn`
+and [`.jonquil.edn`](#jonquiledn)), so a Jolt project with a `deps.edn`
 evaluates in a Jolt child, one with `{:runtime :in-process}` inside the
 server's own process, and one with `{:dialect :clj}` attaches to its nREPL
 server. `jonquil_eval` and `jonquil_run_file` take a `timeout_ms`; the default
