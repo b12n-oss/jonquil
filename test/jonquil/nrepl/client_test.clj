@@ -80,13 +80,21 @@
 (deftest connect-to-reaches-a-named-host-test
   (let [server (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))
         port (.getLocalPort server)
-        accepted (future (with-open [s (.accept server)] (.isConnected s)))]
+        checked (promise)
+        ;; The listener holds the socket until the test has looked: closing
+        ;; it at once raced the client's reader, which saw EOF and marked
+        ;; the connection closed before open? ran (caught by a 25-run loop,
+        ;; 2026-10-18, failing once).
+        accepted (future (with-open [s (.accept server)]
+                           (deref checked 5000 nil)
+                           (.isConnected s)))]
     (try
       (let [conn (client/connect-to "localhost" port 5000)]
         (is (client/open? conn))
+        (deliver checked true)
         (is (true? (deref accepted 5000 :timeout)) "the listener on that host accepted it")
         (client/close! conn))
-      (finally (.close server)))))
+      (finally (deliver checked true) (.close server)))))
 
 (deftest connect-to-an-unknown-host-fails-promptly-test
   (let [t0 (System/currentTimeMillis)]
