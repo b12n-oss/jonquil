@@ -57,9 +57,15 @@
      "apply" "partial" "comp" "constantly" "identity" "juxt" "memoize" "complement"
      "doc" "source" "apropos" "dir" "find-doc" "format" "str"}
    :project-markers ["deps.edn"]
-   ;; The evaluator a project gets when .jonquil.edn names no :runtime, and
-   ;; the runtimes it may name.
+   ;; The evaluator a window gets when .jonquil.edn names no :runtime, and
+   ;; the runtimes it may name. Inside a project holding one of this
+   ;; profile's own markers, :project-evaluator wins instead: Jolt runs out
+   ;; of process there, so a program's System/exit, shutdown-agents or
+   ;; redefined clojure.core can't reach Jonquil itself (measured
+   ;; 2026-10-18). A loose file or untitled buffer has no project folder to
+   ;; run a child in, so it stays in process.
    :evaluator :in-process
+   :project-evaluator :nrepl
    :runtimes #{:in-process :nrepl}})
 
 (def ^:private cljd-special-forms
@@ -309,9 +315,12 @@
                          by-default [by-default :settings]
                          :else [(first pool) :fallback])
         rt-ok? (and runtime (contains? (:runtimes p) runtime))
+        default-rt (if (and (:project-evaluator p) (some markers (:project-markers p)))
+                     (:project-evaluator p)
+                     (:evaluator p))
         w2 (if (and runtime (not rt-ok?))
              [(str ".jonquil.edn asks for runtime " runtime ", which " (:name p)
-                   " doesn't offer here; using " (runtime-name (:evaluator p)))]
+                   " doesn't offer here; using " (runtime-name default-rt))]
              [])
         ;; Only JVM Clojure sends :auto-require (the attach evaluator
         ;; requires the list once per connection); elsewhere it's ignored.
@@ -326,7 +335,7 @@
              [(str ".jonquil.edn :cljs only applies to ClojureScript, not " (:name p) ", so it is ignored")]
              [])]
     (cond-> {:profile p
-             :runtime (if rt-ok? runtime (:evaluator p))
+             :runtime (if rt-ok? runtime default-rt)
              :project-dir (:dir project)
              :source source
              :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4))}

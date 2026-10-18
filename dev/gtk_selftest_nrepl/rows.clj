@@ -150,7 +150,8 @@
                              (and started? (= "Jolt (nREPL)" label)
                                   (some? pid) (= pid reported-pid)
                                   (str/includes? text "; Limit: No stdin")
-                                  (str/includes? text "jolt-lang/nrepl middleware")
+                                  (str/includes? text "; Limit: No inspector out of process")
+                                  (not (str/includes? text "Output appears when"))
                                   (str/includes? text "no file or line")
                                   ready?)
                              {:started started? :label label :pid pid

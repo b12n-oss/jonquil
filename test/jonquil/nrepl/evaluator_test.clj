@@ -184,7 +184,7 @@
       (is (not (alive? other-pid))))))
 
 (deftest no-middleware-means-stop-by-restart-test
-  (with-redefs [child/middleware-root (constantly nil)]
+  (with-redefs [child/middleware-source (constantly nil)]
     (let [e (make (temp-project)) done (promise)]
       (try
         (ev/start! e)
@@ -196,6 +196,27 @@
           (is (= :interrupted (:status (deref done 5000 :timeout))))
           (is (wait-until (fn [] (let [p (nrepl/child-pid e)] (and p (not= p pid)))) 10000) "restarted"))
         (finally (ev/stop! e))))))
+
+(deftest unfetchable-git-middleware-falls-back-to-a-plain-server-test
+  (with-redefs [child/middleware-source
+                (constantly {:git {:git/url "file:///nonexistent/jonquil-nrepl.git"
+                                   :git/tag "v0.4.0" :git/sha "7efdd6c"}})]
+    (let [e (make (temp-project))]
+      (try
+        (is (nil? (ev/start! e)) "the retry without middleware starts")
+        (is (some #(str/includes? % "couldn't be fetched") (ev/limitations e)))
+        (is (some #(str/includes? % "no interrupt op") (ev/limitations e)))
+        (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
+        (finally (ev/stop! e))))))
+
+(deftest limitations-name-the-way-back-test
+  (let [e (make (temp-project))]
+    (try
+      (ev/start! e)
+      (let [ls (ev/limitations e)]
+        (is (not-any? #(str/includes? % "Output appears when") ls) "nREPL v0.4.0 streams")
+        (is (some #(str/includes? % "{:runtime :in-process}") ls)))
+      (finally (ev/stop! e)))))
 
 (deftest stop-during-start-leaves-no-child-test
   (let [dir (temp-project) e (make dir)

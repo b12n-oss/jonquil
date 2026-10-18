@@ -18,6 +18,9 @@
     (let [dir (temp-dirs/temp-dir! "jonquil-mcp-test-")
           settings-path (str (io/file (temp-dirs/temp-dir! "jonquil-mcp-test-") "settings.edn"))]
       (spit (io/file dir "deps.edn") "{}")
+      ;; In process, so bb test starts no Jolt child (a deps.edn project
+      ;; otherwise runs out of process; bb mcp:smoke covers that path).
+      (spit (io/file dir ".jonquil.edn") "{:runtime :in-process}")
       {:dir dir
        :t (tools/make-tools {:dir dir :settings-path settings-path})})))
 
@@ -58,6 +61,8 @@
 (deftest stuck-evaluation-is-evicted
   (let [d (temp-dirs/temp-dir! "jonquil-mcp-test-")
         _ (spit (io/file d "deps.edn") "{}")
+        ;; The fresh evaluator after the eviction stays in process too.
+        _ (spit (io/file d ".jonquil.edn") "{:runtime :in-process}")
         k (dialect/selection-key (ft/project-selection d nil))
         stopped (atom false)
         fake (reify ev/Evaluator

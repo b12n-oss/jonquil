@@ -118,6 +118,35 @@
         (read-string (apply str (keep :out r)))))
     (catch Throwable _ nil)))
 
+(defn- spawn-runtime!
+  "Starts a child with source's middleware, connects and clones a session.
+  The :runtime map, or throws after killing whatever child it started."
+  [ev source]
+  (let [ch (atom nil)]
+    (try
+      (let [c (reset! ch (child/start! (:project-dir (:selection ev)) source))
+            conn (client/connect (:port c))
+            ops (ops/op-names (client/request-sync conn {:op "describe"} request-timeout-ms))
+            sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))]
+        {:child c :conn conn :session sid :ops ops})
+      (catch Throwable e
+        (child/kill! @ch)
+        (throw e)))))
+
+(defn- spawn-with-fallback!
+  "spawn-runtime! with child/middleware-source. A git source that fails
+  (offline on the first start, no git) gets one retry with no middleware,
+  a plain server, and the :runtime map records why as :fetch-error. A
+  checkout that fails is the user's own to see, so it isn't retried."
+  [ev]
+  (let [source (child/middleware-source)]
+    (try
+      (spawn-runtime! ev source)
+      (catch Throwable e
+        (if (:git source)
+          (assoc (spawn-runtime! ev nil) :fetch-error (ex-message e))
+          (throw e))))))
+
 (defn- start-runtime!
   "Launches and connects a child if none is live. nil, or a sentence.
   stop! is terminal for the evaluator: once its :stopped? flag is up, no
@@ -138,24 +167,19 @@
     (or (when (:stopped? @(:state ev)) "This runtime was stopped.")
         (when-not (live? ev)
           (shutdown-runtime! ev)
-          (let [ch (atom nil)]
-            (try
-              (let [c (reset! ch (child/start! (:project-dir (:selection ev)) (child/middleware-root)))
-                    conn (client/connect (:port c))
-                    ops (ops/op-names (client/request-sync conn {:op "describe"} request-timeout-ms))
-                    sid (:new-session (first (client/request-sync conn {:op "clone"} request-timeout-ms)))]
-                ;; A new child has none of the old one's namespaces, so the
-                ;; owner map starts empty with it (tabs plan, ruling 9).
-                (swap! (:state ev) assoc :runtime {:child c :conn conn :session sid :ops ops} :created {})
-                ;; stop! may have run while this was spawning/connecting/cloning:
-                ;; it can't have torn this down (try-shutdown-runtime! only wins
-                ;; the lock once this releases it), so tear it down here instead.
-                (when (:stopped? @(:state ev))
-                  (shutdown-runtime! ev))
-                nil)
-              (catch Throwable e
-                (child/kill! @ch)
-                (str "Couldn't start Jolt over nREPL: " (ex-message e)))))))
+          (try
+            (let [rt (spawn-with-fallback! ev)]
+              ;; A new child has none of the old one's namespaces, so the
+              ;; owner map starts empty with it (tabs plan, ruling 9).
+              (swap! (:state ev) assoc :runtime rt :created {})
+              ;; stop! may have run while this was spawning/connecting/cloning:
+              ;; it can't have torn this down (try-shutdown-runtime! only wins
+              ;; the lock once this releases it), so tear it down here instead.
+              (when (:stopped? @(:state ev))
+                (shutdown-runtime! ev))
+              nil)
+            (catch Throwable e
+              (str "Couldn't start Jolt over nREPL: " (ex-message e))))))
     (finally (.unlock start-lock))))
 
 (defn- finish!
@@ -344,11 +368,15 @@
           (docs/symbol-doc 'user sym text pos))
       (catch Throwable _ nil)))
   (limitations [this]
-    (cond-> ["No stdin: read-line returns nil and read fails with EOF."
-             "Output appears when an evaluation finishes, not while it runs (the jolt-lang/nrepl middleware sends it at the end)."
-             "Jump to definition stays in this buffer: lookup reports no file or line."]
-      (and (live? this) (not (contains? (:ops (runtime this)) "interrupt")))
-      (conj "Stop restarts the runtime: this server has no interrupt op.")))
+    (let [rt (runtime this)]
+      (cond-> ["No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead."
+               "No inspector out of process; {:runtime :in-process} has one."
+               "Jump to definition stays in this buffer: lookup reports no file or line."]
+        (and (live? this) (:fetch-error rt))
+        (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)
+                   ") couldn't be fetched, so this is a plain nREPL server; the next start tries again."))
+        (and (live? this) (not (contains? (:ops rt) "interrupt")))
+        (conj "Stop restarts the runtime: this server has no interrupt op."))))
   ev/Owners
   (release-owner! [_ owner] (session/release-owner-in! state owner) nil))
 

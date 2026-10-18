@@ -54,20 +54,39 @@
                     (.getCanonicalPath (io/file d))))
           cands)))
 
+(def nrepl-git-coord
+  "jolt-lang/nrepl as a git dependency, for a machine with no checkout.
+  v0.4.0 is the first release that streams an evaluation's output. Measured
+  2026-10-18: 2.8 s to ready on the first start (the clone into
+  ~/.gitlibs), 347 ms after that, the same as a checkout."
+  {:git/url "https://github.com/jolt-lang/nrepl.git" :git/tag "v0.4.0" :git/sha "7efdd6c"})
+
+(defn middleware-source
+  "Where the injected middleware comes from: {:local checkout} when
+  middleware-root finds one, else {:git nrepl-git-coord}."
+  []
+  (if-let [root (middleware-root)]
+    {:local root}
+    {:git nrepl-git-coord}))
+
 (defn launch-args
-  "The child's argv. With a middleware root, the follow-up spike's
-  command: jolt -Sdeps '{:deps {nrepl/nrepl {:local/root R}}
-  :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P.
+  "The child's argv. With a middleware source, the follow-up spike's
+  command: jolt -Sdeps '{:deps {nrepl/nrepl COORD}
+  :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P,
+  where COORD is {:local/root R} for {:local R} or the git coordinate for
+  {:git coord}. With a nil source, a plain jolt nrepl-server P.
   The program is jolt's absolute path found on login-path's PATH (jolt.process
   resolves a bare name against Jonquil's own PATH, which a Finder launch has
   too bare), or the bare \"jolt\" when none is found."
-  [port root]
+  [port {:keys [local git] :as source}]
   (let [program (or (tool-path/resolve-program "jolt" (login-path/path)
                                                login-path/executable-file?)
-                    "jolt")]
-    (if root
+                    "jolt")
+        coord (cond local (str "{:local/root " (pr-str local) "}")
+                    git (binding [*print-namespace-maps* false] (pr-str git)))]
+    (if (and source coord)
       [program "-Sdeps"
-       (str "{:deps {nrepl/nrepl {:local/root " (pr-str root) "}}"
+       (str "{:deps {nrepl/nrepl " coord "}"
             " :nrepl/middleware [nrepl.middleware/default-middleware]}")
        "nrepl-server" (str port)]
       [program "nrepl-server" (str port)])))
@@ -196,18 +215,18 @@
 (defn- start-loop!
   "start!'s port scan. Each spawned proc goes into spawned (an atom) so
   start! can end it if anything throws."
-  [dir root token spawned]
+  [dir source token spawned]
   (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
     (if-let [port (first ports)]
       (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
             proc (apply p/process (process-options {:dir dir :log log})
-                        (launch-args port root))
+                        (launch-args port source))
             _ (reset! spawned proc)
             state (wait-ready proc log port ready-deadline-ms)]
         (case state
           :ready (do (owner-ready! dir token port)
                      {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
-                      :dir dir :log log :root root :token token})
+                      :dir dir :log log :source source :token token})
           :exited (if (str/includes? (tail log 20) "bind() failed")
                     (do (io/delete-file log true)
                         (recur (rest ports)))
@@ -221,17 +240,17 @@
 
 (defn start!
   "Launches the child in dir (made absolute here: a relative :dir makes
-  the spawn exit 1 silently, measured) with root's middleware injected, or
-  a vanilla server when root is nil. Returns {:proc :pid :port :dir :log
-  :root :token}. Throws ex-info with the log's tail when no port
+  the spawn exit 1 silently, measured) with source's middleware injected
+  (middleware-source's shape), or a vanilla server when source is nil.
+  Returns {:proc :pid :port :dir :log :source :token}. Throws ex-info with the log's tail when no port
   in the range works or the child won't answer. On any throw the spawned
   child is ended and the directory claim released."
-  [dir root]
+  [dir source]
   (let [dir (.getCanonicalPath (io/file dir))
         token (claim-dir! dir)
         spawned (atom nil)]
     (try
-      (start-loop! dir root token spawned)
+      (start-loop! dir source token spawned)
       (catch Throwable t
         (try (when @spawned (terminate! @spawned))
              (finally (release-dir! dir token)))
