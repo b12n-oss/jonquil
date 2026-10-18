@@ -161,11 +161,15 @@
 ;; --- the def prompt ---------------------------------------------------
 
 (defn- open-def-prompt!
+  "Opens the def prompt, unless the panel's actions are disabled (a lost
+  connection): the def button is insensitive then, and d did the same
+  nothing."
   [pane]
-  (let [dp (:def-popover pane)]
-    (g/gtk-editable-set-text (:entry dp) "")
-    (popover/show-at-caret! dp)
-    (g/gtk-widget-grab-focus (:entry dp)))
+  (when-not (:disabled? @(:state pane))
+    (let [dp (:def-popover pane)]
+      (g/gtk-editable-set-text (:entry dp) "")
+      (popover/show-at-caret! dp)
+      (g/gtk-widget-grab-focus (:entry dp))))
   nil)
 
 ;; --- keys ---------------------------------------------------------------

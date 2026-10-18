@@ -94,6 +94,30 @@
                           {:header header :info info :lines lines :footer footer
                            :tag0 tag0? :tag1 tag1?})))))))
 
+(defn row-pane-d-respects-disabled
+  "d opens the def prompt, but not while the panel's actions are disabled
+  (a lost connection), where the def button is already insensitive: the
+  key is still consumed, and the popover stays hidden. (d is 0x064; this
+  file's KEY-D is defined further down, and Jolt resolves at compile.)"
+  [_ui]
+  (go-row :row-pane-d-respects-disabled support/check
+    (with-pane (noop-opts)
+      (fn [pane]
+        (on-gtk
+         (let [dp (:def-popover pane)
+               shown? (fn [] (pos? (g/gtk-widget-get-visible (:popover dp))))
+               _ (inspector-pane/show-state! pane (assoc (inspect/open (three-row-view)) :disabled? true))
+               h-disabled (inspector-pane/dispatch-key! pane 0x064)
+               shown-disabled? (shown?)
+               _ (inspector-pane/show-state! pane (inspect/open (three-row-view)))
+               h-enabled (inspector-pane/dispatch-key! pane 0x064)
+               shown-enabled? (shown?)]
+           (popover/hide! dp)
+           (support/check :pane-d-respects-disabled
+                          (and (= 1 h-disabled) (not shown-disabled?) (= 1 h-enabled) shown-enabled?)
+                          {:h-disabled h-disabled :shown-disabled shown-disabled?
+                           :h-enabled h-enabled :shown-enabled shown-enabled?})))))))
+
 (defn row-pane-keys-step
   "Down moves the tag to line 1 with no request; Return calls on-request
   with [:in {:idx 1}]; Escape calls on-close."

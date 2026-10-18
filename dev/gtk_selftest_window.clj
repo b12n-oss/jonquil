@@ -220,6 +220,7 @@
    dialects/row-selection-throw-still-paints-new-profile
    inspector/row-pane-renders-view
    inspector/row-pane-keys-step
+   inspector/row-pane-d-respects-disabled
    inspector/row-pane-leaf
    inspector/row-pane-measure
    inspector/row-pane-note-clears
