@@ -132,13 +132,53 @@
         (when form
           {:text (subs text (:start form) (:end form)) :start (:start form) :end (:end form)})))))
 
+(defn carry-caret
+  "Where caret, an offset in old, lands in new when the two differ only in
+  whitespace (formatting re-indents): after the same number of
+  non-whitespace characters and newlines. A caret right before a line's
+  code stays right before it; one inside the indentation (or on a blank
+  line) keeps its column, up to the new indentation's end."
+  [old new caret]
+  (let [caret (min caret (count old))
+        before (subs old 0 caret)
+        code (count (remove #(Character/isWhitespace ^char %) before))
+        lines (count (filter #(= \newline %) before))
+        col (- caret (inc (or (str/last-index-of before "\n") -1)))
+        n (count new)]
+    (loop [i 0 seen-code 0 seen-lines 0]
+      (cond
+        (and (= seen-code code) (= seen-lines lines))
+        ;; on the caret's line, after its code: keep the column if the caret
+        ;; was in leading space, else stop here.
+        (let [line-start (inc (or (str/last-index-of (subs new 0 i) "\n") -1))
+              blank-before? (str/blank? (subs before (- caret col)))
+              at-code? (and (< caret (count old))
+                            (not (Character/isWhitespace (.charAt ^String old caret))))
+              skip (fn [stop?] (loop [j i]
+                                 (if (and (< j n) (#{\space \tab} (.charAt ^String new j)) (not (stop? j)))
+                                   (recur (inc j))
+                                   j)))]
+          (cond
+            (not blank-before?) i
+            at-code? (skip (constantly false))
+            :else (skip (fn [j] (>= (- j line-start) col)))))
+        (>= i n) n
+        :else
+        (let [ch (.charAt ^String new i)]
+          (cond
+            (and (= seen-code code) (not= ch \newline) (Character/isWhitespace ch)) (recur (inc i) seen-code seen-lines)
+            (= seen-code code) (if (= ch \newline) (recur (inc i) seen-code (inc seen-lines)) i)
+            (= ch \newline) (recur (inc i) seen-code (inc seen-lines))
+            (Character/isWhitespace ch) (recur (inc i) seen-code seen-lines)
+            :else (recur (inc i) (inc seen-code) seen-lines)))))))
+
 (defn format-all-op
   "Re-indents the whole buffer as one edit (one undo step). nil when the
   text is already formatted."
   [{:keys [text caret]}]
   (let [out (syntax/format-code text)]
     (when (not= out text)
-      {:edits [[0 (count text) out]] :caret (min caret (count out)) :sel nil})))
+      {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil})))
 
 (defn format-selection-op
   "Re-indents the lines the selection spans, or the caret's line when there
@@ -149,7 +189,7 @@
                 (line-bounds text caret))
         out (if (< s e) (syntax/format-selection-text text s e) text)]
     (when (not= out text)
-      {:edits [[0 (count text) out]] :caret (min caret (count out)) :sel nil})))
+      {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil})))
 
 (defn pre-run-problem
   "A sentence naming the first bracket problem in `text`, checked before Run

@@ -735,11 +735,30 @@
 (defn do-toggle-comment! [ed]
   (apply-edit! ed (edit/toggle-comment (snapshot ed))))
 
+(defn- scroll-to-caret!
+  "Brings the insert mark into view. Formatting replaces the whole buffer,
+  so the caret can land far from where the view was (ROADMAP P3).
+  scroll_to_mark rather than scroll_mark_onscreen: right after a
+  whole-buffer replace the layout isn't valid yet, and scroll_mark_onscreen
+  scrolls by it at once (measured: the caret stayed 5,000 px below a
+  300 px view), while scroll_to_mark waits for the layout. No alignment,
+  so it scrolls only as far as it has to."
+  [ed]
+  (g/gtk-text-view-scroll-to-mark (:view ed) (g/gtk-text-buffer-get-insert (:buf ed)) 0.0 0 0.0 0.0))
+
+(defn- formatted!
+  "apply-edit! for a format op, then the caret scrolled into view when the
+  op changed anything."
+  [ed op]
+  (let [r (apply-edit! ed op)]
+    (when (= 1 r) (scroll-to-caret! ed))
+    r))
+
 (defn do-format-all! [ed]
-  (apply-edit! ed (commands/format-all-op (snapshot ed))))
+  (formatted! ed (commands/format-all-op (snapshot ed))))
 
 (defn do-format-selection! [ed]
-  (apply-edit! ed (commands/format-selection-op (snapshot ed))))
+  (formatted! ed (commands/format-selection-op (snapshot ed))))
 
 (defn do-indent! [ed]
   (apply-edit! ed (edit/indent (snapshot ed))))

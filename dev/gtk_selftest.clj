@@ -403,6 +403,36 @@
                          (and (= 1 handled) (= "(defn f [x]\n  (inc x))" text) (= original undone))
                          {:handled handled :text text :undone undone})))))))
 
+(defn- row-edit-format-keeps-caret-in-view
+  "Format All on a long buffer with the caret near its end and the view
+  scrolled to the top: the caret stays right before the same (inc x) (its
+  old offset would now sit elsewhere, since every line gains an indent),
+  and the view scrolls so the caret is on screen."
+  [ed]
+  (go-row :edit-format-keeps-caret-in-view check
+    (let [buf (:buf ed)
+          text (str "(defn f [x]\n" (apply str (repeat 398 "(inc x)\n")) "(dec x))")
+          caret (str/last-index-of text "(dec")
+          _ (on-gtk (editor/set-text! ed text)
+                    (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+          _ (<! (timeout 200))
+          top? (on-gtk (let [adj (g/gtk-scrollable-get-vadjustment (:view ed))]
+                         (g/gtk-adjustment-set-value adj 0.0)
+                         (zero? (g/gtk-adjustment-get-value adj))))
+          _ (<! (timeout 100))
+          handled (on-gtk (editor/handle-key! ed KEY-F (bit-or g/CONTROL-MASK g/SHIFT-MASK)))
+          visible? (await-until 5000 20
+                                #(let [[_ y _ h] (g/caret-window-rect (:view ed))]
+                                   (and (>= y 0) (<= (+ y h) (g/gtk-widget-get-height (:view ed))))))
+          [after at] (on-gtk (let [t (editor/editor-text ed) c (g/cursor-offset buf)]
+                               [t (subs t c (min (count t) (+ c 4)))]))]
+      (on-gtk (g/gtk-text-buffer-undo buf)
+              (check :edit-format-keeps-caret-in-view
+                     (and top? (= 1 handled) (not= text after) (= "(dec" at) visible?)
+                     {:top top? :handled handled :at at :visible visible?
+                      :rect (g/caret-window-rect (:view ed)) :height (g/gtk-widget-get-height (:view ed))
+                      :adj (g/gtk-adjustment-get-value (g/gtk-scrollable-get-vadjustment (:view ed)))})))))
+
 (defn- row-edit-format-selection [ed]
   (go-row :edit-format-selection check
     (on-gtk (let [buf (:buf ed)
@@ -958,6 +988,7 @@
    row-edit-toggle-comment
    row-edit-toggle-comment-forward
    row-edit-format-all
+   row-edit-format-keeps-caret-in-view
    row-edit-format-selection
    row-edit-format-selection-macos-cmd-option-f
    row-edit-format-selection-macos-cmd-option-l

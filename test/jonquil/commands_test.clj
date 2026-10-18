@@ -34,6 +34,33 @@
       (is (= "(defn a []\n  1)"
              (edit/apply-edits text (:edits (c/format-selection-op (snap text 12)))))))))
 
+(deftest carry-caret-test
+  (let [old "(defn f [x]\n(let [y 1]\n(inc x)))"
+        new "(defn f [x]\n  (let [y 1]\n    (inc x)))"]
+    (testing "the caret keeps its place in the code, not its old offset"
+      (is (= (str/index-of new "inc") (c/carry-caret old new (str/index-of old "inc"))) "before inc")
+      (is (= (+ 2 (str/index-of new "inc")) (c/carry-caret old new (+ 2 (str/index-of old "inc")))) "inside inc")
+      (is (= (count new) (c/carry-caret old new (count old))) "at the end"))
+    (is (= 0 (c/carry-caret old new 0)))
+    (testing "in the indentation it stays on its own line"
+      (let [line3 (inc (str/last-index-of new "\n"))]
+        (is (= (+ 4 line3) (c/carry-caret old new (inc (str/last-index-of old "\n"))))
+            "right before (inc at column 0 stays right before it, now indented")
+        (is (= 2 (c/carry-caret "a\n\nb" "a\n\nb" 2)) "a blank line keeps its place")
+        (is (= 4 (c/carry-caret "a\n   b" "a\n  b" 5)) "column 3 of a 3-space indent lands at the end of the new 2-space one")
+        (is (= 3 (c/carry-caret "a\n   b" "a\n  b" 3)) "column 1 stays at column 1")))
+    (is (= 3 (c/carry-caret "abc" "abc" 3)) "unchanged text, unchanged caret")))
+
+(deftest format-ops-carry-the-caret-test
+  (let [text "(defn f [x]\n(let [y 1]\n(inc x)))"
+        caret (str/index-of text "inc")
+        out (c/format-all-op (snap text caret))]
+    (is (= (str/index-of (edit/apply-edits text (:edits out)) "inc") (:caret out))))
+  (let [text "(defn a []\n1)\n(defn b []\n2)"
+        caret (- (count text) 2)
+        out (c/format-selection-op (snap text caret))]
+    (is (= "2" (subs (edit/apply-edits text (:edits out)) (:caret out) (inc (:caret out)))) "still just before 2")))
+
 (deftest pre-run-problem-test
   (is (nil? (c/pre-run-problem "(defn f [x] (inc x))")))
   (is (= "The ( on line 3 is never closed."
