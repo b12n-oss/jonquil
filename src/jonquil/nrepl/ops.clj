@@ -66,7 +66,8 @@
   "A jonquil.docs/symbol-doc-shaped map from a lookup reply, or nil when
   the reply names nothing (an unknown symbol, a special form, or a server
   without lookup: {:status [\"done\" \"unknown-op\"]}). :file and :line
-  pass through when the reply carries them, else neither key is added."
+  pass through when the reply carries them, else neither key is added; a
+  blank :file (babashka's lookup sends \"\", measured) counts as none."
   [sym msgs]
   (let [m (some (fn [m] (when (or (:info m) (field m :name)) m)) msgs)
         info (or (:info m) m)]
@@ -77,7 +78,7 @@
                :name (field info :name)
                :arglists (or (field info :arglists-str) (field info :arglists))
                :doc (field info :doc)}
-        (field info :file) (assoc :file (field info :file))
+        (not (str/blank? (field info :file))) (assoc :file (field info :file))
         (field info :line) (assoc :line (field info :line))))))
 
 (defn- first-line [s]
@@ -97,13 +98,23 @@
 (defn- error-message
   "An eval-error's message: the first non-blank line after the last err->msg
   header in the err text (the last, so the program's own *err* output
-  before it isn't taken), else ex, else the err text."
+  before it isn't taken). With no header, the err line that names :ex's
+  exception class, since a server that doesn't use clojure.main's format
+  (babashka: err \"java.lang.ArithmeticException: Divide by zero user
+  REPL:1:1\", ex \"class java.lang.ArithmeticException\") puts the message
+  there while :ex holds only the class. Else ex, else the err text's
+  first line."
   [msgs]
   (let [err (apply str (keep :err msgs))
         header (last (re-seq err-header err))
-        after (when header (subs err (+ (str/last-index-of err header) (count header))))]
+        after (when header (subs err (+ (str/last-index-of err header) (count header))))
+        ex (some :ex msgs)
+        cls (some-> ex (str/replace #"^class " "") str/trim not-empty)
+        named (when (and (not header) cls)
+                (some (fn [l] (when (str/includes? l cls) (str/trim l))) (str/split-lines err)))]
     (or (not-empty (first-line after))
-        (first-line (or (some :ex msgs) err)))))
+        named
+        (first-line (or ex err)))))
 
 (defn eval-result
   "jonquil.eval's result shape for one request's replies: {:status

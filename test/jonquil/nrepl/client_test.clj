@@ -76,3 +76,22 @@
         (try (client/connect port 2000) (catch Throwable _ nil)))
       (is (= before (open-fd-count))
           "50 failed connects leave the open-descriptor count unchanged"))))
+
+(deftest connect-to-reaches-a-named-host-test
+  (let [server (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))
+        port (.getLocalPort server)
+        accepted (future (with-open [s (.accept server)] (.isConnected s)))]
+    (try
+      (let [conn (client/connect-to "localhost" port 5000)]
+        (is (client/open? conn))
+        (is (true? (deref accepted 5000 :timeout)) "the listener on that host accepted it")
+        (client/close! conn))
+      (finally (.close server)))))
+
+(deftest connect-to-an-unknown-host-fails-promptly-test
+  (let [t0 (System/currentTimeMillis)]
+    (try
+      (client/connect-to "no-such-host.invalid" 1667 5000)
+      (is false "expected connect-to to throw")
+      (catch java.io.IOException _
+        (is (< (- (System/currentTimeMillis) t0) 5000) "fails without waiting forever")))))

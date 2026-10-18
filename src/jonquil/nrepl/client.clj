@@ -59,19 +59,26 @@
   ;; seconds) doesn't wedge a caller.
   5000)
 
+(declare connect-to)
+
 (defn connect
-  "Connects to 127.0.0.1:port and starts the reader. Throws
-  java.io.IOException when nothing listens there, and
-  java.net.SocketTimeoutException (a java.io.IOException) when the
-  connect itself doesn't finish within connect-timeout-ms (default
-  default-connect-timeout-ms, overridable with the 2-arity). A failed
-  connect always closes the socket it opened before rethrowing, whatever
-  it throws."
+  "Connects to 127.0.0.1:port and starts the reader: connect-to on the
+  loopback address."
   ([port] (connect port default-connect-timeout-ms))
-  ([port connect-timeout-ms]
+  ([port connect-timeout-ms] (connect-to "127.0.0.1" port connect-timeout-ms)))
+
+(defn connect-to
+  "Connects to host:port and starts the reader. Throws
+  java.io.IOException when nothing listens there (or host doesn't
+  resolve), and java.net.SocketTimeoutException (a java.io.IOException)
+  when the connect itself doesn't finish within connect-timeout-ms. A
+  failed connect always closes the socket it opened before rethrowing,
+  whatever it throws."
+  ([host port] (connect-to host port default-connect-timeout-ms))
+  ([host port connect-timeout-ms]
    (let [sock (java.net.Socket.)]
      (try
-       (.connect sock (java.net.InetSocketAddress. "127.0.0.1" (int port)) (int connect-timeout-ms))
+       (.connect sock (java.net.InetSocketAddress. ^String host (int port)) (int connect-timeout-ms))
        (catch Throwable e
          (try (.close sock) (catch Throwable _ nil))
          (throw e)))

@@ -4,7 +4,8 @@
   With no arguments every namespace in `test-namespaces` runs. With arguments,
   only the named ones do, which is the focused loop during TDD. The exit is
   explicit because a Jolt process with live threads may not exit on its own."
-  (:require [clojure.test :as t]
+  (:require [clojure.string :as str]
+            [clojure.test :as t]
             [jonquil.nrepl.jank-child :as jank-child]))
 
 (def test-namespaces
@@ -65,6 +66,7 @@
     jonquil.gtk.editor-test
     jonquil.inspect.view-test
     jonquil.nrepl.inspect-middleware-test
+    jonquil.nrepl.generic-test
     jonquil.nrepl.stdin-middleware-test
     jonquil.nrepl.middleware-files-test
     jonquil.inspect-test])
@@ -88,13 +90,26 @@
   ;; Run with `bb test:jank`, not `bb test`. JONQUIL_JANK picks the binary.
   '[jonquil.live.jank-live-test])
 
+(def live-bb-namespaces
+  ;; The :nrepl dialect's live suite: starts a real `bb nrepl-server` per
+  ;; test. Run with `bb test:bb`, not `bb test`. Skips without bb on PATH.
+  '[jonquil.live.bb-nrepl-test])
+
+(defn- on-path? [program]
+  (some (fn [d] (.canExecute (java.io.File. ^String d ^String program)))
+        (str/split (or (System/getenv "PATH") "") #":")))
+
 (defn -main [& args]
+  (when (and (= ["--live-bb"] args) (not (on-path? "bb")))
+    (println "test:bb: no bb on PATH; skipping")
+    (System/exit 0))
   (when (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
     (println "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping")
     (System/exit 0))
   (let [nss (cond (= ["--live"] args) live-namespaces
                   (= ["--live-clj"] args) live-clj-namespaces
                   (= ["--live-jank"] args) live-jank-namespaces
+                  (= ["--live-bb"] args) live-bb-namespaces
                   (seq args) (mapv symbol args)
                   :else test-namespaces)]
     (apply require nss)
