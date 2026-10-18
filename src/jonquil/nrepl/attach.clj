@@ -228,7 +228,7 @@
           :else
           (let [r (client/request-sync conn {:op "lookup" :sym sym :session session
                                              :ns (or (:name (cljd/ns-form text)) session-ns cljd/default-ns)}
-                                       (:help-timeout-ms timings))]
+                                       (ev/help-timeout (:help-timeout-ms timings)))]
             (if (vector? r)
               (cljd/doc-result sym r)
               (cljd/no-docs sym cljd/lookup-timeout-doc)))))
@@ -239,6 +239,11 @@
      "No server-side completion: completion uses this buffer and ClojureDart's own forms. Docs come from the fork's lookup."
      "Reset on Run isn't available: hot reload can't unload a namespace, so every Run adds to the app."
      "A load stops at the first form the app's REPL compiler rejects; the app's watcher still compiles the saved file."])
+
+  ev/ServerHelp
+  (offline-candidates [_ prefix text pos extra-context]
+    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+         (catch Throwable _ [])))
 
   connection/Attached
   (connected? [this] (connection/live? this))

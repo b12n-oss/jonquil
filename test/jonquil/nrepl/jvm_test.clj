@@ -702,6 +702,13 @@
         (let [e (make dir)]
           (run e "1" {:run? false})
           (is (= (cljd/no-docs "greet" clj/lookup-timeout-doc) (ev/lookup e "greet" fixture-core-text 0)))))))
+  (testing "a slow lookup: past the 300 ms limit on the GTK thread, found with ask-help!'s longer one"
+    (with-project {:docs {"greet" {"ns" "demo.core" "name" "greet"}} :lookup-ms 600}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= (cljd/no-docs "greet" clj/lookup-timeout-doc) (ev/lookup e "greet" fixture-core-text 0)))
+          (is (= :found (:status (binding [ev/*help-timeout-ms* 3000] (ev/lookup e "greet" fixture-core-text 0)))))))))
   (testing "no lookup op: the no-lookup sentence"
     (with-project {:ops (vec (remove #{"lookup"} fake/jvm-ops))}
       (fn [_srv dir _]
@@ -723,6 +730,22 @@
           (testing "once it's loaded, the buffer's namespace answers"
             (is (= greet (found fixture-core-text))))
           (is (nil? (ev/lookup e "nope" fixture-core-text 0)) "info's bare done is not found"))))))
+
+(deftest server-help-test
+  (with-project {:completions {"gre" [["greet" "demo.core"] ["greetings" "demo.core"]]} :completions-ms 600}
+    (fn [srv dir _]
+      (let [e (make dir)
+            names (fn [cs] (set (map :symbol cs)))]
+        (is (ev/server-help? e))
+        (run e "1" {:run? false})
+        (testing "offline-candidates never asks the server"
+          (let [seen (count (filter #{"completions"} (fake/ops-seen srv)))]
+            (is (not (contains? (names (ev/offline-candidates e "gre" fixture-core-text 0 nil)) "greetings")))
+            (is (= seen (count (filter #{"completions"} (fake/ops-seen srv)))))))
+        (testing "a slow server: complete falls back offline at 300 ms, and has its names with the longer limit"
+          (is (not (contains? (names (ev/complete e "gre" fixture-core-text 0 nil)) "greetings")))
+          (is (contains? (names (binding [ev/*help-timeout-ms* 3000] (ev/complete e "gre" fixture-core-text 0 nil)))
+                         "greetings")))))))
 
 (def full-doc-greet-text
   "The fake's own :full-docs answer for greet -- P3.T2's step 5 text,

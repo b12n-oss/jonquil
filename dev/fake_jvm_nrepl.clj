@@ -281,6 +281,8 @@
           (reply {"status" ["done"]}))
         "completions"
         (let [rows (get (:completions opts) (get m "prefix"))]
+          (when-let [ms (or (some-> (:delays opts) deref (get "completions")) (:completions-ms opts))]
+            (wait! stop-latch closed ms))
           (reply {"completions" (mapv (fn [[c n]] {"candidate" c "ns" n "type" "function"}) rows)
                   "status" ["done"]}))
         "lookup"
@@ -288,7 +290,8 @@
               sid (get m "session")
               sess-ns (get-in @sessions [sid :ns] "user")
               ns (or req-ns sess-ns)]
-          (when-let [ms (:lookup-ms opts)] (wait! stop-latch closed ms))
+          (when-let [ms (or (some-> (:delays opts) deref (get "lookup")) (:lookup-ms opts))]
+            (wait! stop-latch closed ms))
           (if (contains? @loaded ns)
             (reply {"info" (get (:docs opts) (get m "sym") []) "status" ["done"]})
             (reply {"message" (str "No namespace: " ns " found")
@@ -368,6 +371,9 @@
              info}, or {\"info\" []} for an unknown symbol; an unloaded
              \"ns\" answers a lookup-error instead, whatever :docs holds
   :lookup-ms ms: lookup answers after this delay (as the cljd fake's)
+  :completions-ms ms: completions answers after this delay
+  :delays    an atom of {\"completions\" ms \"lookup\" ms}, read on every
+             request, so a test can slow the server down and back
   :full-docs {sym text}: doc under a LOADED \"ns\" answers text, or
              \"No doc for \" + sym; an unloaded \"ns\" gets no reply at all
   :doc-ms    ms: doc answers after this delay (default 0), a loaded ns only

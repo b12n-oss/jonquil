@@ -34,6 +34,10 @@
    rows/row-clj-quick-doc
    rows/row-clj-full-doc
    rows/row-clj-full-doc-escape
+   rows/row-clj-slow-completion
+   rows/row-clj-slow-quick-doc
+   rows/row-clj-slow-quick-doc-moved-on
+   rows/row-clj-slow-jump-in-buffer
    rows/row-clj-inspect-after-run
    rows/row-clj-inspect-in-out
    rows/row-clj-inspect-lost-connection

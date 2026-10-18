@@ -39,9 +39,10 @@
     (assoc state :index (max 0 (min (dec n) (+ (:index state) delta))))))
 
 (defn selected
-  "The selected candidate map."
+  "The selected candidate map, or nil when the list is empty (a popup
+  still waiting for the server's names, waiting-state)."
   [state]
-  (nth (:candidates state) (:index state)))
+  (get (:candidates state) (:index state)))
 
 (defn commit-op
   "The edit that inserts the selected candidate: it replaces the whole word
@@ -67,6 +68,36 @@
   [state snapshot candidates]
   (when (still-valid? state snapshot)
     (open-state (prefix-at snapshot) candidates)))
+
+(defn waiting-state
+  "The popup state while the server's names are still on the way: like
+  open-state, but open with no candidates too, and never :single?, since
+  the server may add more. nil only without a prefix."
+  [p candidates]
+  (when p
+    {:prefix-info p
+     :candidates (vec candidates)
+     :index 0
+     :single? false}))
+
+(defn refine-waiting
+  "refine, for a popup whose server names are still on the way: the
+  waiting-state on the new prefix, or nil (close) when it no longer
+  applies."
+  [state snapshot candidates]
+  (when (still-valid? state snapshot)
+    (waiting-state (prefix-at snapshot) candidates)))
+
+(defn arrive
+  "state with candidates (the server's answer, already merged with the
+  offline names) in place of its list, keeping the selected name selected
+  when it's still listed, else the first. Never :single?: a popup already
+  showing is never committed by an answer that lands later."
+  [state candidates]
+  (let [sel (:symbol (selected state))
+        cs (vec candidates)
+        i (or (first (keep-indexed (fn [i c] (when (= sel (:symbol c)) i)) cs)) 0)]
+    (assoc state :candidates cs :index i :single? false)))
 
 ;; --- the symbol quick doc, jump and rename act on ---------------------------
 

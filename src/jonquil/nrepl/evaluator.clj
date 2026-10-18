@@ -483,7 +483,7 @@
               r (when (and (child/alive? child) (client/open? conn))
                   (client/request-sync conn {:op "completions" :prefix prefix
                                              :ns (str (:prompt-ns @state)) :session session}
-                                       help-timeout-ms))]
+                                       (ev/help-timeout help-timeout-ms)))]
           (ops/merge-candidates prefix offline (if (vector? r) (ops/candidates r) [])))
         (catch Throwable _ offline))))
   (lookup [this sym text pos]
@@ -491,7 +491,7 @@
       (or (let [{:keys [child conn ops]} (runtime this)
                 r (when (and (child/alive? child) (client/open? conn) (contains? ops "lookup"))
                     (client/request-sync conn {:op "lookup" :sym sym :ns (str (:prompt-ns @state))}
-                                         help-timeout-ms))]
+                                         (ev/help-timeout help-timeout-ms)))]
             (when (vector? r) (ops/doc-info sym r)))
           (docs/symbol-doc 'user sym text pos))
       (catch Throwable _ nil)))
@@ -509,6 +509,11 @@
                    (:fetch-error rt)))
         (and (live? this) (not (contains? (:ops rt) "interrupt")))
         (conj "Stop restarts the runtime: this server has no interrupt op."))))
+  ev/ServerHelp
+  (offline-candidates [_ prefix text pos extra-context]
+    (try (docs/candidates 'user prefix text pos extra-context)
+         (catch Throwable _ [])))
+
   ev/Owners
   (release-owner! [_ owner] (session/release-owner-in! state owner) nil)
   ev/Inspector

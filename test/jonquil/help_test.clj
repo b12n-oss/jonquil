@@ -46,6 +46,29 @@
     (is (nil? (help/refine s (snap "(ma (x" 6) cands)) "a different word closes it")
     (is (nil? (help/refine s (snap "(map" 4) [])) "no candidates left closes it")))
 
+(deftest waiting-and-arrive-test
+  (let [p (help/prefix-at (snap "(ma" 3))]
+    (testing "a waiting popup stays open with no names, and is never single"
+      (let [w (help/waiting-state p [])]
+        (is (= [] (:candidates w)))
+        (is (nil? (help/selected w)))
+        (is (false? (:single? (help/waiting-state p [(first cands)]))))
+        (is (nil? (help/waiting-state nil cands)))))
+    (testing "refine-waiting keeps it open on an empty list, and closes when the word ends"
+      (let [w (help/waiting-state p [])]
+        (is (= "map" (:prefix (:prefix-info (help/refine-waiting w (snap "(map" 4) [])))))
+        (is (nil? (help/refine-waiting w (snap "(ma " 4) [])))))
+    (testing "the server's names arrive: the selected name stays selected"
+      (let [s (help/move (help/open-state p cands) 1)
+            a (help/arrive s [{:symbol "make-array"} {:symbol "map"} {:symbol "mapv"} {:symbol "max"}])]
+        (is (= "mapv" (:symbol (help/selected a))))
+        (is (false? (:single? (help/arrive s [{:symbol "mapv"}]))) "a late single name isn't committed")))
+    (testing "a selected name the answer doesn't list: the first is selected"
+      (let [a (help/arrive (help/open-state p [{:symbol "mine"}]) [{:symbol "map"} {:symbol "max"}])]
+        (is (= "map" (:symbol (help/selected a))))))
+    (testing "into an empty waiting popup"
+      (is (= "map" (:symbol (help/selected (help/arrive (help/waiting-state p []) cands))))))))
+
 (deftest target-symbol-test
   (is (= "greet" (help/target-symbol (snap "(greet \"x\")" 3))))
   (is (= "greet" (help/target-symbol (snap "(greet \"x\")" 0 1 6))))

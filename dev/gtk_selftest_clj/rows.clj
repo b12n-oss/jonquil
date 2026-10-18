@@ -13,6 +13,7 @@
             [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -51,6 +52,10 @@
 ;; The fixture project and its fake server, stashed so rows and
 ;; after-close-checks! (which runs after main/start! returns) reach them.
 (defonce ^:private fixture* (atom nil))
+
+;; The fake's per-op delays (fake :delays), changed by the slow-server rows
+;; and set back to {} after each.
+(defonce ^:private slow-server (atom {}))
 
 ;; P3.T2 step 5: the fake's own :full-docs answer for greet, referenced by
 ;; row-clj-full-doc below -- the same text test/jonquil/nrepl/jvm_test.clj's
@@ -130,7 +135,8 @@
       (write-jar! jar {"clojure/core.clj" lib-text})
       (let [srv (fake/start!
                  {:slow {"(slow)" 5000}
-                  :completions {"gre" [["greet" "demo.core"]]}
+                  :completions {"gre" [["greet" "demo.core"] ["greetings" "demo.core"]]}
+                  :delays slow-server
                   :loaded ["demo.util" "other.place" "clojure.core"]
                   :docs {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello."
                                   "arglists-str" "([who])" "file" (.getCanonicalPath f) "line" 4}
@@ -610,3 +616,99 @@
                    {:lock (when (.exists lock) (slurp lock))})
     (fake/stop! server)
     (doseq [x (reverse (file-seq (io/file dir)))] (.delete ^java.io.File x))))
+
+;; --- a slow server (async help) ---------------------------------------------
+
+(def ^:private SLOW-MS
+  ;; past the 300 ms limit a server evaluator has on the GTK thread, and
+  ;; well inside ev/async-help-timeout-ms.
+  800)
+
+(def ^:private QUICK-HANDLER-MS
+  ;; estimate: ev/help-grace-ms (25) plus a popover render, with room for
+  ;; a busy machine; a blocking handler would take SLOW-MS or the 300 ms
+  ;; limit.
+  200)
+
+(defn- timed [f]
+  (let [t0 (System/nanoTime)] (f) (/ (- (System/nanoTime) t0) 1e6)))
+
+(defn row-clj-slow-completion
+  "Ctrl+Space with a server whose completions answer after SLOW-MS: the
+  handler returns at once with the popup open, and greetings, a name only
+  the server lists, joins the list when the answer lands."
+  [ui]
+  (go-row :clj-slow-completion support/check
+    (reset! slow-server {"completions" SLOW-MS})
+    (let [c (:completion ui)
+          ms (on-gtk (let [ed (:editor ui)]
+                       (editor/set-text! ed "(gre")
+                       (support/place-cursor! (:buf ed) 4)
+                       (timed (:complete!* ui))))
+          open-at-once (on-gtk (popover/open? c))
+          names (fn [] (set (map :symbol (:candidates (completion/state c)))))
+          arrived (await-until 3000 20 #(contains? (names) "greetings"))]
+      (reset! slow-server {})
+      (on-gtk (support/check :clj-slow-completion
+                             (and (< ms QUICK-HANDLER-MS) open-at-once arrived)
+                             {:handler-ms ms :open-at-once open-at-once :arrived arrived :names (names)})
+              (completion/close! c)))))
+
+(defn row-clj-slow-quick-doc
+  "Ctrl+Q on greet with a server whose lookup answers after SLOW-MS: the
+  handler returns at once saying Looking up, then the popover shows
+  greet's doc and the status goes back to Ready."
+  [ui]
+  (go-row :clj-slow-quick-doc support/check
+    (reset! slow-server {"lookup" SLOW-MS})
+    (let [hp (:help-popover ui)
+          ms (on-gtk (let [ed (:editor ui)]
+                       (editor/set-text! ed "(greet \"x\")")
+                       (support/place-cursor! (:buf ed) 2)
+                       (timed (:quick-doc!* ui))))
+          status-at-once (on-gtk (g/label-text (:status-label ui)))
+          shown (await-until 3000 20 #(and (popover/open? hp)
+                                           (str/includes? (help-popover/quick-doc-text hp) "Says hello.")))
+          status (on-gtk (g/label-text (:status-label ui)))]
+      (reset! slow-server {})
+      (on-gtk (support/check :clj-slow-quick-doc
+                             (and (< ms QUICK-HANDLER-MS) (= "Looking up greet..." status-at-once)
+                                  shown (= "Ready" status))
+                             {:handler-ms ms :status-at-once status-at-once :shown shown :status status})
+              (popover/hide! hp)))))
+
+(defn row-clj-slow-quick-doc-moved-on
+  "The same slow quick doc, but the caret moves off greet before the
+  answer lands: nothing is shown, and the status goes back to Ready."
+  [ui]
+  (go-row :clj-slow-quick-doc-moved-on support/check
+    (reset! slow-server {"lookup" SLOW-MS})
+    (let [hp (:help-popover ui)]
+      (on-gtk (let [ed (:editor ui)]
+                (editor/set-text! ed "(greet \"x\")")
+                (support/place-cursor! (:buf ed) 2)
+                ((:quick-doc!* ui))
+                (support/place-cursor! (:buf ed) 8)))
+      (let [ready (await-until 3000 20 #(= "Ready" (g/label-text (:status-label ui))))
+            open (on-gtk (popover/open? hp))]
+        (reset! slow-server {})
+        (on-gtk (support/check :clj-slow-quick-doc-moved-on (and ready (not open))
+                               {:ready ready :open open})
+                (popover/hide! hp))))))
+
+(defn row-clj-slow-jump-in-buffer
+  "F12 on a name defined in the buffer, with a slow lookup: the buffer is
+  checked first, so it jumps at once without asking the server."
+  [ui]
+  (go-row :clj-slow-jump-in-buffer support/check
+    (reset! slow-server {"lookup" SLOW-MS})
+    (let [ms (on-gtk (let [ed (:editor ui)]
+                       (editor/set-text! ed "(defn foo [] 1)\n(foo)")
+                       (support/place-cursor! (:buf ed) 18)
+                       (timed (:jump!* ui))))
+          r (on-gtk {:status (g/label-text (:status-label ui))
+                     :caret (:caret (editor/snapshot (:editor ui)))})]
+      (reset! slow-server {})
+      (on-gtk (support/check :clj-slow-jump-in-buffer
+                             (and (< ms QUICK-HANDLER-MS) (= "Jumped to foo." (:status r)) (= 6 (:caret r)))
+                             (assoc r :handler-ms ms))))))

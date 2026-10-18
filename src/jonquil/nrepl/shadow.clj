@@ -254,7 +254,7 @@
             (let [r (client/request-sync conn {:op "complete" :prefix prefix
                                                :ns (clj/help-ns text (or session-ns "cljs.user"))
                                                :session session}
-                                         (:help-timeout-ms timings))]
+                                         (ev/help-timeout (:help-timeout-ms timings)))]
               (if (vector? r)
                 (ops/merge-candidates prefix offline (ops/candidates r))
                 offline))
@@ -268,7 +268,7 @@
           (not (client/open? conn)) (cljd/no-docs sym cljd/not-attached-doc)
           (not (contains? ops "eldoc")) (cljd/no-docs sym no-eldoc-doc)
           :else
-          (let [r (eldoc! s sym text (:help-timeout-ms timings))]
+          (let [r (eldoc! s sym text (ev/help-timeout (:help-timeout-ms timings)))]
             (cond
               (not (vector? r)) (cljd/no-docs sym cljd/lookup-timeout-doc)
               ((ops/statuses r) ops/disconnected) (cljd/no-docs sym cljd/not-attached-doc)
@@ -279,6 +279,11 @@
      "No stdin."
      "Reset on Run isn't available: every Run adds to the running build."
      "Run needs the build loaded in a JS runtime (open the app, or run the node script)."])
+
+  ev/ServerHelp
+  (offline-candidates [_ prefix text pos extra-context]
+    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+         (catch Throwable _ [])))
 
   ev/FullDoc
   (full-doc [_ sym text on-result]
