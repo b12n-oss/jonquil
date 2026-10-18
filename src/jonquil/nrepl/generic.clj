@@ -99,7 +99,7 @@
   ;; for good. Basilisp 0.5.1's reads the server process's own stdin: a line
   ;; typed there, "" at once when that stdin is closed, and it waits when
   ;; it's open with nothing written.
-  "; This server has no stdin op, so Jonquil can't send this read any input. On babashka it waits until Stop, which disconnects; on Basilisp it reads the server's own stdin, so type the line in the terminal you started the server in.\n")
+  "; This server has no stdin op, so Jonquil can't answer this read: babashka's waits until Stop, which disconnects, and Basilisp's reads the terminal you started the server in.\n")
 
 (defn with-prefix
   "The candidates whose :symbol starts with prefix. babashka's complete is

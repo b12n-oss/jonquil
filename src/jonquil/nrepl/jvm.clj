@@ -303,6 +303,16 @@
     (cond
       (not (vector? r1)) {:status :timeout}
       ((ops/statuses r1) ops/disconnected) {:status :not-attached}
+      ;; info answers a namespace it doesn't know with a bare done, no
+      ;; error (Basilisp 0.5.1, measured), so a miss there tries the prompt
+      ;; namespace once, and is a plain not-found when that misses too.
+      (and (= op "info") (not (ops/doc-info sym r1)) (not= ns1 (str prompt-ns)))
+      (let [r2 (lookup! (str prompt-ns))]
+        (cond
+          (not (vector? r2)) {:status :timeout}
+          ((ops/statuses r2) ops/disconnected) {:status :not-attached}
+          (ops/doc-info sym r2) {:status :retried :ns (str prompt-ns) :reply r2}
+          :else {:status :ok :ns ns1 :reply r1}))
       (not (ns-errored? r1)) {:status :ok :ns ns1 :reply r1}
       :else
       (let [ns2 (str prompt-ns)]

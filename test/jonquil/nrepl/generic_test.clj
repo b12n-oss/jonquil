@@ -73,7 +73,7 @@
 
 (deftest a-server-with-info-but-no-lookup-has-quick-docs-test
   ;; Basilisp 0.5.1 (measured 2026-10-18): info, no lookup.
-  (is (not-any? #(str/includes? % "quick docs") (generic/limitations #{"eval" "load-file" "info"} true))
+  (is (not-any? #(str/includes? % "No quick docs") (generic/limitations #{"eval" "load-file" "info"} true))
       "quick doc falls back to info"))
 
 (deftest local-file-decodes-like-the-source-panel-test

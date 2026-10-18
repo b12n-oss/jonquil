@@ -233,7 +233,28 @@
     (is (= "Error: ZeroDivisionError: Fraction(1, 0)"
            (:error-text (ops/eval-result [{:err "message: hello\n"}
                                           {:ex basilisp-traceback :status ["eval-error"]}
-                                          {:status ["done"]}] false))))))
+                                          {:status ["done"]}] false)))))
+  (testing "a program's own stderr shaped like a compiler block, then a runtime error"
+    (is (= "Error: ZeroDivisionError: Fraction(1, 0)"
+           (:error-text (ops/eval-result [{:err "  exception: <class 'X'>\n    message: hello\n"}
+                                          {:err basilisp-traceback}
+                                          {:ex basilisp-traceback :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "a message on more than one line: its first line, not its last"
+    (let [tb (str "Traceback (most recent call last):\n"
+                  "  File \"<nREPL Input>\", line 1, in <module>\n"
+                  "basilisp.lang.exception.ExceptionInfo: boom {:a 1,\n"
+                  " :b 2}\n")]
+      (is (= "Error: basilisp.lang.exception.ExceptionInfo: boom {:a 1,"
+             (:error-text (ops/eval-result [{:err tb} {:ex tb :status ["eval-error"]} {:status ["done"]}] false))))))
+  (testing "a SyntaxError's caret lines come before its exception line"
+    (let [tb (str "Traceback (most recent call last):\n"
+                  "  File \"x.py\", line 1\n"
+                  "    (+ 1\n"
+                  "        ^\n"
+                  "SyntaxError: invalid syntax\n")]
+      (is (= "Error: SyntaxError: invalid syntax"
+             (:error-text (ops/eval-result [{:ex tb :status ["eval-error"]} {:status ["done"]}] false)))))))
 
 (deftest doc-info-blank-file-test
   (is (not (contains? (ops/doc-info "map" [{:name "map" :ns "clojure.core" :file "" :status ["done"]}]) :file))

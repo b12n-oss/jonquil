@@ -1,6 +1,7 @@
 (ns jonquil.live.basilisp-nrepl-test
   "The nREPL dialect against a real Basilisp nREPL server, which each test
-  starts in its own temp project and stops again. Run with
+  starts in its own temp project and stops again. Measured against
+  Basilisp 0.5.1 (2026-10-18). Run with
   `bb test:basilisp`; it skips when there's no basilisp (JONQUIL_BASILISP,
   else basilisp on PATH)."
   (:require [clojure.java.io :as io]
@@ -79,9 +80,9 @@
           (testing "a compiler error: the message line"
             (is (= "Error: unable to resolve symbol 'undefined-thing' in this context"
                    (:error-text (first (run e "(undefined-thing 1)" false nil))))))
-          (testing "ex-info"
-            (is (str/includes? (str (:error-text (first (run e "(throw (ex-info \"boom\" {:a 1}))" false nil))))
-                               "boom")))
+          (testing "ex-info: the exception line, message and data"
+            (is (= "Error: basilisp.lang.exception.ExceptionInfo: boom {:a 1}"
+                   (:error-text (first (run e "(throw (ex-info \"boom\" {:a 1}))" false nil))))))
           (finally (ev/stop! e)))))))
 
 (deftest help-test
@@ -95,6 +96,8 @@
               (is (str/includes? (str (:doc d)) "lazy sequence"))
               (is (str/ends-with? (str (:file d)) "basilisp/core.lpy") (pr-str (dissoc d :doc)))
               (is (:location d))))
+          (testing "a buffer namespace the server hasn't loaded: info finds nothing there, so the prompt's answers"
+            (is (str/includes? (str (:doc (ev/lookup e "map" "(ns not.loaded)\n(map" 18))) "lazy sequence")))
           (testing "completion through complete, prefix only"
             (let [names (map :symbol (ev/complete e "map" "(map" 4 nil))]
               (is (some #{"mapv"} names))
@@ -117,7 +120,7 @@
         (try
           (run e "(+ 1 1)" false nil)
           (let [[r out] (run e "(read-line)" false nil)]
-            (is (some #(str/includes? (second %) "on Basilisp it reads the server's own stdin") out) "said first")
+            (is (some #(str/includes? (second %) "Basilisp's reads the terminal you started the server in") out) "said first")
             (is (= {:status :ok :printed "\"\""} (select-keys r [:status :printed]))))
           (finally (ev/stop! e)))))))
 
