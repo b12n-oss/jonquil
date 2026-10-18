@@ -123,10 +123,13 @@ question, waits, and prints the answer back once you press Return.
 Cmd/Ctrl+D sends end-of-input while a program is waiting this way, the
 same signal `read-line` would see from a closed pipe on the command line.
 
-This works the same with Jolt in process and out of process. Out of
-process, Jonquil's own nREPL middleware in the Jolt child asks for each
-line and Stop frees a read that's waiting (see
-[Running Jolt out of process](#running-jolt-out-of-process)).
+This works with Jolt in process and out of process. Out of process,
+Jonquil's own nREPL middleware in the Jolt child asks for each line, a
+`print`ed prompt shows before the wait, and Stop frees a read that's
+waiting (see [Running Jolt out of process](#running-jolt-out-of-process)).
+One difference: in process, Cmd/Ctrl+D closes input for the rest of the
+run; out of process it ends only the read that's waiting, and the next
+`read-line` waits again, as JVM nREPL does.
 
 One thing worth knowing: whatever you've typed at the prompt but not yet
 sent stays there after the program finishes. If the program ended while
