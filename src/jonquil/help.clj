@@ -55,6 +55,16 @@
      :caret (+ start (count sym))
      :sel nil}))
 
+(defn candidate-label
+  "The word a completion row shows beside the name: \"buffer\" for a name
+  the buffer itself defines (buffer-defs, syntax/find-buffer-definitions),
+  which used to read \"user\" before the first Run as if it lived in the
+  user namespace (P4 parked item); else the category's own name."
+  [{:keys [symbol category]} buffer-defs]
+  (if (and (= :user category) (contains? buffer-defs symbol))
+    "buffer"
+    (name category)))
+
 (defn still-valid?
   "Whether an open popup should stay open for the new snapshot: the caret
   is still in a word that starts where the popup's prefix started."

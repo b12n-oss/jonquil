@@ -74,6 +74,9 @@
   [:pointer :int] :void)
 (ffi/defcfn gtk-scrolled-window-set-propagate-natural-height "gtk_scrolled_window_set_propagate_natural_height"
   [:pointer :int] :void)
+(ffi/defcfn gtk-label-set-max-width-chars "gtk_label_set_max_width_chars" [:pointer :int] :void)
+(ffi/defcfn gtk-scrolled-window-set-propagate-natural-width "gtk_scrolled_window_set_propagate_natural_width"
+  [:pointer :int] :void)
 ;; GtkPolicyType: gtkscrolledwindow.h:85-88 (ALWAYS=0, AUTOMATIC=1, NEVER=2,
 ;; EXTERNAL=3).
 (def POLICY-NEVER 2)
@@ -651,6 +654,8 @@
 ;; -- GTK4's GtkBox has no per-child "expand" packing option of its own, a
 ;; child's own hexpand is what it honours.
 (ffi/defcfn gtk-widget-set-hexpand "gtk_widget_set_hexpand" [:pointer :int] :void)
+(ffi/defcfn gtk-widget-set-margin-start "gtk_widget_set_margin_start" [:pointer :int] :void)
+(ffi/defcfn gtk-widget-set-margin-end "gtk_widget_set_margin_end" [:pointer :int] :void)
 
 ;; g_object_new_with_properties: gobject/gobject.h:436-439 (probe 3;
 ;; jonquil.gtk.ffi didn't have this yet, spike.p3-ffi did). The fixed-arity
@@ -973,6 +978,7 @@
 (ffi/defcfn gtk-list-box-append "gtk_list_box_append" [:pointer :pointer] :void)
 (ffi/defcfn gtk-list-box-remove-all "gtk_list_box_remove_all" [:pointer] :void)
 (ffi/defcfn gtk-list-box-get-row-at-index "gtk_list_box_get_row_at_index" [:pointer :int] :pointer)
+(ffi/defcfn gtk-list-box-row-get-child "gtk_list_box_row_get_child" [:pointer] :pointer)
 (ffi/defcfn gtk-list-box-select-row "gtk_list_box_select_row" [:pointer :pointer] :void)
 (ffi/defcfn gtk-list-box-set-selection-mode "gtk_list_box_set_selection_mode" [:pointer :int] :void)
 ;; GtkSelectionMode: gtkenums.h:557-559 (NONE=0, SINGLE=1, BROWSE=2).

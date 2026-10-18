@@ -444,3 +444,24 @@
                 (support/check :jump-shadowed-param
                                (and (= 1 handled) (= 19 caret))
                                {:handled handled :caret caret}))))))
+
+(defn row-quick-doc-fits-its-text
+  "The quick-doc popover sizes its width to the text, up to the 80-column
+  maximum (P4 parked item): a one-line doc gets a narrow popover, a long
+  one the full width. Measured on the scroller's allocated width once each
+  is showing."
+  [ui]
+  (go-row :quick-doc-fits-its-text support/check
+    (let [hp (:help-popover ui)
+          width (fn [] (g/gtk-widget-get-width (:scroll hp)))
+          shown-width (fn [text]
+                        (on-gtk (help-popover/show-doc! hp text))
+                        (await-until 2000 20 #(pos? (width)))
+                        (let [w (on-gtk (width))]
+                          (on-gtk (popover/hide! hp))
+                          w))
+          short-w (shown-width "user/f\n([])\nShort.")
+          long-w (shown-width (str "user/g\n([x])\n" (apply str (repeat 30 "word "))))]
+      (on-gtk (support/check :quick-doc-fits-its-text
+                             (and (pos? short-w) (< (* 2 short-w) long-w) (<= long-w 700))
+                             {:short short-w :long long-w})))))

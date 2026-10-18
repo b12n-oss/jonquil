@@ -32,6 +32,11 @@
    {:name :solarized :dark? false
     :background "#fdf6e3" :text "#657b83" :caret "#268bd2"
     :selection "#eee8d5" :find-highlight "#f6e3a1" :red "#dc322f"
+    ;; The completion list's selected row: base2 (:selection) is 1.14:1
+    ;; against base3, too faint to see; base1 under base03 text is 2.48:1
+    ;; against the background and 5.61:1 for the text (WCAG ratios,
+    ;; computed 2026-10-18). Other themes use :selection, 1.36-2.15:1.
+    :row-selected {:background "#93a1a1" :text "#002b36"}
     :tokens {:comment "#93a1a1" :string "#2aa198" :char "#2aa198"
              :regex "#b58900" :keyword "#859900" :special-form "#859900"
              :number "#d33682" :builtin "#cb4b16" :constant "#859900"
@@ -135,8 +140,8 @@
        "color: " (:text t) "; "
        "font-size: " px "px; } "
        "popover.jonquil-popover row:selected { "
-       "background-color: " (:selection t) "; "
-       "color: " (:text t) "; } "
+       "background-color: " (get-in t [:row-selected :background] (:selection t)) "; "
+       "color: " (get-in t [:row-selected :text] (:text t)) "; } "
        "popover.jonquil-popover label.jonquil-doc { "
        "font-family: monospace; "
        "font-size: " px "px; } "

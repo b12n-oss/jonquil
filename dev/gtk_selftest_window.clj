@@ -163,6 +163,7 @@
    popovers-quickdoc/row-window-escape-closes-popover
    popovers-quickdoc/row-popover-dark-colours
    popovers-quickdoc/row-quick-doc-core
+   popovers-quickdoc/row-quick-doc-fits-its-text
    popovers-quickdoc/row-quick-doc-run-defined
    popovers-quickdoc/row-quick-doc-after-reset
    popovers-quickdoc/row-quick-doc-closes
@@ -176,6 +177,7 @@
    popovers-quickdoc/row-jump-none
    popovers-quickdoc/row-jump-shadowed-param
    completion/row-completion-opens
+   completion/row-completion-sized-to-rows-and-labelled
    completion/row-completion-single-inserts
    completion/row-completion-no-prefix
    completion/row-completion-navigate-commit

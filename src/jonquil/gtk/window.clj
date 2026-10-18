@@ -820,6 +820,11 @@
 ;; inspector showing?" is still (:root pane)'s own visible flag. These sit
 ;; above apply-selection!, which hides the slot on a runtime switch.
 
+(def ^:private STATUS-MARGIN
+  ;; px at each end of the status bar: GNOME's usual 6-12 px gutter, the
+  ;; status box's own child spacing (6) plus a little.
+  8)
+
 (defn- show-right-panel!
   "Shows which (:inspector or :source) in the slot and hides the other.
   When the slot was hidden, also sizes h-paned so the panel claims about
@@ -3350,6 +3355,10 @@
     (g/gtk-box-append status-box status-label)
     (g/gtk-box-append status-box dialect-label)
     (g/gtk-box-append status-box line-col-label)
+    ;; Room at both ends, so "Ln N, Col N" doesn't touch the window's right
+    ;; edge (P4 parked item) and the left matches it.
+    (g/gtk-widget-set-margin-start status-box STATUS-MARGIN)
+    (g/gtk-widget-set-margin-end status-box STATUS-MARGIN)
     (g/gtk-box-append vbox status-box)
     (g/gtk-window-set-child win vbox)
     (g/gtk-window-set-default-size win 900 700)

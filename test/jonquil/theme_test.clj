@@ -90,3 +90,18 @@
 (deftest code-css-popover-test
   (let [css (theme/code-css (theme/theme :navy) 14)]
     (is (str/includes? css "popover.jonquil-popover row:selected { background-color: #2e3250;"))))
+
+(deftest selected-row-is-visible-test
+  ;; The completion list's selected row against the popover background, and
+  ;; its text on it. Solarized's :selection was 1.14:1 (P4 parked item), so
+  ;; it has its own :row-selected; floors are the measured minimum of the
+  ;; others (navy 1.36) and the text floor readable-test uses.
+  (doseq [k theme/theme-names
+          :let [t (theme/theme k)
+                row (get-in t [:row-selected :background] (:selection t))
+                text (get-in t [:row-selected :text] (:text t))]]
+    (testing (name k)
+      (is (<= 1.35 (contrast row (:background t))))
+      (is (<= 3.4 (contrast text row)))))
+  (is (str/includes? (theme/code-css (theme/theme :solarized) 14)
+                     "popover.jonquil-popover row:selected { background-color: #93a1a1; color: #002b36;")))

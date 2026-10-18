@@ -96,7 +96,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]
-            [jonquil.help :as help]))
+            [jonquil.help :as help]
+            [jonquil.syntax :as syntax]))
 
 (def ^:private LIST-WIDTH 320)
 (def ^:private LIST-HEIGHT 160)
@@ -171,7 +172,12 @@
         box (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         pp (popover/make-popover view {:autohide? false :position position})]
     (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
-    (g/gtk-widget-set-size-request list-scroll LIST-WIDTH LIST-HEIGHT)
+    ;; Sized to its rows up to LIST-HEIGHT (eight rows), scrolling beyond,
+    ;; so two candidates don't leave a six-row gap above the doc preview
+    ;; (P4 parked item).
+    (g/gtk-widget-set-size-request list-scroll LIST-WIDTH -1)
+    (g/gtk-scrolled-window-set-propagate-natural-height list-scroll 1)
+    (g/gtk-scrolled-window-set-max-content-height list-scroll LIST-HEIGHT)
     (g/gtk-scrolled-window-set-child list-scroll list-box)
     (g/gtk-box-append box list-scroll)
     (g/gtk-box-append box doc-scroll)
@@ -278,10 +284,11 @@
   child when the row is wider than the label's own natural size, which is
   every row here (list-box is LIST-WIDTH wide, a candidate name is not)."
   [c st]
-  (let [list-box (:list-box c)]
+  (let [list-box (:list-box c)
+        defs (syntax/find-buffer-definitions (or (:text st) ""))]
     (g/gtk-list-box-remove-all list-box)
-    (doseq [{:keys [symbol category]} (:candidates st)]
-      (let [row-label (g/gtk-label-new (str symbol "  " (name category)))]
+    (doseq [{:keys [symbol] :as cand} (:candidates st)]
+      (let [row-label (g/gtk-label-new (str symbol "  " (help/candidate-label cand defs)))]
         (g/gtk-label-set-xalign row-label 0.0)
         (g/gtk-widget-set-halign row-label g/ALIGN-START)
         (g/gtk-list-box-append list-box row-label)))
