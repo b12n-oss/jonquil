@@ -181,6 +181,17 @@
                                         {:ex "class java.lang.ArithmeticException"
                                          :root-ex "class java.lang.ArithmeticException" :status ["eval-error"]}
                                         {:status ["done"]}] false))))
+  (testing "earlier stderr that names the class isn't taken"
+    (is (= "Error: clojure.lang.ExceptionInfo: boom user REPL:1:1"
+           (:error-text (ops/eval-result [{:err "retrying after clojure.lang.ExceptionInfo\n"}
+                                          {:err "clojure.lang.ExceptionInfo: boom user REPL:1:1\n"}
+                                          {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "an :ex that is a message, not a class, is taken as is"
+    (is (= "Error: EOF while reading"
+           (:error-text (ops/eval-result [{:err "something about EOF while reading\n"}
+                                          {:ex "EOF while reading" :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
   (testing "the program's own stderr before the error isn't taken"
     (is (= "Error: clojure.lang.ExceptionInfo: boom user REPL:1:1"
            (:error-text (ops/eval-result [{:err "a warning first\n"}

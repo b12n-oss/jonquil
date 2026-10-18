@@ -98,20 +98,23 @@
 (defn- error-message
   "An eval-error's message: the first non-blank line after the last err->msg
   header in the err text (the last, so the program's own *err* output
-  before it isn't taken). With no header, the err line that names :ex's
-  exception class, since a server that doesn't use clojure.main's format
-  (babashka: err \"java.lang.ArithmeticException: Divide by zero user
-  REPL:1:1\", ex \"class java.lang.ArithmeticException\") puts the message
-  there while :ex holds only the class. Else ex, else the err text's
-  first line."
+  before it isn't taken). With no header and an :ex that is a class
+  (\"class X\"), the LAST err line naming that class, since a server that
+  doesn't use clojure.main's format (babashka: err
+  \"java.lang.ArithmeticException: Divide by zero user REPL:1:1\", ex
+  \"class java.lang.ArithmeticException\") puts the message there while
+  :ex holds only the class; the last, so the program's own earlier stderr
+  that happens to name the class isn't taken. Else ex, else the err
+  text's first line."
   [msgs]
   (let [err (apply str (keep :err msgs))
         header (last (re-seq err-header err))
         after (when header (subs err (+ (str/last-index-of err header) (count header))))
         ex (some :ex msgs)
-        cls (some-> ex (str/replace #"^class " "") str/trim not-empty)
+        cls (when (and ex (str/starts-with? ex "class "))
+              (some-> ex (subs (count "class ")) str/trim not-empty))
         named (when (and (not header) cls)
-                (some (fn [l] (when (str/includes? l cls) (str/trim l))) (str/split-lines err)))]
+                (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))]
     (or (not-empty (first-line after))
         named
         (first-line (or ex err)))))

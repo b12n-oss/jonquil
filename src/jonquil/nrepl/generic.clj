@@ -4,13 +4,14 @@
   record; this namespace is what differs for any server that answers
   nREPL rather than a JVM's.
 
-  Measured against babashka's server (2026-10-18): it writes no port file;
-  it offers clone close complete describe eldoc eval info load-file lookup
-  ls-sessions ns-list, so no interrupt, no stdin and no builtin
-  completions; its complete is fuzzy; lookup's :file is empty; a read
+  Measured against babashka's server (2026-10-18, v1.13.220): it writes no
+  port file; it has no interrupt and no stdin op; its completion is fuzzy,
+  through complete (and through completions, which one connection listed
+  and another didn't); lookup's :file is empty; a read
   blocks the session for good, and a new connection clones a fresh one."
   (:require [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [jonquil.source :as source]))
 
 (def default-host "127.0.0.1")
 
@@ -28,7 +29,11 @@
   (when-let [dir (:project-dir selection)]
     (io/file dir (or (:port-file (:nrepl selection)) (:port-file (:profile selection))))))
 
-(defn- at [host port] (str host ":" port))
+(defn- at
+  "host:port as one writes it, an IPv6 host in brackets."
+  [host port]
+  (str (if (and (str/includes? host ":") (not (str/starts-with? host "["))) (str "[" host "]") host)
+       ":" port))
 
 (defn connect-policy
   "jonquil.nrepl.connection/connect!'s policy for selection: the endpoint
@@ -73,13 +78,15 @@
   path, or a file: URL. Any server's :file is kept only then. babashka,
   after a load-file, answers clojure.core/map with
   file:<its working dir>/clojure/core.clj, which doesn't exist (measured
-  2026-10-18), and a remote server's paths are its own disk's. A jar: URL
-  is kept: jonquil.source reads those itself."
+  2026-10-18), and a remote server's paths are its own disk's. Resolved
+  the way the source panel resolves it (jonquil.source/location: a path,
+  a percent-encoded file: URL, or a jar: URL), then the file (or the jar)
+  must exist here."
   [file]
   (boolean
    (when-not (str/blank? file)
-     (or (str/starts-with? file "jar:")
-         (.isFile (io/file (str/replace-first file #"^file:" "")))))))
+     (when-let [{:keys [path jar]} (source/location {:file file} {})]
+       (.isFile (io/file (or path jar)))))))
 
 (def stdin-notice
   "; This server has no stdin: a read waits until Stop, which disconnects.\n")

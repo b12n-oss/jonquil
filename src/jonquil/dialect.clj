@@ -252,8 +252,10 @@
     (not (map? v)) [nil [".jonquil.edn :nrepl should be a map, like {:port 1667} or {:host \"box\" :port 1667}"]]
     :else
     (let [{:keys [host port port-file]} v
-          checks [[:host host (and (string? host) (not (str/blank? host)))
-                   ":host should be a host name, like \"localhost\""]
+          checks [[:host host (and (string? host) (not (str/blank? host))
+                                   ;; a port goes in :port; an IPv6 literal is fine
+                                   (or (not (str/includes? host ":")) (>= (count (re-seq #":" host)) 2)))
+                   ":host should be a host name or address without a port, like \"localhost\" (the port goes in :port)"]
                   [:port port (and (integer? port) (<= 1 port 65535))
                    ":port should be a port number from 1 to 65535"]
                   [:port-file port-file (and (string? port-file) (not (str/blank? port-file))

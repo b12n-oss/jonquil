@@ -64,7 +64,7 @@
       (is (not (generic/local-file? "file:/no/such/dir/clojure/core.clj")) "babashka's made-up path")
       (is (not (generic/local-file? "")))
       (is (not (generic/local-file? nil)))
-      (is (generic/local-file? "jar:file:/x.jar!/clojure/core.clj") "a jar URL is left to jonquil.source")
+      (is (not (generic/local-file? "jar:file:/no/such.jar!/clojure/core.clj")) "a jar that isn't here")
       (finally (.delete f)))))
 
 (deftest label-test
@@ -74,3 +74,20 @@
 (deftest a-server-with-info-but-no-lookup-has-no-quick-docs-test
   (is (some #(str/includes? % "lookup op") (generic/limitations #{"eval" "load-file" "info"} true))
       "quick doc sends lookup, so info alone doesn't give docs"))
+
+(deftest local-file-decodes-like-the-source-panel-test
+  (let [dir (java.io.File. (System/getProperty "java.io.tmpdir") (str "jonquil generic " (System/nanoTime)))
+        f (java.io.File. dir "a.clj")]
+    (.mkdirs dir)
+    (spit f "(ns a)")
+    (try
+      (is (generic/local-file? (str (.toURI f))) "a percent-encoded file: URL of a real file")
+      (finally (.delete f) (.delete dir)))))
+
+(deftest hosts-test
+  (let [w (fn [h] (:warnings (dialect/parse-config (str "{:nrepl {:host " (pr-str h) " :port 1}}") nil)))]
+    (is (= [] (w "box")))
+    (is (= [] (w "::1")) "an IPv6 literal")
+    (is (= 1 (count (w "box:1667"))) "a port in the host"))
+  (let [m (:messages (generic/connect-policy {:profile dialect/nrepl :project-dir "/p" :nrepl {:host "::1" :port 1}}))]
+    (is (= "; Connecting to the nREPL server at [::1]:1..." ((:connecting m) 1)))))

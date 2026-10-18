@@ -468,13 +468,18 @@
   ;; on the GTK thread. Any throw, a timeout or no connection falls back
   ;; to offline alone. Never docs/candidates, which would list Jolt-
   ;; process namespaces instead of the attached server's own.
-  (complete [_ prefix text pos extra-context]
+  (complete [this prefix text pos extra-context]
     (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
                        (catch Throwable _ []))]
       (try
-        ;; "completions" (nREPL's own), else "complete" (cider's: babashka
-        ;; offers only that, measured), same reply shape; complete can be
-        ;; fuzzy, so only names with the prefix are merged.
+        ;; "completions" (nREPL's own), else "complete" (cider's), same
+        ;; reply shape. For the nREPL dialect only names with the prefix are
+        ;; merged: babashka's answers are fuzzy from either op, and it
+        ;; doesn't always offer the same ones (measured, both v1.13.220: the
+        ;; spike's describe listed only complete, bb test:bb's connection
+        ;; also lists completions; why isn't known). JVM
+        ;; Clojure keeps every name, compliment's c.s/jo ->
+        ;; clojure.string/join among them.
         (let [{:keys [conn session ops prompt-ns]} @state
               op (cond (contains? ops "completions") "completions"
                        (contains? ops "complete") "complete")]
@@ -484,7 +489,8 @@
                                                :session session}
                                          (:help-timeout-ms timings))]
               (if (vector? r)
-                (ops/merge-candidates prefix offline (generic/with-prefix prefix (ops/candidates r)))
+                (ops/merge-candidates prefix offline
+                                      (cond->> (ops/candidates r) (generic? this) (generic/with-prefix prefix)))
                 offline))
             offline))
         (catch Throwable _ offline))))
