@@ -1618,9 +1618,11 @@
   "F12/Ctrl+B inside the source panel: the same lookup on the panel
   editor's own snapshot, so the namespace comes from the panel file's ns
   form. A definition in the panel's file moves the panel caret (history
-  kept); one elsewhere loads into the panel; none says so on the footer.
-  ctx as do-jump!'s."
-  [{:keys [ev* sp sel*] :as ctx}]
+  kept); one in the window's own file moves the window's caret to it and
+  focuses the window's editor, as do-jump! does (it used to load the
+  window's file into the panel); one elsewhere loads into the panel; none
+  says so on the footer. ctx as do-jump!'s."
+  [{:keys [ev* sp sel* ed path status-label] :as ctx}]
   (try
     (let [snap (editor/snapshot (:editor sp))]
       (if-let [{:keys [symbol start]} (help/target snap)]
@@ -1630,6 +1632,11 @@
                     (source/location (:doc target) {:project-dir (:project-dir @sel*)}))]
           (cond
             (= :buffer (:kind target)) (source-pane/move-to-offset! sp (:offset target))
+            (and (:path loc) path @path (source/same-path? (:path loc) @path))
+            (let [text (editor/editor-text ed)]
+              (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
+              (editor/focus! ed)
+              (set-status! status-label (str "Jumped to " symbol ".")))
             loc (show-source! ctx loc)
             :else (source-pane/report! sp (str "No source found for " symbol "."))))
         (source-pane/report! sp "No symbol at the caret.")))
