@@ -6,6 +6,8 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Jump to definition (F12) leaves the buffer for Jolt running out of process: a function from another file in the project, or from a jar dependency, opens in the source panel on its definition. Functions built into Jolt have no source file, so they show their documentation as before.
+
 - Initial public release preparation.
 - An nREPL dialect: `.jonquil.edn {:dialect :nrepl :nrepl {:port 1667}}` attaches to any nREPL server you started (babashka, a non-JVM Clojure, one on another host with `:host`). Features follow the ops the server offers, and the console names the ones it lacks. Checked live against babashka (`bb test:bb`).
 - Quick docs ask cider's `info` when a server has no `lookup` op (Basilisp has only `info`), for the nREPL dialect and JVM Clojure alike.

@@ -86,7 +86,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-18, 694 tests pass (3950 assertions on macOS; 3919 on Linux).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-18, 700 tests pass (3977 assertions on macOS; 3946 on Linux).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>
@@ -104,7 +104,7 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.
 - `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
-- `jonquil.nrepl.middleware-files`, `jonquil.nrepl.inspect-middleware` and `jonquil.nrepl.stdin-middleware`: Jonquil's own nREPL middleware, embedded when Jonquil is compiled, written under `~/.cache/jonquil/nrepl-middleware` and loaded by the Jolt child, which gives out-of-process Jolt the inspector and `read-line`.
+- `jonquil.nrepl.middleware-files`, `jonquil.nrepl.inspect-middleware`, `jonquil.nrepl.stdin-middleware` and `jonquil.nrepl.info-middleware`: Jonquil's own nREPL middleware, embedded when Jonquil is compiled, written under `~/.cache/jonquil/nrepl-middleware` and loaded by the Jolt child, which gives out-of-process Jolt the inspector, `read-line` and jump to definition into other files.
 - `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `bb test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
 - `jonquil.cljs` and `jonquil.nrepl.shadow`: the ClojureScript dialect (experimental), attached to a shadow-cljs nREPL server you started yourself. `bb test` runs its tests against an in-process fake server.
 - `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.

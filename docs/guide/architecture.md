@@ -789,8 +789,8 @@ Out-of-process Jolt answers those same ops from its own child.
 `jonquil.inspect.view/run-op`. Nothing in Jonquil requires it: `jonquil.
 nrepl.middleware-files` embeds its text and `view.clj`'s with a macro when
 Jonquil is compiled (the installed binary has no source tree to read), and
-`ensure-root!` writes the three files (the stdin middleware is the third,
-below) under `$XDG_CACHE_HOME/jonquil/nrepl-middleware/<hash>` or
+`ensure-root!` writes the four files (the stdin and info middleware are
+the others, below) under `$XDG_CACHE_HOME/jonquil/nrepl-middleware/<hash>` or
 `~/.cache/...`, through a temp sibling and a rename. Each start marks its
 folder used and removes other hash-named folders untouched for a day
 (`prune-old!`), never following a symlink. `jonquil.
@@ -826,6 +826,23 @@ inspector alone, since it evaluates on the reader thread a waiting read
 would block.
 `NRepl`'s `inspect!` shares `jonquil.inspect/request` with `Jvm`, so both
 send the same wire ops.
+
+`jonquil.nrepl.info-middleware` goes last, beside the inspector's, so a
+plain server has it too. Its `jonquil-info` op is what lets jump to
+definition leave the buffer: jolt-lang/nrepl's `lookup` answers a var's
+doc and arglists but no file or line. It reads the var's own metadata,
+which Jolt records as it loads a file: a project var's `:file` is
+`./src/...`, relative to the directory jolt started in (the project, for
+the child), and becomes that file's canonical path; a jar dependency's
+`jar:file:` URL is kept as it is; a var built into Jolt has no `:file`,
+so it has no line either. The handler answers on the reader thread, since
+a metadata read never waits. jolt-lang/nrepl ships cider's `info`
+middleware, which answers the same and more, but loading orchard for it
+took a child's start from 0.30 s to 0.92 s (measured 2026-10-18), so
+Jonquil reads the metadata itself. `NRepl`'s `lookup` asks `jonquil-info`
+when the child's `describe` lists it and `lookup` otherwise, and the
+"Jump to definition stays in this buffer" limit line shows only when a
+live child doesn't offer it.
 
 `jonquil.inspect` is the panel's own half, shared by both evaluators: the
 current view, the selected row, a `:pending` marker naming what a reply
