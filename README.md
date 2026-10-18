@@ -15,7 +15,7 @@ in a project (a folder with a `deps.edn`) runs out of process over nREPL,
 so one that calls `System/exit`, crashes or wedges Jolt takes down a
 separate child, not Jonquil. A loose file runs inline, in Jonquil's own
 process, and a project's `.jonquil.edn` `{:runtime :in-process}` keeps it
-there too, for `read-line` and the inspector. Stop, Reset on Run and help
+there too, for `read-line`. Stop, Reset on Run, help and the inspector
 work the same way across either choice. ClojureDart is here too now,
 experimental: rather than starting anything, Jonquil attaches to a
 ClojureDart app you already have running, over its own nREPL server.
