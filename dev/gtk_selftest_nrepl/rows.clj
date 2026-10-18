@@ -14,6 +14,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.session]
             [temp-dirs]))
@@ -150,7 +151,8 @@
                              (and started? (= "Jolt (nREPL)" label)
                                   (some? pid) (= pid reported-pid)
                                   (str/includes? text "; Limit: No stdin")
-                                  (str/includes? text "; Limit: No inspector out of process")
+                                  ;; the child loaded the inspector, so no limit line for it
+                                  (not (str/includes? text "No inspector"))
                                   (not (str/includes? text "Output appears when"))
                                   (str/includes? text "no file or line")
                                   ready?)
@@ -181,6 +183,30 @@
       (on-gtk (support/check :nrepl-repl-follows-run
                              (and ok? (instance? jonquil.nrepl.evaluator.NRepl (evaluator ui)))
                              {:text (support/since ui mark)})))))
+
+(defn row-nrepl-inspect-last
+  "Cmd/Ctrl+I's hook on a REPL value inspects it in the child: the panel
+  opens on *1 with its two entries, through jonquil.nrepl.inspect-
+  middleware's ops, and Escape closes it. Those ops aren't evals, so the
+  next entry's *1 is still the map."
+  [ui]
+  (go-row :nrepl-inspect-last support/check
+    (let [pane (:inspector ui)
+          [submitted? _] (submit-and-await ui "{:a [1 2 3] :b 2}" 5000 #(str/includes? % "=> {:a [1 2 3], :b 2}"))]
+      (on-gtk ((:inspect-last!* ui)))
+      (let [opened? (await-until 3000 20
+                                 #(and (pos? (g/gtk-widget-get-visible (:root pane)))
+                                       (= "*1" (g/label-text (:header pane)))
+                                       (str/includes? (g/label-text (:info pane)) "2 items")))
+            [info text] (on-gtk [(g/label-text (:info pane)) (g/buffer-text (:buf pane))])
+            _ (on-gtk (inspector-pane/focus! pane)
+                      ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil))
+            closed? (await-until 2000 20 #(zero? (g/gtk-widget-get-visible (:root pane))))
+            [kept? mark] (submit-and-await ui "(count *1)" 5000 #(str/includes? % "=> 2"))]
+        (on-gtk (support/check :nrepl-inspect-last
+                               (and submitted? opened? (str/includes? text ":a") closed? kept?)
+                               {:submitted submitted? :opened opened? :info info :text text
+                                :closed closed? :kept kept? :after (support/since ui mark)}))))))
 
 (defn row-nrepl-error-is-text
   "An out-of-process error is text (D2.T1), never a Throwable: result-line

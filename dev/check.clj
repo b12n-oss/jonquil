@@ -22,6 +22,8 @@
     jonquil.inspect
     jonquil.nrepl.bencode
     jonquil.nrepl.ops
+    jonquil.nrepl.inspect-middleware
+    jonquil.nrepl.inspect-files
     jonquil.cljd
     jonquil.clj
     jonquil.cljs

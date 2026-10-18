@@ -16,6 +16,7 @@
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.inspect :as inspect]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.ops :as ops]
@@ -42,6 +43,12 @@
 (def busy-warning
   ;; jonquil.eval/eval-async's own wording, so the console reads the same.
   "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n")
+
+(def inspect-not-running
+  "Nothing to inspect yet: Jolt isn't running. Run something first.")
+
+(def inspect-lost
+  "The connection to Jolt was lost.")
 
 (def stdin-notice
   "; This runtime has no stdin: read-line returns nil and read fails with EOF.\n")
@@ -393,8 +400,9 @@
   (limitations [this]
     (let [rt (runtime this)]
       (cond-> ["No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead."
-               "No inspector out of process; {:runtime :in-process} has one."
                "Jump to definition stays in this buffer: lookup reports no file or line."]
+        (and (live? this) (not (contains? (:ops rt) "inspect-start")))
+        (conj "No inspector: this child couldn't load Jonquil's inspector files; {:runtime :in-process} has one.")
         (and (live? this) (:fetch-error rt))
         (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)
                    ") couldn't be fetched, so this is a plain nREPL server; a new window tries again. Jolt said: "
@@ -402,7 +410,38 @@
         (and (live? this) (not (contains? (:ops rt) "interrupt")))
         (conj "Stop restarts the runtime: this server has no interrupt op."))))
   ev/Owners
-  (release-owner! [_ owner] (session/release-owner-in! state owner) nil))
+  (release-owner! [_ owner] (session/release-owner-in! state owner) nil)
+  ev/Inspector
+  ;; Backed by jonquil.nrepl.inspect-middleware, which child/start! loads
+  ;; into every child it can: the JVM inspector's ops and keys, so the
+  ;; request mapping (inspect/request) and the view reading are shared with
+  ;; jonquil.nrepl.jvm. Middleware ops, not evals, so the user's *1 *2 *3
+  ;; stay put. Off the caller's thread, on-view called exactly once.
+  (inspect! [this op args on-view]
+    (future
+      (try
+        (let [{:keys [conn session ops]} (runtime this)
+              result
+              (cond
+                (not (live? this)) {:error inspect-not-running}
+                (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
+                :else
+                (let [req (cond-> (assoc (inspect/request op args) :session session)
+                            (= op :def) (assoc :ns (str (:prompt-ns @state))))
+                      r (client/request-sync conn req request-timeout-ms)]
+                  (cond
+                    (not (vector? r)) {:error inspect/timeout-message}
+                    ((ops/statuses r) ops/disconnected) {:error inspect-lost :lost? true}
+                    :else (inspect/parse-view (some :view r)))))]
+          (try (on-view result) (catch Throwable _)))
+        (catch Throwable e
+          (try (on-view {:error (or (ex-message e) (str (class e)))})
+               (catch Throwable _)))))
+    nil)
+  ;; true until the child is live (inspect! then says it isn't running yet),
+  ;; and after that only when the child advertised the inspector's ops.
+  (inspectable? [this]
+    (or (not (live? this)) (contains? (:ops (runtime this)) "inspect-start"))))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

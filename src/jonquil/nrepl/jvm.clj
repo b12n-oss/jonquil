@@ -288,20 +288,6 @@
               (and (not (ns-errored? r2)) (ops/doc-info sym r2)) {:status :retried :ns ns2 :reply r2}
               :else {:status :not-loaded :ns1 ns1})))))))
 
-(defn- inspect-request
-  "The wire op mapping for a jonquil.evaluator/Inspector call (decisions):
-  op/args to the server's own inspect-* op and its own keys, before
-  :session is merged in."
-  [op args]
-  (case op
-    :start {:op "inspect-start" :rows (:rows args) :cols (:cols args)}
-    :in {:op "inspect-in" :idx (:idx args)}
-    :out {:op "inspect-out"}
-    :page {:op "inspect-page" :delta (:delta args)}
-    :meta {:op "inspect-toggle-meta" :cursor (:cursor args)}
-    :table {:op "inspect-toggle-table"}
-    :def {:op "inspect-def" :name (:name args)}))
-
 (defrecord Jvm [selection state history listeners timings]
   ev/Evaluator
   ;; Connecting happens on demand, when an evaluation finds no live
@@ -562,7 +548,7 @@
     nil)
 
   ev/Inspector
-  ;; P3.T1: backed by the server's own inspect-* ops (inspect-request's own
+  ;; P3.T1: backed by the server's own inspect-* ops (inspect/request's own
   ;; mapping), off the GTK thread in a future, on-view called exactly once
   ;; and everything caught -- the same pattern jonquil.session's InProcess
   ;; uses. Every request carries :session.
@@ -584,7 +570,7 @@
                   (not (client/open? conn)) {:error clj/lost-connection :lost? true}
                   (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
                   :else
-                  (let [r (client/request-sync conn (assoc (inspect-request op args) :session session)
+                  (let [r (client/request-sync conn (assoc (inspect/request op args) :session session)
                                                (:inspect-timeout-ms timings))]
                     (cond
                       (not (vector? r)) {:error inspect/timeout-message}

@@ -64,6 +64,8 @@
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
     jonquil.inspect.view-test
+    jonquil.nrepl.inspect-middleware-test
+    jonquil.nrepl.inspect-files-test
     jonquil.inspect-test])
 
 (def live-namespaces

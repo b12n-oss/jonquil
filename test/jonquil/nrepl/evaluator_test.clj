@@ -7,6 +7,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
+            [jonquil.inspect :as inspect]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
             [jonquil.nrepl.client :as client]
@@ -63,7 +64,7 @@
   (let [e (make (temp-project))]
     (is (instance? jonquil.nrepl.evaluator.NRepl e))
     (is (nil? (nrepl/child-pid e)) "not started until asked")
-    (is (= 3 (count (ev/limitations e))))))
+    (is (= 2 (count (ev/limitations e))) "stdin and jump; the inspector line only when a live child lacks it")))
 
 (deftest run-repl-and-help-test
   (let [dir (temp-project) e (make dir)]
@@ -265,6 +266,49 @@
           (is (= [{:git child/nrepl-git-coord} nil nil] @sources) "the restart skipped the fetch")
           (is (some #(str/includes? % "Jolt said: git dep:") (ev/limitations e)) "the line survives the restart")
           (finally (ev/stop! e)))))))
+
+(defn- inspect [e op args]
+  (let [p (promise)]
+    (ev/inspect! e op args (fn [v] (deliver p v)))
+    (deref p 10000 :timeout)))
+
+(deftest inspector-over-nrepl-test
+  (let [e (make (temp-project))]
+    (try
+      (is (ev/inspectable? e) "true before the child is live")
+      (is (= {:error nrepl/inspect-not-running} (inspect e :start {:rows 10 :cols 60})))
+      (ev/start! e)
+      (is (ev/inspectable? e))
+      (is (not-any? #(str/includes? % "inspector") (ev/limitations e)))
+      (run e "(def data {:a [1 2 3] :rows [{:id 1} {:id 2}]})" false)
+      (run e "data" false)
+      (let [v (inspect e :start {:rows 10 :cols 60})]
+        (is (= ["*1" 2] [(:path v) (:total v)])))
+      (is (= "*1 / :rows" (:path (inspect e :in {:idx 1}))))
+      (is (= "*1" (:path (inspect e :out {}))))
+      (is (= "#'user/picked" (:defd (inspect e :def {:name "picked"}))) "into the prompt namespace")
+      (is (= "true" (:printed (first (run e "(= *1 data picked)" false)))) "the ops left *1 alone")
+      (finally (ev/stop! e)))))
+
+(deftest a-plain-server-still-has-the-inspector-test
+  (with-redefs [child/middleware-source (constantly nil)]
+    (let [e (make (temp-project))]
+      (try
+        (ev/start! e)
+        (is (ev/inspectable? e))
+        (run e "[:x :y]" false)
+        (is (= 2 (:total (inspect e :start {:rows 10 :cols 40}))))
+        (finally (ev/stop! e))))))
+
+(deftest no-inspector-files-means-unavailable-test
+  (with-redefs [child/inspect-root (constantly nil)]
+    (let [e (make (temp-project))]
+      (try
+        (ev/start! e)
+        (is (not (ev/inspectable? e)))
+        (is (= {:error inspect/unavailable-message} (inspect e :start {:rows 10 :cols 40})))
+        (is (some #(str/includes? % "No inspector") (ev/limitations e)))
+        (finally (ev/stop! e))))))
 
 (deftest limitations-name-the-way-back-test
   (let [e (make (temp-project))]
