@@ -17,7 +17,8 @@ code don't cover on their own.
    Jonquil runs: Jolt in process or out of process, ClojureDart, JVM
    Clojure and ClojureScript by attaching to a server you started (with
    auto-require for JVM projects, and a shadow-cljs build for
-   ClojureScript), and jank, which Jonquil launches itself.
+   ClojureScript), any other nREPL server (babashka, other Clojures, other
+   hosts), and jank, which Jonquil launches itself.
 3. **[Development](development.md)**: the task groups `bb info` prints,
    the unit suite, the self-test and binary-smoke harnesses, screenshots,
    and lint, format, and the git hooks.

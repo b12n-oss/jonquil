@@ -9,9 +9,9 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 64 namespaces in well under a second, and it's the fastest
+currently loads 65 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (672 tests, 3847 assertions
+slower. `bb test` runs the full unit suite (686 tests, 3900 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (672 tests and 3816 assertions, 31
+reports fewer assertions than macOS (686 tests and 3869 assertions, 31
 fewer, measured 2026-10-18).
 
 `bb test:nrepl` runs a second, separate suite (53 tests, 189 assertions,
@@ -36,7 +36,12 @@ yet. `bb test:jank` runs a fourth suite against a real jank: it launches a
 `jank repl` through the same launcher the app uses. It honours
 `JONQUIL_JANK`, then looks for `jank` the way the app does, and when it
 finds none it prints a message and skips, exiting 0, so it is safe on a
-machine without jank. `bb test` never touches a child process or a real server and stays
+machine without jank. `bb test:bb` runs a fifth (5 tests, 19 assertions,
+measured 2026-10-18): each test starts a real `bb nrepl-server` on a free
+port in its own temp project and drives the nREPL dialect against it (Run,
+the error line, completion, lookup, Stop by disconnecting, a read that
+can't be answered, the port file, and a refused port), stopping that server
+after. It skips, exiting 0, when no `bb` is on `PATH`. `bb test` never touches a child process or a real server and stays
 that self-contained on purpose, which is why the live suites are separate
 tasks rather than tags inside the same one. `bb verify` is the pre-commit
 gate: clj-kondo in report mode, then `bb test` followed by `bb

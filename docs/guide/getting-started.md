@@ -36,6 +36,9 @@ you use it:
   (`shadow-cljs.edn`) with `npx shadow-cljs watch <build>` running and a
   JS runtime that has the build loaded. See
   [ClojureScript](using-jonquil.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
+- **Any nREPL server** (the nREPL dialect): the server itself, which you
+  start, and `.jonquil.edn {:dialect :nrepl :nrepl {:port N}}` naming it.
+  See [Any nREPL server](using-jonquil.md#any-nrepl-server-babashka-other-clojures-other-hosts).
 - **Jolt out of process**, the default in a project with a `deps.edn`:
   `git` on `PATH` and a network connection the first time, when Jonquil
   fetches jolt-lang/nrepl's middleware, or a checkout of jolt-lang/nrepl.

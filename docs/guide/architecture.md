@@ -239,7 +239,7 @@ The key-dispatch wrappers carry the same guarantee down at the keyboard level. `
 `jonquil.dialect` holds every dialect as plain data: a profile names its
 file extensions, the `jonquil.syntax` special-forms and builtins sets it
 paints and completes against, its project markers, and which runtime keys
-it offers. `profiles` lists every known one, `jolt`, `cljd`, `clj`, `jank` and `cljs`
+it offers. `profiles` lists every known one, `jolt`, `cljd`, `clj`, `jank`, `cljs` and `nrepl`
 today.
 `find-project` walks up from a file to the nearest directory holding
 `.jonquil.edn` or a marker, reading and parsing the config along the way
@@ -492,6 +492,32 @@ The `Evaluator` protocol itself doesn't change for any of this: all
 attach evaluators implement the same `start!`, `stop!`, `eval!`,
 `interrupt!`, completion and lookup, history and prompt-namespace
 surface the in-process and out-of-process runtimes already do.
+
+### jonquil.nrepl.generic: any nREPL server, attached
+
+The nREPL dialect (`{:dialect :nrepl}`) is the same `Jvm` record:
+`connection/make-attached :nrepl` makes one, because everything JVM-specific
+in it already degrades by the server's ops. `jonquil.nrepl.generic` holds
+what differs, all pure:
+
+- `endpoint` and `port-file` read `.jonquil.edn`'s `:nrepl` map (validated
+  in `dialect/parse-config`); `connect-policy` gives `connection/connect!`
+  an `:endpoint` and sentences that name the host. `connect!` now takes an
+  explicit port before the port file and connects through
+  `client/connect-to host port`, and `selection-key` carries the endpoint,
+  so a changed host or port gets a new connection.
+- `limitations` comes from the server's ops once connected (no `interrupt`,
+  no `stdin`, no completion, no `lookup`) instead of the JVM's fixed list.
+- `with-prefix` trims cider `complete` replies, which the record now asks
+  when a server has no builtin `completions` (babashka's are fuzzy), and
+  `local-file?` drops a lookup's `:file` that isn't on this disk (babashka
+  names one under its own working directory after a `load-file`).
+
+Two changes reach every dialect through `jonquil.nrepl.ops`: `doc-info`
+drops a blank `:file`, and an eval-error with no `clojure.main` header takes
+its line from the `:err` line that names `:ex`'s class, so babashka's
+`java.lang.ArithmeticException: Divide by zero …` reads as that rather than
+the bare class.
 
 ### jonquil.nrepl.shadow: ClojureScript, attached
 
