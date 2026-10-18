@@ -56,6 +56,7 @@
   [rows/row-nrepl-starts-and-reports
    rows/row-nrepl-run-output
    rows/row-nrepl-repl-follows-run
+   rows/row-nrepl-inspect-last
    rows/row-nrepl-error-is-text
    rows/row-nrepl-reset-clears-child
    rows/row-nrepl-stdin-notice

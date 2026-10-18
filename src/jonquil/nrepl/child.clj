@@ -24,6 +24,7 @@
             [jolt.process :as p]
             [jolt.socket]
             [jonquil.login-path :as login-path]
+            [jonquil.nrepl.inspect-files :as inspect-files]
             [jonquil.tool-path :as tool-path]))
 
 (def port-base
@@ -75,21 +76,40 @@
   :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P,
   where COORD is {:local/root R} for {:local R} or the git coordinate for
   {:git coord}. With a nil source, a plain jolt nrepl-server P.
+  source's :inspect (or inspect-root, in the three-argument form), when set,
+  is jonquil.nrepl.inspect-files' folder: it joins the deps as
+  jonquil/nrepl-inspect and its middleware goes last, so even a plain
+  server answers the inspector's ops. A source of just {:inspect root} is a
+  plain server with the inspector.
   The program is jolt's absolute path found on login-path's PATH (jolt.process
   resolves a bare name against Jonquil's own PATH, which a Finder launch has
   too bare), or the bare \"jolt\" when none is found."
-  [port {:keys [local git] :as source}]
-  (let [program (or (tool-path/resolve-program "jolt" (login-path/path)
-                                               login-path/executable-file?)
-                    "jolt")
-        coord (cond local (str "{:local/root " (pr-str local) "}")
-                    git (binding [*print-namespace-maps* false] (pr-str git)))]
-    (if (and source coord)
-      [program "-Sdeps"
-       (str "{:deps {nrepl/nrepl " coord "}"
-            " :nrepl/middleware [nrepl.middleware/default-middleware]}")
-       "nrepl-server" (str port)]
-      [program "nrepl-server" (str port)])))
+  ([port source] (launch-args port (dissoc source :inspect) (:inspect source)))
+  ([port {:keys [local git]} inspect-root]
+   (let [program (or (tool-path/resolve-program "jolt" (login-path/path)
+                                                login-path/executable-file?)
+                     "jolt")
+         coord (cond local (str "{:local/root " (pr-str local) "}")
+                     git (binding [*print-namespace-maps* false] (pr-str git)))
+         deps (cond-> []
+                coord (conj (str "nrepl/nrepl " coord))
+                inspect-root (conj (str inspect-files/lib " {:local/root " (pr-str inspect-root) "}")))
+         middleware (cond-> []
+                      coord (conj "nrepl.middleware/default-middleware")
+                      inspect-root (conj (str inspect-files/middleware)))]
+     (if (seq deps)
+       [program "-Sdeps"
+        (str "{:deps {" (str/join " " deps) "}"
+             " :nrepl/middleware [" (str/join " " middleware) "]}")
+        "nrepl-server" (str port)]
+       [program "nrepl-server" (str port)]))))
+
+(defn inspect-root
+  "The inspector's folder for a child about to start (the evaluator puts it
+  on the source as :inspect), or nil for none; throws when it can't be
+  written. A var of its own so tests can stand in for the cache folder."
+  []
+  (inspect-files/ensure-root!))
 
 (defn process-options
   "The jolt.process options for the child: {:dir :log}, plus login-path's

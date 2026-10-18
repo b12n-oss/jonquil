@@ -6,6 +6,21 @@
 
 (def timeout-message "The server didn't answer.")
 
+(defn request
+  "The wire op for a jonquil.evaluator/Inspector call: op/args to the
+  server's inspect-* op and its keys, before :session is merged in. The
+  JVM's clojure-cli.repl inspector and Jonquil's own Jolt middleware
+  (jonquil.nrepl.inspect-middleware) answer the same ops."
+  [op args]
+  (case op
+    :start {:op "inspect-start" :rows (:rows args) :cols (:cols args)}
+    :in {:op "inspect-in" :idx (:idx args)}
+    :out {:op "inspect-out"}
+    :page {:op "inspect-page" :delta (:delta args)}
+    :meta {:op "inspect-toggle-meta" :cursor (:cursor args)}
+    :table {:op "inspect-toggle-table"}
+    :def {:op "inspect-def" :name (:name args)}))
+
 (defn parse-view
   "Parse a server view string to a map. A blank or unreadable string gives
    {:path \"\" :info \"\" :header \"\" :note \"The server's view couldn't be read.\"}."

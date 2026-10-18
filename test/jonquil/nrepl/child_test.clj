@@ -59,6 +59,21 @@
              (child/launch-args 7952 {:git child/nrepl-git-coord})))
       (is (= ["jolt" "nrepl-server" "7951"] (child/launch-args 7951 nil))))))
 
+(deftest launch-args-with-the-inspector-test
+  (with-login-path "/nonexistent-jonquil:/fake-home-for-test/.local/bin"
+    (fn []
+      (is (= ["jolt" "-Sdeps"
+              (str "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"} jonquil/nrepl-inspect {:local/root \"/c/ins\"}}"
+                   " :nrepl/middleware [nrepl.middleware/default-middleware jonquil.nrepl.inspect-middleware/inspect]}")
+              "nrepl-server" "7950"]
+             (child/launch-args 7950 {:local "/r/nrepl"} "/c/ins")))
+      (is (= ["jolt" "-Sdeps"
+              "{:deps {jonquil/nrepl-inspect {:local/root \"/c/ins\"}} :nrepl/middleware [jonquil.nrepl.inspect-middleware/inspect]}"
+              "nrepl-server" "7951"]
+             (child/launch-args 7951 nil "/c/ins"))
+          "a plain server still gets the inspector")
+      (is (= (child/launch-args 7952 {:local "/r/nrepl"}) (child/launch-args 7952 {:local "/r/nrepl"} nil))))))
+
 (deftest child-uses-resolved-jolt-test
   (let [bin (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "bin")
         jolt (io/file bin "jolt")]

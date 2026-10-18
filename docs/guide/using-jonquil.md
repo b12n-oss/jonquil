@@ -675,11 +675,11 @@ empty collection reads `0 of 0` rather than a range it doesn't have. A
 note from the last action, `no metadata`, `not tabular`, or an error,
 shows there too for a few seconds and then clears on its own.
 
-In-process Jolt supports this outright: a loose file, or a project with
-`{:runtime :in-process}`. JVM Clojure does too, once its
-own server offers clojure-cli.repl's inspector. ClojureDart and Jolt
-running out of process, the default in a `deps.edn` project, don't, in
-this version: Cmd/Ctrl+I there puts a
+Jolt supports this in process and out of process alike. Out of process,
+Jonquil loads the same inspector code into its Jolt child as nREPL
+middleware, so stepping through a value never changes `*1`, `*2` or `*3`.
+JVM Clojure does too, once its own server offers clojure-cli.repl's
+inspector. ClojureDart doesn't, in this version: Cmd/Ctrl+I there puts a
 short sentence in the status bar instead of opening anything. Opening a
 file whose dialect or runtime differs from the one the panel opened
 against hides the panel; Cmd/Ctrl+I on the new file opens a fresh one.
@@ -825,12 +825,17 @@ starts for the new project, and the console says something like
 happens if the new file's project asks for a different runtime, or none
 at all.
 
-Three limits are worth knowing going in. There's no stdin: a program that
-calls `read-line` or `read` gets nil or an EOF straight away. There's no
-inspector. And jump to definition can't leave the buffer, because the
-wire op it would need for that (`info`) isn't there yet, only `lookup`,
-which carries no file or line to jump to. The start lines in the console
-name the first two along with the `{:runtime :in-process}` way back.
+Two limits are worth knowing going in. There's no stdin: a program that
+calls `read-line` or `read` gets nil or an EOF straight away, and the
+start lines in the console name the `{:runtime :in-process}` way back.
+And jump to definition can't leave the buffer, because the wire op it
+would need for that (`info`) isn't there yet, only `lookup`, which carries
+no file or line to jump to. The inspector works: Jonquil writes its
+inspector files under `~/.cache/jonquil/nrepl-inspect` (or
+`$XDG_CACHE_HOME/jonquil/nrepl-inspect`) and the child loads them from
+there, so it works on a plain nREPL server too. If that folder can't be
+written, or the child can't load what's in it, Jolt starts without the
+inspector and the start lines say why.
 Output streams as the program prints, with jolt-lang/nrepl v0.4.0 or
 later; an older checkout sends it all at once when the evaluation
 finishes, so a program that prints once a second for ten seconds and
@@ -1562,8 +1567,7 @@ than being surprises you'd otherwise have to rediscover:
   that other client left.
 - Resizing the inspector panel doesn't reflow the rows already on
   screen; the new width only takes effect the next time you open it.
-- No inspector for ClojureDart, ClojureScript or Jolt running out of
-  process, in this version.
+- No inspector for ClojureDart or ClojureScript, in this version.
 - An MCP eval, run or run-selection against a window that is already
   evaluating answers busy instead of queueing. `jonquil_run_selection`
   still moves the visible selection first, by design.

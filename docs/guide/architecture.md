@@ -691,9 +691,9 @@ temp home.
 `Evaluator` itself: `Inspector`, with `inspect!` (an op, its args, and an
 `on-view` callback called exactly once, off the GTK thread) and
 `inspectable?`. `jonquil.gtk.window` checks `(satisfies? ev/Inspector e)`
-the same way it checks `Attached`, so a Jolt out-of-process evaluator or a
-ClojureDart one, neither of which implements it, gets the unavailable
-sentence instead of a thrown error.
+the same way it checks `Attached`, so a ClojureDart evaluator, which
+doesn't implement it, gets the unavailable sentence instead of a thrown
+error.
 
 ```mermaid
 flowchart LR
@@ -703,10 +703,15 @@ flowchart LR
   pane["jonquil.gtk.inspector-pane<br/>the panel widget"]
   session["jonquil.session<br/>InProcess"]
   jvm["jonquil.nrepl.jvm<br/>Jvm"]
+  nrepl["jonquil.nrepl.evaluator<br/>NRepl"]
+  mw["jonquil.nrepl.inspect-middleware<br/>in the Jolt child"]
   fake["dev/fake_jvm_nrepl.clj<br/>test double"]
   win["jonquil.gtk.window"]
   session -- "implements" --> ev
   jvm -- "implements" --> ev
+  nrepl -- "implements" --> ev
+  nrepl -- "inspect-* ops" --> mw
+  mw -- "uses" --> view
   session -- "uses" --> view
   fake -- "uses" --> view
   win -- "uses" --> inspect
@@ -726,10 +731,34 @@ running both in a future. `dev/fake_jvm_nrepl.clj`, the in-process stand-in
 server's `inspect-*` ops by calling that same `run-op`, so the view logic
 under test is identical to what `bb test:clj` later exercises for real.
 `jonquil.nrepl.jvm`'s `Jvm` record never touches `jonquil.inspect.view` at
-all: its own `inspect!` sends the matching wire op (`inspect-request`'s
+all: its own `inspect!` sends the matching wire op (`jonquil.inspect/request`'s
 mapping) to the real server and parses the `:view` string back with
 `jonquil.inspect/parse-view`, so the view code it draws on lives on the
 server, not in this process.
+
+Out-of-process Jolt answers those same ops from its own child.
+`jonquil.nrepl.inspect-middleware` is nREPL middleware over
+`jonquil.inspect.view/run-op`. Nothing in Jonquil requires it: `jonquil.
+nrepl.inspect-files` embeds its text and `view.clj`'s with a macro when
+Jonquil is compiled (the installed binary has no source tree to read), and
+`ensure-root!` writes both under `$XDG_CACHE_HOME/jonquil/nrepl-inspect/
+<hash>` or `~/.cache/...`, through a temp sibling and a rename. `jonquil.
+nrepl.child` then adds that folder as a `:local/root` dep and puts the
+middleware last in `:nrepl/middleware`, after jolt-lang/nrepl's, or alone
+on a plain server. They're middleware ops rather than evals on purpose:
+`jolt.nrepl/evaluate` shifts the global `*1 *2 *3` after every successful
+eval, and an op leaves the user's history alone. `inspect-start` reads
+that global `*1`, and `inspect-def` takes the prompt namespace in `ns`.
+Each op is answered on a future of its own, one at a time, because jolt
+calls a handler on the connection's reader thread and rendering a view
+realises part of `*1`. The view state is one atom per child, shared by
+every client of it, as clojure-cli.repl's server shares its own; a second
+editor attached through `.nrepl-port` would see the same panel state.
+If the child can't load the middleware (jolt requires every middleware
+namespace before it binds), `jonquil.nrepl.evaluator` starts it again
+without the inspector and names jolt's error in the start lines.
+`NRepl`'s `inspect!` shares `jonquil.inspect/request` with `Jvm`, so both
+send the same wire ops.
 
 `jonquil.inspect` is the panel's own half, shared by both evaluators: the
 current view, the selected row, a `:pending` marker naming what a reply
