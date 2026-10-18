@@ -38,6 +38,8 @@ you use it:
   [ClojureScript](using-jonquil.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
 - **Any nREPL server** (the nREPL dialect): the server itself, which you
   start, and `.jonquil.edn {:dialect :nrepl :nrepl {:port N}}` naming it.
+  Basilisp's `basilisp nrepl-server` writes `.nrepl-port`, so
+  `{:dialect :nrepl}` alone is enough there.
   See [Any nREPL server](using-jonquil.md#any-nrepl-server-babashka-other-clojures-other-hosts).
 - **Jolt out of process**, the default in a project with a `deps.edn`:
   `git` on `PATH` and a network connection the first time, when Jonquil

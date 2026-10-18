@@ -507,17 +507,33 @@ what differs, all pure:
   `client/connect-to host port`, and `selection-key` carries the endpoint,
   so a changed host or port gets a new connection.
 - `limitations` comes from the server's ops once connected (no `interrupt`,
-  no `stdin`, no completion, no `lookup`) instead of the JVM's fixed list.
+  no `stdin`, no completion, neither `lookup` nor `info`) instead of the
+  JVM's fixed list. `stdin-notice` is said before a Run or entry that reads
+  stdin on a server without the op, and names the two behaviours measured:
+  babashka's read blocks until Stop, Basilisp's reads the server process's
+  own stdin.
 - `with-prefix` trims cider `complete` replies, which the record now asks
   when a server has no builtin `completions` (babashka's are fuzzy), and
   `local-file?` drops a lookup's `:file` that isn't on this disk (babashka
-  names one under its own working directory after a `load-file`).
+  names one under its own working directory after a `load-file`, and a
+  remote server's paths are its own disk's).
+
+Quick docs pick their op in `jonquil.nrepl.jvm/lookup-op`: `lookup`, else
+cider's `info`, which Basilisp offers instead (`ops/doc-info` reads both
+reply shapes). `info` answers a namespace it doesn't know with a bare done
+rather than an error, so `resolve-lookup!` retries a miss there in the
+prompt namespace once, as it already did for `lookup`'s error.
 
 Two changes reach every dialect through `jonquil.nrepl.ops`: `doc-info`
-drops a blank `:file`, and an eval-error with no `clojure.main` header takes
-its line from the `:err` line that names `:ex`'s class, so babashka's
-`java.lang.ArithmeticException: Divide by zero …` reads as that rather than
-the bare class.
+drops a blank `:file`, and `error-message` handles eval-errors with no
+`clojure.main` header. When `:ex` is a class, the line is the last `:err`
+line naming it, so babashka's `java.lang.ArithmeticException: Divide by
+zero …` reads as that rather than the bare class. When it isn't, Basilisp's
+shapes come next: the exception line of a Python traceback in `:err` (the
+first unindented line after `Traceback (most recent call last):`), then the
+`message:` line of Basilisp's compiler error block, then a traceback in
+`:ex`. Each needs its literal marker, so other servers fall through to the
+old first-line rule.
 
 ### jonquil.nrepl.shadow: ClojureScript, attached
 

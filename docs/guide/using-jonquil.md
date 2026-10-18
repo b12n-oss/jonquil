@@ -785,7 +785,7 @@ extension, and a project can name it with `{:dialect :jank}` in its
 
 The nREPL dialect has neither a marker nor an extension, so only
 `{:dialect :nrepl}` in a project's `.jonquil.edn` picks it. A babashka
-project with a `bb.edn` stays Jolt's until you say so, since the dialect
+project with a `bb.edn`, or a Basilisp one, stays Jolt's until you say so, since the dialect
 needs a server you start yourself (see
 [Any nREPL server](#any-nrepl-server-babashka-other-clojures-other-hosts)).
 
