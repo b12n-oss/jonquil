@@ -429,6 +429,12 @@
   [ui]
   (go-row :nrepl-open-switches-evaluator support/check
     (let [old-pid (own-child-pid ui)
+          ;; the inspector open and focused first: the switch hides it, and
+          ;; focus has to land on the editor rather than nowhere
+          pane (:inspector ui)
+          _ (on-gtk ((:inspect-last!* ui)))
+          panel? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root pane))))
+          _ (on-gtk (inspector-pane/focus! pane))
           mark (on-gtk (let [m (support/out-end-offset ui)]
                          ((:open-path! ui) (in-process-project-fixture!))
                          m))
@@ -436,6 +442,8 @@
                                                           "; Switched to Jolt. The previous session is gone."))
           [label1 inproc1?] (on-gtk [(g/label-text (:dialect-label ui))
                                      (instance? jonquil.session.InProcess (evaluator ui))])
+          [hidden? editor-focused?] (on-gtk [(zero? (g/gtk-widget-get-visible (:root pane)))
+                                             (= (:view (:editor ui)) (g/gtk-root-get-focus (:window ui)))])
           ;; D2's original re-check loop, inlined: retries alive? every
           ;; 200 ms up to 5000 ms until old-pid is gone.
           dead1? (let [t0 (System/currentTimeMillis)]
@@ -450,10 +458,12 @@
           label2 (on-gtk (g/label-text (:dialect-label ui)))
           [ok3? mark3] (run-and-await ui "(+ 1 2)" 5000 #(str/includes? % "=> 3"))]
       (on-gtk (support/check :nrepl-open-switches-evaluator
-                             (and switched1? (= "Jolt" label1) inproc1?
+                             (and panel? hidden? editor-focused?
+                                  switched1? (= "Jolt" label1) inproc1?
                                   (some? old-pid) dead1?
                                   started2? (= "Jolt (nREPL)" label2) ok3?)
-                             {:switched1? switched1? :label1 label1 :inproc1? inproc1?
+                             {:panel panel? :hidden hidden? :editor-focused editor-focused?
+                              :switched1? switched1? :label1 label1 :inproc1? inproc1?
                               :old-pid old-pid :dead1? dead1? :started2? started2?
                               :label2 label2 :text (support/since ui mark3)})))))
 

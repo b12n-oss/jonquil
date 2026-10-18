@@ -835,6 +835,15 @@
     (when was-hidden?
       (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
 
+(defn- focus-within?
+  "True when keyboard focus is widget or inside it."
+  [widget]
+  (let [root (g/gtk-widget-get-root widget)]
+    (when-not (ffi/null? root)
+      (let [f (g/gtk-root-get-focus root)]
+        (and (not (ffi/null? f))
+             (or (= f widget) (pos? (g/gtk-widget-is-ancestor f widget))))))))
+
 (defn- hide-right-panel!
   "Hides which's root, and the slot once neither root is showing. Hiding
   :source also cancels any re-scroll settling still in flight for it
@@ -877,7 +886,7 @@
   (apply-reset-toggle!), and the label is set last, from the evaluator the
   window ends up with, so opening another file of the same app keeps
   reading \"attached\"."
-  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state right inspector-state]} sel]
+  [{:keys [cv status-label dialect-label sel* ev* mode-fn reset-chk reset-state right inspector-state active-ed]} sel]
   (let [old-sel @sel*]
     (reset! sel* sel)
     (show-selection! cv dialect-label sel)
@@ -888,8 +897,14 @@
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label cv)
         (reset! ev* new)
-        (hide-right-panel! right :inspector)
-        (hide-right-panel! right :source)
+        ;; Focus inside a panel this hides would go nowhere, so it moves to
+        ;; the active tab's editor, as closing the inspector does.
+        (let [focus-in-panel? (or (focus-within? (:inspector-root right))
+                                  (focus-within? (:source-root right)))]
+          (hide-right-panel! right :inspector)
+          (hide-right-panel! right :source)
+          (when (and focus-in-panel? active-ed)
+            (when-let [ed (active-ed)] (editor/focus! ed))))
         (reset! inspector-state nil)
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
@@ -3338,6 +3353,7 @@
                       (fn [f] (cview/on-focus-lost! cv f)))
     (let [sel-ctx {:cv cv :status-label status-label :dialect-label dialect-label :sel* sel* :ev* ev*
                    :reset-chk reset-chk :reset-state reset-state :right right :inspector-state inspector-state
+                   :active-ed (fn [] (:ed (active-tab)))
                    :mode-fn (fn [] (if (zero? (g/gtk-check-button-get-active reset-chk)) :accumulate :reset))}
           ;; A file argument that doesn't exist opens an empty editor with
           ;; the path remembered anyway, so Save creates it -- unlike the
