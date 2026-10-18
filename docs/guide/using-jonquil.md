@@ -1266,6 +1266,12 @@ one on this machine, now reachable over the network. Keep it on a network
 you trust, or tunnel it: `ssh -L 1667:localhost:1667 box`, then
 `{:port 1667}` here.
 
+Over a slow link, completion and quick docs can come back from this buffer
+alone. Each asks the server with a 300 ms limit, since it runs as you
+type, and a babashka server on a distant host measured 300 to 400 ms a
+round trip through an ssh tunnel. Run, the REPL, errors and Stop worked
+the same there as on this machine.
+
 ### jank (experimental)
 
 Jonquil supports jank as an experimental dialect. Unlike ClojureDart and JVM Clojure, you don't start
@@ -1631,7 +1637,8 @@ than being surprises you'd otherwise have to rediscover:
 - The nREPL dialect does what the server offers: with no `interrupt` op,
   Stop disconnects and leaves the evaluation running in the server; with
   no `stdin` op, a read waits until Stop on babashka, and reads the server's
-  own terminal on Basilisp. Reset on Run isn't available, and
+  own terminal on Basilisp. Over a slow link, completion and quick docs
+  can miss their 300 ms limit and use only this buffer. Reset on Run isn't available, and
   jump to definition follows only a file that exists on this machine.
 - No stdin, for the ClojureScript dialect.
 - Reset on Run isn't available for ClojureScript.
