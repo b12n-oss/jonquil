@@ -46,3 +46,20 @@
   (is (= ["done"] (get (mw/handle {"op" "jonquil-info" "sym" "nope" "ns" "user"}) "status")))
   (is (= #{"status"} (set (keys (mw/handle {"op" "jonquil-info" "sym" "nope" "ns" "user"})))) "a bare done")
   (is (= "map" (get (mw/handle {"op" "jonquil-info" "sym" "map" "ns" "user"}) "name"))))
+
+(def odd-meta 1)
+
+(deftest metadata-it-can-meet-test
+  (testing "a bare classpath name isn't resolved against the directory (review finding 1)"
+    ;; README.md exists in this directory, so resolving the bare name here
+    ;; would name an unrelated file
+    (is (.isFile (io/file "README.md")))
+    (alter-meta! #'odd-meta assoc :file "README.md" :line 1)
+    (is (not (contains? (mw/info "jonquil.nrepl.info-middleware-test" "odd-meta") "file"))))
+  (testing "./ and absolute paths still resolve"
+    (alter-meta! #'odd-meta assoc :file "./README.md")
+    (is (= (.getCanonicalPath (io/file "README.md"))
+           (get (mw/info "jonquil.nrepl.info-middleware-test" "odd-meta") "file"))))
+  ;; No test for a var without :name or :ns: Jolt supplies both on every
+  ;; meta read, even after an alter-meta! dissoc (measured, v0.8.23).
+  )

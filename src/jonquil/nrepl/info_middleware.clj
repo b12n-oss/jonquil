@@ -25,13 +25,17 @@
 
 (defn- file-of
   "A var's :file as something that opens on this machine: a jar: or file:
-  URL as it is, a path that names a file as its canonical path (\"./src/x\"
-  is relative to the child's directory, the project), else nil."
+  URL as it is; an absolute path, or one starting ./ (relative to the
+  child's directory, the project), as its canonical path when it names a
+  file; else nil. A bare name such as clojure/string.clj is a classpath
+  name, not a path: resolving it against the project could open an
+  unrelated file of the same name there (review finding 1)."
   [f]
   (when (and (string? f) (not (str/blank? f)))
     (cond
       (or (str/starts-with? f "jar:") (str/starts-with? f "file:")) f
-      :else (let [x (io/file f)] (when (.isFile x) (.getCanonicalPath x))))))
+      (or (str/starts-with? f "/") (str/starts-with? f "./"))
+      (let [x (io/file f)] (when (.isFile x) (.getCanonicalPath x))))))
 
 (defn info
   "The reply fields for sym resolved in the namespace named ns-str (user
@@ -46,7 +50,10 @@
     (when (var? v)
       (let [m (meta v)
             file (file-of (:file m))]
-        (cond-> {"name" (str (:name m)) "ns" (str (ns-name (:ns m)))}
+        ;; :name falls back to sym, and a missing :ns is left out rather
+        ;; than thrown on, as jolt-lang/nrepl's lookup does (findings 2, 3).
+        (cond-> {"name" (str (or (:name m) sym))}
+          (:ns m) (assoc "ns" (str (ns-name (:ns m))))
           (:doc m) (assoc "doc" (:doc m))
           (:arglists m) (assoc "arglists-str" (pr-str (:arglists m)))
           file (assoc "file" file)
@@ -67,5 +74,5 @@
   (server/register-ops! op)
   (fn [request]
     (if-let [r (handle request)]
-      (do (server/respond request r) nil)
+      (do (try (server/respond request r) (catch Throwable _ nil)) nil)
       (handler request))))

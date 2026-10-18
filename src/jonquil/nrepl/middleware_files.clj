@@ -1,7 +1,7 @@
 (ns jonquil.nrepl.middleware-files
   "Jonquil's own nREPL middleware for an out-of-process Jolt child (the
-  inspector, stdin and jonquil-info) as source files, carried inside Jonquil and written
-  where the child can load them as a :local/root dep.
+  inspector, stdin and jonquil-info) as source files, carried inside
+  Jonquil and written where the child can load them as a :local/root dep.
 
   The installed app is a compiled binary with no source tree, and
   io/resource of a source file is nil there at runtime, so embedded-text
