@@ -23,6 +23,9 @@ OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
 reports fewer assertions than macOS (690 tests and 3890 assertions, 31
 fewer, measured 2026-10-18).
 
+<details>
+<summary><strong>The live suites: <code>test:nrepl</code>, <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code> and <code>test:basilisp</code></strong></summary>
+
 `bb test:nrepl` runs a second, separate suite (53 tests, 189 assertions,
 about 50 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
@@ -50,9 +53,16 @@ completion, the limitations, a read with the server's stdin closed, and
 Stop by disconnecting. It uses `JONQUIL_BASILISP` when that's set, else a
 `basilisp` on `PATH`, and skips, exiting 0, with neither. `bb test` never touches a child process or a real server and stays
 that self-contained on purpose, which is why the live suites are separate
-tasks rather than tags inside the same one. `bb verify` is the pre-commit
+tasks rather than tags inside the same one.
+
+</details>
+
+`bb verify` is the pre-commit
 gate: clj-kondo in report mode, then `bb test` followed by `bb
 test:nrepl`, both of which must pass.
+
+<details>
+<summary><strong><code>bb mcp:smoke</code>: what it checks, headless, with <code>--window</code> and with <code>--attach</code></strong></summary>
 
 `bb mcp:smoke` smokes `jonquil --mcp` over real stdio: it starts the
 server from the checkout (`jolt -M -m jonquil.main --mcp DIR`), speaks
@@ -89,6 +99,8 @@ that a second bridge then attaches and evaluates. It ends by sending SIGTERM
 to the window, which must exit within 20 s and remove its registry file. Every
 bridge stdout line must parse as JSON. It prints 16 checks.
 
+</details>
+
 ## Self-test and docs: nine windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
@@ -97,6 +109,10 @@ others can't.
 **`bb gtk:selftest`** opens nine real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
+
+<details>
+<summary><strong>The nine groups, and what each one covers</strong></summary>
+
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
 window (`dev/gtk_selftest_window.clj`, 305 rows), with its rows split by
@@ -177,6 +193,11 @@ shadow-cljs nREPL server running in this same process
 browser. A full run reports 48, 305, 18, 15, 30, 4, 13, 5 and 10 rows
 passing, in group order.
 
+</details>
+
+<details>
+<summary><strong>How the rows run: go blocks, timeouts and the GTK thread</strong></summary>
+
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
 order, and a per-row timeout records a FAIL rather than letting one stuck
@@ -193,6 +214,8 @@ leftovers don't leak into the next. Every driver closes its window through
 `gtk-async/close-window-bounded!`, which asks the window to close and then
 waits a bounded time for it to go away. If it's still open, the run
 records a FAIL and exits 1 instead of hanging.
+
+</details>
 
 **`bb smoke:binary`** is the one harness that runs outside the GTK process
 under test. It builds `target/smoke/jonquil` (skip the build with `--no-build`),
@@ -212,6 +235,10 @@ optional `:fork-sha` pins a prefix the app's own `deps.edn` `:git/sha` must
 start with, and without the key the version check is skipped. Without
 that file the task prints how to create it and exits 1. If the
 app isn't up, or the screen is locked, every step SKIPs and the task exits 0.
+
+<details>
+<summary><strong>What it does, step by step</strong></summary>
+
 One Jonquil process stays open for the whole run, since every step shares
 the same attached session. In order, it:
 
@@ -234,6 +261,8 @@ it recorded at the start. Quitting and restarting the app stay manual
 checks, so those two steps always SKIP. If a close runs past 3 s, it saves
 a screenshot and a stack sample under `target/smoke/`.
 
+</details>
+
 **`bb smoke:cljs`** drives a built `./jonquil` against a real, running
 shadow-cljs app, so it needs the watch and a JS runtime up first (`npx
 shadow-cljs watch <build>`, then the browser tab or the node script). The
@@ -253,6 +282,9 @@ one pass; to retake just one, run `jolt -M:shots <scene-id>` directly, the
 same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
+<details>
+<summary><strong>The jank and JVM Clojure scenes</strong></summary>
+
 The `jank` scene runs against a real jank, found the way the app finds it
 (`JONQUIL_JANK`, `PATH`, the usual install folders). With none installed it
 prints that and exits 0 without writing an image. Retake it with
@@ -266,6 +298,8 @@ one, and stopped once the window closes. So they need Java 17+ and the
 downloads the ClojureDocs export into its temp config directory. The
 `inspector` scene (in-process Jolt) needs none of that: a REPL entry,
 Cmd/Ctrl+I, then in on one of its rows so the panel's table view shows.
+
+</details>
 
 Every harness isolates the user's own settings from the app it's
 driving. The window self-tests and `docs:shots` pass a temp `:settings-path`

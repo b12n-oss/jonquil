@@ -88,6 +88,9 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-18, 690 tests pass (3921 assertions on macOS; 3890 on Linux).
 
+<details>
+<summary><strong>The namespaces, and what each one does</strong></summary>
+
 - `jonquil.syntax`: Tokenization, bracket matching, indentation analysis, formatting and doc lookup.
 - `jonquil.paint`: Syntax highlighting plan from tokens and rainbow brackets.
 - `jonquil.docs`: Doc strings and completion candidates for an eval namespace, falling back to `user` when that namespace is gone.
@@ -107,6 +110,8 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
 - `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `bb test:bb` and `bb test:basilisp` run live suites against a real `bb nrepl-server` and `basilisp nrepl-server`.
 - `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`: the jank dialect (experimental). Jonquil launches its own `jank repl` per window from a private temp folder and talks to it over nREPL. `bb test` runs these against an in-process fake server, and `bb test:jank` runs a live suite against a real jank.
+
+</details>
 
 ## Commands
 

@@ -6,6 +6,10 @@ that actually stops it. This page walks through the window, the editor
 and console, the file tree and tabs, themes, the dialects Jonquil can run,
 and the limits that still apply.
 
+Each section starts with what you need day to day. Edge cases, exact
+messages and per-server detail sit in folded blocks below it: click a
+bold line to open one.
+
 ## The window
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](../images/window.png)
@@ -63,12 +67,17 @@ the same path Cmd/Ctrl+E does: it's echoed at the console prompt,
 evaluated there, and joins the REPL history. With no form at the caret,
 nothing runs and the status bar says "No form at the caret."
 
+<details>
+<summary><strong>Run Form's details: discarded forms, metadata and the flash</strong></summary>
+
 A form you've switched off with `#_` counts as no form, so Run Form won't
 run code you've discarded (a stacked `#_ #_` discards both forms, the way
 the reader does). Metadata in front of a form travels with it:
 `^:private (defn f [] 1)` runs with its `^:private`. The flash is a real
 selection for a quarter of a second, but a key pressed during it cancels
 the flash first and puts the caret back, so it never types over the form.
+
+</details>
 
 ## The REPL prompt, and how it differs from Run
 
@@ -131,12 +140,17 @@ One difference: in process, Cmd/Ctrl+D closes input for the rest of the
 run; out of process it ends only the read that's waiting, and the next
 `read-line` waits again, as JVM nREPL does.
 
+<details>
+<summary><strong>Text you typed while the program was running</strong></summary>
+
 One thing worth knowing: whatever you've typed at the prompt but not yet
 sent stays there after the program finishes. If the program ended while
 that text was waiting for it, your next Return doesn't evaluate it. It
 prints "This was typed while the program ran. Press Return again to
 evaluate it." and a second Return evaluates it. Edit the text first and
 Return behaves normally. Nothing is deleted either way.
+
+</details>
 
 ## Stop
 
@@ -249,6 +263,9 @@ Thai, or any other composed script works the same in both panes, and (like
 everything else in the output history) you can't type into old console
 output, only at the current prompt.
 
+<details>
+<summary><strong>Return during an input-method composition</strong></summary>
+
 There's one documented quirk around Return while an input-method
 composition is still in progress. If you press Return while the last
 syllable is still underlined and uncommitted, Jonquil lets GTK handle the
@@ -261,6 +278,8 @@ a plain newline at column 0, and Hangul names worked end to end: typing
 `(def 안녕 "...")` at the prompt returned `#'user/안녕`. Typing a closing
 character such as `"` or `)` after a Hangul syllable commits the syllable
 by itself, so an entry that ends that way needs only one Return.
+
+</details>
 
 ## Open and Save
 
@@ -278,7 +297,12 @@ you save.
 
 Cmd/Ctrl+S saves to the file's remembered path, or opens a Save dialog if
 there isn't one yet. Cmd/Ctrl+Shift+S always opens the Save dialog, even
-for a file that already has a path. Either way, the save itself is atomic:
+for a file that already has a path.
+
+<details>
+<summary><strong>How a save stays safe: atomic writes, symlinks and permissions</strong></summary>
+
+Either way, the save itself is atomic:
 Jonquil writes to a hidden temporary file next to the target first, then
 renames it into place, so a crash or a full disk mid-write can't leave a
 half-written file behind. Saving through a symlink follows the link and
@@ -290,6 +314,8 @@ levels of symbolic links". When the file already exists, the temporary
 file is created private (mode 600) before the new text goes in and only
 then gets the file's own permissions, so a private file's content is never
 written into a more open file.
+
+</details>
 
 ![The close prompt: Save, Don't Save and Cancel over unsaved changes](../images/close-prompt.png)
 
@@ -323,6 +349,9 @@ Every tab shares the window's one evaluator and its one console, the way
 a project REPL in CIDER or Calva does. So `demo.clj` can call what
 `core.clj` defined, and the prompt follows whichever tab ran last.
 
+<details>
+<summary><strong>Reset on Run with several tabs</strong></summary>
+
 Reset on Run works per tab. Each tab owns the namespaces its own Runs
 created, and a Run with the box ticked removes only that tab's
 namespaces, plus anything you created at the prompt, plus `user`.
@@ -337,6 +366,11 @@ worth knowing:
   it come up more often.
 - Every Run still starts from a fresh `user`, so two Untitled tabs without
   an `ns` form overwrite each other's definitions.
+
+</details>
+
+<details>
+<summary><strong>Files from another project, and loose Jolt files</strong></summary>
 
 A window belongs to one project, the one its first file came from. Open a
 file from somewhere else and it still gets a tab you can edit and save,
@@ -353,6 +387,8 @@ elsewhere switches it too. A loose Jolt file keeps the window's Jolt even
 on its own: when tabs close down to it, and when the only tab is saved
 under a new name outside any project.
 
+</details>
+
 ### Tabs from last time
 
 Jonquil remembers which files have tabs in the window, in order, and
@@ -367,6 +403,9 @@ straight away and the tabs open into it. A start from the
 Dock or Finder has no folder of its own, so it goes back to the project
 you quit most recently and roots the file tree there.
 
+<details>
+<summary><strong>What isn't reopened, and turning it off</strong></summary>
+
 Only files are remembered. Untitled tabs, and text you didn't save, are
 not: quitting already asks about those, and a file you chose not to save
 reopens as it is on disk. Naming a file at launch (`jonquil core.clj`)
@@ -379,6 +418,8 @@ Couldn't read sessions.edn, so no tabs were reopened.` The list lives in `sessio
 `:reopen-tabs? false` in `settings.edn`; Jonquil then neither saves nor
 reopens anything.
 
+</details>
+
 ## Opening from Finder and the Dock
 
 With the macOS app installed (see [Getting started](getting-started.md#the-macos-app)),
@@ -386,7 +427,12 @@ Open With on a Clojure file in Finder, or dropping files on Jonquil's Dock
 icon, opens each file in a tab. On Linux, a file manager's Open With on an
 installed Jonquil does the same (see [Linux](getting-started.md#linux)), and
 so does giving several files on the command line: `jonquil a.clj b.clj` opens
-two tabs on either system. The usual tab rules apply: a file that's
+two tabs on either system.
+
+<details>
+<summary><strong>Tab rules, folders, and files that can't be opened</strong></summary>
+
+The usual tab rules apply: a file that's
 already open just selects its tab, an untouched Untitled tab is filled
 first, and a file from another project than the window's gets an editable
 tab that refuses Run (see [Tabs](#tabs)). A folder, from Open With, a
@@ -402,6 +448,8 @@ A file Jonquil can't honour says so on the status line: a path it can't read
 is named with the reason, and a file that isn't local (a URI) is reported as
 "not a local file". The rest of a batch still opens. When several fail, only
 the last failure stays on the status line.
+
+</details>
 
 ## File tree
 
@@ -438,6 +486,9 @@ highlighted when its row is showing. Switching tabs never opens folders by
 itself, but saving a file somewhere under the root, or opening one into a
 tab, does: a new file you just saved shows up in the tree right away.
 
+<details>
+<summary><strong>What the tree hides, and refreshing it</strong></summary>
+
 Dotfiles and dot-folders (`.git`, `.cpcache`, `.clj-kondo`…) and the
 folders `target` and `node_modules` are hidden, along with whatever the root's `.gitignore`
 names, as long as the line is a plain name (`out`), a `*` pattern (`*.log`)
@@ -455,6 +506,8 @@ in the header, roots the tree somewhere else; it doesn't open or close any
 tab, and only changes which project the window runs while the window holds
 nothing but one empty Untitled tab.
 
+</details>
+
 ### Files and folders
 
 Right-click a row for **New File…**, **New Folder…**, **Rename…** and **Move to
@@ -465,6 +518,9 @@ folder that file is listed in. The "(can't read)" row has no menu.
 
 F2 renames the selected row. Delete, or Cmd+Backspace (Ctrl+Backspace on
 Linux), moves it to the Trash. Return still opens a file or toggles a folder.
+
+<details>
+<summary><strong>Naming rules, open tabs after a rename, and the Trash</strong></summary>
 
 The menu swaps to a name box. Return accepts the name, while Escape or a
 click outside cancels. Escape on the menu itself closes it. Rename pre-selects the
@@ -491,6 +547,8 @@ recreate the folder.
 A new file whose name the tree hides (a dotfile, or a `.gitignore` match) is
 still created and opened, and the console says it's hidden. Dragging rows to
 move them isn't supported yet.
+
+</details>
 
 ## Themes
 
@@ -522,6 +580,9 @@ the status bar says which one it landed on, `Theme: auto (dark)` or
 `Theme: auto (light)`; that text stays as it was if the system flips later,
 though the window itself changes. Off macOS, auto shows light for now.
 
+<details>
+<summary><strong>Where the choice is saved</strong></summary>
+
 The choice sticks: it's saved to `$XDG_CONFIG_HOME/jonquil/settings.edn` (or
 `~/.config/jonquil/settings.edn` when that variable isn't set) as
 `{:theme :navy}`, or whichever theme you picked (`{:theme :auto}` for auto,
@@ -531,6 +592,8 @@ file that can't be read, or that names a theme Jonquil doesn't know, also
 starts it in light, but says so once in the console. A settings file that's
 a symlink stays a symlink after Jonquil saves through it. To go back to
 light, delete the file.
+
+</details>
 
 ## Help
 
@@ -556,6 +619,9 @@ and a documentation preview for whichever one is selected on the other.
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](../images/completion.png)
 
+<details>
+<summary><strong>Keys while the popup is open</strong></summary>
+
 While the popup is open, Up and Down move the selection one row, PageUp
 and PageDown move it eight rows, Enter or Tab commits the selected
 candidate, and Escape closes the popup without touching the buffer.
@@ -566,6 +632,8 @@ history and from evaluation while it's open: Up and Down move the list
 instead of paging through history, and Enter commits the candidate
 instead of running the line. Close the popup first, by committing
 something or by Escape, to get history and evaluation back.
+
+</details>
 
 Candidates come from Clojure's special forms and core built-ins, whatever
 the Definitions pane itself defines, and whatever your program has
@@ -595,6 +663,9 @@ where a definition lives, jump shows the var's documentation in the
 quick-doc popup instead. When nothing matches at all, the status bar
 says so.
 
+<details>
+<summary><strong>The source panel</strong></summary>
+
 Inside the source panel, F12 or Ctrl+B follows a definition again, in
 the same file or into another, and Cmd/Ctrl+[ goes back. A definition in
 the window's own file is the exception: F12 moves the window's caret to
@@ -606,6 +677,8 @@ project has an **Open in window** button (Cmd/Ctrl+Shift+O while the panel
 has focus) that opens it in a tab for editing, on the same line, or
 brings forward the tab that already has it. Nothing in your other tabs is
 touched.
+
+</details>
 
 ![F12 on clojure.string/join in a JVM Clojure window: the source panel shows string.clj from the Clojure jar, read-only, on join's definition](../images/clj-source.png)
 
@@ -641,12 +714,19 @@ macOS reserves Ctrl+Space by default, under System Settings > Keyboard >
 Keyboard Shortcuts > Input Sources > "Select the previous input source."
 While that shortcut stays on, a real Ctrl+Space keypress goes to the
 system first and never reaches Jonquil at all. Turn it off there (or
-rebind it to something else) to free Ctrl+Space for completion. This
+rebind it to something else) to free Ctrl+Space for completion.
+
+<details>
+<summary><strong>Why Jonquil can't work around it</strong></summary>
+
+This
 isn't something Jonquil can work around from inside the app: in testing,
 a Ctrl+Space routed straight to Jonquil's own process by its pid reached
 the completion handler without trouble, but an actual key press on the
 keyboard still went to the system's input-source switch as long as that
 shortcut was turned on.
+
+</details>
 
 ## Inspecting values
 
@@ -667,6 +747,9 @@ a footer. A collection's rows read `label · preview`, one per entry, or,
 when every entry is a map and they all share the same keys, one row per
 entry in a table instead, a column per key. A leaf value, a string or a
 number, shows its own printed form in place of rows.
+
+<details>
+<summary><strong>The panel's keys and its footer</strong></summary>
 
 Up and Down move the selection. Return or Right goes in a level, onto
 whatever's selected; Left or Backspace comes back out, landing on the row
@@ -689,6 +772,8 @@ empty collection reads `0 of 0` rather than a range it doesn't have. A
 note from the last action, `no metadata`, `not tabular`, or an error,
 shows there too for a few seconds and then clears on its own.
 
+</details>
+
 Jolt supports this in process and out of process alike. Out of process,
 Jonquil loads the same inspector code into its Jolt child as nREPL
 middleware, so stepping through a value never changes `*1`, `*2` or `*3`.
@@ -697,6 +782,9 @@ inspector. ClojureDart doesn't, in this version: Cmd/Ctrl+I there puts a
 short sentence in the status bar instead of opening anything. Opening a
 file whose dialect or runtime differs from the one the panel opened
 against hides the panel; Cmd/Ctrl+I on the new file opens a fresh one.
+
+<details>
+<summary><strong>On the JVM, and the panel's size and limits</strong></summary>
 
 On the JVM, before your first Run, Cmd/Ctrl+I says "Nothing to inspect
 yet: Jonquil isn't attached to the server. Run something first." After a
@@ -719,6 +807,8 @@ whichever client's action landed there last, Jonquil's own or another
 tool attached to the same server. Either runtime caps a collection at
 1000 entries: past that, the info line reads `1000+ items` instead of a
 count, and paging still works over everything up to the cap.
+
+</details>
 
 ## Dialects and runtimes
 
@@ -754,6 +844,9 @@ The project is the nearest directory, at or above the open file, holding
 above it, or an unsaved window, has no project, so only the extension and
 the settings default are left to decide.
 
+<details>
+<summary><strong>How each dialect gets picked: ClojureDart, JVM Clojure, ClojureScript, jank and nREPL</strong></summary>
+
 ClojureDart's own marker is `pubspec.yaml`. A ClojureDart app commonly
 carries a `deps.edn` too, for `bb` tasks, say, so both markers can be
 present in the same project at once: rule 2 only decides when exactly one
@@ -788,6 +881,8 @@ The nREPL dialect has neither a marker nor an extension, so only
 project with a `bb.edn`, or a Basilisp one, stays Jolt's until you say so, since the dialect
 needs a server you start yourself (see
 [Any nREPL server](#any-nrepl-server-babashka-other-clojures-other-hosts)).
+
+</details>
 
 ### `.jonquil.edn`
 
@@ -835,6 +930,9 @@ window's folder: in a window opened on a `deps.edn` project it runs out of
 process with the rest of that project, and in a window with no folder it
 runs in process.
 
+<details>
+<summary><strong>Start lines, Stop, switching projects, and stdin and the inspector</strong></summary>
+
 At start, the console reports the child's pid, its port, and which
 project directory it's running in, then lists what this particular
 runtime can't do (three of those are below). Stop still interrupts a
@@ -868,6 +966,8 @@ Output streams as the program prints, with jolt-lang/nrepl v0.4.0 or
 later; an older checkout sends it all at once when the evaluation
 finishes, so a program that prints once a second for ten seconds and
 then shows everything in one burst is the sign to update the checkout.
+
+</details>
 
 ### Where the nREPL middleware comes from
 
@@ -912,6 +1012,9 @@ server. That fork writes its port to `NREPL.lock` in the app
 directory, which is how Jonquil finds it; upstream ClojureDart
 carries no nREPL server of its own, so there's nothing there for
 Jonquil to attach to. The fork isn't published yet.
+
+<details>
+<summary><strong>Connecting, Run, Stop, Reset on Run and docs</strong></summary>
 
 Jonquil connects the first time you Run, or on any evaluation while it
 holds no live connection, and prints "; Connecting to the app on port
@@ -965,6 +1068,8 @@ time" once its own budget runs out, or, only on a fork build that
 predates symbol lookup, "No docs for ClojureDart symbols yet (the app's
 ClojureDart fork doesn't answer lookup)".
 
+</details>
+
 ### JVM Clojure: attaching to your own nREPL server
 
 JVM Clojure attaches the same way ClojureDart does: Jonquil never starts
@@ -999,6 +1104,9 @@ again and the next Run reconnects.
 
 ![A JVM Clojure window after Run: the console connects to the server, loads the file, then answers two REPL entries in its namespace](../images/clj-attach.png)
 
+<details>
+<summary><strong>What the console says when it can't connect</strong></summary>
+
 Jonquil connects the first time you Run, or on any evaluation while it
 holds no live connection, printing "; Connecting to the nREPL server on
 port N..." while it does. If nothing's listening yet, the console says
@@ -1010,6 +1118,8 @@ have stopped.", and a port that answers but isn't nREPL at all gets
 "; Port N isn't an nREPL server Jonquil can use." Jonquil only ever
 reads `.nrepl-port`: since it never started the server that owns the
 file, it never writes to it or deletes it either.
+
+</details>
 
 #### Auto-require
 
@@ -1029,6 +1139,9 @@ session before whatever you asked to run. That means the first Run or REPL
 entry, and again after a reconnect, because a restarted server has
 forgotten everything. It isn't sent twice on the same connection.
 
+<details>
+<summary><strong>When the require fails, and the list's format</strong></summary>
+
 If the require fails, a namespace that isn't on the classpath for example,
 the server's own error shows in the console, followed by "; auto-require
 failed (the error is above), so carrying on without it. It runs again on
@@ -1041,6 +1154,10 @@ ignored, with a line like `; project: .jonquil.edn :auto-require should be
 a vector of namespace symbols, like [my.app.core], not my.app.core, so it
 is ignored`. Jonquil reads `.jonquil.edn` when a window chooses its
 dialect, so an edit to the list takes effect in a new window.
+
+</details>
+
+#### Run, Stop, stdin and docs
 
 Run sends the whole Definitions pane as a `load-file`, without naming a
 namespace itself: the file's own `ns` form is what decides where the
@@ -1076,6 +1193,9 @@ prompt sends end-of-input when the server runs nREPL 1.8.0 or later, so
 1.8.0 queues an early EOF and would end your next read with it. The EOF
 doesn't stick: the next `read-line` waits for a line again.
 
+<details>
+<summary><strong>End-of-input on an older nREPL</strong></summary>
+
 On an older server nothing is sent and the read keeps waiting for an
 actual line. The console says why, once per connection, the first time
 you press Cmd/Ctrl+D. nREPL 1.7.0 fails an empty `stdin` op rather than
@@ -1087,6 +1207,8 @@ answering EOF, and the `clojure-cli.repl-server` 0.1.0 release brings in
                      nrepl/nrepl {:mvn/version "1.8.0"}}
         :main-opts ["-m" "clojure-cli.repl.server"]}
 ```
+
+</details>
 
 Completion and quick documentation both ask the server, not just this
 buffer. Ctrl+Space merges the server's own candidates in with the
@@ -1104,6 +1226,9 @@ server yet. Run the file first."
 
 ![Quick doc on clojure.core's map in a JVM Clojure window, ending with a Defined in line inside the Clojure jar](../images/clj-quick-doc.png)
 
+<details>
+<summary><strong>Full documentation from ClojureDocs</strong></summary>
+
 Press Ctrl+Q or Shift+F1 a second time on the same popover, and Jonquil
 asks the server for full documentation instead of the short quick-doc
 text: clojure-cli.repl's own `doc` op, which returns ClojureDocs' full
@@ -1119,6 +1244,8 @@ resolve tells you so again in the status bar, rather than asking the
 server for a doc it already knows nothing useful about.
 
 ![Full documentation for map after a second quick-doc press, with ClojureDocs' examples](../images/clj-full-doc.png)
+
+</details>
 
 ### ClojureScript (experimental): attaching to a shadow-cljs build
 
@@ -1160,6 +1287,9 @@ builds: :app :test. Pick one with {:cljs {:shadow-build :app}} in
 there takes effect on the next one, while a `.jonquil.edn` edit takes effect
 when the file is reopened.
 
+<details>
+<summary><strong>What the console says when it can't connect</strong></summary>
+
 If nothing's listening yet, the console says so: "; No shadow-cljs server
 here. Start one in `<dir>` with npx shadow-cljs watch app." A stale
 `.shadow-cljs/nrepl.port` naming a port nothing answers gets
@@ -1170,6 +1300,8 @@ use." A file with no project around it gets "; This file isn't in a
 project, so there's no shadow-cljs.edn to read. Save it inside the project
 that has shadow-cljs.edn." Jonquil only ever reads
 `.shadow-cljs/nrepl.port`; it never writes to the file or deletes it.
+
+</details>
 
 When the server is up but no JS runtime has loaded the build, Run says so:
 "; The build isn't loaded in any JS runtime. Open the app (or run the node
@@ -1233,6 +1365,9 @@ For babashka, start the server in the project and name its port, since
 bb nrepl-server 1667
 ```
 
+<details>
+<summary><strong>What to expect from babashka</strong></summary>
+
 Measured against babashka's server, here's what to expect. Run, the REPL,
 quick docs and completion all work (Jonquil keeps only completion names
 that start with what you typed, since babashka's matching is looser). Its server has no `interrupt` op, so Stop
@@ -1243,6 +1378,8 @@ says so before the evaluation starts. Jump to definition stays in the
 buffer for library functions, because babashka names a file that isn't on
 this disk, and Jonquil only follows a `:file` it can open.
 
+</details>
+
 Basilisp's server writes `.nrepl-port` in the folder you start it in, so
 start it in the project and `{:dialect :nrepl}` is all `.jonquil.edn`
 needs:
@@ -1250,6 +1387,9 @@ needs:
 ```bash
 basilisp nrepl-server
 ```
+
+<details>
+<summary><strong>What to expect from Basilisp</strong></summary>
 
 Measured against Basilisp 0.5.1: Run, the REPL and completion work, and
 the error line is the exception Python names last
@@ -1260,6 +1400,8 @@ babashka it has no `interrupt` op, so Stop disconnects. It has no `stdin`
 op either, but its `read-line` reads the server's own stdin, so type the
 line in the terminal you started the server in. The console says that
 too, before the evaluation starts.
+
+</details>
 
 A server on another host is the same unauthenticated code execution as
 one on this machine, now reachable over the network. Keep it on a network
@@ -1320,11 +1462,16 @@ process has already served a request: the first Run just starts jank and
 prints no Reset line. Uncheck it and Run builds on whatever the process
 already has.
 
+<details>
+<summary><strong>A loose file whose first evaluation isn't a Run</strong></summary>
+
 One caveat for a loose `.jank` file with no project: when the first
 evaluation is a REPL line or Run Selection rather than Run, jank starts
 without that module path, so a `require` of a sibling namespace fails. It lasts until a Run starts jank: a Run after a Stop, or any
 Run with Reset on Run ticked. Stop alone doesn't help, because a REPL line
 still starts jank without the path. Run the file first to avoid it.
+
+</details>
 
 #### Docs and completion
 
@@ -1381,6 +1528,9 @@ the project, defaulting to `DIR`. `jonquil_run_file` requires its file `path`,
 and `jonquil_check_brackets` takes either `text` or a `path` naming the file
 to check:
 
+<details>
+<summary><strong>The six tools</strong></summary>
+
 | Tool | What it does |
 |---|---|
 | `jonquil_eval` | Evaluates code as a REPL line; definitions persist between calls |
@@ -1389,6 +1539,8 @@ to check:
 | `jonquil_doc` | Documentation for a symbol in the project's runtime |
 | `jonquil_complete` | Up to 50 completion candidates for a prefix |
 | `jonquil_project` | The dialect, runtime and directory the other tools would use; starts nothing |
+
+</details>
 
 The dialect and runtime come from the IDE's own choice: the file's extension
 and the project's `.jonquil.edn` (see [Choosing a dialect](#choosing-a-dialect)
@@ -1418,6 +1570,9 @@ Headless `jonquil --mcp` keeps its six tools unchanged. With `--window` the
 server offers fifteen, and they act on the live window rather than on private
 evaluators:
 
+<details>
+<summary><strong>The fifteen window tools</strong></summary>
+
 | Tool | What it does |
 |---|---|
 | `jonquil_eval` | Evaluates code as a REPL entry at the console prompt: echoed, visible, with `*1` and history as if you had typed it |
@@ -1435,6 +1590,11 @@ evaluators:
 | `jonquil_complete` | Completion candidates for a prefix, one per line, at most 50 |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem, for `text` or a file `path` |
 | `jonquil_project` | The window's live dialect selection: label, runtime, project directory, source, warnings |
+
+</details>
+
+<details>
+<summary><strong>Timeouts, other projects' tabs, disconnecting and trust</strong></summary>
 
 `jonquil_eval`, `jonquil_run` and `jonquil_run_selection` take a `timeout_ms`
 (default 30000) and interrupt the evaluation when it expires. A program that
@@ -1454,6 +1614,8 @@ the serve loop writes a line to stderr and closes the window the same way.
 
 The trust boundary is the headless server's, plus the files the window can
 reach: the agent can open, edit and save any file you can.
+
+</details>
 
 ### Attaching to a window that is already open
 
@@ -1480,6 +1642,9 @@ Left bare, `jonquil --mcp-attach` attaches when exactly one window is
 listening. With none, or with several and no `DIR` to choose between them, it
 refuses and says why, listing the live windows when there is more than one.
 
+<details>
+<summary><strong>Which folder it matches, and detaching</strong></summary>
+
 The folder a window registers is the one it opened on. A window with no file
 tree root registers its working directory. Open Folder re-roots the window and
 its registration together, so attach matches the folder the window shows now,
@@ -1491,6 +1656,8 @@ the relay loses its connection mid-stream it writes one line to stderr and
 exits. The window removes its entry when it quits, and an entry left behind by
 a crash is recognized by its dead pid and skipped. `bb mcp:smoke --attach`
 exercises all of this end to end.
+
+</details>
 
 **Trust.** While `:mcp-listen?` is on, any local process that can reach the
 loopback interface gets unauthenticated code execution in your account, plus
@@ -1509,6 +1676,11 @@ its stdin.
 
 ## Keys
 
+The keys, grouped by what they're for. Each group opens on a click.
+
+<details>
+<summary><strong>Run, files and tabs</strong></summary>
+
 | Key | Where | Does |
 |---|---|---|
 | F5 | anywhere in the window | Run |
@@ -1524,12 +1696,28 @@ its stdin.
 | Cmd/Ctrl+1 to 8 | anywhere in the window | Go to that tab |
 | Cmd/Ctrl+9 | anywhere in the window | Go to the last tab |
 | Cmd/Ctrl+Shift+E | anywhere in the window | Show or hide the file tree |
+
+</details>
+
+<details>
+<summary><strong>File tree</strong></summary>
+
+| Key | Where | Does |
+|---|---|---|
 | Up/Down, Return | file tree | Move, and open a file or a folder |
 | Right/Left | file tree | Open or close the selected folder |
 | F2 | file tree | Rename the selected row |
 | Delete, Cmd/Ctrl+Backspace | file tree | Move the selected row to the Trash |
 | Shift+F10, Menu | file tree | Open the menu for the selected row |
 | Escape | file tree | Give focus back to the editor |
+
+</details>
+
+<details>
+<summary><strong>Editing, undo, zoom and themes</strong></summary>
+
+| Key | Where | Does |
+|---|---|---|
 | ( [ { " | Definitions editor | Auto-pair the closer, or wrap the selection |
 | Tab | Definitions editor | Indent the line or selection |
 | Shift+Tab | Definitions editor | Unindent the line or selection |
@@ -1541,32 +1729,64 @@ its stdin.
 | Cmd/Ctrl+Z | anywhere in the window | Undo |
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
 | Cmd/Ctrl+Y | anywhere in the window | Redo |
-| Cmd/Ctrl+E | anywhere in the window | Run the editor's selection, or its current line, at the console prompt |
-| Cmd/Ctrl+Enter | Definitions editor | Run the form at the caret (in a comment block, the form inside it) |
 | F6 | anywhere in the window | Move focus between the editor and the console |
-| Escape | Definitions editor, console input | Close an open completion, quick doc or rename popover (before it would Stop) |
-| Cmd/Ctrl+L | anywhere in the window | Clear the console's output history |
-| Cmd/Ctrl+Shift+L | anywhere in the window | Clear the last entry's output (CIDER's C-c C-o) |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
-| Cmd/Ctrl+F | anywhere in the window | Open the find bar |
-| Cmd/Ctrl+H | anywhere in the window | Open the find bar with replace showing |
-| Return, F3 or Cmd/Ctrl+G | find bar (F3/Cmd+G also from the editor) | Next match |
-| Shift+Return, Shift+F3 or Cmd/Ctrl+Shift+G | find bar | Previous match |
-| Escape | find bar | Close the find bar |
 | Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, auto) |
+
+</details>
+
+<details>
+<summary><strong>Running code and the console</strong></summary>
+
+| Key | Where | Does |
+|---|---|---|
+| Cmd/Ctrl+E | anywhere in the window | Run the editor's selection, or its current line, at the console prompt |
+| Cmd/Ctrl+Enter | Definitions editor | Run the form at the caret (in a comment block, the form inside it) |
+| Cmd/Ctrl+L | anywhere in the window | Clear the console's output history |
+| Cmd/Ctrl+Shift+L | anywhere in the window | Clear the last entry's output (CIDER's C-c C-o) |
 | Return | console prompt | Evaluate, send the line as stdin, or insert a newline for an unfinished multi-line entry |
 | Shift+Return | console prompt | Always insert a newline |
 | Up | console prompt, first line of input | Recall the previous history entry |
 | Down | console prompt, last line of input | Recall the next history entry |
 | Cmd/Ctrl+D | console prompt, while waiting on input | Send end-of-input |
+
+</details>
+
+<details>
+<summary><strong>Find and replace</strong></summary>
+
+| Key | Where | Does |
+|---|---|---|
+| Cmd/Ctrl+F | anywhere in the window | Open the find bar |
+| Cmd/Ctrl+H | anywhere in the window | Open the find bar with replace showing |
+| Return, F3 or Cmd/Ctrl+G | find bar (F3/Cmd+G also from the editor) | Next match |
+| Shift+Return, Shift+F3 or Cmd/Ctrl+Shift+G | find bar | Previous match |
+| Escape | find bar | Close the find bar |
+
+</details>
+
+<details>
+<summary><strong>Completion, docs, jump and rename</strong></summary>
+
+| Key | Where | Does |
+|---|---|---|
+| Escape | Definitions editor, console input | Close an open completion, quick doc or rename popover (before it would Stop) |
 | Ctrl+Space | Definitions editor, console input | Open or commit completion |
 | Ctrl+Q or Shift+F1 | Definitions editor | Quick documentation |
 | Ctrl+Q or Shift+F1, pressed again on the same popover | Definitions editor | Full documentation (JVM Clojure only) |
 | F12 or Ctrl+B | Definitions editor | Jump to definition |
 | Shift+F6 or F2 | Definitions editor | Rename |
 | Shift+F10 or right click | Definitions editor, console input | Open the context menu |
+
+</details>
+
+<details>
+<summary><strong>Inspector and source panel</strong></summary>
+
+| Key | Where | Does |
+|---|---|---|
 | Cmd/Ctrl+I | anywhere in the window | Inspect the last result |
 | Cmd/Ctrl+Shift+I | anywhere in the window | Inspect the form at the caret |
 | Up/Down | inspector panel | Move the selection |
@@ -1581,10 +1801,15 @@ its stdin.
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
 | Escape | Source panel | Close the panel |
 
+</details>
+
 ## Known limits
 
 A few rough edges are already known and parked for a later phase, rather
 than being surprises you'd otherwise have to rediscover:
+
+<details>
+<summary><strong>The window and editing</strong> (3)</summary>
 
 - Return during an IME composition commits the syllable and inserts a
   plain newline rather than acting on it; a second Return does the rest.
@@ -1596,6 +1821,12 @@ than being surprises you'd otherwise have to rediscover:
   20,000 lines the worst stall measured about 69 ms, and the colours catch
   up within about 0.7 s. At 2,000 lines it's about 10 ms. The benchmark is
   in [Development](development.md#benchmark).
+
+</details>
+
+<details>
+<summary><strong>Jolt out of process</strong> (4)</summary>
+
 - An unresolved symbol evaluates to an `Unbound` var rather than an error,
   when Jonquil is running Jolt out of process.
 - A crash or SIGKILL of Jonquil leaves its out-of-process Jolt child
@@ -1608,6 +1839,12 @@ than being surprises you'd otherwise have to rediscover:
 - Stop against an unresponsive out-of-process child takes about 2.2
   seconds: a second waiting for it to answer the interrupt, a second more
   for it to exit once killed, and a little overhead either side.
+
+</details>
+
+<details>
+<summary><strong>ClojureDart</strong> (9)</summary>
+
 - Stop against a ClojureDart app detaches instead of interrupting: the
   app keeps whatever it already has.
 - No stdin, for the ClojureDart dialect.
@@ -1627,29 +1864,14 @@ than being surprises you'd otherwise have to rediscover:
 - A ClojureDart load stops at the first form the app's REPL compiler
   rejects, even though the app's own watcher still compiles the saved
   file.
+
+</details>
+
+<details>
+<summary><strong>JVM Clojure</strong> (5)</summary>
+
 - JVM Clojure attaches to a server you started, and never starts or stops
   the JVM itself.
-- ClojureScript attaches to a shadow-cljs server you started, and never
-  starts or stops the watch or the JS runtime.
-- Stop against ClojureScript detaches instead of interrupting: the
-  shadow-cljs interrupt stops nothing, since the work is in the JS runtime,
-  and the runtime keeps running what it has.
-- The nREPL dialect does what the server offers: with no `interrupt` op,
-  Stop disconnects and leaves the evaluation running in the server; with
-  no `stdin` op, a read waits until Stop on babashka, and reads the server's
-  own terminal on Basilisp. Over a slow link, completion and quick docs
-  can miss their 300 ms limit and use only this buffer. Reset on Run isn't available, and
-  jump to definition follows only a file that exists on this machine.
-- No stdin, for the ClojureScript dialect.
-- Reset on Run isn't available for ClojureScript.
-- `js/console.log` output goes to the JS runtime's own console, not
-  Jonquil's. `println` does reach Jonquil.
-- A namespace the watched build doesn't include can be required and
-  compiles, but never loads into the runtime, so its first use throws a
-  ReferenceError. Keep a Run'd file's requires within the build; namespaces
-  the buffer itself defines are fine.
-- With no JS runtime connected, Run says the build isn't loaded in any JS
-  runtime.
 - Reset on Run isn't available for JVM Clojure either: it's your own JVM,
   so Jonquil doesn't unload namespaces in it.
 - Stdin closes only on nREPL 1.8.0 or later: on older servers a read
@@ -1662,6 +1884,45 @@ than being surprises you'd otherwise have to rediscover:
   `; interrupted`, but the loop keeps running in your JVM. A sleep,
   blocking I/O and `read-line` do stop. Jonquil never kills the JVM, so
   the way out is to restart the server yourself.
+
+</details>
+
+<details>
+<summary><strong>ClojureScript</strong> (7)</summary>
+
+- ClojureScript attaches to a shadow-cljs server you started, and never
+  starts or stops the watch or the JS runtime.
+- Stop against ClojureScript detaches instead of interrupting: the
+  shadow-cljs interrupt stops nothing, since the work is in the JS runtime,
+  and the runtime keeps running what it has.
+- No stdin, for the ClojureScript dialect.
+- Reset on Run isn't available for ClojureScript.
+- `js/console.log` output goes to the JS runtime's own console, not
+  Jonquil's. `println` does reach Jonquil.
+- A namespace the watched build doesn't include can be required and
+  compiles, but never loads into the runtime, so its first use throws a
+  ReferenceError. Keep a Run'd file's requires within the build; namespaces
+  the buffer itself defines are fine.
+- With no JS runtime connected, Run says the build isn't loaded in any JS
+  runtime.
+
+</details>
+
+<details>
+<summary><strong>The nREPL dialect (babashka, Basilisp, other servers)</strong> (1)</summary>
+
+- The nREPL dialect does what the server offers: with no `interrupt` op,
+  Stop disconnects and leaves the evaluation running in the server; with
+  no `stdin` op, a read waits until Stop on babashka, and reads the server's
+  own terminal on Basilisp. Over a slow link, completion and quick docs
+  can miss their 300 ms limit and use only this buffer. Reset on Run isn't available, and
+  jump to definition follows only a file that exists on this machine.
+
+</details>
+
+<details>
+<summary><strong>The inspector</strong> (5)</summary>
+
 - The inspector panel never refreshes itself: a later evaluation leaves
   it showing whatever it had until you open it again.
 - A collection in the inspector panel shows at most 1000 entries.
@@ -1672,8 +1933,16 @@ than being surprises you'd otherwise have to rediscover:
 - Resizing the inspector panel doesn't reflow the rows already on
   screen; the new width only takes effect the next time you open it.
 - No inspector for ClojureDart or ClojureScript, in this version.
+
+</details>
+
+<details>
+<summary><strong>MCP</strong> (2)</summary>
+
 - An MCP eval, run or run-selection against a window that is already
   evaluating answers busy instead of queueing. `jonquil_run_selection`
   still moves the visible selection first, by design.
 - A listening window (`:mcp-listen?`) serves one MCP client at a time:
   a second attach waits until the first detaches.
+
+</details>
