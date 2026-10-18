@@ -42,9 +42,11 @@
 ;; line would soft-wrap at all.
 (def ^:private DOC-WIDTH 660)
 
-;; The quick-doc popover's cap in characters: the 80 columns DOC-WIDTH was
-;; sized for, now a cap rather than a fixed width (it fits its text).
-(def ^:private DOC-COLUMNS 80)
+;; The quick-doc popover's cap in characters, now a cap rather than a fixed
+;; width (it fits its text): DOC-WIDTH's 660 px was about 84 columns, an
+;; 80-column docstring plus a cushion, and max-width-chars works from
+;; Pango's approximate character width, so the cushion stays.
+(def ^:private DOC-COLUMNS 84)
 (def ^:private DOC-HEIGHT 260)
 (def ^:private RENAME-WIDTH 260)
 

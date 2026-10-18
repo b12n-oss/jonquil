@@ -143,9 +143,10 @@
   exactly as before. With {:fit-width? n}, the scroller takes the label's
   natural width instead, capped at n characters (gtk_label_set_max_width_
   chars, so the cap follows the zoom), so a one-line doc gets a narrow
-  popover rather than the full 80 columns (P4 parked item). Measured: the
-  scroller's own max-content-width doesn't cap it, since its horizontal
-  policy is NEVER (a long doc grew to 1175 px). The completion preview keeps the fixed width, so its
+  popover rather than the full 80 columns (P4 parked item). The cap is on
+  the label because the scroller's own max-content-width doesn't apply
+  while its horizontal policy is NEVER: measured, a long doc grew to
+  1175 px. The completion preview keeps the fixed width, so its
   popup doesn't change size as the selection moves. Returns {:label
   :scroll}; callers set the label's text and append :scroll into their
   own box (gtk_box_append)."

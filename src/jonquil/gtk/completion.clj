@@ -139,7 +139,8 @@
   jonquil.gtk.help-popover, so it never steals keys from its view (probe
   1). Its child is a vertical box: a
   GtkListBox (BROWSE selection, so exactly one candidate row is always
-  selected) inside a GtkScrolledWindow sized LIST-WIDTHxLIST-HEIGHT, over
+  selected) inside a GtkScrolledWindow LIST-WIDTH wide and as tall as its
+  rows up to LIST-HEIGHT, over
   jonquil.gtk.popover/make-doc-scroll's own doc-preview label+scroll at
   DOC-WIDTHxDOC-HEIGHT (fix wave item 5: wrapped, top-aligned, no
   horizontal scrolling, sized to content up to DOC-HEIGHT; fix wave item 2:
