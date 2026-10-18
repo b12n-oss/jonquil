@@ -95,6 +95,35 @@
   server on Windows."
   #"(?:(?:Execution|Syntax|Unexpected) error|Error (?:printing return value|reading eval result))[^\n]* at [^\n]*\)\.\r?\n")
 
+(def ^:private python-traceback "Traceback (most recent call last):")
+
+(defn- exception-line
+  "The exception line of the last Python traceback in s: the first line
+  after its header that isn't indented (frames and their source lines
+  are), so a message that runs on over more lines, or a SyntaxError's
+  caret lines before it, don't get taken. nil without a traceback."
+  [s]
+  (when-let [i (str/last-index-of (str s) python-traceback)]
+    (some->> (str/split-lines (subs s (+ i (count python-traceback))))
+             (remove str/blank?)
+             (remove #(re-find #"^\s" %))
+             first str/trim not-empty)))
+
+(defn- compiler-message
+  "The message line of Basilisp's compiler and reader error block, which
+  it sends as err (measured, Basilisp 0.5.1):
+  \"  exception: <class '...CompilerException'>\\n    message: unable to
+  resolve symbol 'x' in this context\\n   location: <nREPL Input>:1\". The
+  last message: line after the last line that starts with exception:, or
+  nil when err has no such block."
+  [err]
+  (let [lines (vec (str/split-lines err))
+        i (last (keep-indexed (fn [i l] (when (re-find #"^\s*exception: <class '" l) i)) lines))]
+    (when i
+      (some->> (subvec lines i)
+               (keep #(second (re-find #"^\s*message: (.*)$" %)))
+               last str/trim not-empty))))
+
 (defn- error-message
   "An eval-error's message: the first non-blank line after the last err->msg
   header in the err text (the last, so the program's own *err* output
@@ -104,8 +133,14 @@
   \"java.lang.ArithmeticException: Divide by zero user REPL:1:1\", ex
   \"class java.lang.ArithmeticException\") puts the message there while
   :ex holds only the class; the last, so the program's own earlier stderr
-  that happens to name the class isn't taken. Else ex, else the err
-  text's first line."
+  that happens to name the class isn't taken. With no header and no class,
+  Basilisp's shapes (measured, 0.5.1): a runtime error sends a Python
+  traceback as err and ex, and its exception line is the message
+  (\"ZeroDivisionError: Fraction(1, 0)\"); a compile or reader error sends
+  a block of labelled lines as err (and a traceback as ex), and its
+  message: line is. So a traceback in err wins (the program's own stderr
+  before it can't pass for a block), then the block, then a traceback in
+  ex. Else ex, else the err text's first line."
   [msgs]
   (let [err (apply str (keep :err msgs))
         header (last (re-seq err-header err))
@@ -114,9 +149,12 @@
         cls (when (and ex (str/starts-with? ex "class "))
               (some-> ex (subs (count "class ")) str/trim not-empty))
         named (when (and (not header) cls)
-                (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))]
+                (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))
+        python (when-not (or header cls)
+                 (or (exception-line err) (compiler-message err) (exception-line ex)))]
     (or (not-empty (first-line after))
         named
+        python
         (first-line (or ex err)))))
 
 (defn eval-result

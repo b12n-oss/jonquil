@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
 
 - Initial public release preparation.
 - An nREPL dialect: `.jonquil.edn {:dialect :nrepl :nrepl {:port 1667}}` attaches to any nREPL server you started (babashka, a non-JVM Clojure, one on another host with `:host`). Features follow the ops the server offers, and the console names the ones it lacks. Checked live against babashka (`bb test:bb`).
+- Quick docs ask cider's `info` when a server has no `lookup` op (Basilisp has only `info`), for the nREPL dialect and JVM Clojure alike.
+- `bb test:basilisp` runs the nREPL dialect against a real `basilisp nrepl-server`.
 - JVM Clojure asks cider's `complete` for completions when the server has no builtin `completions` (a pre-1.0 nREPL with cider-nrepl), instead of offering only the buffer's names.
 - `read-line` and `read` work for Jolt running out of process: Jonquil's own nREPL middleware in the Jolt child asks for each line at the prompt, Cmd/Ctrl+D ends input for that read, and Stop frees a waiting read. A plain nREPL server (the fallback when jolt-lang/nrepl can't be fetched), or a child that couldn't load Jonquil's middleware, still has no stdin.
 - The inspector (Cmd/Ctrl+I) works for Jolt running out of process: Jonquil loads its inspector code into the Jolt child as nREPL middleware, written under `~/.cache/jonquil/nrepl-middleware`, so stepping through a value leaves `*1`, `*2` and `*3` alone, on a plain nREPL server too.
@@ -15,6 +17,8 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- The nREPL dialect's error line against Basilisp shows the exception (`ZeroDivisionError: Fraction(1, 0)`) or a compile error's message, not `Traceback (most recent call last):`.
+- The nREPL dialect's stdin notice no longer says every read waits until Stop: Basilisp's `read-line` reads the server's own terminal.
 - Open With offers Jonquil for `.cljs` files too, on macOS (the app's document types) and Linux (the `text/x-clojure` MIME globs), now that there's a ClojureScript dialect.
 - JVM Clojure: output from another thread while `read-line` waits no longer takes the console out of input mode.
 - Find and replace: Return on a focused Replace or Replace All button presses it, instead of moving to the next match.

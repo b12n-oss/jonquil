@@ -199,6 +199,63 @@
                                           {:ex "class clojure.lang.ExceptionInfo" :status ["eval-error"]}
                                           {:status ["done"]}] false))))))
 
+(def ^:private basilisp-traceback
+  ;; Basilisp 0.5.1's runtime error ex (measured 2026-10-18), frames cut.
+  (str "Traceback (most recent call last):\n"
+       "  File \"/site-packages/basilisp/contrib/nrepl_server.lpy\", line 141, in do_handle_eval\n"
+       "    (let [result (last\n"
+       "                 ^^^^^\n"
+       "  File \"/lib/python3.12/fractions.py\", line 281, in __new__\n"
+       "    raise ZeroDivisionError('Fraction(%s, 0)' % numerator)\n"
+       "ZeroDivisionError: Fraction(1, 0)\n"))
+
+(deftest basilisp-error-line-test
+  (testing "a runtime error: the traceback's last line, in ex and err"
+    (is (= "Error: ZeroDivisionError: Fraction(1, 0)"
+           (:error-text (ops/eval-result [{:err basilisp-traceback}
+                                          {:ex basilisp-traceback :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "a compiler error: the message line of the block in err, not the traceback"
+    (is (= "Error: unable to resolve symbol 'undefined-thing' in this context"
+           (:error-text (ops/eval-result [{:err (str "\n  exception: <class 'basilisp.lang.compiler.exception.CompilerException'>\n"
+                                                     "      phase: :analyzing\n"
+                                                     "    message: unable to resolve symbol 'undefined-thing' in this context\n"
+                                                     "       form: undefined-thing\n"
+                                                     "   location: <nREPL Input>:1\n")}
+                                          {:ex basilisp-traceback :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "a reader error"
+    (is (= "Error: Unexpected EOF in list"
+           (:error-text (ops/eval-result [{:err "\n  exception: <class 'basilisp.lang.reader.UnexpectedEOFError'>\n    message: Unexpected EOF in list\n       line: 1:4\n"}
+                                          {:ex basilisp-traceback :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "a program's own message: line before a traceback isn't a compiler block"
+    (is (= "Error: ZeroDivisionError: Fraction(1, 0)"
+           (:error-text (ops/eval-result [{:err "message: hello\n"}
+                                          {:ex basilisp-traceback :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "a program's own stderr shaped like a compiler block, then a runtime error"
+    (is (= "Error: ZeroDivisionError: Fraction(1, 0)"
+           (:error-text (ops/eval-result [{:err "  exception: <class 'X'>\n    message: hello\n"}
+                                          {:err basilisp-traceback}
+                                          {:ex basilisp-traceback :status ["eval-error"]}
+                                          {:status ["done"]}] false)))))
+  (testing "a message on more than one line: its first line, not its last"
+    (let [tb (str "Traceback (most recent call last):\n"
+                  "  File \"<nREPL Input>\", line 1, in <module>\n"
+                  "basilisp.lang.exception.ExceptionInfo: boom {:a 1,\n"
+                  " :b 2}\n")]
+      (is (= "Error: basilisp.lang.exception.ExceptionInfo: boom {:a 1,"
+             (:error-text (ops/eval-result [{:err tb} {:ex tb :status ["eval-error"]} {:status ["done"]}] false))))))
+  (testing "a SyntaxError's caret lines come before its exception line"
+    (let [tb (str "Traceback (most recent call last):\n"
+                  "  File \"x.py\", line 1\n"
+                  "    (+ 1\n"
+                  "        ^\n"
+                  "SyntaxError: invalid syntax\n")]
+      (is (= "Error: SyntaxError: invalid syntax"
+             (:error-text (ops/eval-result [{:ex tb :status ["eval-error"]} {:status ["done"]}] false)))))))
+
 (deftest doc-info-blank-file-test
   (is (not (contains? (ops/doc-info "map" [{:name "map" :ns "clojure.core" :file "" :status ["done"]}]) :file))
       "babashka's empty :file is no file")

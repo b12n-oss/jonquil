@@ -293,6 +293,13 @@
             (reply {"info" (get (:docs opts) (get m "sym") []) "status" ["done"]})
             (reply {"message" (str "No namespace: " ns " found")
                     "status" ["done" "error" "lookup-error"]})))
+        "info"
+        ;; cider's info, Basilisp 0.5.1's shape (measured 2026-10-18): the
+        ;; fields flat in the reply, and only status for an unknown symbol
+        ;; or namespace. Advertised only when :ops names it.
+        (let [ns (or (get m "ns") (get-in @sessions [(get m "session") :ns] "user"))]
+          (reply (assoc (if (contains? @loaded ns) (get (:docs opts) (get m "sym") {}) {})
+                        "status" ["done"])))
         "doc"
         (let [req-ns (get m "ns")
               sid (get m "session")

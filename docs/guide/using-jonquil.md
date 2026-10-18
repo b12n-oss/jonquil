@@ -1205,8 +1205,8 @@ Namespaces the buffer itself defines are fine.
 ### Any nREPL server: babashka, other Clojures, other hosts
 
 `{:dialect :nrepl}` in a project's `.jonquil.edn` attaches to an nREPL
-server you started, whatever language it runs: babashka, a Clojure that
-isn't on the JVM, or a server on another machine. Jonquil connects on the
+server you started, whatever language it runs: babashka, Basilisp (Clojure
+on Python), or a server on another machine. Jonquil connects on the
 first Run and never starts or stops the server. It assumes nothing about
 the server beyond what its `describe` reply says, so a feature works when
 the server offers the op behind it and the start lines say which ones it
@@ -1243,10 +1243,34 @@ says so before the evaluation starts. Jump to definition stays in the
 buffer for library functions, because babashka names a file that isn't on
 this disk, and Jonquil only follows a `:file` it can open.
 
+Basilisp's server writes `.nrepl-port` in the folder you start it in, so
+start it in the project and `{:dialect :nrepl}` is all `.jonquil.edn`
+needs:
+
+```bash
+basilisp nrepl-server
+```
+
+Measured against Basilisp 0.5.1: Run, the REPL and completion work, and
+the error line is the exception Python names last
+(`ZeroDivisionError: Fraction(1, 0)`), or the message of a compile error.
+Quick docs come from its `info` op, since it has no `lookup`, and for
+Basilisp's core functions they name its own `core.lpy` on this disk. Like
+babashka it has no `interrupt` op, so Stop disconnects. It has no `stdin`
+op either, but its `read-line` reads the server's own stdin, so type the
+line in the terminal you started the server in. The console says that
+too, before the evaluation starts.
+
 A server on another host is the same unauthenticated code execution as
 one on this machine, now reachable over the network. Keep it on a network
 you trust, or tunnel it: `ssh -L 1667:localhost:1667 box`, then
 `{:port 1667}` here.
+
+Over a slow link, completion and quick docs can come back from this buffer
+alone. Each asks the server with a 300 ms limit, since it runs as you
+type, and a babashka server on a distant host measured 300 to 400 ms a
+round trip through an ssh tunnel. Run, the REPL, errors and Stop worked
+the same there as on this machine.
 
 ### jank (experimental)
 
@@ -1612,7 +1636,9 @@ than being surprises you'd otherwise have to rediscover:
   and the runtime keeps running what it has.
 - The nREPL dialect does what the server offers: with no `interrupt` op,
   Stop disconnects and leaves the evaluation running in the server; with
-  no `stdin` op, a read waits until Stop. Reset on Run isn't available, and
+  no `stdin` op, a read waits until Stop on babashka, and reads the server's
+  own terminal on Basilisp. Over a slow link, completion and quick docs
+  can miss their 300 ms limit and use only this buffer. Reset on Run isn't available, and
   jump to definition follows only a file that exists on this machine.
 - No stdin, for the ClojureScript dialect.
 - Reset on Run isn't available for ClojureScript.

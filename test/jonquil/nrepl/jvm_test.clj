@@ -707,7 +707,22 @@
       (fn [_srv dir _]
         (let [e (make dir)]
           (run e "1" {:run? false})
-          (is (= (cljd/no-docs "greet" clj/no-lookup-doc) (ev/lookup e "greet" fixture-core-text 0))))))))
+          (is (= (cljd/no-docs "greet" clj/no-lookup-doc) (ev/lookup e "greet" fixture-core-text 0)))))))
+  (testing "no lookup op but info (Basilisp's ops): the docs come from info"
+    (with-project {:ops (conj (vec (remove #{"lookup"} fake/jvm-ops)) "info")
+                   :docs {"greet" {"ns" "demo.core" "name" "greet" "arglists-str" "[who]" "doc" "Says hello."}}}
+      (fn [srv dir file]
+        (let [e (make dir)
+              greet {:status :found :name "greet" :ns "demo.core" :doc "Says hello." :arglists "[who]"}
+              found (fn [text] (select-keys (ev/lookup e "greet" text 0) [:status :name :ns :doc :arglists]))]
+          (run e "1" {:run? false})
+          (testing "the buffer's namespace isn't loaded: info's bare done there, then the prompt's answers"
+            (is (= greet (found fixture-core-text)))
+            (is (= 2 (count (filter #{"info"} (fake/ops-seen srv)))) "asked twice"))
+          (run e fixture-core-text {:run? true :path file})
+          (testing "once it's loaded, the buffer's namespace answers"
+            (is (= greet (found fixture-core-text))))
+          (is (nil? (ev/lookup e "nope" fixture-core-text 0)) "info's bare done is not found"))))))
 
 (def full-doc-greet-text
   "The fake's own :full-docs answer for greet -- P3.T2's step 5 text,
@@ -762,6 +777,13 @@
           (run e "1" {:run? false})
           (is (= {:status :no-op} (full-doc-sync e "greet" "1" 2000)))
           (is (not-any? #{"doc"} (fake/ops-seen srv)))))))
+  (testing "doc but neither lookup nor info: :no-op, since nothing can find the namespace first"
+    (with-project {:ops (vec (remove #{"lookup"} fake/jvm-ops))}
+      (fn [srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= {:status :no-op} (full-doc-sync e "greet" "1" 2000)))
+          (is (not-any? #{"doc" "lookup" "info"} (fake/ops-seen srv)))))))
   (testing "a symbol the namespace doesn't know: :not-found, and doc is never sent"
     (with-project {:full-docs {"nope" "never sent"}}
       (fn [srv dir _]
