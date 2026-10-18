@@ -802,9 +802,11 @@ otherwise takes Jolt down with it takes down that child, not the window
 running it, and the project's own `deps.edn` is the child's classpath.
 `.jonquil.edn` `{:runtime :in-process}` keeps a project inside Jonquil's
 process instead, and `{:runtime :nrepl}` asks for a child in a folder
-without a `deps.edn`. A loose file, or a tab that hasn't been saved
-anywhere, has no project folder to start a child in, so it always runs in
-process.
+without a `deps.edn`. A file outside any project folder has nowhere to
+start a child, so it always runs in process. An untitled tab follows the
+window's folder: in a window opened on a `deps.edn` project it runs out of
+process with the rest of that project, and in a window with no folder it
+runs in process.
 
 At start, the console reports the child's pid, its port, and which
 project directory it's running in, then lists what this particular
