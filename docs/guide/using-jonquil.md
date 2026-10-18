@@ -1234,9 +1234,8 @@ bb nrepl-server 1667
 ```
 
 Measured against babashka's server, here's what to expect. Run, the REPL,
-quick docs and completion all work, the last through cider's `complete`
-op (Jonquil keeps only names that start with what you typed, since
-babashka's matching is looser). Its server has no `interrupt` op, so Stop
+quick docs and completion all work (Jonquil keeps only completion names
+that start with what you typed, since babashka's matching is looser). Its server has no `interrupt` op, so Stop
 can't end a running evaluation: it disconnects instead, the evaluation
 keeps running inside babashka, and the next Run connects a fresh session.
 It has no `stdin` op either, so a `read-line` waits until Stop; the console
