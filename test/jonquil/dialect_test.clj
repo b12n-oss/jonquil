@@ -120,18 +120,34 @@
       (is (= :nrepl (:runtime s)))
       (is (= [] (:warnings s))))
     (let [s (dialect/select dialect/profiles (proj #{"deps.edn"} "{:runtime :bogus}") "/p/a.clj" nil)]
-      (is (= :in-process (:runtime s)))
-      (is (= [".jonquil.edn asks for runtime :bogus, which Jolt doesn't offer here; using in-process"]
+      (is (= :nrepl (:runtime s)))
+      (is (= [".jonquil.edn asks for runtime :bogus, which Jolt doesn't offer here; using nREPL"]
              (:warnings s)))))
   (testing "a malformed .jonquil.edn is a warning, and the other rules decide"
     (let [s (dialect/select dialect/profiles (proj #{"deps.edn"} "{:dialect") "/p/a.clj" nil)]
-      (is (= [:jolt :marker :in-process] [(:id (:profile s)) (:source s) (:runtime s)]))
+      (is (= [:jolt :marker :nrepl] [(:id (:profile s)) (:source s) (:runtime s)]))
       (is (= [".jonquil.edn isn't valid EDN, so it is ignored"] (:warnings s)))))
   (testing "an unknown :dialect is a warning"
     (let [s (dialect/select dialect/profiles (proj #{} "{:dialect :bogus}") "/p/a.clj" nil)]
       (is (= :jolt (:id (:profile s))))
       (is (= [".jonquil.edn names :bogus, which isn't a known dialect"] (:warnings s)))))
   (is (= "/p" (:project-dir (dialect/select dialect/profiles (proj #{"deps.edn"} nil) nil nil)))))
+
+(deftest jolt-project-default-test
+  (let [rt (fn [project path] (:runtime (dialect/select dialect/profiles project path nil)))]
+    (testing "a deps.edn project runs Jolt out of process"
+      (is (= :nrepl (rt (proj #{"deps.edn"} nil) "/p/src/a.clj")))
+      (is (= :nrepl (rt (proj #{"deps.edn"} nil) nil)) "an untitled tab in the project"))
+    (testing ".jonquil.edn {:runtime :in-process} opts a project back"
+      (is (= :in-process (rt (proj #{"deps.edn"} "{:runtime :in-process}") "/p/src/a.clj"))))
+    (testing "no project: in process"
+      (is (= :in-process (rt nil "/tmp/a.clj")))
+      (is (= :in-process (rt nil nil))))
+    (testing "a folder found without Jolt's own marker stays in process"
+      (is (= :in-process (rt (proj #{} "{:dialect :jolt}") "/p/a.clj")) "only .jonquil.edn")
+      (is (= :in-process (rt (proj #{"pubspec.yaml"} nil) "/p/a.clj")) "another dialect's marker"))
+    (testing "other dialects keep their own evaluator"
+      (is (= :attach (rt (proj #{"deps.edn"} "{:dialect :clj}") "/p/a.clj"))))))
 
 (deftest label-test
   (is (= "Jolt" (dialect/label {:profile dialect/jolt :runtime :in-process})))
@@ -147,7 +163,8 @@
             (dialect/selection-key
              (dialect/select dialect/profiles (when config (assoc (proj #{"deps.edn"} config) :dir dir)) path nil)))]
     (is (= [:jolt :in-process nil] (k nil nil "/tmp/a.clj")))
-    (is (= (k nil nil "/tmp/a.clj") (k "{}" "/p" "/p/a.clj")) "in-process ignores the project")
+    (is (= (k nil nil "/tmp/a.clj") (k "{:runtime :in-process}" "/p" "/p/a.clj")) "in-process ignores the project")
+    (is (= [:jolt :nrepl "/p"] (k "{}" "/p" "/p/a.clj")) "a deps.edn project runs out of process by default")
     (is (= [:jolt :nrepl "/p"] (k "{:runtime :nrepl}" "/p" "/p/a.clj")))
     (is (not= (k "{:runtime :nrepl}" "/p" "/p/a.clj") (k "{:runtime :nrepl}" "/q" "/q/a.clj"))
         "another nREPL project needs its own child")))
@@ -177,8 +194,9 @@
     (let [both (proj #{"deps.edn" "pubspec.yaml"} nil)]
       (is (= [:cljd :extension :attach] ((juxt (comp :id :profile) :source :runtime)
                                          (dialect/select with-cljd both "/p/src/a/drive.cljd" nil))))
-      (is (= [:jolt :extension :in-process] ((juxt (comp :id :profile) :source :runtime)
-                                             (dialect/select with-cljd both "/p/dev/user.clj" nil))))
+      (is (= [:jolt :extension :nrepl] ((juxt (comp :id :profile) :source :runtime)
+                                        (dialect/select with-cljd both "/p/dev/user.clj" nil)))
+          "deps.edn is Jolt's own marker, so its project default applies")
       (is (= [:jolt :extension] ((juxt (comp :id :profile) :source)
                                  (dialect/select with-cljd both "/p/src/a/shared.cljc" nil)))
           ".cljc stays Jolt's")

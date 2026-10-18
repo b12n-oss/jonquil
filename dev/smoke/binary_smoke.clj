@@ -1555,6 +1555,11 @@
   (let [t0 (System/currentTimeMillis)
         no-build (some #{"--no-build"} args)]
     (fs/create-dirs out-dir)
+    ;; target/smoke sits inside this checkout's deps.edn project, where Jolt
+    ;; now runs out of process by default; the smoke drives the in-process
+    ;; runtime (stdin among it), so its fixtures opt back in. The nREPL
+    ;; step's own project keeps its own .jonquil.edn, the nearer one.
+    (spit (str out-dir "/.jonquil.edn") "{:runtime :in-process}\n")
     (if no-build
       (when-not (fs/exists? binary-path)
         (binding [*out* *err*]

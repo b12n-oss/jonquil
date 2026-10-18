@@ -123,6 +123,12 @@ question, waits, and prints the answer back once you press Return.
 Cmd/Ctrl+D sends end-of-input while a program is waiting this way, the
 same signal `read-line` would see from a closed pipe on the command line.
 
+This needs Jolt running in process: a loose file, or a project whose
+`.jonquil.edn` says `{:runtime :in-process}`, the way `docs/demos` does.
+In a `deps.edn` project Jolt runs out of process by default, and there
+`read-line` returns nil straight away (see
+[Running Jolt out of process](#running-jolt-out-of-process)).
+
 One thing worth knowing: whatever you've typed at the prompt but not yet
 sent stays there after the program finishes. If the program ended while
 that text was waiting for it, your next Return doesn't evaluate it. It
@@ -669,9 +675,11 @@ empty collection reads `0 of 0` rather than a range it doesn't have. A
 note from the last action, `no metadata`, `not tabular`, or an error,
 shows there too for a few seconds and then clears on its own.
 
-In-process Jolt supports this outright. JVM Clojure does too, once its
+In-process Jolt supports this outright: a loose file, or a project with
+`{:runtime :in-process}`. JVM Clojure does too, once its
 own server offers clojure-cli.repl's inspector. ClojureDart and Jolt
-running out of process don't, in this version: Cmd/Ctrl+I there puts a
+running out of process, the default in a `deps.edn` project, don't, in
+this version: Cmd/Ctrl+I there puts a
 short sentence in the status bar instead of opening anything. Opening a
 file whose dialect or runtime differs from the one the panel opened
 against hides the panel; Cmd/Ctrl+I on the new file opens a fresh one.
@@ -765,7 +773,7 @@ A `.jonquil.edn` at the project root pins the dialect and, for Jolt,
 chooses the runtime:
 
 ```clojure
-{:dialect :jolt :runtime :nrepl}
+{:dialect :jolt :runtime :in-process}
 ```
 
 Both keys default independently, so either can be left out. A file that
@@ -786,11 +794,19 @@ the console says so.
 
 ### Running Jolt out of process
 
-`{:runtime :nrepl}` moves your program out of Jonquil's own process.
-Jonquil starts a separate `jolt nrepl-server` in the project directory and
-talks to it over a socket instead of evaluating inline. That's the whole
-point: a program that segfaults, calls `System/exit`, or otherwise takes
-Jolt down with it takes down that child, not the window running it.
+In a project with a `deps.edn`, Jolt runs out of process: Jonquil starts a
+separate `jolt nrepl-server` in the project directory and talks to it over
+a socket instead of evaluating inline. A program that calls `System/exit`,
+calls `shutdown-agents`, redefines something in `clojure.core` or
+otherwise takes Jolt down with it takes down that child, not the window
+running it, and the project's own `deps.edn` is the child's classpath.
+`.jonquil.edn` `{:runtime :in-process}` keeps a project inside Jonquil's
+process instead, and `{:runtime :nrepl}` asks for a child in a folder
+without a `deps.edn`. A file outside any project folder has nowhere to
+start a child, so it always runs in process. An untitled tab follows the
+window's folder: in a window opened on a `deps.edn` project it runs out of
+process with the rest of that project, and in a window with no folder it
+runs in process.
 
 At start, the console reports the child's pid, its port, and which
 project directory it's running in, then lists what this particular
@@ -809,25 +825,31 @@ starts for the new project, and the console says something like
 happens if the new file's project asks for a different runtime, or none
 at all.
 
-Two limits are worth knowing going in. There's no stdin: a program that
-calls `read-line` or `read` gets nil or an EOF straight away. And jump
-to definition can't leave the buffer, because the wire op it would need
-for that (`info`) isn't there yet, only `lookup`, which carries no file
-or line to jump to. A third was lifted upstream: output streams as it
-prints on a jolt-lang/nrepl checkout at v0.4.0 or later, while an older
-checkout sends it all at once when the evaluation finishes, so a
-program that prints once a second for ten seconds and then shows
-everything in one burst is the sign to update the checkout.
+Three limits are worth knowing going in. There's no stdin: a program that
+calls `read-line` or `read` gets nil or an EOF straight away. There's no
+inspector. And jump to definition can't leave the buffer, because the
+wire op it would need for that (`info`) isn't there yet, only `lookup`,
+which carries no file or line to jump to. The start lines in the console
+name the first two along with the `{:runtime :in-process}` way back.
+Output streams as the program prints, with jolt-lang/nrepl v0.4.0 or
+later; an older checkout sends it all at once when the evaluation
+finishes, so a program that prints once a second for ten seconds and
+then shows everything in one burst is the sign to update the checkout.
 
-### The jolt-lang/nrepl checkout
+### Where the nREPL middleware comes from
 
-Interrupt and lookup both need Jonquil to inject middleware from a
-jolt-lang/nrepl checkout when it starts the child, found at
+Interrupt and lookup both need Jonquil to inject jolt-lang/nrepl's
+middleware when it starts the child. A checkout comes first, found at
 `$JONQUIL_JOLT_NREPL`, or `~/dev/jolt-lang/nrepl` when that variable isn't
-set. Without either one in place, the child runs a vanilla nREPL server
-with neither op, so Stop always falls back to killing and restarting it,
-even on a program that would otherwise have interrupted cleanly. Keep
-the checkout at v0.4.0 or later so output streams as it prints.
+set; keep it at v0.4.0 or later so output streams as it prints. With no
+checkout, Jonquil asks Jolt for jolt-lang/nrepl v0.4.0 as a git
+dependency. The first start clones it into `~/.gitlibs`, which took about
+3 seconds here, and needs `git` on `PATH` and a network connection; later
+starts take about a third of a second, the same as a checkout. If that
+fetch fails, Jonquil starts a plain nREPL server instead and says so in
+the console. A plain server has neither op, so Stop falls back to killing
+and restarting the child, even on a program that would otherwise have
+interrupted cleanly. The next start tries the fetch again.
 
 ### `.nrepl-port`
 
@@ -1267,8 +1289,9 @@ to check:
 
 The dialect and runtime come from the IDE's own choice: the file's extension
 and the project's `.jonquil.edn` (see [Choosing a dialect](#choosing-a-dialect)
-and [`.jonquil.edn`](#jonquil-edn)), so a project with `{:runtime :nrepl}`
-evaluates in a Jolt child and one with `{:dialect :clj}` attaches to its nREPL
+and [`.jonquil.edn`](#jonquil-edn)), so a Jolt project with a `deps.edn`
+evaluates in a Jolt child, one with `{:runtime :in-process}` inside the
+server's own process, and one with `{:dialect :clj}` attaches to its nREPL
 server. `jonquil_eval` and `jonquil_run_file` take a `timeout_ms`; the default
 deadline is 30 s, after which the evaluation is interrupted and the tool
 answers with an error. Closing stdin ends the server and stops every runtime

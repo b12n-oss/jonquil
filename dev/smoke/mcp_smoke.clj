@@ -116,6 +116,11 @@
       (fs/create-dirs d)
       (spit (str d "/deps.edn") "{}")
       (spit (str d "/a.clj") "(ns a)\n(def x 1)\n"))
+    ;; proj has a deps.edn, where Jolt runs out of process by default; this
+    ;; block is the in-process headless path (where a stray println could
+    ;; reach the JSON on stdout), so it opts back in. nrepl-proj is the
+    ;; out-of-process one.
+    (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit (str nrepl-proj "/.jonquil.edn") "{:runtime :nrepl}")
     (let [srv (launch! proj xdg)]
       (try
@@ -171,6 +176,8 @@
         a (str proj "/a.clj")]
     (fs/create-dirs proj)
     (spit (str proj "/deps.edn") "{}")
+    ;; In process, as this window block was written against.
+    (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit a "(ns demo.a) (def y 7) y")
     (let [srv (launch! proj xdg)
           pid (.pid ^java.lang.Process (:proc (:proc srv)))]
@@ -276,6 +283,8 @@
     (fs/create-dirs proj)
     (fs/create-dirs (str xdg "/jonquil"))
     (spit (str proj "/deps.edn") "{}")
+    ;; In process, as this attach block was written against.
+    (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit (str xdg "/jonquil/settings.edn") "{:mcp-listen? true}")
     (try
       (let [win (track! (launch! proj xdg []))

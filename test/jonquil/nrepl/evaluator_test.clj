@@ -184,7 +184,7 @@
       (is (not (alive? other-pid))))))
 
 (deftest no-middleware-means-stop-by-restart-test
-  (with-redefs [child/middleware-root (constantly nil)]
+  (with-redefs [child/middleware-source (constantly nil)]
     (let [e (make (temp-project)) done (promise)]
       (try
         (ev/start! e)
@@ -196,6 +196,84 @@
           (is (= :interrupted (:status (deref done 5000 :timeout))))
           (is (wait-until (fn [] (let [p (nrepl/child-pid e)] (and p (not= p pid)))) 10000) "restarted"))
         (finally (ev/stop! e))))))
+
+(deftest unfetchable-git-middleware-falls-back-to-a-plain-server-test
+  (with-redefs [child/middleware-source
+                (constantly {:git {:git/url "file:///nonexistent/jonquil-nrepl.git"
+                                   :git/tag "v0.4.0" :git/sha "7efdd6c"}})]
+    (let [e (make (temp-project))]
+      (try
+        (is (nil? (ev/start! e)) "the retry without middleware starts")
+        (is (some #(str/includes? % "couldn't be fetched") (ev/limitations e)))
+        (is (some #(str/includes? % "Jolt said: git dep: could not list file:///nonexistent") (ev/limitations e))
+            "jolt's own line, not a guess")
+        (is (some #(str/includes? % "no interrupt op") (ev/limitations e)))
+        (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
+        (finally (ev/stop! e))))))
+
+(defn- fetch-failure
+  "An ex-info shaped like child/start!'s for a child that exited, whose log
+  holds jolt's git-dependency failure line."
+  []
+  (let [log (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "child.log")]
+    (spit log "Unhandled exception: git dep: could not list https://x.invalid/n.git (git ls-remote exited 128 after 3 attempts: fatal: unable to access)\n  trace:\n")
+    (ex-info "jolt nrepl-server exited: ..." {:log (.getPath log)})))
+
+(deftest fetch-error-line-test
+  (is (= "git dep: could not list https://x.invalid/n.git (git ls-remote exited 128 after 3 attempts: fatal: unable to access)"
+         (nrepl/fetch-error-line (fetch-failure))))
+  (is (nil? (nrepl/fetch-error-line (ex-info "no log" {}))))
+  (let [log (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "child.log")]
+    (spit log "jolt nrepl-server: bind() failed\n")
+    (is (nil? (nrepl/fetch-error-line (ex-info "x" {:log (.getPath log)}))) "another failure isn't a fetch failure")))
+
+(deftest only-a-fetch-failure-falls-back-test
+  (let [sources (atom [])]
+    (with-redefs [child/middleware-source (constantly {:git child/nrepl-git-coord})
+                  child/start! (fn [_ source] (swap! sources conj source)
+                                 (throw (ex-info "jolt nrepl-server didn't answer within 15000 ms" {})))]
+      (let [e (make (temp-project))]
+        (is (str/starts-with? (ev/start! e) "Couldn't start Jolt over nREPL: jolt nrepl-server didn't answer"))
+        (is (= [{:git child/nrepl-git-coord}] @sources) "a timeout isn't retried as a plain server")
+        (ev/stop! e)))))
+
+(deftest no-fallback-after-stop-test
+  (let [sources (atom []) e (make (temp-project))]
+    (with-redefs [child/middleware-source (constantly {:git child/nrepl-git-coord})
+                  child/start! (fn [_ source] (swap! sources conj source)
+                                 (swap! (:state e) assoc :stopped? true)
+                                 (throw (fetch-failure)))]
+      (is (string? (ev/start! e)))
+      (is (= 1 (count @sources)) "stop! during the fetch: no plain-server retry"))))
+
+(deftest a-failed-fetch-is-remembered-test
+  (let [sources (atom [])
+        real-start child/start!]
+    (with-redefs [child/middleware-source (constantly {:git child/nrepl-git-coord})
+                  child/start! (fn [d source] (swap! sources conj source)
+                                 (if source (throw (fetch-failure)) (real-start d source)))]
+      (let [e (make (temp-project))]
+        (try
+          (is (nil? (ev/start! e)))
+          (is (= [{:git child/nrepl-git-coord} nil] @sources))
+          (let [pid (nrepl/child-pid e) done (promise)]
+            (ev/eval! e "(loop [] (recur))" {:run? false :on-complete (fn [r] (deliver done r))})
+            (wait-for-eval-id e)
+            (ev/interrupt! e)
+            (is (= :interrupted (:status (deref done 5000 :timeout))))
+            (is (wait-until (fn [] (let [p (nrepl/child-pid e)] (and p (not= p pid)))) 10000) "Stop restarted the plain server"))
+          (is (= [{:git child/nrepl-git-coord} nil nil] @sources) "the restart skipped the fetch")
+          (is (some #(str/includes? % "Jolt said: git dep:") (ev/limitations e)) "the line survives the restart")
+          (finally (ev/stop! e)))))))
+
+(deftest limitations-name-the-way-back-test
+  (let [e (make (temp-project))]
+    (try
+      (ev/start! e)
+      (let [ls (ev/limitations e)]
+        (is (not-any? #(str/includes? % "Output appears when") ls) "nREPL v0.4.0 streams")
+        (is (some #(str/includes? % "{:runtime :in-process}") ls)))
+      (finally (ev/stop! e)))))
 
 (deftest stop-during-start-leaves-no-child-test
   (let [dir (temp-project) e (make dir)

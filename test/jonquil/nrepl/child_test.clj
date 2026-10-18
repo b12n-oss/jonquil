@@ -52,7 +52,11 @@
       (is (= ["jolt" "-Sdeps"
               "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"}} :nrepl/middleware [nrepl.middleware/default-middleware]}"
               "nrepl-server" "7950"]
-             (child/launch-args 7950 "/r/nrepl")))
+             (child/launch-args 7950 {:local "/r/nrepl"})))
+      (is (= ["jolt" "-Sdeps"
+              "{:deps {nrepl/nrepl {:git/url \"https://github.com/jolt-lang/nrepl.git\", :git/tag \"v0.4.0\", :git/sha \"7efdd6c\"}} :nrepl/middleware [nrepl.middleware/default-middleware]}"
+              "nrepl-server" "7952"]
+             (child/launch-args 7952 {:git child/nrepl-git-coord})))
       (is (= ["jolt" "nrepl-server" "7951"] (child/launch-args 7951 nil))))))
 
 (deftest child-uses-resolved-jolt-test
@@ -70,6 +74,11 @@
 (deftest middleware-root-test
   (is (some? (child/middleware-root)) "these tests need the jolt-lang/nrepl checkout (JONQUIL_JOLT_NREPL or ~/dev/jolt-lang/nrepl)"))
 
+(deftest middleware-source-test
+  (is (= {:local (child/middleware-root)} (child/middleware-source)) "the checkout first")
+  (with-redefs [child/middleware-root (constantly nil)]
+    (is (= {:git child/nrepl-git-coord} (child/middleware-source)) "else the pinned git dependency")))
+
 (defn- hold-free-port
   "A ServerSocket the OS bound to a free port on addr, so no test names a
   fixed port that a just-exited child might still hold."
@@ -85,7 +94,7 @@
 (deftest start-answers-and-kill-cleans-up-test
   (let [dir (temp-project)
         _ (spit (io/file dir ".nrepl-port") "4242\n")
-        c (child/start! dir (child/middleware-root))]
+        c (child/start! dir (child/middleware-source))]
     (try
       (is (child/alive? c))
       (is (= (str (:port c)) (str/trim (slurp (io/file dir ".nrepl-port")))) "the child writes its port")

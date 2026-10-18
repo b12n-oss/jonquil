@@ -247,7 +247,12 @@ without ever throwing: an unreadable or malformed file becomes a warning,
 not a crash. `select` turns a project, a path, and a settings default
 into one selection: the profile, the runtime, the project directory (for
 anything other than `:in-process`), where the choice came from, and any
-warnings the window should show. `selection-key` is what a window
+warnings the window should show. The runtime is `.jonquil.edn`'s
+`:runtime` when the profile offers it; otherwise the profile's
+`:project-evaluator` when the project holds one of that profile's own
+markers (Jolt's is `:nrepl`, for a `deps.edn` folder), else its
+`:evaluator` (Jolt's is `:in-process`). So a Jolt project runs out of
+process by default and a loose file in process. `selection-key` is what a window
 compares before deciding a new file needs a new evaluator: the dialect,
 the runtime, and, when the runtime isn't `:in-process`, the project
 directory too.

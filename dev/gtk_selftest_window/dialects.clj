@@ -11,10 +11,13 @@
             [jonquil.gtk.ffi :as g]))
 
 (defn- temp-project!
-  "A project under the temp dir: deps.edn, .jonquil.edn holding config
-  (none when nil -- any leftover .jonquil.edn already at this path is
-  removed too, belt and braces alongside the name below being unique)
-  and src/demo/a.clj. [canonical-file-path canonical-dir-path].
+  "A project under the temp dir: deps.edn unless deps? is false,
+  .jonquil.edn holding config (none when nil -- any leftover .jonquil.edn
+  already at this path is removed too, belt and braces alongside the name
+  below being unique) and src/demo/a.clj. [canonical-file-path
+  canonical-dir-path]. Without deps.edn the folder is a project only
+  through .jonquil.edn, so Jolt stays in process there; with it, Jolt runs
+  out of process unless the config says {:runtime :in-process}.
 
   I2: nanoTime counts from process start (Jolt), measured at about 97 to
   99 ms on a fresh `jolt -e` run, and the dirs were never deleted -- about
@@ -23,13 +26,13 @@
   removed a stale .jonquil.edn a collision left behind. currentTimeMillis
   plus a random-uuid can't collide, and the row deletes its own dir when
   it's done (below)."
-  [config]
+  [config deps?]
   (let [d (io/file (System/getProperty "java.io.tmpdir")
                    (str "jonquil-selftest-dialect-" (System/currentTimeMillis) "-" (random-uuid)))
         f (io/file d "src/demo/a.clj")
         config-file (io/file d ".jonquil.edn")]
     (.mkdirs (.getParentFile f))
-    (spit (io/file d "deps.edn") "{:paths [\"src\"]}")
+    (when deps? (spit (io/file d "deps.edn") "{:paths [\"src\"]}"))
     (if config
       (spit config-file config)
       (io/delete-file config-file true))
@@ -48,8 +51,9 @@
 
 (defn- open-then-run
   "Opens a fresh project's file, then Runs (+ 1 2). opts is {:row :config
-  :expect} (:row the check keyword, :config .jonquil.edn text or nil,
-  :expect the substring warned must hold, or nil). Passes when the run
+  :expect :deps?} (:row the check keyword, :config .jonquil.edn text or nil,
+  :expect the substring warned must hold, or nil, :deps? whether the
+  project has a deps.edn). Passes when the run
   printed => 3, the label still reads Jolt, the evaluator is the same
   one, and the console since the open holds expect (a string) or, for
   nil, no \"; project:\" line at all.
@@ -72,9 +76,9 @@
   the same GTK-thread discipline as the rest of the row, since the
   deleted deps.edn/.jonquil.edn/source file sit next to state open-path!'s
   own on-gui!-deferred watch callbacks may still read."
-  [ui {:keys [row config expect]}]
+  [ui {:keys [row config expect deps?]}]
   (go-row row support/check
-    (let [[file dir] (temp-project! config)]
+    (let [[file dir] (temp-project! config deps?)]
       (try
         (let [[mark before] (on-gtk (let [m (support/out-end-offset ui)
                                           before ((:evaluator* ui))]
@@ -109,15 +113,18 @@
 (defn row-project-config-malformed-warns [ui]
   (open-then-run ui {:row :project-config-malformed-warns
                      :config "{:runtime"
+                     :deps? false
                      :expect "; project: .jonquil.edn isn't valid EDN, so it is ignored"}))
 
 (defn row-project-config-unknown-runtime-warns [ui]
   (open-then-run ui {:row :project-config-unknown-runtime-warns
                      :config "{:runtime :bogus}"
+                     :deps? false
                      :expect "; project: .jonquil.edn asks for runtime :bogus, which Jolt doesn't offer here; using in-process"}))
 
 (defn row-project-open-keeps-evaluator [ui]
-  (open-then-run ui {:row :project-open-keeps-evaluator :config nil :expect nil}))
+  (open-then-run ui {:row :project-open-keeps-evaluator :config "{:runtime :in-process}"
+                     :deps? true :expect nil}))
 
 (defn row-editor-paints-profile-sets
   "P1.T2 (cljd plan): with the cljd profile, the editor paints f/widget
@@ -178,7 +185,7 @@
   [ui]
   (go-row :selection-throw-still-paints-new-profile support/check
     (let [ed (:editor ui)
-          [file dir] (temp-project! nil)]
+          [file dir] (temp-project! "{:runtime :in-process}" true)]
       (try
         (let [mark (on-gtk (editor/set-profile! ed dialect/cljd)
                            (let [m (support/out-end-offset ui)]
