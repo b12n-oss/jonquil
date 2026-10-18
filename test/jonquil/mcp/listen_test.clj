@@ -6,6 +6,7 @@
             [jonquil.mcp :as mcp]
             [jonquil.mcp.json :as json]
             [jonquil.mcp.listen :as listen]
+            [jonquil.mcp.window]
             [temp-dirs])
   (:import (java.io IOException)
            (java.lang ProcessHandle)

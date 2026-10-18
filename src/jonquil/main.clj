@@ -95,10 +95,10 @@
   (try
     (let [sp (settings/settings-path)]
       (when (:mcp-listen? (settings/load-settings sp))
-        (let [root (some-> (:root @(:state (:file-tree ui))) io/file .getCanonicalPath)]
-          (let [l (listen/start-listener! {:ui ui :dir root :settings-path sp})]
-            (reset! listener l)
-            (listen/follow-root! (:state (:file-tree ui)) l)))))
+        (let [root (some-> (:root @(:state (:file-tree ui))) io/file .getCanonicalPath)
+              l (listen/start-listener! {:ui ui :dir root :settings-path sp})]
+          (reset! listener l)
+          (listen/follow-root! (:state (:file-tree ui)) l))))
     (catch Throwable e
       (binding [*out* *err*]
         (println "jonquil: MCP listener not started:" (ex-message e))))))
