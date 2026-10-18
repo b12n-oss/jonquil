@@ -834,7 +834,8 @@ no file or line to jump to. The inspector works: Jonquil writes its
 inspector files under `~/.cache/jonquil/nrepl-inspect` (or
 `$XDG_CACHE_HOME/jonquil/nrepl-inspect`) and the child loads them from
 there, so it works on a plain nREPL server too. If that folder can't be
-written, the start lines say there's no inspector.
+written, or the child can't load what's in it, Jolt starts without the
+inspector and the start lines say why.
 Output streams as the program prints, with jolt-lang/nrepl v0.4.0 or
 later; an older checkout sends it all at once when the evaluation
 finishes, so a program that prints once a second for ten seconds and

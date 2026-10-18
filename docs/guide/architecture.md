@@ -749,6 +749,14 @@ on a plain server. They're middleware ops rather than evals on purpose:
 `jolt.nrepl/evaluate` shifts the global `*1 *2 *3` after every successful
 eval, and an op leaves the user's history alone. `inspect-start` reads
 that global `*1`, and `inspect-def` takes the prompt namespace in `ns`.
+Each op is answered on a future of its own, one at a time, because jolt
+calls a handler on the connection's reader thread and rendering a view
+realises part of `*1`. The view state is one atom per child, shared by
+every client of it, as clojure-cli.repl's server shares its own; a second
+editor attached through `.nrepl-port` would see the same panel state.
+If the child can't load the middleware (jolt requires every middleware
+namespace before it binds), `jonquil.nrepl.evaluator` starts it again
+without the inspector and names jolt's error in the start lines.
 `NRepl`'s `inspect!` shares `jonquil.inspect/request` with `Jvm`, so both
 send the same wire ops.
 
