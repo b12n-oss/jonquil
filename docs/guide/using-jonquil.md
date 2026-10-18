@@ -1487,7 +1487,7 @@ its stdin.
 | Page Up/Page Down | inspector panel | Page |
 | m | inspector panel | Toggle metadata |
 | v | inspector panel | Toggle between the table and the list |
-| d | inspector panel | Open the def prompt |
+| d | inspector panel | Open the def prompt (nothing while the panel's actions are disabled, after a lost connection) |
 | Escape | inspector panel | Close the panel and focus the editor |
 | Cmd/Ctrl+[ | Source panel | Back to where the panel was |
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
