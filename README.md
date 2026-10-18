@@ -4,7 +4,7 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work, now including ClojureDart and ClojureScript (both experimental) and JVM Clojure, each attached to a running server**
+**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work: Jolt in or out of process; JVM Clojure, ClojureDart and ClojureScript (both experimental) and any other nREPL server, such as babashka or Basilisp, each attached to a server you started; and jank (experimental), which Jonquil launches itself**
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
@@ -27,7 +27,12 @@ lists under `:auto-require` as it does. ClojureScript is the third attach
 dialect, also experimental: open a `.cljs` file, start your shadow-cljs
 build with `npx shadow-cljs watch <build>`, and Jonquil connects to its
 nREPL server the first time you Run, evaluating in whatever JS runtime has
-the build loaded. jank is the other experimental
+the build loaded. Any other nREPL server attaches the same way once a
+project's `.jonquil.edn` says `{:dialect :nrepl}`: babashka
+(`bb nrepl-server 1667`, then `:nrepl {:port 1667}`), Basilisp, whose
+`basilisp nrepl-server` writes `.nrepl-port` itself, or a server on
+another host through `:host`. Features follow what that server offers, and
+the console says what it can't do. jank is the other experimental
 dialect: open a `.jank` file and Jonquil starts its own `jank repl` for the
 window on the first Run (`brew install jank-lang/jank/jank`, or set
 `JONQUIL_JANK`). A short list of limits for each runtime
@@ -51,6 +56,7 @@ Ctrl+Space completes as you type, with a documentation preview beside the candid
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork isn't published yet
 - Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
 - A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect: Jonquil attaches to it and never starts it
+- An nREPL server you started, only for the nREPL dialect (babashka's `bb nrepl-server`, Basilisp's `basilisp nrepl-server`, or any other). Jonquil never starts or stops it, and the server runs whatever it's sent, so keep a remote one on a network you trust or reach it through an ssh tunnel
 
 ## Running
 
@@ -99,7 +105,7 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `bb test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
 - `jonquil.cljs` and `jonquil.nrepl.shadow`: the ClojureScript dialect (experimental), attached to a shadow-cljs nREPL server you started yourself. `bb test` runs its tests against an in-process fake server.
 - `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
-- `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `bb test:bb` runs a live suite against a real `bb nrepl-server`.
+- `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `bb test:bb` and `bb test:basilisp` run live suites against a real `bb nrepl-server` and `basilisp nrepl-server`.
 - `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`: the jank dialect (experimental). Jonquil launches its own `jank repl` per window from a private temp folder and talks to it over nREPL. `bb test` runs these against an in-process fake server, and `bb test:jank` runs a live suite against a real jank.
 
 ## Commands
@@ -141,9 +147,10 @@ bb hooks:uninstall      # remove the git pre-commit hook
 ```
 
 `.github/workflows/lint.yml` runs the same lint and format check on GitHub
-Actions, but only when triggered by hand from the Actions tab. Jonquil is a
-private repo for now, so the workflow carries no push, pull request or
-schedule trigger.
+Actions, and `.github/workflows/site.yml` builds the docs site without publishing it, but both
+only when triggered by hand from the Actions tab. Jonquil is a private repo
+for now, so neither workflow carries a push, pull request or schedule
+trigger.
 
 ## The name
 
