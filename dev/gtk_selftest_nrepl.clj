@@ -67,6 +67,7 @@
    rows/row-nrepl-child-dies-mid-eval
    rows/row-nrepl-open-switches-evaluator
    rows/row-nrepl-two-tabs-owner-reset
+   rows/row-nrepl-loose-file-runs-in-the-child
    rows/row-nrepl-close-kills-child])
 
 ;; --- driver ----------------------------------------------------------------

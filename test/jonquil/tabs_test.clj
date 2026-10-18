@@ -33,6 +33,18 @@
     (is (not (tabs/runnable-here? (assoc jolt :runtime :nrepl) (assoc jolt :runtime :nrepl :project-dir "/b"))))
     (is (not (tabs/runnable-here? jolt (assoc jolt :profile dialect/cljd :runtime :attach))))))
 
+(deftest a-loose-jolt-file-runs-in-any-jolt-window
+  (let [project {:profile dialect/jolt :runtime :nrepl :project-dir "/p"}
+        loose {:profile dialect/jolt :runtime :in-process :project-dir nil}]
+    (is (tabs/runnable-here? project loose) "a scratch file in a deps.edn window runs in its child")
+    (is (tabs/runnable-here? (assoc loose :project-dir nil) loose))
+    (is (not (tabs/runnable-here? project (assoc loose :project-dir "/q")))
+        "a file of another project still refuses, even one kept in process")
+    (is (not (tabs/runnable-here? {:profile dialect/cljd :runtime :attach :project-dir "/app"} loose))
+        "only a Jolt window")
+    (is (not (tabs/runnable-here? project {:profile dialect/cljs :runtime :attach :project-dir nil}))
+        "only a Jolt file")))
+
 (deftest close-alert-test
   (is (= {:message "Save changes to a.clj before closing?" :buttons ["Save" "Don't Save" "Cancel"]}
          (tabs/close-alert ["a.clj"])))

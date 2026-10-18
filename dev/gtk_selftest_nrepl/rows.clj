@@ -458,6 +458,31 @@
                                {:ok1 ok1 :ok2 ok2 :ok3 ok3 :third (support/since ui m3)})
                 (finally (close-extra-tabs! ui)))))))
 
+(defn row-nrepl-loose-file-runs-in-the-child
+  "A Jolt file outside any project, opened as a second tab in this deps.edn
+  window, Runs in the window's own Jolt child (jonquil.tabs/runnable-here?'s
+  loose-file rule): it prints the child's pid, not Jonquil's, and the
+  window keeps the same evaluator. (Closing down to the loose tab alone
+  isn't driven here: the next row quits through the first tab's editor.
+  tabs-test pins the rule that close path asks.)"
+  [ui]
+  (go-row :nrepl-loose-file-runs-in-the-child support/check
+    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-loose-") "scratch.clj")
+          _ (spit f "(.pid (java.lang.ProcessHandle/current))\n")
+          [before loose] (on-gtk (let [b (evaluator ui)]
+                                   ((:open-file! ui) (.getCanonicalPath f))
+                                   [b (last ((:tabs* ui)))]))
+          [ran? m] (<! (tabs/run-tab ui loose nil 20000 #(re-find #"=> \d+" %)))
+          [out pid] (on-gtk [(support/since ui m) (nrepl/child-pid (evaluator ui))])
+          printed (some-> (re-find #"=> (\d+)" out) second parse-long)
+          kept? (on-gtk (identical? before (evaluator ui)))]
+      (on-gtk (try
+                (support/check :nrepl-loose-file-runs-in-the-child
+                               (and ran? (some? pid) (= pid printed) kept?
+                                    (not (str/includes? out "can't run here")))
+                               {:out out :child-pid pid :printed printed :kept kept?})
+                (finally (close-extra-tabs! ui)))))))
+
 (defn row-nrepl-close-kills-child
   "The deliberately LAST row: records the live child's own pid, leaves the
   editor clean (set-text! never marks it dirty, so the real close below

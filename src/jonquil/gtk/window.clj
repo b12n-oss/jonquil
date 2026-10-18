@@ -2296,7 +2296,7 @@
       (let [[only & more] @tabs
             osel (when only @(:project only))]
         (when (and only (not more) osel
-                   (not= (dialect/selection-key osel) (dialect/selection-key @sel*)))
+                   (not (tabs/runnable-here? @sel* osel)))
           (try (apply-selection! sel-ctx osel)
                (catch :default e
                  (cview/append! cv :error (str "; project: " (ex-message e) "\n")))))))))
