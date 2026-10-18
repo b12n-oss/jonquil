@@ -299,6 +299,14 @@
          (or (= f (:replacement fb))
              (not (zero? (g/gtk-widget-is-ancestor f (:replacement fb))))))))
 
+(defn- button-focused?
+  "True when keyboard focus is on the Replace or Replace All button, where
+  Return belongs to GTK's own activation of that button."
+  [fb]
+  (let [f (focused-widget fb)]
+    (and (not (ffi/null? f))
+         (or (= f (:replace-btn fb)) (= f (:replace-all-btn fb))))))
+
 (defn handle-nav-key!
   "F3/command+g (next match) and Shift+F3/command+shift+g (previous) while
   the bar is open: 1 when handled, 0 otherwise, and always 0 while either
@@ -322,10 +330,11 @@
   always 0 while either entry has an IME preedit composition active (fix
   round 1), so a composing Hangul/CJK syllable's own Return/Escape reaches
   the entry's IM context instead of being reinterpreted as find-next!/
-  close!. Escape closes the bar. Return in the replacement entry replaces
-  the current match; Return elsewhere in the bar, F3 and command+g go to
-  the next match; Shift+Return, Shift+F3 and command+shift+g go to the
-  previous one."
+  close!. Escape closes the bar. Return on a focused Replace or Replace
+  All button is left to GTK, which presses that button; Return in the
+  replacement entry replaces the current match; Return elsewhere in the
+  bar, F3 and command+g go to the next match; Shift+Return, Shift+F3 and
+  command+shift+g go to the previous one."
   [fb keyval0 state]
   (let [keyval (g/gdk-keyval-to-lower keyval0)]
     (cond
@@ -334,6 +343,8 @@
       :else
       (cond
         (= keyval KEY-ESCAPE) (do (close! fb) 1)
+
+        (and (= keyval KEY-RETURN) (button-focused? fb)) 0
 
         (and (= keyval KEY-RETURN) (replacement-focused? fb))
         (do (replace-one! fb) 1)

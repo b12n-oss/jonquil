@@ -213,6 +213,32 @@
                                   :sel-before sel-before :sel-after sel-after
                                   :visible-before visible-before :visible-after visible-after})))))))
 
+(defn row-find-return-on-a-button-yields
+  "Return with focus on Replace All is left to GTK, which presses the
+  button, rather than taken as next match: handle-key! answers 0 and the
+  editor's selection doesn't move. The same Return with focus in the
+  query still moves to the next match."
+  [ui]
+  (go-row :find-return-on-a-button-yields support/check
+    (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)
+          _ (on-gtk (editor/set-text! ed "foo bar foo baz foo")
+                    (find-bar/open! fb :replace)
+                    (g/gtk-editable-set-text (:query fb) "foo"))
+          focused? (on-gtk (g/gtk-widget-grab-focus (:replace-all-btn fb))
+                           (= (:replace-all-btn fb) (g/gtk-root-get-focus (g/gtk-widget-get-root (:box fb)))))
+          [result before after] (on-gtk (let [b (g/selection-offsets buf)
+                                              r (find-bar/handle-key! fb support/KEY-RETURN 0)]
+                                          [r b (g/selection-offsets buf)]))
+          [query-result moved] (on-gtk (g/gtk-widget-grab-focus (:query fb))
+                                       (let [b (g/selection-offsets buf)
+                                             r (find-bar/handle-key! fb support/KEY-RETURN 0)]
+                                         [r (not= b (g/selection-offsets buf))]))]
+      (on-gtk (find-bar/close! fb)
+              (support/check :find-return-on-a-button-yields
+                             (and focused? (= 0 result) (= before after) (= 1 query-result) moved)
+                             {:focused focused? :result result :before before :after after
+                              :query-result query-result :moved moved})))))
+
 (defn row-find-prefill-selects
   "open! must select the whole prefilled query text, not just prefill
   and focus it. Selects \"bar\" in the editor first, so open!'s own

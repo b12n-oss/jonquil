@@ -112,6 +112,7 @@
    find-replace/row-find-hangul
    find-replace/row-find-survives-repaint
    find-replace/row-find-preedit-yields
+   find-replace/row-find-return-on-a-button-yields
    find-replace/row-find-prefill-selects
    close-prerun/row-line-col
    close-prerun/row-close-clean
