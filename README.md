@@ -11,10 +11,11 @@ Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, a
 See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
 
 Jonquil picks a dialect for whatever file is open. For Jolt, a program
-runs either inline, in Jonquil's own process, or out of process over
-nREPL, opting in per project with a `.jonquil.edn` `{:runtime :nrepl}`;
-out of process means a program that crashes or wedges Jolt itself takes
-down a separate child, not Jonquil, and Stop, Reset on Run and help all
+in a project (a folder with a `deps.edn`) runs out of process over nREPL,
+so one that calls `System/exit`, crashes or wedges Jolt takes down a
+separate child, not Jonquil. A loose file runs inline, in Jonquil's own
+process, and a project's `.jonquil.edn` `{:runtime :in-process}` keeps it
+there too, for `read-line` and the inspector. Stop, Reset on Run and help
 work the same way across either choice. ClojureDart is here too now,
 experimental: rather than starting anything, Jonquil attaches to a
 ClojureDart app you already have running, over its own nREPL server.
@@ -46,7 +47,7 @@ Ctrl+Space completes as you type, with a documentation preview beside the candid
 
 - [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`
 - GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
-- A [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) checkout, only for the out-of-process nREPL runtime and `bb test:nrepl`: set `$JONQUIL_JOLT_NREPL` to it, or place it at `~/dev/jolt-lang/nrepl`
+- `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.0 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork isn't published yet
 - Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
 - A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect: Jonquil attaches to it and never starts it

@@ -32,9 +32,10 @@ you use it:
 - **ClojureDart** (experimental): a running app built with the ClojureDart
   fork that serves nREPL. See
   [ClojureDart](using-jonquil.md#clojuredart-experimental-attaching-to-a-running-app).
-- **Jolt out of process**: a checkout of jolt-lang/nrepl for the full
-  nREPL middleware. See
-  [Running Jolt out of process](using-jonquil.md#running-jolt-out-of-process).
+- **Jolt out of process**, the default in a project with a `deps.edn`:
+  `git` on `PATH` and a network connection the first time, when Jonquil
+  fetches jolt-lang/nrepl's middleware, or a checkout of jolt-lang/nrepl.
+  See [Running Jolt out of process](using-jonquil.md#running-jolt-out-of-process).
 
 ## Running
 
