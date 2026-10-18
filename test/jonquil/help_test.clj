@@ -69,6 +69,13 @@
     (testing "into an empty waiting popup"
       (is (= "map" (:symbol (help/selected (help/arrive (help/waiting-state p []) cands))))))))
 
+(deftest candidate-label-test
+  (let [defs #{"greet"}]
+    (is (= "buffer" (help/candidate-label {:symbol "greet" :category :user} defs)) "defined in the buffer")
+    (is (= "user" (help/candidate-label {:symbol "other" :category :user} defs)) "the program's, not the buffer's")
+    (is (= "builtin" (help/candidate-label {:symbol "map" :category :builtin} defs)))
+    (is (= "builtin" (help/candidate-label {:symbol "greet" :category :builtin} defs)) "only :user names get the buffer label")))
+
 (deftest target-symbol-test
   (is (= "greet" (help/target-symbol (snap "(greet \"x\")" 3))))
   (is (= "greet" (help/target-symbol (snap "(greet \"x\")" 0 1 6))))

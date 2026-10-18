@@ -637,7 +637,10 @@ something or by Escape, to get history and evaluation back.
 
 Candidates come from Clojure's special forms and core built-ins, whatever
 the Definitions pane itself defines, and whatever your program has
-defined by running or by typing at the prompt.
+defined by running or by typing at the prompt. Each row names where it
+came from: `special`, `builtin`, `buffer` for a name this file defines,
+and `user` for the rest. The list is as tall as its names, up to eight
+rows, and scrolls past that.
 
 When a server answers completion (JVM Clojure, ClojureScript, any nREPL
 server, Jolt out of process, jank), Jonquil asks it without making you

@@ -140,9 +140,18 @@
   beyond that -- no more tall empty box under a one-line doc. width is
   still a fixed size request (height -1, so only the max-content-height
   clamp bounds the vertical size), keeping each popover's own width
-  exactly as before. Returns {:label :scroll}; callers set the label's
-  text and append :scroll into their own box (gtk_box_append)."
-  [width max-height]
+  exactly as before. With {:fit-width? n}, the scroller takes the label's
+  natural width instead, capped at n characters (gtk_label_set_max_width_
+  chars, so the cap follows the zoom), so a one-line doc gets a narrow
+  popover rather than the full 80 columns (P4 parked item). The cap is on
+  the label because the scroller's own max-content-width doesn't apply
+  while its horizontal policy is NEVER: measured, a long doc grew to
+  1175 px. The completion preview keeps the fixed width, so its
+  popup doesn't change size as the selection moves. Returns {:label
+  :scroll}; callers set the label's text and append :scroll into their
+  own box (gtk_box_append)."
+  ([width max-height] (make-doc-scroll width max-height {}))
+  ([width max-height {:keys [fit-width?]}]
   (let [label (g/gtk-label-new "")
         scroll (g/gtk-scrolled-window-new)]
     (g/gtk-widget-add-css-class label "jonquil-doc")
@@ -150,12 +159,15 @@
     (g/gtk-label-set-wrap label 1)
     (g/gtk-label-set-wrap-mode label g/PANGO-WRAP-WORD-CHAR)
     (g/gtk-widget-set-valign label g/ALIGN-START)
-    (g/gtk-widget-set-size-request scroll width -1)
+    (if fit-width?
+      (do (g/gtk-label-set-max-width-chars label fit-width?)
+          (g/gtk-scrolled-window-set-propagate-natural-width scroll 1))
+      (g/gtk-widget-set-size-request scroll width -1))
     (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
     (g/gtk-scrolled-window-set-propagate-natural-height scroll 1)
     (g/gtk-scrolled-window-set-max-content-height scroll max-height)
     (g/gtk-scrolled-window-set-child scroll label)
-    {:label label :scroll scroll}))
+    {:label label :scroll scroll})))
 
 (defn show-at-caret!
   "Points pp's popover at view's caret and pops it up. probe 2:

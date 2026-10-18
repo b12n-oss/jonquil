@@ -690,3 +690,32 @@
                                (and opened? (= 0 swallowed) (= 0 handled) (nil? (completion/state c)))
                                {:opened opened? :swallowed swallowed :handled handled
                                 :still-open (some? (completion/state c))}))))))
+
+(defn row-completion-sized-to-rows-and-labelled
+  "Two names the buffer defines (P4 parked items): the list is as tall as
+  its two rows rather than eight, and each row reads \"buffer\", not
+  \"user\", before any Run. A long list (\"ma\") still gets the full
+  height. Heights are the list's scrolled window, read once showing."
+  [ui]
+  (go-row :completion-sized-to-rows-and-labelled support/check
+    (let [c (:completion ui)
+          scroll-h (fn [] (g/gtk-widget-get-height (g/gtk-widget-get-parent (g/gtk-widget-get-parent (:list-box c)))))
+          row-texts (fn [] (let [lb (:list-box c)]
+                             (vec (for [i (range (count (:candidates (completion/state c))))]
+                                    (g/label-text (g/gtk-list-box-row-get-child (g/gtk-list-box-get-row-at-index lb i)))))))
+          open-on (fn [text caret]
+                    (on-gtk (let [ed (:editor ui)]
+                              (editor/set-text! ed text)
+                              (support/place-cursor! (:buf ed) caret)
+                              ((:complete!* ui))))
+                    (await-until 2000 20 #(pos? (scroll-h)))
+                    (let [r (on-gtk {:h (scroll-h) :rows (row-texts)})]
+                      (on-gtk (completion/close! c))
+                      r))
+          text "(defn zzq-a [] 1)\n(defn zzq-b [] 2)\n(zzq"
+          few (open-on text (count text))
+          many (open-on "(ma" 3)]
+      (on-gtk (support/check :completion-sized-to-rows-and-labelled
+                             (and (= ["zzq-a  buffer" "zzq-b  buffer"] (:rows few))
+                                  (< (* 2 (:h few)) (:h many)))
+                             {:few few :many-h (:h many)})))))
