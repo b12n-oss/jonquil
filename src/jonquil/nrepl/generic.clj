@@ -8,7 +8,13 @@
   port file; it has no interrupt and no stdin op; its completion is fuzzy,
   through complete (and through completions, which one connection listed
   and another didn't); lookup's :file is empty; a read
-  blocks the session for good, and a new connection clones a fresh one."
+  blocks the session for good, and a new connection clones a fresh one.
+
+  And against Basilisp's (0.5.1, same day): it writes .nrepl-port; no
+  interrupt, stdin, lookup or completions op, but complete (prefix only)
+  and info; errors come as a Python traceback or a compiler block
+  (jonquil.nrepl.ops/error-message); a read reads the server process's own
+  stdin."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.source :as source]))
@@ -66,12 +72,12 @@
     (and connected? (not (contains? ops "interrupt")))
     (conj "This server has no interrupt op, so Stop disconnects: the evaluation keeps running in the server, and the next Run connects a fresh session.")
     (and connected? (not (contains? ops "stdin")))
-    (conj "This server has no stdin op, so a read waits until Stop.")
+    (conj "This server has no stdin op, so Jonquil can't send a read any input: babashka's read waits until Stop, and Basilisp's reads the server's own stdin, the terminal it was started in.")
     (and connected? (not (or (contains? ops "completions") (contains? ops "complete"))))
     (conj "Completion offers only this buffer's names: the server has no completion op.")
-    ;; lookup only: it's the op jonquil.nrepl.jvm's quick doc sends
-    (and connected? (not (contains? ops "lookup")))
-    (conj "No quick docs: the server has no lookup op.")))
+    ;; jonquil.nrepl.jvm's quick doc sends lookup, else info
+    (and connected? (not (or (contains? ops "lookup") (contains? ops "info"))))
+    (conj "No quick docs: the server has no lookup or info op.")))
 
 (defn local-file?
   "True when a lookup's :file names a file that exists on this machine: a
@@ -89,7 +95,11 @@
        (.isFile (io/file (or path jar)))))))
 
 (def stdin-notice
-  "; This server has no stdin: a read waits until Stop, which disconnects.\n")
+  ;; Measured 2026-10-18: babashka v1.13.220's read-line blocks the session
+  ;; for good. Basilisp 0.5.1's reads the server process's own stdin: a line
+  ;; typed there, "" at once when that stdin is closed, and it waits when
+  ;; it's open with nothing written.
+  "; This server has no stdin op, so Jonquil can't send this read any input. On babashka it waits until Stop, which disconnects; on Basilisp it reads the server's own stdin, so type the line in the terminal you started the server in.\n")
 
 (defn with-prefix
   "The candidates whose :symbol starts with prefix. babashka's complete is

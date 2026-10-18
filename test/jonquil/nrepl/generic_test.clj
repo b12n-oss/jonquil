@@ -38,7 +38,7 @@
       (is (some #(str/includes? % "Stop disconnects") ls))
       (is (some #(str/includes? % "read") ls))
       (is (not-any? #(str/includes? % "completion op") ls))
-      (is (not-any? #(str/includes? % "lookup op") ls))
+      (is (not-any? #(str/includes? % "No quick docs") ls))
       (is (not-any? #(str/includes? % "JVM") ls) "nothing JVM-specific")))
   (testing "a server with everything says only what's always true"
     (is (= generic/always-limits
@@ -46,7 +46,7 @@
   (testing "a bare server"
     (let [ls (generic/limitations #{"eval" "load-file" "clone"} true)]
       (is (some #(str/includes? % "completion op") ls))
-      (is (some #(str/includes? % "lookup op") ls)))))
+      (is (some #(str/includes? % "No quick docs") ls)))))
 
 (deftest only-candidates-with-the-prefix-test
   ;; babashka's complete is fuzzy: "ma" also brings Throwable->map and format.
@@ -71,9 +71,10 @@
   (is (= "nREPL (not running)" (dialect/label {:profile dialect/nrepl :runtime :attach})))
   (is (= "nREPL (attached)" (dialect/label {:profile dialect/nrepl :runtime :attach} :attached))))
 
-(deftest a-server-with-info-but-no-lookup-has-no-quick-docs-test
-  (is (some #(str/includes? % "lookup op") (generic/limitations #{"eval" "load-file" "info"} true))
-      "quick doc sends lookup, so info alone doesn't give docs"))
+(deftest a-server-with-info-but-no-lookup-has-quick-docs-test
+  ;; Basilisp 0.5.1 (measured 2026-10-18): info, no lookup.
+  (is (not-any? #(str/includes? % "quick docs") (generic/limitations #{"eval" "load-file" "info"} true))
+      "quick doc falls back to info"))
 
 (deftest local-file-decodes-like-the-source-panel-test
   (let [dir (java.io.File. (System/getProperty "java.io.tmpdir") (str "jonquil generic " (System/nanoTime)))

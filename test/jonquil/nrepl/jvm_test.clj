@@ -707,7 +707,16 @@
       (fn [_srv dir _]
         (let [e (make dir)]
           (run e "1" {:run? false})
-          (is (= (cljd/no-docs "greet" clj/no-lookup-doc) (ev/lookup e "greet" fixture-core-text 0))))))))
+          (is (= (cljd/no-docs "greet" clj/no-lookup-doc) (ev/lookup e "greet" fixture-core-text 0)))))))
+  (testing "no lookup op but info (Basilisp's ops): the docs come from info"
+    (with-project {:ops (conj (vec (remove #{"lookup"} fake/jvm-ops)) "info")
+                   :docs {"greet" {"ns" "demo.core" "name" "greet" "arglists-str" "[who]" "doc" "Says hello."}}}
+      (fn [_srv dir _]
+        (let [e (make dir)]
+          (run e "1" {:run? false})
+          (is (= {:status :found :name "greet" :ns "demo.core" :doc "Says hello." :arglists "[who]"}
+                 (select-keys (ev/lookup e "greet" fixture-core-text 0) [:status :name :ns :doc :arglists])))
+          (is (nil? (ev/lookup e "nope" fixture-core-text 0)) "info's bare done is not found"))))))
 
 (def full-doc-greet-text
   "The fake's own :full-docs answer for greet -- P3.T2's step 5 text,

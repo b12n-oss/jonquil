@@ -95,6 +95,12 @@
   ;; test. Run with `bb test:bb`, not `bb test`. Skips without bb on PATH.
   '[jonquil.live.bb-nrepl-test])
 
+(def live-basilisp-namespaces
+  ;; The :nrepl dialect against Basilisp: starts a real `basilisp
+  ;; nrepl-server` per test. Run with `bb test:basilisp`. Skips without
+  ;; JONQUIL_BASILISP or a basilisp on PATH.
+  '[jonquil.live.basilisp-nrepl-test])
+
 (defn- on-path? [program]
   (some (fn [d] (.canExecute (java.io.File. ^String d ^String program)))
         (str/split (or (System/getenv "PATH") "") #":")))
@@ -103,6 +109,10 @@
   (when (and (= ["--live-bb"] args) (not (on-path? "bb")))
     (println "test:bb: no bb on PATH; skipping")
     (System/exit 0))
+  (when (and (= ["--live-basilisp"] args)
+             (not (if-let [b (System/getenv "JONQUIL_BASILISP")] (.canExecute (java.io.File. ^String b)) (on-path? "basilisp"))))
+    (println "test:basilisp: no basilisp found (set JONQUIL_BASILISP or put basilisp on PATH); skipping")
+    (System/exit 0))
   (when (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
     (println "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping")
     (System/exit 0))
@@ -110,6 +120,7 @@
                   (= ["--live-clj"] args) live-clj-namespaces
                   (= ["--live-jank"] args) live-jank-namespaces
                   (= ["--live-bb"] args) live-bb-namespaces
+                  (= ["--live-basilisp"] args) live-basilisp-namespaces
                   (seq args) (mapv symbol args)
                   :else test-namespaces)]
     (apply require nss)

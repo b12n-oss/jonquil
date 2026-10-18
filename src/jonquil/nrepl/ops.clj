@@ -95,6 +95,24 @@
   server on Windows."
   #"(?:(?:Execution|Syntax|Unexpected) error|Error (?:printing return value|reading eval result))[^\n]* at [^\n]*\)\.\r?\n")
 
+(def ^:private python-traceback "Traceback (most recent call last):")
+
+(defn- last-line [s]
+  (some-> (last (remove str/blank? (str/split-lines (str s)))) str/trim))
+
+(defn- compiler-message
+  "The message line of Basilisp's compiler and reader error block, which
+  it sends as err (measured, Basilisp 0.5.1):
+  \"  exception: <class '...CompilerException'>\\n    message: unable to
+  resolve symbol 'x' in this context\\n   location: <nREPL Input>:1\". The
+  last message: line after the last exception: line, or nil when err has
+  no such block."
+  [err]
+  (when-let [i (str/last-index-of err "exception: <class '")]
+    (some->> (str/split-lines (subs err i))
+             (keep #(second (re-find #"^\s*message: (.*)$" %)))
+             last str/trim not-empty)))
+
 (defn- error-message
   "An eval-error's message: the first non-blank line after the last err->msg
   header in the err text (the last, so the program's own *err* output
@@ -104,8 +122,11 @@
   \"java.lang.ArithmeticException: Divide by zero user REPL:1:1\", ex
   \"class java.lang.ArithmeticException\") puts the message there while
   :ex holds only the class; the last, so the program's own earlier stderr
-  that happens to name the class isn't taken. Else ex, else the err
-  text's first line."
+  that happens to name the class isn't taken. With no header and no class,
+  Basilisp's shapes (measured, 0.5.1): the message line of its compiler
+  error block in err, else the last line of a Python traceback in ex or err
+  (\"ZeroDivisionError: Fraction(1, 0)\", the exception Python names
+  last). Else ex, else the err text's first line."
   [msgs]
   (let [err (apply str (keep :err msgs))
         header (last (re-seq err-header err))
@@ -114,9 +135,13 @@
         cls (when (and ex (str/starts-with? ex "class "))
               (some-> ex (subs (count "class ")) str/trim not-empty))
         named (when (and (not header) cls)
-                (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))]
+                (some-> (last (filter #(str/includes? % cls) (str/split-lines err))) str/trim))
+        python (when-not (or header cls)
+                 (or (compiler-message err)
+                     (some #(when (str/includes? (str %) python-traceback) (last-line %)) [ex err])))]
     (or (not-empty (first-line after))
         named
+        python
         (first-line (or ex err)))))
 
 (defn eval-result

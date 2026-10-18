@@ -68,7 +68,7 @@
   "Nothing to inspect yet: Jonquil isn't attached to the server. Run something first.")
 
 (def no-lookup-doc
-  "No docs: this server has no lookup op.")
+  "No docs: this server has no lookup or info op.")
 
 (def lookup-timeout-doc
   "No docs: the server didn't answer in time.")
