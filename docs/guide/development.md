@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 65 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (689 tests, 3908 assertions
+slower. `bb test` runs the full unit suite (690 tests, 3914 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (689 tests and 3877 assertions, 31
+reports fewer assertions than macOS (690 tests and 3883 assertions, 31
 fewer, measured 2026-10-18).
 
 `bb test:nrepl` runs a second, separate suite (53 tests, 189 assertions,
@@ -41,7 +41,13 @@ measured 2026-10-18): each test starts a real `bb nrepl-server` on a free
 port in its own temp project and drives the nREPL dialect against it (Run,
 the error line, completion, lookup, Stop by disconnecting, a read that
 can't be answered, the port file, and a refused port), stopping that server
-after. It skips, exiting 0, when no `bb` is on `PATH`. `bb test` never touches a child process or a real server and stays
+after. It skips, exiting 0, when no `bb` is on `PATH`. `bb test:basilisp`
+runs a sixth (5 tests, 20 assertions, measured 2026-10-18) the same way
+against a real `basilisp nrepl-server`: the port file Basilisp writes, the
+error lines for a runtime and a compile error, quick docs through `info`,
+completion, the limitations, a read with the server's stdin closed, and
+Stop by disconnecting. It uses `JONQUIL_BASILISP` when that's set, else a
+`basilisp` on `PATH`, and skips, exiting 0, with neither. `bb test` never touches a child process or a real server and stays
 that self-contained on purpose, which is why the live suites are separate
 tasks rather than tags inside the same one. `bb verify` is the pre-commit
 gate: clj-kondo in report mode, then `bb test` followed by `bb
