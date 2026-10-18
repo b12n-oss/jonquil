@@ -82,12 +82,12 @@
 (defn- serve-connection!
   "Serves one accepted socket until the client's EOF, then closes it. A throw
   out of serve! logs one stderr line; the caller accepts the next client."
-  [sock {:keys [ui dir gui]}]
+  [sock {:keys [ui dir-fn gui]}]
   (try
     (let [in (io/reader (.getInputStream sock) :encoding "UTF-8")
           out (io/writer (.getOutputStream sock) :encoding "UTF-8")]
       (mcp/serve! {:tools (mcp-window/make-window-tools
-                           {:ui ui :gui gui :dir (or dir (System/getProperty "user.dir"))})
+                           {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
                    :read-line (fn [] (.readLine ^java.io.BufferedReader in))
                    :write-line (fn [s]
                                  (.write ^java.io.Writer out (str s "\n"))
@@ -138,8 +138,11 @@
 (defn start-listener!
   "Binds 127.0.0.1 on an OS-picked port, writes this process's registry
   entry, runs housekeeping, and accepts clients one at a time on a future.
-  Returns {:port p :stop! (fn [])}; stop! closes the socket (ending the
-  accept loop) and deletes the entry, and is safe to call twice; a connection already being
+  Returns {:port p :stop! (fn []) :set-dir! (fn [dir])}; set-dir! (the window
+  re-rooted, follow-root!) rewrites the entry's :dir, so attaching by folder
+  follows the window, and each later client is served that folder; stop!
+  closes the socket (ending the accept loop) and deletes the entry, and is
+  safe to call twice, after which set-dir! writes nothing; a connection already being
   served outlives stop! (the entry is gone but the session runs on) and ends
   with its client or the process. If a step
   after the bind throws, the socket is closed and the exception rethrown. If
@@ -150,17 +153,38 @@
   (let [ss (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
         port (.getLocalPort ss)
         pid (.pid (ProcessHandle/current))
+        dir* (atom dir)
+        stopped? (atom false)
         stop! (fn []
+                (reset! stopped? true)
                 (try (.close ss) (catch Throwable _ nil))
-                (delete-entry! settings-path pid))]
+                (delete-entry! settings-path pid))
+        set-dir! (fn [d]
+                   (reset! dir* d)
+                   (when-not @stopped?
+                     (write-entry! settings-path {:dir d :port port :pid pid})))]
     (try
       (write-entry! settings-path {:dir (or dir (System/getProperty "user.dir")) :port port :pid pid})
       (housekeep! settings-path)
       (catch Throwable e
         (try (.close ss) (catch Throwable _ nil))
         (throw e)))
-    (future (accept-loop! ss {:ui ui :dir dir :gui gui} stop!))
-    {:port port :stop! stop!}))
+    (future (accept-loop! ss {:ui ui :dir-fn (fn [] @dir*) :gui gui} stop!))
+    {:port port :stop! stop! :set-dir! set-dir!}))
+
+(defn follow-root!
+  "Keeps listener l's folder on the window's tree root: watches tree-state
+  (the file tree's state atom, whose :root an Open Folder re-root changes)
+  and calls l's set-dir! with the new root's canonical path. A failure is
+  said on stderr; the window carries on."
+  [tree-state l]
+  (add-watch tree-state ::follow-root
+             (fn [_ _ old new]
+               (let [r (:root new)]
+                 (when (and r (not= (:root old) r))
+                   (try ((:set-dir! l) (.getCanonicalPath (io/file r)))
+                        (catch Throwable e
+                          (log "couldn't follow the new folder:" (or (ex-message e) (str e))))))))))
 
 ;; --- discovery and the --mcp-attach bridge -----------------------------------
 
