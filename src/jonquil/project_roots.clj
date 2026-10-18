@@ -6,9 +6,13 @@
   project kept there ({:runtime :in-process}) couldn't require its own
   namespaces: \"Could not locate demo/util.jolt (or .clj/.cljc) on the
   source roots\" (measured 2026-10-18, Jolt v0.8.23). use-project! puts
-  the project's :paths in front of those roots, through jolt.host's
+  the project's :paths after those roots, through jolt.host's
   set-source-roots!, the seam jolt.main and jolt.deps use to set up a
-  project. Only :paths: a dependency in :deps is not resolved here."
+  project. After, not before (review finding 4): Jolt and Jonquil run in
+  this same process, and a project's src/clojure/... or src/jonquil/...
+  must not shadow the IDE's own namespaces. Only :paths: a dependency in
+  :deps is not resolved here. The roots are process-wide, which is one
+  window's worth: Jonquil runs one window per process."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -32,22 +36,35 @@
                   (filter #(.isDirectory ^java.io.File %))
                   (map #(.getCanonicalPath ^java.io.File %))
                   (distinct))
-            (if (sequential? ps) ps [])))))
+            ;; any collection of strings (a set too); anything else is nothing
+            (if (coll? ps) ps [])))))
 
 (defn- host-fn [sym]
   (try (some-> (resolve sym) deref) (catch Exception _ nil)))
 
 (defonce ^:private base-roots
-  ;; The roots Jolt started with, read the first time a project is used, so
-  ;; switching to another project replaces the old project's roots rather
-  ;; than piling them up.
-  (delay (when-let [f (host-fn 'jolt.host/source-roots)] (vec (f)))))
+  ;; The roots Jolt started with, kept so switching to another project
+  ;; replaces the old project's roots rather than piling them up. Read when
+  ;; this namespace loads, before any project is used, and again later only
+  ;; while it's still unknown (review finding 3: a nil is never kept).
+  (atom (when-let [f (host-fn 'jolt.host/source-roots)] (vec (f)))))
+
+(defonce ^:private warned? (atom false))
 
 (defn use-project!
-  "Makes dir's source folders (paths) the first roots Jolt searches, ahead
-  of the roots it started with; nil dir leaves only those. A no-op when
-  jolt.host doesn't offer the seam."
+  "Makes dir's source folders (paths) roots Jolt searches, after the roots
+  it started with; nil dir leaves only those. true when the roots were set.
+  Without jolt.host's seam it says so once on stderr and returns false
+  (review finding 2), since a project kept in process then can't require
+  its own namespaces."
   [dir]
-  (when-let [set-roots! (host-fn 'jolt.host/set-source-roots!)]
-    (when-let [base @base-roots]
-      (set-roots! (vec (distinct (concat (paths dir) base)))))))
+  (let [set-roots! (host-fn 'jolt.host/set-source-roots!)
+        base (or @base-roots
+                 (when-let [f (host-fn 'jolt.host/source-roots)]
+                   (reset! base-roots (vec (f)))))]
+    (if (and set-roots! base)
+      (do (set-roots! (vec (distinct (concat base (paths dir))))) true)
+      (do (when (and dir (compare-and-set! warned? false true))
+            (binding [*out* *err*]
+              (println "jonquil: this Jolt has no jolt.host/set-source-roots!, so a project kept in process can't load its own namespaces")))
+          false))))

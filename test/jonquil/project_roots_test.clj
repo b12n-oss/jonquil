@@ -37,6 +37,9 @@
   (testing "a deps.edn that doesn't read as a map counts as missing"
     (let [dir (project! {"deps.edn" "{:paths [" "src/a.clj" ""})]
       (is (= [(canon dir "src")] (roots/paths dir)))))
+  (testing "a set of paths works too"
+    (let [dir (project! {"deps.edn" "{:paths #{\"src\"}}" "src/a.clj" ""})]
+      (is (= [(canon dir "src")] (roots/paths dir)))))
   (testing "an empty :paths is empty"
     (let [dir (project! {"deps.edn" "{:paths []}" "src/a.clj" ""})]
       (is (= [] (roots/paths dir)))))
@@ -69,3 +72,40 @@
       (finally
         (roots/use-project! nil)
         (doseq [n '[demo.rootsa demo.rootsutil]] (remove-ns n))))))
+
+(deftest project-roots-come-after-jolts-own-test
+  ;; Jolt and Jonquil share this process: a project's folders must not
+  ;; shadow their namespaces (review finding 4).
+  (let [dir (project! {"src/a.clj" ""})
+        before (vec ((requiring-resolve 'jolt.host/source-roots)))]
+    (try
+      (is (true? (roots/use-project! dir)))
+      (let [after (vec ((requiring-resolve 'jolt.host/source-roots)))]
+        (is (= (canon dir "src") (peek after)) "the project's folder is last")
+        (is (= (vec (remove #{(canon dir "src")} after)) (vec (distinct (remove #{(canon dir "src")} before))))
+            "Jolt's own roots keep their order, in front"))
+      (finally (roots/use-project! nil)))))
+
+(deftest two-projects-on-one-evaluator-test
+  ;; A window keeps one in-process evaluator when it opens a file from
+  ;; another in-process project, so each Run applies its own file's project
+  ;; (review finding 1).
+  (let [mk (fn [ns-a ns-u]
+             (project! {"deps.edn" "{:paths [\"src\"]}"
+                        ".jonquil.edn" "{:runtime :in-process}"
+                        (str "src/" ns-u ".clj") (str "(ns " ns-u ")\n(defn v [] :" ns-u ")\n;; " (System/nanoTime) "\n")
+                        (str "src/" ns-a ".clj") (str "(ns " ns-a " (:require [" ns-u " :as u]))\n(u/v)\n")}))
+        a (mk "proja" "projautil")
+        b (mk "projb" "projbutil")
+        run (fn [e path] (let [p (promise)]
+                           (ev/eval! e (slurp path) {:run? true :path path :on-output (fn [_ _]) :on-complete #(deliver p %)})
+                           (select-keys (deref p 10000 :timeout) [:status :printed])))
+        pa (canon a "src/proja.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project pa) pa nil))]
+    (try
+      (is (= {:status :ok :printed ":projautil"} (run e pa)))
+      (is (= {:status :ok :printed ":projbutil"} (run e (canon b "src/projb.clj")))
+          "the second project's own namespace, on the same evaluator")
+      (finally
+        (roots/use-project! nil)
+        (doseq [n '[proja projautil projb projbutil]] (remove-ns n))))))
