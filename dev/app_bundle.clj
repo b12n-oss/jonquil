@@ -13,7 +13,7 @@
 
 (def bundle-id "net.b12n.jonquil")
 (def bundle-dir "Jonquil.app")
-(def doc-extensions ["clj" "cljc" "cljd" "jank" "edn" "bb"])
+(def doc-extensions ["clj" "cljc" "cljd" "cljs" "jank" "edn" "bb"])
 
 (defn- xml-escape [s]
   (-> (str s)

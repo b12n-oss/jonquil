@@ -13,6 +13,7 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Open With offers Jonquil for `.cljs` files too, on macOS (the app's document types) and Linux (the `text/x-clojure` MIME globs), now that there's a ClojureScript dialect.
 - JVM Clojure: output from another thread while `read-line` waits no longer takes the console out of input mode.
 - Find and replace: Return on a focused Replace or Replace All button presses it, instead of moving to the next match.
 - Format All and Format Selection keep the caret on the same code and scroll it into view.

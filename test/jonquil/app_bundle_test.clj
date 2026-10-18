@@ -86,3 +86,8 @@
   (testing "no plist at all"
     (is (not (ab/replaceable? nil)))
     (is (not (ab/replaceable? "")))))
+
+(deftest the-real-bundle-offers-every-dialects-extension
+  ;; Pure, so it runs on every OS (the plist checks above need plutil).
+  (is (= ["clj" "cljc" "cljd" "cljs" "jank" "edn" "bb"] ab/doc-extensions)
+      "ClojureScript's .cljs is offered too, since Jonquil has a cljs dialect"))
