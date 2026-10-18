@@ -506,7 +506,7 @@
             (let [r (client/request-sync conn {:op op :prefix prefix
                                                :ns (clj/help-ns text prompt-ns)
                                                :session session}
-                                         (:help-timeout-ms timings))]
+                                         (ev/help-timeout (:help-timeout-ms timings)))]
               (if (vector? r)
                 (ops/merge-candidates prefix offline
                                       (cond->> (ops/candidates r) (generic? this) (generic/with-prefix prefix)))
@@ -530,7 +530,7 @@
           (not (client/open? conn)) (cljd/no-docs sym clj/not-attached-doc)
           (not (lookup-op ops)) (cljd/no-docs sym clj/no-lookup-doc)
           :else
-          (let [res (resolve-lookup! conn session (lookup-op ops) sym text prompt-ns (:help-timeout-ms timings))]
+          (let [res (resolve-lookup! conn session (lookup-op ops) sym text prompt-ns (ev/help-timeout (:help-timeout-ms timings)))]
             (case (:status res)
               :timeout (cljd/no-docs sym clj/lookup-timeout-doc)
               :not-attached (cljd/no-docs sym clj/not-attached-doc)
@@ -544,6 +544,11 @@
     (if (generic? this)
       (generic/limitations (:ops @state) (connection/live? this))
       clj/limitations))
+
+  ev/ServerHelp
+  (offline-candidates [_ prefix text pos extra-context]
+    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+         (catch Throwable _ [])))
 
   ev/FullDoc
   ;; P3.T2: backed by the server's own "doc" op, in a future (never on the
@@ -578,7 +583,7 @@
           :else
           (future
             (try
-              (let [res (resolve-lookup! conn session (lookup-op ops) sym text prompt-ns (:help-timeout-ms timings))]
+              (let [res (resolve-lookup! conn session (lookup-op ops) sym text prompt-ns (ev/help-timeout (:help-timeout-ms timings)))]
                 (case (:status res)
                   :timeout (on-result {:status :timeout})
                   :not-attached (on-result {:status :not-attached})

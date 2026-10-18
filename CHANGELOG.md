@@ -30,6 +30,8 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Completion, its doc preview, quick doc and jump to definition no longer hold up typing against a slow server (JVM Clojure, ClojureScript, ClojureDart, any nREPL server, Jolt out of process, jank). Jonquil waits about 25 ms for the answer, then opens the popup on the names it already knows and merges the server's in when they land; quick doc and jump say "Looking up X..." meanwhile. A jump to a definition in the file never waits for the server.
+
 - A Jolt file outside any project runs in the window's own Jolt, out of process in a `deps.edn` project window, instead of refusing to run there while other tabs are open; closing tabs down to that file, or saving the window's only tab as one, no longer switches the window to in-process Jolt.
 - Jolt now runs out of process by default in a project with a `deps.edn`, so a program that calls `System/exit`, `shutdown-agents` or redefines `clojure.core` takes down a separate Jolt child rather than Jonquil. A loose file still runs in process, and `.jonquil.edn` `{:runtime :in-process}` keeps a project there. With no jolt-lang/nrepl checkout, Jonquil fetches nREPL v0.4.0 as a git dependency, and starts a plain nREPL server if that fails. The out-of-process start no longer lists "Output appears when an evaluation finishes" as a limit, since nREPL v0.4.0 streams output.
 - Jonquil now needs Jolt v0.8.23 or later, and `pp` is referred at the prompt next to `pprint`, so `(pp)` pretty-prints `*1` in process and out of process.

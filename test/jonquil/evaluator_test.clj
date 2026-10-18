@@ -88,3 +88,35 @@
     (is (= "Helps." (:doc (ev/lookup e "helped" "(helped 1)" 1))))
     (is (= "clojure.core" (:ns (ev/lookup e "map" "(map inc [1])" 1))))
     (is (nil? (ev/lookup e "" "" 0)))))
+
+(deftest ask-help-test
+  (testing "an answer inside the grace wait comes back now, and on-later never runs"
+    (let [later (atom 0)]
+      (is (= [:now 7] (ev/ask-help! 1000 (fn [] 7) (fn [_] (swap! later inc)))))
+      (Thread/sleep 50)
+      (is (zero? @later))))
+  (testing "nil is an answer too"
+    (is (= [:now nil] (ev/ask-help! 1000 (fn [] nil) (fn [_] nil)))))
+  (testing "a late answer goes to on-later, with the long limit bound"
+    (let [got (promise)]
+      (is (= [:later] (ev/ask-help! 10 (fn [] (Thread/sleep 150) (ev/help-timeout 300)) (fn [r] (deliver got r)))))
+      (is (= ev/async-help-timeout-ms (deref got 2000 :timeout)))))
+  (testing "a throw is an answer help-error reads, late and now"
+    (let [got (promise)]
+      (ev/ask-help! 10 (fn [] (Thread/sleep 50) (throw (ex-info "boom" {}))) (fn [r] (deliver got r)))
+      (is (= "boom" (ev/help-error (deref got 2000 :timeout)))))
+    (is (= "bang" (ev/help-error (second (ev/ask-help! 1000 (fn [] (throw (ex-info "bang" {}))) (fn [_] nil))))))
+    (is (nil? (ev/help-error [{:symbol "map"}])) "a candidate list isn't an error")
+    (is (nil? (ev/help-error {:status :found :name "map"})) "nor is a doc"))
+  (testing "every request settles exactly once, whichever side wins"
+    (let [later (atom 0)
+          nows (count (filter #(= :now (first %))
+                              (doall (for [_ (range 100)] (ev/ask-help! 0 (fn [] 1) (fn [_] (swap! later inc)))))))]
+      ;; the late ones land on worker threads: poll, rather than guess how long
+      (loop [n 0] (when (and (< n 300) (< (+ nows @later) 100)) (Thread/sleep 10) (recur (inc n))))
+      (is (= 100 (+ nows @later)))))
+  (testing "unbound, help-timeout is the evaluator's own"
+    (is (= 300 (ev/help-timeout 300)))))
+
+(deftest server-help-test
+  (is (not (ev/server-help? (fresh))) "in-process Jolt is asked directly"))

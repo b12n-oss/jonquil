@@ -204,7 +204,7 @@
       :else
       (let [r (client/request-sync conn {:op "eval" :code (jank/meta-doc-code sym)
                                          :ns (clj/help-ns text prompt-ns) :session session}
-                                   (or timeout-ms (:help-timeout-ms timings)))]
+                                   (or timeout-ms (ev/help-timeout (:help-timeout-ms timings))))]
         (if (vector? r)
           (jank/meta-doc sym r)
           (cljd/no-docs sym timeout-doc))))))
@@ -252,7 +252,7 @@
           (let [r (client/request-sync conn {:op "completions" :prefix prefix
                                              :ns (clj/help-ns text prompt-ns)
                                              :session session}
-                                       (:help-timeout-ms timings))]
+                                       (ev/help-timeout (:help-timeout-ms timings)))]
             (if (vector? r)
               (ops/merge-candidates prefix offline (ops/candidates r))
               offline))
@@ -262,6 +262,11 @@
     (try (meta-lookup this sym text nil)
          (catch Throwable _ (cljd/no-docs sym timeout-doc))))
   (limitations [_] jank/limitations)
+
+  ev/ServerHelp
+  (offline-candidates [_ prefix text pos extra-context]
+    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
+         (catch Throwable _ [])))
 
   ev/FullDoc
   ;; Off the GTK thread, with the longer bound; on-result is called once.

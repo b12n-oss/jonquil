@@ -46,6 +46,72 @@
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
 
+(def ^:dynamic *help-timeout-ms*
+  "When bound, how long a server evaluator's complete and lookup wait for
+  the server, in place of its own :help-timeout-ms (300 ms, sized for the
+  GTK thread). ask-help! binds it off the GTK thread."
+  nil)
+
+(defn help-timeout
+  "*help-timeout-ms* when bound, else default."
+  [default]
+  (or *help-timeout-ms* default))
+
+(defprotocol ServerHelp
+  "Evaluators whose complete and lookup ask a server (every attach
+  evaluator, out-of-process Jolt and jank). The window asks them through
+  ask-help!, so a slow server never holds the GTK thread; in-process Jolt
+  doesn't implement this and is asked directly."
+  (offline-candidates [ev prefix text pos extra-context]
+    "complete's candidates without asking the server: what complete falls
+    back to. Never throws."))
+
+(defn server-help?
+  "True when ev's help asks a server (ServerHelp)."
+  [ev]
+  (satisfies? ServerHelp ev))
+
+(def async-help-timeout-ms
+  ;; estimate: 3-8x the round trips measured through an ssh tunnel to a
+  ;; distant babashka (293-857 ms, 2026-10-18). Off the GTK thread, so a
+  ;; long wait costs a stale request at worst, never a stalled key.
+  3000)
+
+(def help-grace-ms
+  ;; estimate: a local server answered completions in 6.7 ms and lookup in
+  ;; 1.2 ms (jonquil.nrepl.evaluator's help-timeout-ms probe), so a local
+  ;; answer lands well inside this and the window acts on it at once.
+  25)
+
+(defn ask-help!
+  "Runs (f) on a worker thread, with *help-timeout-ms* bound to
+  async-help-timeout-ms, and waits up to grace-ms for it. [:now r] when it
+  answered in time; else [:later], and (on-later r) runs on a worker
+  thread once it does. Exactly one of the two gets r. When f throws, r is
+  {::error message}, which help-error reads, so a caller can say so
+  rather than show nothing (review finding 1)."
+  [grace-ms f on-later]
+  ;; st: ::waiting until one side settles it. The worker stores its answer
+  ;; only while the caller still waits; once the caller has given up
+  ;; (::later), the worker hands the answer to on-later instead.
+  (let [p (promise)
+        st (atom ::waiting)]
+    (future
+      (let [r (try (binding [*help-timeout-ms* async-help-timeout-ms] (f))
+                   (catch Throwable e {::error (or (ex-message e) (str (class e)))}))]
+        (when-not (compare-and-set! st ::waiting [::done r])
+          (try (on-later r) (catch Throwable _ nil)))
+        (deliver p true)))
+    (deref p grace-ms nil)
+    (if (compare-and-set! st ::waiting ::later)
+      [:later]
+      [:now (second @st)])))
+
+(defn help-error
+  "The message of an ask-help! answer whose f threw, else nil."
+  [r]
+  (when (map? r) (::error r)))
+
 (defprotocol Owners
   "Tabs plan, final review finding 2: evaluators that track which owner
   (tab) created which namespaces (jonquil.session's InProcess, jonquil.

@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 65 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (690 tests, 3921 assertions
+slower. `bb test` runs the full unit suite (694 tests, 3950 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (690 tests and 3890 assertions, 31
+reports fewer assertions than macOS (694 tests and 3919 assertions, 31
 fewer, measured 2026-10-18).
 
 <details>
@@ -148,7 +148,7 @@ fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, Stop's detach, and the inspector's unavailable sentence, over
 that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 30 rows) opens against a throwaway JVM Clojure project whose
+(`dev/gtk_selftest_clj.clj`, 35 rows) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
 (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its
@@ -158,7 +158,11 @@ after the server restarts and the prompt going back to `user`, quick doc, jump t
 full docs and its Escape, the inspector before and after a Run, in and
 out, a lost connection and reconnecting while idle, Reset on Run's tick
 through a switch to a Jolt file and back, and a close that never sends
-the server a `close` op. Its source rows open definitions from a fixture
+the server a `close` op. Five rows slow the fake down (its `:delays` atom
+makes completions or lookup answer after 800 ms) and check that the
+handlers return at once, that the late answers land, that one for a symbol
+the caret has left is dropped, that a jump within the buffer doesn't wait,
+and that a tab closed mid-request is left alone. Its source rows open definitions from a fixture
 jar and from files inside and outside the project, follow and go back,
 open a project file in the window, and share the slot with the inspector.
 
@@ -190,7 +194,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. A full run reports 48, 305, 18, 15, 30, 4, 13, 5 and 10 rows
+browser. A full run reports 48, 305, 18, 15, 35, 4, 13, 5 and 10 rows
 passing, in group order.
 
 </details>

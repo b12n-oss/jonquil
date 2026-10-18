@@ -639,6 +639,18 @@ Candidates come from Clojure's special forms and core built-ins, whatever
 the Definitions pane itself defines, and whatever your program has
 defined by running or by typing at the prompt.
 
+When a server answers completion (JVM Clojure, ClojureScript, any nREPL
+server, Jolt out of process, jank), Jonquil asks it without making you
+wait. A local server answers before the popup opens, so nothing changes
+there. A slow one gets about a fortieth of a second: after that the popup
+opens on the names Jonquil already knows (or "Asking the server..." when
+it knows none), and the server's names join the list when they arrive,
+with your selection kept. Keep typing and the list follows what you type;
+an answer for text you've since changed is dropped. Quick documentation
+and jump to definition work the same way, saying "Looking up X..." on the
+status bar until the answer lands, and a jump to a definition in the file
+never waits for the server at all.
+
 ### Quick documentation
 
 Ctrl+Q or Shift+F1 opens a popup with the namespace, arglists, and
@@ -1408,11 +1420,12 @@ one on this machine, now reachable over the network. Keep it on a network
 you trust, or tunnel it: `ssh -L 1667:localhost:1667 box`, then
 `{:port 1667}` here.
 
-Over a slow link, completion and quick docs can come back from this buffer
-alone. Each asks the server with a 300 ms limit, since it runs as you
-type, and a babashka server on a distant host measured 300 to 400 ms a
-round trip through an ssh tunnel. Run, the REPL, errors and Stop worked
-the same there as on this machine.
+Over a slow link, completion and quick docs arrive a moment after you ask
+rather than holding up typing (see [Completion](#completion)). A babashka
+server on a distant host measured 300 to 400 ms a round trip through an
+ssh tunnel: the popup opened in about 30 ms on the names Jonquil knew, and
+the server's own names followed. Run, the REPL, errors and Stop worked the
+same there as on this machine.
 
 ### jank (experimental)
 
@@ -1834,8 +1847,9 @@ than being surprises you'd otherwise have to rediscover:
   closing the window, and SIGTERM, SIGHUP or SIGINT all stop the child
   first. Exiting can take a while when a child is still starting: stop
   waits up to about 16 seconds for each start in flight.
-- A wedged out-of-process child can hold a completion or quick-doc lookup
-  for up to 300 ms before Jonquil falls back to its own offline answer.
+- A wedged out-of-process child no longer holds a key: completion and
+  quick doc go on after about 25 ms with Jonquil's own offline answer, and
+  give up on the child's after 3 seconds.
 - Stop against an unresponsive out-of-process child takes about 2.2
   seconds: a second waiting for it to answer the interrupt, a second more
   for it to exit once killed, and a little overhead either side.
@@ -1914,8 +1928,7 @@ than being surprises you'd otherwise have to rediscover:
 - The nREPL dialect does what the server offers: with no `interrupt` op,
   Stop disconnects and leaves the evaluation running in the server; with
   no `stdin` op, a read waits until Stop on babashka, and reads the server's
-  own terminal on Basilisp. Over a slow link, completion and quick docs
-  can miss their 300 ms limit and use only this buffer. Reset on Run isn't available, and
+  own terminal on Basilisp. Reset on Run isn't available, and
   jump to definition follows only a file that exists on this machine.
 
 </details>
