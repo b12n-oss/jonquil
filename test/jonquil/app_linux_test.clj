@@ -62,7 +62,7 @@
     (testing "it parses as XML"
       (is (= :mime-info (:tag root))))
     (testing "exactly three types, with their globs in order"
-      (is (= [["text/x-clojure" ["*.clj" "*.cljc" "*.cljd" "*.bb"]]
+      (is (= [["text/x-clojure" ["*.clj" "*.cljc" "*.cljd" "*.cljs" "*.bb"]]
               ["application/edn" ["*.edn"]]
               ["text/x-jank" ["*.jank"]]]
              (mapv (fn [t] [(get-in t [:attrs :type])
