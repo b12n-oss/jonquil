@@ -309,7 +309,10 @@ nREPL middleware (below, under the inspector) loaded into each child:
   Ending a child kills only the pid this namespace spawned, in order
   (`SIGTERM`, then `SIGKILL` if it's still alive a second later).
   Jonquil never reads or writes the project's `.nrepl-port` for its own
-  child: it knows the port it picked.
+  child: it knows the port it picked. The child's stdin is a pipe Jonquil
+  holds open, and a thread in the child exits it when the pipe ends, so a
+  crash or SIGKILL of Jonquil, which runs no hook, still takes the child
+  with it.
 - `jonquil.nrepl.client` holds one socket and one reader for the whole
   life of a child. Its `connect` bounds the socket connect itself to 5
   seconds by default, so a port that never answers fails with an

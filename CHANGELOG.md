@@ -38,6 +38,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Changed
 
+- A crash or force-quit of Jonquil no longer leaves its out-of-process Jolt child running: the child notices its parent is gone and exits within a few seconds.
 - Jolt running out of process no longer writes `.nrepl-port` into your project while its child runs, so the file doesn't show up in `git status` and no other nREPL client can attach to Jonquil's own child by mistake. A `.nrepl-port` your project already has is left alone.
 - Completion, its doc preview, quick doc and jump to definition no longer hold up typing against a slow server (JVM Clojure, ClojureScript, ClojureDart, any nREPL server, Jolt out of process, jank). Jonquil waits about 25 ms for the answer, then opens the popup on the names it already knows and merges the server's in when they land; quick doc and jump say "Looking up X..." meanwhile. A jump to a definition in the file never waits for the server.
 - A Jolt file outside any project runs in the window's own Jolt, out of process in a `deps.edn` project window, instead of refusing to run there while other tabs are open; closing tabs down to that file, or saving the window's only tab as one, no longer switches the window to in-process Jolt.

@@ -1876,11 +1876,12 @@ than being surprises you'd otherwise have to rediscover:
 
 - An unresolved symbol evaluates to an `Unbound` var rather than an error,
   when Jonquil is running Jolt out of process.
-- A crash or SIGKILL of Jonquil leaves its out-of-process Jolt child
-  running, since neither can run a hook. Ordinary Quit, Cmd/Ctrl+W,
-  closing the window, and SIGTERM, SIGHUP or SIGINT all stop the child
-  first. Exiting can take a while when a child is still starting: stop
-  waits up to about 16 seconds for each start in flight.
+- Exiting can take a while when an out-of-process Jolt child is still
+  starting: stop waits up to about 16 seconds for each start in flight.
+  Ordinary Quit, Cmd/Ctrl+W, closing the window, and SIGTERM, SIGHUP or
+  SIGINT stop the child first; after a crash or a SIGKILL of Jonquil the
+  child notices its parent is gone and exits on its own within a few
+  seconds.
 - A wedged out-of-process child no longer holds a key: completion and
   quick doc go on after about 25 ms with Jonquil's own offline answer, and
   give up on the child's after 3 seconds.
