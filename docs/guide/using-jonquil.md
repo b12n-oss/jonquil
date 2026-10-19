@@ -1030,6 +1030,9 @@ already has (from your own server, say) is never touched. It also means
 another nREPL-aware editor, or a JVM Clojure window on the same project,
 can't mistake Jonquil's child for your project's server. Running your own
 `jolt nrepl-server` beside it works as usual: that one writes the file.
+The child uses Jonquil's own middleware list, so a `:nrepl/middleware`
+in your `deps.edn` isn't loaded there; it wasn't before either, since
+Jonquil's list replaced it.
 
 ### ClojureDart (experimental): attaching to a running app
 

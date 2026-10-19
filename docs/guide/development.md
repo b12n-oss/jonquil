@@ -337,9 +337,12 @@ names these harnesses make; `bb clean:tmp --dry-run` lists them first.
 - **An interrupted `bb test:nrepl` or `bb gtk:selftest` run can leave a
   Jolt child behind.** Both kill their own children on every exit path in
   the ordinary case, but a Ctrl-C or a killed process midway through can
-  still skip that cleanup. Run `pgrep -fl "nrepl-server 79"` afterward;
-  anything it finds is a leftover from the run you just interrupted, so
-  kill only those pids, never anything already there before you started.
+  still skip that cleanup. A child whose test process died exits on its
+  own within a few seconds (it watches its stdin pipe), but one whose
+  test process is still alive doesn't. Run `pgrep -fl "jolt.nrepl/start 79"`
+  afterward; anything it finds is a leftover from the run you just
+  interrupted, so kill only those pids, never anything already there
+  before you started.
 - **An interrupted `bb test:clj` can leave a JVM behind.** Its fixture
   sends SIGTERM to the server it started on every ordinary exit path, but
   a Ctrl-C midway can skip that. Run `pgrep -fl clojure-cli.repl.server`
