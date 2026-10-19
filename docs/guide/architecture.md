@@ -831,11 +831,18 @@ send the same wire ops.
 plain server has it too. Its `jonquil-info` op is what lets jump to
 definition leave the buffer: jolt-lang/nrepl's `lookup` answers a var's
 doc and arglists but no file or line. It reads the var's own metadata,
-which Jolt records as it loads a file: a project var's `:file` is
-`./src/...`, relative to the directory jolt started in (the project, for
-the child), and becomes that file's canonical path; a jar dependency's
-`jar:file:` URL is kept as it is; a var built into Jolt has no `:file`,
-so it has no line either. The handler answers on the reader thread, since
+which Jolt records as it loads a file. On v0.8.23 a project var's
+`:file` is `./src/...`, relative to the directory jolt started in (the
+project, for the child), and becomes that file's canonical path; a jar
+dependency's `jar:file:` URL is kept as it is; a var built into Jolt has
+no `:file`, so it has no line either. Jolt's main branch from 2026-10-19
+(jolt-lang/jolt f714b0ed, not yet released) records the classpath name
+instead (`demo/util.clj`, as JVM Clojure does), and the handler resolves
+that with `io/resource` on the child's classpath: an existing `file:`
+URL gives its path, a `jar:file:` URL is kept. A bare name is never
+resolved against the directory, where a file of the same name could be an
+unrelated one. In process, `jonquil.source/resolve-file` does the same on
+the roots `jonquil.project-roots` set. The handler answers on the reader thread, since
 a metadata read never waits. jolt-lang/nrepl ships cider's `info`
 middleware, which answers the same and more, but loading orchard for it
 took a child's start from 0.30 s to 0.92 s (measured 2026-10-18), so

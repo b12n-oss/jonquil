@@ -1866,7 +1866,8 @@ than being surprises you'd otherwise have to rediscover:
 - With Jolt v0.8.23 and earlier, two projects holding a byte-for-byte
   identical namespace file can make F12 open the other project's copy:
   Jolt caches compiled code by its text, and a cached file keeps the place
-  it was first loaded from (jolt-lang/jolt#1404, a fix is open).
+  it was first loaded from (jolt-lang/jolt#1404). Jolt's main branch
+  fixed it on 2026-10-19, after v0.8.23; no release has the fix yet.
 
 </details>
 

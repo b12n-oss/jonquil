@@ -20,6 +20,7 @@ All notable changes to this project are documented here.
 ### Fixed
 
 - A project kept in process (`{:runtime :in-process}`) can require its own namespaces: its `deps.edn` `:paths` are Jolt's source folders there now, so F12 also opens those files. `:deps` libraries are still only loaded out of process.
+- Jump to definition keeps working on Jolt newer than v0.8.23, which records a required namespace's file by its classpath name (`demo/util.clj`) rather than a path: Jonquil now looks that name up on the classpath, in process and out.
 
 - The completion list is as tall as its names, up to eight rows, rather than always eight; a name the buffer defines is labelled `buffer`, not `user`; the quick-doc popover fits its text, up to the width it always had; solarized's selected completion row is visible; and the status bar no longer runs into the window's right edge.
 
