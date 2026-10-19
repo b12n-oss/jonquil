@@ -1,8 +1,8 @@
 (ns jonquil.nrepl.child
-  "The out-of-process Jolt child: pick a port, launch `jolt nrepl-server`
-  in the project directory with nREPL middleware injected through -Sdeps
-  (the command the dialects follow-up spike measured), wait until it
-  answers, and end it again, killing only the pid it spawned.
+  "The out-of-process Jolt child: pick a port, launch Jolt's nREPL server
+  in the project directory with nREPL middleware injected (its deps through
+  -Sdeps), wait until it answers, and end it again, killing only the pid it
+  spawned.
 
   Port rules (~/.claude/rules/dynamic-port-selection.md): a candidate must
   bind on both 127.0.0.1 and the wildcard address (a loopback bind
@@ -10,15 +10,15 @@
   bind is the real attempt: a child that exits because its bind failed
   moves the scan to the next port. There is no port override to honour.
 
-  jolt nrepl-server writes .nrepl-port into its working directory, the
-  user's project, and removes it on SIGTERM. A .nrepl-port that was there
-  before the first child started belongs to someone else, so it is read
-  first and written back once the last child is gone.
-
-  Children for one directory can overlap (project switch A, B, A), and each
-  one's SIGTERM deletes the file whatever it holds. So a process-wide owner
-  table per directory (claim-dir!, owner-ready!, release-dir!) keeps the
-  file pointing at the most recently started child that still runs."
+  The server writes no .nrepl-port. `jolt nrepl-server` would write one
+  into the project while the child runs, where it showed in git status
+  and where another nREPL client (a JVM Clojure window on the same
+  project, say) could take Jonquil's own child for the project's server.
+  So the child runs `jolt -e` with jolt.nrepl/start's {:port-file nil}
+  (Jolt v0.8.18 and later), doing what nrepl-server does around it: block
+  SIGINT, add the shutdown hook, park the main thread. Jonquil picks the
+  port itself, so nothing needs the file; a .nrepl-port of the user's own
+  is never touched."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
@@ -70,12 +70,31 @@
     {:local root}
     {:git nrepl-git-coord}))
 
+(defn server-form
+  "The -e form that runs the server on port with the middleware symbols,
+  as `jolt nrepl-server` does (jolt.main) but with no port file, plus a
+  watcher: a thread that reads the child's stdin, a pipe Jonquil holds
+  open for the child's whole life, and exits the child at its end. When
+  Jonquil dies in a way that runs no hook (a crash, SIGKILL), the OS
+  closes the pipe, so the child doesn't outlive it (measured: exited
+  within 3 s of its parent's SIGKILL). System/exit runs the shutdown hook,
+  which stops the server. *in*'s root is an empty reader, so a program's
+  read on a plain server (no stdin middleware) ends at once, as it did
+  with /dev/null for stdin, instead of waiting on the watcher's pipe."
+  [port middleware]
+  (str "(do (require 'jolt.nrepl) (jolt.host/block-sigint)"
+       " (alter-var-root #'*in* (constantly (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. \"\"))))"
+       " (let [stop (jolt.nrepl/start " port " '[" (str/join " " middleware) "] {:port-file nil})]"
+       " (jolt.host/add-shutdown-hook stop)"
+       " (future (try (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur)))) (catch Throwable _ nil))"
+       " (System/exit 0))"
+       " (jolt.host/park-until-interrupt) (stop)))"))
+
 (defn launch-args
-  "The child's argv. With a middleware source, the follow-up spike's
-  command: jolt -Sdeps '{:deps {nrepl/nrepl COORD}
-  :nrepl/middleware [nrepl.middleware/default-middleware]}' nrepl-server P,
+  "The child's argv. With a middleware source: jolt -Sdeps '{:deps
+  {nrepl/nrepl COORD}}' -e (server-form P [nrepl.middleware/default-middleware]),
   where COORD is {:local/root R} for {:local R} or the git coordinate for
-  {:git coord}. With a nil source, a plain jolt nrepl-server P.
+  {:git coord}. With a nil source, a plain server: jolt -e (server-form P []).
   source's :jonquil (or jonquil-root, in the three-argument form), when set,
   is jonquil.nrepl.middleware-files' folder: it joins the deps as
   jonquil/nrepl-middleware. The inspector's middleware and jonquil-info's go
@@ -103,11 +122,9 @@
                       jonquil-root (conj (str middleware-files/inspect-middleware)
                                          (str middleware-files/info-middleware)))]
      (if (seq deps)
-       [program "-Sdeps"
-        (str "{:deps {" (str/join " " deps) "}"
-             " :nrepl/middleware [" (str/join " " middleware) "]}")
-        "nrepl-server" (str port)]
-       [program "nrepl-server" (str port)]))))
+       [program "-Sdeps" (str "{:deps {" (str/join " " deps) "}}")
+        "-e" (server-form port middleware)]
+       [program "-e" (server-form port middleware)]))))
 
 (defn jonquil-root
   "The inspector's folder for a child about to start (the evaluator puts it
@@ -119,17 +136,13 @@
 (defn process-options
   "The jolt.process options for the child: {:dir :log}, plus login-path's
   PATH in the child's environment so jolt's own tool lookups see it
-  (no :extra-env when there is no PATH at all)."
+  (no :extra-env when there is no PATH at all). stdin is left as a pipe,
+  which the process record holds open until kill!: server-form's watcher
+  ends the child when it closes, Jonquil's own death included."
   [{:keys [dir log]}]
   (let [path (login-path/path)]
-    (cond-> {:dir dir :out (io/file log) :err :out :in (io/file "/dev/null")}
+    (cond-> {:dir dir :out (io/file log) :err :out}
       path (assoc :extra-env {"PATH" path}))))
-
-(defn- port-file [dir] (io/file dir ".nrepl-port"))
-
-(defn- read-port-file [dir]
-  (let [f (port-file dir)]
-    (when (.exists f) (try (slurp f) (catch Exception _ nil)))))
 
 (defn- tail [path n]
   (try (let [lines (str/split-lines (slurp path))]
@@ -166,68 +179,12 @@
   ;; dialects spike; a stopped or wedged child gets SIGKILL after this.
   1000)
 
-(defonce ^:private dir-owners
-  ;; canonical dir -> {:saved <.nrepl-port text found by the first claim, or nil>
-  ;;                   :owners [[token port-or-nil] ...] in claim order}
-  (atom {}))
-
-(defonce ^:private owners-lock (Object.))
-
-(defonce ^:private token-counter (atom 0))
-
-(defn claim-dir!
-  "Registers a child about to start in dir and returns its token. The first
-  claim for a directory reads the .nrepl-port that is there into :saved."
-  [dir]
-  (let [dir (.getCanonicalPath (io/file dir))
-        token (swap! token-counter inc)]
-    (locking owners-lock
-      (let [entry (or (get @dir-owners dir) {:saved (read-port-file dir) :owners []})]
-        (swap! dir-owners assoc dir (update entry :owners conj [token nil]))))
-    token))
-
-(defn owner-ready!
-  "Records the port token's child listens on and writes .nrepl-port with it,
-  since an earlier owner's exit may have deleted the file."
-  [dir token port]
-  (let [dir (.getCanonicalPath (io/file dir))]
-    (locking owners-lock
-      (when (get @dir-owners dir)
-        (swap! dir-owners update-in [dir :owners]
-               (fn [owners] (mapv (fn [[t _ :as o]] (if (= t token) [t port] o)) owners)))
-        (try (spit (port-file dir) (str port))
-             (catch Exception _ nil))))))
-
-(defn release-dir!
-  "Drops token's claim. If other owners remain, .nrepl-port is rewritten
-  with the port of the latest-claimed owner that has one (untouched when
-  none has). The last owner out restores the saved .nrepl-port, or deletes
-  the file when it still holds the releasing child's port."
-  [dir token]
-  (let [dir (.getCanonicalPath (io/file dir))]
-    (locking owners-lock
-      (when-let [{:keys [saved owners]} (get @dir-owners dir)]
-        (when-let [[_ port] (first (filter (fn [[t _]] (= t token)) owners))]
-          (let [remaining (vec (remove (fn [[t _]] (= t token)) owners))
-                f (port-file dir)]
-            (try
-              (if (seq remaining)
-                (swap! dir-owners assoc-in [dir :owners] remaining)
-                (swap! dir-owners dissoc dir))
-              (if (seq remaining)
-                (when-let [p (some second (rseq remaining))]
-                  (spit f (str p)))
-                (cond
-                  saved (spit f saved)
-                  (and port (.exists f) (= (str port) (str/trim (slurp f)))) (.delete f)))
-              (catch Exception _ nil))))))))
-
 (defn- terminate!
   "SIGTERM, then SIGKILL after term-grace-ms if proc is still alive (a
   SIGSTOPped child ignores SIGTERM until continued, SIGKILL never), and
   confirms it exited either way. Returns the exit code, or nil when it
-  was already gone. Doesn't touch the port file or the log: callers do
-  that themselves, since a failed start! keeps its log and kill! doesn't."
+  was already gone. Doesn't touch the log: a failed start! keeps it and
+  kill! doesn't."
   [proc]
   (when (p/alive? proc)
     (p/destroy proc)
@@ -240,7 +197,7 @@
 (defn- start-loop!
   "start!'s port scan. Each spawned proc goes into spawned (an atom) so
   start! can end it if anything throws."
-  [dir source token spawned]
+  [dir source spawned]
   (loop [ports (filter port-free? (range port-base (+ port-base port-span)))]
     (if-let [port (first ports)]
       (let [log (str (System/getProperty "java.io.tmpdir") "/jonquil-nrepl-" (System/nanoTime) ".log")
@@ -249,9 +206,8 @@
             _ (reset! spawned proc)
             state (wait-ready proc log port ready-deadline-ms)]
         (case state
-          :ready (do (owner-ready! dir token port)
-                     {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
-                      :dir dir :log log :source source :token token})
+          :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port port
+                  :dir dir :log log :source source}
           :exited (if (str/includes? (tail log 20) "bind() failed")
                     (do (io/delete-file log true)
                         (recur (rest ports)))
@@ -267,30 +223,26 @@
   "Launches the child in dir (made absolute here: a relative :dir makes
   the spawn exit 1 silently, measured) with source's middleware injected
   (middleware-source's shape), or a vanilla server when source is nil.
-  Returns {:proc :pid :port :dir :log :source :token}. Throws ex-info with the log's tail when no port
+  Returns {:proc :pid :port :dir :log :source}. Throws ex-info with the log's tail when no port
   in the range works or the child won't answer. On any throw the spawned
-  child is ended and the directory claim released."
+  child is ended."
   [dir source]
   (let [dir (.getCanonicalPath (io/file dir))
-        token (claim-dir! dir)
         spawned (atom nil)]
     (try
-      (start-loop! dir source token spawned)
+      (start-loop! dir source spawned)
       (catch Throwable t
-        (try (when @spawned (terminate! @spawned))
-             (finally (release-dir! dir token)))
+        (when @spawned (terminate! @spawned))
         (throw t)))))
 
 (defn alive? [child] (boolean (and child (p/alive? (:proc child)))))
 
 (defn kill!
-  "Ends the child: SIGTERM (jolt removes .nrepl-port on it), then SIGKILL
-  after term-grace-ms if it's still alive. Only the pid this namespace
-  spawned is signalled. Then releases its claim on the directory's
-  .nrepl-port (see release-dir!) and deletes the log. Returns the exit code, or nil when it was already gone."
-  [{:keys [proc log dir token] :as child}]
+  "Ends the child: SIGTERM, then SIGKILL after term-grace-ms if it's still
+  alive. Only the pid this namespace spawned is signalled. Then deletes the
+  log. Returns the exit code, or nil when it was already gone."
+  [{:keys [proc log] :as child}]
   (when child
     (let [code (terminate! proc)]
-      (release-dir! dir token)
       (try (io/delete-file log true) (catch Exception _ nil))
       code)))

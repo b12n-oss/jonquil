@@ -1415,7 +1415,7 @@
   (str/includes? (:out (p/sh "ps" "-p" (str pid) "-o" "pid=")) (str pid)))
 
 (defn- kill-pid!
-  "SIGKILLs pid directly. Jonquil's own child (the Jolt nrepl-server, a
+  "SIGKILLs pid directly. Jonquil's own child (its Jolt nREPL server, a
   grandchild of this script) is never itself in `launched` -- only the
   jonquil pid this script spawned is -- so stop!/kill-all-launched! never
   reach it, and it has no signal handling of its own. Best-effort: an
@@ -1426,7 +1426,7 @@
 (defn- step-nrepl-run-and-close!
   "D2.T6: the built binary on a {:runtime :nrepl} project. It starts its own
   Jolt child, F5 prints through it, and Cmd+W quits with that child gone and
-  the project's .nrepl-port back as it was before."
+  the project's .nrepl-port untouched (the child writes none)."
   []
   (let [{:keys [file dir]} (nrepl-fixture!)
         {:keys [proc pid]} (launch! file)]

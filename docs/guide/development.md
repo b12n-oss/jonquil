@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 67 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (720 tests, 4071 assertions
+slower. `bb test` runs the full unit suite (714 tests, 4059 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -20,13 +20,13 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (720 tests and 4040 assertions, 31
+reports fewer assertions than macOS (714 tests and 4028 assertions, 31
 fewer, measured 2026-10-19).
 
 <details>
 <summary><strong>The live suites: <code>test:nrepl</code>, <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code> and <code>test:basilisp</code></strong></summary>
 
-`bb test:nrepl` runs a second, separate suite (56 tests, 206 assertions,
+`bb test:nrepl` runs a second, separate suite (59 tests, 213 assertions,
 about 50 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
@@ -337,9 +337,12 @@ names these harnesses make; `bb clean:tmp --dry-run` lists them first.
 - **An interrupted `bb test:nrepl` or `bb gtk:selftest` run can leave a
   Jolt child behind.** Both kill their own children on every exit path in
   the ordinary case, but a Ctrl-C or a killed process midway through can
-  still skip that cleanup. Run `pgrep -fl "nrepl-server 79"` afterward;
-  anything it finds is a leftover from the run you just interrupted, so
-  kill only those pids, never anything already there before you started.
+  still skip that cleanup. A child whose test process died exits on its
+  own within a few seconds (it watches its stdin pipe), but one whose
+  test process is still alive doesn't. Run `pgrep -fl "jolt.nrepl/start 79"`
+  afterward; anything it finds is a leftover from the run you just
+  interrupted, so kill only those pids, never anything already there
+  before you started.
 - **An interrupted `bb test:clj` can leave a JVM behind.** Its fixture
   sends SIGTERM to the server it started on every ordinary exit path, but
   a Ctrl-C midway can skip that. Run `pgrep -fl clojure-cli.repl.server`

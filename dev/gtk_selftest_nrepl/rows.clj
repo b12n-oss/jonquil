@@ -24,7 +24,7 @@
 
 ;; D2.T5: the fixture!-built project's own {:dir :file}, stashed here so a
 ;; row (row-nrepl-open-switches-evaluator, reopening it after switching
-;; away) and after-close-checks! (reading its .nrepl-port back, after
+;; away) and after-close-checks! (checking its .nrepl-port is untouched, after
 ;; main/start! has returned and -main's own local is out of scope) can
 ;; both reach it without threading it through every row-fn's [ui]
 ;; signature.
@@ -48,7 +48,7 @@
   .jonquil.edn when :config is nil and so could inherit a stale one
   (the real bug). Given the same unique name anyway (the brief), but
   cleanup stays out of scope: after-close-checks! reads this dir's own
-  .nrepl-port back after main/start! returns, so deleting it here isn't
+  .nrepl-port after main/start! returns, so deleting it here isn't
   trivially safe: the driver deletes it (temp-dirs/delete-made!) only
   once those checks have run."
   []
@@ -582,8 +582,8 @@
   running go block). Three checks, all against row-nrepl-close-kills-
   child's own close:
   - the child pid it recorded no longer answers ps (kill! reached it);
-  - the fixture project's .nrepl-port is back to the \"someone else\"
-    value fixture! wrote (4242\\n) -- child/kill!'s own restore;
+  - the fixture project's .nrepl-port still holds the \"someone else\"
+    value fixture! wrote (4242\\n): the child writes no port file;
   - this process itself has no leftover children (pgrep -P).
 
   Deviation from the brief (reported; see the report): the brief's own
@@ -606,7 +606,7 @@
     (support/check :nrepl-close-kills-child
                    (and (some? pid) (str/blank? (str (:out ps))))
                    {:pid pid :ps-out (:out ps)})
-    (support/check :nrepl-close-restores-port-file
+    (support/check :nrepl-close-leaves-port-file
                    (= "4242\n" port-text)
                    {:port-text port-text})
     (support/check :nrepl-close-no-children
