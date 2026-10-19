@@ -79,26 +79,36 @@
   path, or ./src/...). Measured on f714b0ed in source mode: a stdlib name
   such as clojure/string.clj resolves to a file: URL that doesn't exist,
   and in a release binary to an image resource whose string is the bare
-  name again, so both come back nil."
+  name again, so all of those come back nil. Never throws (a lookup
+  mustn't)."
   [cp-name]
-  (when-let [u (try (io/resource cp-name) (catch :default _ nil))]
-    (let [s (str u)]
-      (cond
-        (and (str/starts-with? s "jar:file:") (str/includes? s "!/")) s
-        (str/starts-with? s "file:")
-        (let [f (io/file (uri-path s))] (when (.isFile f) (.getCanonicalPath f)))))))
+  (try
+    (when-let [u (io/resource cp-name)]
+      (let [s (str u)]
+        (cond
+          (and (str/starts-with? s "jar:file:") (str/includes? s "!/")) s
+          (str/starts-with? s "file:")
+          (when-let [p (uri-path s)]
+            (let [f (io/file p)] (when (.isFile f) (.getCanonicalPath f)))))))
+    (catch :default _ nil)))
+
+(defn- classpath-name?
+  "True for a bare source name such as demo/util.clj: not a URL, not a path
+  (absolute or ./), ending in a source extension. Leaves out
+  get-symbol-doc's \"unknown\" and v0.8.23's ./src/... spelling (review
+  finding 2)."
+  [f]
+  (and (string? f)
+       (re-find #"\.(clj|cljc|jolt)$" f)
+       (not (re-find #"^(jar:|file:|/|\./|\.\./)" f))))
 
 (defn resolve-file
-  "doc-info with a bare classpath :file (neither a jar:/file: URL nor an
-  absolute path) replaced by classpath-file's answer when it has one, so
-  location can open it. Any other doc-info comes back unchanged."
+  "doc-info with a bare classpath :file (classpath-name?) replaced by
+  classpath-file's answer when it has one, so location can open it. Any
+  other doc-info comes back unchanged."
   [doc-info]
   (let [f (:file doc-info)]
-    (if-let [p (when (and (string? f) (seq f)
-                          (not (str/starts-with? f "jar:"))
-                          (not (str/starts-with? f "file:"))
-                          (not (str/starts-with? f "/")))
-                 (classpath-file f))]
+    (if-let [p (when (classpath-name? f) (classpath-file f))]
       (assoc doc-info :file p)
       doc-info)))
 

@@ -76,7 +76,8 @@
         "location can open what it resolves to")
     (testing "anything else comes back unchanged"
       (doseq [d [{:file "unknown"} {:file "/x/y.clj"} {:file "jar:file:/a.jar!/b.clj"}
-                 {:file "file:/x/y.clj"} {:file ""} {:line 1} {:file "README.md"}]]
+                 {:file "file:/x/y.clj"} {:file ""} {:line 1} {:file "README.md"}
+                 {:file "./src/jonquil/help.clj"} {:file "jonquil"} {:file nil}]]
         (is (= d (source/resolve-file d)))))))
 
 (deftest same-file-test

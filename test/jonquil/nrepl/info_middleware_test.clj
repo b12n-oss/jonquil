@@ -63,7 +63,10 @@
   (testing "a classpath name, as a Jolt after v0.8.23 records it, resolves on the classpath"
     (alter-meta! #'odd-meta assoc :file "jonquil/help.clj" :line 2)
     (is (= {"file" (.getCanonicalPath (io/file "src/jonquil/help.clj")) "line" 2}
-           (select-keys (mw/info "jonquil.nrepl.info-middleware-test" "odd-meta") ["file" "line"]))))
+           (select-keys (mw/info "jonquil.nrepl.info-middleware-test" "odd-meta") ["file" "line"])))
+    (alter-meta! #'odd-meta assoc :file "no/such/thing.clj")
+    (is (not (contains? (mw/info "jonquil.nrepl.info-middleware-test" "odd-meta") "file"))
+        "a classpath name that isn't there has no file"))
   ;; No test for a var without :name or :ns: Jolt supplies both on every
   ;; meta read, even after an alter-meta! dissoc (measured, v0.8.23).
   )
