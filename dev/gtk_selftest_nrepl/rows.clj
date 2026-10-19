@@ -297,9 +297,11 @@
 
 (defn row-nrepl-jump-to-another-file
   "F12 on demo.util/helper after the child has required demo.util: the
-  child's jonquil-info names src/demo/util.clj and line 3, so the source
-  panel opens on that file there (jump to definition used to stay in the
-  buffer for out-of-process Jolt)."
+  child's jonquil-info names src/demo/util.clj and line 3, a project file,
+  so it opens in a tab there (jump opens a tab, 2026-10-19; it used to
+  open in the source panel, and before that stayed in the buffer).
+  Cmd/Ctrl+[ goes back to the first tab, and the row closes the new one
+  so later rows see one tab again."
   [ui]
   (go-row :nrepl-jump-to-another-file support/check
     (let [cv (:console ui)
@@ -308,21 +310,29 @@
                          (cview/handle-return! cv false)
                          m))
           required? (await-until 10000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> nil")))
-          sp (:source-pane ui)]
+          first-id (on-gtk (:id ((:active-tab* ui))))
+          first-text (on-gtk (editor/editor-text (:editor ui)))]
       (on-gtk (let [ed (:editor ui) text "(demo.util/helper 1)"]
                 (editor/set-text! ed text)
                 (support/place-cursor! (:buf ed) (+ 1 (str/index-of text "helper")))
                 ((:jump!* ui))))
-      (let [shown? (await-until 5000 20 #(pos? (g/gtk-widget-get-visible (:root sp))))
-            v (on-gtk {:header (g/label-text (:header sp))
-                       :line (inc (first (g/cursor-line-col (:buf (:editor sp)))))
-                       :text (editor/editor-text (:editor sp))
-                       :status (g/label-text (:status-label ui))})]
-        (on-gtk (support/check :nrepl-jump-to-another-file
-                               (and required? shown? (str/includes? (:header v) "util.clj")
-                                    (= 3 (:line v)) (str/includes? (:text v) "(defn helper"))
-                               (assoc (dissoc v :text) :required required? :shown shown?))
-                ((:source-close!* ui)))))))
+      (let [opened? (await-until 5000 20 #(= 2 (count ((:tabs* ui)))))
+            v (on-gtk (let [t ((:active-tab* ui))]
+                        {:tab (some-> @(:path t) (str/split #"/") last)
+                         :line (inc (first (g/cursor-line-col (:buf (:ed t)))))
+                         :text (editor/editor-text (:ed t))
+                         :panel (pos? (g/gtk-widget-get-visible (:root (:source-pane ui))))
+                         :status (g/label-text (:status-label ui))}))
+            back? (on-gtk ((:handle-window-key! ui) nil 0x05b 0 g/CONTROL-MASK nil)
+                          (= first-id (:id ((:active-tab* ui)))))]
+        (on-gtk (doseq [t (rest ((:tabs* ui)))]
+                  (editor/mark-saved! (:ed t))
+                  ((:close-tab! ui) (:id t)))
+                (editor/set-text! (:editor ui) first-text)
+                (support/check :nrepl-jump-to-another-file
+                               (and required? opened? (= "util.clj" (:tab v)) (= 3 (:line v))
+                                    (str/includes? (:text v) "(defn helper") (not (:panel v)) back?)
+                               (assoc (dissoc v :text) :required required? :opened opened? :back back?)))))))
 
 (defn row-nrepl-quick-doc-from-child
   "(greet 1), caret 2, quick doc: the popover's text can only have come

@@ -47,7 +47,7 @@
    source/row-clj-source-own-file
    source/row-clj-source-jump-to-own-file
    source/row-clj-source-follow-and-back
-   source/row-clj-source-open-in-window
+   source/row-clj-source-project-file-opens-a-tab
    source/row-clj-source-outside-read-only
    source/row-clj-source-escape
    source/row-clj-source-missing-entry

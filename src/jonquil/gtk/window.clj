@@ -1625,6 +1625,48 @@
 
 (declare jump-to! source-jump-to!)
 
+(defn- open-in-tab!
+  "Jump-opens-a-tab (user's choice, 2026-10-19): a definition in one of
+  the project's files (loc's :editable?, the rule Open in window uses)
+  opens in a tab, or brings forward the tab that has it, with the caret on
+  its line, and the panel closes. Where the jump started, the active tab
+  and its caret, goes on :jump-back* first, for Cmd/Ctrl+[. When the tab
+  doesn't end up showing loc's file (the read failed), the panel shows it
+  instead, footer and all. ctx is the source-ctx map."
+  [{:keys [open-file! active-tab jump-back* right status-label] :as ctx} symbol loc]
+  (let [{from-ed :ed from-path :path from-id :id} (active-tab)
+        from {:id from-id :path @from-path :offset (:caret (editor/snapshot from-ed))}
+        {err :error} (open-file! (:path loc))
+        {:keys [ed path]} (active-tab)]
+    (if (and (not err) @path (source/same-path? @path (:path loc)))
+      (let [text (editor/editor-text ed)]
+        (swap! jump-back* source/push from)
+        (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
+        (hide-right-panel! right :source)
+        (editor/focus! ed)
+        (set-status! status-label (str "Jumped to " symbol ".")))
+      (show-source! ctx loc))))
+
+(defn- jump-back!
+  "Cmd/Ctrl+[ in the editor after a jump into a tab: back to the tab and
+  caret the newest jump started from, or that file reopened when its tab
+  has closed since. Returns false, doing nothing, when no jump is left to
+  go back from, so the key passes on as before. ctx is the source-ctx map
+  plus :select-tab!."
+  [{:keys [jump-back* select-tab! open-file! active-tab tab-open? status-label]}]
+  (if-let [[{:keys [id path offset]} rest-h] (source/back @jump-back*)]
+    (do (reset! jump-back* rest-h)
+        (if (tab-open? id)
+          (select-tab! id)
+          (when path (open-file! path)))
+        (let [{:keys [ed] t-path :path} (active-tab)]
+          (when (or (tab-open? id) (and path @t-path (source/same-path? @t-path path)))
+            (place-caret-and-scroll! ed (min offset (count (editor/editor-text ed))))
+            (editor/focus! ed)))
+        (set-status! status-label "Back.")
+        true)
+    false))
+
 (defn- do-jump!
   "F12/Ctrl+B (P4.T4), the ui's own :jump!*: help/jump-target on ed's
   snapshot, using ev/lookup as the external fallback. :buffer places the
@@ -1670,6 +1712,10 @@
       (let [text (editor/editor-text ed)]
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
         (set-status! status-label (str "Jumped to " symbol ".")))
+
+      (and (:editable? loc) (:open-file! ctx))
+      (do (close-popovers-fn help-pop)
+          (open-in-tab! ctx symbol loc))
 
       loc
       (do (close-popovers-fn help-pop)
@@ -1721,6 +1767,7 @@
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
         (editor/focus! ed)
         (set-status! status-label (str "Jumped to " symbol ".")))
+      (and (:editable? loc) (:open-file! ctx)) (open-in-tab! ctx symbol loc)
       loc (show-source! ctx loc)
       :else (source-pane/report! sp (str "No source found for " symbol ".")))))
 
@@ -2152,7 +2199,10 @@
   focused, ahead of the plain Cmd/Ctrl+O clause below; and Cmd/Ctrl+[
   steps its history back when it's focused, ahead of :else. Every one of
   these three only fires while (:focused? source-keys) is true, so none
-  of them touch a key meant for the editor or the console.
+  of them touch a key meant for the editor or the console. Its optional
+  :jump-back! (a no-arg fn, true when it went back) takes Cmd/Ctrl+[
+  anywhere else after a jump that opened a tab, and passes the key on when
+  there's no such jump.
 
   tree-keys ({:focused? :leave! :menu-open? :close-menu!}, each a no-arg
   fn) is the file tree's: :focused? is true while focus is anywhere in the
@@ -2257,6 +2307,11 @@
           (and (command-chord? state) (= keyval KEY-BRACELEFT)) (do (step-tab-fn -1) 1)
           (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
           (do ((:back! source-keys)) 1)
+          ;; Anywhere else, back from a jump into a tab (open-in-tab!);
+          ;; with none to go back from the key passes on as before.
+          (and (command-chord? state) (= keyval KEY-BRACKETLEFT) (:jump-back! source-keys)
+               ((:jump-back! source-keys)))
+          1
           :else 0))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
@@ -3098,9 +3153,14 @@
         ;; inspector exists (*right, reset below).
         sp (source-pane/make-pane)
         *right (atom nil)
+        ;; Where each jump into a tab started, newest last, for Cmd/Ctrl+[
+        ;; (open-in-tab!, jump-back!).
+        jump-back* (atom [])
         source-ctx (fn [t] {:ed (:ed t) :ev* ev* :status-label status-label :help-pop (:help-pop t)
                             :close-popovers-fn close-popovers-fn :sp sp :right @*right
-                            :path (:path t) :sel* sel* :active? (fn [] (active? t))})
+                            :path (:path t) :sel* sel* :active? (fn [] (active? t))
+                            :open-file! (fn [p] (open-file! @*tab-ctx p))
+                            :active-tab active-tab :jump-back* jump-back*})
         ;; The window's evaluator when its help asks a server
         ;; (ev/ServerHelp): completion then asks off the GTK thread.
         server-ev (fn [] (let [e @ev*] (when (ev/server-help? e) e)))
@@ -3215,8 +3275,11 @@
         source-back-fn (fn [] (source-pane/back! sp))
         source-open-fn (fn [] (do-source-open! {:sp sp :right right :active-tab active-tab
                                                 :open-file! (fn [p] (open-file! @*tab-ctx p))}))
+        jump-back-fn (fn [] (jump-back! (assoc (source-ctx (active-tab))
+                                               :select-tab! (fn [id] (select-tab! @*tab-ctx id))
+                                               :tab-open? (fn [id] (some? (tab-by-id tabs id))))))
         source-keys {:focused? (fn [] (source-pane/focused? sp win)) :close! source-close-fn
-                     :back! source-back-fn :open! source-open-fn}
+                     :back! source-back-fn :open! source-open-fn :jump-back! jump-back-fn}
         close-inspector-fn (fn [] (close-inspector-panel! right (:ed (active-tab))))
         toggle-focus-fn (fn [] (do-toggle-focus! win (:ed (active-tab)) cv))
         clear-console-fn (fn [] (do-clear-console! cv))
@@ -3802,6 +3865,7 @@
                    :source-jump!* source-jump-fn
                    :source-open!* source-open-fn
                    :source-back!* source-back-fn
+                   :jump-back!* jump-back-fn
                    :source-close!* source-close-fn
                  ;; M5/M4 self-test hook: the exact fn the "key-pressed"
                  ;; signal calls, so a row can invoke it directly with a
@@ -3902,7 +3966,7 @@
   :activate-menu-action!* :repl-activate-menu-action!*
   :complete!* :completion
   :inspector :inspect-last!* :inspect-form!* :inspector-state* :inspector-last-args*
-  :source-pane :right-slot :source-jump!* :source-open!* :source-back!* :source-close!*
+  :source-pane :right-slot :source-jump!* :source-open!* :source-back!* :jump-back!* :source-close!*
   :handle-window-key! :simulate-open-result! :simulate-save-result! :toolbar
   :close-choice! :activate-quit-action!* :request-close!* :closing? :suppress-close?
   :alert-dialog-count :alert-pending? :alert-release!
