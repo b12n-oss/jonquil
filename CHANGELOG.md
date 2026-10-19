@@ -20,7 +20,7 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
-- A project kept in process (`{:runtime :in-process}`) can require its own namespaces: its `deps.edn` `:paths` are Jolt's source folders there now, so F12 also opens those files. `:deps` libraries are still only loaded out of process.
+- A project kept in process (`{:runtime :in-process}`) can require its own namespaces: its `deps.edn` `:paths` are Jolt's source folders there now, so F12 also opens those files. Its `:deps` libraries load there too, fetched on the first evaluation that needs them, off the window's thread.
 - With Jolt in process, F12 on a function another tab's Run defined opens that tab's file on the definition, once the file is saved, instead of showing the docs.
 - Jump to definition keeps working on Jolt newer than v0.8.23, which records a required namespace's file by its classpath name (`demo/util.clj`) rather than a path: Jonquil now looks that name up on the classpath, in process and out.
 
