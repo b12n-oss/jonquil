@@ -950,9 +950,13 @@ process instead. Its `deps.edn` is resolved there the way the `jolt`
 command resolves it, `:paths` (`src` when it names none) and the
 libraries under `:deps` alike, so a file can require another of the
 project's files or a dependency, and F12 opens either. A git or Maven
-dependency is fetched the first time a Run or REPL entry needs it, which
-shows as the evaluation running; if it can't be fetched, the Run goes
-ahead on `:paths` alone and the console says why. Jonquil and your
+dependency is fetched the first time a Run or REPL entry needs it: the
+console says "Resolving deps.edn..." and the evaluation shows as running,
+and Stop stops it. If it can't be fetched, the Run goes ahead on `:paths`
+alone, the console says why, and a Run half a minute later tries again.
+Jonquil resolves again after an edit to the project's `deps.edn`, but not
+after one to a `:local/root` dependency's own; touch the project's file
+for that. Jonquil and your
 program share that process, so a library Jonquil has already loaded
 keeps Jonquil's copy. `{:runtime :nrepl}` asks for a child in a folder
 without a `deps.edn`. A file outside any project folder has nowhere to
