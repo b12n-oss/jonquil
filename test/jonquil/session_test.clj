@@ -194,8 +194,20 @@
         (is (nil? (:file (var-meta 'runfile.b/f)))))
       (finally (remove-ns 'runfile.b)))))
 
+(deftest unsaved-edits-are-not-the-file-test
+  ;; Run sends the buffer's text; when that isn't what's on disk the vars'
+  ;; lines would point into the wrong text there (review finding 2).
+  (let [path (saved! "runfile/d.clj" "(ns runfile.d)\n(defn f [] 1)\n")
+        s (session/make-session)]
+    (try
+      (run session/run-definitions! s "(ns runfile.d)\n\n(defn f [] 1)\n" {:path path})
+      (is (= {:line 3} (var-meta 'runfile.d/f)) "no file: the buffer has an edit the file doesn't")
+      (run session/run-definitions! s "(ns runfile.d)\n(defn f [] 1)\n" {:path path})
+      (is (= {:file path :line 2} (var-meta 'runfile.d/f)) "saved again, marked")
+      (finally (remove-ns 'runfile.d)))))
+
 (deftest only-what-the-run-defined-is-marked-test
-  (let [path (saved! "runfile/c.clj" "")
+  (let [path (saved! "runfile/c.clj" "(ns runfile.c)\n(defn from-run [] 2)\n")
         s (session/make-session)]
     (session/set-mode! s :accumulate)
     (try
@@ -204,6 +216,7 @@
       (is (= {:file path :line 2} (var-meta 'runfile.c/from-run)))
       (is (nil? (:file (var-meta 'runfile.c/from-repl))) "a REPL entry's var isn't the file's")
       (testing "a second Run redefines, and the var is marked again at its new line"
+        (spit path "(ns runfile.c)\n\n\n(defn from-run [] 3)\n")
         (run session/run-definitions! s "(ns runfile.c)\n\n\n(defn from-run [] 3)\n" {:path path})
         (is (= {:file path :line 4} (var-meta 'runfile.c/from-run))))
       (finally (remove-ns 'runfile.c)))))

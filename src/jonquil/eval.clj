@@ -193,6 +193,9 @@
      :on-output (fn [kind s])  kind is :out or :err
      :on-wait-input (fn [bool])
      :on-status-change (fn [status])  :running, :waiting-input, :idle
+     :before-idle (fn [result])  on the worker, after the evaluation and
+       before the context goes idle, so nothing else can evaluate while it
+       runs; a throw is reported and ignored
      :on-complete (fn [result])  {:status :ok|:error|:interrupted, :ns sym, ...}
        :ok also carries :value (the raw result) and :printed -- (pr-str
        value) with *print-length* bound to 1000, computed inside the same
@@ -221,7 +224,7 @@
    should enqueue that work for later and return, not invoke-and-wait."
   [{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
    code
-   {:keys [on-output on-wait-input on-status-change on-complete] :as opts}]
+   {:keys [on-output on-wait-input on-status-change on-complete before-idle] :as opts}]
   (let [ns-sym (or (:ns-name opts) 'user)]
     (locking lock
       (if (evaluating? ctx)
@@ -339,6 +342,11 @@
                                  (assoc s :finishing true)
                                  s))))
               (Thread/interrupted)
+              ;; Still this evaluation's turn: a new eval-async can't start
+              ;; until the reset to idle below.
+              (try
+                (when before-idle (before-idle result))
+                (catch :default e (report-callback-exception! "before-idle" e)))
               ;; Fix #3: reset-to-idle and its notification are one locked
               ;; unit, so a new eval-async's own registration (locked, above)
               ;; can never squeeze its :running notification in before this

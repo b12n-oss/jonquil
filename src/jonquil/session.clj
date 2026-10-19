@@ -144,10 +144,13 @@
             [v (meta v)]))))
 
 (defn- saved-file
-  "path's canonical path when it names a file on disk, else nil."
-  [path]
+  "path's canonical path when it names a file on disk holding exactly code,
+  else nil. A buffer with unsaved edits doesn't match its file, and its
+  vars' lines would point into the wrong text there (review finding 2)."
+  [path code]
   (when path
-    (try (let [f (io/file path)] (when (.isFile f) (.getCanonicalPath f)))
+    (try (let [f (io/file path)]
+           (when (and (.isFile f) (= code (slurp f))) (.getCanonicalPath f)))
          (catch Throwable _ nil))))
 
 (defn mark-run-file!
@@ -157,7 +160,11 @@
   with load-string, and Jolt turns the reader's file off there on purpose
   (an evaluated string isn't the file that called it), so these vars had a
   line but nowhere to jump to. A var a REPL entry defined earlier keeps its
-  metadata, so it isn't marked; one a require loaded already has a :file."
+  metadata, so it isn't marked; one a require loaded already has a :file.
+  What else changes a var's metadata during the Run is marked too: an
+  alter-meta! the program does, a load-file of another file, a future the
+  program started (review finding 3, accepted: all are the Run's own
+  doing)."
   [file before]
   (doseq [[v m] (program-vars)
           :when (and (:line m) (nil? (:file m)) (not= m (get before v)))]
@@ -167,12 +174,13 @@
   "Runs the Definitions text. In :reset mode, first removes what earlier
   evaluations created. Returns nil when started, or the engine's warning
   string when a program is already running (and then resets nothing). With
-  :path naming a saved file, the vars the Run defines get it as their :file
+  :path naming a file that holds exactly code, the vars the Run defines get
+  it as their :file
   (mark-run-file!), so jump to definition from another tab can open it."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (let [owner (:owner opts :run)
-         file (saved-file (:path opts))]
+         file (saved-file (:path opts) code)]
      ;; A Run of a file in a project uses that project's source folders: a
      ;; window keeps one in-process evaluator when it opens a file from
      ;; another in-process project (selection-key leaves the project out),
@@ -183,13 +191,13 @@
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
      (create-ns 'user)
+     ;; Marked in before-idle, on the Run's own worker before the context
+     ;; goes idle, so a REPL entry or another Run can't define a var in
+     ;; between and get this file (review finding 1).
      (let [before (when (and file (not (eval/evaluating? ctx))) (program-vars))
-           user-complete (:on-complete opts)
            opts (cond-> (assoc opts :owner owner)
-                  before (assoc :on-complete
-                                (fn [result]
-                                  (try (mark-run-file! file before) (catch Throwable _ nil))
-                                  (when user-complete (user-complete result)))))]
+                  before (assoc :before-idle
+                                (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
        (evaluate! session code 'user opts)))))
 
 (defn submit-repl!
