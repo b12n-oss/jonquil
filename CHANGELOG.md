@@ -15,6 +15,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - With Jolt in process, F12 on a function another tab's Run defined opens that tab's file on the definition, once the file is saved, instead of showing the docs.
 - An nREPL dialect: `.jonquil.edn {:dialect :nrepl :nrepl {:port 1667}}` attaches to any nREPL server you started (babashka, a non-JVM Clojure, one on another host with `:host`). Features follow the ops the server offers, and the console names the ones it lacks. Checked live against babashka (`bb test:bb`).
 - Quick docs ask cider's `info` when a server has no `lookup` op (Basilisp has only `info`), for the nREPL dialect and JVM Clojure alike.
+- `bb test:nightly` runs the live nREPL suite against Jolt's nightly build, downloaded, checked against its `.sha256` and cached under `~/.cache/jonquil/jolt-nightly`, so a Jolt change that breaks Jonquil shows up before a release.
 - `bb test:basilisp` runs the nREPL dialect against a real `basilisp nrepl-server`.
 - JVM Clojure asks cider's `complete` for completions when the server has no builtin `completions` (a pre-1.0 nREPL with cider-nrepl), instead of offering only the buffer's names.
 - `read-line` and `read` work for Jolt running out of process: Jonquil's own nREPL middleware in the Jolt child asks for each line at the prompt, Cmd/Ctrl+D ends input for that read, and Stop frees a waiting read. A plain nREPL server (the fallback when jolt-lang/nrepl can't be fetched), or a child that couldn't load Jonquil's middleware, still has no stdin.
