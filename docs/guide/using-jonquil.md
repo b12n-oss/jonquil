@@ -1177,7 +1177,8 @@ session before whatever you asked to run. That means the first Run or REPL
 entry, and again after a reconnect, because a restarted server has
 forgotten everything. It isn't sent twice on the same connection.
 
-A Jolt project takes the same key, without the `:dialect` line. Out of
+A Jolt project takes the same key, without the `:dialect` line (any
+project Jonquil runs under Jolt, which a `deps.edn` makes the default). Out of
 process, the list is required in the Jolt child before its first
 evaluation, and again whenever that child restarts. In process, it's
 required once per window, before the first evaluation and after the
@@ -1195,7 +1196,7 @@ run again: on the next connect for JVM Clojure, when the Jolt runtime
 restarts out of process, and in a new window in process. Your own Run or
 REPL line still goes out after it.
 Stop during a slow require ends that evaluation as usual, and your request
-isn't sent.
+isn't sent; for Jolt, the next evaluation then tries the list again.
 
 The list has to be a vector of namespace symbols. Anything else is
 ignored, with a line like `; project: .jonquil.edn :auto-require should be
