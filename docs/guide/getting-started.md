@@ -16,6 +16,9 @@
   gtk4`, which pulls in `pango` and `glib` as dependencies. Jonquil loads GTK4
   and pango at startup rather than linking against them. On Linux they come
   from your distribution; see [Linux](#linux).
+- **[babashka](https://babashka.org)** (`bb`), to run the tasks below
+  (`bb app:run`, `bb app:build`, the tests). The built binary doesn't
+  need it.
 
 Jonquil was most recently tested on Jolt v0.8.23.
 

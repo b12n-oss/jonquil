@@ -9,7 +9,7 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 65 namespaces in well under a second, and it's the fastest
+currently loads 67 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
 slower. `bb test` runs the full unit suite (717 tests, 4055 assertions
 on macOS) with nothing outside the process, or pass namespace

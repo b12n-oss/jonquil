@@ -1,15 +1,17 @@
 # Changelog
 
-All notable changes to this project are documented here.
+All notable changes to this project are documented here, starting from
+the open-source preparation work (2026-10-17). What shipped before that,
+phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
 ### Added
 
 - F12 on a definition in one of your project's files opens it in a tab, ready to edit, instead of the read-only source panel; Cmd/Ctrl+[ goes back to where you pressed F12 (the last 50 jumps). Library code and files outside the project still open in the panel.
-- Jump to definition (F12) leaves the buffer for Jolt running out of process: a function from another file in the project, or from a jar dependency, opens in the source panel on its definition. Functions built into Jolt have no source file, so they show their documentation as before.
-
-- Initial public release preparation.
+- Jump to definition (F12) leaves the buffer for Jolt running out of process: a function from another file in the project opens in its tab, and one from a jar dependency in the source panel, on its definition. Functions built into Jolt have no source file, so they show their documentation as before.
+- A project kept in process (`{:runtime :in-process}`) can require its own namespaces: its `deps.edn` `:paths` are Jolt's source folders there now, so F12 also opens those files. Its `:deps` libraries load there too, fetched on the first evaluation that needs them, off the window's thread.
+- With Jolt in process, F12 on a function another tab's Run defined opens that tab's file on the definition, once the file is saved, instead of showing the docs.
 - An nREPL dialect: `.jonquil.edn {:dialect :nrepl :nrepl {:port 1667}}` attaches to any nREPL server you started (babashka, a non-JVM Clojure, one on another host with `:host`). Features follow the ops the server offers, and the console names the ones it lacks. Checked live against babashka (`bb test:bb`).
 - Quick docs ask cider's `info` when a server has no `lookup` op (Basilisp has only `info`), for the nREPL dialect and JVM Clojure alike.
 - `bb test:basilisp` runs the nREPL dialect against a real `basilisp nrepl-server`.
@@ -20,12 +22,8 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
-- A project kept in process (`{:runtime :in-process}`) can require its own namespaces: its `deps.edn` `:paths` are Jolt's source folders there now, so F12 also opens those files. Its `:deps` libraries load there too, fetched on the first evaluation that needs them, off the window's thread.
-- With Jolt in process, F12 on a function another tab's Run defined opens that tab's file on the definition, once the file is saved, instead of showing the docs.
 - Jump to definition keeps working on Jolt newer than v0.8.23, which records a required namespace's file by its classpath name (`demo/util.clj`) rather than a path: Jonquil now looks that name up on the classpath, in process and out.
-
 - The completion list is as tall as its names, up to eight rows, rather than always eight; a name the buffer defines is labelled `buffer`, not `user`; the quick-doc popover fits its text, up to the width it always had; solarized's selected completion row is visible; and the status bar no longer runs into the window's right edge.
-
 - The nREPL dialect's error line against Basilisp shows the exception (`ZeroDivisionError: Fraction(1, 0)`) or a compile error's message, not `Traceback (most recent call last):`.
 - The nREPL dialect's stdin notice no longer says every read waits until Stop: Basilisp's `read-line` reads the server's own terminal.
 - Open With offers Jonquil for `.cljs` files too, on macOS (the app's document types) and Linux (the `text/x-clojure` MIME globs), now that there's a ClojureScript dialect.
@@ -40,7 +38,6 @@ All notable changes to this project are documented here.
 ### Changed
 
 - Completion, its doc preview, quick doc and jump to definition no longer hold up typing against a slow server (JVM Clojure, ClojureScript, ClojureDart, any nREPL server, Jolt out of process, jank). Jonquil waits about 25 ms for the answer, then opens the popup on the names it already knows and merges the server's in when they land; quick doc and jump say "Looking up X..." meanwhile. A jump to a definition in the file never waits for the server.
-
 - A Jolt file outside any project runs in the window's own Jolt, out of process in a `deps.edn` project window, instead of refusing to run there while other tabs are open; closing tabs down to that file, or saving the window's only tab as one, no longer switches the window to in-process Jolt.
 - Jolt now runs out of process by default in a project with a `deps.edn`, so a program that calls `System/exit`, `shutdown-agents` or redefines `clojure.core` takes down a separate Jolt child rather than Jonquil. A loose file still runs in process, and `.jonquil.edn` `{:runtime :in-process}` keeps a project there. With no jolt-lang/nrepl checkout, Jonquil fetches nREPL v0.4.0 as a git dependency, and starts a plain nREPL server if that fails. The out-of-process start no longer lists "Output appears when an evaluation finishes" as a limit, since nREPL v0.4.0 streams output.
 - Jonquil now needs Jolt v0.8.23 or later, and `pp` is referred at the prompt next to `pprint`, so `(pp)` pretty-prints `*1` in process and out of process.

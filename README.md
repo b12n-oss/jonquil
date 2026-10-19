@@ -4,7 +4,7 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work: Jolt in or out of process; JVM Clojure, ClojureDart and ClojureScript (both experimental) and any other nREPL server, such as babashka or Basilisp, each attached to a server you started; and jank (experimental), which Jonquil launches itself**
+**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work: Jolt in or out of process; JVM Clojure, ClojureDart (experimental), ClojureScript (experimental) and any other nREPL server, such as babashka or Basilisp, each attached to a server you started; and jank (experimental), which Jonquil launches itself**
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
@@ -44,7 +44,7 @@ An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate
 
 A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console, and Jonquil remembers them as they change, so starting it again in the same folder brings the same tabs back. Started from the Dock or Finder, it goes back to the project you quit last. Put `:reopen-tabs? false` in the settings file to turn that off. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
 
-Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined, and Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu. At the prompt, `*1`, `*2`, `*3` and `*e` hold the last results and the last error, and `doc`, `find-doc`, `apropos`, `dir`, `pprint` and `pp` are there without a `require`, whether Jolt runs in process or out of it.
+Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined: in the buffer, in a tab for another of your project's files (Cmd/Ctrl+[ goes back), or in a read-only panel for library code. Shift+F6 or F2 then Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu. At the prompt, `*1`, `*2`, `*3` and `*e` hold the last results and the last error, and `doc`, `find-doc`, `apropos`, `dir`, `pprint` and `pp` are there without a `require`, whether Jolt runs in process or out of it.
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
@@ -101,6 +101,8 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.file-ops`: The file tree's disk operations: create, rename and the console sentences for a trash or a hidden new name.
 - `jonquil.tabs`: The window's tabs as plain data: labels, the open-file lookup, the runnable-here check, and alert and banner text.
 - `jonquil.last-session`: Which tabs are open in each project, kept in `sessions.edn` beside the settings file.
+- `jonquil.source`: Where a definition outside the buffer lives and its text, the pure half of the source panel and of jump into a tab.
+- `jonquil.project-roots`: A project kept in process: its `deps.edn` `:paths` and `:deps` as Jolt's roots, after Jolt's own.
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
 - `jonquil.evaluator`: The `Evaluator` protocol every dialect's runtime implements, so a window doesn't care which one it's talking to.
 - `jonquil.nrepl.*`: Jolt running out of process over nREPL: the child, the wire client and bencode codec, and the evaluator that ties them together. `bb test:nrepl` runs its live tests separately, since they spawn real Jolt children (see Requirements, above).
@@ -109,6 +111,7 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.cljs` and `jonquil.nrepl.shadow`: the ClojureScript dialect (experimental), attached to a shadow-cljs nREPL server you started yourself. `bb test` runs its tests against an in-process fake server.
 - `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
 - `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `bb test:bb` and `bb test:basilisp` run live suites against a real `bb nrepl-server` and `basilisp nrepl-server`.
+- `jonquil.mcp` and `jonquil.mcp.*`: the MCP server behind `jonquil --mcp`: the six headless tools (`tools`), the fifteen over a live window (`window`), the listener `--mcp-attach` reaches (`listen`), and its JSON (`json`).
 - `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`: the jank dialect (experimental). Jonquil launches its own `jank repl` per window from a private temp folder and talks to it over nREPL. `bb test` runs these against an in-process fake server, and `bb test:jank` runs a live suite against a real jank.
 
 </details>
