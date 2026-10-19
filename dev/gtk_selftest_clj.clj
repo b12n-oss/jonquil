@@ -48,6 +48,7 @@
    source/row-clj-source-jump-to-own-file
    source/row-clj-source-follow-and-back
    source/row-clj-source-project-file-opens-a-tab
+   source/row-clj-source-back-skips-a-closed-untitled-tab
    source/row-clj-source-outside-read-only
    source/row-clj-source-escape
    source/row-clj-source-missing-entry

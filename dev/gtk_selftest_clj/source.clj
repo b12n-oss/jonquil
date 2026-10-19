@@ -181,6 +181,35 @@
                                   (contains? #{2 3} (:caret back)))
                              (assoc v :opened opened? :back back))))))
 
+(defn row-clj-source-back-skips-a-closed-untitled-tab
+  "F12 on proj-helper from a new Untitled tab opens util.clj in its own
+  tab; closing the Untitled tab leaves Cmd/Ctrl+[ nothing to go back to,
+  so it says so instead of claiming \"Back.\" (review finding 2), and
+  leaves util.clj showing. The row closes the tabs it made."
+  [ui]
+  (go-row :clj-source-back-skips-a-closed-untitled-tab support/check
+    (let [scratch-id (on-gtk ((:source-close!* ui))
+                             ((:new-tab!* ui))
+                             (let [t ((:active-tab* ui)) text "(proj-helper)"]
+                               (editor/set-text! (:ed t) text)
+                               (support/place-cursor! (:buf (:ed t)) 2)
+                               ((:jump! (:actions t)))
+                               (:id t)))
+          opened? (await-until 3000 20 #(some-> ((:active-tab* ui)) :path deref (str/ends-with? "util.clj")))
+          _ (on-gtk (when-let [t (some #(when (= scratch-id (:id %)) %) ((:tabs* ui)))]
+                      (editor/mark-saved! (:ed t))
+                      ((:close-tab! ui) scratch-id)))
+          _ (on-gtk (window-key! ui KEY-BRACKETLEFT g/CONTROL-MASK))
+          said? (await-until 2000 20 #(= "Nothing to go back to: those tabs are closed." (g/label-text (:status-label ui))))
+          v (on-gtk {:tab (some-> ((:active-tab* ui)) :path deref (str/split #"/") last)
+                     :status (g/label-text (:status-label ui))})
+          _ (on-gtk (doseq [t (rest ((:tabs* ui)))]
+                      (editor/mark-saved! (:ed t))
+                      ((:close-tab! ui) (:id t))))]
+      (on-gtk (support/check :clj-source-back-skips-a-closed-untitled-tab
+                             (and opened? said? (= "util.clj" (:tab v)))
+                             (assoc v :opened opened? :said said?))))))
+
 (defn row-clj-source-outside-read-only
   "F12 on outside-fn opens other/place.clj read-only; Cmd/Ctrl+Shift+O says
   why on the footer and leaves the window's buffer alone."

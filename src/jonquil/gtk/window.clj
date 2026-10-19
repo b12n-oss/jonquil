@@ -1637,10 +1637,13 @@
   (let [{from-ed :ed from-path :path from-id :id} (active-tab)
         from {:id from-id :path @from-path :offset (:caret (editor/snapshot from-ed))}
         {err :error} (open-file! (:path loc))
-        {:keys [ed path]} (active-tab)]
+        {:keys [ed path id]} (active-tab)]
     (if (and (not err) @path (source/same-path? @path (:path loc)))
       (let [text (editor/editor-text ed)]
-        (swap! jump-back* source/push from)
+        ;; Only a jump that left its tab can go back: open-file! fills an
+        ;; untouched Untitled tab in place, and there's nothing to return
+        ;; to there (review finding 1).
+        (when-not (= id from-id) (swap! jump-back* source/push from))
         (place-caret-and-scroll! ed (source/line-offset text (:line (source/clamp-line text (:line loc)))))
         (hide-right-panel! right :source)
         (editor/focus! ed)
@@ -1654,18 +1657,28 @@
   go back from, so the key passes on as before. ctx is the source-ctx map
   plus :select-tab!."
   [{:keys [jump-back* select-tab! open-file! active-tab tab-open? status-label]}]
-  (if-let [[{:keys [id path offset]} rest-h] (source/back @jump-back*)]
-    (do (reset! jump-back* rest-h)
-        (if (tab-open? id)
-          (select-tab! id)
-          (when path (open-file! path)))
-        (let [{:keys [ed] t-path :path} (active-tab)]
-          (when (or (tab-open? id) (and path @t-path (source/same-path? @t-path path)))
-            (place-caret-and-scroll! ed (min offset (count (editor/editor-text ed))))
-            (editor/focus! ed)))
-        (set-status! status-label "Back.")
-        true)
-    false))
+  (if (empty? @jump-back*)
+    false
+    ;; An entry whose tab has closed and whose file can't be reopened (an
+    ;; Untitled tab, a deleted file) is skipped for the next one down
+    ;; (review finding 2).
+    (loop []
+      (if-let [[{:keys [id path offset]} rest-h] (source/back @jump-back*)]
+        (do (reset! jump-back* rest-h)
+            (let [restored? (cond
+                              (tab-open? id) (do (select-tab! id) true)
+                              path (do (open-file! path)
+                                       (boolean (some-> (active-tab) :path deref (source/same-path? path))))
+                              :else false)]
+              (if restored?
+                (let [{:keys [ed]} (active-tab)]
+                  (place-caret-and-scroll! ed (min offset (count (editor/editor-text ed))))
+                  (editor/focus! ed)
+                  (set-status! status-label "Back.")
+                  true)
+                (recur))))
+        (do (set-status! status-label "Nothing to go back to: those tabs are closed.")
+            true)))))
 
 (defn- do-jump!
   "F12/Ctrl+B (P4.T4), the ui's own :jump!*: help/jump-target on ed's
