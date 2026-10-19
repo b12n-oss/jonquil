@@ -112,3 +112,96 @@
       (finally
         (roots/use-project! nil)
         (doseq [n '[proja projautil projb projbutil]] (remove-ns n))))))
+
+(defn- run-in [e path]
+  (let [p (promise) out (atom "")]
+    (ev/eval! e (slurp path) {:run? true :path path :on-output (fn [_ s] (swap! out str s))
+                              :on-complete #(deliver p %)})
+    (assoc (select-keys (deref p 20000 :timeout) [:status :printed]) :out @out)))
+
+(deftest a-project-in-process-loads-its-deps-test
+  ;; Before, only :paths were roots in process: "Could not locate
+  ;; depslib/core..." for anything under :deps.
+  (let [base (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-deps-")))
+        stamp (System/nanoTime)
+        _ (doseq [[rel text] {"depslib/deps.edn" "{:paths [\"src\"]}"
+                              "depslib/src/depslib/core.clj" (str "(ns depslib.core)\n(defn twice [x] (* 2 x))\n;; " stamp "\n")
+                              "app/deps.edn" "{:paths [\"src\"] :deps {local/depslib {:local/root \"../depslib\"}}}"
+                              "app/.jonquil.edn" "{:runtime :in-process}"
+                              "app/src/depsapp.clj" "(ns depsapp (:require [depslib.core :as d]))\n(d/twice 21)\n"}]
+            (let [f (io/file base rel)] (.mkdirs (.getParentFile f)) (spit f text)))
+        path (canon base "app/src/depsapp.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))]
+    (try
+      (is (= {:status :ok :printed "42"} (select-keys (run-in e path) [:status :printed])))
+      (testing "the dependency's root goes after the project's own, both after Jolt's"
+        (let [rs (vec ((requiring-resolve 'jolt.host/source-roots)))]
+          (is (= [(canon base "app/src") (canon base "depslib/src")] (vec (take-last 2 rs))))))
+      (testing "a REPL entry after it can require from the dependency too"
+        (let [p (promise)]
+          (ev/eval! e "(require 'depslib.core) (depslib.core/twice 5)" {:on-output (fn [_ _]) :on-complete #(deliver p %)})
+          (is (= "10" (:printed (deref p 10000 :timeout))))))
+      (finally
+        (roots/use-project! nil)
+        (doseq [n '[depsapp depslib.core]] (remove-ns n))))))
+
+(deftest a-dependency-that-cant-be-resolved-test
+  ;; The Run still goes ahead on the project's :paths, and the console says
+  ;; why the rest is missing.
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {nope/nope {:git/url \"file:///no/such/repo\" :git/sha \"0000000000000000000000000000000000000000\"}}}"
+                       ".jonquil.edn" "{:runtime :in-process}"
+                       "src/depsbad.clj" "(ns depsbad)\n(+ 1 2)\n"})
+        path (canon dir "src/depsbad.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))]
+    (try
+      (let [r (run-in e path)]
+        (is (= :ok (:status r)))
+        (is (= "3" (:printed r)))
+        (is (re-find #"couldn't resolve .*deps\.edn, so only its :paths are loaded" (:out r)) (:out r)))
+      (testing "said once per deps.edn edit, not on every Run"
+        (is (not (re-find #"couldn't resolve" (:out (run-in e path))))))
+      (finally
+        (roots/use-project! nil)
+        (remove-ns 'depsbad)))))
+
+(deftest a-failure-is-retried-test
+  ;; A failure is kept only a little while, so a network blip heals on a
+  ;; later Run (review finding 2).
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {nope/nope {:git/url \"file:///no/such/repo\" :git/sha \"1111111111111111111111111111111111111111\"}}}"
+                       ".jonquil.edn" "{:runtime :in-process}"
+                       "src/depsretry.clj" "(ns depsretry)\n(+ 1 2)\n"})
+        path (canon dir "src/depsretry.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))]
+    (try
+      (with-redefs [roots/failure-retry-ms 0]
+        (is (re-find #"couldn't resolve" (:out (run-in e path))))
+        (is (re-find #"couldn't resolve" (:out (run-in e path))) "tried again, so said again"))
+      (finally
+        (roots/use-project! nil)
+        (remove-ns 'depsretry)))))
+
+(deftest stop-during-a-resolve-test
+  ;; Stop while dependencies are being fetched stops the Run, and isn't
+  ;; remembered as a failure (review finding 1).
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {slow/slow {:local/root \"/nowhere\"}}}"
+                       ".jonquil.edn" "{:runtime :in-process}"
+                       "src/depsstop.clj" "(ns depsstop)\n(+ 1 2)\n"})
+        path (canon dir "src/depsstop.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))
+        calls (atom 0)
+        resolve-var (requiring-resolve 'jolt.deps/resolve-project)]
+    (try
+      (with-redefs-fn {resolve-var (fn [& _] (swap! calls inc) (Thread/sleep 10000) {:roots []})}
+        (fn []
+          (let [p (promise)]
+            (ev/eval! e (slurp path) {:run? true :path path :on-output (fn [_ _]) :on-complete #(deliver p %)})
+            (Thread/sleep 300)
+            (ev/interrupt! e)
+            (is (= :interrupted (:status (deref p 5000 :timeout)))))))
+      (with-redefs-fn {resolve-var (fn [& _] (swap! calls inc) {:roots [(canon dir "src")]})}
+        (fn []
+          (is (= "3" (:printed (run-in e path))))
+          (is (= 2 @calls) "resolved again: the Stop wasn't cached as a failure")))
+      (finally
+        (roots/use-project! nil)
+        (remove-ns 'depsstop)))))

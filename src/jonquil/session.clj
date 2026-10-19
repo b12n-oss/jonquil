@@ -83,9 +83,11 @@
 
 (defmethod ev/make :in-process [selection]
   ;; The project's source folders, so a project kept in process can require
-  ;; its own namespaces (jonquil.project-roots).
+  ;; its own namespaces (jonquil.project-roots). :paths only here, with no
+  ;; network; each evaluation resolves :deps on its worker (evaluate!).
   (roots/use-project! (:project-dir selection))
-  (make-session))
+  (doto (make-session)
+    (-> :state (swap! assoc :project-dir (:project-dir selection)))))
 
 (defn- ns-names [] (set (map ns-name (all-ns))))
 
@@ -117,9 +119,14 @@
 (defn- evaluate!
   [{:keys [ctx state]} code ns-sym opts]
   (let [before (ns-names)
-        user-complete (:on-complete opts)]
+        user-complete (:on-complete opts)
+        dir (:project-dir @state)]
     (eval/eval-async ctx code
                      (assoc opts
+                            ;; The project's :paths and :deps as Jolt's roots,
+                            ;; resolved on the worker: a first resolve can fetch
+                            ;; dependencies, which mustn't freeze the window.
+                            :before-eval (when dir (fn [] (roots/use-project-deps! dir)))
                             :ns-name ns-sym
                             :on-complete
                             (fn [result]
@@ -180,13 +187,15 @@
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (let [owner (:owner opts :run)]
-     ;; A Run of a file in a project uses that project's source folders: a
-     ;; window keeps one in-process evaluator when it opens a file from
-     ;; another in-process project (selection-key leaves the project out),
-     ;; so make's own call isn't enough (review finding 1). A loose file
-     ;; leaves them as they are.
-     (when-let [dir (some-> (:path opts) dialect/find-project :dir)]
-       (roots/use-project! dir))
+     ;; A Run of a file in a project uses that project's source folders and
+     ;; dependencies (evaluate!'s :before-eval), and so do the REPL entries
+     ;; after it: a window keeps one in-process evaluator when it opens a
+     ;; file from another in-process project (selection-key leaves the
+     ;; project out), so make's own project isn't enough (review finding
+     ;; 1). A loose file leaves them as they are.
+     (when-let [dir (and (not (eval/evaluating? ctx))
+                         (some-> (:path opts) dialect/find-project :dir))]
+       (swap! state assoc :project-dir dir))
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
      (create-ns 'user)

@@ -127,11 +127,16 @@
     (let [util (io/file d "src/demo/util.clj")
           outside-dir (temp-dirs/temp-dir! "jonquil-selftest-clj-outside-")
           outside (io/file outside-dir "other/place.clj")
+          ;; F12 opens a project file in a tab (2026-10-19), so the panel's
+          ;; own rows follow this read-only copy of util.clj outside the
+          ;; project; proj-helper still names the project's util.clj
+          outside-util (io/file outside-dir "other/util.clj")
           jar (str (.getCanonicalPath (io/file outside-dir)) "/lib.jar")
           jar-url (str "jar:file:" jar "!/")]
       (spit util util-text)
       (.mkdirs (.getParentFile outside))
       (spit outside outside-text)
+      (spit outside-util util-text)
       (write-jar! jar {"clojure/core.clj" lib-text})
       (let [srv (fake/start!
                  {:slow {"(slow)" 5000}
@@ -144,12 +149,13 @@
                                 "doc" "Returns a lazy sequence of the results of applying f."
                                 "arglists-str" "([f] [f coll] [f c1 c2] [f c1 c2 c3] [f c1 c2 c3 & colls])"
                                 "file" (str jar-url "clojure/core.clj") "line" 20}
-                         "helper2" {"ns" "demo.util" "name" "helper2" "file" (.getCanonicalPath util) "line" 3}
-                         "helper" {"ns" "demo.util" "name" "helper" "file" (.getCanonicalPath util) "line" 6}
+                         "helper2" {"ns" "demo.util" "name" "helper2" "file" (.getCanonicalPath outside-util) "line" 3}
+                         "helper" {"ns" "demo.util" "name" "helper" "file" (.getCanonicalPath outside-util) "line" 6}
+                         "proj-helper" {"ns" "demo.util" "name" "proj-helper" "file" (.getCanonicalPath util) "line" 6}
                          "outside-fn" {"ns" "other.place" "name" "outside-fn"
                                        "file" (.getCanonicalPath outside) "line" 2}
                          "ghost" {"ns" "clojure.core" "name" "ghost" "file" (str jar-url "nope/ghost.clj") "line" 1}
-                         "late" {"ns" "demo.util" "name" "late" "file" (.getCanonicalPath util) "line" 999}}
+                         "late" {"ns" "demo.util" "name" "late" "file" (.getCanonicalPath outside-util) "line" 999}}
                   :full-docs {"greet" full-doc-greet-text}
                   ;; P3.T2: row-clj-inspect-in-out's own REPL entry, a
                   ;; single-key map so :in always lands on idx 0 with no

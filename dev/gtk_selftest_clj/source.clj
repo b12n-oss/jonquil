@@ -105,7 +105,7 @@
   [ui]
   (go-row :clj-source-jump-to-own-file support/check
     (on-gtk (jump-on! ui "(helper2)" "helper2"))
-    (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
+    (let [opened? (await-until 3000 20 #(= "util.clj  · read-only" (header ui)))
           _ (on-gtk (let [ed (:editor ui)]
                       (editor/set-text! ed rows/fixture-core-text)
                       (support/place-cursor! (:buf ed) 0)
@@ -116,7 +116,7 @@
                      :header (header ui)
                      :window-focused (= (:view (:editor ui)) (g/gtk-root-get-focus (:window ui)))})]
       (on-gtk (support/check :clj-source-jump-to-own-file
-                             (and opened? jumped? (= 4 (:window-line v)) (= "util.clj" (:header v))
+                             (and opened? jumped? (= 4 (:window-line v)) (= "util.clj  · read-only" (:header v))
                                   (:window-focused v))
                              (assoc v :opened opened? :jumped jumped?))))))
 
@@ -128,7 +128,7 @@
   [ui]
   (go-row :clj-source-follow-and-back support/check
     (on-gtk (jump-on! ui "(helper2)" "helper2"))
-    (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
+    (let [opened? (await-until 3000 20 #(= "util.clj  · read-only" (header ui)))
           first-line (on-gtk (panel-line ui))
           in-file (on-gtk (panel-caret-on! ui "helper" "(helper))")
                           ((:source-jump!* ui))
@@ -143,38 +143,72 @@
       (on-gtk (support/check :clj-source-follow-and-back
                              (and opened? (= 3 first-line) (= 6 in-file)
                                   (= ["place.clj  · read-only" 2] out)
-                                  (= ["util.clj" 7] back1) (= ["util.clj" 4] back2))
+                                  (= ["util.clj  · read-only" 7] back1) (= ["util.clj  · read-only" 4] back2))
                              {:opened opened? :first first-line :in-file in-file :out out
                               :back1 back1 :back2 back2})))))
 
-(defn row-clj-source-open-in-window
-  "F12 on helper opens util.clj (editable). Tabs plan P2.T3: Open in window
-  no longer replaces the window's buffer, so there's no unsaved-changes
-  refusal: with the first tab dirty, Cmd/Ctrl+Shift+O with the panel
-  focused opens util.clj in a new tab, caret on line 6, hides the panel,
-  and leaves the first tab's text alone. The row then closes that tab so
-  later rows see one tab again."
+(defn row-clj-source-project-file-opens-a-tab
+  "F12 on proj-helper, defined in the project's own util.clj (line 6),
+  opens that file in a new tab with the caret on line 6 and no panel,
+  leaving the first tab's dirty text alone (jump opens a tab, 2026-10-19).
+  Cmd/Ctrl+[ then goes back to the first tab, caret where F12 was pressed.
+  The row closes the new tab so later rows see one tab again."
   [ui]
-  (go-row :clj-source-open-in-window support/check
-    (on-gtk (jump-on! ui "(helper)" "helper")
-            (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:editor ui)) " " -1 1))
-    (let [opened? (await-until 3000 20 #(= "util.clj" (header ui)))
+  (go-row :clj-source-project-file-opens-a-tab support/check
+    (let [first-id (on-gtk (:id ((:active-tab* ui))))
+          _ (on-gtk (jump-on! ui "(proj-helper)" "proj-helper")
+                    (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:editor ui)) " " -1 1))
           first-text (on-gtk (editor/editor-text (:editor ui)))
-          _ (on-gtk (source-pane/focus! (sp ui))
-                    (window-key! ui KEY-O (bit-or g/CONTROL-MASK g/SHIFT-MASK)))
+          opened? (await-until 3000 20 #(= 2 (count ((:tabs* ui)))))
           v (on-gtk (let [t ((:active-tab* ui))]
                       {:tabs (count ((:tabs* ui)))
                        :text (editor/editor-text (:ed t))
                        :line (inc (first (g/cursor-line-col (:buf (:ed t)))))
                        :panel (visible? (:root (sp ui)))
                        :first-kept (= first-text (editor/editor-text (:editor ui)))}))
+          back (on-gtk (window-key! ui KEY-BRACKETLEFT g/CONTROL-MASK)
+                       (let [t ((:active-tab* ui))]
+                         {:same-tab (= first-id (:id t))
+                          :caret (g/cursor-offset (:buf (:ed t)))}))
           _ (on-gtk (doseq [t (rest ((:tabs* ui)))]
                       (editor/mark-saved! (:ed t))
                       ((:close-tab! ui) (:id t))))]
-      (on-gtk (support/check :clj-source-open-in-window
+      (on-gtk (support/check :clj-source-project-file-opens-a-tab
                              (and opened? (= 2 (:tabs v)) (= rows/util-text (:text v)) (= 6 (:line v))
-                                  (not (:panel v)) (:first-kept v))
-                             (assoc v :opened opened?))))))
+                                  (not (:panel v)) (:first-kept v) (:same-tab back)
+                                  ;; recorded when the lookup answers, which
+                                  ;; can be after the row's own space
+                                  (contains? #{2 3} (:caret back)))
+                             (assoc v :opened opened? :back back))))))
+
+(defn row-clj-source-back-skips-a-closed-untitled-tab
+  "F12 on proj-helper from a new Untitled tab opens util.clj in its own
+  tab; closing the Untitled tab leaves Cmd/Ctrl+[ nothing to go back to,
+  so it says so instead of claiming \"Back.\" (review finding 2), and
+  leaves util.clj showing. The row closes the tabs it made."
+  [ui]
+  (go-row :clj-source-back-skips-a-closed-untitled-tab support/check
+    (let [scratch-id (on-gtk ((:source-close!* ui))
+                             ((:new-tab!* ui))
+                             (let [t ((:active-tab* ui)) text "(proj-helper)"]
+                               (editor/set-text! (:ed t) text)
+                               (support/place-cursor! (:buf (:ed t)) 2)
+                               ((:jump! (:actions t)))
+                               (:id t)))
+          opened? (await-until 3000 20 #(some-> ((:active-tab* ui)) :path deref (str/ends-with? "util.clj")))
+          _ (on-gtk (when-let [t (some #(when (= scratch-id (:id %)) %) ((:tabs* ui)))]
+                      (editor/mark-saved! (:ed t))
+                      ((:close-tab! ui) scratch-id)))
+          _ (on-gtk (window-key! ui KEY-BRACKETLEFT g/CONTROL-MASK))
+          said? (await-until 2000 20 #(= "Nothing to go back to: those tabs are closed." (g/label-text (:status-label ui))))
+          v (on-gtk {:tab (some-> ((:active-tab* ui)) :path deref (str/split #"/") last)
+                     :status (g/label-text (:status-label ui))})
+          _ (on-gtk (doseq [t (rest ((:tabs* ui)))]
+                      (editor/mark-saved! (:ed t))
+                      ((:close-tab! ui) (:id t))))]
+      (on-gtk (support/check :clj-source-back-skips-a-closed-untitled-tab
+                             (and opened? said? (= "util.clj" (:tab v)))
+                             (assoc v :opened opened? :said said?))))))
 
 (defn row-clj-source-outside-read-only
   "F12 on outside-fn opens other/place.clj read-only; Cmd/Ctrl+Shift+O says

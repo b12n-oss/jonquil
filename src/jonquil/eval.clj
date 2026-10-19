@@ -193,6 +193,9 @@
      :on-output (fn [kind s])  kind is :out or :err
      :on-wait-input (fn [bool])
      :on-status-change (fn [status])  :running, :waiting-input, :idle
+     :before-eval (fn [])  on the worker, before the evaluation, with *out*
+       and *err* already the console's, so what it prints shows there; a
+       throw is reported and the evaluation goes ahead
      :before-idle (fn [result])  on the worker, after the evaluation and
        before the context goes idle, so nothing else can evaluate while it
        runs; a throw is reported and ignored
@@ -224,7 +227,7 @@
    should enqueue that work for later and return, not invoke-and-wait."
   [{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
    code
-   {:keys [on-output on-wait-input on-status-change on-complete before-idle] :as opts}]
+   {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle] :as opts}]
   (let [ns-sym (or (:ns-name opts) 'user)]
     (locking lock
       (if (evaluating? ctx)
@@ -278,6 +281,16 @@
                       (binding [*out* out-w *err* err-w *in* in-rdr *ns* target
                                 *1 (:1 @repl-vars) *2 (:2 @repl-vars) *3 (:3 @repl-vars) *e (:e @repl-vars)]
                         (let [r (try
+                                  (when before-eval
+                                    (try (before-eval)
+                                         ;; A Stop during it stops the
+                                         ;; evaluation (review finding 1).
+                                         (catch :default e
+                                           (if (interrupted? e)
+                                             (throw e)
+                                             (report-callback-exception! "before-eval" e)))))
+                                  (when @stop-requested
+                                    (throw (ex-info "stopped" {:jolt/interrupted true})))
                                   ;; I4: unconditional -- the ns-resolve guard
                                   ;; this replaced was always false on Jolt.
                                   ;; Also refer the clojure.repl helpers that
