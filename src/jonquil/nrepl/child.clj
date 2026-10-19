@@ -72,11 +72,23 @@
 
 (defn server-form
   "The -e form that runs the server on port with the middleware symbols,
-  as `jolt nrepl-server` does (jolt.main) but with no port file."
+  as `jolt nrepl-server` does (jolt.main) but with no port file, plus a
+  watcher: a thread that reads the child's stdin, a pipe Jonquil holds
+  open for the child's whole life, and exits the child at its end. When
+  Jonquil dies in a way that runs no hook (a crash, SIGKILL), the OS
+  closes the pipe, so the child doesn't outlive it (measured: exited
+  within 3 s of its parent's SIGKILL). System/exit runs the shutdown hook,
+  which stops the server. *in*'s root is an empty reader, so a program's
+  read on a plain server (no stdin middleware) ends at once, as it did
+  with /dev/null for stdin, instead of waiting on the watcher's pipe."
   [port middleware]
   (str "(do (require 'jolt.nrepl) (jolt.host/block-sigint)"
+       " (alter-var-root #'*in* (constantly (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. \"\"))))"
        " (let [stop (jolt.nrepl/start " port " '[" (str/join " " middleware) "] {:port-file nil})]"
-       " (jolt.host/add-shutdown-hook stop) (jolt.host/park-until-interrupt) (stop)))"))
+       " (jolt.host/add-shutdown-hook stop)"
+       " (future (try (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur)))) (catch Throwable _ nil))"
+       " (System/exit 0))"
+       " (jolt.host/park-until-interrupt) (stop)))"))
 
 (defn launch-args
   "The child's argv. With a middleware source: jolt -Sdeps '{:deps
@@ -124,10 +136,12 @@
 (defn process-options
   "The jolt.process options for the child: {:dir :log}, plus login-path's
   PATH in the child's environment so jolt's own tool lookups see it
-  (no :extra-env when there is no PATH at all)."
+  (no :extra-env when there is no PATH at all). stdin is left as a pipe,
+  which the process record holds open until kill!: server-form's watcher
+  ends the child when it closes, Jonquil's own death included."
   [{:keys [dir log]}]
   (let [path (login-path/path)]
-    (cond-> {:dir dir :out (io/file log) :err :out :in (io/file "/dev/null")}
+    (cond-> {:dir dir :out (io/file log) :err :out}
       path (assoc :extra-env {"PATH" path}))))
 
 (defn- tail [path n]

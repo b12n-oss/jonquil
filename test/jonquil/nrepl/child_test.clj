@@ -60,15 +60,48 @@
       (is (= ["jolt" "-e" (child/server-form 7951 [])] (child/launch-args 7951 nil))))))
 
 (deftest server-form-test
-  (is (= (str "(do (require 'jolt.nrepl) (jolt.host/block-sigint)"
-              " (let [stop (jolt.nrepl/start 7950 '[a/b c/d] {:port-file nil})]"
-              " (jolt.host/add-shutdown-hook stop) (jolt.host/park-until-interrupt) (stop)))")
-         (child/server-form 7950 ["a/b" "c/d"])))
-  (is (= '(do (require 'jolt.nrepl) (jolt.host/block-sigint)
-              (let [stop (jolt.nrepl/start 7950 '[] {:port-file nil})]
-                (jolt.host/add-shutdown-hook stop) (jolt.host/park-until-interrupt) (stop)))
-         (read-string (child/server-form 7950 [])))
-      "it reads as one form"))
+  (let [form (read-string (child/server-form 7950 ["a/b" "c/d"]))]
+    (is (= 'do (first form)) "it reads as one form")
+    (is (str/includes? (child/server-form 7950 ["a/b" "c/d"])
+                       "(jolt.nrepl/start 7950 '[a/b c/d] {:port-file nil})"))
+    (is (str/includes? (child/server-form 7950 []) "System/in") "the parent-death watcher")))
+
+(deftest closing-stdin-ends-the-child-test
+  ;; What the OS does to the pipe when Jonquil dies without a hook.
+  (let [c (child/start! (temp-project) nil)]
+    (try
+      (is (child/alive? c))
+      (.close ^java.io.OutputStream (:in (:proc c)))
+      (is (wait-until #(not (child/alive? c)) 5000) "the child exits on its own")
+      (finally (child/kill! c)))))
+
+(deftest a-killed-parent-takes-its-child-test
+  ;; The real case: a Jolt process that started a child is SIGKILLed (no
+  ;; hook can run), and the child goes too.
+  (let [dir (temp-project)
+        parent (p/process {:dir (.getCanonicalPath (io/file ".")) :out :pipe :err :out}
+                          "jolt" "-e"
+                          (str "(do (require 'jonquil.nrepl.child)"
+                               " (let [c (jonquil.nrepl.child/start! " (pr-str dir) " nil)]"
+                               " (println :child-pid (:pid c)) (flush))"
+                               " (jolt.host/park-until-interrupt))"))
+        rdr (io/reader (:out parent))
+        line (loop [n 0] (let [l (.readLine ^java.io.BufferedReader rdr)]
+                           (cond (nil? l) nil
+                                 (str/starts-with? l ":child-pid") l
+                                 (< n 200) (recur (inc n)))))
+        pid (some-> line (str/split #" ") second parse-long)]
+    (try
+      (is pid (str "the parent printed its child's pid: " line))
+      (when pid
+        (is (.isPresent (java.lang.ProcessHandle/of pid)) "the child runs")
+        (.destroyForcibly ^java.lang.Process (:proc parent))
+        (is (wait-until #(not (.isPresent (java.lang.ProcessHandle/of pid))) 10000)
+            "the child is gone after its parent's SIGKILL"))
+      (finally
+        (force-kill! parent)
+        (when (and pid (.isPresent (java.lang.ProcessHandle/of pid)))
+          (clojure.java.shell/sh "kill" "-9" (str pid)))))))
 
 (deftest launch-args-with-the-inspector-test
   (with-login-path "/nonexistent-jonquil:/fake-home-for-test/.local/bin"
