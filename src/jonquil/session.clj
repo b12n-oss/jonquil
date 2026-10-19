@@ -129,17 +129,26 @@
   the eval worker after the project's roots and :deps are set (so a
   dependency's namespace can be in it). The namespaces are libraries, so
   Reset on Run keeps them. A failure prints its error and says so, and
-  isn't tried again in this session; a Stop stops the evaluation. Flagged
+  isn't tried again in this session; a Stop stops the evaluation and the
+  next one tries again. Flagged
   first, so a list that throws isn't resent on every evaluation."
-  [state dir]
-  (let [{nss :auto-require ar-dir :auto-require-dir done? :auto-required?} @state]
+  [ctx state dir]
+  (let [{nss :auto-require ar-dir :auto-require-dir done? :auto-required?} @state
+        ;; Stop reaches a require here as a plain thread interrupt (this runs
+        ;; outside the interruptible section), so ask the engine's own flag.
+        stopped? (fn [e] (or (eval/interrupted? e)
+                             (boolean (some-> (:running-state ctx) deref :stop-requested deref))))]
     (when (and (seq nss) (not done?) (= dir ar-dir))
       (swap! state assoc :auto-required? true)
       (println (clj/auto-require-message nss))
       (try
         (apply require nss)
         (catch Throwable e
-          (when (eval/interrupted? e) (throw e))
+          ;; Stopped: not loaded, so the next evaluation tries again
+          ;; (review finding 2).
+          (when (stopped? e)
+            (swap! state assoc :auto-required? false)
+            (throw e))
           (binding [*out* *err*]
             (println (eval/format-error e))
             (println (clj/auto-require-failed auto-require-retry))))))))
@@ -156,7 +165,7 @@
                             ;; dependencies, which mustn't freeze the window.
                             :before-eval (when dir (fn []
                                                      (roots/use-project-deps! dir)
-                                                     (auto-require! state dir)))
+                                                     (auto-require! ctx state dir)))
                             :ns-name ns-sym
                             :on-complete
                             (fn [result]

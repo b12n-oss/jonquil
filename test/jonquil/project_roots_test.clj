@@ -246,3 +246,28 @@
       (finally
         (roots/use-project! nil)
         (remove-ns 'arbad)))))
+
+(deftest stop-during-auto-require-test
+  ;; Stop while the list loads stops the Run, and the next evaluation tries
+  ;; the list again rather than skipping it (review finding 2).
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"]}"
+                       ".jonquil.edn" "{:runtime :in-process :auto-require [arslow.core]}"
+                       "src/arslow/core.clj" (str "(ns arslow.core)\n(Thread/sleep 10000)\n;; " (System/nanoTime) "\n")
+                       "src/arstop.clj" "(ns arstop)\n(+ 1 2)\n"})
+        path (canon dir "src/arstop.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))]
+    (try
+      (let [p (promise)]
+        (ev/eval! e (slurp path) {:run? true :path path :on-output (fn [_ _]) :on-complete #(deliver p %)})
+        (Thread/sleep 500)
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref p 5000 :timeout)))))
+      (remove-ns 'arslow.core)
+      (spit (io/file dir "src/arslow/core.clj") (str "(ns arslow.core)\n(def loaded :yes)\n;; " (System/nanoTime) "\n"))
+      (let [r (run-in e path)]
+        (is (= "3" (:printed r)))
+        (is (str/includes? (:out r) "; auto-require: arslow.core") "tried again")
+        (is (some? (find-ns 'arslow.core))))
+      (finally
+        (roots/use-project! nil)
+        (doseq [n '[arstop arslow.core]] (remove-ns n))))))

@@ -369,10 +369,17 @@
     (when (and nss (not (:auto-required? (runtime ev))))
       (swap! state assoc-in [:runtime :auto-required?] true)
       (when on-output (on-output :system (str (clj/auto-require-message nss) "\n")))
-      (let [msgs @(send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output})]
-        (when (and (not= :ok (:status (ops/eval-result msgs (stop-requested? ev))))
-                   (not (stop-requested? ev))
-                   on-output)
+      (let [done (send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output})
+            req-id (get-in @state [:running :id])
+            msgs @done]
+        ;; The require is over, so a Stop from here on must find no id and
+        ;; skip the user's request, as before (review finding 1).
+        (swap! state update :running (fn [r] (if (= req-id (:id r)) (dissoc r :id) r)))
+        (cond
+          ;; Stopped: not loaded, so the next evaluation tries again
+          ;; (finding 2).
+          (stop-requested? ev) (swap! state assoc-in [:runtime :auto-required?] false)
+          (and (not= :ok (:status (ops/eval-result msgs false))) on-output)
           (on-output :system (str (clj/auto-require-failed auto-require-retry) "\n")))))))
 
 (defn- run-worker!

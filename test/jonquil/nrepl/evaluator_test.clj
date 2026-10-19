@@ -695,3 +695,29 @@
           (is (= "true" (:printed r)))
           (is (some #(= [:system "; auto-require: arlib2.core\n"] %) out))))
       (finally (ev/stop! e)))))
+
+(deftest stop-during-auto-require-out-of-process-test
+  ;; Stop while the list loads: interrupted, the user's request not sent,
+  ;; and the next evaluation tries the list again and then runs normally
+  ;; (review findings 1 and 2: no stale request id, no silently skipped list).
+  (let [dir (temp-project)
+        lib (io/file dir "src/arslow2/core.clj")
+        e (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir :auto-require '[arslow2.core]})]
+    (.mkdirs (.getParentFile lib))
+    ;; a loop, which interrupts cleanly (a sleep makes Stop restart the
+    ;; child, and a new child requires the list again whatever the flag)
+    (spit lib (str "(ns arslow2.core)\n(loop [] (recur))\n;; " (System/nanoTime) "\n"))
+    (try
+      (is (nil? (ev/start! e)))
+      (let [done (promise) pid (nrepl/child-pid e)]
+        (ev/eval! e "(def sent :yes)" {:on-output (fn [_ _]) :on-complete #(deliver done %)})
+        (wait-for-eval-id e)
+        (Thread/sleep 300)
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 15000 :timeout))))
+        (is (= pid (nrepl/child-pid e)) "an interrupt, not a restart"))
+      (spit lib (str "(ns arslow2.core)\n(def loaded :yes)\n;; " (System/nanoTime) "\n"))
+      (let [[r out] (run e "[(some? (find-ns 'arslow2.core)) (some? (resolve 'user/sent))]" false)]
+        (is (= "[true false]" (:printed r)) "the list loaded this time; the stopped request never ran")
+        (is (some #(= [:system "; auto-require: arslow2.core\n"] %) out) "tried again"))
+      (finally (ev/stop! e)))))
