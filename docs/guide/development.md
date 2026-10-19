@@ -149,7 +149,7 @@ fork checkout and no real app; its rows cover connecting, a quiet load,
 Run Selection and Run Form switching the session's namespace, quick doc,
 completion, Stop's detach, and the inspector's unavailable sentence, over
 that fake connection. The fifth
-(`dev/gtk_selftest_clj.clj`, 35 rows) opens against a throwaway JVM Clojure project whose
+(`dev/gtk_selftest_clj.clj`, 36 rows) opens against a throwaway JVM Clojure project whose
 `.jonquil.edn` says `{:dialect :clj}` and whose `.nrepl-port` names a
 fake JVM nREPL server running in this same process
 (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its
