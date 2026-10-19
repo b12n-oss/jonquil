@@ -8,7 +8,8 @@
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.find-bar :as find-bar]))
+            [jonquil.gtk.find-bar :as find-bar]
+            [jolt.ffi :as ffi]))
 
 ;; --- P3.T4: find and replace bar ------------------------------------------
 ;; Each row is self-contained (its own editor/set-text!, open! and query)
@@ -396,19 +397,28 @@
   find-next! instead."
   [ui]
   (go-row :find-return-in-replacement support/check
-    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
-              (editor/set-text! ed "foo bar foo baz foo")
-              (find-bar/open! fb :replace)
-              (g/gtk-editable-set-text (:query fb) "foo")
-              (g/gtk-editable-set-text (:replacement fb) "X")
-              (g/gtk-widget-grab-focus (:replacement fb))
-              (let [handled (find-bar/handle-key! fb support/KEY-RETURN 0)
+    (let [fb (:find-bar ui)
+          in-replacement? (fn [] (let [f (g/gtk-root-get-focus (:window ui))]
+                                   (and (not (ffi/null? f))
+                                        (not (zero? (g/gtk-widget-is-ancestor f (:replacement fb)))))))
+          _ (on-gtk (let [ed (:editor ui)]
+                      (editor/set-text! ed "foo bar foo baz foo")
+                      (find-bar/open! fb :replace)
+                      (g/gtk-editable-set-text (:query fb) "foo")
+                      (g/gtk-editable-set-text (:replacement fb) "X")
+                      (g/gtk-widget-grab-focus (:replacement fb))))
+          ;; Return reads where focus is, so wait for it to land rather than
+          ;; pressing in the same step (failed 1 run in 3 under load,
+          ;; 2026-10-19: Return ran find-next)
+          focused? (await-until 2000 20 in-replacement?)]
+      (on-gtk (let [ed (:editor ui) buf (:buf ed)
+                    handled (find-bar/handle-key! fb support/KEY-RETURN 0)
                     text (editor/editor-text ed)
                     sel (g/selection-offsets buf)]
                 (find-bar/close! fb)
                 (support/check :find-return-in-replacement
-                               (and (= 1 handled) (= "X bar foo baz foo" text) (= [6 9] sel))
-                               {:handled handled :text text :sel sel}))))))
+                               (and focused? (= 1 handled) (= "X bar foo baz foo" text) (= [6 9] sel))
+                               {:focused focused? :handled handled :text text :sel sel}))))))
 
 (defn row-window-find-keys-editor-focused
   "I4: with the bar open and focus back in the editor, F3, Cmd+G and
