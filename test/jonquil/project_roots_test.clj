@@ -2,6 +2,7 @@
   "The project's source folders for in-process Jolt, and a project kept in
   process requiring its own namespace through them."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -205,3 +206,43 @@
       (finally
         (roots/use-project! nil)
         (remove-ns 'depsstop)))))
+
+(deftest auto-require-in-process-test
+  ;; .jonquil.edn :auto-require for Jolt in process: required once per
+  ;; session before the first evaluation, after the project's roots.
+  (let [stamp (System/nanoTime)
+        dir (project! {"deps.edn" "{:paths [\"src\"]}"
+                       ".jonquil.edn" "{:runtime :in-process :auto-require [arlib.core]}"
+                       "src/arlib/core.clj" (str "(ns arlib.core)\n(def loaded :yes)\n;; " stamp "\n")
+                       "src/arapp.clj" "(ns arapp)\n(+ 1 2)\n"})
+        path (canon dir "src/arapp.clj")
+        sel (dialect/select dialect/profiles (dialect/find-project path) path nil)
+        e (ev/make sel)]
+    (try
+      (is (= '[arlib.core] (:auto-require sel)))
+      (let [r (run-in e path)]
+        (is (= "3" (:printed r)))
+        (is (str/includes? (:out r) "; auto-require: arlib.core"))
+        (is (some? (find-ns 'arlib.core)) "required before the Run"))
+      (testing "once per session, and Reset on Run keeps it"
+        (let [r (run-in e path)]
+          (is (not (str/includes? (:out r) "auto-require")))
+          (is (some? (find-ns 'arlib.core)))))
+      (finally
+        (roots/use-project! nil)
+        (doseq [n '[arapp arlib.core]] (remove-ns n))))))
+
+(deftest auto-require-that-fails-test
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"]}"
+                       ".jonquil.edn" "{:runtime :in-process :auto-require [no.such.ns]}"
+                       "src/arbad.clj" "(ns arbad)\n(+ 1 2)\n"})
+        path (canon dir "src/arbad.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))]
+    (try
+      (let [r (run-in e path)]
+        (is (= "3" (:printed r)) "the Run still goes ahead")
+        (is (str/includes? (:out r) "auto-require failed (the error is above), so carrying on without it. It runs again in a new window.")))
+      (is (not (str/includes? (:out (run-in e path)) "auto-require")) "not tried again this session")
+      (finally
+        (roots/use-project! nil)
+        (remove-ns 'arbad)))))

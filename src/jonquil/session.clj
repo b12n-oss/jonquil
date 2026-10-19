@@ -11,6 +11,7 @@
   map had, so every caller that reads them is unchanged."
   (:require [clojure.java.io :as io]
             [clojure.set :as set]
+            [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -87,7 +88,9 @@
   ;; network; each evaluation resolves :deps on its worker (evaluate!).
   (roots/use-project! (:project-dir selection))
   (doto (make-session)
-    (-> :state (swap! assoc :project-dir (:project-dir selection)))))
+    (-> :state (swap! assoc :project-dir (:project-dir selection)
+                      :auto-require (when (:project-dir selection) (seq (:auto-require selection)))
+                      :auto-require-dir (:project-dir selection)))))
 
 (defn- ns-names [] (set (map ns-name (all-ns))))
 
@@ -116,6 +119,31 @@
                            (update :created dissoc owner :repl)
                            (assoc :prompt-ns 'user)))))
 
+(def auto-require-retry
+  "When an in-process :auto-require list that failed runs again."
+  "It runs again in a new window.")
+
+(defn auto-require!
+  "Once per session, before its first evaluation in the window's own
+  project: says so, then requires .jonquil.edn's :auto-require list, on
+  the eval worker after the project's roots and :deps are set (so a
+  dependency's namespace can be in it). The namespaces are libraries, so
+  Reset on Run keeps them. A failure prints its error and says so, and
+  isn't tried again in this session; a Stop stops the evaluation. Flagged
+  first, so a list that throws isn't resent on every evaluation."
+  [state dir]
+  (let [{nss :auto-require ar-dir :auto-require-dir done? :auto-required?} @state]
+    (when (and (seq nss) (not done?) (= dir ar-dir))
+      (swap! state assoc :auto-required? true)
+      (println (clj/auto-require-message nss))
+      (try
+        (apply require nss)
+        (catch Throwable e
+          (when (eval/interrupted? e) (throw e))
+          (binding [*out* *err*]
+            (println (eval/format-error e))
+            (println (clj/auto-require-failed auto-require-retry))))))))
+
 (defn- evaluate!
   [{:keys [ctx state]} code ns-sym opts]
   (let [before (ns-names)
@@ -126,7 +154,9 @@
                             ;; The project's :paths and :deps as Jolt's roots,
                             ;; resolved on the worker: a first resolve can fetch
                             ;; dependencies, which mustn't freeze the window.
-                            :before-eval (when dir (fn [] (roots/use-project-deps! dir)))
+                            :before-eval (when dir (fn []
+                                                     (roots/use-project-deps! dir)
+                                                     (auto-require! state dir)))
                             :ns-name ns-sym
                             :on-complete
                             (fn [result]

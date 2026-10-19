@@ -370,11 +370,11 @@
              [(str ".jonquil.edn asks for runtime " runtime ", which " (:name p)
                    " doesn't offer here; using " (runtime-name default-rt))]
              [])
-        ;; Only JVM Clojure sends :auto-require (the attach evaluator
-        ;; requires the list once per connection); elsewhere it's ignored.
-        clj? (= :clj (:id p))
-        w3 (if (and auto-require (not clj?))
-             [(str ".jonquil.edn :auto-require only applies to JVM Clojure, not " (:name p) ", so it is ignored")]
+        ;; JVM Clojure and Jolt read :auto-require (once per connection,
+        ;; session or child start); elsewhere it's ignored.
+        auto-require? (contains? #{:clj :jolt} (:id p))
+        w3 (if (and auto-require (not auto-require?))
+             [(str ".jonquil.edn :auto-require only applies to JVM Clojure and Jolt, not " (:name p) ", so it is ignored")]
              [])
         ;; Only ClojureScript reads :cljs (the build choice); elsewhere it's
         ;; ignored.
@@ -391,7 +391,7 @@
              :project-dir (:dir project)
              :source source
              :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5))}
-      (and auto-require clj?) (assoc :auto-require auto-require)
+      (and auto-require auto-require?) (assoc :auto-require auto-require)
       (and cljs cljs?) (assoc :cljs cljs)
       (and nrepl nrepl?) (assoc :nrepl nrepl))))
 

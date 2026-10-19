@@ -35,8 +35,14 @@
   [nss]
   (str "; auto-require: " (str/join " " nss)))
 
+(defn auto-require-failed
+  "The line said after .jonquil.edn's :auto-require list failed; retry says
+  when it runs again."
+  [retry]
+  (str "; auto-require failed (the error is above), so carrying on without it. " retry))
+
 (def auto-require-failed-message
-  "; auto-require failed (the error is above), so carrying on without it. It runs again on the next connect.")
+  (auto-require-failed "It runs again on the next connect."))
 
 (defn auto-require-code
   "One require form for the namespace symbols in nss."

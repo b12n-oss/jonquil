@@ -672,3 +672,26 @@
       (run-owned e "(ns orphan.a) (def x 1)" 3)
       (is (= "nil" (:printed (first (run e "(ns-resolve 'orphan.a 'old-fn)" false)))))
       (finally (ev/stop! e)))))
+
+(deftest auto-require-out-of-process-test
+  ;; .jonquil.edn :auto-require for Jolt out of process: once per child,
+  ;; before its first evaluation, and again after a restart.
+  (let [dir (temp-project)
+        lib (io/file dir "src/arlib2/core.clj")
+        e (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir :auto-require '[arlib2.core]})]
+    (.mkdirs (.getParentFile lib))
+    (spit lib (str "(ns arlib2.core)\n(def loaded :yes)\n;; " (System/nanoTime) "\n"))
+    (try
+      (let [[r out] (run e "(some? (find-ns 'arlib2.core))" false)]
+        (is (= "true" (:printed r)) "required before the first evaluation")
+        (is (some #(= [:system "; auto-require: arlib2.core\n"] %) out)))
+      (testing "once per child"
+        (let [[_ out] (run e "1" false)]
+          (is (not-any? #(str/includes? (second %) "auto-require") out))))
+      (testing "a restarted child requires it again"
+        (child/kill! (:child (#'nrepl/runtime e)))
+        (wait-until #(not (child/alive? (:child (#'nrepl/runtime e)))) 5000)
+        (let [[r out] (run e "(some? (find-ns 'arlib2.core))" false)]
+          (is (= "true" (:printed r)))
+          (is (some #(= [:system "; auto-require: arlib2.core\n"] %) out))))
+      (finally (ev/stop! e)))))
