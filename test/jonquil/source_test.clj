@@ -58,6 +58,27 @@
     (is (= 1 (:line (source/location {:file "/x/y.clj"} {:project-dir "/p"}))))
     (is (= 1 (:line (source/location {:file "/x/y.clj" :line 0} {:project-dir "/p"}))))))
 
+(deftest classpath-file-test
+  ;; A Jolt after v0.8.23 (jolt-lang/jolt f714b0ed) records a required
+  ;; namespace's :file as its classpath name, so these stand in for that.
+  (testing "a name on this process's roots resolves to the file's path"
+    (is (= (.getCanonicalPath (io/file "src/jonquil/help.clj")) (source/classpath-file "jonquil/help.clj"))))
+  (testing "nothing on the roots, or a Jolt image resource whose string is the bare name, is nil"
+    (is (.isFile (io/file "README.md")) "it is in the directory, but not on a root")
+    (is (nil? (source/classpath-file "README.md")))
+    (is (nil? (source/classpath-file "no/such/thing.clj")))
+    (is (nil? (source/classpath-file "clojure/string.clj")))))
+
+(deftest resolve-file-test
+  (let [help (.getCanonicalPath (io/file "src/jonquil/help.clj"))]
+    (is (= {:file help :line 3} (source/resolve-file {:file "jonquil/help.clj" :line 3})))
+    (is (= help (:path (source/location (source/resolve-file {:file "jonquil/help.clj"}) {})))
+        "location can open what it resolves to")
+    (testing "anything else comes back unchanged"
+      (doseq [d [{:file "unknown"} {:file "/x/y.clj"} {:file "jar:file:/a.jar!/b.clj"}
+                 {:file "file:/x/y.clj"} {:file ""} {:line 1} {:file "README.md"}]]
+        (is (= d (source/resolve-file d)))))))
+
 (deftest same-file-test
   (let [dir (temp-dirs/temp-dir! "jonquil-source-test-")
         f (io/file dir "a.clj")]

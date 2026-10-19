@@ -68,7 +68,10 @@
         (testing "the var knows its file, so jump to definition can open it"
           (let [d (ev/lookup e "u/helper" text 52)]
             (is (= (canon dir "src/demo/rootsutil.clj") (:file d)))
-            (is (= 3 (:line d))))))
+            (is (= 3 (:line d)))))
+        (testing "a classpath :file, as a Jolt after v0.8.23 records it, resolves on the project's roots"
+          (alter-meta! (resolve 'demo.rootsutil/helper) assoc :file "demo/rootsutil.clj")
+          (is (= (canon dir "src/demo/rootsutil.clj") (:file (ev/lookup e "u/helper" (str text " ") 52))))))
       (finally
         (roots/use-project! nil)
         (doseq [n '[demo.rootsa demo.rootsutil]] (remove-ns n))))))

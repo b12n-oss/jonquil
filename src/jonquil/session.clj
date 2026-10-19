@@ -15,7 +15,8 @@
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.inspect.view :as view]
-            [jonquil.project-roots :as roots]))
+            [jonquil.project-roots :as roots]
+            [jonquil.source :as source]))
 
 (declare run-definitions! submit-repl! set-mode!)
 
@@ -50,7 +51,9 @@
   (complete [_ prefix text pos extra-context]
     (docs/candidates (:prompt-ns @state) prefix text pos extra-context))
   (lookup [_ sym text pos]
-    (docs/symbol-doc (:prompt-ns @state) sym text pos))
+    ;; a newer Jolt records a required namespace's :file as its classpath
+    ;; name, which resolves on the roots project-roots set
+    (some-> (docs/symbol-doc (:prompt-ns @state) sym text pos) source/resolve-file))
   (limitations [_] [])
   ev/Inspector
   (inspect! [_ op args on-view]

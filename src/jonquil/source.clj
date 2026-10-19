@@ -69,6 +69,39 @@
            :editable? (boolean (and project-dir (under? path project-dir)))
            :label (file-name path)})))))
 
+(defn classpath-file
+  "A bare classpath name (\"demo/util.clj\") as something location can read,
+  resolved with io/resource on the roots this process searches: a file: URL
+  whose file exists gives its canonical path, a jar:file:<jar>!/<entry> URL
+  is kept as it is, anything else is nil. Jolt from jolt-lang/jolt f714b0ed
+  (2026-10-19, after v0.8.23) records a required namespace's :file this way,
+  as JVM Clojure does; v0.8.23 recorded the root's spelling (an absolute
+  path, or ./src/...). Measured on f714b0ed in source mode: a stdlib name
+  such as clojure/string.clj resolves to a file: URL that doesn't exist,
+  and in a release binary to an image resource whose string is the bare
+  name again, so both come back nil."
+  [cp-name]
+  (when-let [u (try (io/resource cp-name) (catch :default _ nil))]
+    (let [s (str u)]
+      (cond
+        (and (str/starts-with? s "jar:file:") (str/includes? s "!/")) s
+        (str/starts-with? s "file:")
+        (let [f (io/file (uri-path s))] (when (.isFile f) (.getCanonicalPath f)))))))
+
+(defn resolve-file
+  "doc-info with a bare classpath :file (neither a jar:/file: URL nor an
+  absolute path) replaced by classpath-file's answer when it has one, so
+  location can open it. Any other doc-info comes back unchanged."
+  [doc-info]
+  (let [f (:file doc-info)]
+    (if-let [p (when (and (string? f) (seq f)
+                          (not (str/starts-with? f "jar:"))
+                          (not (str/starts-with? f "file:"))
+                          (not (str/starts-with? f "/")))
+                 (classpath-file f))]
+      (assoc doc-info :file p)
+      doc-info)))
+
 (defn same-file?
   "True when locations a and b show the same file or jar entry."
   [a b]
