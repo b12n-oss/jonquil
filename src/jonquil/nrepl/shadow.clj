@@ -243,8 +243,9 @@
   (prompt-ns [_] (symbol (or (:session-ns @state) "cljs.user")))
   (set-mode! [_ _] nil)
   ;; Offline candidates, plus the server's own when connected and it
-  ;; advertises complete, bounded by :help-timeout-ms since this runs on the
-  ;; GTK thread. Any throw, a timeout or no connection falls back to offline.
+  ;; advertises complete, bounded by ev/*help-timeout-ms* (the window asks
+  ;; through ev/ask-help!, off the GTK thread, with a 3 s limit). Any throw,
+  ;; a timeout or no connection falls back to offline.
   (complete [_ prefix text pos extra-context]
     (let [offline (try (cljd/candidates (:profile selection) prefix text pos extra-context)
                        (catch Throwable _ []))]

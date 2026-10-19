@@ -1685,11 +1685,12 @@
   snapshot, using ev/lookup as the external fallback. :buffer places the
   caret, status \"Jumped to <sym>.\". An :external target whose lookup
   carries :file goes through jonquil.source/location: a location in the
-  window's own file moves the caret to that line (clamped) instead;
-  anything else opens in the source panel (source-panel spec). An
-  :external target without :file (in-process Jolt, ClojureDart) shows its
-  doc in the quick-doc popover as before, closing every other P4 popover
-  first. No definition reads \"No definition found for <sym>.\", no symbol
+  window's own file moves the caret to that line (clamped) instead; one
+  in a project file opens in its tab (open-in-tab!); anything else opens
+  in the source panel (source-panel spec). An :external target without
+  :file (ClojureDart, ClojureScript, jank, a Jolt var with no recorded
+  file) shows its doc in the quick-doc popover, closing every other P4
+  popover first. No definition reads \"No definition found for <sym>.\", no symbol
   \"No symbol at the caret.\" Wrapped in try/catch like do-quick-doc!. ctx
   is {:ed :ev* :status-label :help-pop :close-popovers-fn :sp :right :path
   :sel*}."

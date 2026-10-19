@@ -32,5 +32,5 @@ code don't cover on their own.
    the gates it must pass, and how to send it.
 
 `ROADMAP.md` holds the phase-by-phase status and the parked items for each
-one. `UPSTREAM.md` holds the file-by-file provenance table that the last
-page above summarizes.
+one. `UPSTREAM.md` holds the file-by-file provenance table that Porting and
+attribution summarizes.

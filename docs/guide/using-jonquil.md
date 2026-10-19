@@ -678,9 +678,10 @@ definition. A file in your project opens in a tab, or brings forward the
 tab that already has it, ready to edit; Cmd/Ctrl+[ then takes you back to
 where you pressed F12, one jump at a time. Library code from a jar, and
 any file outside your project, opens in a read-only source panel on the
-right instead. With Jolt in process that
-includes a function another tab's Run defined, once that tab's file is
-saved: the Run records the file for the vars it defines. In other
+right instead. With Jolt in process, a function another tab's Run
+defined counts too, once that tab's file is saved and unchanged since the
+Run: the Run records the file for the vars it defines, and F12 opens it
+like any other file. In other
 runtimes, which don't say where a definition lives (ClojureDart,
 ClojureScript, jank), jump shows the var's documentation in the quick-doc
 popup instead.
@@ -887,7 +888,7 @@ this one is skipped, and selection falls through to whichever rule comes
 next.
 
 ClojureScript's marker is `shadow-cljs.edn`, and a `.cljs` file selects it
-by its extension as well. That is a change from earlier versions: a `.cljs`
+by its extension as well, so a `.cljs`
 file outside a shadow-cljs project (a loose file, or a figwheel or
 `cljs.main` project with no `shadow-cljs.edn`) used to fall back to
 in-process Jolt. It now selects ClojureScript, and Run explains that there
@@ -1005,8 +1006,8 @@ then shows everything in one burst is the sign to update the checkout.
 
 ### Where the nREPL middleware comes from
 
-Interrupt and lookup both need Jonquil to inject jolt-lang/nrepl's
-middleware when it starts the child. A checkout comes first, found at
+Interrupt needs Jonquil to inject jolt-lang/nrepl's middleware when it
+starts the child. A checkout comes first, found at
 `$JONQUIL_JOLT_NREPL`, or `~/dev/jolt-lang/nrepl` when that variable isn't
 set; keep it at v0.4.0 or later so output streams as it prints. With no
 checkout, Jonquil asks Jolt for jolt-lang/nrepl v0.4.0 as a git
@@ -1014,9 +1015,12 @@ dependency. The first start clones it into `~/.gitlibs`, which took about
 3 seconds here, and needs `git` on `PATH` and a network connection; later
 starts take about a third of a second, the same as a checkout. If that
 fetch fails, Jonquil starts a plain nREPL server instead and says so in
-the console. A plain server has neither op, so Stop falls back to killing
-and restarting the child, even on a program that would otherwise have
-interrupted cleanly. The next start tries the fetch again.
+the console. A plain server has no `interrupt`, so Stop falls back to
+killing and restarting the child, even on a program that would otherwise
+have interrupted cleanly. Quick doc, jump to definition and the inspector
+still work there, through Jonquil's own middleware, but `read-line` has no
+stdin. The next
+start tries the fetch again.
 
 ### `.nrepl-port`
 
@@ -1705,7 +1709,7 @@ on.
 Whoever can start `jonquil --mcp` can run code as you. Evaluating is the point
 of the tools, and nothing authenticates the caller. That is the model of MCP
 over stdio: the client controls what it spawns, so you already decide who gets
-to launch the server. It is also the same reach `bb nrepl` gives today. Don't
+to launch the server. It is also the same reach `bb nrepl-server` gives today. Don't
 put it behind anything that lets someone else choose its command line or feed
 its stdin.
 
@@ -1810,7 +1814,7 @@ The keys, grouped by what they're for. Each group opens on a click.
 | Escape | Definitions editor, console input | Close an open completion, quick doc or rename popover (before it would Stop) |
 | Ctrl+Space | Definitions editor, console input | Open or commit completion |
 | Ctrl+Q or Shift+F1 | Definitions editor | Quick documentation |
-| Ctrl+Q or Shift+F1, pressed again on the same popover | Definitions editor | Full documentation (JVM Clojure only) |
+| Ctrl+Q or Shift+F1, pressed again on the same popover | Definitions editor | Full documentation (JVM Clojure, an nREPL server with a `doc` op, ClojureScript and jank; not Jolt or ClojureDart) |
 | F12 or Ctrl+B | Definitions editor | Jump to definition |
 | Shift+F6 or F2 | Definitions editor | Rename |
 | Shift+F10 or right click | Definitions editor, console input | Open the context menu |

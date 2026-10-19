@@ -272,8 +272,9 @@ the third, and every `:attach` runtime is another:
 `ev/make :attach` forwards to `jonquil.nrepl.connection`'s own
 `make-attached` multimethod, dispatched a second time on the selection's
 profile id, so `jonquil.nrepl.attach` (`:cljd`), `jonquil.nrepl.jvm`
-(`:clj`) and `jonquil.nrepl.shadow` (`:cljs`) each register their own method rather than sharing one `:attach`
-implementation.
+(`:clj`, and `:nrepl` for the nREPL dialect, on the same record) and
+`jonquil.nrepl.shadow` (`:cljs`) each register their own method rather
+than sharing one `:attach` implementation.
 
 ```mermaid
 flowchart LR
@@ -286,6 +287,7 @@ flowchart LR
   ma -- ":cljd" --> attach["jonquil.nrepl.attach<br/>Attach: a running ClojureDart app"]
   ma -- ":clj" --> jvm["jonquil.nrepl.jvm<br/>Jvm: your own nREPL server"]
   ma -- ":cljs" --> shadow["jonquil.nrepl.shadow<br/>Shadow: a running shadow-cljs build"]
+  ma -- ":nrepl" --> jvm
 ```
 
 ### `jonquil.nrepl.*`: Jolt out of process
@@ -480,8 +482,8 @@ on the GTK thread, since it's asked for on demand rather than on every
 keystroke: it's backed by clojure-cli.repl's own `doc` op, whose first
 call downloads the ClojureDocs export into the server's own config
 directory, so `:full-doc-timeout-ms` leaves room for several seconds
-there, well past `:help-timeout-ms`'s 300 ms budget for `lookup` and
-`complete` on the GTK thread.
+there, well past the 3 s a late `lookup` or `complete` answer is given
+(`ev/ask-help!`, off the GTK thread).
 
 `jonquil.clj` is this evaluator's pure half, the same split `jonquil.cljd`
 draws for ClojureDart: the console's own sentences, the buffer's `ns`
@@ -890,15 +892,17 @@ evaluate in, and the Jolt ones ignore it.
 
 ### Plug points for more dialects
 
-Four more dialects exist now, ClojureDart, JVM Clojure, ClojureScript and jank. The
+Five more dialects exist now: ClojureDart, JVM Clojure, ClojureScript,
+jank, and the nREPL dialect (any nREPL server, on JVM Clojure's evaluator). The
 attach ones already use two of these plug points. `jonquil.paint/paint-plan` takes the active
 profile as an argument, so highlighting and completion both draw on each
 profile's own `:special-forms` and `:builtins` rather than Jolt's alone.
 A profile's `:port-file` is most of what an attach runtime needs:
 `jonquil.dialect/cljd` names `NREPL.lock` and `jonquil.dialect/clj`
-names `.nrepl-port`, `jonquil.dialect/cljs` names `.shadow-cljs/nrepl.port`,
-while `jonquil.nrepl.connection` holds the connect, describe, clone and
-detach lifecycle all three share.
+names `.nrepl-port`, `jonquil.dialect/cljs` names `.shadow-cljs/nrepl.port`
+and `jonquil.dialect/nrepl` names `.nrepl-port` too (overridable from
+`.jonquil.edn`), while `jonquil.nrepl.connection` holds the connect,
+describe, clone and detach lifecycle all four share.
 
 A few places are still written for Jolt rather than read from a
 profile, though. `child/start!`'s launch args, its port scan, and the log text it
