@@ -123,6 +123,7 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 bb check                  # require every namespace, exit 0
 bb test                   # all test namespaces; exits 1 on any failure or error
 bb test:nrepl             # live nREPL tests: spawn Jolt children (need the jolt-lang/nrepl checkout)
+bb test:nightly           # test:nrepl against Jolt's nightly build, cached under ~/.cache/jonquil/jolt-nightly (--offline reuses it)
 bb test:clj               # live JVM tests: start a real clojure -M:serve (need Java 17+ and the clojure CLI)
 bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
 bb test:bb                # live nREPL-dialect tests: start a real bb nrepl-server (bb on PATH; skips without one)

@@ -24,12 +24,23 @@ reports fewer assertions than macOS (714 tests and 4028 assertions, 31
 fewer, measured 2026-10-19).
 
 <details>
-<summary><strong>The live suites: <code>test:nrepl</code>, <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code> and <code>test:basilisp</code></strong></summary>
+<summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code> and <code>test:basilisp</code></strong></summary>
 
 `bb test:nrepl` runs a second, separate suite (59 tests, 213 assertions,
 about 50 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
+`bb test:nightly` runs that same suite on Jolt's nightly build (the
+`vnightly` pre-release, built daily from Jolt's main), so a change on Jolt
+main that breaks Jonquil shows up before it reaches a release. It downloads
+the build for macOS (arm64 or x86_64) or Linux x86_64 with `curl`, checks it
+against the published `.sha256`, and unpacks it under
+`$XDG_CACHE_HOME/jonquil/jolt-nightly` (or `~/.cache/jonquil/jolt-nightly`)
+without touching the `jolt` on `PATH`. Later runs fetch only the `.sha256`
+and download again when it changes, and `--offline` reuses the cached build.
+The nightly goes first on `PATH` for the run, and the Jolt children pick it
+up too (checked with `ps`, 2026-10-20: 59 tests, 213 assertions on
+`v0.8.23-26-g1dcdf9e4`).
 `bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by
 `dev/clj_server.clj` (mirroring `jonquil.nrepl.child`'s shape for a Jolt
