@@ -46,7 +46,6 @@
     jonquil.nrepl.client-test
     jonquil.nrepl.connection-test
     jonquil.nrepl.jank-child-test
-    jonquil.nrepl.owner-table-test
     jonquil.nrepl.ops-test
     jonquil.cljd-test
     jonquil.clj-test

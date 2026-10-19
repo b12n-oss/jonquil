@@ -1,5 +1,5 @@
 (ns jonquil.nrepl.child-test
-  "Spawns real `jolt nrepl-server` children (jolt on PATH; the injected
+  "Spawns real Jolt nREPL server children (jolt on PATH; the injected
   middleware from child/middleware-root). Every child a test starts, the
   test kills by its own pid."
   (:require [clojure.java.io :as io]
@@ -50,27 +50,37 @@
   (with-login-path "/nonexistent-jonquil:/fake-home-for-test/.local/bin"
     (fn []
       (is (= ["jolt" "-Sdeps"
-              "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"}} :nrepl/middleware [nrepl.middleware/default-middleware]}"
-              "nrepl-server" "7950"]
+              "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"}}}"
+              "-e" (child/server-form 7950 ["nrepl.middleware/default-middleware"])]
              (child/launch-args 7950 {:local "/r/nrepl"})))
       (is (= ["jolt" "-Sdeps"
-              "{:deps {nrepl/nrepl {:git/url \"https://github.com/jolt-lang/nrepl.git\", :git/tag \"v0.4.0\", :git/sha \"7efdd6c\"}} :nrepl/middleware [nrepl.middleware/default-middleware]}"
-              "nrepl-server" "7952"]
+              "{:deps {nrepl/nrepl {:git/url \"https://github.com/jolt-lang/nrepl.git\", :git/tag \"v0.4.0\", :git/sha \"7efdd6c\"}}}"
+              "-e" (child/server-form 7952 ["nrepl.middleware/default-middleware"])]
              (child/launch-args 7952 {:git child/nrepl-git-coord})))
-      (is (= ["jolt" "nrepl-server" "7951"] (child/launch-args 7951 nil))))))
+      (is (= ["jolt" "-e" (child/server-form 7951 [])] (child/launch-args 7951 nil))))))
+
+(deftest server-form-test
+  (is (= (str "(do (require 'jolt.nrepl) (jolt.host/block-sigint)"
+              " (let [stop (jolt.nrepl/start 7950 '[a/b c/d] {:port-file nil})]"
+              " (jolt.host/add-shutdown-hook stop) (jolt.host/park-until-interrupt) (stop)))")
+         (child/server-form 7950 ["a/b" "c/d"])))
+  (is (= '(do (require 'jolt.nrepl) (jolt.host/block-sigint)
+              (let [stop (jolt.nrepl/start 7950 '[] {:port-file nil})]
+                (jolt.host/add-shutdown-hook stop) (jolt.host/park-until-interrupt) (stop)))
+         (read-string (child/server-form 7950 [])))
+      "it reads as one form"))
 
 (deftest launch-args-with-the-inspector-test
   (with-login-path "/nonexistent-jonquil:/fake-home-for-test/.local/bin"
     (fn []
       (is (= ["jolt" "-Sdeps"
-              (str "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"} jonquil/nrepl-middleware {:local/root \"/c/ins\"}}"
-                   " :nrepl/middleware [jonquil.nrepl.stdin-middleware/stdin nrepl.middleware/default-middleware"
-                   " jonquil.nrepl.inspect-middleware/inspect jonquil.nrepl.info-middleware/jonquil-info]}")
-              "nrepl-server" "7950"]
+              "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"} jonquil/nrepl-middleware {:local/root \"/c/ins\"}}}"
+              "-e" (child/server-form 7950 ["jonquil.nrepl.stdin-middleware/stdin" "nrepl.middleware/default-middleware"
+                                           "jonquil.nrepl.inspect-middleware/inspect" "jonquil.nrepl.info-middleware/jonquil-info"])]
              (child/launch-args 7950 {:local "/r/nrepl"} "/c/ins")))
       (is (= ["jolt" "-Sdeps"
-              "{:deps {jonquil/nrepl-middleware {:local/root \"/c/ins\"}} :nrepl/middleware [jonquil.nrepl.inspect-middleware/inspect jonquil.nrepl.info-middleware/jonquil-info]}"
-              "nrepl-server" "7951"]
+              "{:deps {jonquil/nrepl-middleware {:local/root \"/c/ins\"}}}"
+              "-e" (child/server-form 7951 ["jonquil.nrepl.inspect-middleware/inspect" "jonquil.nrepl.info-middleware/jonquil-info"])]
              (child/launch-args 7951 nil "/c/ins"))
           "a plain server still gets the inspector and jonquil-info, but not stdin")
       (is (= (child/launch-args 7952 {:local "/r/nrepl"}) (child/launch-args 7952 {:local "/r/nrepl"} nil))))))
@@ -84,7 +94,7 @@
     (let [path (str (.getPath bin) ":/fake-home-for-test/.local/bin")]
       (with-login-path path
         (fn []
-          (is (= [(.getPath jolt) "nrepl-server" "7951"] (child/launch-args 7951 nil)))
+          (is (= [(.getPath jolt) "-e" (child/server-form 7951 [])] (child/launch-args 7951 nil)))
           (is (= {"PATH" path} (:extra-env (child/process-options {:dir "/d" :log "/l"})))))))))
 
 (deftest middleware-root-test
@@ -113,14 +123,14 @@
         c (child/start! dir (child/middleware-source))]
     (try
       (is (child/alive? c))
-      (is (= (str (:port c)) (str/trim (slurp (io/file dir ".nrepl-port")))) "the child writes its port")
+      (is (= "4242\n" (slurp (io/file dir ".nrepl-port"))) "the child writes no port file over the user's")
       (let [conn (client/connect (:port c))]
         (is (contains? (set (keys (:ops (first (client/request-sync conn {:op "describe"} 5000))))) "interrupt"))
         (client/close! conn))
       (finally
         (is (= 143 (child/kill! c)) "SIGTERM")))
     (is (not (child/alive? c)))
-    (is (= "4242\n" (slurp (io/file dir ".nrepl-port"))) "the .nrepl-port that was there is back")
+    (is (= "4242\n" (slurp (io/file dir ".nrepl-port"))) "and the user's .nrepl-port is still there")
     (is (not (.exists (io/file (:log c)))) "the log is deleted")))
 
 (deftest kill-escalates-on-a-stopped-child-test
@@ -128,7 +138,7 @@
     (clojure.java.shell/sh "kill" "-STOP" (str (:pid c)))
     (is (= 137 (child/kill! c)) "SIGKILL after the SIGTERM grace")
     (is (not (child/alive? c)))
-    (is (not (.exists (io/file (:dir c) ".nrepl-port"))) "no stale port file")))
+    (is (not (.exists (io/file (:dir c) ".nrepl-port"))) "no port file at all")))
 
 (deftest a-failed-bind-moves-to-the-next-port-test
   ;; The scan starts at a port this test holds (one the OS picked, never
@@ -174,7 +184,7 @@
       (let [pid (.pid ^java.lang.Process (:proc @captured))]
         (is (wait-until #(not (.isPresent (java.lang.ProcessHandle/of pid))) 3000)
             "the child is dead within about 3 s of the throw"))
-      (is (= "9999\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back, byte-identical")
+      (is (= "9999\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is untouched, byte-identical")
       (finally (force-kill! @captured)
                (when @log (io/delete-file @log true))))))
 
@@ -201,7 +211,7 @@
           ;; throw. It's deleted in the finally, once the child is dead.
           (reset! log (:log (ex-data ex)))))
       (is (wait-until #(not (p/alive? @captured)) 3000) "the child is dead")
-      (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is back")
+      (is (= "5555\n" (slurp (io/file dir ".nrepl-port"))) "the seeded .nrepl-port is untouched")
       (finally (force-kill! @captured)
                (when @log (io/delete-file @log true))))))
 
@@ -222,9 +232,8 @@
       (let [c1 (start!)
             c2 (start!)]
         (is (not= (:port c1) (:port c2)))
-        (is (= (str (:port c2)) (port-file-text dir)))
+        (is (= "1234" (port-file-text dir)) "neither child writes the file")
         (child/kill! c1)
-        (is (= (str (:port c2)) (port-file-text dir)) "the first child's exit leaves the second's port")
         (child/kill! c2)
-        (is (= "1234" (port-file-text dir)) "the seeded file is back"))
+        (is (= "1234" (port-file-text dir)) "nor deletes it"))
       (finally (doseq [c @started] (force-kill! (:proc c)))))))
