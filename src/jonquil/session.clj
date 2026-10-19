@@ -179,8 +179,7 @@
   (mark-run-file!), so jump to definition from another tab can open it."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
-   (let [owner (:owner opts :run)
-         file (saved-file (:path opts) code)]
+   (let [owner (:owner opts :run)]
      ;; A Run of a file in a project uses that project's source folders: a
      ;; window keeps one in-process evaluator when it opens a file from
      ;; another in-process project (selection-key leaves the project out),
@@ -194,7 +193,8 @@
      ;; Marked in before-idle, on the Run's own worker before the context
      ;; goes idle, so a REPL entry or another Run can't define a var in
      ;; between and get this file (review finding 1).
-     (let [before (when (and file (not (eval/evaluating? ctx))) (program-vars))
+     (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
+           before (when file (program-vars))
            opts (cond-> (assoc opts :owner owner)
                   before (assoc :before-idle
                                 (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
