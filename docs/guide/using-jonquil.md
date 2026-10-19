@@ -673,8 +673,12 @@ anything else that can shadow a name), then a top-level `def`, `defn`, or
 similar form anywhere in the file. When neither turns up but the symbol
 resolves to a definition in another file, which JVM Clojure's server,
 Jolt in or out of process, and an nREPL server whose files are on this
-machine can tell Jonquil, that file opens in a read-only source panel on
-the right, with the caret on the definition. With Jolt in process that
+machine can tell Jonquil, Jonquil opens that file with the caret on the
+definition. A file in your project opens in a tab, or brings forward the
+tab that already has it, ready to edit; Cmd/Ctrl+[ then takes you back to
+where you pressed F12, one jump at a time. Library code from a jar, and
+any file outside your project, opens in a read-only source panel on the
+right instead. With Jolt in process that
 includes a function another tab's Run defined, once that tab's file is
 saved: the Run records the file for the vars it defines. In other
 runtimes, which don't say where a definition lives (ClojureDart,
@@ -687,17 +691,15 @@ says so.
 <details>
 <summary><strong>The source panel</strong></summary>
 
-Inside the source panel, F12 or Ctrl+B follows a definition again, in
-the same file or into another, and Cmd/Ctrl+[ goes back. A definition in
-the window's own file is the exception: F12 moves the window's caret to
-it and puts focus back in the editor, rather than loading that file into
-the panel. Escape closes
-the panel, and Cmd/Ctrl+I swaps it for the inspector. Library code from
-a jar, and any file outside your project, is read-only. A file in your
-project has an **Open in window** button (Cmd/Ctrl+Shift+O while the panel
-has focus) that opens it in a tab for editing, on the same line, or
-brings forward the tab that already has it. Nothing in your other tabs is
-touched.
+The panel shows library code and files outside your project, read-only.
+Inside it, F12 or Ctrl+B follows a definition again, in the same file or
+into another, and Cmd/Ctrl+[ goes back. A definition in one of your
+project's files opens in its tab, as a jump from the editor does, and a
+definition in the window's own file moves the window's caret to it and
+puts focus back in the editor. Escape closes the panel, and Cmd/Ctrl+I
+swaps it for the inspector. Should a project file ever land in the panel
+(its tab couldn't be opened), the **Open in window** button
+(Cmd/Ctrl+Shift+O while the panel has focus) tries again.
 
 </details>
 
@@ -1822,6 +1824,7 @@ The keys, grouped by what they're for. Each group opens on a click.
 | d | inspector panel | Open the def prompt (nothing while the panel's actions are disabled, after a lost connection) |
 | Escape | inspector panel | Close the panel and focus the editor |
 | Cmd/Ctrl+[ | Source panel | Back to where the panel was |
+| Cmd/Ctrl+[ | Elsewhere, after F12 opened a tab | Back to where F12 was pressed |
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
 | Escape | Source panel | Close the panel |
 
