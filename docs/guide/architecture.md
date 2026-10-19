@@ -447,10 +447,15 @@ successful Run moves the prompt to the buffer's own namespace afterward.
 On each fresh connection, after the inspect registration and before the
 user's own request, `auto-require!` sends one `(require ...)` eval for
 the selection's `:auto-require` list (parsed from `.jonquil.edn` by
-`dialect/parse-config`, kept on the selection only for `:clj`). The
-connect policy's `:on-connect` resets `:auto-required?` to false, so a
-reconnect requires again; a failure streams the server's error, prints
-`clj/auto-require-failed-message`, and still sends the user's request.
+`dialect/parse-config`, kept on the selection only for `:clj` and
+`:jolt`). The connect policy's `:on-connect` resets `:auto-required?` to
+false, so a reconnect requires again; a failure streams the server's
+error, prints `clj/auto-require-failed-message`, and still sends the
+user's request. Jolt does the same in two places: out of process,
+`jonquil.nrepl.evaluator`'s `auto-require!` flags the `:runtime` map,
+which every child start replaces; in process, `jonquil.session/auto-require!`
+runs in `eval-async`'s `:before-eval` after `use-project-deps!`, once per
+session, for the window's own project only.
 
 Unlike ClojureDart, this server supports `interrupt` and `stdin`. Stop
 marks the running evaluation and, when the server advertises `interrupt`,

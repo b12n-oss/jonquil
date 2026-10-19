@@ -8,6 +8,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- `.jonquil.edn :auto-require` works for Jolt projects too, in and out of process: the listed namespaces load before the first evaluation (out of process, again after the Jolt runtime restarts), so the first line at the prompt can call into them.
 - F12 on a definition in one of your project's files opens it in a tab, ready to edit, instead of the read-only source panel; Cmd/Ctrl+[ goes back to where you pressed F12 (the last 50 jumps). Library code and files outside the project still open in the panel.
 - Jump to definition (F12) leaves the buffer for Jolt running out of process: a function from another file in the project opens in its tab, and one from a jar dependency in the source panel, on its definition. Functions built into Jolt have no source file, so they show their documentation as before.
 - A project kept in process (`{:runtime :in-process}`) can require its own namespaces: its `deps.edn` `:paths` are Jolt's source folders there now, so F12 also opens those files. Its `:deps` libraries load there too, fetched on the first evaluation that needs them, off the window's thread.
