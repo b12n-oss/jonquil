@@ -175,6 +175,7 @@
    popovers-quickdoc/row-jump-local-binding
    popovers-quickdoc/row-jump-external
    popovers-quickdoc/row-jump-none
+   popovers-quickdoc/row-jump-to-a-run-file
    popovers-quickdoc/row-jump-shadowed-param
    completion/row-completion-opens
    completion/row-completion-sized-to-rows-and-labelled

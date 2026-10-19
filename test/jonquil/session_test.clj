@@ -1,7 +1,12 @@
 (ns jonquil.session-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.evaluator :as ev]
-            [jonquil.session :as session]))
+            [jonquil.session :as session]
+            [jonquil.source :as source]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (defn- run
   ([f s code] (run f s code {}))
@@ -153,3 +158,52 @@
     (swap! (:state s) assoc :prompt-ns 'jonquil.no-such-ns-for-inspect)
     (let [r (inspect-sync s :def {:name "x"})]
       (is (string? (:error r))))))
+
+(defn- saved! [rel text]
+  (let [f (io/file (temp-dirs/temp-dir! "jonquil-runfile-") rel)]
+    (.mkdirs (.getParentFile f))
+    (spit f text)
+    (.getCanonicalPath f)))
+
+(defn- var-meta [sym] (select-keys (meta (resolve sym)) [:file :line]))
+
+(deftest a-run-of-a-saved-file-gives-its-vars-the-file-test
+  ;; Before, a Run's vars had a line and no file (load-string), so F12 from
+  ;; another tab showed the docs instead of jumping.
+  (let [text "(ns runfile.a)\n\n(defn helper\n  \"Helps.\"\n  [x]\n  (inc x))\n\n(def answer 42)\n"
+        path (saved! "runfile/a.clj" text)
+        s (session/make-session)]
+    (try
+      (is (= :ok (:status (run session/run-definitions! s text {:path path}))))
+      (is (= {:file path :line 3} (var-meta 'runfile.a/helper)))
+      (is (= {:file path :line 8} (var-meta 'runfile.a/answer)))
+      (testing "a lookup from another tab's text finds the file, and the source panel can open it"
+        (let [d (ev/lookup s "runfile.a/helper" "(runfile.a/helper 1)" 3)]
+          (is (= path (:file d)))
+          (is (= {:path path :line 3} (select-keys (source/location d {}) [:path :line])))))
+      (finally (remove-ns 'runfile.a)))))
+
+(deftest no-saved-file-no-file-test
+  (let [s (session/make-session)]
+    (try
+      (testing "an untitled buffer"
+        (run session/run-definitions! s "(ns runfile.b) (defn f [] 1)")
+        (is (nil? (:file (var-meta 'runfile.b/f)))))
+      (testing "a path that isn't on disk (never saved)"
+        (run session/run-definitions! s "(ns runfile.b) (defn f [] 1)" {:path "/no/such/dir/b.clj"})
+        (is (nil? (:file (var-meta 'runfile.b/f)))))
+      (finally (remove-ns 'runfile.b)))))
+
+(deftest only-what-the-run-defined-is-marked-test
+  (let [path (saved! "runfile/c.clj" "")
+        s (session/make-session)]
+    (session/set-mode! s :accumulate)
+    (try
+      (run session/submit-repl! s "(ns runfile.c) (defn from-repl [] 1)")
+      (run session/run-definitions! s "(ns runfile.c)\n(defn from-run [] 2)\n" {:path path})
+      (is (= {:file path :line 2} (var-meta 'runfile.c/from-run)))
+      (is (nil? (:file (var-meta 'runfile.c/from-repl))) "a REPL entry's var isn't the file's")
+      (testing "a second Run redefines, and the var is marked again at its new line"
+        (run session/run-definitions! s "(ns runfile.c)\n\n\n(defn from-run [] 3)\n" {:path path})
+        (is (= {:file path :line 4} (var-meta 'runfile.c/from-run))))
+      (finally (remove-ns 'runfile.c)))))

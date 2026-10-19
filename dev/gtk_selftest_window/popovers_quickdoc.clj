@@ -427,6 +427,40 @@
                              (and (= 1 handled) status-ok?)
                              {:handled handled :status (g/label-text (:status-label ui))})))))
 
+(defn row-jump-to-a-run-file
+  "F12 on a function another tab's in-process Run defined: the Run of a
+  saved file gives its vars that file (session/mark-run-file!), so the
+  source panel opens it on the definition's line. Before, the var had a
+  line but no file and F12 showed its docs."
+  [ui]
+  (go-row :jump-to-a-run-file support/check
+    (let [dir (doto (java.io.File. (System/getProperty "java.io.tmpdir") (str "jonquil-runfile-" (System/nanoTime))) (.mkdirs))
+          f (java.io.File. dir "runfilew.clj")
+          text "(ns runfilew)\n\n(defn helper\n  \"Helps.\"\n  [x]\n  (inc x))\n"
+          _ (spit f text)
+          done (promise)
+          sp (:source-pane ui)]
+      (try
+        (session/run-definitions! (:session ui) text {:path (.getPath f) :owner :jump-row
+                                                      :on-output (fn [_ _]) :on-complete #(deliver done %)})
+        (let [ran (:status (deref done 5000 :timeout))]
+          (docs/clear-doc-cache!)
+          (on-gtk (let [ed (:editor ui) t "(runfilew/helper 1)"]
+                    (editor/set-text! ed t)
+                    (support/place-cursor! (:buf ed) (+ 1 (str/index-of t "helper")))
+                    ((:jump!* ui))))
+          (let [shown? (await-until 5000 20 #(pos? (g/gtk-widget-get-visible (:root sp))))
+                v (on-gtk {:header (g/label-text (:header sp))
+                           :line (inc (first (g/cursor-line-col (:buf (:editor sp)))))})]
+            (on-gtk (support/check :jump-to-a-run-file
+                                   (and (= :ok ran) shown? (str/includes? (:header v) "runfilew.clj") (= 3 (:line v)))
+                                   (assoc v :ran ran :shown shown?))
+                    ((:source-close!* ui)))))
+        (finally
+          (remove-ns 'runfilew)
+          (.delete f)
+          (.delete dir))))))
+
 (defn row-jump-shadowed-param
   "I1: \"(def x 1)\\n(defn f [x] x)\", caret 22 (the body's own x, a usage
   of the PARAMETER, not the top-level def) -- jonquil.help/jump-target's
