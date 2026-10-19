@@ -703,18 +703,22 @@
           row-texts (fn [] (let [lb (:list-box c)]
                              (vec (for [i (range (count (:candidates (completion/state c))))]
                                     (g/label-text (g/gtk-list-box-row-get-child (g/gtk-list-box-get-row-at-index lb i)))))))
-          open-on (fn [text caret]
+          ;; ready? says when the height is this list's: the scrolled window
+          ;; keeps its last height while closed, so the second open read
+          ;; the first list's 46 px before GTK resized it (2 runs of 4,
+          ;; 2026-10-19)
+          open-on (fn [text caret ready?]
                     (on-gtk (let [ed (:editor ui)]
                               (editor/set-text! ed text)
                               (support/place-cursor! (:buf ed) caret)
                               ((:complete!* ui))))
-                    (await-until 2000 20 #(pos? (scroll-h)))
+                    (await-until 2000 20 #(ready? (scroll-h)))
                     (let [r (on-gtk {:h (scroll-h) :rows (row-texts)})]
                       (on-gtk (completion/close! c))
                       r))
           text "(defn zzq-a [] 1)\n(defn zzq-b [] 2)\n(zzq"
-          few (open-on text (count text))
-          many (open-on "(ma" 3)]
+          few (open-on text (count text) pos?)
+          many (open-on "(ma" 3 #(< (* 2 (:h few)) %))]
       (on-gtk (support/check :completion-sized-to-rows-and-labelled
                              (and (= ["zzq-a  buffer" "zzq-b  buffer"] (:rows few))
                                   (< (* 2 (:h few)) (:h many)))

@@ -11,7 +11,7 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 65 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (708 tests, 4027 assertions
+slower. `bb test` runs the full unit suite (713 tests, 4043 assertions
 on macOS) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (708 tests and 3996 assertions, 31
+reports fewer assertions than macOS (713 tests and 4012 assertions, 31
 fewer, measured 2026-10-19).
 
 <details>
@@ -115,7 +115,7 @@ handlers a person would use rather than the internal functions directly.
 
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 307 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 308 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
@@ -195,7 +195,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. A full run reports 48, 307, 19, 15, 35, 4, 13, 5 and 10 rows
+browser. A full run reports 48, 308, 19, 15, 35, 4, 13, 5 and 10 rows
 passing, in group order.
 
 </details>

@@ -9,7 +9,8 @@
   A session is the InProcess record, the in-process implementation of
   jonquil.evaluator/Evaluator. It keeps the :ctx and :state keys a plain
   map had, so every caller that reads them is unchanged."
-  (:require [clojure.set :as set]
+  (:require [clojure.java.io :as io]
+            [clojure.set :as set]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -131,10 +132,51 @@
                                          (= :ok (:status result)) (assoc :last-value (:value result)))))
                               (when user-complete (user-complete result)))))))
 
+(defn- program-vars
+  "{var meta} for every var interned in a namespace that isn't a loaded
+  library: the program's own namespaces (Jonquil's and Jolt's are libraries)."
+  []
+  (let [libs (set (loaded-libs))]
+    (into {}
+          (for [n (all-ns)
+                :when (not (libs (ns-name n)))
+                v (vals (ns-interns n))]
+            [v (meta v)]))))
+
+(defn- saved-file
+  "path's canonical path when it names a file on disk holding exactly code,
+  else nil. A buffer with unsaved edits doesn't match its file, and its
+  vars' lines would point into the wrong text there (review finding 2)."
+  [path code]
+  (when path
+    (try (let [f (io/file path)]
+           (when (and (.isFile f) (= code (slurp f))) (.getCanonicalPath f)))
+         (catch Throwable _ nil))))
+
+(defn mark-run-file!
+  "Gives file to every var a Run defined: one whose metadata isn't what it
+  was before the Run (before, program-vars' map; a def replaces a var's
+  metadata), with a :line and no :file. A Run evaluates the buffer's text
+  with load-string, and Jolt turns the reader's file off there on purpose
+  (an evaluated string isn't the file that called it), so these vars had a
+  line but nowhere to jump to. A var a REPL entry defined earlier keeps its
+  metadata, so it isn't marked; one a require loaded already has a :file.
+  What else changes a var's metadata during the Run is marked too: an
+  alter-meta! the program does, a load-file of another file, a future the
+  program started (review finding 3, accepted: all are the Run's own
+  doing)."
+  [file before]
+  (doseq [[v m] (program-vars)
+          :when (and (:line m) (nil? (:file m)) (not= m (get before v)))]
+    (try (alter-meta! v assoc :file file) (catch Throwable _ nil))))
+
 (defn run-definitions!
   "Runs the Definitions text. In :reset mode, first removes what earlier
   evaluations created. Returns nil when started, or the engine's warning
-  string when a program is already running (and then resets nothing)."
+  string when a program is already running (and then resets nothing). With
+  :path naming a file that holds exactly code, the vars the Run defines get
+  it as their :file
+  (mark-run-file!), so jump to definition from another tab can open it."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (let [owner (:owner opts :run)]
@@ -148,7 +190,15 @@
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
      (create-ns 'user)
-     (evaluate! session code 'user (assoc opts :owner owner)))))
+     ;; Marked in before-idle, on the Run's own worker before the context
+     ;; goes idle, so a REPL entry or another Run can't define a var in
+     ;; between and get this file (review finding 1).
+     (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
+           before (when file (program-vars))
+           opts (cond-> (assoc opts :owner owner)
+                  before (assoc :before-idle
+                                (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
+       (evaluate! session code 'user opts)))))
 
 (defn submit-repl!
   "Evaluates one REPL entry in the namespace the last evaluation left, and

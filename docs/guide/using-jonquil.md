@@ -671,12 +671,15 @@ it into view, when Jonquil can find one in the buffer. It checks the
 nearest enclosing local binding first (a function parameter, a `let`, or
 anything else that can shadow a name), then a top-level `def`, `defn`, or
 similar form anywhere in the file. When neither turns up but the symbol
-resolves to a definition in another file, which JVM Clojure's server, Jolt
-out of process, and an nREPL server whose files are on this machine can
-tell Jonquil, that file opens in a read-only source panel on the right,
-with the caret on the definition. In other runtimes, which don't say
-where a definition lives (Jolt in process, ClojureDart, ClojureScript,
-jank), jump shows the var's documentation in the quick-doc popup instead.
+resolves to a definition in another file, which JVM Clojure's server,
+Jolt in or out of process, and an nREPL server whose files are on this
+machine can tell Jonquil, that file opens in a read-only source panel on
+the right, with the caret on the definition. With Jolt in process that
+includes a function another tab's Run defined, once that tab's file is
+saved: the Run records the file for the vars it defines. In other
+runtimes, which don't say where a definition lives (ClojureDart,
+ClojureScript, jank), jump shows the var's documentation in the quick-doc
+popup instead.
 Functions built into Jolt itself, `clojure.core`'s among them, have no
 source file to open, so they show their documentation too. When nothing matches at all, the status bar
 says so.

@@ -431,3 +431,21 @@
                                   :done (promise) :stop-requested flag})
     (is (nil? (sut/stop-eval! ctx)))
     (is (false? @flag) "a finishing run is not re-classified as interrupted")))
+
+(deftest before-idle-runs-while-still-evaluating-test
+  ;; jonquil.session marks a Run's vars there, so nothing else may evaluate
+  ;; until it returns.
+  (let [ctx (sut/make-eval-context)
+        seen (atom nil)
+        [r] (run-sync ctx "(+ 1 2)"
+                      {:before-idle (fn [res] (reset! seen {:status (:status res) :busy (sut/evaluating? ctx)
+                                                            :refused (string? (sut/eval-async ctx "1" {}))}))}
+                      3000)]
+    (is (= :ok (:status r)))
+    (is (= {:status :ok :busy true :refused true} @seen) "the context is still busy, so a second eval is refused")
+    (is (not (sut/evaluating? ctx)) "and it's idle once on-complete has run"))
+  (testing "a throwing before-idle still completes"
+    (let [ctx (sut/make-eval-context)
+          [r] (binding [*err* (java.io.StringWriter.)]
+                (run-sync ctx "(+ 1 2)" {:before-idle (fn [_] (throw (ex-info "boom" {})))} 3000))]
+      (is (= 3 (:value r))))))
