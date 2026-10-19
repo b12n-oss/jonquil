@@ -99,7 +99,10 @@
   (let [dir (temp-project) e (make dir)
         util (io/file dir "src/demo/util.clj")]
     (.mkdirs (.getParentFile util))
-    (spit util "(ns demo.util)\n\n(defn helper\n  \"Helps.\"\n  [x]\n  (inc x))\n")
+    ;; unique per run: Jolt v0.8.23 caches compiled code by its text, and an
+    ;; identical file compiled elsewhere reports that place's :file
+    ;; (jolt-lang/jolt#1404)
+    (spit util (str "(ns demo.util)\n\n(defn helper\n  \"Helps.\"\n  [x]\n  (inc x))\n;; " (System/nanoTime) "\n"))
     (try
       (is (nil? (ev/start! e)))
       (is (= :ok (:status (first (run e "(require 'demo.util)" false)))))

@@ -10,10 +10,13 @@
   jonquil.evaluator/Evaluator. It keeps the :ctx and :state keys a plain
   map had, so every caller that reads them is unchanged."
   (:require [clojure.set :as set]
+            [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
-            [jonquil.inspect.view :as view]))
+            [jonquil.inspect.view :as view]
+            [jonquil.project-roots :as roots]
+            [jonquil.source :as source]))
 
 (declare run-definitions! submit-repl! set-mode!)
 
@@ -48,7 +51,9 @@
   (complete [_ prefix text pos extra-context]
     (docs/candidates (:prompt-ns @state) prefix text pos extra-context))
   (lookup [_ sym text pos]
-    (docs/symbol-doc (:prompt-ns @state) sym text pos))
+    ;; a newer Jolt records a required namespace's :file as its classpath
+    ;; name, which resolves on the roots project-roots set
+    (some-> (docs/symbol-doc (:prompt-ns @state) sym text pos) source/resolve-file))
   (limitations [_] [])
   ev/Inspector
   (inspect! [_ op args on-view]
@@ -75,7 +80,11 @@
                (atom {:mode :reset :prompt-ns 'user :created {}
                       :inspect-view (atom nil)})))
 
-(defmethod ev/make :in-process [_] (make-session))
+(defmethod ev/make :in-process [selection]
+  ;; The project's source folders, so a project kept in process can require
+  ;; its own namespaces (jonquil.project-roots).
+  (roots/use-project! (:project-dir selection))
+  (make-session))
 
 (defn- ns-names [] (set (map ns-name (all-ns))))
 
@@ -129,6 +138,13 @@
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (let [owner (:owner opts :run)]
+     ;; A Run of a file in a project uses that project's source folders: a
+     ;; window keeps one in-process evaluator when it opens a file from
+     ;; another in-process project (selection-key leaves the project out),
+     ;; so make's own call isn't enough (review finding 1). A loose file
+     ;; leaves them as they are.
+     (when-let [dir (some-> (:path opts) dialect/find-project :dir)]
+       (roots/use-project! dir))
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
      (create-ns 'user)

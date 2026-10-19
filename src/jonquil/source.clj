@@ -69,6 +69,49 @@
            :editable? (boolean (and project-dir (under? path project-dir)))
            :label (file-name path)})))))
 
+(defn classpath-file
+  "A bare classpath name (\"demo/util.clj\") as something location can read,
+  resolved with io/resource on the roots this process searches: a file: URL
+  whose file exists gives its canonical path, a jar:file:<jar>!/<entry> URL
+  is kept as it is, anything else is nil. Jolt from jolt-lang/jolt f714b0ed
+  (2026-10-19, after v0.8.23) records a required namespace's :file this way,
+  as JVM Clojure does; v0.8.23 recorded the root's spelling (an absolute
+  path, or ./src/...). Measured on f714b0ed in source mode: a stdlib name
+  such as clojure/string.clj resolves to a file: URL that doesn't exist,
+  and in a release binary to an image resource whose string is the bare
+  name again, so all of those come back nil. Never throws (a lookup
+  mustn't)."
+  [cp-name]
+  (try
+    (when-let [u (io/resource cp-name)]
+      (let [s (str u)]
+        (cond
+          (and (str/starts-with? s "jar:file:") (str/includes? s "!/")) s
+          (str/starts-with? s "file:")
+          (when-let [p (uri-path s)]
+            (let [f (io/file p)] (when (.isFile f) (.getCanonicalPath f)))))))
+    (catch :default _ nil)))
+
+(defn- classpath-name?
+  "True for a bare source name such as demo/util.clj: not a URL, not a path
+  (absolute or ./), ending in a source extension. Leaves out
+  get-symbol-doc's \"unknown\" and v0.8.23's ./src/... spelling (review
+  finding 2)."
+  [f]
+  (and (string? f)
+       (re-find #"\.(clj|cljc|jolt)$" f)
+       (not (re-find #"^(jar:|file:|/|\./|\.\./)" f))))
+
+(defn resolve-file
+  "doc-info with a bare classpath :file (classpath-name?) replaced by
+  classpath-file's answer when it has one, so location can open it. Any
+  other doc-info comes back unchanged."
+  [doc-info]
+  (let [f (:file doc-info)]
+    (if-let [p (when (classpath-name? f) (classpath-file f))]
+      (assoc doc-info :file p)
+      doc-info)))
+
 (defn same-file?
   "True when locations a and b show the same file or jar entry."
   [a b]

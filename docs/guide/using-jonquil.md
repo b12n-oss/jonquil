@@ -941,7 +941,10 @@ calls `shutdown-agents`, redefines something in `clojure.core` or
 otherwise takes Jolt down with it takes down that child, not the window
 running it, and the project's own `deps.edn` is the child's classpath.
 `.jonquil.edn` `{:runtime :in-process}` keeps a project inside Jonquil's
-process instead, and `{:runtime :nrepl}` asks for a child in a folder
+process instead. Its `deps.edn` `:paths` (`src` when it names none) are
+where Jolt looks for its namespaces there too, so a file can require
+another of the project's files and F12 opens it, but the libraries under
+`:deps` aren't loaded in process. `{:runtime :nrepl}` asks for a child in a folder
 without a `deps.edn`. A file outside any project folder has nowhere to
 start a child, so it always runs in process. An untitled tab follows the
 window's folder: in a window opened on a `deps.edn` project it runs out of
@@ -1843,7 +1846,7 @@ than being surprises you'd otherwise have to rediscover:
 </details>
 
 <details>
-<summary><strong>Jolt out of process</strong> (4)</summary>
+<summary><strong>Jolt, in or out of process</strong> (6)</summary>
 
 - An unresolved symbol evaluates to an `Unbound` var rather than an error,
   when Jonquil is running Jolt out of process.
@@ -1858,6 +1861,13 @@ than being surprises you'd otherwise have to rediscover:
 - Stop against an unresponsive out-of-process child takes about 2.2
   seconds: a second waiting for it to answer the interrupt, a second more
   for it to exit once killed, and a little overhead either side.
+- A project kept in process (`{:runtime :in-process}`) loads its own
+  `:paths`, but not its `:deps` libraries; run it out of process for those.
+- With Jolt v0.8.23 and earlier, two projects holding a byte-for-byte
+  identical namespace file can make F12 open the other project's copy:
+  Jolt caches compiled code by its text, and a cached file keeps the place
+  it was first loaded from (jolt-lang/jolt#1404). Jolt's main branch
+  fixed it on 2026-10-19, after v0.8.23; no release has the fix yet.
 
 </details>
 

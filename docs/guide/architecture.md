@@ -193,7 +193,7 @@ The console reads its busy/waiting state live from the engine (`:evaluating?`/`:
 
 ### `jonquil.session` and the O1 reset rule
 
-`jonquil.session`'s `InProcess` record holds one window's in-process evaluation state: the eval context, the current mode (`:reset` or `:accumulate`), the prompt namespace, and the namespaces each owner created, a map from owner to a set. It's the original, and still the default, implementation of the `Evaluator` protocol described below. Run and the REPL both call through the same `evaluate!` path into `jonquil.eval/eval-async`, so the engine itself never distinguishes them.
+`jonquil.session`'s `InProcess` record holds one window's in-process evaluation state: the eval context, the current mode (`:reset` or `:accumulate`), the prompt namespace, and the namespaces each owner created, a map from owner to a set. It's the original, and still the default, implementation of the `Evaluator` protocol described below. Run and the REPL both call through the same `evaluate!` path into `jonquil.eval/eval-async`, so the engine itself never distinguishes them. Making one also points Jolt at the window's project: `jonquil.project-roots/use-project!` adds the project's `deps.edn` `:paths`, made absolute, after the roots Jolt started with (so a project can't shadow the IDE's own namespaces in this shared process; captured once, so a switch replaces rather than piles up), and so does every Run of a file in another in-process project, since the window keeps one evaluator for those, through `jolt.host/set-source-roots!`, the same seam `jolt.main` uses. Without it, a project kept in process couldn't require its own namespaces, and with absolute roots Jolt records an absolute `:file`, which jump to definition opens. `:deps` aren't resolved in process.
 
 The O1 spec decision is that Run resets by default: in `:reset` mode, `run-definitions!` first removes the namespaces its owner created, then the REPL's, then `user`, and recreates a fresh `user` and evaluates into it. Loaded libraries are never owned, so they stay. An owner is whatever `eval!`'s `:owner` option names: the window passes a tab's id for Run, Run Selection, Run Form and Inspect Form, and a console entry falls back to `:repl`. A tab that closes hands its set to `:repl` (`jonquil.evaluator/Owners`, `release-owner!`), so the next Run from any tab clears it. Unchecking the toolbar's Reset on Run checkbox flips the session to `:accumulate`, and Run stops clearing first, building on whatever earlier evaluations already defined, the same way the REPL prompt always does. The out-of-process nREPL runtime applies the identical rule, just over the wire. Around every evaluation it asks the child for its namespaces and loaded libraries (`ops/ns-snapshot-code`, about 1 ms), and its reset form removes the owner's set on the child instead of on this process. The snapshot prints its data and returns the old `*1`, having pre-shifted `*1` and `*2`, so the server's own history shift leaves `*1`, `*2` and `*3` where the user had them. The same eval refers `doc`, `find-doc`, `apropos`, `dir`, `pprint` and `pp` into the session's namespace, inside its own `try`, the way the in-process engine does. So Reset on Run, the history vars and the helpers mean the same thing whichever evaluator is running underneath them.
 
@@ -831,11 +831,18 @@ send the same wire ops.
 plain server has it too. Its `jonquil-info` op is what lets jump to
 definition leave the buffer: jolt-lang/nrepl's `lookup` answers a var's
 doc and arglists but no file or line. It reads the var's own metadata,
-which Jolt records as it loads a file: a project var's `:file` is
-`./src/...`, relative to the directory jolt started in (the project, for
-the child), and becomes that file's canonical path; a jar dependency's
-`jar:file:` URL is kept as it is; a var built into Jolt has no `:file`,
-so it has no line either. The handler answers on the reader thread, since
+which Jolt records as it loads a file. On v0.8.23 a project var's
+`:file` is `./src/...`, relative to the directory jolt started in (the
+project, for the child), and becomes that file's canonical path; a jar
+dependency's `jar:file:` URL is kept as it is; a var built into Jolt has
+no `:file`, so it has no line either. Jolt's main branch from 2026-10-19
+(jolt-lang/jolt f714b0ed, not yet released) records the classpath name
+instead (`demo/util.clj`, as JVM Clojure does), and the handler resolves
+that with `io/resource` on the child's classpath: an existing `file:`
+URL gives its path, a `jar:file:` URL is kept. A bare name is never
+resolved against the directory, where a file of the same name could be an
+unrelated one. In process, `jonquil.source/resolve-file` does the same on
+the roots `jonquil.project-roots` set. The handler answers on the reader thread, since
 a metadata read never waits. jolt-lang/nrepl ships cider's `info`
 middleware, which answers the same and more, but loading orchard for it
 took a child's start from 0.30 s to 0.92 s (measured 2026-10-18), so

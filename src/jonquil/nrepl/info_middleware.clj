@@ -11,7 +11,8 @@
   It reads the var's own metadata, which Jolt records as it loads a file
   (measured 2026-10-18, Jolt v0.8.23): a project namespace's var has
   :file \"./src/demo/util.clj\", relative to the directory jolt started in,
-  which for the child is the project; a var from a jar dependency has a
+  which for the child is the project (a newer Jolt records
+  \"demo/util.clj\", see file-of); a var from a jar dependency has a
   jar:file: URL; a var built into Jolt (clojure.core) has no :file, and
   clojure.string's has a :line but no :file. jolt-lang/nrepl's cider info
   middleware answers the same and more, but loading orchard for it added
@@ -23,19 +24,37 @@
 
 (def op "jonquil-info")
 
+(defn- classpath-file
+  "A bare classpath name through io/resource on the child's classpath: an
+  existing file: URL's canonical path, a jar:file:...!/... URL as it is,
+  else nil. jonquil.source/classpath-file's twin (this text loads in the
+  child, where jonquil.source isn't)."
+  [cp-name]
+  (when-let [u (try (io/resource cp-name) (catch Throwable _ nil))]
+    (let [s (str u)]
+      (cond
+        (and (str/starts-with? s "jar:file:") (str/includes? s "!/")) s
+        (str/starts-with? s "file:")
+        (let [x (io/file (.getPath (java.net.URI. s)))]
+          (when (.isFile x) (.getCanonicalPath x)))))))
+
 (defn- file-of
   "A var's :file as something that opens on this machine: a jar: or file:
   URL as it is; an absolute path, or one starting ./ (relative to the
   child's directory, the project), as its canonical path when it names a
-  file; else nil. A bare name such as clojure/string.clj is a classpath
-  name, not a path: resolving it against the project could open an
-  unrelated file of the same name there (review finding 1)."
+  file; a bare name such as demo/util.clj through classpath-file; else nil.
+  A bare name is a classpath name, not a path: resolving it against the
+  project directory could open an unrelated file of the same name there
+  (review finding 1). Jolt from jolt-lang/jolt f714b0ed (2026-10-19)
+  records a required namespace's :file as that bare name, as JVM Clojure
+  does; v0.8.23 recorded ./src/demo/util.clj."
   [f]
   (when (and (string? f) (not (str/blank? f)))
     (cond
       (or (str/starts-with? f "jar:") (str/starts-with? f "file:")) f
       (or (str/starts-with? f "/") (str/starts-with? f "./"))
-      (let [x (io/file f)] (when (.isFile x) (.getCanonicalPath x))))))
+      (let [x (io/file f)] (when (.isFile x) (.getCanonicalPath x)))
+      :else (try (classpath-file f) (catch Throwable _ nil)))))
 
 (defn info
   "The reply fields for sym resolved in the namespace named ns-str (user
