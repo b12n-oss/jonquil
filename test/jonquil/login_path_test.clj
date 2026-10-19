@@ -114,13 +114,18 @@
     (- (System/currentTimeMillis) t0)))
 
 (deftest backgrounded-child-test
+  ;; Measured against the deadline rather than the clock: with a 1 s
+  ;; timeout a loaded machine (load average 6 to 11, 2026-10-18) started
+  ;; the fake shell too late and the lookup timed out. Waiting on the child
+  ;; would mean the full 10 s timeout and a fallback; anything under half
+  ;; of it is an answer that didn't.
   (testing "a shell that answers then leaves a child holding stdout open"
     (let [sh (fake-shell! (str "printf '\\n__JONQUIL_PATH__/a:/b__END__\\n'\n"
                                "sleep 86477 &\nexit 0"))
           dt (elapsed-ms (fn []
-                           (start-with sh {:timeout-ms 1000})
+                           (start-with sh {:timeout-ms 10000})
                            (is (= {:path "/a:/b" :source :shell :shell "shell"} (lp/answer)))))]
-      (is (< dt 2000) (str "answered after " dt " ms"))
+      (is (< dt 5000) (str "answered after " dt " ms, the timeout is 10000"))
       @(p/process {:out :string} "pkill" "-f" "sleep 86477"))))
 
 (deftest hung-answer-is-stored-test
@@ -185,17 +190,24 @@
                              "printf '\\n__JONQUIL_PATH__/a:/b__END__\\n'\n"
                              "sleep 86493"))]
     (try
-      (start-with sh {:timeout-ms 1000})
+      ;; 3 s, not 1: under load (2026-10-19) the fake shell hadn't printed
+      ;; by a 1 s deadline. Longer would cost the suite: this shell hangs
+      ;; until the deadline.
+      (start-with sh {:timeout-ms 3000})
       (is (= {:path "/a:/b" :source :shell :shell "shell"} (lp/answer)))
       (finally @(p/process {} "pkill" "-9" "-f" "sleep 86493")))))
 
 (deftest endless-output-is-capped-test
   ;; Output past the read cap stops the shell at once instead of filling the
   ;; disk until the deadline.
+  ;; Measured against the deadline, as backgrounded-child-test is: 3534
+  ;; and 5506 ms were seen under load on Linux in Docker (2026-10-18)
+  ;; against the old 2000 ms bound and 4 s timeout. Running to the deadline
+  ;; would take the full 20 s.
   (let [sh (fake-shell! "exec yes jonquil-86494")
         dt (elapsed-ms (fn []
-                         (start-with sh {:timeout-ms 4000})
+                         (start-with sh {:timeout-ms 20000})
                          (is (= :fallback (:source (lp/answer))))))]
-    (is (< dt 2000) (str "answered after " dt " ms"))
+    (is (< dt 10000) (str "answered after " dt " ms, the timeout is 20000"))
     (Thread/sleep 200)
     (is (not (running? "jonquil-86494")))))

@@ -487,8 +487,11 @@
             (ev/stop! e)
             (let [elapsed (- (System/currentTimeMillis) t0)]
               (is (< elapsed 200) (str "stop! during a cold start took " elapsed " ms"))))
-          (is (wait-until (fn [] (some? @captured)) 8000) "the delayed start eventually spawned a child")
-          (is (wait-until (fn [] (not (child/alive? @captured))) 8000) "and it's dead, not orphaned")
+          ;; Eventually-waits, so generous: the redef sleeps 5 s and a Jolt
+          ;; run from source takes about 6 s more to start (measured
+          ;; 2026-10-19), past the 8 s these used to allow.
+          (is (wait-until (fn [] (some? @captured)) 30000) "the delayed start eventually spawned a child")
+          (is (wait-until (fn [] (not (child/alive? @captured))) 30000) "and it's dead, not orphaned")
           (is (nil? (nrepl/child-pid e)))
           @start-fut))
       (finally
