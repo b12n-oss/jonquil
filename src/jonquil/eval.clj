@@ -283,7 +283,14 @@
                         (let [r (try
                                   (when before-eval
                                     (try (before-eval)
-                                         (catch :default e (report-callback-exception! "before-eval" e))))
+                                         ;; A Stop during it stops the
+                                         ;; evaluation (review finding 1).
+                                         (catch :default e
+                                           (if (interrupted? e)
+                                             (throw e)
+                                             (report-callback-exception! "before-eval" e)))))
+                                  (when @stop-requested
+                                    (throw (ex-info "stopped" {:jolt/interrupted true})))
                                   ;; I4: unconditional -- the ns-resolve guard
                                   ;; this replaced was always false on Jolt.
                                   ;; Also refer the clojure.repl helpers that

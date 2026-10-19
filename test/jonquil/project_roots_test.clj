@@ -163,3 +163,45 @@
       (finally
         (roots/use-project! nil)
         (remove-ns 'depsbad)))))
+
+(deftest a-failure-is-retried-test
+  ;; A failure is kept only a little while, so a network blip heals on a
+  ;; later Run (review finding 2).
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {nope/nope {:git/url \"file:///no/such/repo\" :git/sha \"1111111111111111111111111111111111111111\"}}}"
+                       ".jonquil.edn" "{:runtime :in-process}"
+                       "src/depsretry.clj" "(ns depsretry)\n(+ 1 2)\n"})
+        path (canon dir "src/depsretry.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))]
+    (try
+      (with-redefs [roots/failure-retry-ms 0]
+        (is (re-find #"couldn't resolve" (:out (run-in e path))))
+        (is (re-find #"couldn't resolve" (:out (run-in e path))) "tried again, so said again"))
+      (finally
+        (roots/use-project! nil)
+        (remove-ns 'depsretry)))))
+
+(deftest stop-during-a-resolve-test
+  ;; Stop while dependencies are being fetched stops the Run, and isn't
+  ;; remembered as a failure (review finding 1).
+  (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {slow/slow {:local/root \"/nowhere\"}}}"
+                       ".jonquil.edn" "{:runtime :in-process}"
+                       "src/depsstop.clj" "(ns depsstop)\n(+ 1 2)\n"})
+        path (canon dir "src/depsstop.clj")
+        e (ev/make (dialect/select dialect/profiles (dialect/find-project path) path nil))
+        calls (atom 0)
+        resolve-var (requiring-resolve 'jolt.deps/resolve-project)]
+    (try
+      (with-redefs-fn {resolve-var (fn [& _] (swap! calls inc) (Thread/sleep 10000) {:roots []})}
+        (fn []
+          (let [p (promise)]
+            (ev/eval! e (slurp path) {:run? true :path path :on-output (fn [_ _]) :on-complete #(deliver p %)})
+            (Thread/sleep 300)
+            (ev/interrupt! e)
+            (is (= :interrupted (:status (deref p 5000 :timeout)))))))
+      (with-redefs-fn {resolve-var (fn [& _] (swap! calls inc) {:roots [(canon dir "src")]})}
+        (fn []
+          (is (= "3" (:printed (run-in e path))))
+          (is (= 2 @calls) "resolved again: the Stop wasn't cached as a failure")))
+      (finally
+        (roots/use-project! nil)
+        (remove-ns 'depsstop)))))

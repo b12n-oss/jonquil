@@ -193,7 +193,8 @@
      ;; file from another in-process project (selection-key leaves the
      ;; project out), so make's own project isn't enough (review finding
      ;; 1). A loose file leaves them as they are.
-     (when-let [dir (some-> (:path opts) dialect/find-project :dir)]
+     (when-let [dir (and (not (eval/evaluating? ctx))
+                         (some-> (:path opts) dialect/find-project :dir))]
        (swap! state assoc :project-dir dir))
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
