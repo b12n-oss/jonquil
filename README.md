@@ -23,7 +23,8 @@ JVM Clojure attaches the same way, to a project's own nREPL server, once
 its `.jonquil.edn` says `{:dialect :clj}`: start a server with
 `clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil
 connects the first time you Run, requiring any namespaces the project
-lists under `:auto-require` as it does. ClojureScript is the third attach
+lists under `:auto-require` as it does (a Jolt project can list them
+too). ClojureScript is the third attach
 dialect, also experimental: open a `.cljs` file, start your shadow-cljs
 build with `npx shadow-cljs watch <build>`, and Jonquil connects to its
 nREPL server the first time you Run, evaluating in whatever JS runtime has
@@ -86,7 +87,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-19, 717 tests pass (4055 assertions on macOS; 4024 on Linux).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-19, 720 tests pass (4071 assertions on macOS; 4040 on Linux).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>

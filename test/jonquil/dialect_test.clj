@@ -346,12 +346,17 @@
       (is (= :clj (:id (:profile s))))
       (is (= '[my.app.core] (:auto-require s)))
       (is (= [] (:warnings s)))))
-  (testing "any other dialect ignores it, with a warning"
+  (testing "a Jolt project's list reaches the selection too, in or out of process"
     (let [s (dialect/select all3 (proj #{"deps.edn"} "{:auto-require [my.app.core]}") "/p/a.clj" nil)]
       (is (= :jolt (:id (:profile s))))
+      (is (= '[my.app.core] (:auto-require s)))
+      (is (= [] (:warnings s)))))
+  (testing "any other dialect ignores it, with a warning"
+    (let [s (dialect/select dialect/profiles (proj #{"deps.edn"} "{:dialect :jank :auto-require [my.app.core]}") "/p/a.jank" nil)]
+      (is (= :jank (:id (:profile s))))
       (is (nil? (:auto-require s)))
       (is (= 1 (count (:warnings s))))
-      (is (str/includes? (first (:warnings s)) ":auto-require only applies to JVM Clojure")))))
+      (is (str/includes? (first (:warnings s)) ":auto-require only applies to JVM Clojure and Jolt")))))
 
 ;; D3 P1.T1: the :jank profile, which Jonquil launches itself.
 (def ^:private all4 [dialect/jolt dialect/cljd dialect/clj dialect/jank])

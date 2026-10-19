@@ -935,8 +935,8 @@ it is: `{:port 1667}`, `{:host "box" :port 1667}`, or `{:port-file
 just that one line in its `.jonquil.edn` attaches to its own nREPL server
 instead of running under Jolt (see below). A JVM project can also list
 namespaces under `:auto-require` for Jonquil to load as it connects (see
-[Auto-require](#auto-require)). Any other dialect ignores that key, and
-the console says so.
+[Auto-require](#auto-require)), and a Jolt project can too. Any other
+dialect ignores that key, and the console says so.
 
 ### Running Jolt out of process
 
@@ -1177,15 +1177,26 @@ session before whatever you asked to run. That means the first Run or REPL
 entry, and again after a reconnect, because a restarted server has
 forgotten everything. It isn't sent twice on the same connection.
 
+A Jolt project takes the same key, without the `:dialect` line (any
+project Jonquil runs under Jolt, which a `deps.edn` makes the default). Out of
+process, the list is required in the Jolt child before its first
+evaluation, and again whenever that child restarts. In process, it's
+required once per window, before the first evaluation and after the
+project's `:deps` are loaded, so a dependency's namespace can be in it.
+Reset on Run keeps those namespaces, since they're libraries rather than
+something your program defined.
+
 <details>
 <summary><strong>When the require fails, and the list's format</strong></summary>
 
 If the require fails, a namespace that isn't on the classpath for example,
 the server's own error shows in the console, followed by "; auto-require
-failed (the error is above), so carrying on without it. It runs again on
-the next connect." Your own Run or REPL line still goes out after it.
+failed (the error is above), so carrying on without it." and when it will
+run again: on the next connect for JVM Clojure, when the Jolt runtime
+restarts out of process, and in a new window in process. Your own Run or
+REPL line still goes out after it.
 Stop during a slow require ends that evaluation as usual, and your request
-isn't sent.
+isn't sent; for Jolt, the next evaluation then tries the list again.
 
 The list has to be a vector of namespace symbols. Anything else is
 ignored, with a line like `; project: .jonquil.edn :auto-require should be

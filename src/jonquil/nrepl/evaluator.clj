@@ -352,6 +352,36 @@
 (defn- stop-requested? [ev]
   (boolean (get-in @(:state ev) [:running :stop-requested?])))
 
+(def auto-require-retry
+  "When an out-of-process :auto-require list that failed runs again."
+  "It runs again when the Jolt runtime restarts.")
+
+(defn- auto-require!
+  "Once per child, before its first Run or REPL entry, when the selection
+  carries .jonquil.edn's :auto-require: says so, then requires the list
+  with one eval on the session, streaming its output like any evaluation.
+  The flag lives on the :runtime map, which a new child replaces, so a
+  restarted child requires the list again (JVM Clojure's once per
+  connection). A failure (not a Stop) says so after the child's own
+  error."
+  [{:keys [selection state] :as ev} on-output]
+  (let [nss (seq (:auto-require selection))]
+    (when (and nss (not (:auto-required? (runtime ev))))
+      (swap! state assoc-in [:runtime :auto-required?] true)
+      (when on-output (on-output :system (str (clj/auto-require-message nss) "\n")))
+      (let [done (send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output})
+            req-id (get-in @state [:running :id])
+            msgs @done]
+        ;; The require is over, so a Stop from here on must find no id and
+        ;; skip the user's request, as before (review finding 1).
+        (swap! state update :running (fn [r] (if (= req-id (:id r)) (dissoc r :id) r)))
+        (cond
+          ;; Stopped: not loaded, so the next evaluation tries again
+          ;; (finding 2).
+          (stop-requested? ev) (swap! state assoc-in [:runtime :auto-required?] false)
+          (and (not= :ok (:status (ops/eval-result msgs false))) on-output)
+          (on-output :system (str (clj/auto-require-failed auto-require-retry) "\n")))))))
+
 (defn- run-worker!
   [ev code {:keys [run? on-output on-status-change] :as opts}]
   (try
@@ -369,6 +399,7 @@
             (on-output :system "; The Jolt runtime had exited, so a new one was started.\n"))
           (when (and on-output (ops/reads-stdin? code) (not (contains? (:ops (runtime ev)) "stdin")))
             (on-output :system stdin-notice))
+          (auto-require! ev on-output)
           (let [{:keys [conn session]} (runtime ev)
                 owner (:owner opts (if run? :run :repl))]
             (when (and run? (= :reset (:mode @(:state ev))))

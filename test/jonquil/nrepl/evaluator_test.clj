@@ -672,3 +672,52 @@
       (run-owned e "(ns orphan.a) (def x 1)" 3)
       (is (= "nil" (:printed (first (run e "(ns-resolve 'orphan.a 'old-fn)" false)))))
       (finally (ev/stop! e)))))
+
+(deftest auto-require-out-of-process-test
+  ;; .jonquil.edn :auto-require for Jolt out of process: once per child,
+  ;; before its first evaluation, and again after a restart.
+  (let [dir (temp-project)
+        lib (io/file dir "src/arlib2/core.clj")
+        e (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir :auto-require '[arlib2.core]})]
+    (.mkdirs (.getParentFile lib))
+    (spit lib (str "(ns arlib2.core)\n(def loaded :yes)\n;; " (System/nanoTime) "\n"))
+    (try
+      (let [[r out] (run e "(some? (find-ns 'arlib2.core))" false)]
+        (is (= "true" (:printed r)) "required before the first evaluation")
+        (is (some #(= [:system "; auto-require: arlib2.core\n"] %) out)))
+      (testing "once per child"
+        (let [[_ out] (run e "1" false)]
+          (is (not-any? #(str/includes? (second %) "auto-require") out))))
+      (testing "a restarted child requires it again"
+        (child/kill! (:child (#'nrepl/runtime e)))
+        (wait-until #(not (child/alive? (:child (#'nrepl/runtime e)))) 5000)
+        (let [[r out] (run e "(some? (find-ns 'arlib2.core))" false)]
+          (is (= "true" (:printed r)))
+          (is (some #(= [:system "; auto-require: arlib2.core\n"] %) out))))
+      (finally (ev/stop! e)))))
+
+(deftest stop-during-auto-require-out-of-process-test
+  ;; Stop while the list loads: interrupted, the user's request not sent,
+  ;; and the next evaluation tries the list again and then runs normally
+  ;; (review findings 1 and 2: no stale request id, no silently skipped list).
+  (let [dir (temp-project)
+        lib (io/file dir "src/arslow2/core.clj")
+        e (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir :auto-require '[arslow2.core]})]
+    (.mkdirs (.getParentFile lib))
+    ;; a loop, which interrupts cleanly (a sleep makes Stop restart the
+    ;; child, and a new child requires the list again whatever the flag)
+    (spit lib (str "(ns arslow2.core)\n(loop [] (recur))\n;; " (System/nanoTime) "\n"))
+    (try
+      (is (nil? (ev/start! e)))
+      (let [done (promise) pid (nrepl/child-pid e)]
+        (ev/eval! e "(def sent :yes)" {:on-output (fn [_ _]) :on-complete #(deliver done %)})
+        (wait-for-eval-id e)
+        (Thread/sleep 300)
+        (ev/interrupt! e)
+        (is (= :interrupted (:status (deref done 15000 :timeout))))
+        (is (= pid (nrepl/child-pid e)) "an interrupt, not a restart"))
+      (spit lib (str "(ns arslow2.core)\n(def loaded :yes)\n;; " (System/nanoTime) "\n"))
+      (let [[r out] (run e "[(some? (find-ns 'arslow2.core)) (some? (resolve 'user/sent))]" false)]
+        (is (= "[true false]" (:printed r)) "the list loaded this time; the stopped request never ran")
+        (is (some #(= [:system "; auto-require: arslow2.core\n"] %) out) "tried again"))
+      (finally (ev/stop! e)))))
