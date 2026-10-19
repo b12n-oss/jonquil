@@ -10,9 +10,13 @@
   set-source-roots!, the seam jolt.main and jolt.deps use to set up a
   project. After, not before (review finding 4): Jolt and Jonquil run in
   this same process, and a project's src/clojure/... or src/jonquil/...
-  must not shadow the IDE's own namespaces. Only :paths: a dependency in
-  :deps is not resolved here. The roots are process-wide, which is one
-  window's worth: Jonquil runs one window per process."
+  must not shadow the IDE's own namespaces. use-project! sets :paths only,
+  which needs no network; use-project-deps! also resolves :deps through
+  jolt.deps/resolve-project, the same resolver the jolt CLI and an
+  out-of-process child use (git and Maven dependencies fetched on first
+  use, so it runs on the eval worker, never the GTK thread). The roots are
+  process-wide, which is one window's worth: Jonquil runs one window per
+  process."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -68,3 +72,50 @@
             (binding [*out* *err*]
               (println "jonquil: this Jolt has no jolt.host/set-source-roots!, so a project kept in process can't load its own namespaces")))
           false))))
+
+(defonce ^:private resolved
+  ;; {[dir deps.edn-mtime] {:roots [...]} or {:roots [...] :problem msg}}:
+  ;; one resolve per deps.edn edit, a failure included, so a project whose
+  ;; dependency can't be fetched isn't fetched again on every Run.
+  (atom {}))
+
+(defn- resolve-project-roots
+  "{:roots [...]} for dir's whole deps.edn (:paths, then each dependency's
+  root, in classpath order), or {:roots (paths dir) :problem msg} when it
+  can't be resolved."
+  [dir]
+  (try
+    (let [resolve-project (requiring-resolve 'jolt.deps/resolve-project)]
+      ;; canonical, as paths' are: a :local/root comes back as
+      ;; app/../lib/src (measured)
+      {:roots (mapv (fn [r] (let [f (io/file r)] (if (.exists f) (.getCanonicalPath f) r)))
+                    (:roots (resolve-project dir)))})
+    (catch Throwable e
+      {:roots (paths dir)
+       :problem (str "couldn't resolve " dir "/deps.edn, so only its :paths are loaded: "
+                     (or (ex-message e) (str (class e))))})))
+
+(defn use-project-deps!
+  "use-project!, with dir's :deps resolved too when it has a deps.edn: the
+  dependencies' roots go after its :paths, all after the roots Jolt started
+  with. Cached per deps.edn edit. Prints why on *err* (the console, on the
+  eval worker) when a fresh resolve fails, and the roots are then :paths
+  only. true when the roots were set, as use-project!."
+  [dir]
+  (let [f (when dir (io/file dir "deps.edn"))]
+    (if-not (and f (.isFile f))
+      (use-project! dir)
+      (let [k [(.getCanonicalPath (io/file dir)) (.lastModified f)]
+            hit (get @resolved k)
+            r (or hit (let [r (resolve-project-roots (first k))]
+                        (swap! resolved assoc k r)
+                        r))
+            set-roots! (host-fn 'jolt.host/set-source-roots!)
+            base (or @base-roots
+                     (when-let [g (host-fn 'jolt.host/source-roots)]
+                       (reset! base-roots (vec (g)))))]
+        (when (and (:problem r) (not hit))
+          (binding [*out* *err*] (println (str "; " (:problem r)))))
+        (if (and set-roots! base)
+          (do (set-roots! (vec (distinct (concat base (:roots r))))) true)
+          (use-project! dir))))))
