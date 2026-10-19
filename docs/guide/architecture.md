@@ -281,7 +281,7 @@ flowchart LR
   file["opened file"] --> fp["dialect/find-project<br/>markers and .jonquil.edn"]
   fp --> sel["dialect/select<br/>profile, runtime, project dir"]
   sel -- ":in-process" --> inproc["jonquil.session<br/>InProcess (Jolt)"]
-  sel -- ":nrepl" --> nrepl["jonquil.nrepl.evaluator<br/>NRepl: spawns jolt nrepl-server"]
+  sel -- ":nrepl" --> nrepl["jonquil.nrepl.evaluator<br/>NRepl: spawns a Jolt nREPL server"]
   sel -- ":launch" --> jankev["jonquil.nrepl.jank<br/>Jank: its own jank repl, started lazily"]
   sel -- ":attach" --> ma["jonquil.nrepl.connection<br/>make-attached, by profile id"]
   ma -- ":cljd" --> attach["jonquil.nrepl.attach<br/>Attach: a running ClojureDart app"]
@@ -295,8 +295,10 @@ flowchart LR
 Four namespaces make up the out-of-process runtime, with Jonquil's own
 nREPL middleware (below, under the inspector) loaded into each child:
 
-- `jonquil.nrepl.child` launches `jolt nrepl-server` in the project
-  directory, with its middleware from `middleware-source`: a jolt-lang/nrepl
+- `jonquil.nrepl.child` launches Jolt's nREPL server in the project
+  directory (`jolt -e` calling `jolt.nrepl/start` with `{:port-file nil}`,
+  wrapped the way `jolt nrepl-server` wraps it, so no `.nrepl-port` is
+  written), with its middleware from `middleware-source`: a jolt-lang/nrepl
   checkout (`$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl`), else a git
   dependency on jolt-lang/nrepl v0.4.0 (`nrepl-git-coord`), else none (a
   plain server); Jonquil's own middleware folder joins it either way, scanning ports `7950`-`7999` for one that binds on both the
@@ -306,12 +308,8 @@ nREPL middleware (below, under the inspector) loaded into each child:
   itself prints once it's listening, never from the connection alone.
   Ending a child kills only the pid this namespace spawned, in order
   (`SIGTERM`, then `SIGKILL` if it's still alive a second later).
-  `.nrepl-port` is handled through one process-wide owner table keyed by
-  project directory: the first child in a directory remembers what the
-  file held, overlapping children share that memory, a child that stops
-  while others run rewrites the file with the newest running child's
-  port, and the last one out restores the original content or deletes the
-  file if there was none.
+  Jonquil never reads or writes the project's `.nrepl-port` for its own
+  child: it knows the port it picked.
 - `jonquil.nrepl.client` holds one socket and one reader for the whole
   life of a child. Its `connect` bounds the socket connect itself to 5
   seconds by default, so a port that never answers fails with an

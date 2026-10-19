@@ -941,7 +941,7 @@ dialect ignores that key, and the console says so.
 ### Running Jolt out of process
 
 In a project with a `deps.edn`, Jolt runs out of process: Jonquil starts a
-separate `jolt nrepl-server` in the project directory and talks to it over
+separate Jolt nREPL server in the project directory and talks to it over
 a socket instead of evaluating inline. A program that calls `System/exit`,
 calls `shutdown-agents`, redefines something in `clojure.core` or
 otherwise takes Jolt down with it takes down that child, not the window
@@ -1024,16 +1024,12 @@ start tries the fetch again.
 
 ### `.nrepl-port`
 
-While the child runs, `jolt nrepl-server` writes its port into the
-project's `.nrepl-port`, the file any nREPL-aware editor already looks
-for. The first child in a project folder remembers what the file held
-before. If another child starts there while it runs (two windows on one
-project, or switching a project from A to B and back to A quickly), they
-share that memory. Whenever a child stops while others still run, the file
-is rewritten with the newest running child's port. The last one out
-restores whatever was there before, or deletes the file if nothing was, so
-a project that already used that file for something else gets it back
-exactly as it was.
+Jonquil's Jolt child writes no `.nrepl-port`. Jonquil picks the child's
+port itself, so nothing needs the file, and a `.nrepl-port` your project
+already has (from your own server, say) is never touched. It also means
+another nREPL-aware editor, or a JVM Clojure window on the same project,
+can't mistake Jonquil's child for your project's server. Running your own
+`jolt nrepl-server` beside it works as usual: that one writes the file.
 
 ### ClojureDart (experimental): attaching to a running app
 
