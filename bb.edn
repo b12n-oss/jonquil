@@ -43,10 +43,15 @@
        dev/smoke/fixtures and dev/smoke/PixelAt.java need to stay off it,
        and both are excluded by the .clj filter below, not by name."
       []
-      (let [clj-or-dir (fn [p] (or (fs/directory? p) (str/ends-with? (str p) ".clj")))
+      (let [clj? (fn [p] (str/ends-with? (str p) ".clj"))
+            ;; A dev/ folder is listed by its .clj files, never whole:
+            ;; clojure-lsp parses every file in a folder it's handed, and
+            ;; dev/linux's Dockerfile threw "A single colon is not a valid
+            ;; keyword" at the colon of its first line (2026-10-20).
             dev-top (->> (fs/list-dir "dev")
                          (remove (fn [p] (= "smoke" (str (fs/file-name p)))))
-                         (filter clj-or-dir))
+                         (mapcat (fn [p] (if (fs/directory? p) (sort (fs/glob p "**.clj")) [p])))
+                         (filter clj?))
             smoke   (->> (fs/list-dir "dev/smoke")
                          (filter (fn [p] (str/ends-with? (str p) ".clj"))))
             ;; Upstream lifts stay byte-close to kimtg/DrClojure-Neo so a
