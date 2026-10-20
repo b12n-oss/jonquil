@@ -161,7 +161,7 @@
       (swap! state
              (fn [s]
                (let [arrived? (contains? (:done-forms s) sentinel)]
-                 (cond-> (assoc s :sink nil :sink-form nil)
+                 (cond-> (if (= sentinel (:sink-form s)) (assoc s :sink nil :sink-form nil) s)
                    sentinel (update :done-forms disj sentinel)
                    (and sentinel (= :timeout outcome) (not arrived?)) (assoc :drain sentinel)))))
       [outcome @replies])))
@@ -215,11 +215,29 @@
                  (str "(in-ns '" buffer-ns ")\n"))]
     (str prefix code "\n" sentinel-form)))
 
+(defn- incomplete-problem
+  "The reader's EOF message when code ends inside a form (an open string,
+  a trailing #_ ' @ or backslash), else nil. Brackets are checked by
+  commands/pre-run-problem; this catches what balanced brackets miss, which
+  would otherwise swallow the sentinel into the last form and hang. Other
+  read errors pass: the prepl answers those itself."
+  [code]
+  (let [r (java.io.PushbackReader. (java.io.StringReader. code))]
+    (try
+      (binding [*default-data-reader-fn* (fn [_ v] v)]
+        (loop []
+          (when-not (= ::eof (read {:read-cond :allow :features #{:cljs} :eof ::eof} r))
+            (recur))))
+      nil
+      (catch Throwable e
+        (let [m (or (ex-message e) "")]
+          (when (str/starts-with? m "EOF") (str "Error: " m)))))))
+
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
   (try
     (when on-status-change (on-status-change :running))
-    (if-let [problem (commands/pre-run-problem code)]
+    (if-let [problem (or (commands/pre-run-problem code) (incomplete-problem code))]
       (finish! ev opts {:status :error :error-text problem})
       (let [_ (when (and run? (= :reset (:mode @state)) (:used? @state))
                 (kill-child! ev)

@@ -79,6 +79,18 @@
       (is (zero? @launches))
       (is (empty? (fake/received-forms srv))))))
 
+(deftest incomplete-input-sends-nothing-test
+  (with-node {} {}
+    (fn [srv {:keys [ev]}]
+      (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))))
+      (let [before (count (fake/received-forms srv))]
+        (doseq [code ["\"abc" "(+ 1 2) #_" "(+ 1 2) '" "(+ 1 2) @" "\\"]]
+          (let [r (:result (run ev code {:run? false}))]
+            (is (= :error (:status r)) code)
+            (is (re-find #"^Error: EOF" (str (:error-text r))) code)))
+        (is (= before (count (fake/received-forms srv)))))
+      (is (= "3" (:printed (:result (run ev "(+ 1 2)" {:run? false}))))))))
+
 (deftest ns-prefix-test
   (with-node {} {}
     (fn [srv {:keys [ev]}]
