@@ -26,6 +26,7 @@
 
 (def ^:private NOT-RUNNING "ClojureScript (node) (not running)")
 (def ^:private RUNNING "ClojureScript (node) (running)")
+(def ^:private BROWSER-NOT-RUNNING "ClojureScript (browser) (not running)")
 
 ;; The fixture project, stashed so rows and after-close-checks! (which runs
 ;; after main/start! returns) reach it. :closing holds the pid
@@ -39,6 +40,18 @@
     (spit (io/file d "deps.edn") "{:deps {org.clojure/clojurescript {:mvn/version \"1.12.42\"}}}\n")
     (spit f fixture-core-text)
     (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f)})))
+
+(defn- browser-fixture!
+  "A second project whose .jonquil.edn selects the browser target. Returns
+  its src/demo/page.cljs path."
+  []
+  (let [d (io/file (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-cljs-browser-"))))
+        f (io/file d "src/demo/page.cljs")]
+    (.mkdirs (.getParentFile f))
+    (spit (io/file d "deps.edn") "{:deps {org.clojure/clojurescript {:mvn/version \"1.12.42\"}}}\n")
+    (spit (io/file d ".jonquil.edn") "{:cljs {:target :browser}}\n")
+    (spit f "(ns demo.page)\n")
+    (.getCanonicalPath f)))
 
 (defn evaluator [ui] ((:evaluator* ui)))
 
@@ -93,6 +106,29 @@
                              (and (= NOT-RUNNING (label ui)) (not ticked?) clickable?)
                              {:label (label ui) :reset-ticked ticked? :reset-clickable clickable?
                               :text (support/console-text ui)})))))
+
+(defn row-cljs-browser-selected-and-runs
+  "Opening a file of a project with .jonquil.edn {:cljs {:target :browser}}
+  switches the window to the browser evaluator: its label says ClojureScript
+  (browser) isn't running, a Run through the fake prepl prints 3 (the fake
+  needs no page and its ready line carries no URL, so nothing waits for one),
+  and opening the node file again restores the node label. It does NOT prove
+  the opener is called with the page URL: the window builds its own
+  evaluator, so the opener can't be stubbed here. That is covered by
+  jonquil.nrepl.cljs-node-eval-test and the live test."
+  [ui]
+  (go-row :cljs-browser-selected-and-runs support/check
+    (let [page (browser-fixture!)
+          _ (on-gtk ((:open-path! ui) page))
+          browser? (await-until 5000 20 #(= BROWSER-NOT-RUNNING (label ui)))
+          [ok? mark] (run-and-await ui "(+ 1 2)" 30000 #(value-line? % "3"))
+          _ (on-gtk ((:stop!* ui)))
+          _ (on-gtk ((:open-path! ui) (:file @fixture*)))
+          back? (await-until 5000 20 #(= NOT-RUNNING (label ui)))]
+      (on-gtk (support/check :cljs-browser-selected-and-runs
+                             (and browser? ok? back?)
+                             {:browser browser? :ok ok? :back back? :label (label ui)
+                              :text (support/since ui mark)})))))
 
 (defn row-cljs-node-run-prints-value
   "Run evaluates the buffer in the fake: the console shows 3, the label

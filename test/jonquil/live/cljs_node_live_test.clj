@@ -13,7 +13,9 @@
             [jolt.process :as p]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
+            [jonquil.nrepl.cljs-child :as cljs-child]
             [jonquil.nrepl.cljs-node :as cljs-node]
+            [jonquil.nrepl.cljs-node-files :as files]
             [temp-dirs]))
 
 (def deps-text "{:paths [\"src\"]\n :deps {org.clojure/clojurescript {:mvn/version \"1.12.42\"}}}\n")
@@ -172,3 +174,66 @@
               row (listen-rows pid)]
         (let [name-col (nth (reverse (str/split (str/trim row) #"\s+")) 1)]
           (is (str/starts-with? name-col "127.0.0.1:") row))))))
+
+(defn- browser-selection []
+  {:profile dialect/cljs :runtime :launch :project-dir *dir*
+   :cljs {:target :browser} :cljs-target :browser})
+
+(defn- http-get
+  "[status body] of a GET to url, through curl (Jolt's URL has no http handler)."
+  [url]
+  (let [out (sh-out "curl" "-s" "-m" "5" "-w" "\n%{http_code}" url)
+        i (str/last-index-of out "\n")]
+    [(parse-long (str/trim (subs out (inc i)))) (subs out 0 i)]))
+
+(defn- free-port []
+  (with-open [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (.getLocalPort s)))
+
+(deftest browser-listeners-are-loopback-only-live
+  ;; No browser opens and no evaluator is involved: the browser launcher is
+  ;; started through cljs-child/start! (the evaluator's own first Run can't
+  ;; get past the setup form without a page, see the task 5 report). The
+  ;; prepl and the HTTP server must listen on 127.0.0.1 only, and the page
+  ;; URL must answer HTML.
+  (let [port (free-port)
+        child (cljs-child/start! {:clojure (cljs-child/find-clojure)
+                                  :launcher (files/ensure-launcher!)
+                                  :project-dir *dir* :target :browser :http-port port})]
+    (try
+      (is (nil? (:error child)) (pr-str child))
+      (is (= (str "http://127.0.0.1:" port) (:url child)) (pr-str (:url child)))
+      (let [pids (process-tree (:pid child))
+            names (map #(nth (reverse (str/split (str/trim %) #"\s+")) 1)
+                       (mapcat listen-rows pids))]
+        (is (some #(= (str "127.0.0.1:" (:port child)) %) names) (pr-str [(:port child) names]))
+        (is (some #(= (str "127.0.0.1:" port) %) names) (pr-str [port names]))
+        (doseq [n names] (is (str/starts-with? n "127.0.0.1:") n)))
+      ;; The HTTP server starts when the first form reaches the prepl.
+      (with-open [sock (java.net.Socket. "127.0.0.1" (int (:port child)))]
+        (doto (io/writer (.getOutputStream sock))
+          (.write "(require 'cljs.repl)\n")
+          (.flush))
+        (Thread/sleep 3000)
+        (let [[status body] (http-get (:url child))]
+          (is (= 200 status))
+          (is (re-find #"(?i)<html" body) (subs body 0 (min 200 (count body))))))
+      (finally (cljs-child/kill! child)))))
+
+(deftest real-browser-live
+  ;; Opens a REAL browser tab, so it only runs with JONQUIL_BROWSER_LIVE=1.
+  (let [live? (= "1" (System/getenv "JONQUIL_BROWSER_LIVE"))]
+    (if live?
+      (let [e (cljs-node/make-cljs-node (browser-selection) {:timings {:page-timeout-ms 60000}})]
+        (try
+          (let [{:keys [result]} (run e "(+ 1 2)")]
+            (is (= "3" (:printed result)) (pr-str result)))
+          (let [{:keys [result out]} (run e "(println \"from-browser\")")]
+            (is (= :ok (:status result)) (pr-str result))
+            (is (some #(= [:out "from-browser\n"] %) out) (pr-str out)))
+          (let [{:keys [result]} (run e "(throw (js/Error. \"boom\"))")]
+            (is (= :error (:status result)) (pr-str result)))
+          (let [{:keys [result]} (run e "(+ 2 3)")]
+            (is (= "5" (:printed result)) (pr-str result)))
+          (finally (ev/stop! e))))
+      (println "skip: set JONQUIL_BROWSER_LIVE=1 to run the real-browser test (it opens a browser tab)"))))

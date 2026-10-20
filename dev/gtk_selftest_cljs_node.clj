@@ -23,6 +23,7 @@
 
 (def ^:private row-fns
   [rows/row-cljs-node-starts-not-running
+   rows/row-cljs-browser-selected-and-runs
    rows/row-cljs-node-run-prints-value
    rows/row-cljs-node-run-error-line
    rows/row-cljs-node-stop-restarts
