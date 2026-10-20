@@ -56,5 +56,18 @@
   (is (nil? (cljs-node/parse-reply "garbage {")))
   (is (nil? (cljs-node/parse-reply "[1 2]"))))
 
+(deftest reset-message-test
+  (is (not= cljs-node/reset-message cljs-node/stopped-message)))
+
+(deftest fold-replies-no-ns-test
+  (let [s (cljs-node/sentinel 4)
+        ret (fn [v form & kv] (apply assoc {:tag :ret :val v :form form} kv))
+        ok (cljs-node/fold-replies [(ret "1" "(+ 0 1)") (ret s s)] s)
+        err (cljs-node/fold-replies [(ret "{:cause \"bad\"}" "(f)" :exception true) (ret s s)] s)]
+    (is (= {:status :ok :printed "1"} ok))
+    (is (not (contains? ok :ns)))
+    (is (= {:status :error :error-text "Error: bad"} err))
+    (is (not (contains? err :ns)))))
+
 (deftest limitations-test
   (is (= 4 (count cljs-node/limitations))))

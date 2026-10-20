@@ -18,7 +18,7 @@
   (str "; ClojureScript on node didn't start: " text))
 
 (def reset-message
-  "; Stopped. ClojureScript restarted, so earlier definitions are gone.")
+  "; Reset on Run: ClojureScript restarts, so this Run starts clean.")
 
 (def stopped-message
   "; Stopped. ClojureScript restarted, so earlier definitions are gone.")
@@ -105,12 +105,13 @@
   [replies sentinel-form]
   (let [rets (filter #(= :ret (:tag %)) replies)
         body (take-while #(not= sentinel-form (:form %)) rets)
-        ns (some->> (keep :ns rets) last symbol)]
+        cur-ns (some->> (keep :ns rets) last symbol)]
     (if-let [failing (first (filter :exception body))]
-      {:status :error :error-text (error-line failing) :ns ns}
-      {:status :ok
-       :printed (if (seq body) (:val (last body)) "nil")
-       :ns ns})))
+      (cond-> {:status :error :error-text (error-line failing)}
+        cur-ns (assoc :ns cur-ns))
+      (cond-> {:status :ok
+               :printed (if (seq body) (:val (last body)) "nil")}
+        cur-ns (assoc :ns cur-ns)))))
 
 (defn output-of
   "[kind text] for a reply that prints: :out and :err as they are, :tap as
