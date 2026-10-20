@@ -17,9 +17,10 @@
 
 (defn- recv
   "The next reply map, or ::none when nothing arrives within ms."
-  [{:keys [^java.io.BufferedReader in]} ms]
-  (let [f (future (.readLine in))
-        line (deref f ms ::none)]
+  [{:keys [^java.net.Socket sock ^java.io.BufferedReader in]} ms]
+  (.setSoTimeout sock (int ms))
+  (let [line (try (.readLine in)
+                  (catch java.net.SocketTimeoutException _ ::none))]
     (if (= ::none line) ::none (edn/read-string line))))
 
 (defn- with-fake [opts f]
