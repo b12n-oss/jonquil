@@ -63,6 +63,12 @@
             (>= (- (System/currentTimeMillis) t0) deadline-ms) false
             :else (do (<! (timeout 50)) (recur))))))
 
+(defn- value-line?
+  "True when text has a console result line for value v, i.e. a line that
+  is exactly \"=> v\"."
+  [text v]
+  (boolean (re-find (re-pattern (str "(?m)^=> " v "$")) text)))
+
 (defn- run-and-await
   "Sets the editor to code, Runs, and parks until the evaluator is idle and
   (expect-fn text-since-start) holds. [ok mark]."
@@ -88,7 +94,7 @@
   turns to running."
   [ui]
   (go-row :cljs-node-run-prints-value support/check
-    (let [[ok? mark] (run-and-await ui fixture-core-text 30000 #(str/includes? % "3"))
+    (let [[ok? mark] (run-and-await ui fixture-core-text 30000 #(value-line? % "3"))
           running? (await-until 2000 20 #(= RUNNING (label ui)))]
       (on-gtk (support/check :cljs-node-run-prints-value
                              (and ok? running? (pid-of ui))
@@ -100,7 +106,7 @@
   [ui]
   (go-row :cljs-node-run-error-line support/check
     (let [[ok? mark] (run-and-await ui "(throw (ex-info \"boom-cljs\" {}))" 30000
-                                    #(str/includes? % "boom-cljs"))]
+                                    #(re-find (re-pattern "(?m)^Error: .*boom-cljs") %))]
       (on-gtk (support/check :cljs-node-run-error-line ok? {:text (support/since ui mark)})))))
 
 (defn row-cljs-node-stop-restarts
@@ -109,21 +115,26 @@
   next Run starts a new child and answers."
   [ui]
   (go-row :cljs-node-stop-restarts support/check
-    (let [old (pid-of ui)
+    (let [before (pid-of ui)
           mark (on-gtk (let [m (support/out-end-offset ui)]
                          (editor/set-text! (:editor ui) "(str \"slow\")")
                          ((:run!* ui))
                          m))
-          started? (await-until 3000 20 #(not (idle? ui)))
+          ;; Reset on Run relaunches the child before the form is sent, so
+          ;; the pid that runs the slow form is a new one, seen once the
+          ;; evaluator is busy and the pid has changed.
+          started? (await-until 20000 20 #(and (not (idle? ui))
+                                               (pid-of ui) (not= before (pid-of ui))))
+          old (pid-of ui)
           _ (on-gtk ((:stop!* ui)))
           stopped? (await-until 5000 20 #(and (idle? ui)
                                               (str/includes? (support/since ui mark) cljs-node/stopped-message)))
           gone? (and old (await-gone old 3000))
-          [answered? mark2] (run-and-await ui "(+ 20 22)" 30000 #(str/includes? % "42"))
+          [answered? mark2] (run-and-await ui "(+ 20 22)" 30000 #(value-line? % "42"))
           new (pid-of ui)]
       (on-gtk (support/check :cljs-node-stop-restarts
-                             (and old started? stopped? gone? answered? new (not= old new))
-                             {:old old :new new :started started? :stopped stopped? :gone gone?
+                             (and before old started? stopped? gone? answered? new (not= old new))
+                             {:before before :old old :new new :started started? :stopped stopped? :gone gone?
                               :answered answered? :text (str (support/since ui mark) (support/since ui mark2))})))))
 
 (defn row-cljs-node-close-kills-child

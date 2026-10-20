@@ -29,9 +29,9 @@
    rows/row-cljs-node-close-kills-child])
 
 (def ^:private PER-ROW-MS
-  ;; estimate: the longest rows start the child (up to 20000 ms on a loaded
-  ;; machine), plus run-row's own 10000 ms idle wait.
-  45000)
+  ;; estimate: the stop row waits up to 20000 + 5000 + 3000 + 30000 ms
+  ;; (relaunch, stop, kill, next Run) plus run-row's 10000 ms idle wait.
+  70000)
 
 (defn- run-row
   "Resets the editor and the console's input, waits (up to 10000 ms) for
