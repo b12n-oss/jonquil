@@ -167,7 +167,8 @@
   (let [release (promise)]
     (with-node {:slow-ms 5000} {:kill (fn [_] (deref release 5000 nil))}
       (fn [srv {:keys [ev]}]
-        (let [done (promise)]
+        (let [done (promise) heard (atom [])]
+          (connection/on-connection! ev (fn [c] (swap! heard conj c)))
           (ev/eval! ev "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
           (is (wait-until #(some (fn [f] (re-find #"slow" f)) (fake/received-forms srv)) 5000))
           (let [t0 (System/currentTimeMillis)]
@@ -175,8 +176,13 @@
             (is (< (- (System/currentTimeMillis) t0) 500) "interrupt! didn't wait for the kill"))
           (is (= {:status :interrupted} (deref done 5000 :timeout)))
           (is (not (node/settled? ev)) "a kill still running keeps the evaluator unsettled")
+          (is (= false (last @heard)) "the window hears disconnected at Stop, not when the kill ends")
+          (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))) "the next eval connects meanwhile")
+          (is (= true (last @heard)))
           (deliver release true)
-          (is (wait-until #(node/settled? ev) 3000)))))))
+          (is (wait-until #(node/settled? ev) 3000))
+          (Thread/sleep 100)
+          (is (= true (last @heard)) "the old kill ending says nothing that contradicts the new child"))))))
 
 (deftest output-between-evaluations-test
   ;; node can print after an evaluation finished (a setTimeout, a promise):

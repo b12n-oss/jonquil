@@ -79,13 +79,14 @@
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (:child old)]
+       ;; Said now, not when the kill ends: a background kill can finish after
+       ;; the next evaluation's child connected, and must not contradict it.
+       (connection/notify! ev false)
        (if background?
          (future (try ((:kill hooks) child)
                       (catch Throwable _ nil)
-                      (finally (swap! state update :killing dec)
-                               (connection/notify! ev false))))
-         (do ((:kill hooks) child)
-             (connection/notify! ev false))))
+                      (finally (swap! state update :killing dec))))
+         ((:kill hooks) child)))
      nil)))
 
 (defn- ensure-child!
@@ -325,7 +326,7 @@
   ev/Evaluator
   (start! [_] nil)
   (stop! [this]
-    (swap! state (fn [s] (cond-> (assoc s :stopped? true)
+    (swap! state (fn [s] (cond-> (assoc s :stopped? true :last-output nil)
                            (:running s) (assoc-in [:running :stop-requested?] true))))
     (kill-child! this)
     nil)
