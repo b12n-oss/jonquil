@@ -850,7 +850,8 @@ rest of the time. JVM Clojure reads the same way, `Clojure (JVM) (attached)`
 or `Clojure (JVM) (not running)`, and ClojureScript reads
 `ClojureScript (shadow-cljs) (attached)` or `ClojureScript (shadow-cljs)
 (not running)`, or `ClojureScript (node) (running)` and `ClojureScript (node)
-(not running)` when Jonquil runs its own ClojureScript on node. For jank it
+(not running)` when Jonquil runs its own ClojureScript on node (or
+`ClojureScript (browser)` with the same two endings, for the browser). For jank it
 reads `jank (running)` while Jonquil's own jank process is
 up, and `jank (not running)` until the first evaluation starts one. The
 nREPL dialect reads `nREPL (attached)` or `nREPL (not running)`.
@@ -899,7 +900,10 @@ file fell back to in-process Jolt, and later got a Run notice saying there
 was no shadow-cljs project to attach to.) `{:dialect :cljs}` in a
 project's `.jonquil.edn` forces the dialect for files with other
 extensions, and `{:runtime :launch}` or `{:runtime :attach}` there forces
-the runtime, say to launch node inside a shadow-cljs project.
+the runtime, say to launch node inside a shadow-cljs project. A project
+without `shadow-cljs.edn` can run the launched ClojureScript in a browser
+instead of node with `{:cljs {:target :browser}}`; see
+[running in the browser](#clojurescript-experimental-running-in-the-browser).
 
 jank has no project marker either. A `.jank` file opens as jank by its
 extension, and a project can name it with `{:dialect :jank}` in its
@@ -1356,6 +1360,51 @@ jumps to a definition in the same buffer only. There is no stdin and no
 inspector. Output the program prints after an evaluation has answered (a
 timer that fires later, say) still reaches the console, above the prompt,
 including while quick docs are being fetched.
+
+### ClojureScript (experimental): running in the browser
+
+Node stays the default. To run your ClojureScript in a browser tab instead,
+put `{:cljs {:target :browser}}` in the project's `.jonquil.edn`. It needs a
+project, so a loose `.cljs` file keeps running on node. The status bar then
+reads `ClojureScript (browser) (not running)` until the first Run, and
+`(running)` after. In a project with a `shadow-cljs.edn` the `:target` is
+ignored with a warning, since Jonquil attaches there (unless
+`{:runtime :launch}` is set too). An unknown value, such as `:target :foo`,
+warns and uses node. The tools are the same as for node, except that you
+need a browser in place of `node`.
+
+On the first Run, Jonquil starts ClojureScript and opens the page in your
+default browser: `open` on macOS, `xdg-open` on Linux, or the command named
+by `JONQUIL_OPEN_URL`, which gets the URL as its only argument. Then it waits
+up to 60 seconds for the page to connect. If none does (the opener failed,
+or you use another browser), the console tells you the URL and that you can
+open it yourself. The process keeps running, so the next Run carries on as
+soon as a page has connected. Evaluation, errors and output work as they do
+on node, with your code running in the tab.
+
+Each window gets one URL, `http://127.0.0.1:` and a port Jonquil picks the
+first time and keeps. Stop and Reset on Run restart ClojureScript, because
+nothing can interrupt the page, and the console then asks you to reload the
+tab at the same URL. If something else took that port meanwhile, Jonquil
+picks another and says so. A loop that never ends freezes the tab until you
+reload it, and an evaluation sent after you closed the tab waits until you
+press Stop.
+
+`js/console.log`, and any output printed after an evaluation finished, go to
+the browser's own console and not to Jonquil's. As with node, there is no
+stdin and no inspector, F12 stays in the buffer, and completion and quick
+docs work the same way.
+
+Two listeners make this work, and both are loopback-only and
+unauthenticated: the prepl, and the HTTP server that serves the page and
+carries the browser connection. ClojureScript's browser REPL server binds
+every network interface by default and ignores `:host` for listening, so
+Jonquil's launcher binds the port itself, to `127.0.0.1`, before ClojureScript
+starts, and replaces the server's start function with one that uses that
+socket. If a ClojureScript version changes that function's shape, the
+launcher refuses to start. While the window is open, any user on this
+machine could send code to the page's REPL, the same exposure as the node
+runtime.
 
 ### ClojureScript (experimental): attaching to a shadow-cljs build
 
@@ -2023,6 +2072,25 @@ than being surprises you'd otherwise have to rediscover:
 - F12 stays in the buffer.
 - Completion comes from the buffer and Clojure core names, and quick
   docs from `cljs.repl/doc` while the process is idle.
+
+</details>
+
+<details>
+<summary><strong>ClojureScript in the browser</strong> (6)</summary>
+
+- Jonquil starts and stops its own process, which needs the Clojure CLI on
+  the login shell's `PATH`, and your code runs in a browser tab it opens
+  through `open`, `xdg-open` or `JONQUIL_OPEN_URL`. Its prepl and page
+  server are unauthenticated loopback listeners.
+- Stop and Reset on Run restart ClojureScript, so earlier definitions are
+  gone and you reload the tab at the same URL.
+- A loop that never ends freezes the tab until you reload it, and an
+  evaluation sent after the tab closed waits until Stop.
+- `js/console.log` and output printed after an evaluation finished go to
+  the browser's own console.
+- No stdin and no inspector; F12 stays in the buffer.
+- Completion comes from the buffer and Clojure core names, and quick docs
+  from `cljs.repl/doc` while the process is idle.
 
 </details>
 

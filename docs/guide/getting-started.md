@@ -42,6 +42,9 @@ you use it:
   A `.cljs` file outside a shadow-cljs project needs only the Clojure CLI
   and `node`, and Jonquil starts ClojureScript itself. See
   [ClojureScript on node](using-jonquil.md#clojurescript-experimental-running-on-node).
+  A project can run it in a browser tab instead, with
+  `{:cljs {:target :browser}}` in `.jonquil.edn`; see
+  [running in the browser](using-jonquil.md#clojurescript-experimental-running-in-the-browser).
 - **Any nREPL server** (the nREPL dialect): the server itself, which you
   start, and `.jonquil.edn {:dialect :nrepl :nrepl {:port N}}` naming it.
   Basilisp's `basilisp nrepl-server` writes `.nrepl-port`, so

@@ -619,6 +619,37 @@ Five namespaces and one launcher make it up:
 Both listeners (the prepl and node's socket) are unauthenticated and
 loopback-only, the same exposure as the Jolt nREPL child.
 
+#### Browser mode
+
+`.jonquil.edn {:cljs {:target :browser}}` makes `jonquil.dialect` return
+`:cljs-target :browser` for a launched ClojureScript (node otherwise; an
+unknown value warns and uses node, and the key is ignored with a warning when
+the runtime attaches). The same evaluator, child and launcher serve both:
+
+- The launcher takes `browser <http-port>`. It pre-binds that port on
+  `127.0.0.1` and exits 3 with a `jonquil-cljs-http-port-taken` marker if it
+  is busy (the evaluator then picks another port once and retries), and exits
+  2 with a usage line when the port argument is missing. ClojureScript's
+  `cljs.repl.server/start` listens on every interface, so the launcher
+  replaces it with the same body bound to loopback, taking the pre-bound
+  socket the first time, and exits 2 if the function's arglists differ. The
+  prepl is `cljs.server.browser/prepl` with `:launch-browser false`, and the
+  ready line carries the page URL.
+- `jonquil.nrepl.cljs-node` picks the HTTP port once per window and keeps it
+  across restarts. On a launch it announces the page (`open-url!`: `open`,
+  `xdg-open` or `JONQUIL_OPEN_URL`) before the setup form, because the
+  browser REPL's setup blocks until a page connects, so the wait is bounded
+  by `:page-timeout-ms` (60 s) rather than the ordinary eval timeout. When it
+  times out, the setup stays pending, the console names the URL and the next
+  Run waits for it. ClojureScript's "Waiting for browser to connect" line is
+  dropped. Stop and Reset on Run kill the child, wait for the kill to finish
+  (`await-kills!`, so the port is free) and ask for a reload.
+- `jonquil.cljs-node` holds the browser-specific sentences and
+  `browser-limitations`; the dialect label reads `ClojureScript (browser)`.
+
+Both listeners (the prepl and the page server) are unauthenticated and
+loopback-only.
+
 ### jank: `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`
 
 jank is the one dialect whose runtime is `:launch`: Jonquil starts the
