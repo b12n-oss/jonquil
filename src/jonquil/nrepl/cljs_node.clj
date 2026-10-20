@@ -17,6 +17,7 @@
   so overlapping calls from the reader thread and close! are safe."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [jolt.process :as p]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.cljs-node :as cljs-node]
@@ -36,7 +37,10 @@
    :help-timeout-ms 3000
    :full-doc-timeout-ms 5000
    ;; nil: cljs-child/start! applies its own default.
-   :start-timeout-ms nil})
+   :start-timeout-ms nil
+   ;; estimate: the page connects ~2.6 s after `open` (measured); the rest is
+   ;; slack for a cold browser.
+   :page-timeout-ms 60000})
 
 (def busy-warning
   "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n")
@@ -46,6 +50,8 @@
 (def timeout-doc "No docs: ClojureScript didn't answer in time.")
 
 (def exited-text "Error: the ClojureScript process exited")
+
+(defn- name* [x] (if (keyword? x) (name x) x))
 
 (defn- stopping? [{:keys [state] :as ev}]
   (or (connection/stop-requested? ev) (boolean (:stopped? @state))))
@@ -90,11 +96,45 @@
          ((:kill hooks) child)))
      nil)))
 
+(defn- browser? [{:keys [selection]}]
+  (= :browser (:cljs-target selection)))
+
+(defn- free-port
+  "A loopback port the OS just handed out: bind port 0, read it, close it."
+  []
+  (with-open [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (.getLocalPort s)))
+
+(defn- http-port!
+  "The evaluator's HTTP port: chosen once, kept for every launch. With
+  :fresh? a new one replaces it (the launcher found it taken)."
+  [{:keys [state]} fresh?]
+  (:http-port (swap! state (fn [s] (if (and (:http-port s) (not fresh?))
+                                     s
+                                     (assoc s :http-port (free-port)))))))
+
+(defn- launch-child!
+  "Launches once, or twice when the browser's HTTP port was taken. [started
+  port-changed?]."
+  [{:keys [hooks selection] :as ev} clojure launcher]
+  (let [base {:clojure clojure
+              :launcher launcher
+              :project-dir (:project-dir selection)
+              :cancelled? (fn [] (stopping? ev))}
+        go (fn [fresh?]
+             ((:launch hooks) (cond-> base
+                                (browser? ev) (assoc :target :browser
+                                                     :http-port (http-port! ev fresh?)))))
+        started (go false)]
+    (if (= :http-port-taken (:error started))
+      [(go true) true]
+      [started false])))
+
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
   evaluation with. A stored child that died, or lost its connection, is
   killed first. A Stop during the launch kills what it produced."
-  [{:keys [state hooks selection] :as ev} on-output]
+  [{:keys [state hooks] :as ev} on-output]
   (let [child (:child @state)]
     (if (and child ((:alive? hooks) child) (prepl/open? (:conn @state)))
       nil
@@ -106,15 +146,18 @@
               {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
               (do
                 (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
-                (let [started ((:launch hooks)
-                               {:clojure clojure
-                                :launcher launcher
-                                :project-dir (:project-dir selection)
-                                :cancelled? (fn [] (stopping? ev))})]
+                (let [[started port-changed?] (launch-child! ev clojure launcher)]
                   (cond
                     (= :cancelled (:error started)) {:status :interrupted}
-                    (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
-                    :else (do (swap! state assoc :child started)
+                    (:error started) {:status :notice :text (cljs-node/start-failed-message (name* (:error started)))}
+                    :else (do (swap! state
+                                     (fn [s]
+                                       (cond-> (assoc s :child started)
+                                         (browser? ev)
+                                         (assoc :await-page (:url started)
+                                                :announce (cond port-changed? :port-changed
+                                                                (:opened? s) :reload
+                                                                :else :first)))))
                               (when (stopping? ev) (kill-child! ev))
                               nil))))))
           {:status :notice :text cljs-node/no-clojure-message})))))
@@ -129,6 +172,8 @@
   beat it."
   [{:keys [state]} closed? r]
   (cond
+    (cljs-node/waiting-line? r) nil
+
     (= :closed (:tag r))
     (when (compare-and-set! closed? false true)
       (swap! state assoc :drain nil)
@@ -197,7 +242,14 @@
   [{:keys [state timings] :as ev}]
   (let [child (:child @state)
         closed? (atom false)
-        conn (try (prepl/connect! "127.0.0.1" (:port child) (fn [r] (dispatch! ev closed? r)))
+        connect (fn [] (prepl/connect! "127.0.0.1" (:port child) (fn [r] (dispatch! ev closed? r))))
+        ;; A connect right after the previous connection closed was once
+        ;; reset (measured, transient): one retry.
+        conn (try (try (connect)
+                       (catch Throwable e
+                         (if (re-find #"(?i)reset|refused" (str (ex-message e)))
+                           (do (Thread/sleep 300) (connect))
+                           (throw e))))
                   (catch Throwable e e))]
     (if (instance? Throwable conn)
       {:status :notice
@@ -222,6 +274,31 @@
                :text (cljs-node/start-failed-message
                       (str "the session setup " (if (= :timeout outcome) "timed out" "failed")
                            (when (:log child) (str ". The log: " (:log child)))))})))))))
+
+(defn- open-url!
+  "Opens url in the default browser: open on macOS, xdg-open elsewhere.
+  True when the command started, false (never throws) when it did not."
+  [url]
+  (try (let [mac? (str/includes? (str/lower-case (str (System/getProperty "os.name"))) "mac")]
+         (p/process {:out :discard :err :discard} (if mac? "open" "xdg-open") url)
+         true)
+       (catch Throwable _ false)))
+
+(defn- announce-page!
+  "Says how the page is reached, once per browser launch: opens it on the
+  evaluator's first launch, else asks for a reload."
+  [{:keys [state hooks]} on-output]
+  (let [[old _] (swap-vals! state (fn [s] (cond-> (assoc s :announce nil)
+                                            (= :first (:announce s)) (assoc :opened? true))))
+        url (:await-page old)
+        say (fn [t] (connection/say! on-output :system (str t "\n")))]
+    (case (:announce old)
+      :first (if ((:open-url hooks) url)
+               (say (cljs-node/opened-message url))
+               (say (str "; Open " url " in a browser.")))
+      :reload (say (cljs-node/reload-message url))
+      :port-changed (say (str "; The browser port changed: open " url "."))
+      nil)))
 
 (defn- wait-not-helping! [{:keys [state]}]
   (loop [n 0]
@@ -254,7 +331,7 @@
           (when (str/starts-with? m "EOF") (str "Error: " m)))))))
 
 (defn- run-worker!
-  [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
+  [{:keys [state timings] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
   (try
     (when on-output (swap! state assoc :last-output on-output))
     (when on-status-change (on-status-change :running))
@@ -274,20 +351,27 @@
           :else
           (do
             (wait-not-helping! ev)
-            (let [sentinel-form (next-sentinel! ev)
+            (announce-page! ev on-output)
+            (let [await-url (:await-page @state)
+                  sentinel-form (next-sentinel! ev)
                   text (eval-text (:prompt-ns @state) opts code sentinel-form)
                   _ (swap! state assoc :used? true)
                   [outcome replies] (exchange! ev text
                                                (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                               {:on-output on-output :sentinel sentinel-form})]
+                                               {:on-output on-output :sentinel sentinel-form
+                                                :timeout-ms (when await-url (:page-timeout-ms timings))})]
               (case outcome
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
+                        (swap! state assoc :await-page nil)
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
                         (finish! ev opts result))
-                (if (stopping? ev)
-                  (finish! ev opts {:status :interrupted})
-                  (do (kill-child! ev)
-                      (finish! ev opts {:status :error :error-text exited-text})))))))))
+                (cond
+                  (stopping? ev) (finish! ev opts {:status :interrupted})
+                  ;; No page yet: keep the child, its late ret is drained.
+                  (and (= :timeout outcome) await-url)
+                  (finish! ev opts {:status :notice :text (cljs-node/no-page-message await-url)})
+                  :else (do (kill-child! ev)
+                            (finish! ev opts {:status :error :error-text exited-text})))))))))
     (catch Throwable e
       (try (kill-child! ev) (catch Throwable _ nil))
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))
@@ -371,7 +455,9 @@
   (lookup [this sym _text _pos]
     (try (meta-lookup this sym nil)
          (catch Throwable _ (cljd/no-docs sym timeout-doc))))
-  (limitations [_] cljs-node/limitations)
+  (limitations [_] (if (= :browser (:cljs-target selection))
+                     cljs-node/browser-limitations
+                     cljs-node/limitations))
 
   ev/ServerHelp
   (offline-candidates [_ prefix text pos extra-context]
@@ -393,16 +479,18 @@
   "A ClojureScript-on-node evaluator for a jonquil.dialect/select result,
   with no child yet. opts: :timings (merged over default-timings) and the
   hooks tests fake: :launch (fn [{:keys [clojure launcher project-dir
-  cancelled?]}] child-or-{:error}), :find-clojure, :ensure-launcher,
-  :alive?, :kill."
+  cancelled? target http-port]}] child-or-{:error}), :find-clojure,
+  :ensure-launcher, :alive?, :kill, and :open-url (fn [url] truthy on
+  success), used only for a browser selection (:cljs-target :browser)."
   ([selection] (make-cljs-node selection {}))
-  ([selection {:keys [timings launch find-clojure alive? kill ensure-launcher]}]
+  ([selection {:keys [timings launch find-clojure alive? kill ensure-launcher open-url]}]
    (let [timings (merge default-timings timings)]
      (->CljsNode selection
                  (atom {:running nil :conn nil :child nil :ready? false :sink nil
                         :drain nil :sink-form nil :done-forms #{} :helping false :n 0
                         :prompt-ns 'cljs.user :mode :reset :used? false :stopped? false
-                        :killing 0 :last-output nil})
+                        :killing 0 :last-output nil
+                        :http-port nil :opened? false :await-page nil :announce nil})
                  (atom (eval/create-history))
                  (atom [])
                  timings
@@ -411,7 +499,8 @@
                   :find-clojure (or find-clojure cljs-child/find-clojure)
                   :ensure-launcher (or ensure-launcher files/ensure-launcher!)
                   :alive? (or alive? cljs-child/alive?)
-                  :kill (or kill cljs-child/kill!)}))))
+                  :kill (or kill cljs-child/kill!)
+                  :open-url (or open-url open-url!)}))))
 
 (def settle-deadline-ms
   ;; estimate: a launch notices a Stop within its poll, then kills the tree;

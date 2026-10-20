@@ -332,8 +332,9 @@
   Returns {:profile p :runtime k :project-dir dir-or-nil :source k
   :warnings [str]}, plus :auto-require [sym] when the project's config
   names one and the dialect is :clj, plus :cljs {map} when it names one and
-  the dialect is :cljs, :source one of :config :marker :extension :settings
-  :fallback. A settings default naming a marker-less profile (in practice
+  the dialect is :cljs, plus :cljs-target (:node or :browser, only for a
+  cljs selection that launches its own process), :source one of :config
+  :marker :extension :settings :fallback. A settings default naming a marker-less profile (in practice
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
@@ -417,7 +418,8 @@
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
-  runtime, and for an out-of-process runtime the project it runs in. Equal
+  runtime, and for an out-of-process runtime the project it runs in, plus
+  :cljs-target for a cljs launch (node and the browser differ). Equal
   keys keep the window's evaluator when another file opens. The nREPL
   dialect's :nrepl endpoint is part of it, so a changed host or port gets
   a new connection."

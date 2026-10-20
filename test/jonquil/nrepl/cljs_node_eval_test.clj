@@ -213,3 +213,125 @@
         "printed output never passes for docs; only the doc form's value counts")
     (is (= "" (#'node/doc-text [{:tag :out :val "only output\n"}] form)))
     (is (= "" (#'node/doc-text [{:tag :ret :form form :exception true :val "{:cause \"x\"}"}] form)))))
+
+;; --- browser mode ---
+
+(def ^:private fake-url "http://127.0.0.1:1234")
+
+(defn- with-browser
+  "Like with-node, for a browser selection. f gets srv and a map with :ev,
+  :launches (the opts each launch got), :opened (urls :open-url got) and
+  :kills. launch-results is a seq of overrides for the first launches
+  (e.g. {:error :http-port-taken}); later launches succeed."
+  [fake-opts {:keys [launch-results open-result timings]} f]
+  (let [srv (fake/start! fake-opts)
+        launches (atom []) opened (atom []) kills (atom 0)
+        results (atom (vec launch-results))
+        e (node/make-cljs-node
+           {:profile dialect/cljs :runtime :launch :project-dir nil :cljs-target :browser}
+           {:timings timings
+            :launch (fn [o]
+                      (swap! launches conj o)
+                      (let [r (first @results)]
+                        (swap! results #(vec (rest %)))
+                        (or r {:port (:port srv) :url fake-url :pid -1 :log "/fake/log"})))
+            :open-url (fn [url] (swap! opened conj url) (if (nil? open-result) true open-result))
+            :find-clojure (fn [] "/fake/clojure")
+            :ensure-launcher (fn [] "/fake/launcher.clj")
+            :alive? (fn [_] true)
+            :kill (fn [_] (swap! kills inc))})]
+    (try (f srv {:ev e :launches launches :opened opened :kills kills})
+         (finally (ev/stop! e) (fake/stop! srv)))))
+
+(defn- text-of [out] (apply str (map second out)))
+
+(deftest browser-first-run-opens-once-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev launches opened]}]
+      (let [{:keys [result out]} (run ev "(+ 1 2)" {:run? false})]
+        (is (= "3" (:printed result)))
+        (is (= [fake-url] @opened))
+        (is (str/includes? (text-of out) (cljs-node/opened-message fake-url)))
+        (is (= :browser (:target (first @launches))))
+        (is (integer? (:http-port (first @launches)))))
+      (let [{:keys [out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= [fake-url] @opened) "a second evaluation doesn't open again")
+        (is (not (str/includes? (text-of out) "Opened")))))))
+
+(deftest browser-open-url-failure-test
+  (with-browser {} {:open-result false}
+    (fn [_ {:keys [ev]}]
+      (let [{:keys [out]} (run ev "1" {:run? false})]
+        (is (str/includes? (text-of out) (str "; Open " fake-url " in a browser.")))
+        (is (not (str/includes? (text-of out) "Opened")))))))
+
+(deftest browser-stop-then-run-reloads-test
+  (with-browser {:slow-ms 5000} {}
+    (fn [srv {:keys [ev launches opened kills]}]
+      (let [done (promise)]
+        (ev/eval! ev "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(some (fn [f] (re-find #"slow" f)) (fake/received-forms srv)) 5000))
+        (ev/interrupt! ev)
+        (is (= {:status :interrupted} (deref done 5000 :timeout)))
+        (is (wait-until #(= 1 @kills) 3000)))
+      (let [{:keys [result out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= "2" (:printed result)))
+        (is (str/includes? (text-of out) (cljs-node/reload-message fake-url)))
+        (is (= 1 (count @opened)) "no second tab")
+        (is (= 2 (count @launches)))
+        (is (= (:http-port (first @launches)) (:http-port (second @launches)))
+            "the same HTTP port for both launches")))))
+
+(deftest browser-port-taken-relaunches-test
+  (with-browser {} {:launch-results [{:error :http-port-taken}]}
+    (fn [_ {:keys [ev launches opened]}]
+      (let [{:keys [result out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= "2" (:printed result)))
+        (is (= 2 (count @launches)))
+        (is (not= (:http-port (first @launches)) (:http-port (second @launches))))
+        (is (str/includes? (text-of out) (str "; The browser port changed: open " fake-url ".")))
+        (is (not (str/includes? (text-of out) "restarted")))
+        (is (empty? @opened) "a port change doesn't count as the first open"))))
+  (with-browser {} {:launch-results [{:error :http-port-taken} {:error :http-port-taken}]}
+    (fn [_ {:keys [ev launches]}]
+      (let [r (:result (run ev "(+ 1 1)" {:run? false}))]
+        (is (= :notice (:status r)))
+        (is (str/includes? (:text r) "http-port-taken"))
+        (is (= 2 (count @launches)))))))
+
+(deftest browser-waiting-line-is-dropped-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev]}]
+      (let [out (atom [])]
+        (ev/eval! ev "(+ 1 1)" {:run? false :on-output (fn [k s] (swap! out conj [k s]))
+                                :on-complete (fn [_])})
+        (is (wait-until #(not (ev/evaluating? ev)) 5000))
+        (#'node/dispatch! ev (atom false)
+                          {:tag :out :val "Waiting for browser to connect to http://127.0.0.1:1234 ...\n"})
+        (#'node/dispatch! ev (atom false) {:tag :out :val "kept\n"})
+        (is (not (str/includes? (text-of @out) "Waiting for browser")))
+        (is (str/includes? (text-of @out) "kept"))))))
+
+(deftest browser-first-eval-page-timeout-test
+  (with-browser {:slow-ms 3000} {:timings {:page-timeout-ms 300}}
+    (fn [_ {:keys [ev kills]}]
+      (let [r (:result (run ev "(slow)" {:run? false}))]
+        (is (= {:status :notice :text (cljs-node/no-page-message fake-url)} r))
+        (is (zero? @kills) "the child is kept")
+        (is (connection/connected? ev))))))
+
+(deftest browser-limitations-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev]}]
+      (is (= cljs-node/browser-limitations (ev/limitations ev)))))
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (is (= cljs-node/limitations (ev/limitations ev))))))
+
+(deftest node-never-opens-a-url-test
+  (let [opened (atom [])]
+    (with-node {} {:open-url (fn [u] (swap! opened conj u) true)}
+      (fn [_ {:keys [ev]}]
+        (run ev "(+ 1 1)" {:run? true})
+        (run ev "(+ 1 1)" {:run? true})
+        (is (empty? @opened))))))
