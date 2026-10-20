@@ -26,7 +26,7 @@ fewer, measured 2026-10-20).
 <details>
 <summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code> and <code>test:basilisp</code></strong></summary>
 
-`bb test:nrepl` runs a second, separate suite (61 tests, 220 assertions,
+`bb test:nrepl` runs a second, separate suite (62 tests, 225 assertions,
 about 50 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
 jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
