@@ -69,7 +69,7 @@
                  (.mkdirs d) (spit (io/file d "precious") "x") d)
         link (let [l (io/file base "0badf00d")]
                (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath target)
-                                                        (make-array java.nio.file.attribute.FileAttribute 0))
+                                                       (make-array java.nio.file.attribute.FileAttribute 0))
                l)
         root (files/ensure-root! base)]
     (is (not (.exists old)) "another version's folder, unused for two days")

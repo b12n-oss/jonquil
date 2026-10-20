@@ -112,35 +112,35 @@
   the deps.edn is deps-edn-text byte for byte."
   ([] (start! {}))
   ([{:keys [nrepl]}]
-    (let [uid (str (System/nanoTime) "-" (random-uuid))
-          tmp (System/getProperty "java.io.tmpdir")
-          dir (io/file tmp (str "jonquil-clj-server-" uid))
-          config-dir (io/file tmp (str "jonquil-clj-config-" uid))
-          src (io/file dir "src/demo/core.clj")
-          log (str tmp "/jonquil-clj-server-" uid ".log")]
-      (.mkdirs (.getParentFile src))
-      (.mkdirs config-dir)
-      (spit (io/file dir "deps.edn") (if nrepl (deps-edn-with-nrepl nrepl) deps-edn-text))
-      (spit src fixture-core-text)
-      (let [dir-path (.getCanonicalPath dir)
-            config-path (.getCanonicalPath config-dir)
-            proc (p/process {:dir dir-path :out (io/file log) :err :out
-                             :extra-env {"CLJ_CONFIG" config-path}}
-                            "clojure" "-M:serve")
-            state (wait-ready proc log ready-deadline-ms)]
-        (case state
-          :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port (port-from-log log)
-                  :dir dir-path :config-dir config-path :log log}
-          (let [msg (if (= :exited state)
-                      (str "clojure -M:serve exited: " (tail log 20))
-                      (str "clojure -M:serve didn't answer within " ready-deadline-ms " ms: " (tail log 20)))]
+   (let [uid (str (System/nanoTime) "-" (random-uuid))
+         tmp (System/getProperty "java.io.tmpdir")
+         dir (io/file tmp (str "jonquil-clj-server-" uid))
+         config-dir (io/file tmp (str "jonquil-clj-config-" uid))
+         src (io/file dir "src/demo/core.clj")
+         log (str tmp "/jonquil-clj-server-" uid ".log")]
+     (.mkdirs (.getParentFile src))
+     (.mkdirs config-dir)
+     (spit (io/file dir "deps.edn") (if nrepl (deps-edn-with-nrepl nrepl) deps-edn-text))
+     (spit src fixture-core-text)
+     (let [dir-path (.getCanonicalPath dir)
+           config-path (.getCanonicalPath config-dir)
+           proc (p/process {:dir dir-path :out (io/file log) :err :out
+                            :extra-env {"CLJ_CONFIG" config-path}}
+                           "clojure" "-M:serve")
+           state (wait-ready proc log ready-deadline-ms)]
+       (case state
+         :ready {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :port (port-from-log log)
+                 :dir dir-path :config-dir config-path :log log}
+         (let [msg (if (= :exited state)
+                     (str "clojure -M:serve exited: " (tail log 20))
+                     (str "clojure -M:serve didn't answer within " ready-deadline-ms " ms: " (tail log 20)))]
             ;; No server to hand back, so nothing else will clean up: end the
             ;; process, then delete both temp dirs. The log stays, since the
             ;; exception names it.
-            (terminate! proc)
-            (delete-tree! dir-path)
-            (delete-tree! config-path)
-            (throw (ex-info msg {:log log}))))))))
+           (terminate! proc)
+           (delete-tree! dir-path)
+           (delete-tree! config-path)
+           (throw (ex-info msg {:log log}))))))))
 
 (defn stop!
   "Ends the server this namespace started (only the pid at (:proc srv),

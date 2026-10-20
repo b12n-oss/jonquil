@@ -227,8 +227,8 @@
             (>= attempts 3) (throw e)
             fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line) (recur (inc attempts)))
             (and (:jonquil source) (exited? e)) (do (swap! (:state ev) assoc :jonquil-error
-                                         (str "the Jolt child couldn't load Jonquil's nREPL middleware: " (log-error-line e)))
-                                  (recur (inc attempts)))
+                                                           (str "the Jolt child couldn't load Jonquil's nREPL middleware: " (log-error-line e)))
+                                                    (recur (inc attempts)))
             :else (throw e)))))))
 
 (defn- start-runtime!

@@ -242,20 +242,20 @@
   nothing. Returns true when it popped up, else nil. GTK-thread only."
   ([pane path] (open-menu! pane path nil))
   ([{:keys [popover menu state row-widgets] :as pane} path pt]
-  (let [row (when path (row-at pane path))
-        root (:root @state)
-        target (cond (nil? path) (when root (let [c (canonical root)] {:path c :listed c :dir? true}))
-                     (and row (not (:error? row))) (select-keys row [:path :listed :dir?]))]
-    (when target
-      (swap! menu assoc :target target :items (if (nil? path) (vec (take 2 ITEMS)) ITEMS)
-             :mode :menu :open? true :problem nil)
-      (doseq [[label btn] (:buttons pane)]
-        (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0)))
-      (set-problem! pane nil)
-      (show-menu-mode! pane :menu)
-      (point-popover-at! pane (when row (:row (get @row-widgets (.indexOf ^java.util.List (visible-rows pane) row)))) pt)
-      (g/gtk-popover-popup popover)
-      true))))
+   (let [row (when path (row-at pane path))
+         root (:root @state)
+         target (cond (nil? path) (when root (let [c (canonical root)] {:path c :listed c :dir? true}))
+                      (and row (not (:error? row))) (select-keys row [:path :listed :dir?]))]
+     (when target
+       (swap! menu assoc :target target :items (if (nil? path) (vec (take 2 ITEMS)) ITEMS)
+              :mode :menu :open? true :problem nil)
+       (doseq [[label btn] (:buttons pane)]
+         (g/gtk-widget-set-visible btn (if (some #{label} (:items @menu)) 1 0)))
+       (set-problem! pane nil)
+       (show-menu-mode! pane :menu)
+       (point-popover-at! pane (when row (:row (get @row-widgets (.indexOf ^java.util.List (visible-rows pane) row)))) pt)
+       (g/gtk-popover-popup popover)
+       true))))
 
 (defn- listed [{:keys [path listed]}] (or listed path))
 
@@ -296,15 +296,15 @@
   is open and shows that label."
   [{:keys [menu on-trash on-error] :as pane} label]
   (when (and (:open? @menu) (some #{label} (:items @menu)))
-   (case label
-    "New File…" (show-name-entry! pane :new-file)
-    "New Folder…" (show-name-entry! pane :new-folder)
-    "Rename…" (show-name-entry! pane :rename)
-    "Move to Trash" (let [path (listed (:target @menu))]
-                      (close-menu! pane)
-                      (when-let [problem (when on-trash (on-trash path))]
-                        (on-error (str "; trash: " problem))))
-    nil))
+    (case label
+      "New File…" (show-name-entry! pane :new-file)
+      "New Folder…" (show-name-entry! pane :new-folder)
+      "Rename…" (show-name-entry! pane :rename)
+      "Move to Trash" (let [path (listed (:target @menu))]
+                        (close-menu! pane)
+                        (when-let [problem (when on-trash (on-trash path))]
+                          (on-error (str "; trash: " problem))))
+      nil))
   nil)
 
 (defn submit-name!

@@ -216,7 +216,7 @@
     (g/gtk-window-present win)
     (fresh! ed text)
     (report "plan" n (median (repeatedly (if (> n 5000) 3 5) (fn [] (let [fresh (str (StringBuilder. ^String text))]
-                                                               (timed (fn [] (paint/paint-plan fresh))))))))
+                                                                      (timed (fn [] (paint/paint-plan fresh))))))))
     (let [off (edit-offset text)]
       (report-stall ed n "stall-edit" text off "x")
       (report-stall ed n "stall-quote" text off "\""))

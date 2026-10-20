@@ -304,8 +304,8 @@
                    :else (if-let [d (eldoc-info sym r)]
                            {:status :ok
                             :text (str/join "\n" (remove str/blank? [(str (:ns d) "/" (:name d))
-                                                                      (:arglists d)
-                                                                      (:doc d)]))}
+                                                                     (:arglists d)
+                                                                     (:doc d)]))}
                            {:status :not-found}))))
               (catch Throwable _ (on-result {:status :timeout}))))))
       (catch Throwable _ (on-result {:status :timeout})))

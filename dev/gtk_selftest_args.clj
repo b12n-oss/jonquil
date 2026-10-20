@@ -32,7 +32,7 @@
   []
   (let [d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-args-")))]
     (doseq [[rel text] [["deps.edn" "{}\n"] ["src/a.clj" "(def a 1)\n"] ["b.clj" "(def b 2)\n"]
-                       ["sub/c.clj" "(def c 3)\n"]]]
+                        ["sub/c.clj" "(def c 3)\n"]]]
       (let [f (io/file d rel)] (io/make-parents f) (spit f text)))
     (reset! fixture* {:dir d :sub (str d "/sub") :a (str d "/src/a.clj") :b (str d "/b.clj")})))
 

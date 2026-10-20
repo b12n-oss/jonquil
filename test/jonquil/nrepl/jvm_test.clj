@@ -1033,7 +1033,6 @@
                                     (wait-until! (fn [] (some #{"inspect-start"} (fake/ops-seen srv))))
                                     (fake/drop-connections! srv))))))))))
 
-
 ;; --- auto-require (.jonquil.edn :auto-require, via the selection) ---
 
 (defn- make-auto [dir nss]

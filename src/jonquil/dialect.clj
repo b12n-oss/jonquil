@@ -331,8 +331,8 @@
   selection falls through to :fallback (I2)."
   [profiles project path default]
   (let [{:keys [dialect runtime auto-require cljs nrepl warnings]} (if project
-                                             (parse-config (:config project) (:config-error project))
-                                             {:warnings []})
+                                                                     (parse-config (:config project) (:config-error project))
+                                                                     {:warnings []})
         by-config (when dialect (profile profiles dialect))
         w1 (if (and dialect (not by-config))
              [(str ".jonquil.edn names " dialect ", which isn't a known dialect")]

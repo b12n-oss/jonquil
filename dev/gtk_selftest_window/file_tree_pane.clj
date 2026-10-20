@@ -28,18 +28,18 @@
   callbacks)."
   ([f] (with-pane {} f))
   ([extra f]
-  (let [opened (atom [])
-        {:keys [win p]} (on-gtk (let [win (g/gtk-window-new)
-                                      p (pane/make-pane (merge {:on-open (fn [path] (swap! opened conj path))
-                                                                :on-open-folder (fn [] nil)
-                                                                :on-error (fn [_] nil)}
-                                                               extra))]
-                                  (g/gtk-window-set-default-size win 300 500)
-                                  (g/gtk-window-set-child win (:root p))
-                                  (g/gtk-window-present win)
-                                  {:win win :p p}))]
-    (try (f p opened)
-         (finally (on-gtk (g/gtk-window-close win)))))))
+   (let [opened (atom [])
+         {:keys [win p]} (on-gtk (let [win (g/gtk-window-new)
+                                       p (pane/make-pane (merge {:on-open (fn [path] (swap! opened conj path))
+                                                                 :on-open-folder (fn [] nil)
+                                                                 :on-error (fn [_] nil)}
+                                                                extra))]
+                                   (g/gtk-window-set-default-size win 300 500)
+                                   (g/gtk-window-set-child win (:root p))
+                                   (g/gtk-window-present win)
+                                   {:win win :p p}))]
+     (try (f p opened)
+          (finally (on-gtk (g/gtk-window-close win)))))))
 
 (defn- names [p] (mapv :name (pane/visible-rows p)))
 
