@@ -8,7 +8,7 @@
 ;; --- the console's sentences ---
 
 (def experimental-message
-  "; ClojureScript support is experimental. Jonquil connects to the shadow-cljs nREPL server on the first Run.")
+  "; ClojureScript support is experimental.")
 
 (def detached-message
   "; Detached from the shadow-cljs server. The watch and the app weren't touched.")

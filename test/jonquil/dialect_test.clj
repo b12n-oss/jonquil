@@ -408,8 +408,10 @@
   (is (= :cljs (:id dialect/cljs)))
   (is (= #{"cljs"} (:extensions dialect/cljs)))
   (is (= ["shadow-cljs.edn"] (:project-markers dialect/cljs)))
-  (is (= [:attach #{:attach} ".shadow-cljs/nrepl.port"]
-         [(:evaluator dialect/cljs) (:runtimes dialect/cljs) (:port-file dialect/cljs)]))
+  (is (= [:launch :attach #{:attach :launch} ".shadow-cljs/nrepl.port"]
+         [(:evaluator dialect/cljs) (:project-evaluator dialect/cljs) (:runtimes dialect/cljs) (:port-file dialect/cljs)]))
+  (is (= "ClojureScript" (:name dialect/cljs)))
+  (is (= {:attach "ClojureScript (shadow-cljs)" :launch "ClojureScript (node)"} (:runtime-names dialect/cljs)))
   (is (= (:special-forms dialect/jolt) (:special-forms dialect/cljs))))
 
 (deftest cljs-selection-test
@@ -491,3 +493,31 @@
     (let [k (fn [cfg] (dialect/selection-key (dialect/select dialect/profiles (proj #{} cfg) "/p/a.clj" nil)))]
       (is (not= (k "{:dialect :nrepl :nrepl {:port 1}}") (k "{:dialect :nrepl :nrepl {:port 2}}")))
       (is (= (k "{:dialect :nrepl :nrepl {:port 1}}") (k "{:dialect :nrepl :nrepl {:port 1}}"))))))
+
+(deftest cljs-launch-selection-test
+  (let [sel (fn [markers cfg path] (dialect/select all5 (proj markers cfg) path nil))]
+    (testing "a loose .cljs file launches"
+      (let [s (dialect/select all5 nil "/tmp/x.cljs" nil)]
+        (is (= [:cljs :launch] [(:id (:profile s)) (:runtime s)]))))
+    (testing "a project without shadow-cljs.edn launches; with it, attaches"
+      (is (= :launch (:runtime (sel #{"deps.edn"} nil "/p/a.cljs"))))
+      (is (= :attach (:runtime (sel #{"shadow-cljs.edn"} nil "/p/a.cljs")))))
+    (testing ".jonquil.edn :runtime overrides either way"
+      (is (= :attach (:runtime (sel #{"deps.edn"} "{:dialect :cljs :runtime :attach}" "/p/a.cljs"))))
+      (is (= :launch (:runtime (sel #{"shadow-cljs.edn"} "{:dialect :cljs :runtime :launch}" "/p/a.cljs")))))
+    (testing ":cljs {:shadow-build} stays on a launch selection, without a warning"
+      (let [s (sel #{"deps.edn"} "{:dialect :cljs :cljs {:shadow-build :app}}" "/p/a.cljs")]
+        (is (= [:launch {:shadow-build :app} []] [(:runtime s) (:cljs s) (:warnings s)]))))))
+
+(deftest cljs-launch-label-test
+  (let [launch (dialect/select all5 nil "/tmp/x.cljs" nil)
+        attach (dialect/select all5 (proj #{"shadow-cljs.edn"} nil) "/p/a.cljs" nil)]
+    (is (= "ClojureScript (node) (running)" (dialect/label launch :attached)))
+    (is (= "ClojureScript (node) (not running)" (dialect/label launch nil)))
+    (is (= "ClojureScript (shadow-cljs) (attached)" (dialect/label attach :attached)))
+    (is (= "ClojureScript (shadow-cljs) (not running)" (dialect/label attach nil)))))
+
+(deftest cljs-launch-reset-toggle-test
+  (let [launch (dialect/select all5 nil "/tmp/x.cljs" nil)
+        r (dialect/reset-toggle {} launch true)]
+    (is (= [true true nil] [(:active? r) (:sensitive? r) (:tooltip r)]))))

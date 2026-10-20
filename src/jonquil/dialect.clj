@@ -149,21 +149,25 @@
 
 (def cljs
   {:id :cljs
-   :name "ClojureScript (shadow-cljs)"
+   :name "ClojureScript"
+   :runtime-names {:attach "ClojureScript (shadow-cljs)" :launch "ClojureScript (node)"}
    :extensions #{"cljs"}
    :reader-features #{:cljs}
    :special-forms (:special-forms jolt)
    :builtins (:builtins jolt)
    :project-markers ["shadow-cljs.edn"]
-   ;; Attach-only: Jonquil connects to the shadow-cljs nREPL server, found
-   ;; through :port-file in the project directory, and never starts it.
-   :evaluator :attach
-   :runtimes #{:attach}
+   ;; Two runtimes. :attach connects to the shadow-cljs nREPL server, found
+   ;; through :port-file in the project directory, and never starts it; a
+   ;; project with shadow-cljs.edn defaults to it (:project-evaluator).
+   ;; :launch starts ClojureScript on node, which everything else gets.
+   :evaluator :launch
+   :project-evaluator :attach
+   :runtimes #{:attach :launch}
    :port-file ".shadow-cljs/nrepl.port"
    :experimental true
    ;; The same text as jonquil.cljs/experimental-message (dialect can't
    ;; require cljs); a test keeps the two equal.
-   :experimental-message "; ClojureScript support is experimental. Jonquil connects to the shadow-cljs nREPL server on the first Run."
+   :experimental-message "; ClojureScript support is experimental."
    :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
 
 (def nrepl
@@ -430,7 +434,7 @@
   ([selection] (label selection nil))
   ([{:keys [profile runtime]} connection]
    (cond
-     (= :attach runtime) (str (:name profile) (if (= :attached connection) " (attached)" " (not running)"))
-     (= :launch runtime) (str (:name profile) (if (= :attached connection) " (running)" " (not running)"))
+     (= :attach runtime) (str (get-in profile [:runtime-names :attach] (:name profile)) (if (= :attached connection) " (attached)" " (not running)"))
+     (= :launch runtime) (str (get-in profile [:runtime-names :launch] (:name profile)) (if (= :attached connection) " (running)" " (not running)"))
      (= runtime (:evaluator profile)) (:name profile)
      :else (str (:name profile) " (" (runtime-name runtime) ")"))))
