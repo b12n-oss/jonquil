@@ -108,7 +108,11 @@
   [& args]
   (let [browser? (= "browser" (first args))]
     (if browser?
-      (let [port (parse-long (second args))]
+      (let [port (some-> (second args) parse-long)]
+        (when-not port
+          (binding [*out* *err*]
+            (println "usage: jonquil.cljs-node-launch browser <http-port>"))
+          (System/exit 2))
         (reset! http-port port)
         (try (reset! prebound (ServerSocket. (int port) 50 (InetAddress/getByName "127.0.0.1")))
              (catch java.io.IOException _

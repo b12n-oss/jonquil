@@ -127,6 +127,15 @@
     (is (= {:error :http-port-taken} r))
     (is (= before (run-dirs)) "the run dir is removed")))
 
+(deftest node-start-ignores-the-port-taken-marker-test
+  (let [script (fake-script! "echo 'jonquil-cljs-http-port-taken 9123'\nexit 3")
+        r (child/start! {:clojure script :launcher "l.clj" :target :node})]
+    (try (is (not= :http-port-taken (:error r)) (str r))
+         (is (string? (:error r)) (str r))
+         (finally
+           (when-let [log (some->> (:error r) (re-find #"The log: (.+)$") second)]
+             (#'child/delete-tree! (.getParent (io/file log))))))))
+
 (deftest bind-failure-text-without-marker-is-ordinary-failure-test
   (let [script (fake-script! "echo 'java.net.BindException: Address already in use'\nexit 1")
         r (child/start! {:clojure script :launcher "l.clj" :target :browser :http-port 9123})]
