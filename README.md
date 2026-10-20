@@ -4,7 +4,7 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work: Jolt in or out of process; JVM Clojure, ClojureDart (experimental), ClojureScript (experimental) and any other nREPL server, such as babashka or Basilisp, each attached to a server you started; and jank (experimental), which Jonquil launches itself**
+**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work: Jolt in or out of process; JVM Clojure, ClojureDart (experimental), ClojureScript (experimental), which attaches to a shadow-cljs server you started or launches on node; any other nREPL server, such as babashka or Basilisp, attached to a server you started; and jank (experimental), which Jonquil launches itself**
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
@@ -24,11 +24,14 @@ its `.jonquil.edn` says `{:dialect :clj}`: start a server with
 `clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil
 connects the first time you Run, requiring any namespaces the project
 lists under `:auto-require` as it does (a Jolt project can list them
-too). ClojureScript is the third attach
-dialect, also experimental: open a `.cljs` file, start your shadow-cljs
-build with `npx shadow-cljs watch <build>`, and Jonquil connects to its
-nREPL server the first time you Run, evaluating in whatever JS runtime has
-the build loaded. Any other nREPL server attaches the same way once a
+too). ClojureScript is also experimental, and it has two
+runtimes. In a project with a `shadow-cljs.edn`, start your build with
+`npx shadow-cljs watch <build>` and Jonquil connects to its nREPL server the
+first time you Run, evaluating in whatever JS runtime has the build loaded.
+A `.cljs` file anywhere else, a loose file included, runs on node: Jonquil
+starts ClojureScript for the window on the first Run, which needs the Clojure
+CLI and `node` (and the launcher's local sockets listen on loopback only).
+Any other nREPL server attaches the same way once a
 project's `.jonquil.edn` says `{:dialect :nrepl}`: babashka
 (`bb nrepl-server 1667`, then `:nrepl {:port 1667}`), Basilisp, whose
 `basilisp nrepl-server` writes `.nrepl-port` itself, or a server on
@@ -56,7 +59,8 @@ Ctrl+Space completes as you type, with a documentation preview beside the candid
 - `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.0 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork isn't published yet
 - Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
-- A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect: Jonquil attaches to it and never starts it
+- A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect when it attaches: Jonquil never starts it
+- The `clojure` CLI and `node` on `PATH` (or `JONQUIL_CLOJURE`), only for ClojureScript on node: Jonquil starts ClojureScript itself, and the first start can download the Closure Compiler
 - An nREPL server you started, only for the nREPL dialect (babashka's `bb nrepl-server`, Basilisp's `basilisp nrepl-server`, or any other). Jonquil never starts or stops it, and the server runs whatever it's sent, so keep a remote one on a network you trust or reach it through an ssh tunnel
 
 ## Running
@@ -87,7 +91,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-20, 716 tests pass (4067 assertions on macOS; 4036 on Linux).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-20, 763 tests pass (4237 assertions on macOS; Linux was last measured at 716 tests and 4036 assertions).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>
@@ -110,6 +114,7 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.nrepl.middleware-files`, `jonquil.nrepl.inspect-middleware`, `jonquil.nrepl.stdin-middleware` and `jonquil.nrepl.info-middleware`: Jonquil's own nREPL middleware, embedded when Jonquil is compiled, written under `~/.cache/jonquil/nrepl-middleware` and loaded by the Jolt child, which gives out-of-process Jolt the inspector, `read-line` and jump to definition into other files.
 - `jonquil.cljd` and `jonquil.nrepl.attach`: the ClojureDart dialect, attached to a running app over its own nREPL server. `bb test` runs its tests against an in-process fake server, so there's still no child process and nothing outside the repo.
 - `jonquil.cljs` and `jonquil.nrepl.shadow`: the ClojureScript dialect (experimental), attached to a shadow-cljs nREPL server you started yourself. `bb test` runs its tests against an in-process fake server.
+- `jonquil.cljs-node`, `jonquil.cljs-node-launch`, `jonquil.nrepl.cljs-node`, `jonquil.nrepl.cljs-child`, `jonquil.nrepl.cljs-node-files` and `jonquil.nrepl.prepl`: ClojureScript on node (experimental). Jonquil launches a `clojure` process per window that serves a prepl on loopback and runs ClojureScript's node REPL, and talks to it over line-delimited EDN. `bb test` runs these against a fake prepl and `bb test:cljs-node` runs a live suite against real `clojure` and `node`.
 - `jonquil.clj`, `jonquil.nrepl.connection` and `jonquil.nrepl.jvm`: the JVM Clojure dialect, attached to an nREPL server you started yourself. `jonquil.nrepl.connection` is the attach lifecycle shared with ClojureDart's own. `bb test` runs `jonquil.nrepl.jvm`'s tests against an in-process fake server, and `bb test:clj` runs a second suite against a real `clojure -M:serve`.
 - `jonquil.nrepl.generic`: the nREPL dialect, attached to any nREPL server you started (babashka, Basilisp, one on another host), through the JVM attach evaluator with nothing JVM-specific assumed. `bb test:bb` and `bb test:basilisp` run live suites against a real `bb nrepl-server` and `basilisp nrepl-server`.
 - `jonquil.mcp` and `jonquil.mcp.*`: the MCP server behind `jonquil --mcp`: the six headless tools (`tools`), the fifteen over a live window (`window`), the listener `--mcp-attach` reaches (`listen`), and its JSON (`json`).
@@ -128,9 +133,10 @@ bb test:clj               # live JVM tests: start a real clojure -M:serve (need 
 bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
 bb test:bb                # live nREPL-dialect tests: start a real bb nrepl-server (bb on PATH; skips without one)
 bb test:basilisp          # the same against a real basilisp nrepl-server (JONQUIL_BASILISP or basilisp on PATH)
+bb test:cljs-node         # live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)
 bb test jonquil.edit-test # one namespace (the TDD loop)
 bb linux:test             # bb test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)
-bb gtk:selftest           # real-window self-tests, opens nine windows (don't type while it runs)
+bb gtk:selftest           # real-window self-tests, opens ten windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
 bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
 bb smoke:cljd             # drive the built binary against a running ClojureDart app (start your ClojureDart app first; see the development guide)

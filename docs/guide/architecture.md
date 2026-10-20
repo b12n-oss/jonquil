@@ -201,7 +201,7 @@ The O1 spec decision is that Run resets by default: in `:reset` mode, `run-defin
 
 Three `bb` tasks drive the real GTK front end headlessly, without a human at the keyboard:
 
-- `bb gtk:selftest` now opens nine real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection. The fourth (cljd plan P2.T4) opens a window against a throwaway ClojureDart app directory whose `NREPL.lock` names a fake fork server running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no fork checkout and no real app; its rows cover connecting, a quiet load, Run Selection and Run Form switching the session's namespace, quick doc, completion, and Stop's detach, all over that fake connection. The fifth (clj plan P2.T4) opens a window against a throwaway JVM Clojure project whose `.nrepl-port` names a fake JVM nREPL server running in this same process (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its rows cover connecting, Run moving the prompt, a selection against a namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting after the server restarts, quick doc, jump to an external definition, full docs and its Escape, and a close that never sends the server a `close` op. The sixth is launched on a directory (`dev/gtk_selftest_tree.clj`). The seventh (`dev/gtk_selftest_jank.clj`, 13 rows) opens a window on a throwaway `.jank` project with `JONQUIL_JANK` naming `dev/fake-jank`, a script that serves a fake jank nREPL in its working directory, so the real launcher starts a real child process and the rows can check its pid and run directory on disk: the first Run, a REPL line, a selection against a namespace jank hasn't loaded, quick doc, F12 inside the buffer, the inspector's unavailable sentence, Stop and Reset each restarting the process, and a quit that kills it. The eighth (`dev/gtk_selftest_args.clj`, 5 rows) is launched with a folder and two files, which reach the window through GApplication's `open` signal; its rows check the tree root, that the launch saves no tree visibility, the two tabs, the active tab and the program name. The ninth (`dev/gtk_selftest_cljs.clj`, 10 rows) opens a window on a throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake shadow-cljs nREPL server running in this same process (`dev/fake_shadow_nrepl.clj`), so it needs no node and no real build.
+- `bb gtk:selftest` now opens ten real GTK windows in turn. The first two run the P2 front-end and full-window self-test rows against them, exercising the same button and key handlers a person would use rather than calling internal functions directly; the third (D2.T4) opens a window against a throwaway project with `{:runtime :nrepl}` in its `.jonquil.edn`, so a real Jolt child runs behind it, and its rows cover starting, running, Stop, help, and closing over that live connection. The fourth (cljd plan P2.T4) opens a window against a throwaway ClojureDart app directory whose `NREPL.lock` names a fake fork server running in this same process (`dev/fake_cljd_nrepl.clj`), so it needs no fork checkout and no real app; its rows cover connecting, a quiet load, Run Selection and Run Form switching the session's namespace, quick doc, completion, and Stop's detach, all over that fake connection. The fifth (clj plan P2.T4) opens a window against a throwaway JVM Clojure project whose `.nrepl-port` names a fake JVM nREPL server running in this same process (`dev/fake_jvm_nrepl.clj`), so it needs no real `clojure -M:serve`; its rows cover connecting, Run moving the prompt, a selection against a namespace the server hasn't loaded, Stop's interrupt, stdin, reconnecting after the server restarts, quick doc, jump to an external definition, full docs and its Escape, and a close that never sends the server a `close` op. The sixth is launched on a directory (`dev/gtk_selftest_tree.clj`). The seventh (`dev/gtk_selftest_jank.clj`, 13 rows) opens a window on a throwaway `.jank` project with `JONQUIL_JANK` naming `dev/fake-jank`, a script that serves a fake jank nREPL in its working directory, so the real launcher starts a real child process and the rows can check its pid and run directory on disk: the first Run, a REPL line, a selection against a namespace jank hasn't loaded, quick doc, F12 inside the buffer, the inspector's unavailable sentence, Stop and Reset each restarting the process, and a quit that kills it. The eighth (`dev/gtk_selftest_args.clj`, 5 rows) is launched with a folder and two files, which reach the window through GApplication's `open` signal; its rows check the tree root, that the launch saves no tree visibility, the two tabs, the active tab and the program name. The ninth (`dev/gtk_selftest_cljs.clj`, 10 rows) opens a window on a throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake shadow-cljs nREPL server running in this same process (`dev/fake_shadow_nrepl.clj`), so it needs no node and no real build. The tenth (`dev/gtk_selftest_cljs_node.clj`, 6 rows) opens a window on a `.cljs` file outside a shadow-cljs project, so the real launcher starts a fake prepl (`dev/fake_cljs_prepl.clj`) as a child process.
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
 All three poll a condition against a deadline rather than sleeping, and all three hand any blocking subprocess call (screenshots, GIF recording, the nREPL window's own child) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
@@ -288,6 +288,7 @@ flowchart LR
   ma -- ":clj" --> jvm["jonquil.nrepl.jvm<br/>Jvm: your own nREPL server"]
   ma -- ":cljs" --> shadow["jonquil.nrepl.shadow<br/>Shadow: a running shadow-cljs build"]
   ma -- ":nrepl" --> jvm
+  sel -- ":launch, :cljs" --> cljsnode["jonquil.nrepl.cljs-node<br/>CljsNode: ClojureScript on node, started lazily"]
 ```
 
 ### `jonquil.nrepl.*`: Jolt out of process
@@ -572,6 +573,51 @@ the offline tables otherwise.
 `jonquil.cljs` is the pure half, the same split `jonquil.cljd` and
 `jonquil.clj` draw: the console's sentences, the build choice, the select
 form, and the reply decisions, as plain functions with no socket and no GTK.
+
+### ClojureScript on node: `jonquil.cljs-node` and friends
+
+`.cljs` outside a shadow-cljs project is the second `:launch` runtime. The
+dialect profile has two runtimes: `:attach` (`jonquil.nrepl.shadow`), the
+default in a project with `shadow-cljs.edn` through the profile's
+`:project-evaluator`, and `:launch` for everything else, which
+`.jonquil.edn {:runtime ...}` can override. `ev/make-launched` dispatches on
+the profile id, so `jonquil.nrepl.cljs-node` registers `:cljs` beside jank.
+
+Five namespaces and one launcher make it up:
+
+- `jonquil.cljs-node` is the pure half: the console's sentences, the
+  `clojure` arguments (ClojureScript 1.12.42 is added with `-Sdeps` only when
+  `deps.edn` doesn't name `org.clojure/clojurescript`), the ready line and
+  the readers for prepl replies.
+- `jonquil.cljs-node-launch` is JVM Clojure that runs inside the child. Jolt
+  never loads it: `jonquil.nrepl.cljs-node-files` embeds its text when Jonquil
+  is compiled and writes it under the cache folder. It serves a prepl
+  (`cljs.server.node/prepl`) on a loopback port the OS picks, prints
+  `jonquil-cljs-prepl <port>`, and exits when its stdin ends, which is how a
+  crashed Jonquil takes the child down. ClojureScript's `node_repl.js` listens
+  on every interface, so the launcher serves a patched copy of it through a
+  classloader: the one line `.listen(PORT);` becomes
+  `.listen(PORT, "127.0.0.1");`, and if a ClojureScript version doesn't
+  contain that line the launcher exits with an error. The copy lives in a
+  temp folder that `deleteOnExit` removes.
+- `jonquil.nrepl.cljs-child` finds `clojure` (`JONQUIL_CLOJURE`, else the
+  login shell's `PATH`), starts the launcher in the project directory with
+  stdin held open, waits for the ready line (60 s, since a first run
+  downloads), and kills the process tree on stop.
+- `jonquil.nrepl.prepl` is the client for ClojureScript's prepl: line-
+  delimited EDN over a socket, one reader thread, replies delivered to a
+  handler that drops anything after `:closed`.
+- `jonquil.nrepl.cljs-node` is the `Evaluator`. A prepl has no request ids,
+  so each evaluation sends its forms followed by a sentinel form and reads
+  replies until the sentinel's `:ret`. Input that ends inside a form is
+  refused before sending, since the reader would wait for the rest. Stop,
+  Reset on Run and a close kill the child, because nothing can interrupt it.
+  Help evaluates `cljs.repl/doc` only while idle; a help that times out
+  leaves its sentinel in `:drain`, and replies up to that `:ret` are dropped
+  before the next evaluation's are read.
+
+Both listeners (the prepl and node's socket) are unauthenticated and
+loopback-only, the same exposure as the Jolt nREPL child.
 
 ### jank: `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`
 
