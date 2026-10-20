@@ -16,6 +16,7 @@
             [jonquil.nrepl.attach]
             [jonquil.nrepl.connection]
             [jonquil.nrepl.evaluator]
+            [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]

@@ -61,6 +61,7 @@
     jonquil.nrepl.jvm-test
     jonquil.nrepl.shadow-test
     jonquil.nrepl.jank-eval-test
+    jonquil.nrepl.cljs-node-eval-test
     jonquil.gtk.appearance-test
     jonquil.gtk.trash-test
     jonquil.gtk.ffi-test

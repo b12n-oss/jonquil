@@ -52,6 +52,7 @@
             [jonquil.nrepl.attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]

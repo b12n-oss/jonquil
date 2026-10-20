@@ -48,6 +48,7 @@
     jonquil.nrepl.jvm
     jonquil.nrepl.shadow
     jonquil.nrepl.jank
+    jonquil.nrepl.cljs-node
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help

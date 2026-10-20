@@ -163,3 +163,15 @@
   dispatched on its :runtime. Each implementation's namespace adds its
   method; requiring that namespace is what registers it."
   (fn [selection] (:runtime selection)))
+
+(defmulti make-launched
+  "A new evaluator that launches its own child, for a jonquil.dialect/select
+  result, dispatched on (:id (:profile selection)). Each dialect's namespace
+  adds its method; requiring that namespace is what registers it."
+  (fn [selection] (:id (:profile selection))))
+
+(defmethod make-launched :default [selection]
+  (let [id (:id (:profile selection))]
+    (throw (ex-info (str "No launched evaluator for dialect " id) {:dialect id}))))
+
+(defmethod make :launch [selection] (make-launched selection))
