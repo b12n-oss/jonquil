@@ -29,6 +29,12 @@
                             :on-complete (fn [r] (deliver done r))))
     {:result (deref done 10000 :timeout) :out @out}))
 
+(defn- wait-until [pred ms]
+  (let [deadline (+ (System/currentTimeMillis) ms)]
+    (loop [] (cond (pred) true
+                   (> (System/currentTimeMillis) deadline) false
+                   :else (do (Thread/sleep 20) (recur))))))
+
 (defn- with-node [fake-opts overrides f]
   (let [srv (fake/start! fake-opts)
         n (make-test-node srv overrides)]
@@ -111,7 +117,7 @@
             (Thread/sleep 20) (recur (inc n))))
         (ev/interrupt! ev)
         (is (= {:status :interrupted} (deref done 5000 :timeout)))
-        (is (= 1 @kills))
+        (is (wait-until #(= 1 @kills) 3000) "Stop's kill runs off the caller's thread")
         (is (re-find #"Stopped" (apply str (map second @out))))
         (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))))
         (is (= 2 @launches))))))
@@ -153,3 +159,37 @@
       (is (= node/timeout-doc (:doc (ev/lookup ev 'slow "" 0))))
       (let [r (:result (run ev "(+ 20 22)" {:run? false}))]
         (is (= {:status :ok :printed "42"} (select-keys r [:status :printed])))))))
+
+(deftest stop-returns-before-a-slow-kill-test
+  ;; Stop is called on the GTK thread; killing a JVM and node can take a
+  ;; second or two, so the kill runs in the background, and the evaluator
+  ;; isn't settled (the registry waits on it before quitting) until it ends.
+  (let [release (promise)]
+    (with-node {:slow-ms 5000} {:kill (fn [_] (deref release 5000 nil))}
+      (fn [srv {:keys [ev]}]
+        (let [done (promise)]
+          (ev/eval! ev "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+          (is (wait-until #(some (fn [f] (re-find #"slow" f)) (fake/received-forms srv)) 5000))
+          (let [t0 (System/currentTimeMillis)]
+            (ev/interrupt! ev)
+            (is (< (- (System/currentTimeMillis) t0) 500) "interrupt! didn't wait for the kill"))
+          (is (= {:status :interrupted} (deref done 5000 :timeout)))
+          (is (not (node/settled? ev)) "a kill still running keeps the evaluator unsettled")
+          (deliver release true)
+          (is (wait-until #(node/settled? ev) 3000)))))))
+
+(deftest output-between-evaluations-test
+  ;; node can print after an evaluation finished (a setTimeout, a promise):
+  ;; with no evaluation waiting, :out and :err go to the last evaluation's
+  ;; on-output instead of being dropped.
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [out (atom [])]
+        (ev/eval! ev "(+ 1 1)" {:run? false :on-output (fn [k s] (swap! out conj [k s]))
+                                :on-complete (fn [_])})
+        (is (wait-until #(not (ev/evaluating? ev)) 5000))
+        (#'node/dispatch! ev (atom false) {:tag :out :val "late\n"})
+        (#'node/dispatch! ev (atom false) {:tag :err :val "warn\n"})
+        (#'node/dispatch! ev (atom false) {:tag :ret :val "9" :form "x"})
+        (is (= [[:out "late\n"] [:err "warn\n"]] (filterv (comp #{"late\n" "warn\n"} second) @out)))
+        (is (not-any? #(= "9" (second %)) @out) "a stray ret isn't shown")))))
