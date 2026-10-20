@@ -74,8 +74,14 @@
   (try (str/join "\n" (take-last n (str/split-lines (slurp path))))
        (catch Exception _ "")))
 
-(defn- read-port [log]
-  (try (cljs-node/ready-port (slurp log)) (catch Exception _ nil)))
+(defn- read-log [log]
+  (try (slurp log) (catch Exception _ "")))
+
+(defn- port-taken?
+  "True when the log shows the HTTP port could not be bound."
+  [text]
+  (or (str/includes? text "Address already in use")
+      (str/includes? text "BindException")))
 
 (defn process-options
   "The jolt.process options for the child: {:dir :log}, plus login-path's
@@ -89,14 +95,19 @@
 
 (defn start!
   "Starts the launcher with clojure in a fresh <tmpdir>/jonquil-cljs-run-<suffix>
-  and waits for its ready line. Returns {:proc :pid :port :run-dir :log
-  :stdin}, or {:error text} when the process exits early or timeout-ms
+  and waits for its ready line. Returns {:proc :pid :port :url :run-dir :log
+  :stdin} (:url is the page URL of a browser launch, nil for node), or
+  {:error :http-port-taken} when a :browser launch's log shows a bind
+  failure before the ready line (the tree is killed and the run dir
+  removed), or {:error text} when the process exits early or timeout-ms
   (default 60000) passes (the text carries the exit code, the log's last 5
   lines and \"The log: <path>\"; the log is kept), or {:error :cancelled}
   when (cancelled?) turns true. Every failure kills the tree. opts:
   :clojure and :launcher (required), :project-dir, :timeout-ms,
-  :cancelled?, :args-fn (default cljs-node/launch-args; a test seam)."
-  [{:keys [clojure launcher project-dir timeout-ms cancelled? args-fn]}]
+  :cancelled?, :target (:node or :browser), :http-port (browser only),
+  :args-fn (default cljs-node/launch-args; a test seam; it receives
+  :target and :http-port too)."
+  [{:keys [clojure launcher project-dir timeout-ms cancelled? args-fn target http-port]}]
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         args-fn (or args-fn cljs-node/launch-args)
         ;; :dir must be canonical absolute: a relative or symlinked one
@@ -113,7 +124,8 @@
         deps-file (io/file dir "deps.edn")
         add-dep? (cljs-node/needs-cljs-dep?
                   (when (.isFile deps-file) (try (slurp deps-file) (catch Exception _ nil))))
-        argv (args-fn {:clojure clojure :launcher launcher :add-dep? add-dep?})
+        argv (args-fn {:clojure clojure :launcher launcher :add-dep? add-dep?
+                       :target target :http-port http-port})
         spawned (try (apply p/process (process-options {:dir dir :log log}) argv)
                      (catch Exception e
                        (delete-tree! run-dir)
@@ -131,9 +143,12 @@
         ;; Anything thrown while waiting must not leave the tree behind.
         (try
           (loop []
-            (let [port (read-port log)]
+            (let [text (read-log log)
+                  port (cljs-node/ready-port text)]
               (cond
-                port (assoc child :port port)
+                port (assoc child :port port :url (cljs-node/ready-url text))
+                (and (= :browser target) (port-taken? text))
+                (do (kill! child) {:error :http-port-taken})
                 (and cancelled? (cancelled?)) (do (kill! child) {:error :cancelled})
                 (not (p/alive? proc))
                 (let [r (deref proc 500 nil)]
