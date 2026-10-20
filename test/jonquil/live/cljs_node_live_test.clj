@@ -95,12 +95,27 @@
       (is (= :ok (:status result)) (pr-str [result out]))
       (is (= "\"hi x\"" (:printed result)) (pr-str result)))))
 
+(defn- node-pids
+  "The pids among pids whose command's first word ends with node."
+  [pids]
+  (filter (fn [pid]
+            (let [cmd (str/trim (sh-out "ps" "-o" "command=" "-p" pid))
+                  word (first (str/split cmd #"\s+"))]
+              (str/ends-with? (str word) "node")))
+          pids))
+
+(defn- listen-rows [pid]
+  (rest (str/split-lines (sh-out "lsof" "-nP" "-a" "-p" pid "-iTCP" "-sTCP:LISTEN"))))
+
 (deftest stop-kills-the-tree-live
   (with-cljs [e (make)]
-    (is (= "1" (:printed (:result (run e "1")))))
-    (let [pids (process-tree (cljs-node/child-pid e))
+    (is (= "1" (:printed (:result (run e "1")))) "the first eval starts the child")
+    (let [child (cljs-node/child-pid e)
+          _ (is (some? child))
+          pids (process-tree child)
+          nodes (node-pids pids)
           done (promise)]
-      (is (some? (cljs-node/child-pid e)))
+      (is (seq nodes) (str "node is among the child's tree: " (pr-str pids)))
       (ev/eval! e "(loop [] (recur))" {:run? false :on-complete (fn [r] (deliver done r))})
       (Thread/sleep 1000)
       (let [t0 (System/currentTimeMillis)]
@@ -109,18 +124,18 @@
         (is (< (- (System/currentTimeMillis) t0) 5000)))
       (let [{:keys [result]} (run e "(+ 4 5)")]
         (is (= "9" (:printed result)) (pr-str result)))
-      (is (< 1 (count pids)) (str "expected node among the process-tree: " (pr-str pids)))
       (is (not-any? pid-alive? pids) (str "alive: " (pr-str (filter pid-alive? pids)))))))
 
 (deftest listeners-are-loopback-only-live
   (with-cljs [e (make)]
-    (is (= "2" (:printed (:result (run e "(+ 1 1)")))))
-    (let [pids (process-tree (cljs-node/child-pid e))
-          rows (mapcat (fn [pid]
-                         (rest (str/split-lines
-                                (sh-out "lsof" "-nP" "-a" "-p" pid "-iTCP" "-sTCP:LISTEN"))))
-                       pids)]
-      (is (seq rows) "at least the prepl listens")
-      (doseq [row rows]
+    (is (= "2" (:printed (:result (run e "(+ 1 1)")))) "the first eval starts the child")
+    (let [child (cljs-node/child-pid e)
+          _ (is (some? child))
+          pids (process-tree child)
+          nodes (node-pids pids)]
+      (is (seq nodes) (str "node is among the child's tree: " (pr-str pids)))
+      (is (some #(seq (listen-rows %)) nodes) "node owns a listening socket")
+      (doseq [pid pids
+              row (listen-rows pid)]
         (let [name-col (nth (reverse (str/split (str/trim row) #"\s+")) 1)]
           (is (str/starts-with? name-col "127.0.0.1:") row))))))
