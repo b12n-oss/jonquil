@@ -22,8 +22,14 @@
 (defn- wait-until [pred ms]
   (loop [n 0] (cond (pred) true (> (* n 50) ms) false :else (do (Thread/sleep 50) (recur (inc n))))))
 
+(defn- owner-only? [dir]
+  (= #{"OWNER_READ" "OWNER_WRITE" "OWNER_EXECUTE"}
+     (set (map str (java.nio.file.Files/getPosixFilePermissions
+                    (.toPath (io/file dir))
+                    (make-array java.nio.file.LinkOption 0))))))
+
 (defn- run-dirs []
-  (set (filter #(re-matches #"jonquil-jank-\d+" %)
+  (set (filter #(re-matches #"jonquil-jank-run-.+" %)
                (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
 
 (defn- slow-binary
@@ -85,6 +91,7 @@
       (is (nil? (:error child)) (str child))
       (is (.exists (io/file (:run-dir child) ".nrepl-port")))
       (is (contains? (run-dirs) (.getName (io/file (:run-dir child)))) "run-dirs sees a live run dir")
+      (is (owner-only? (:run-dir child)) "the run dir is created owner-only")
       (let [conn (client/connect (:port child))]
         (try (is (some :versions (client/request-sync conn {:op "describe"} 2000)))
              (finally (client/close! conn))))

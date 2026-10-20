@@ -14,7 +14,7 @@
 (def fake-clojure (.getCanonicalPath (io/file "dev/fake-cljs-clojure")))
 
 (defn- run-dirs []
-  (set (filter #(re-matches #"jonquil-cljs-\d+" %)
+  (set (filter #(re-matches #"jonquil-cljs-run-.+" %)
                (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
 
 (defn- pgrep? [pattern]
@@ -32,6 +32,12 @@
                                            :exists? #(= "/b/clojure" %)})))
   (is (nil? (child/find-clojure {:env {} :path "/a:/b" :exists? (constantly false)}))))
 
+(defn- owner-only? [dir]
+  (= #{"OWNER_READ" "OWNER_WRITE" "OWNER_EXECUTE"}
+     (set (map str (java.nio.file.Files/getPosixFilePermissions
+                    (.toPath (io/file dir))
+                    (make-array java.nio.file.LinkOption 0))))))
+
 (deftest start-and-kill-test
   (let [c (child/start! {:clojure fake-clojure :launcher "l.clj"})]
     (try
@@ -39,6 +45,8 @@
       (is (connects? (:port c)))
       (is (child/alive? c))
       (is (.exists (io/file (:log c))))
+      (is (contains? (run-dirs) (.getName (io/file (:run-dir c)))) "run-dirs sees a live run dir")
+      (is (owner-only? (:run-dir c)) "the run dir is created owner-only")
       (finally (child/kill! c)))
     (is (not (child/alive? c)))
     (is (not (.exists (io/file (:run-dir c)))))
