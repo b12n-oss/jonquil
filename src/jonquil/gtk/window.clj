@@ -1966,6 +1966,14 @@
   (let [f (g/gtk-root-get-focus win)]
     (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb)))))))
 
+(defn- rename-focused?
+  "True when win's focus is inside rename-pop's popover (its entry's GtkText
+  delegate, as find-bar-focused? explains). rename-pop may be nil."
+  [win rename-pop]
+  (let [f (g/gtk-root-get-focus win)]
+    (boolean (and rename-pop (not (ffi/null? f))
+                  (not (zero? (g/gtk-widget-is-ancestor f (:popover rename-pop))))))))
+
 (defn- reload-code-css!
   "Loads theme t's CSS (jonquil.theme/code-css) at font size px into the
   one shared GtkCssProvider, and remembers the CSS string in code-css
@@ -2256,6 +2264,11 @@
             ;; Tabs plan P2.T2: the find bar is the active tab's.
             fb (:fb (active-tab))]
         (cond
+          ;; Typing in the rename popover's entry: every key but Escape
+          ;; is the entry's, so Cmd/Ctrl+W, T, R, F5 and the rest can't
+          ;; close, switch or Run the tab mid-rename. Escape goes on to
+          ;; the popover clause below, which closes it.
+          (and (not= keyval KEY-ESCAPE) (rename-focused? win (:rename-pop (active-tab)))) 0
           (= keyval KEY-F5) (do (run-fn) 1)
           (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
           (find-bar/handle-key! fb keyval0 state)

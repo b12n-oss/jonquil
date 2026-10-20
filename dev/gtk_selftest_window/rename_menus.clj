@@ -7,7 +7,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
-            [jonquil.gtk.popover :as popover]))
+            [jonquil.gtk.popover :as popover]
+            [jolt.ffi :as ffi]))
 
 ;; --- P4.T7: rename and the P4 context menus --------------------------------
 
@@ -180,6 +181,41 @@
       (on-gtk (support/check :rename-closed-signal-syncs
                              (and opened? closed?)
                              {:opened opened? :closed closed?})))))
+
+(def ^:private KEY-T 0x074)
+(def ^:private KEY-W 0x077)
+(def ^:private KEY-F5 0xffc2)
+
+(defn row-rename-entry-keeps-window-keys
+  "With focus in the rename popover's entry, the window's capture-phase key
+  handler leaves Cmd/Ctrl+T and Cmd/Ctrl+W to the entry (0, no new or
+  closed tab), and F5 doesn't Run; Escape still reaches the popover clause
+  and closes it (1). :handle-window-key! is the signal's own fn, called
+  directly, after waiting for the entry's focus to land."
+  [ui]
+  (go-row :rename-entry-keeps-window-keys support/check
+    (let [rp (:rename-popover ui)
+          tabs0 (on-gtk (let [ed (:editor ui)]
+                          (editor/set-text! ed "(map inc [1])")
+                          (support/place-cursor! (:buf ed) 2)
+                          (editor/handle-key! ed support/KEY-F6 g/SHIFT-MASK)
+                          (count ((:tabs* ui)))))
+          focused? (await-until 2000 20
+                                #(let [f (g/gtk-root-get-focus (:window ui))]
+                                   (and (not (ffi/null? f))
+                                        (not (zero? (g/gtk-widget-is-ancestor f (:popover rp)))))))
+          [ht hw hf5 tabs1 open?] (on-gtk [((:handle-window-key! ui) ffi/null KEY-T 0 g/META-MASK ffi/null)
+                                           ((:handle-window-key! ui) ffi/null KEY-W 0 g/META-MASK ffi/null)
+                                           ((:handle-window-key! ui) ffi/null KEY-F5 0 0 ffi/null)
+                                           (count ((:tabs* ui)))
+                                           (popover/open? rp)])
+          hesc (on-gtk ((:handle-window-key! ui) ffi/null support/KEY-ESCAPE 0 0 ffi/null))
+          closed? (await-until 1000 20 #(not (popover/open? rp)))]
+      (on-gtk (when (popover/open? rp) (popover/hide! rp))
+              (support/check :rename-entry-keeps-window-keys
+                             (and focused? (= 0 ht hw hf5) (= tabs0 tabs1) open? (= 1 hesc) closed?)
+                             {:focused focused? :cmd-t ht :cmd-w hw :f5 hf5 :tabs [tabs0 tabs1]
+                              :open open? :escape hesc :closed closed?})))))
 
 (defn row-menu-actions
   ":activate-menu-action!* for jump, quick-doc, toggle-comment, each
