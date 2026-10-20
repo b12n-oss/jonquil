@@ -70,4 +70,7 @@
     (is (not (contains? err :ns)))))
 
 (deftest limitations-test
-  (is (= 4 (count cljs-node/limitations))))
+  (is (= 4 (count cljs-node/limitations)))
+  (is (= "Jonquil starts and stops its own ClojureScript process."
+         (first cljs-node/limitations)))
+  (is (not-any? #(re-find #"experimental" %) cljs-node/limitations)))
