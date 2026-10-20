@@ -191,6 +191,12 @@
   (with-open [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
     (.getLocalPort s)))
 
+(defn- listener-names
+  "The local address column of every listening socket in the child's tree."
+  [child]
+  (map #(nth (reverse (str/split (str/trim %) #"\s+")) 1)
+       (mapcat listen-rows (process-tree (:pid child)))))
+
 (deftest browser-listeners-are-loopback-only-live
   ;; No browser opens and no evaluator is involved: the browser launcher is
   ;; started through cljs-child/start! (the evaluator's own first Run can't
@@ -204,9 +210,7 @@
     (try
       (is (nil? (:error child)) (pr-str child))
       (is (= (str "http://127.0.0.1:" port) (:url child)) (pr-str (:url child)))
-      (let [pids (process-tree (:pid child))
-            names (map #(nth (reverse (str/split (str/trim %) #"\s+")) 1)
-                       (mapcat listen-rows pids))]
+      (let [names (listener-names child)]
         (is (some #(= (str "127.0.0.1:" (:port child)) %) names) (pr-str [(:port child) names]))
         (is (some #(= (str "127.0.0.1:" port) %) names) (pr-str [port names]))
         (doseq [n names] (is (str/starts-with? n "127.0.0.1:") n)))
@@ -222,7 +226,11 @@
                                   r
                                   (do (Thread/sleep 250) (recur)))))]
           (is (= 200 status))
-          (is (re-find #"(?i)<html" body) (subs body 0 (min 200 (count body))))))
+          (is (re-find #"(?i)<html" body) (subs body 0 (min 200 (count body)))))
+        ;; Listeners the HTTP server's first connection created count too.
+        (let [names (listener-names child)]
+          (is (some #(= (str "127.0.0.1:" port) %) names) (pr-str [port names]))
+          (doseq [n names] (is (str/starts-with? n "127.0.0.1:") n))))
       (finally (cljs-child/kill! child)))))
 
 (deftest browser-no-page-keeps-the-child-live
@@ -244,6 +252,42 @@
           (is (some? pid))
           (is (pid-alive? pid) "the child is still alive")))
       (finally (ev/stop! e)))))
+
+(deftest browser-stop-then-run-keeps-the-url-live
+  ;; Stop kills in the background, and the next Run launches while the old
+  ;; JVM may still hold the pre-bound HTTP port. The Run waits for the kill,
+  ;; so the second launch gets the same port (the open tab keeps working) and
+  ;; nothing says the port changed. :open-url is stubbed: no browser opens.
+  (let [opened (atom [])
+        e (cljs-node/make-cljs-node (browser-selection)
+                                    {:timings {:page-timeout-ms 4000}
+                                     :open-url (fn [url] (swap! opened conj url) true)})
+        done (promise)]
+    (try
+      (ev/eval! e "(+ 1 2)" {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+      (is (loop [n 0] (cond (seq @opened) true
+                            (> n 3000) false
+                            :else (do (Thread/sleep 20) (recur (inc n)))))
+          "the page was opened by the first launch")
+      (Thread/sleep 1000)
+      (ev/interrupt! e)
+      (is (= :interrupted (:status (deref done 30000 :timeout))))
+      (let [{:keys [result out]} (run e "(+ 1 2)")
+            url (first @opened)
+            text (apply str (map second out))]
+        (is (= {:status :notice :text (cljs-node-msg/no-page-message url)} result) (pr-str result))
+        (is (= url (:url (:child @(:state e)))) "the second launch served the same address")
+        (is (= 1 (count @opened)) "no second tab")
+        (is (not (str/includes? text "port changed")) text)
+        (is (str/includes? text (cljs-node-msg/reload-message url)) text))
+      (finally (ev/stop! e)))))
+
+(deftest launcher-without-a-port-prints-usage-live
+  (let [r @(p/process {:out :string :err :string :dir *dir*}
+                      (cljs-child/find-clojure) "-M" "-i" (files/ensure-launcher!)
+                      "-m" "jonquil.cljs-node-launch" "browser")]
+    (is (= 2 (:exit r)) (pr-str r))
+    (is (str/includes? (str (:err r)) "usage: jonquil.cljs-node-launch browser <http-port>") (pr-str (:err r)))))
 
 (deftest real-browser-live
   ;; Opens a REAL browser tab, so it only runs with JONQUIL_BROWSER_LIVE=1.

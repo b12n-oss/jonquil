@@ -101,6 +101,10 @@
   (is (false? (cljs-node/waiting-line? {:tag :ret :val "Waiting for browser to connect to x"})))
   (is (false? (cljs-node/waiting-line? {:tag :out}))))
 
+(deftest target-neutral-messages-test
+  (is (= "; Starting ClojureScript (/c/clojure)..." (cljs-node/starting-message "/c/clojure")))
+  (is (= "; ClojureScript didn't start: boom" (cljs-node/start-failed-message "boom"))))
+
 (deftest browser-messages-test
   (is (= ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
           "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."

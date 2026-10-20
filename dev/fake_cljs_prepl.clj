@@ -87,7 +87,9 @@
                 (Thread/sleep (long (:hold-setup-ms opts))))
               (when (and (:slow-ms opts) (str/includes? text "slow"))
                 (Thread/sleep (long (:slow-ms opts))))
-              (let [result (eval-form (create-ns (symbol current)) (strip-setup form))]
+              (let [result (if (and (:fail-setup? opts) (re-find #"\(require\s+'cljs\.repl" text))
+                             {:out "" :exception true :val (error-val (ex-info "no page" {}))}
+                             (eval-form (create-ns (symbol current)) (strip-setup form)))]
                 (if (and (:exception result) (:wedge-on-throw-without-setup? opts) (not setup?))
                   ;; the real bug: never answer again, just drain until EOF
                   (loop [] (when (and (.readLine in) (not @stopped?)) (recur)))
@@ -109,7 +111,9 @@
   :slow-ms  sleep this long before answering a form whose source holds
             \"slow\"
   :hold-setup-ms  sleep this long before answering (require 'cljs.repl),
-            as the browser prepl does until a page connects"
+            as the browser prepl does until a page connects
+  :fail-setup?  answer (require 'cljs.repl) with an exception (after any
+            :hold-setup-ms), as a browser setup that fails late would"
   ([] (start! {}))
   ([opts]
    (let [ss (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))

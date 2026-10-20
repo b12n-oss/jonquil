@@ -9,13 +9,13 @@
 ;; --- the console's sentences ---
 
 (defn starting-message [clojure-path]
-  (str "; Starting ClojureScript on node (" clojure-path ")..."))
+  (str "; Starting ClojureScript (" clojure-path ")..."))
 
 (def no-clojure-message
   "; ClojureScript on node needs the Clojure CLI (clojure). Install it or set JONQUIL_CLOJURE to its path.")
 
 (defn start-failed-message [text]
-  (str "; ClojureScript on node didn't start: " text))
+  (str "; ClojureScript didn't start: " text))
 
 (def reset-message
   "; Reset on Run: ClojureScript restarts, so this Run starts clean.")
@@ -42,7 +42,7 @@
   (str "; ClojureScript restarted: reload the browser tab at " url "."))
 
 (defn no-page-message
-  "Shown when the first evaluation waited the bound and no page connected."
+  "Shown when a setup waited the page bound and no page connected."
   [url]
   (str "; No page has connected yet. Open " url " in a browser, then Run again."))
 

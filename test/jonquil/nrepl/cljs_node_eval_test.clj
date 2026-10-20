@@ -295,15 +295,39 @@
         (is (= "2" (:printed result)))
         (is (= 2 (count @launches)))
         (is (not= (:http-port (first @launches)) (:http-port (second @launches))))
-        (is (str/includes? (text-of out) (str "; The browser port changed: open " (url-of launches 1) ".")))
         (is (not (str/includes? (text-of out) "restarted")))
-        (is (empty? @opened) "a port change doesn't count as the first open"))))
+        ;; The page was never opened, so it opens now, at the new address.
+        (is (= [(url-of launches 1)] @opened))
+        (is (str/includes? (text-of out) (cljs-node/opened-message (url-of launches 1))))
+        (is (str/includes? (text-of out) (str "; The browser port changed: the page is at "
+                                              (url-of launches 1) ".")))
+        (is (not (str/includes? (text-of out) "open http://"))))))
   (with-browser {} {:launch-results [{:error :http-port-taken} {:error :http-port-taken}]}
     (fn [_ {:keys [ev launches]}]
       (let [r (:result (run ev "(+ 1 1)" {:run? false}))]
         (is (= :notice (:status r)))
         (is (= node/port-twice-message (:text r)))
         (is (= 2 (count @launches)))))))
+
+(deftest browser-port-change-after-the-first-open-asks-to-open-test
+  (with-browser {} {:launch-results [nil {:error :http-port-taken}]}
+    (fn [_ {:keys [ev launches opened]}]
+      (run ev "(+ 1 1)" {:run? false})
+      (#'node/kill-child! ev)
+      (let [{:keys [out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= 3 (count @launches)))
+        (is (= 1 (count @opened)) "no second tab")
+        (is (str/includes? (text-of out) (str "; The browser port changed: open " (url-of launches 2) ".")))))))
+
+(deftest waiting-line-is-kept-for-node-test
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [out (atom [])]
+        (ev/eval! ev "(+ 1 1)" {:run? true :on-output (fn [k s] (swap! out conj [k s]))
+                                :on-complete (fn [_])})
+        (is (wait-until #(not (ev/evaluating? ev)) 5000))
+        (#'node/dispatch! ev (atom false) {:tag :out :val "Waiting for browser to connect to x\n"})
+        (is (str/includes? (text-of @out) "Waiting for browser to connect to x"))))))
 
 (deftest browser-waiting-line-is-dropped-test
   (with-browser {} {}
@@ -351,6 +375,30 @@
         (is (= "3" (:printed r)) (pr-str r)))
       (is (zero? @kills)))))
 
+(deftest browser-failed-late-setup-relaunches-test
+  ;; The setup answers with an exception after the page bound: the child is
+  ;; not kept to report it forever, the next Run launches a fresh one.
+  (with-browser {:hold-setup-ms 500 :fail-setup? true} {:timings {:page-timeout-ms 200}}
+    (fn [_ {:keys [ev launches kills]}]
+      (is (= :notice (:status (:result (run ev "(+ 1 2)" {:run? false})))))
+      (is (zero? @kills) "kept while the setup is pending")
+      (is (wait-until #(= :failed (:setup-pending @(:state ev))) 3000))
+      (let [{:keys [result out]} (run ev "(+ 1 2)" {:run? false})]
+        (is (= 2 (count @launches)) "relaunched")
+        (is (= 1 @kills) "the failed child was killed")
+        (is (= :notice (:status result)) (pr-str result))
+        (is (str/includes? (text-of out) (cljs-node/start-failed-message "the session setup failed")))))))
+
+(deftest browser-setup-failing-inside-the-bound-kills-the-child-test
+  (with-browser {:fail-setup? true} {}
+    (fn [_ {:keys [ev launches kills]}]
+      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+        (is (= :notice (:status r)))
+        (is (str/includes? (:text r) "the session setup failed")))
+      (is (= 1 @kills))
+      (is (nil? (:child @(:state ev))))
+      (is (= 1 (count @launches))))))
+
 (deftest browser-never-opens-an-empty-url-test
   (with-browser {} {}
     (fn [_ {:keys [ev opened]}]
@@ -373,6 +421,16 @@
         (run ev "(+ 1 1)" {:run? true})
         (run ev "(+ 1 1)" {:run? true})
         (is (empty? @opened))))))
+
+(deftest open-url-leaves-a-slow-opener-running-test
+  (let [dir (java.io.File/createTempFile "jonquil-open" "")
+        _ (.delete dir) _ (.mkdirs dir)
+        slow (java.io.File. dir "slow.sh")]
+    (try
+      (spit slow "#!/bin/sh\nsleep 2\n")
+      (.setExecutable slow true)
+      (is (true? (#'node/open-url! "http://x" (.getPath slow))) "still running after a second is fine")
+      (finally (doseq [f [slow dir]] (.delete f))))))
 
 (deftest open-url-honours-the-override-command-test
   (let [dir (java.io.File/createTempFile "jonquil-open" "")
