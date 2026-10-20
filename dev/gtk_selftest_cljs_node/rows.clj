@@ -136,7 +136,7 @@
           [answered? mark2] (run-and-await ui "(+ 20 22)" 30000 #(value-line? % "42"))
           new (pid-of ui)]
       (on-gtk (support/check :cljs-node-stop-restarts
-                             (and before old started? stopped? gone? answered? new (not= old new))
+                             (and before old (= before old) started? stopped? gone? answered? new (not= old new))
                              {:before before :old old :new new :started started? :stopped stopped? :gone gone?
                               :answered answered? :text (str (support/since ui mark) (support/since ui mark2))})))))
 
