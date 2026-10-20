@@ -107,9 +107,13 @@
           {:status :notice :text cljs-node/no-clojure-message})))))
 
 (defn- dispatch!
-  "Routes one reply of connection gen to the current sink. closed? is that
-  connection's own flag: a reply after its :closed is dropped, and :closed
-  itself is delivered once."
+  "Routes one reply of one connection. closed? is that connection's own
+  flag: a reply after its :closed is dropped, and :closed itself is
+  delivered once. A ret whose :form is the pending :drain sentinel (a help
+  that timed out) clears :drain and is dropped with everything before it. A
+  ret that is the current exchange's sentinel is recorded in :done-forms in
+  the same swap, so exchange! can tell a timeout from a ret that just
+  beat it."
   [{:keys [state]} closed? r]
   (cond
     (= :closed (:tag r))
@@ -120,17 +124,26 @@
     @closed? nil
 
     :else
-    (let [{:keys [drain sink]} @state]
-      (if drain
-        (when (and (= :ret (:tag r)) (= drain (:form r)))
-          (swap! state (fn [s] (cond-> s (= drain (:drain s)) (assoc :drain nil)))))
-        (when sink (sink r))))))
+    (let [form (when (= :ret (:tag r)) (:form r))
+          [old _] (swap-vals! state
+                              (fn [s]
+                                (cond
+                                  (and form (= form (:drain s))) (assoc s :drain nil)
+                                  (and form (= form (:sink-form s))) (update s :done-forms conj form)
+                                  :else s)))]
+      (cond
+        (:drain old) nil
+        (:sink old) ((:sink old) r)))))
 
 (defn- exchange!
   "Sends text and collects the replies until (done? reply) or :closed or
   timeout-ms. [outcome replies], outcome :done, :closed or :timeout. Output
-  replies go to on-output as they arrive when it is given."
-  [{:keys [state]} text done? {:keys [on-output timeout-ms]}]
+  replies go to on-output as they arrive when it is given. With :sentinel
+  (the form whose ret ends the exchange), the end of the exchange is one
+  swap: it clears the sink and, on a timeout whose sentinel ret has not
+  arrived, sets :drain to it, so the late ret is dropped by dispatch! and
+  nothing else is."
+  [{:keys [state]} text done? {:keys [on-output timeout-ms sentinel]}]
   (let [p (promise)
         replies (atom [])
         sink (fn [r]
@@ -141,11 +154,16 @@
                        (when-let [[k t] (cljs-node/output-of r)]
                          (connection/say! on-output k t)))
                      (when (done? r) (deliver p :done)))))]
-    (swap! state assoc :sink sink)
+    (swap! state assoc :sink sink :sink-form sentinel)
     (let [outcome (try (prepl/send! (:conn @state) text)
                        (if timeout-ms (deref p timeout-ms :timeout) (deref p))
                        (catch Throwable _ :closed))]
-      (swap! state assoc :sink nil)
+      (swap! state
+             (fn [s]
+               (let [arrived? (contains? (:done-forms s) sentinel)]
+                 (cond-> (assoc s :sink nil :sink-form nil)
+                   sentinel (update :done-forms disj sentinel)
+                   (and sentinel (= :timeout outcome) (not arrived?)) (assoc :drain sentinel)))))
       [outcome @replies])))
 
 (defn- next-sentinel! [{:keys [state]}]
@@ -169,7 +187,8 @@
       (do
         (swap! state assoc :conn conn)
         (if (stopping? ev)
-          {:status :interrupted}
+          (do (try (prepl/close! conn) (catch Throwable _ nil))
+              {:status :interrupted})
           (let [[outcome replies] (exchange! ev cljs-node/setup-form ret?
                                              {:timeout-ms (:setup-timeout-ms timings)})]
             (cond
@@ -221,7 +240,7 @@
                   _ (swap! state assoc :used? true)
                   [outcome replies] (exchange! ev text
                                                (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                               {:on-output on-output})]
+                                               {:on-output on-output :sentinel sentinel-form})]
               (case outcome
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
@@ -257,12 +276,12 @@
         (let [sentinel-form (next-sentinel! ev)
               [outcome replies] (exchange! ev (str "(cljs.repl/doc " sym ")\n" sentinel-form)
                                            (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                           {:timeout-ms (or timeout-ms (ev/help-timeout (:help-timeout-ms timings)))})]
+                                           {:sentinel sentinel-form
+                                            :timeout-ms (or timeout-ms (ev/help-timeout (:help-timeout-ms timings)))})]
           (if (= :done outcome)
             (let [t (doc-text replies)]
               (cljd/no-docs sym (if (str/blank? t) (str "No docs for " sym) t)))
-            (do (when (= :timeout outcome) (swap! state assoc :drain sentinel-form))
-                (cljd/no-docs sym timeout-doc))))
+            (cljd/no-docs sym timeout-doc)))
         (finally (swap! state assoc :helping false))))))
 
 (defrecord CljsNode [selection state history listeners timings hooks]
@@ -327,7 +346,7 @@
    (let [timings (merge default-timings timings)]
      (->CljsNode selection
                  (atom {:running nil :conn nil :child nil :ready? false :sink nil
-                        :drain nil :helping false :n 0
+                        :drain nil :sink-form nil :done-forms #{} :helping false :n 0
                         :prompt-ns 'cljs.user :mode :reset :used? false :stopped? false})
                  (atom (eval/create-history))
                  (atom [])

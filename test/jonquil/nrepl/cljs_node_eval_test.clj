@@ -130,3 +130,14 @@
         (doseq [s @(:conns srv)] (.close ^java.net.Socket s))
         (is (= {:status :error :error-text node/exited-text} (deref done 5000 :timeout)))
         (is (= 1 @kills))))))
+
+(deftest late-help-reply-is-drained-test
+  ;; The help form contains "slow", so the fake answers it after 1.5 s,
+  ;; past the 200 ms help bound. The next evaluation must still finish
+  ;; with its own value, not wait on or swallow the stale reply.
+  (with-node {:slow-ms 1500} {:timings {:help-timeout-ms 200}}
+    (fn [_ {:keys [ev]}]
+      (is (= "1" (:printed (:result (run ev "1" {:run? false})))))
+      (is (= node/timeout-doc (:doc (ev/lookup ev 'slow "" 0))))
+      (let [r (:result (run ev "(+ 20 22)" {:run? false}))]
+        (is (= {:status :ok :printed "42"} (select-keys r [:status :printed])))))))
