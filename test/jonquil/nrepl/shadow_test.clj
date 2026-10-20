@@ -75,6 +75,11 @@
     (is (= 'cljs.user (ev/prompt-ns e)))
     (is (satisfies? ev/FullDoc e))))
 
+(deftest limitations-test
+  (let [e (ev/make {:profile dialect/cljs :runtime :attach :project-dir "/nowhere"})]
+    (is (= "Jonquil connects to the shadow-cljs nREPL server on the first Run."
+           (first (ev/limitations e))))))
+
 (deftest connect-rules-test
   (testing "no port file: the not-running notice"
     (let [[dir _] (temp-project nil) e (make dir)]

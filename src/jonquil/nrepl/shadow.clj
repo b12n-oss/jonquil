@@ -276,7 +276,8 @@
               :else (or (eldoc-info sym r) (cljd/no-docs sym (str "No docs for " sym)))))))
       (catch Throwable _ nil)))
   (limitations [_]
-    ["Stop detaches: there's no interrupt, so the build's runtime keeps running whatever it already has."
+    ["Jonquil connects to the shadow-cljs nREPL server on the first Run."
+     "Stop detaches: there's no interrupt, so the build's runtime keeps running whatever it already has."
      "No stdin."
      "Reset on Run isn't available: every Run adds to the running build."
      "Run needs the build loaded in a JS runtime (open the app, or run the node script)."])
