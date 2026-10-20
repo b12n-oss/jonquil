@@ -6,7 +6,10 @@
   explicit because a Jolt process with live threads may not exit on its own."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [jonquil.nrepl.jank-child :as jank-child]))
+            [jonquil.login-path :as login-path]
+            [jonquil.nrepl.cljs-child :as cljs-child]
+            [jonquil.nrepl.jank-child :as jank-child]
+            [jonquil.tool-path :as tool-path]))
 
 (def test-namespaces
   ;; Add each new test namespace here as tasks land.
@@ -50,15 +53,18 @@
     jonquil.cljd-test
     jonquil.clj-test
     jonquil.cljs-test
+    jonquil.cljs-node-test
     jonquil.jank-test
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
     jonquil.fake-shadow-nrepl-test
+    jonquil.fake-cljs-prepl-test
     jonquil.fake-jank-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.nrepl.jvm-test
     jonquil.nrepl.shadow-test
     jonquil.nrepl.jank-eval-test
+    jonquil.nrepl.cljs-node-eval-test
     jonquil.gtk.appearance-test
     jonquil.gtk.trash-test
     jonquil.gtk.ffi-test
@@ -70,6 +76,9 @@
     jonquil.nrepl.generic-test
     jonquil.nrepl.stdin-middleware-test
     jonquil.nrepl.middleware-files-test
+    jonquil.nrepl.cljs-child-test
+    jonquil.nrepl.cljs-node-files-test
+    jonquil.nrepl.prepl-test
     jonquil.inspect-test])
 
 (def live-namespaces
@@ -90,6 +99,11 @@
   ;; The :jank dialect's live suite: launches a real `jank repl` per test.
   ;; Run with `bb test:jank`, not `bb test`. JONQUIL_JANK picks the binary.
   '[jonquil.live.jank-live-test])
+
+(def live-cljs-node-namespaces
+  ;; The :cljs dialect's launch runtime against real ClojureScript on node.
+  ;; Run with `bb test:cljs-node`. Skips without the clojure CLI or node.
+  '[jonquil.live.cljs-node-live-test])
 
 (def live-bb-namespaces
   ;; The :nrepl dialect's live suite: starts a real `bb nrepl-server` per
@@ -117,9 +131,17 @@
   (when (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
     (println "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping")
     (System/exit 0))
+  (when (= ["--live-cljs-node"] args)
+    (when (nil? (cljs-child/find-clojure))
+      (println "test:cljs-node: no clojure CLI found (set JONQUIL_CLOJURE or install clojure); skipping")
+      (System/exit 0))
+    (when (nil? (tool-path/resolve-program "node" (login-path/path) login-path/executable-file?))
+      (println "test:cljs-node: no node on the login PATH; skipping")
+      (System/exit 0)))
   (let [nss (cond (= ["--live"] args) live-namespaces
                   (= ["--live-clj"] args) live-clj-namespaces
                   (= ["--live-jank"] args) live-jank-namespaces
+                  (= ["--live-cljs-node"] args) live-cljs-node-namespaces
                   (= ["--live-bb"] args) live-bb-namespaces
                   (= ["--live-basilisp"] args) live-basilisp-namespaces
                   (seq args) (mapv symbol args)

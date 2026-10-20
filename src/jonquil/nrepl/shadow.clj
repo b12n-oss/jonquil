@@ -281,6 +281,10 @@
      "Reset on Run isn't available: every Run adds to the running build."
      "Run needs the build loaded in a JS runtime (open the app, or run the node script)."])
 
+  ev/StartNote
+  (start-note [_]
+    "Jonquil connects to the shadow-cljs nREPL server on the first Run.")
+
   ev/ServerHelp
   (offline-candidates [_ prefix text pos extra-context]
     (try (cljd/candidates (:profile selection) prefix text pos extra-context)

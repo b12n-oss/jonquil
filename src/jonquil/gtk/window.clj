@@ -52,6 +52,7 @@
             [jonquil.nrepl.attach]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
@@ -805,6 +806,8 @@
     (satisfies? connection/Attached e)
     (do (when (:experimental (:profile sel))
           (cview/append! cv :system (str (:experimental-message (:profile sel)) "\n")))
+        (when (satisfies? ev/StartNote e)
+          (cview/append! cv :system (str "; " (ev/start-note e) "\n")))
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 

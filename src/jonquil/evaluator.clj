@@ -46,6 +46,12 @@
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
 
+(defprotocol StartNote
+  "An evaluator that connects on the first Run says so once, as a plain
+  note in the console next to the experimental line, not as a limit."
+  (start-note [ev]
+    "One sentence for the console when the window opens."))
+
 (def ^:dynamic *help-timeout-ms*
   "When bound, how long a server evaluator's complete and lookup wait for
   the server, in place of its own :help-timeout-ms (300 ms, sized for the
@@ -163,3 +169,15 @@
   dispatched on its :runtime. Each implementation's namespace adds its
   method; requiring that namespace is what registers it."
   (fn [selection] (:runtime selection)))
+
+(defmulti make-launched
+  "A new evaluator that launches its own child, for a jonquil.dialect/select
+  result, dispatched on (:id (:profile selection)). Each dialect's namespace
+  adds its method; requiring that namespace is what registers it."
+  (fn [selection] (:id (:profile selection))))
+
+(defmethod make-launched :default [selection]
+  (let [id (:id (:profile selection))]
+    (throw (ex-info (str "No launched evaluator for dialect " id) {:dialect id}))))
+
+(defmethod make :launch [selection] (make-launched selection))

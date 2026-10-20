@@ -28,9 +28,13 @@
     jonquil.nrepl.generic
     jonquil.nrepl.stdin-middleware
     jonquil.nrepl.middleware-files
+    jonquil.nrepl.cljs-child
+    jonquil.nrepl.cljs-node-files
+    jonquil.nrepl.prepl
     jonquil.cljd
     jonquil.clj
     jonquil.cljs
+    jonquil.cljs-node
     jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection
@@ -44,6 +48,7 @@
     jonquil.nrepl.jvm
     jonquil.nrepl.shadow
     jonquil.nrepl.jank
+    jonquil.nrepl.cljs-node
     jonquil.runtime-registry
     jonquil.commands
     jonquil.help

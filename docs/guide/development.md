@@ -9,10 +9,10 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 67 namespaces in well under a second, and it's the fastest
+currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (716 tests, 4067 assertions
-on macOS) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (763 tests, 4237 assertions
+on macOS, 4206 on Linux, measured with `bb linux:test` on 2026-10-20) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -41,6 +41,8 @@ and download again when it changes, and `--offline` reuses the cached build.
 The nightly goes first on `PATH` for the run, and the Jolt children pick it
 up too (checked with `ps`, 2026-10-20: 59 tests, 213 assertions on
 `v0.8.23-26-g1dcdf9e4`).
+`bb test:cljs-node` runs a live suite for ClojureScript on node (6 tests, 23 assertions): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, recovery after an error, requiring a project namespace, that Stop kills the whole process tree, and that the listeners are loopback-only. It skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
+
 `bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by
 `dev/clj_server.clj` (mirroring `jonquil.nrepl.child`'s shape for a Jolt
@@ -112,17 +114,17 @@ bridge stdout line must parse as JSON. It prints 16 checks.
 
 </details>
 
-## Self-test and docs: nine windows, one binary, one camera
+## Self-test and docs: ten windows, one binary, one camera
 
 Three harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
-**`bb gtk:selftest`** opens nine real GTK windows in turn and runs the
+**`bb gtk:selftest`** opens ten real GTK windows in turn and runs the
 front-end self-test rows against them, calling the same button and key
 handlers a person would use rather than the internal functions directly.
 
 <details>
-<summary><strong>The nine groups, and what each one covers</strong></summary>
+<summary><strong>The ten groups, and what each one covers</strong></summary>
 
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
@@ -206,7 +208,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. A full run reports 48, 309, 19, 15, 36, 4, 13, 5 and 10 rows
+browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 6 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, and a quit that kills the child. A full run reports 48, 309, 19, 15, 36, 4, 13, 5, 10 and 6 rows
 passing, in group order.
 
 </details>

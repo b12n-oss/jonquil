@@ -35,10 +35,13 @@ you use it:
 - **ClojureDart** (experimental): a running app built with the ClojureDart
   fork that serves nREPL. See
   [ClojureDart](using-jonquil.md#clojuredart-experimental-attaching-to-a-running-app).
-- **ClojureScript** (experimental): a shadow-cljs project
-  (`shadow-cljs.edn`) with `npx shadow-cljs watch <build>` running and a
+- **ClojureScript** (experimental): in a shadow-cljs project
+  (`shadow-cljs.edn`), `npx shadow-cljs watch <build>` running and a
   JS runtime that has the build loaded. See
   [ClojureScript](using-jonquil.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
+  A `.cljs` file outside a shadow-cljs project needs only the Clojure CLI
+  and `node`, and Jonquil starts ClojureScript itself. See
+  [ClojureScript on node](using-jonquil.md#clojurescript-experimental-running-on-node).
 - **Any nREPL server** (the nREPL dialect): the server itself, which you
   start, and `.jonquil.edn {:dialect :nrepl :nrepl {:port N}}` naming it.
   Basilisp's `basilisp nrepl-server` writes `.nrepl-port`, so

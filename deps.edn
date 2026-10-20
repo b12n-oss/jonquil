@@ -58,10 +58,15 @@
   ;; D3 plan P1.T2: the fake jank nREPL server as a stand-in `jank`
   ;; executable (dev/fake-jank runs -m fake-jank-nrepl).
   :fake-jank {:extra-paths ["dev"]}
+  ;; cljs-node plan T3: a fake prepl as a stand-in `clojure` (dev/fake-cljs-clojure).
+  :fake-cljs {:extra-paths ["dev"]}
   ;; D3 plan P3.T1: a jank window against the fake jank process. Run it
   ;; with JONQUIL_JANK pointing at dev/fake-jank (bb gtk:selftest sets it).
   :selftest-jank {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-jank"]}
+  ;; The ClojureScript-on-node window rows: dev/fake-cljs-clojure as JONQUIL_CLOJURE.
+  :selftest-cljs-node {:extra-paths ["dev"]
+                       :main-opts ["-m" "gtk-selftest-cljs-node"]}
   ;; File-tree plan P2.T3: a window launched on a directory.
   :selftest-tree {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-tree"]}

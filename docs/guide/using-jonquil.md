@@ -849,7 +849,9 @@ holds a live connection to the app, and `ClojureDart (not running)` the
 rest of the time. JVM Clojure reads the same way, `Clojure (JVM) (attached)`
 or `Clojure (JVM) (not running)`, and ClojureScript reads
 `ClojureScript (shadow-cljs) (attached)` or `ClojureScript (shadow-cljs)
-(not running)`. For jank it reads `jank (running)` while Jonquil's own jank process is
+(not running)`, or `ClojureScript (node) (running)` and `ClojureScript (node)
+(not running)` when Jonquil runs its own ClojureScript on node. For jank it
+reads `jank (running)` while Jonquil's own jank process is
 up, and `jank (not running)` until the first evaluation starts one. The
 nREPL dialect reads `nREPL (attached)` or `nREPL (not running)`.
 
@@ -887,14 +889,17 @@ file with no project at all; inside a project, a marker-less default like
 this one is skipped, and selection falls through to whichever rule comes
 next.
 
-ClojureScript's marker is `shadow-cljs.edn`, and a `.cljs` file selects it
-by its extension as well, so a `.cljs`
-file outside a shadow-cljs project (a loose file, or a figwheel or
-`cljs.main` project with no `shadow-cljs.edn`) used to fall back to
-in-process Jolt. It now selects ClojureScript, and Run explains that there
-is no shadow-cljs project or build to attach to. `{:dialect :cljs}` in a
+ClojureScript's marker is `shadow-cljs.edn`, and a `.cljs` file selects the
+dialect by its extension as well. Which runtime it gets depends on the
+project. A project with a `shadow-cljs.edn` attaches to your shadow-cljs
+server, as it always did. A `.cljs` file in any other project, or a loose
+`.cljs` file with no project at all, runs "ClojureScript (node)": Jonquil
+starts ClojureScript on node itself. (Before this runtime existed, such a
+file fell back to in-process Jolt, and later got a Run notice saying there
+was no shadow-cljs project to attach to.) `{:dialect :cljs}` in a
 project's `.jonquil.edn` forces the dialect for files with other
-extensions.
+extensions, and `{:runtime :launch}` or `{:runtime :attach}` there forces
+the runtime, say to launch node inside a shadow-cljs project.
 
 jank has no project marker either. A `.jank` file opens as jank by its
 extension, and a project can name it with `{:dialect :jank}` in its
@@ -1295,6 +1300,61 @@ server for a doc it already knows nothing useful about.
 
 </details>
 
+### ClojureScript (experimental): running on node
+
+A `.cljs` file outside a shadow-cljs project (see
+[Choosing a dialect](#choosing-a-dialect)) runs on node. Like jank, Jonquil
+starts the runtime itself, on the window's first Run, so there's no build
+to start and nothing to open in a browser. The status bar reads
+`ClojureScript (node) (not running)` until then, and `(running)` after.
+ClojureScript support is experimental, and the console says so once when
+the window opens.
+
+You need two tools on the login shell's `PATH`: the Clojure CLI
+(`clojure`, or point `JONQUIL_CLOJURE` at it) and `node`. If `clojure` is
+missing, Run says so and names `JONQUIL_CLOJURE`. Jonquil adds ClojureScript
+1.12.42 to the command line with `-Sdeps`, but only when the project's
+`deps.edn` doesn't already name `org.clojure/clojurescript`; a project that
+does gets its own version. The first start on a machine can download the
+Closure Compiler and ClojureScript, so Jonquil gives it 60 seconds before
+it gives up. The child runs in the project directory when there is one, so
+the project's `deps.edn` and paths apply.
+
+Run evaluates every top-level form in the buffer, in order, and output
+streams to the console as it happens. A JavaScript exception prints as one
+error line and the session carries on, so the next form (and the next Run)
+still runs in the same process. Input that ends inside a form, such as an
+unterminated string or a trailing `#_`, `'` or `@`, is refused with an error
+instead of being sent, because the process would wait for the rest of the
+form until you pressed Stop.
+
+Stop and Reset on Run both restart the process, because nothing in this
+runtime can interrupt a running evaluation. Earlier definitions are gone
+afterwards, and the console says so. Reset on Run is on by default, so each
+Run after the first restarts it, which takes a few seconds; untick it to
+keep your definitions between Runs. Closing the window or quitting kills
+the Clojure process and node with it. If Jonquil itself crashes, the
+child's stdin ends, its JVM exits, and node goes down with it.
+
+Two listeners make this work, and both are loopback-only and
+unauthenticated. The ClojureScript process serves a prepl on `127.0.0.1`
+at a port the OS picks, and the node process it drives listens on a second
+socket. ClojureScript's stock node script (`cljs/repl/node_repl.js`)
+listens on every network interface, so Jonquil's launcher rewrites that one
+line at run time, in a copy it writes to a temporary folder and removes on
+exit, and the socket then listens on `127.0.0.1` only. If a ClojureScript
+version changes that line, the launcher refuses to start rather than leave
+the socket open, and the console says why. Neither listener checks who's
+connecting, which is the same exposure as Jonquil's own nREPL children: while
+the window is open, any user on this machine could send code to the process.
+
+Completion offers the buffer's names and Clojure core's. Quick
+documentation comes from `cljs.repl/doc` while the process is idle. F12
+jumps to a definition in the same buffer only. There is no stdin and no
+inspector, and async output that arrives between evaluations (a timer
+firing later, say) isn't shown, since the console only reads the replies to
+an evaluation.
+
 ### ClojureScript (experimental): attaching to a shadow-cljs build
 
 ClojureScript support is experimental. It attaches the way ClojureDart and
@@ -1344,9 +1404,10 @@ here. Start one in `<dir>` with npx shadow-cljs watch app." A stale
 "; .shadow-cljs/nrepl.port says port N, but nothing answers there. The
 server may have stopped.", and a port that answers but isn't a shadow-cljs
 nREPL server gets "; Port N isn't a shadow-cljs nREPL server Jonquil can
-use." A file with no project around it gets "; This file isn't in a
-project, so there's no shadow-cljs.edn to read. Save it inside the project
-that has shadow-cljs.edn." Jonquil only ever reads
+use." A file with no project around it, when you've forced
+`{:runtime :attach}`, gets "; This file isn't in a project, so there's no
+shadow-cljs.edn to read. Save it inside the project that has
+shadow-cljs.edn." Jonquil only ever reads
 `.shadow-cljs/nrepl.port`; it never writes to the file or deletes it.
 
 </details>
@@ -1949,7 +2010,23 @@ than being surprises you'd otherwise have to rediscover:
 </details>
 
 <details>
-<summary><strong>ClojureScript</strong> (7)</summary>
+<summary><strong>ClojureScript on node</strong> (6)</summary>
+
+- Jonquil starts and stops its own process, which needs the Clojure CLI
+  and `node` on the login shell's `PATH`. Its prepl and node socket are
+  unauthenticated loopback listeners.
+- Stop and Reset on Run restart the process, so earlier definitions are
+  gone afterwards.
+- No stdin and no inspector.
+- F12 stays in the buffer.
+- Completion comes from the buffer and Clojure core names, and quick
+  docs from `cljs.repl/doc` while the process is idle.
+- Async output that arrives between evaluations isn't shown.
+
+</details>
+
+<details>
+<summary><strong>ClojureScript with shadow-cljs</strong> (7)</summary>
 
 - ClojureScript attaches to a shadow-cljs server you started, and never
   starts or stops the watch or the JS runtime.

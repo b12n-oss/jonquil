@@ -20,6 +20,7 @@
   (:require [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.cljs-node :as cljs-node]
             [jonquil.nrepl.jank :as jank]))
 
 (defonce ^:private live (atom #{}))
@@ -39,6 +40,7 @@
   (cond
     (instance? jonquil.nrepl.evaluator.NRepl ev) (nrepl/settled? ev)
     (instance? jonquil.nrepl.jank.Jank ev) (jank/settled? ev)
+    (instance? jonquil.nrepl.cljs_node.CljsNode ev) (cljs-node/settled? ev)
     :else true))
 
 (defn unregister!
@@ -94,5 +96,7 @@
         (instance? jonquil.nrepl.evaluator.NRepl e)
         (wait-until-settled! e (+ child/ready-deadline-ms child/term-grace-ms))
         (instance? jonquil.nrepl.jank.Jank e)
-        (wait-until-settled! e jank/settle-deadline-ms)))
+        (wait-until-settled! e jank/settle-deadline-ms)
+        (instance? jonquil.nrepl.cljs_node.CljsNode e)
+        (wait-until-settled! e cljs-node/settle-deadline-ms)))
     nil))

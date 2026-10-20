@@ -325,4 +325,4 @@
   [ev]
   (:run-dir (:child @(:state ev))))
 
-(defmethod ev/make :launch [selection] (make-jank selection))
+(defmethod ev/make-launched :jank [selection] (make-jank selection))
