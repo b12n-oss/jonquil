@@ -1353,9 +1353,8 @@ the window is open, any user on this machine could send code to the process.
 Completion offers the buffer's names and Clojure core's. Quick
 documentation comes from `cljs.repl/doc` while the process is idle. F12
 jumps to a definition in the same buffer only. There is no stdin and no
-inspector, and async output that arrives between evaluations (a timer
-firing later, say) isn't shown, since the console only reads the replies to
-an evaluation.
+inspector. Output the program prints after an evaluation has answered (a
+timer that fires later, say) still reaches the console, above the prompt.
 
 ### ClojureScript (experimental): attaching to a shadow-cljs build
 
@@ -2023,7 +2022,6 @@ than being surprises you'd otherwise have to rediscover:
 - F12 stays in the buffer.
 - Completion comes from the buffer and Clojure core names, and quick
   docs from `cljs.repl/doc` while the process is idle.
-- Async output that arrives between evaluations isn't shown.
 
 </details>
 
