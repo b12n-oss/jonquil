@@ -333,7 +333,9 @@
                r8 (shell {:continue true} "jolt" "-M:selftest-args")
                r9 (shell {:continue true} "jolt" "-M:selftest-cljs")
                r10 (shell {:continue true :extra-env {"JONQUIL_CLOJURE" (str (fs/absolutize "dev/fake-cljs-clojure"))
-                                                      "FAKE_CLJS_SLOW_MS" "30000"}}
+                                                      "FAKE_CLJS_SLOW_MS" "30000"
+                                                      "JONQUIL_OPEN_URL" (str (fs/absolutize "dev/fake-open-url"))
+                                                      "FAKE_OPEN_URL_LOG" (str (fs/path (System/getProperty "java.io.tmpdir") "jonquil-selftest-open-url.log"))}}
                           "jolt" "-M:selftest-cljs-node")
                ok1 (zero? (:exit r1))
                ok2 (zero? (:exit r2))

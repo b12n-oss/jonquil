@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# A stand-in for the browser opener in Jonquil's self-test: appends its
+# argument and a newline to the file named by FAKE_OPEN_URL_LOG. Never opens
+# anything.
+printf '%s\n' "$1" >> "${FAKE_OPEN_URL_LOG:?FAKE_OPEN_URL_LOG is not set}"

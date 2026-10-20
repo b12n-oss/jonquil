@@ -26,6 +26,7 @@
 
 (def ^:private NOT-RUNNING "ClojureScript (node) (not running)")
 (def ^:private RUNNING "ClojureScript (node) (running)")
+(def ^:private BROWSER-RUNNING "ClojureScript (browser) (running)")
 (def ^:private BROWSER-NOT-RUNNING "ClojureScript (browser) (not running)")
 
 ;; The fixture project, stashed so rows and after-close-checks! (which runs
@@ -107,28 +108,45 @@
                              {:label (label ui) :reset-ticked ticked? :reset-clickable clickable?
                               :text (support/console-text ui)})))))
 
+(defn- open-url-log-lines
+  "The URLs dev/fake-open-url recorded, or nil when the log is absent."
+  []
+  (let [f (io/file (System/getenv "FAKE_OPEN_URL_LOG"))]
+    (when (.isFile f) (str/split-lines (slurp f)))))
+
 (defn row-cljs-browser-selected-and-runs
   "Opening a file of a project with .jonquil.edn {:cljs {:target :browser}}
   switches the window to the browser evaluator: its label says ClojureScript
   (browser) isn't running, a Run through the fake prepl prints 3 (the fake
-  needs no page and its ready line carries no URL, so nothing waits for one),
-  and opening the node file again restores the node label. It does NOT prove
-  the opener is called with the page URL: the window builds its own
-  evaluator, so the opener can't be stubbed here. That is covered by
-  jonquil.nrepl.cljs-node-eval-test and the live test."
+  needs no page), the label then reads (running), and the opener
+  (JONQUIL_OPEN_URL -> dev/fake-open-url, which logs to FAKE_OPEN_URL_LOG)
+  was called exactly once with http://127.0.0.1:<port>. Opening the node file
+  again restores the node label. Fails at once, before opening anything, when
+  JONQUIL_OPEN_URL or FAKE_OPEN_URL_LOG is unset, so a hand run can't open a
+  real browser tab."
   [ui]
   (go-row :cljs-browser-selected-and-runs support/check
-    (let [page (browser-fixture!)
-          _ (on-gtk ((:open-path! ui) page))
-          browser? (await-until 5000 20 #(= BROWSER-NOT-RUNNING (label ui)))
-          [ok? mark] (run-and-await ui "(+ 1 2)" 30000 #(value-line? % "3"))
-          _ (on-gtk ((:stop!* ui)))
-          _ (on-gtk ((:open-path! ui) (:file @fixture*)))
-          back? (await-until 5000 20 #(= NOT-RUNNING (label ui)))]
-      (on-gtk (support/check :cljs-browser-selected-and-runs
-                             (and browser? ok? back?)
-                             {:browser browser? :ok ok? :back back? :label (label ui)
-                              :text (support/since ui mark)})))))
+    (if-not (and (System/getenv "JONQUIL_OPEN_URL") (System/getenv "FAKE_OPEN_URL_LOG"))
+      (on-gtk (support/check :cljs-browser-selected-and-runs false
+                             {:reason "JONQUIL_OPEN_URL and FAKE_OPEN_URL_LOG must be set (see bb.edn gtk:selftest); refusing to risk a real browser tab"}))
+      (let [_ (.delete (io/file (System/getenv "FAKE_OPEN_URL_LOG")))
+            page (browser-fixture!)
+            _ (on-gtk ((:open-path! ui) page))
+            browser? (await-until 5000 20 #(= BROWSER-NOT-RUNNING (label ui)))
+            [ok? mark] (run-and-await ui "(+ 1 2)" 30000 #(value-line? % "3"))
+            running? (await-until 2000 20 #(= BROWSER-RUNNING (label ui)))
+            ;; The opener runs as its own process: give its log a moment.
+            _ (await-until 3000 20 #(seq (open-url-log-lines)))
+            opened (open-url-log-lines)
+            _ (on-gtk ((:stop!* ui)))
+            _ (on-gtk ((:open-path! ui) (:file @fixture*)))
+            back? (await-until 5000 20 #(= NOT-RUNNING (label ui)))]
+        (on-gtk (support/check :cljs-browser-selected-and-runs
+                               (and browser? ok? running? back?
+                                    (= 1 (count opened))
+                                    (boolean (re-matches #"http://127\.0\.0\.1:\d+" (str (first opened)))))
+                               {:browser browser? :ok ok? :running running? :back back? :opened opened
+                                :text (support/since ui mark)}))))))
 
 (defn row-cljs-node-run-prints-value
   "Run evaluates the buffer in the fake: the console shows 3, the label

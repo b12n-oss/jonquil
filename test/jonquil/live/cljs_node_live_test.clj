@@ -215,8 +215,12 @@
         (doto (io/writer (.getOutputStream sock))
           (.write "(require 'cljs.repl)\n")
           (.flush))
-        (Thread/sleep 3000)
-        (let [[status body] (http-get (:url child))]
+        (let [deadline (+ (System/currentTimeMillis) 20000)
+              [status body] (loop []
+                              (let [r (try (http-get (:url child)) (catch Throwable _ [0 ""]))]
+                                (if (or (= 200 (first r)) (> (System/currentTimeMillis) deadline))
+                                  r
+                                  (do (Thread/sleep 250) (recur)))))]
           (is (= 200 status))
           (is (re-find #"(?i)<html" body) (subs body 0 (min 200 (count body))))))
       (finally (cljs-child/kill! child)))))
@@ -248,6 +252,7 @@
       (let [e (cljs-node/make-cljs-node (browser-selection) {:timings {:page-timeout-ms 60000}})]
         (try
           (let [{:keys [result]} (run e "(+ 1 2)")]
+            (is (= :ok (:status result)) (pr-str result))
             (is (= "3" (:printed result)) (pr-str result)))
           (let [{:keys [result out]} (run e "(println \"from-browser\")")]
             (is (= :ok (:status result)) (pr-str result))
