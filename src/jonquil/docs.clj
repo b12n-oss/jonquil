@@ -14,7 +14,10 @@
 
 (def ^:private doc-cache-limit 256)
 
-(defonce ^:private doc-cache (atom {}))
+;; {:gen n :m {key doc}}. clear-doc-cache! bumps :gen, so a lookup that
+;; started before a clear (a Run redefining the name) drops its answer
+;; instead of storing it after the clear.
+(defonce ^:private doc-cache (atom {:gen 0 :m {}}))
 
 (defn- resolve-ns
   "The namespace named ns-sym, or `user` when it no longer exists."
@@ -24,19 +27,26 @@
 (defn clear-doc-cache!
   "Empties the symbol-doc memo (tests, and after a Run redefines names)."
   []
-  (reset! doc-cache {}))
+  (swap! doc-cache (fn [{:keys [gen]}] {:gen (inc gen) :m {}}))
+  nil)
 
 (defn symbol-doc
   "syntax/get-symbol-doc with ns-sym's namespace as *ns* (or `user` when it
-  is gone). Memoised on [ns-sym sym-name text]; nil when the lookup throws."
+  is gone). Memoised on [ns-sym sym-name text]; nil when the lookup throws,
+  and that nil isn't memoised, so the next call asks again."
   [ns-sym sym-name text pos]
-  (let [k [ns-sym sym-name text]]
-    (if-let [hit (find @doc-cache k)]
+  (let [k [ns-sym sym-name text]
+        {:keys [gen m]} @doc-cache]
+    (if-let [hit (find m k)]
       (val hit)
-      (let [v (try (binding [*ns* (resolve-ns ns-sym)]
-                     (syntax/get-symbol-doc sym-name text pos))
-                   (catch Exception _ nil))]
-        (swap! doc-cache (fn [m] (assoc (if (>= (count m) doc-cache-limit) {} m) k v)))
+      (let [[ok? v] (try [true (binding [*ns* (resolve-ns ns-sym)]
+                                 (syntax/get-symbol-doc sym-name text pos))]
+                         (catch Exception _ [false nil]))]
+        (when ok?
+          (swap! doc-cache (fn [c]
+                             (if (= gen (:gen c))
+                               (update c :m (fn [m] (assoc (if (>= (count m) doc-cache-limit) {} m) k v)))
+                               c))))
         v))))
 
 (defn candidates

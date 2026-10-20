@@ -5,6 +5,7 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.console :as console]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.inspect :as inspect]
@@ -66,6 +67,18 @@
     (is (instance? jonquil.nrepl.evaluator.NRepl e))
     (is (nil? (nrepl/child-pid e)) "not started until asked")
     (is (= [] (ev/limitations e)) "the jump, stdin and inspector lines only when a live child lacks them")))
+
+(deftest a-run-of-an-unclosed-form-gets-the-eof-hint-test
+  ;; window.clj's Run hint keys on "EOF while reading" in the result's text,
+  ;; so this pins that a child's reader error still says so over nREPL.
+  (let [e (make (temp-project))
+        code "(defn f [x]\n  (+ x 1)"]
+    (try
+      (let [[r] (run e code true)]
+        (is (= :error (:status r)))
+        (is (str/includes? (console/error-text r) "EOF while reading") (pr-str r))
+        (is (= "The ( on line 1 is never closed." (console/unclosed-bracket-message code))))
+      (finally (ev/stop! e)))))
 
 (deftest run-repl-and-help-test
   (let [dir (temp-project) e (make dir)]
@@ -253,6 +266,25 @@
         (is (= [{:git child/nrepl-git-coord}] (map #(dissoc % :jonquil) @sources))
             "a timeout isn't retried, as a plain server or without the inspector")
         (ev/stop! e)))))
+
+(deftest a-failed-start-names-its-log-test
+  (let [log (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "child.log")]
+    (spit log "Unhandled exception: boom\n")
+    (with-redefs [child/start! (fn [_ _] (throw (ex-info "jolt nrepl-server exited: boom" {:log (.getPath log)})))]
+      (let [e (make (temp-project))
+            msg (ev/start! e)]
+        (is (str/starts-with? msg "Couldn't start Jolt over nREPL: jolt nrepl-server exited: boom"))
+        (is (str/ends-with? msg (str "\nThe child's log: " (.getPath log))))
+        (ev/stop! e)))
+    (testing "no log line when the log is gone, or was never named"
+      (with-redefs [child/start! (fn [_ _] (throw (ex-info "jolt nrepl-server exited: boom" {:log (str (.getPath log) ".gone")})))]
+        (let [e (make (temp-project))]
+          (is (not (str/includes? (ev/start! e) "child's log")))
+          (ev/stop! e)))
+      (with-redefs [child/start! (fn [_ _] (throw (ex-info "no free port in 7900-7999" {})))]
+        (let [e (make (temp-project))]
+          (is (= "Couldn't start Jolt over nREPL: no free port in 7900-7999" (ev/start! e)))
+          (ev/stop! e))))))
 
 (deftest no-fallback-after-stop-test
   (let [sources (atom []) e (make (temp-project))]

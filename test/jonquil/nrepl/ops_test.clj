@@ -61,6 +61,12 @@
          (ops/eval-result [{:ns "myproj.core" :status ["done"] :value "#'myproj.core/myproj-fn"}] false)))
   (is (= {:status :error :error-text "Error: Divide by zero"}
          (ops/eval-result [{:err "Divide by zero\n"} {:ex "Divide by zero" :status ["eval-error" "done"]}] false)))
+  (testing "an eval-error with neither err nor ex still says something"
+    (is (= {:status :error :error-text "Error: evaluation failed"}
+           (ops/eval-result [{:status ["eval-error" "done"]}] false)))
+    (is (= "Error: evaluation failed"
+           (:error-text (ops/eval-result [{:err "  \n"} {:status ["eval-error" "done"]}] false)))
+        "blank err text counts as none"))
   (testing "a jolt trace after the message is cut"
     (is (= "Error: EOF while reading"
            (:error-text (ops/eval-result [{:ex "EOF while reading\n  trace:\n    nrepl.middleware.caught/strip-config (x.clj:111)\n"

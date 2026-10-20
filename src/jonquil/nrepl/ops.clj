@@ -178,7 +178,7 @@
 
              (st "eval-error")
              {:status :error
-              :error-text (str "Error: " (error-message msgs))}
+              :error-text (str "Error: " (or (not-empty (error-message msgs)) "evaluation failed"))}
 
              :else
              {:status :ok :printed (or (last (keep :value msgs)) "nil")})]

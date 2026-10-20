@@ -24,6 +24,10 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Typing in the rename popover no longer triggers window shortcuts: Cmd/Ctrl+W, Cmd/Ctrl+T, F5 and the rest go to the entry, so a rename can't close or switch the tab or Run it. Escape still closes the popover.
+- Quick doc and the completion preview recover from a lookup that failed once, instead of showing nothing for that name until the next evaluation, and a lookup that a Run overtakes no longer brings back the doc from before the Run.
+- When out-of-process Jolt can't start, the console's message says where the child's log is.
+- An evaluation error that arrives with no message reads "Error: evaluation failed" rather than a bare "Error: ".
 - Jump to definition keeps working on Jolt newer than v0.8.23, which records a required namespace's file by its classpath name (`demo/util.clj`) rather than a path: Jonquil now looks that name up on the classpath, in process and out.
 - The completion list is as tall as its names, up to eight rows, rather than always eight; a name the buffer defines is labelled `buffer`, not `user`; the quick-doc popover fits its text, up to the width it always had; solarized's selected completion row is visible; and the status bar no longer runs into the window's right edge.
 - The nREPL dialect's error line against Basilisp shows the exception (`ZeroDivisionError: Fraction(1, 0)`) or a compile error's message, not `Traceback (most recent call last):`.

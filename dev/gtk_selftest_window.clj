@@ -211,6 +211,7 @@
    rename-menus/row-rename-cmd-does-nothing
    rename-menus/row-rename-cmd-shift-f6-does-nothing
    rename-menus/row-rename-closed-signal-syncs
+   rename-menus/row-rename-entry-keeps-window-keys
    rename-menus/row-menu-actions
    rename-menus/row-menu-actions-console-complete
    rename-menus/row-menu-action-throw-is-contained
