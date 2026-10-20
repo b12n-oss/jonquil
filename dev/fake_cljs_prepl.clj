@@ -83,6 +83,8 @@
           (do
             (swap! forms conj text)
             (let [setup? (or setup? (boolean (re-find #"\(require\s+'cljs\.repl" text)))]
+              (when (and (:hold-setup-ms opts) (re-find #"\(require\s+'cljs\.repl" text))
+                (Thread/sleep (long (:hold-setup-ms opts))))
               (when (and (:slow-ms opts) (str/includes? text "slow"))
                 (Thread/sleep (long (:slow-ms opts))))
               (let [result (eval-form (create-ns (symbol current)) (strip-setup form))]
@@ -105,7 +107,9 @@
   opts:
   :wedge-on-throw-without-setup?  reproduce the real prepl bug (see ns doc)
   :slow-ms  sleep this long before answering a form whose source holds
-            \"slow\""
+            \"slow\"
+  :hold-setup-ms  sleep this long before answering (require 'cljs.repl),
+            as the browser prepl does until a page connects"
   ([] (start! {}))
   ([opts]
    (let [ss (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))

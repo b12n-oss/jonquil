@@ -51,7 +51,8 @@
 
 (def exited-text "Error: the ClojureScript process exited")
 
-(defn- name* [x] (if (keyword? x) (name x) x))
+(def port-twice-message
+  "; ClojureScript couldn't start: the browser port was in use twice. Try Run again.")
 
 (defn- stopping? [{:keys [state] :as ev}]
   (or (connection/stop-requested? ev) (boolean (:stopped? @state))))
@@ -82,7 +83,8 @@
   ([{:keys [state hooks] :as ev} {:keys [background?]}]
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
-                                                    :used? false :prompt-ns 'cljs.user :drain nil)
+                                                    :used? false :prompt-ns 'cljs.user :drain nil
+                                                    :setup-pending nil)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (:child old)]
@@ -149,12 +151,13 @@
                 (let [[started port-changed?] (launch-child! ev clojure launcher)]
                   (cond
                     (= :cancelled (:error started)) {:status :interrupted}
-                    (:error started) {:status :notice :text (cljs-node/start-failed-message (name* (:error started)))}
+                    (= :http-port-taken (:error started)) {:status :notice :text port-twice-message}
+                    (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
                     :else (do (swap! state
                                      (fn [s]
                                        (cond-> (assoc s :child started)
                                          (browser? ev)
-                                         (assoc :await-page (:url started)
+                                         (assoc :await-page (str "http://127.0.0.1:" (:http-port s))
                                                 :announce (cond port-changed? :port-changed
                                                                 (:opened? s) :reload
                                                                 :else :first)))))
@@ -170,7 +173,7 @@
   ret that is the current exchange's sentinel is recorded in :done-forms in
   the same swap, so exchange! can tell a timeout from a ret that just
   beat it."
-  [{:keys [state]} closed? r]
+  [{:keys [state] :as ev} closed? r]
   (cond
     (cljs-node/waiting-line? r) nil
 
@@ -193,9 +196,16 @@
           [old _] (swap-vals! state
                               (fn [s]
                                 (cond
-                                  (and form (= form (:drain s))) (assoc s :drain nil)
+                                  (and form (= form (:drain s)))
+                                  (cond-> (assoc s :drain nil)
+                                    (and (= form cljs-node/setup-form) (:setup-pending s))
+                                    (assoc :setup-pending (if (:exception r) :failed nil)
+                                           :ready? (not (:exception r))))
                                   (and form (= form (:sink-form s))) (update s :done-forms conj form)
                                   :else s)))]
+      (when (and form (= form (:drain old)) (= form cljs-node/setup-form)
+                 (:setup-pending old) (not (:exception r)))
+        (connection/notify! ev true))
       (cond
         (:drain old) nil
         (:sink old) ((:sink old) r)))))
@@ -236,11 +246,46 @@
 
 (defn- ret? [r] (= :ret (:tag r)))
 
+(defn- open-url!
+  "Opens url in the default browser: open on macOS, xdg-open elsewhere, or
+  the command named by env JONQUIL_OPEN_URL (given the URL as its only
+  argument) when that is set. True when it started and did not exit
+  non-zero within about a second, false (never throws) otherwise."
+  ([url] (open-url! url (System/getenv "JONQUIL_OPEN_URL")))
+  ([url override]
+   (try (let [mac? (str/includes? (str/lower-case (str (System/getProperty "os.name"))) "mac")
+              program (if (str/blank? override) (if mac? "open" "xdg-open") override)
+              proc (p/process {:out :discard :err :discard} program url)
+              jp ^java.lang.Process (:proc proc)]
+          ;; A non-zero exit within ~1 s is a failure; still running is fine.
+          (loop [n 0]
+            (cond (not (p/alive? proc)) (zero? (.exitValue jp))
+                  (>= n 50) true
+                  :else (do (Thread/sleep 20) (recur (inc n))))))
+        (catch Throwable _ false))))
+
+(defn- announce-page!
+  "Says how the page is reached, once per browser launch: opens it on the
+  evaluator's first launch, else asks for a reload."
+  [{:keys [state hooks]} on-output]
+  (let [[old _] (swap-vals! state (fn [s] (cond-> (assoc s :announce nil)
+                                            (= :first (:announce s)) (assoc :opened? true))))
+        url (:await-page old)
+        say (fn [t] (connection/say! on-output :system (str t "\n")))]
+    (case (:announce old)
+      :first (if ((:open-url hooks) url)
+               (say (cljs-node/opened-message url))
+               (say (str "; Open " url " in a browser.")))
+      :reload (say (cljs-node/reload-message url))
+      :port-changed (say (str "; The browser port changed: open " url "."))
+      nil)))
+
 (defn- connect!
   "Connects the prepl to the stored child and runs the setup form. nil when
   ready, else the result to finish with."
   [{:keys [state timings] :as ev}]
   (let [child (:child @state)
+        browser? (browser? ev)
         closed? (atom false)
         connect (fn [] (prepl/connect! "127.0.0.1" (:port child) (fn [r] (dispatch! ev closed? r))))
         ;; A connect right after the previous connection closed was once
@@ -261,44 +306,54 @@
         (if (stopping? ev)
           (do (try (prepl/close! conn) (catch Throwable _ nil))
               {:status :interrupted})
-          (let [[outcome replies] (exchange! ev cljs-node/setup-form ret?
-                                             {:timeout-ms (:setup-timeout-ms timings)})]
+          ;; The browser's setup blocks until a page connects, so the page is
+          ;; announced (and opened) first, and the wait is the page bound.
+          (let [_ (when browser? (announce-page! ev (:last-output @state)))
+                [outcome replies] (exchange! ev cljs-node/setup-form ret?
+                                             (if browser?
+                                               {:timeout-ms (:page-timeout-ms timings)
+                                                :sentinel cljs-node/setup-form}
+                                               {:timeout-ms (:setup-timeout-ms timings)}))]
             (cond
               (stopping? ev) {:status :interrupted}
               (and (= :done outcome) (not-any? :exception replies))
               (do (swap! state assoc :ready? true)
                   (connection/notify! ev true)
                   nil)
+              (and browser? (= :timeout outcome))
+              ;; Keep the child: the setup ret is drained when it arrives and
+              ;; the next evaluation waits for it (await-setup!).
+              (let [url (:await-page @state)
+                    [_ new] (swap-vals! state
+                                        (fn [s] (if (= cljs-node/setup-form (:drain s))
+                                                  (assoc s :setup-pending true)
+                                                  (assoc s :ready? true))))]
+                (when (:ready? new) (connection/notify! ev true))
+                (if (:ready? new)
+                  nil
+                  {:status :notice :text (cljs-node/no-page-message url)}))
               :else
               {:status :notice
                :text (cljs-node/start-failed-message
                       (str "the session setup " (if (= :timeout outcome) "timed out" "failed")
                            (when (:log child) (str ". The log: " (:log child)))))})))))))
 
-(defn- open-url!
-  "Opens url in the default browser: open on macOS, xdg-open elsewhere.
-  True when the command started, false (never throws) when it did not."
-  [url]
-  (try (let [mac? (str/includes? (str/lower-case (str (System/getProperty "os.name"))) "mac")]
-         (p/process {:out :discard :err :discard} (if mac? "open" "xdg-open") url)
-         true)
-       (catch Throwable _ false)))
-
-(defn- announce-page!
-  "Says how the page is reached, once per browser launch: opens it on the
-  evaluator's first launch, else asks for a reload."
-  [{:keys [state hooks]} on-output]
-  (let [[old _] (swap-vals! state (fn [s] (cond-> (assoc s :announce nil)
-                                            (= :first (:announce s)) (assoc :opened? true))))
-        url (:await-page old)
-        say (fn [t] (connection/say! on-output :system (str t "\n")))]
-    (case (:announce old)
-      :first (if ((:open-url hooks) url)
-               (say (cljs-node/opened-message url))
-               (say (str "; Open " url " in a browser.")))
-      :reload (say (cljs-node/reload-message url))
-      :port-changed (say (str "; The browser port changed: open " url "."))
-      nil)))
+(defn- await-setup!
+  "A browser setup that timed out is still pending: wait for its ret, bounded
+  by the page timeout again. nil when ready, else the result to finish with."
+  [{:keys [state timings] :as ev}]
+  (let [url (:await-page @state)
+        deadline (+ (System/currentTimeMillis) (:page-timeout-ms timings))]
+    (loop []
+      (let [{:keys [setup-pending conn]} @state]
+        (cond
+          (stopping? ev) {:status :interrupted}
+          (nil? setup-pending) nil
+          (= :failed setup-pending) {:status :notice
+                                     :text (cljs-node/start-failed-message "the session setup failed")}
+          (not (prepl/open? conn)) {:status :error :error-text exited-text}
+          (> (System/currentTimeMillis) deadline) {:status :notice :text (cljs-node/no-page-message url)}
+          :else (do (Thread/sleep 20) (recur)))))))
 
 (defn- wait-not-helping! [{:keys [state]}]
   (loop [n 0]
@@ -331,7 +386,7 @@
           (when (str/starts-with? m "EOF") (str "Error: " m)))))))
 
 (defn- run-worker!
-  [{:keys [state timings] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
+  [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
   (try
     (when on-output (swap! state assoc :last-output on-output))
     (when on-status-change (on-status-change :running))
@@ -341,37 +396,35 @@
                 (kill-child! ev)
                 (connection/say! on-output :system (str cljs-node/reset-message "\n")))
             problem (or (ensure-child! ev on-output)
-                        (when-not (live? ev)
-                          (or (when (stopping? ev) {:status :interrupted})
-                              (connect! ev))))]
+                        (if (:setup-pending @state)
+                          (await-setup! ev)
+                          (when-not (live? ev)
+                            (or (when (stopping? ev) {:status :interrupted})
+                                (connect! ev)))))]
         (cond
-          problem (do (when (:child @state) (kill-child! ev))
+          problem (do (when (and (:child @state)
+                                 (not (and (= :notice (:status problem)) (:setup-pending @state)
+                                           (prepl/open? (:conn @state)))))
+                        (kill-child! ev))
                       (finish! ev opts problem))
           (stopping? ev) (finish! ev opts {:status :interrupted})
           :else
           (do
             (wait-not-helping! ev)
-            (announce-page! ev on-output)
-            (let [await-url (:await-page @state)
-                  sentinel-form (next-sentinel! ev)
+            (let [sentinel-form (next-sentinel! ev)
                   text (eval-text (:prompt-ns @state) opts code sentinel-form)
                   _ (swap! state assoc :used? true)
                   [outcome replies] (exchange! ev text
                                                (fn [r] (and (ret? r) (= sentinel-form (:form r))))
-                                               {:on-output on-output :sentinel sentinel-form
-                                                :timeout-ms (when await-url (:page-timeout-ms timings))})]
+                                               {:on-output on-output :sentinel sentinel-form})]
               (case outcome
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
-                        (swap! state assoc :await-page nil)
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
                         (finish! ev opts result))
-                (cond
-                  (stopping? ev) (finish! ev opts {:status :interrupted})
-                  ;; No page yet: keep the child, its late ret is drained.
-                  (and (= :timeout outcome) await-url)
-                  (finish! ev opts {:status :notice :text (cljs-node/no-page-message await-url)})
-                  :else (do (kill-child! ev)
-                            (finish! ev opts {:status :error :error-text exited-text})))))))))
+                (if (stopping? ev)
+                  (finish! ev opts {:status :interrupted})
+                  (do (kill-child! ev)
+                      (finish! ev opts {:status :error :error-text exited-text})))))))))
     (catch Throwable e
       (try (kill-child! ev) (catch Throwable _ nil))
       (finish! ev opts {:status :error :error-text (str "Error: " (ex-message e))}))))

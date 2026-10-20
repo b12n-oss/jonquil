@@ -11,6 +11,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [jolt.process :as p]
+            [jonquil.cljs-node :as cljs-node-msg]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.cljs-child :as cljs-child]
@@ -219,6 +220,26 @@
           (is (= 200 status))
           (is (re-find #"(?i)<html" body) (subs body 0 (min 200 (count body))))))
       (finally (cljs-child/kill! child)))))
+
+(deftest browser-no-page-keeps-the-child-live
+  ;; The real browser setup blocks until a page connects. With :open-url
+  ;; stubbed nobody connects: the first Run opens the page (stub) before
+  ;; the setup, returns the no-page notice at the page bound, and leaves
+  ;; the child alive. No browser opens.
+  (let [opened (atom [])
+        e (cljs-node/make-cljs-node (browser-selection)
+                                    {:timings {:page-timeout-ms 4000}
+                                     :open-url (fn [url] (swap! opened conj url) true)})]
+    (try
+      (let [{:keys [result]} (run e "(+ 1 2)")
+            url (first @opened)]
+        (is (some? url))
+        (is (re-find #"^http://127\.0\.0\.1:\d+$" (str url)) (pr-str url))
+        (is (= {:status :notice :text (cljs-node-msg/no-page-message url)} result) (pr-str result))
+        (let [pid (cljs-node/child-pid e)]
+          (is (some? pid))
+          (is (pid-alive? pid) "the child is still alive")))
+      (finally (ev/stop! e)))))
 
 (deftest real-browser-live
   ;; Opens a REAL browser tab, so it only runs with JONQUIL_BROWSER_LIVE=1.
