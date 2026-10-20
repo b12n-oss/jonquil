@@ -1,6 +1,7 @@
 (ns jonquil.docs-test
   (:require [clojure.test :refer [deftest is]]
-            [jonquil.docs :as docs]))
+            [jonquil.docs :as docs]
+            [jonquil.syntax :as syntax]))
 
 (def sandbox (create-ns 'jonquil.docs-test.sandbox))
 
@@ -53,3 +54,25 @@
         t2 "(defn zork \"two\" [a] a)"]
     (is (not= (docs/symbol-doc 'user "zork" t1 0) (docs/symbol-doc 'user "zork" t2 0))
         "a changed buffer isn't served the old doc")))
+
+(deftest a-failed-lookup-is-not-cached-test
+  (docs/clear-doc-cache!)
+  (let [calls (atom 0)]
+    (with-redefs [syntax/get-symbol-doc (fn [& _] (swap! calls inc) (throw (ex-info "boom" {})))]
+      (is (nil? (docs/symbol-doc 'user "zork" "x" 0))))
+    (with-redefs [syntax/get-symbol-doc (fn [& _] (swap! calls inc) {:status :found :doc "back"})]
+      (is (= "back" (:doc (docs/symbol-doc 'user "zork" "x" 0))) "the next lookup asks again")
+      (is (= "back" (:doc (docs/symbol-doc 'user "zork" "x" 0)))))
+    (is (= 2 @calls) "a lookup that finished is cached")))
+
+(deftest a-lookup-overtaken-by-a-clear-is-not-cached-test
+  ;; A lookup that started before a clear (a Run redefining the name) mustn't
+  ;; store its answer after it.
+  (docs/clear-doc-cache!)
+  (let [answer (atom "old")]
+    (with-redefs [syntax/get-symbol-doc (fn [& _]
+                                          (let [a @answer]
+                                            (when (= a "old") (docs/clear-doc-cache!) (reset! answer "new"))
+                                            {:status :found :doc a}))]
+      (is (= "old" (:doc (docs/symbol-doc 'user "zork" "y" 0))) "the caller still gets its answer")
+      (is (= "new" (:doc (docs/symbol-doc 'user "zork" "y" 0))) "the next lookup isn't served it"))))
