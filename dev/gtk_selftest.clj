@@ -90,20 +90,32 @@
                         :comment-at-14 (g/has-tag-at? buf 14 (get tags :comment))
                         :comment-tag-italic (g/tag-italic? (get tags :comment))}))))))
 
-(defn- row-editor-undo-text-only [ed]
+(defn- row-editor-undo-text-only
+  "One interactive insert into an emptied buffer, then, once its colouring
+  has landed (tags aren't undo steps, which is what this row pins), one
+  undo empties the buffer again. Self-contained: it used to undo whatever
+  the row before left, and a stray keystroke between the two (2026-10-19:
+  a space after the text, with no code path that inserts one) failed it as
+  an undo bug. The text is checked in the same GTK step as the undo, and a
+  buffer that changed after the insert is reported as :stray-edit."
+  [ed]
   (go-row :editor-undo-text-only check
-    (on-gtk (let [buf (:buf ed)
-                  text-before (editor/editor-text ed)
-                  can-undo-before (not (zero? (g/gtk-text-buffer-get-can-undo buf)))
-                  dirty-before (editor/dirty? ed)]
-              (g/gtk-text-buffer-undo buf)
-              (let [text-after (editor/editor-text ed)]
-                (check :editor-undo-text-only (= "" text-after)
-                       {:text text-after
-                        :text-before text-before
-                        :can-undo-before can-undo-before
-                        :dirty-before dirty-before
-                        :can-undo-after (not (zero? (g/gtk-text-buffer-get-can-undo buf)))}))))))
+    (let [buf (:buf ed) tags (:tags ed)
+          code "(defn f [x]\n  ; note\n  x)"]
+      (on-gtk (editor/set-text! ed "")
+              (g/gtk-text-buffer-insert-interactive-at-cursor buf code -1 1))
+      (let [coloured? (await-until 1000 20 #(g/has-tag-at? buf 1 (get tags :special-form)))]
+        (on-gtk (let [text-before (editor/editor-text ed)
+                      can-undo-before (not (zero? (g/gtk-text-buffer-get-can-undo buf)))]
+                  (g/gtk-text-buffer-undo buf)
+                  (let [text-after (editor/editor-text ed)]
+                    (check :editor-undo-text-only
+                           (and coloured? (= code text-before) (= "" text-after))
+                           (cond-> {:text text-after
+                                    :coloured coloured?
+                                    :can-undo-before can-undo-before
+                                    :can-undo-after (not (zero? (g/gtk-text-buffer-get-can-undo buf)))}
+                             (not= code text-before) (assoc :stray-edit text-before))))))))))
 
 (defn- row-editor-smart-enter [ed]
   (go-row :editor-smart-enter check
