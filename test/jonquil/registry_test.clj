@@ -21,8 +21,13 @@
                  symbol))
        set))
 
+(def ^:private jvm-only
+  "Source files run only inside a JVM child, never loaded by Jolt, so bb check
+  can't load them."
+  '#{jonquil.cljs-node-launch})
+
 (deftest every-src-namespace-is-checked
-  (is (= (ns-names-under "src") (set check/namespaces))))
+  (is (= (apply disj (ns-names-under "src") jvm-only) (set check/namespaces))))
 
 (deftest every-test-namespace-is-run
   (is (= (ns-names-under "test")

@@ -28,6 +28,7 @@
     jonquil.nrepl.generic
     jonquil.nrepl.stdin-middleware
     jonquil.nrepl.middleware-files
+    jonquil.nrepl.cljs-node-files
     jonquil.cljd
     jonquil.clj
     jonquil.cljs
