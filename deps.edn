@@ -64,6 +64,9 @@
   ;; with JONQUIL_JANK pointing at dev/fake-jank (bb gtk:selftest sets it).
   :selftest-jank {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-jank"]}
+  ;; The ClojureScript-on-node window rows: dev/fake-cljs-clojure as JONQUIL_CLOJURE.
+  :selftest-cljs-node {:extra-paths ["dev"]
+                       :main-opts ["-m" "gtk-selftest-cljs-node"]}
   ;; File-tree plan P2.T3: a window launched on a directory.
   :selftest-tree {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-tree"]}

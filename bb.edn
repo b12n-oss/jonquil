@@ -321,7 +321,7 @@
   check {:doc "Headless compile-check of every project namespace"
          :task (shell "jolt" "-M:check")}
   gtk:selftest
-  {:doc "Open nine real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory, the seventh runs a jank window against a fake jank process, the eighth is launched with file and folder arguments, the ninth attaches to a fake shadow-cljs server)"
+  {:doc "Open ten real GTK windows in turn and run the front-end self-test rows (the third runs Jolt over nREPL, the fourth attaches to a fake ClojureDart app, the fifth attaches to a fake JVM nREPL server, the sixth is launched on a directory, the seventh runs a jank window against a fake jank process, the eighth is launched with file and folder arguments, the ninth attaches to a fake shadow-cljs server, the tenth runs a ClojureScript-on-node window against a fake clojure launcher)"
    :task (let [r1 (shell {:continue true} "jolt" "-M:selftest")
                r2 (shell {:continue true} "jolt" "-M:selftest-window")
                r3 (shell {:continue true} "jolt" "-M:selftest-nrepl")
@@ -332,6 +332,9 @@
                          "jolt" "-M:selftest-jank")
                r8 (shell {:continue true} "jolt" "-M:selftest-args")
                r9 (shell {:continue true} "jolt" "-M:selftest-cljs")
+               r10 (shell {:continue true :extra-env {"JONQUIL_CLOJURE" (str (fs/absolutize "dev/fake-cljs-clojure"))
+                                                      "FAKE_CLJS_SLOW_MS" "30000"}}
+                          "jolt" "-M:selftest-cljs-node")
                ok1 (zero? (:exit r1))
                ok2 (zero? (:exit r2))
                ok3 (zero? (:exit r3))
@@ -340,7 +343,8 @@
                ok6 (zero? (:exit r6))
                ok7 (zero? (:exit r7))
                ok8 (zero? (:exit r8))
-               ok9 (zero? (:exit r9))]
+               ok9 (zero? (:exit r9))
+               ok10 (zero? (:exit r10))]
            (when-not ok1 (println "gtk:selftest: editor/console rows FAILED"))
            (when-not ok2 (println "gtk:selftest: window rows FAILED"))
            (when-not ok3 (println "gtk:selftest: nREPL rows FAILED"))
@@ -350,7 +354,8 @@
            (when-not ok7 (println "gtk:selftest: jank rows FAILED"))
            (when-not ok8 (println "gtk:selftest: file-argument rows FAILED"))
            (when-not ok9 (println "gtk:selftest: ClojureScript rows FAILED"))
-           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7 ok8 ok9) 0 1)))}
+           (when-not ok10 (println "gtk:selftest: ClojureScript-on-node rows FAILED"))
+           (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7 ok8 ok9 ok10) 0 1)))}
   docs:shots
   {:doc "Self-capture docs/images/*.png (+ one GIF): one fresh process per scene"
    ;; P2.T9 round 1: one shared process/window for all 7 scenes let every
@@ -612,7 +617,7 @@
                          "jonquil-attach-test-" "jonquil-jvm-test-" "jonquil-selftest-"
                          "jonquil-selftest-window-settings-" "jonquil-selftest-nrepl-"
                          "jonquil-selftest-loose-" "jonquil-selftest-cljd-" "jonquil-selftest-clj-"
-                         "jonquil-selftest-clj-outside-" "jonquil-selftest-jank-"
+                         "jonquil-selftest-clj-outside-" "jonquil-selftest-jank-" "jonquil-selftest-cljs-node-"
                          "jonquil-selftest-dialect-" "jonquil-selftest-atomic-"
                          "jonquil-selftest-bad-settings-" "jonquil-selftest-badutf8-"
                          "jonquil-selftest-capslock-" "jonquil-selftest-close-fail-"
