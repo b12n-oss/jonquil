@@ -1,7 +1,8 @@
 (ns jonquil.nrepl.cljs-node-eval-test
   "The ClojureScript-on-node evaluator against dev/fake_cljs_prepl.clj, with
   the child process faked: a launch hook that returns the fake's port."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [fake-cljs-prepl :as fake]
             [jonquil.cljs-node :as cljs-node]
             [jonquil.dialect :as dialect]
@@ -199,3 +200,16 @@
         (#'node/dispatch! ev (atom false) {:tag :ret :val "9" :form "x"})
         (is (= [[:out "late\n"] [:err "warn\n"]] (filterv (comp #{"late\n" "warn\n"} second) @out)))
         (is (not-any? #(= "9" (second %)) @out) "a stray ret isn't shown")))))
+
+(deftest doc-text-reads-the-doc-forms-value-test
+  (let [form (#'node/doc-form 'map)
+        doc "-------------------------\ncljs.core/map\n([f])\n  Returns a lazy sequence."]
+    (is (= "(with-out-str (cljs.repl/doc map))" form))
+    (is (= (str/trim doc)
+           (#'node/doc-text [{:tag :out :val "stray\n"}
+                             {:tag :ret :form form :val (pr-str doc)}
+                             {:tag :ret :form ":jonquil.eval/end-3" :val ":jonquil.eval/end-3"}]
+                            form))
+        "printed output never passes for docs; only the doc form's value counts")
+    (is (= "" (#'node/doc-text [{:tag :out :val "only output\n"}] form)))
+    (is (= "" (#'node/doc-text [{:tag :ret :form form :exception true :val "{:cause \"x\"}"}] form)))))

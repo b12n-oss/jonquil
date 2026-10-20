@@ -15,7 +15,8 @@
   anything after that connection's :closed (the prepl client may deliver a
   few buffered replies late) and touches shared state only through atoms,
   so overlapping calls from the reader thread and close! are safe."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.cljs-node :as cljs-node]
@@ -295,8 +296,19 @@
 
 (def ^:private plain-symbol #"[^\s()\[\]{}\"';,@^`~\\]+")
 
-(defn- doc-text [replies]
-  (str/trim (apply str (keep #(when (= :out (:tag %)) (:val %)) replies))))
+(defn- doc-form [sym] (str "(with-out-str (cljs.repl/doc " sym "))"))
+
+(defn- doc-text
+  "The doc text from a help exchange's replies: the value of doc-form's own
+  ret (with-out-str hands the printed doc back as a string), so output the
+  program prints meanwhile can't pass for docs. \"\" when there's none."
+  [replies form]
+  (or (some (fn [r]
+              (when (and (ret? r) (= form (:form r)) (not (:exception r)))
+                (let [v (try (edn/read-string (:val r)) (catch Throwable _ nil))]
+                  (when (string? v) (str/trim v)))))
+            replies)
+      ""))
 
 (defn- meta-lookup
   "Docs for sym from (cljs.repl/doc sym), bounded by timeout-ms; only when
@@ -312,12 +324,16 @@
       :else
       (try
         (let [sentinel-form (next-sentinel! ev)
-              [outcome replies] (exchange! ev (str "(cljs.repl/doc " sym ")\n" sentinel-form)
+              form (doc-form sym)
+              ;; The program's own output during the lookup (a timer firing)
+              ;; goes to the console, as it would between evaluations.
+              [outcome replies] (exchange! ev (str form "\n" sentinel-form)
                                            (fn [r] (and (ret? r) (= sentinel-form (:form r))))
                                            {:sentinel sentinel-form
+                                            :on-output (:last-output @state)
                                             :timeout-ms (or timeout-ms (ev/help-timeout (:help-timeout-ms timings)))})]
           (if (= :done outcome)
-            (let [t (doc-text replies)]
+            (let [t (doc-text replies form)]
               (cljd/no-docs sym (if (str/blank? t) (str "No docs for " sym) t)))
             (cljd/no-docs sym timeout-doc)))
         (finally (swap! state assoc :helping false))))))
