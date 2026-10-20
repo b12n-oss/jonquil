@@ -268,13 +268,22 @@
         (ev/stop! e)))))
 
 (deftest a-failed-start-names-its-log-test
-  (let [log (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "child.log")]
-    (spit log "Unhandled exception: boom\n")
-    (with-redefs [child/start! (fn [_ _] (throw (ex-info "jolt nrepl-server exited: boom" {:log (.getPath log)})))]
+  (let [dir (temp-dirs/temp-dir! "jonquil-nrepl-test-")
+        log (io/file dir "child.log")
+        logs (atom [])]
+    ;; Each attempt writes its own log, as child/start! does, so the
+    ;; fallback's deleting an earlier one leaves the last to be named.
+    (with-redefs [child/start! (fn [_ _]
+                                 (let [f (io/file dir (str "child-" (count @logs) ".log"))]
+                                   (spit f "Unhandled exception: boom\n")
+                                   (swap! logs conj f)
+                                   (throw (ex-info "jolt nrepl-server exited: boom" {:log (.getPath f)}))))]
       (let [e (make (temp-project))
             msg (ev/start! e)]
         (is (str/starts-with? msg "Couldn't start Jolt over nREPL: jolt nrepl-server exited: boom"))
-        (is (str/ends-with? msg (str "\nThe child's log: " (.getPath log))))
+        (is (str/ends-with? msg (str "\nThe child's log: " (.getPath (last @logs)))))
+        (is (= [false true] (map #(.exists %) @logs))
+            "the attempt with Jonquil's middleware fell back, and only the last log is left")
         (ev/stop! e)))
     (testing "no log line when the log is gone, or was never named"
       (with-redefs [child/start! (fn [_ _] (throw (ex-info "jolt nrepl-server exited: boom" {:log (str (.getPath log) ".gone")})))]
@@ -285,6 +294,26 @@
         (let [e (make (temp-project))]
           (is (= "Couldn't start Jolt over nREPL: no free port in 7900-7999" (ev/start! e)))
           (ev/stop! e))))))
+
+(deftest a-fallback-deletes-the-earlier-attempts-log-test
+  (let [first-e (fetch-failure)
+        first-log (:log (ex-data first-e))
+        last-log (io/file (temp-dirs/temp-dir! "jonquil-nrepl-test-") "child.log")
+        calls (atom 0)]
+    (spit last-log "still starting\n")
+    (with-redefs [child/middleware-source (constantly {:git child/nrepl-git-coord})
+                  child/start! (fn [_ _]
+                                 (if (= 1 (swap! calls inc))
+                                   (throw first-e)
+                                   (throw (ex-info "jolt nrepl-server didn't answer within 15000 ms"
+                                                   {:log (.getPath last-log)}))))]
+      (let [e (make (temp-project))
+            msg (ev/start! e)]
+        (is (= 2 @calls) "the fetch failure fell back to a plain server")
+        (is (not (.exists (io/file first-log))) "the fetch attempt's log is gone")
+        (is (.exists last-log) "the last attempt's log is kept")
+        (is (str/ends-with? msg (str "\nThe child's log: " (.getPath last-log))))
+        (ev/stop! e)))))
 
 (deftest no-fallback-after-stop-test
   (let [sources (atom []) e (make (temp-project))]
