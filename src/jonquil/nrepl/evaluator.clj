@@ -192,6 +192,15 @@
         (when err (swap! (:state ev) assoc :jonquil-error err))
         [(cond-> source root (assoc :jonquil root)) err]))))
 
+(defn- discard-log!
+  "Deletes the log child/start! kept for e's failed start, once a fallback
+  has read what it needs from it: only the last attempt's log is named on
+  the console, so an earlier one would be left behind in the temp folder."
+  [e]
+  (when-let [log (:log (ex-data e))]
+    (.delete (java.io.File. ^String log)))
+  nil)
+
 (defn- spawn-with-fallback!
   "spawn-runtime! with attempt-source, falling back step by step. Each
   failure the evaluator can route around is remembered in its state for
@@ -226,9 +235,12 @@
           (cond
             (:stopped? @(:state ev)) (throw e)
             (>= attempts 3) (throw e)
-            fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line) (recur (inc attempts)))
+            fetch-line (do (swap! (:state ev) assoc :fetch-error fetch-line)
+                           (discard-log! e)
+                           (recur (inc attempts)))
             (and (:jonquil source) (exited? e)) (do (swap! (:state ev) assoc :jonquil-error
                                                            (str "the Jolt child couldn't load Jonquil's nREPL middleware: " (log-error-line e)))
+                                                    (discard-log! e)
                                                     (recur (inc attempts)))
             :else (throw e)))))))
 
