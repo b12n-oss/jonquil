@@ -95,6 +95,22 @@
                    (Thread/sleep 50) (recur))))
       (is (some #(= [:out "late\n"] %) @out) (pr-str @out)))))
 
+(deftest quick-doc-ignores-the-programs-output-live
+  ;; A timer printing while quick docs are fetched goes to the console, and
+  ;; the doc is cljs.repl/doc's own text.
+  (with-cljs [e (make)]
+    (let [out (atom [])]
+      (ev/eval! e "(js/setTimeout (fn [] (println \"stray\")) 150)"
+                {:run? false :on-output (fn [k s] (swap! out conj [k s])) :on-complete (fn [_])})
+      (let [deadline (+ (System/currentTimeMillis) 60000)]
+        (loop [] (when (and (ev/evaluating? e) (< (System/currentTimeMillis) deadline))
+                   (Thread/sleep 20) (recur))))
+      (let [doc (ev/lookup e "map" "(map inc [1])" 1)
+            _ (Thread/sleep 400)]
+        (is (re-find #"cljs.core/map" (str (:doc doc))) (pr-str doc))
+        (is (not (re-find #"stray" (str (:doc doc)))) "the program's output isn't the doc")
+        (is (some #(= [:out "stray\n"] %) @out) (pr-str @out))))))
+
 (deftest error-then-recover-live
   (with-cljs [e (make)]
     (let [{:keys [result out]} (run e "(throw (js/Error. \"boom\"))")]

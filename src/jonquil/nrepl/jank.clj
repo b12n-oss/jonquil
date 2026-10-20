@@ -70,15 +70,26 @@
 
 (defn- kill-child!
   "Drops the connection (pending requests fail as disconnected), clears the
-  child from state and kills its process tree. Idempotent."
-  [{:keys [state hooks] :as ev}]
-  (let [[old _] (swap-vals! state assoc :child nil :used? false)
-        child (:child old)]
-    (connection/detach! ev)
-    (when child
-      ((:kill hooks) child)
-      (connection/notify! ev false))
-    nil))
+  child from state and kills its process tree. Idempotent. With
+  :background? (Stop, on the GTK thread) the kill runs in a future;
+  :killing counts kills in flight and settled? waits for them, so quitting
+  never cuts one off. Disconnected is said at once either way, so a kill
+  ending after the next child connected can't contradict it."
+  ([ev] (kill-child! ev {}))
+  ([{:keys [state hooks] :as ev} {:keys [background?]}]
+   (let [[old _] (swap-vals! state (fn [s]
+                                     (cond-> (assoc s :child nil :used? false)
+                                       (and background? (:child s)) (update :killing inc))))
+         child (:child old)]
+     (connection/detach! ev)
+     (when child
+       (connection/notify! ev false)
+       (if background?
+         (future (try ((:kill hooks) child)
+                      (catch Throwable _ nil)
+                      (finally (swap! state update :killing dec))))
+         ((:kill hooks) child)))
+     nil)))
 
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
@@ -229,10 +240,10 @@
     ;; Idle Stop does nothing. A running one marks the stop and kills the
     ;; child: the in-flight request fails as disconnected, which the worker
     ;; reads as :interrupted. Runs on the GTK thread: no socket writes, only
-    ;; a close and a process kill.
+    ;; a close, and the process kill goes to the background.
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
       (when (:running old)
-        (kill-child! this)))
+        (kill-child! this {:background? true})))
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] false)
@@ -291,7 +302,7 @@
      (->Jank selection
              (atom {:running nil :conn nil :connecting nil :session nil :ops #{}
                     :session-ns nil :prompt-ns 'user :mode :reset
-                    :child nil :used? false :stopped? false})
+                    :child nil :used? false :stopped? false :killing 0})
              (atom (eval/create-history))
              (atom [])
              timings
@@ -313,7 +324,8 @@
   deletes its run dir itself. jonquil.runtime-registry waits on this
   before the process exits."
   [ev]
-  (nil? (:running @(:state ev))))
+  (let [s @(:state ev)]
+    (and (nil? (:running s)) (zero? (:killing s)))))
 
 (defn child-pid
   "The pid of ev's current child, or nil."
