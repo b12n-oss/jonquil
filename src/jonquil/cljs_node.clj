@@ -27,7 +27,7 @@
   ["Jonquil starts and stops its own ClojureScript process."
    "Stop restarts it, so earlier definitions are gone afterwards."
    "No stdin and no inspector; jump to definition stays in this file."
-   "Completion uses this file's names and ClojureScript core's."])
+   "Completion uses this file's names and Clojure core's."])
 
 ;; --- launch ---
 

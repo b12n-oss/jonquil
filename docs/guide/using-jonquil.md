@@ -899,8 +899,7 @@ file fell back to in-process Jolt, and later got a Run notice saying there
 was no shadow-cljs project to attach to.) `{:dialect :cljs}` in a
 project's `.jonquil.edn` forces the dialect for files with other
 extensions, and `{:runtime :launch}` or `{:runtime :attach}` there forces
-the runtime, say to launch node inside a shadow-cljs project, or to attach
-from a project whose `shadow-cljs.edn` lives elsewhere.
+the runtime, say to launch node inside a shadow-cljs project.
 
 jank has no project marker either. A `.jank` file opens as jank by its
 extension, and a project can name it with `{:dialect :jank}` in its
@@ -1349,7 +1348,7 @@ the socket open, and the console says why. Neither listener checks who's
 connecting, which is the same exposure as Jonquil's own nREPL children: while
 the window is open, any user on this machine could send code to the process.
 
-Completion offers the buffer's names and ClojureScript core's. Quick
+Completion offers the buffer's names and Clojure core's. Quick
 documentation comes from `cljs.repl/doc` while the process is idle. F12
 jumps to a definition in the same buffer only. There is no stdin and no
 inspector, and async output that arrives between evaluations (a timer
@@ -2020,7 +2019,7 @@ than being surprises you'd otherwise have to rediscover:
   gone afterwards.
 - No stdin and no inspector.
 - F12 stays in the buffer.
-- Completion comes from the buffer and ClojureScript core's names, and quick
+- Completion comes from the buffer and Clojure core names, and quick
   docs from `cljs.repl/doc` while the process is idle.
 - Async output that arrives between evaluations isn't shown.
 
