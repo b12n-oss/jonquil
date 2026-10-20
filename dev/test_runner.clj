@@ -72,6 +72,7 @@
     jonquil.nrepl.generic-test
     jonquil.nrepl.stdin-middleware-test
     jonquil.nrepl.middleware-files-test
+    jonquil.nrepl.cljs-child-test
     jonquil.nrepl.cljs-node-files-test
     jonquil.inspect-test])
 

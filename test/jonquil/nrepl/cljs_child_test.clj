@@ -1,0 +1,83 @@
+(ns jonquil.nrepl.cljs-child-test
+  "The ClojureScript child against dev/fake-cljs-clojure (ignores its args,
+  serves a fake prepl, prints the ready line), plus find-clojure."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is use-fixtures]]
+            [jolt.process :as p]
+            [jonquil.cljs-node :as cljs-node]
+            [jonquil.nrepl.cljs-child :as child]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
+
+(def fake-clojure (.getCanonicalPath (io/file "dev/fake-cljs-clojure")))
+
+(defn- run-dirs []
+  (set (filter #(re-matches #"jonquil-cljs-\d+" %)
+               (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
+
+(defn- pgrep? [pattern]
+  (let [r (p/sh "pgrep" "-f" pattern)]
+    (boolean (and (zero? (:exit r)) (not (str/blank? (:out r)))))))
+
+(defn- connects? [port]
+  (try (with-open [_ (java.net.Socket. "127.0.0.1" (int port))] true)
+       (catch Exception _ false)))
+
+(deftest find-clojure-test
+  (is (= "/x/clj" (child/find-clojure {:env {"JONQUIL_CLOJURE" "/x/clj"}
+                                       :exists? (constantly true)})))
+  (is (= "/b/clojure" (child/find-clojure {:env {} :path "/a:/b"
+                                           :exists? #(= "/b/clojure" %)})))
+  (is (nil? (child/find-clojure {:env {} :path "/a:/b" :exists? (constantly false)}))))
+
+(deftest start-and-kill-test
+  (let [c (child/start! {:clojure fake-clojure :launcher "l.clj"})]
+    (try
+      (is (nil? (:error c)) (str c))
+      (is (connects? (:port c)))
+      (is (child/alive? c))
+      (is (.exists (io/file (:log c))))
+      (finally (child/kill! c)))
+    (is (not (child/alive? c)))
+    (is (not (.exists (io/file (:run-dir c)))))
+    (is (nil? (child/kill! c)) "idempotent")
+    (is (nil? (child/kill! nil)))))
+
+(deftest project-with-clojurescript-gets-no-sdeps-test
+  (let [with (temp-dirs/temp-dir! "jonquil-cljs-test-")
+        without (temp-dirs/temp-dir! "jonquil-cljs-test-")
+        seen (atom [])
+        spy (fn [opts] (swap! seen conj opts) (cljs-node/launch-args opts))]
+    (spit (io/file with "deps.edn")
+          "{:deps {org.clojure/clojurescript {:mvn/version \"1.11.132\"}}}")
+    (doseq [d [with without]]
+      (let [c (child/start! {:clojure fake-clojure :launcher "l.clj" :project-dir d :args-fn spy})]
+        (try (is (nil? (:error c)) (str c))
+             (finally (child/kill! c)))))
+    (is (= [false true] (mapv :add-dep? @seen)))))
+
+(deftest exits-at-once-test
+  (let [r (child/start! {:clojure "/usr/bin/false" :launcher "l.clj"})]
+    (try
+      (is (string? (:error r)) (str r))
+      (is (str/includes? (:error r) "exit 1"))
+      (is (str/includes? (:error r) "The log: "))
+      (let [log (second (re-find #"The log: (.+)$" (:error r)))]
+        (is (.exists (io/file log)) "a failed start keeps the log"))
+      (finally
+        (when-let [log (some->> (:error r) (re-find #"The log: (.+)$") second)]
+          (#'child/delete-tree! (.getParent (io/file log))))))))
+
+(deftest cancelled-test
+  (let [slow (str (temp-dirs/temp-dir! "jonquil-cljs-test-") "/slow-clojure")
+        before (run-dirs)
+        t0 (System/currentTimeMillis)]
+    (spit slow "#!/usr/bin/env bash\nsleep 61\n")
+    (.setExecutable (io/file slow) true)
+    (is (= {:error :cancelled}
+           (child/start! {:clojure slow :launcher "l.clj"
+                          :cancelled? #(> (- (System/currentTimeMillis) t0) 200)})))
+    (is (not (pgrep? "slow-clojure")))
+    (is (= before (run-dirs)))))
