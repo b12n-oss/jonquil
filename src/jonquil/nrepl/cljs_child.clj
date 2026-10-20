@@ -78,10 +78,12 @@
   (try (slurp log) (catch Exception _ "")))
 
 (defn- port-taken?
-  "True when the log shows the HTTP port could not be bound."
+  "True when the log has the launcher's own marker line
+  `jonquil-cljs-http-port-taken <port>`. Compile output that merely
+  mentions a BindException doesn't count."
   [text]
-  (or (str/includes? text "Address already in use")
-      (str/includes? text "BindException")))
+  (boolean (some #(re-matches #"jonquil-cljs-http-port-taken \d+" %)
+                 (str/split-lines text))))
 
 (defn process-options
   "The jolt.process options for the child: {:dir :log}, plus login-path's
@@ -97,8 +99,8 @@
   "Starts the launcher with clojure in a fresh <tmpdir>/jonquil-cljs-run-<suffix>
   and waits for its ready line. Returns {:proc :pid :port :url :run-dir :log
   :stdin} (:url is the page URL of a browser launch, nil for node), or
-  {:error :http-port-taken} when a :browser launch's log shows a bind
-  failure before the ready line (the tree is killed and the run dir
+  {:error :http-port-taken} when a :browser launch's log has the
+  launcher's `jonquil-cljs-http-port-taken <port>` line (it exits 3) (the tree is killed and the run dir
   removed), or {:error text} when the process exits early or timeout-ms
   (default 60000) passes (the text carries the exit code, the log's last 5
   lines and \"The log: <path>\"; the log is kept), or {:error :cancelled}

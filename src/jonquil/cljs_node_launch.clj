@@ -60,6 +60,12 @@
 
 (def ^:private http-port (atom nil))
 
+(def ^:private prebound
+  "The HTTP ServerSocket bound in -main before the ready line, so a taken
+  port is reported at start. The replaced cljs.repl.server/start takes it
+  the first time it runs and clears the atom; later calls bind afresh."
+  (atom nil))
+
 (defn browser-accept
   "Per connection: a ClojureScript prepl on the browser REPL. The HTTP server
   comes up on first use (cljs.repl.server/start, replaced to bind loopback)
@@ -87,7 +93,8 @@
      v
      (fn [_]
        (fn [opts]
-         (let [ss (ServerSocket. (int (:port opts)) 50 (InetAddress/getByName "127.0.0.1"))]
+         (let [[old _] (reset-vals! prebound nil)
+               ss (or old (ServerSocket. (int (:port opts)) 50 (InetAddress/getByName "127.0.0.1")))]
            (.start (Thread. ((ns-resolve 'clojure.core 'binding-conveyor-fn)
                              (fn [] (@loop-var opts ss)))))
            (swap! @state-var (fn [old] (assoc old :socket ss :port (:port opts))))))))))
@@ -101,8 +108,14 @@
   [& args]
   (let [browser? (= "browser" (first args))]
     (if browser?
-      (do (reset! http-port (parse-long (second args)))
-          (loopback-start!))
+      (let [port (parse-long (second args))]
+        (reset! http-port port)
+        (try (reset! prebound (ServerSocket. (int port) 50 (InetAddress/getByName "127.0.0.1")))
+             (catch java.io.IOException _
+               (println (str "jonquil-cljs-http-port-taken " port))
+               (flush)
+               (System/exit 3)))
+        (loopback-start!))
       (when-not (str/includes? (script-text) unpatched)
         (binding [*out* *err*]
           (println (str "jonquil: " script " has no " unpatched
