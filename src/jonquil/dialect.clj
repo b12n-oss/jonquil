@@ -168,7 +168,10 @@
    ;; The same text as jonquil.cljs/experimental-message (dialect can't
    ;; require cljs); a test keeps the two equal.
    :experimental-message "; ClojureScript support is experimental."
-   :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."})
+   :reset-tooltip "Hot reload can't unload a namespace, so every Run adds to the running app."
+   ;; A runtime whose Reset on Run starts unticked, though it can reset: on
+   ;; node a reset restarts the ClojureScript process, which takes seconds.
+   :reset-tooltips {:launch "Reset on Run restarts ClojureScript, which takes a few seconds, so it starts off here. Tick it to start every Run clean."}})
 
 (def nrepl
   {:id :nrepl
@@ -417,14 +420,27 @@
   profile's :reset-tooltip; the tick it took down goes into :saved, so a
   later switch back to a runtime that can reset puts it up again. A
   switch from one attach runtime to another keeps the first saved tick.
+  A runtime named in the profile's :reset-tooltips (ClojureScript on node)
+  can reset but starts unticked: the tick it took down is saved the same
+  way, the box stays clickable, and a tick the person gives it there
+  stands until the window leaves that runtime.
   Returns {:state s :active? b :sensitive? b :tooltip s-or-nil}."
   [state sel active?]
-  (if (= :attach (:runtime sel))
-    {:state (if (contains? state :saved) state {:saved active?})
-     :active? false :sensitive? false :tooltip (:reset-tooltip (:profile sel))}
-    {:state {}
-     :active? (if (contains? state :saved) (:saved state) active?)
-     :sensitive? true :tooltip nil}))
+  (let [off-tip (get-in sel [:profile :reset-tooltips (:runtime sel)])]
+    (cond
+      (= :attach (:runtime sel))
+      {:state (if (contains? state :saved) state {:saved active?})
+       :active? false :sensitive? false :tooltip (:reset-tooltip (:profile sel))}
+
+      off-tip
+      (if (contains? state :saved)
+        {:state state :active? active? :sensitive? true :tooltip off-tip}
+        {:state {:saved active?} :active? false :sensitive? true :tooltip off-tip})
+
+      :else
+      {:state {}
+       :active? (if (contains? state :saved) (:saved state) active?)
+       :sensitive? true :tooltip nil})))
 
 (defn label
   "The status bar's dialect text: the profile's name, plus the runtime when
