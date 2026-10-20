@@ -46,6 +46,12 @@
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
 
+(defprotocol StartNote
+  "An evaluator that connects on the first Run says so once, as a plain
+  note in the console next to the experimental line, not as a limit."
+  (start-note [ev]
+    "One sentence for the console when the window opens."))
+
 (def ^:dynamic *help-timeout-ms*
   "When bound, how long a server evaluator's complete and lookup wait for
   the server, in place of its own :help-timeout-ms (300 ms, sized for the

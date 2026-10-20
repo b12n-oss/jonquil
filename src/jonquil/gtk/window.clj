@@ -806,6 +806,8 @@
     (satisfies? connection/Attached e)
     (do (when (:experimental (:profile sel))
           (cview/append! cv :system (str (:experimental-message (:profile sel)) "\n")))
+        (when (satisfies? ev/StartNote e)
+          (cview/append! cv :system (str "; " (ev/start-note e) "\n")))
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
