@@ -55,6 +55,7 @@
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
     jonquil.fake-shadow-nrepl-test
+    jonquil.fake-cljs-prepl-test
     jonquil.fake-jank-nrepl-test
     jonquil.nrepl.attach-test
     jonquil.nrepl.jvm-test

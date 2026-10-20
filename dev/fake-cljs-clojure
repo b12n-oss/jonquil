@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A stand-in for `clojure ... -M -i <launcher> -m jonquil.cljs-node-launch`
+# for Jonquil's tests: ignores its arguments and serves a fake ClojureScript
+# prepl, printing the ready line `jonquil-cljs-prepl <port>`. Ends when
+# stdin reaches EOF.
+cd "$(dirname "$0")/.." && exec jolt -M:fake-cljs -m fake-cljs-prepl
