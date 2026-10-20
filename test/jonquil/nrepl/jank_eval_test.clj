@@ -130,7 +130,8 @@
       (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
       (ev/interrupt! e)
       (is (= {:status :interrupted} (deref done 5000 :timeout)))
-      (is (= 1 @(:kills j)))
+      (wait-until! #(= 1 @(:kills j)))
+      (is (= 1 @(:kills j)) "Stop's kill runs off the caller's thread")
       (is (re-find (re-pattern (java.util.regex.Pattern/quote jank/stopped-message)) (all-text @out)))
       (is (nil? (jank-eval/child-pid e)))
       (is (= :ok (:status (:result (run e "(+ 1 1)" {:run? false})))))
@@ -368,3 +369,23 @@
         (is (= "Says hi." (:doc d))))
       (Thread/sleep 100)
       (is (= 1 @calls)))))
+
+(deftest stop-returns-before-a-slow-kill-test
+  ;; Stop runs on the GTK thread: the kill is backgrounded, and the evaluator
+  ;; isn't settled (the registry waits on it before quitting) until it ends.
+  (let [release (promise)]
+    (with-jank [j {:slow {"(spin)" 5000}}
+                {:kill (fn [c] (deref release 5000 nil) (some-> (:live c) (reset! false)))} srv]
+      (let [e (:ev j) done (promise) heard (atom [])]
+        (connection/on-connection! e (fn [c] (swap! heard conj c)))
+        (ev/eval! e "(spin)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (wait-until! #(some (fn [m] (= "(spin)" (get m "code"))) (fake/requests srv)))
+        (let [t0 (System/currentTimeMillis)]
+          (ev/interrupt! e)
+          (is (< (- (System/currentTimeMillis) t0) 500) "interrupt! didn't wait for the kill"))
+        (is (= {:status :interrupted} (deref done 5000 :timeout)))
+        (is (not (jank-eval/settled? e)) "a kill still running keeps the evaluator unsettled")
+        (is (= false (last @heard)) "disconnected is said at Stop")
+        (deliver release true)
+        (wait-until! #(jank-eval/settled? e))
+        (is (jank-eval/settled? e))))))
