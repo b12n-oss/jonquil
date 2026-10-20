@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (763 tests, 4237 assertions
-on macOS, 4206 on Linux, measured with `bb linux:test` on 2026-10-20) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (763 tests, 4240 assertions
+on macOS, 4209 on Linux, measured with `bb linux:test` on 2026-10-20) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and

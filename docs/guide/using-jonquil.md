@@ -1330,9 +1330,11 @@ form until you pressed Stop.
 
 Stop and Reset on Run both restart the process, because nothing in this
 runtime can interrupt a running evaluation. Earlier definitions are gone
-afterwards, and the console says so. Reset on Run is on by default, so each
-Run after the first restarts it, which takes a few seconds; untick it to
-keep your definitions between Runs. Closing the window or quitting kills
+afterwards, and the console says so. Since a restart takes a few seconds,
+Reset on Run starts unticked in a ClojureScript-on-node window, so your
+definitions carry from one Run to the next; tick it when you want each Run
+to start clean. Switching the window back to another dialect puts your
+earlier choice back. Closing the window or quitting kills
 the Clojure process and node with it. If Jonquil itself crashes, the
 child's stdin ends, its JVM exits, and node goes down with it.
 
@@ -2034,7 +2036,7 @@ than being surprises you'd otherwise have to rediscover:
   shadow-cljs interrupt stops nothing, since the work is in the JS runtime,
   and the runtime keeps running what it has.
 - No stdin, for the ClojureScript dialect.
-- Reset on Run isn't available for ClojureScript.
+- Reset on Run isn't available for ClojureScript attached to shadow-cljs.
 - `js/console.log` output goes to the JS runtime's own console, not
   Jonquil's. `println` does reach Jonquil.
 - A namespace the watched build doesn't include can be required and
