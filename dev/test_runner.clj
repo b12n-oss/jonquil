@@ -74,6 +74,7 @@
     jonquil.nrepl.middleware-files-test
     jonquil.nrepl.cljs-child-test
     jonquil.nrepl.cljs-node-files-test
+    jonquil.nrepl.prepl-test
     jonquil.inspect-test])
 
 (def live-namespaces

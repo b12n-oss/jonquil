@@ -30,6 +30,7 @@
     jonquil.nrepl.middleware-files
     jonquil.nrepl.cljs-child
     jonquil.nrepl.cljs-node-files
+    jonquil.nrepl.prepl
     jonquil.cljd
     jonquil.clj
     jonquil.cljs
