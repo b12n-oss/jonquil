@@ -19,21 +19,32 @@
 
 (defn- script-text [] (slurp (io/resource script)))
 
+(def ^:private patched-url
+  "The patched script, written once per JVM. deleteOnExit runs in reverse
+  registration order, so the folders are registered outermost first and the
+  file last: the file goes first, then each folder is empty when its turn
+  comes."
+  (delay
+    (let [dir (.toFile (Files/createTempDirectory "jonquil-cljs-" (make-array FileAttribute 0)))
+          f (io/file dir script)]
+      (io/make-parents f)
+      (doseq [d (reverse (take-while some? (iterate #(.getParentFile ^java.io.File %) (.getParentFile f))))
+              :when (.startsWith (.getPath ^java.io.File d) (.getPath dir))]
+        (.deleteOnExit ^java.io.File d))
+      (spit f (str/replace (script-text) unpatched patched))
+      (.deleteOnExit f)
+      (.toURL (.toURI f)))))
+
 (defn- loopback-loader
   "A classloader answering node_repl.js with a copy that listens on
   127.0.0.1 only; every other resource comes from parent."
   [^ClassLoader parent]
-  (let [dir (.toFile (Files/createTempDirectory "jonquil-cljs-" (make-array FileAttribute 0)))
-        f (io/file dir script)]
-    (io/make-parents f)
-    (spit f (str/replace (script-text) unpatched patched))
-    (.deleteOnExit f)
-    (let [url (.toURL (.toURI f))]
-      ;; Child-first for this one name: a plain URLClassLoader asks its
-      ;; parent first, which finds the jar's unpatched script.
-      (proxy [ClassLoader] [parent]
-        (getResource [n]
-          (if (= n script) url (proxy-super getResource n)))))))
+  (let [url @patched-url]
+    ;; Child-first for this one name: a plain URLClassLoader asks its
+    ;; parent first, which finds the jar's unpatched script.
+    (proxy [ClassLoader] [parent]
+      (getResource [n]
+        (if (= n script) url (proxy-super getResource n))))))
 
 (defn- free-port []
   (with-open [s (ServerSocket. 0 0 (InetAddress/getByName "127.0.0.1"))]
