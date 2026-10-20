@@ -31,6 +31,7 @@
     jonquil.cljd
     jonquil.clj
     jonquil.cljs
+    jonquil.cljs-node
     jonquil.jank
     jonquil.nrepl.client
     jonquil.nrepl.connection

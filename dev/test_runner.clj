@@ -50,6 +50,7 @@
     jonquil.cljd-test
     jonquil.clj-test
     jonquil.cljs-test
+    jonquil.cljs-node-test
     jonquil.jank-test
     jonquil.fake-cljd-nrepl-test
     jonquil.fake-jvm-nrepl-test
