@@ -87,7 +87,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-19, 714 tests pass (4059 assertions on macOS; 4028 on Linux).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-20, 716 tests pass (4067 assertions on macOS; 4036 on Linux).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>
