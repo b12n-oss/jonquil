@@ -2,7 +2,7 @@
   "Open and Save: the dirty-open guard, invalid UTF-8, atomic/symlink/mode
   save behaviour, and dialog-dismissed handling."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]))

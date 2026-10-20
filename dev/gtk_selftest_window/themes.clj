@@ -1,7 +1,7 @@
 (ns gtk-selftest-window.themes
   "apply-theme!, the theme chord/cycle, and settings isolation/save/load."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.appearance :as appearance]
             [jonquil.gtk.editor :as editor]

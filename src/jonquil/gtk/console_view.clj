@@ -53,8 +53,8 @@
   editor.clj's on-cursor-moved!/on-focus-lost! -- the console's own
   refine!/close! triggers."
   (:require [clojure.string :as str]
-            [jonquil.console :as console]
             [jolt.ffi :as ffi]
+            [jonquil.console :as console]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
             [jonquil.theme :as theme]))

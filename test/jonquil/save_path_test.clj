@@ -1,7 +1,7 @@
 (ns jonquil.save-path-test
   (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.save-path :as sp]
             [temp-dirs]))
 

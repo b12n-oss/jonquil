@@ -6,8 +6,8 @@
   (:require [clojure.java.io :as io]
             [gtk-async :as gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
-            [jonquil.file-tree :as ft]
             [jolt.ffi :as ffi]
+            [jonquil.file-tree :as ft]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as pane]
             [temp-dirs]))

@@ -19,8 +19,8 @@
   GTK involved."
   (:require [jonquil.evaluator :as ev]
             [jonquil.nrepl.child :as child]
-            [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.nrepl.cljs-node :as cljs-node]
+            [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.nrepl.jank :as jank]))
 
 (defonce ^:private live (atom #{}))

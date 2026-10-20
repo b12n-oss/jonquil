@@ -1,14 +1,14 @@
 (ns gtk-selftest-window.rename-menus
   "Rename and the P4 context menus (editor and REPL)."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jolt.ffi :as ffi]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
-            [jonquil.gtk.popover :as popover]
-            [jolt.ffi :as ffi]))
+            [jonquil.gtk.popover :as popover]))
 
 ;; --- P4.T7: rename and the P4 context menus --------------------------------
 

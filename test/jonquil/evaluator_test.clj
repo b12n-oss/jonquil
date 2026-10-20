@@ -1,16 +1,17 @@
 (ns jonquil.evaluator-test
   "The in-process engine through the Evaluator protocol: the same answers
-  jonquil.session and jonquil.docs give when called directly."
+  jonquil.session and jonquil.docs give when called directly.
+
+  jonquil.nrepl.attach is required bare and unaliased (jonquil.nrepl.
+  connection-test's convention): it's loaded only for its :cljd defmethod
+  on connection/make-attached, which transitively registers connection.clj's
+  own :attach defmethod on ev/make too. full-doc-protocol-test's second
+  assertion needs both to dispatch at all. (The note lives here because
+  clojure-lsp's clean-ns scrambles comments inside a :require.)"
   (:require [clojure.test :refer [deftest is testing]]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.evaluator :as ev]
-            ;; Bare, unaliased (jonquil.nrepl.connection-test's own
-            ;; convention): loaded only for its :cljd defmethod on
-            ;; connection/make-attached, transitively registering
-            ;; connection.clj's own :attach defmethod on ev/make too --
-            ;; full-doc-protocol-test's second assertion needs both to
-            ;; dispatch at all.
             [jonquil.nrepl.attach]
             [jonquil.session :as session]))
 

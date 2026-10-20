@@ -11,7 +11,7 @@
   while the run goes on."
   (:require [clojure.core.async :refer [<! go timeout]]
             [clojure.string :as str]
-            [gtk-async :as ga :refer [on-gtk await-until go-row]]
+            [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.console-view :as cview]

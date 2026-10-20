@@ -20,10 +20,10 @@
   eof-live-1-8 needs nREPL 1.8.0 (the shared server runs 1.7.0), and
   server-stopped-leaves-no-port-file-live stops its server, which would
   break the shared one for the tests after it."
-  (:require [clojure.java.io :as io]
+  (:require [clj-server :as clj-server]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
-            [clj-server :as clj-server]
             [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]

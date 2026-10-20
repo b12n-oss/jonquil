@@ -18,7 +18,7 @@
   they didn't type (the rule save-to! follows)."
   (:require [clojure.java.io :as io]
             [clojure.string :as str])
-  (:import (java.nio.file Files FileAlreadyExistsException CopyOption)
+  (:import (java.nio.file CopyOption FileAlreadyExistsException Files)
            (java.nio.file.attribute FileAttribute)))
 
 (defn- canonical [p] (.getCanonicalPath (io/file p)))

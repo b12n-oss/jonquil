@@ -1,10 +1,10 @@
 (ns jonquil.app-linux-test
-  (:require [clojure.java.io :as io]
+  (:require [app-linux :as al]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [grenadine.xml :as xml]
             [jolt.process :as p]
-            [app-linux :as al]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)

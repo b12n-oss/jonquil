@@ -48,7 +48,8 @@
   else kept as the printed string."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [fake-nrepl-core :as core :refer [head live? matches? read-forms wait!]]
+            [fake-nrepl-core :as core :refer [head live? matches? read-forms
+                                              wait!]]
             [jonquil.inspect.view :as view]))
 
 (def jvm-ops

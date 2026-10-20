@@ -6,9 +6,9 @@
   not re-signed: `jolt build` appends the program image after the launcher's
   Mach-O, which makes `codesign --force` fail strict validation, and the
   linker's ad-hoc signature on the built binary is what macOS needs."
-  (:require [clojure.java.io :as io]
+  (:require [app-linux]
+            [clojure.java.io :as io]
             [clojure.string :as str]
-            [app-linux]
             [jolt.process :as p]))
 
 (def bundle-id "net.b12n.jonquil")

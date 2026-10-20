@@ -9,7 +9,7 @@
   out-end: run-row clears the input between rows, so that tail is the
   prompt followed by whatever a row has typed."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
