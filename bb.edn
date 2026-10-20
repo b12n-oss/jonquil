@@ -617,7 +617,7 @@
                          "jonquil-attach-test-" "jonquil-jvm-test-" "jonquil-selftest-"
                          "jonquil-selftest-window-settings-" "jonquil-selftest-nrepl-"
                          "jonquil-selftest-loose-" "jonquil-selftest-cljd-" "jonquil-selftest-clj-"
-                         "jonquil-selftest-clj-outside-" "jonquil-selftest-jank-" "jonquil-selftest-cljs-node-"
+                         "jonquil-selftest-clj-outside-" "jonquil-selftest-jank-" "jonquil-selftest-cljs-node-" "jonquil-cljs-"
                          "jonquil-selftest-dialect-" "jonquil-selftest-atomic-"
                          "jonquil-selftest-bad-settings-" "jonquil-selftest-badutf8-"
                          "jonquil-selftest-capslock-" "jonquil-selftest-close-fail-"

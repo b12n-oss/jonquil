@@ -138,8 +138,12 @@
   (try (.close ^java.net.ServerSocket (:server srv)) (catch Throwable _ nil))
   (doseq [s @(:conns srv)] (try (.close ^java.net.Socket s) (catch Throwable _ nil)))
   (let [deadline (+ (System/currentTimeMillis) 1000)]
+    ;; A connection thread mid-read throws SocketException once its socket
+    ;; closes, and deref rethrows that: wait for each, whatever it ended in
+    ;; (this made stop! itself throw now and then on a loaded Linux run).
     (doseq [f @(:futures srv)]
-      (deref f (max 0 (- deadline (System/currentTimeMillis))) nil)))
+      (try (deref f (max 0 (- deadline (System/currentTimeMillis))) nil)
+           (catch Throwable _ nil))))
   nil)
 
 (defn -main [& _]

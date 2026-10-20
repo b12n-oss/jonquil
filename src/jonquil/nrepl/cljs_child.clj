@@ -88,7 +88,7 @@
 (defn- canonical [path] (.getCanonicalPath (io/file path)))
 
 (defn start!
-  "Starts the launcher with clojure in a fresh <tmpdir>/jonquil-cljs-<nanos>
+  "Starts the launcher with clojure in a fresh <tmpdir>/jonquil-cljs-run-<suffix>
   and waits for its ready line. Returns {:proc :pid :port :run-dir :log
   :stdin}, or {:error text} when the process exits early or timeout-ms
   (default 60000) passes (the text carries the exit code, the log's last 5
@@ -101,10 +101,13 @@
         args-fn (or args-fn cljs-node/launch-args)
         ;; :dir must be canonical absolute: a relative or symlinked one
         ;; makes the spawn misbehave (see nrepl.child).
-        run-dir (let [d (io/file (System/getProperty "java.io.tmpdir")
-                                 (str "jonquil-cljs-" (System/nanoTime)))]
-                  (.mkdirs d)
-                  (.getCanonicalPath d))
+        ;; createTempDirectory makes the folder itself (owner-only, and it
+        ;; fails rather than reusing a folder or symlink someone else made
+        ;; at a guessable name).
+        run-dir (.getCanonicalPath
+                 (.toFile (java.nio.file.Files/createTempDirectory
+                           "jonquil-cljs-run-"
+                           (make-array java.nio.file.attribute.FileAttribute 0))))
         log (str run-dir "/server.log")
         dir (if project-dir (canonical project-dir) run-dir)
         deps-file (io/file dir "deps.edn")

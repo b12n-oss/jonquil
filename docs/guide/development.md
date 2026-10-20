@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (763 tests, 4240 assertions
-on macOS, 4209 on Linux, measured with `bb linux:test` on 2026-10-20) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (765 tests, 4255 assertions
+on macOS, 4224 on Linux, measured with `bb linux:test` on 2026-10-20) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -41,7 +41,7 @@ and download again when it changes, and `--offline` reuses the cached build.
 The nightly goes first on `PATH` for the run, and the Jolt children pick it
 up too (checked with `ps`, 2026-10-20: 59 tests, 213 assertions on
 `v0.8.23-26-g1dcdf9e4`).
-`bb test:cljs-node` runs a live suite for ClojureScript on node (6 tests, 23 assertions): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, recovery after an error, requiring a project namespace, that Stop kills the whole process tree, and that the listeners are loopback-only. It skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
+`bb test:cljs-node` runs a live suite for ClojureScript on node (7 tests, 26 assertions): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, that output printed after an evaluation answered (a `setTimeout`) still arrives, recovery after an error, requiring a project namespace, that Stop kills the whole process tree, and that the listeners are loopback-only. It skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
 
 `bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by

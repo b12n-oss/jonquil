@@ -78,6 +78,23 @@
       (is (= :ok (:status result)) (pr-str [result out]))
       (is (some #(= [:out "hello\n"] %) out) (pr-str out)))))
 
+(deftest output-after-the-evaluation-live
+  ;; A setTimeout prints after the evaluation answered: the console still
+  ;; gets it, through the last evaluation's on-output.
+  (with-cljs [e (make)]
+    (let [out (atom []) done (promise)]
+      (ev/eval! e "(js/setTimeout (fn [] (println \"late\")) 300)"
+                {:run? false
+                 :on-output (fn [k s] (swap! out conj [k s]))
+                 :on-complete (fn [r] (deliver done r))})
+      (is (= :ok (:status (deref done 60000 :timeout))))
+      (is (not-any? #(= [:out "late\n"] %) @out) "not yet: the timer hasn't fired")
+      (let [deadline (+ (System/currentTimeMillis) 5000)]
+        (loop [] (when (and (not-any? #(= [:out "late\n"] %) @out)
+                            (< (System/currentTimeMillis) deadline))
+                   (Thread/sleep 50) (recur))))
+      (is (some #(= [:out "late\n"] %) @out) (pr-str @out)))))
+
 (deftest error-then-recover-live
   (with-cljs [e (make)]
     (let [{:keys [result out]} (run e "(throw (js/Error. \"boom\"))")]

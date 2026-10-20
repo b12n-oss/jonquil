@@ -135,7 +135,7 @@
       path (assoc :extra-env {"PATH" path}))))
 
 (defn start!
-  "Starts jank in a fresh <tmpdir>/jonquil-jank-<nanos> and waits for its
+  "Starts jank in a fresh <tmpdir>/jonquil-jank-run-<suffix> and waits for its
   port file. Returns {:proc :pid :port :run-dir}, or {:error text} when
   jank exits early (text carries the exit code and the log's last 5
   lines) or timeout-ms (default 30000) passes, or {:error :cancelled}
@@ -146,10 +146,13 @@
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         ;; :dir must be canonical absolute: a relative or symlinked one
         ;; makes the spawn misbehave (see nrepl.child).
-        run-dir (let [d (io/file (System/getProperty "java.io.tmpdir")
-                                 (str "jonquil-jank-" (System/nanoTime)))]
-                  (.mkdirs d)
-                  (.getCanonicalPath d))
+        ;; createTempDirectory makes the folder itself (owner-only, and it
+        ;; fails rather than reusing a folder or symlink someone else made
+        ;; at a guessable name).
+        run-dir (.getCanonicalPath
+                 (.toFile (java.nio.file.Files/createTempDirectory
+                           "jonquil-jank-run-"
+                           (make-array java.nio.file.attribute.FileAttribute 0))))
         log (str run-dir "/server.log")
         spawned (try (apply p/process (process-options {:dir run-dir :log log})
                             (launch-command binary module-path))

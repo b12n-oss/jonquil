@@ -115,7 +115,7 @@
         (ev/stop! e)))))
 
 (defn- jank-run-dirs []
-  (set (filter #(re-matches #"jonquil-jank-\d+" %)
+  (set (filter #(re-matches #"jonquil-jank-run-.+" %)
                (seq (.list (io/file (System/getProperty "java.io.tmpdir")))))))
 
 (defn- pgrep? [pattern]

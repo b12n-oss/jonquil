@@ -67,15 +67,27 @@
 
 (defn- kill-child!
   "Closes the connection (an evaluation waiting on it sees :closed), clears
-  the child and kills its process tree. Idempotent."
-  [{:keys [state hooks] :as ev}]
-  (let [[old _] (swap-vals! state assoc :child nil :conn nil :ready? false
-                            :used? false :prompt-ns 'cljs.user :drain nil)]
-    (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
-    (when (:child old)
-      ((:kill hooks) (:child old))
-      (connection/notify! ev false))
-    nil))
+  the child and kills its process tree. Idempotent. With :background? the
+  kill runs in a future (Stop calls this on the GTK thread, and a JVM plus
+  node can take a second or two to die); :killing counts kills in flight,
+  and settled? waits for them, so quitting never cuts one off."
+  ([ev] (kill-child! ev {}))
+  ([{:keys [state hooks] :as ev} {:keys [background?]}]
+   (let [[old _] (swap-vals! state (fn [s]
+                                     (cond-> (assoc s :child nil :conn nil :ready? false
+                                                    :used? false :prompt-ns 'cljs.user :drain nil)
+                                       (and background? (:child s)) (update :killing inc))))]
+     (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
+     (when-let [child (:child old)]
+       ;; Said now, not when the kill ends: a background kill can finish after
+       ;; the next evaluation's child connected, and must not contradict it.
+       (connection/notify! ev false)
+       (if background?
+         (future (try ((:kill hooks) child)
+                      (catch Throwable _ nil)
+                      (finally (swap! state update :killing dec))))
+         ((:kill hooks) child)))
+     nil)))
 
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
@@ -122,6 +134,13 @@
       (when-let [f (:sink @state)] (f r)))
 
     @closed? nil
+
+    ;; Nothing waiting: output node prints after an evaluation finished (a
+    ;; setTimeout, a promise) goes to the last evaluation's on-output.
+    (and (nil? (:sink @state)) (nil? (:drain @state)) (#{:out :err :tap} (:tag r)))
+    (when-let [f (:last-output @state)]
+      (when-let [[k t] (cljs-node/output-of r)]
+        (connection/say! f k t)))
 
     :else
     (let [form (when (= :ret (:tag r)) (:form r))
@@ -236,6 +255,7 @@
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
   (try
+    (when on-output (swap! state assoc :last-output on-output))
     (when on-status-change (on-status-change :running))
     (if-let [problem (or (commands/pre-run-problem code) (incomplete-problem code))]
       (finish! ev opts {:status :error :error-text problem})
@@ -306,7 +326,7 @@
   ev/Evaluator
   (start! [_] nil)
   (stop! [this]
-    (swap! state (fn [s] (cond-> (assoc s :stopped? true)
+    (swap! state (fn [s] (cond-> (assoc s :stopped? true :last-output nil)
                            (:running s) (assoc-in [:running :stop-requested?] true))))
     (kill-child! this)
     nil)
@@ -320,7 +340,7 @@
   (interrupt! [this]
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]
       (when (:running old)
-        (kill-child! this)))
+        (kill-child! this {:background? true})))
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] false)
@@ -365,7 +385,8 @@
      (->CljsNode selection
                  (atom {:running nil :conn nil :child nil :ready? false :sink nil
                         :drain nil :sink-form nil :done-forms #{} :helping false :n 0
-                        :prompt-ns 'cljs.user :mode :reset :used? false :stopped? false})
+                        :prompt-ns 'cljs.user :mode :reset :used? false :stopped? false
+                        :killing 0 :last-output nil})
                  (atom (eval/create-history))
                  (atom [])
                  timings
@@ -382,9 +403,11 @@
   5000)
 
 (defn settled?
-  "True once no evaluation, and so no launch, is in flight."
+  "True once no evaluation (and so no launch) and no background kill is in
+  flight."
   [ev]
-  (nil? (:running @(:state ev))))
+  (let [s @(:state ev)]
+    (and (nil? (:running s)) (zero? (:killing s)))))
 
 (defn child-pid [ev] (:pid (:child @(:state ev))))
 
