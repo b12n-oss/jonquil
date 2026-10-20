@@ -82,12 +82,17 @@
 
 (defn row-cljs-node-starts-not-running
   "The window opened src/demo/core.cljs outside any shadow-cljs project:
-  the label says ClojureScript (node) isn't running yet."
+  the label says ClojureScript (node) isn't running yet, and Reset on Run
+  starts unticked but clickable (a reset restarts ClojureScript)."
   [ui]
   (go-row :cljs-node-starts-not-running support/check
-    (on-gtk (support/check :cljs-node-starts-not-running
-                           (= NOT-RUNNING (label ui))
-                           {:label (label ui) :text (support/console-text ui)}))))
+    (on-gtk (let [chk (:reset-check ui)
+                  ticked? (not (zero? (g/gtk-check-button-get-active chk)))
+                  clickable? (not (zero? (g/gtk-widget-get-sensitive chk)))]
+              (support/check :cljs-node-starts-not-running
+                             (and (= NOT-RUNNING (label ui)) (not ticked?) clickable?)
+                             {:label (label ui) :reset-ticked ticked? :reset-clickable clickable?
+                              :text (support/console-text ui)})))))
 
 (defn row-cljs-node-run-prints-value
   "Run evaluates the buffer in the fake: the console shows 3, the label
@@ -120,11 +125,9 @@
                          (editor/set-text! (:editor ui) "(str \"slow\")")
                          ((:run!* ui))
                          m))
-          ;; Reset on Run relaunches the child before the form is sent, so
-          ;; the pid that runs the slow form is a new one, seen once the
-          ;; evaluator is busy and the pid has changed.
-          started? (await-until 20000 20 #(and (not (idle? ui))
-                                               (pid-of ui) (not= before (pid-of ui))))
+          ;; Reset on Run starts unticked on node, so the child the earlier
+          ;; rows started runs the slow form: busy with a pid.
+          started? (await-until 20000 20 #(and (not (idle? ui)) (pid-of ui)))
           old (pid-of ui)
           _ (on-gtk ((:stop!* ui)))
           stopped? (await-until 5000 20 #(and (idle? ui)
@@ -133,7 +136,7 @@
           [answered? mark2] (run-and-await ui "(+ 20 22)" 30000 #(value-line? % "42"))
           new (pid-of ui)]
       (on-gtk (support/check :cljs-node-stop-restarts
-                             (and before old started? stopped? gone? answered? new (not= old new))
+                             (and before old (= before old) started? stopped? gone? answered? new (not= old new))
                              {:before before :old old :new new :started started? :stopped stopped? :gone gone?
                               :answered answered? :text (str (support/since ui mark) (support/since ui mark2))})))))
 

@@ -519,5 +519,18 @@
 
 (deftest cljs-launch-reset-toggle-test
   (let [launch (dialect/select all5 nil "/tmp/x.cljs" nil)
-        r (dialect/reset-toggle {} launch true)]
-    (is (= [true true nil] [(:active? r) (:sensitive? r) (:tooltip r)]))))
+        jolt-sel {:profile dialect/jolt :runtime :in-process}
+        tip (get-in dialect/cljs [:reset-tooltips :launch])]
+    (testing "ClojureScript on node starts unticked but clickable, keeping the tick it took down"
+      (is (= {:state {:saved true} :active? false :sensitive? true :tooltip tip}
+             (dialect/reset-toggle {} launch true))))
+    (testing "a tick the person gives it there stays while the window stays on node"
+      (is (= {:state {:saved true} :active? true :sensitive? true :tooltip tip}
+             (dialect/reset-toggle {:saved true} launch true))))
+    (testing "back to Jolt puts the earlier tick back up"
+      (is (= {:state {} :active? true :sensitive? true :tooltip nil}
+             (dialect/reset-toggle {:saved true} jolt-sel false))))
+    (testing "the shadow attach runtime is unchanged: unticked and disabled"
+      (let [attach (assoc launch :runtime :attach)]
+        (is (= [false false (:reset-tooltip dialect/cljs)]
+               ((juxt :active? :sensitive? :tooltip) (dialect/reset-toggle {} attach true))))))))
