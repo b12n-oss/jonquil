@@ -1,7 +1,7 @@
 (ns gtk-selftest-window.completion
   "Completion with a doc preview, in both the editor and the REPL input."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]

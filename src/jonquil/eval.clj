@@ -3,9 +3,9 @@
    Output writers bound directly, load-string under run-interruptible, *ns*
    always bound, and Stop that lets the worker's own exit path go idle."
   (:require [clojure.string :as str])
-  (:import (java.io Reader StringReader Writer)
-           (java.util.concurrent LinkedBlockingQueue)
-           (clojure.lang LineNumberingPushbackReader)))
+  (:import (clojure.lang LineNumberingPushbackReader)
+           (java.io Reader StringReader Writer)
+           (java.util.concurrent LinkedBlockingQueue)))
 
 (defn create-writer
   "Creates a java.io.Writer that forwards character chunks to (on-chunk str).

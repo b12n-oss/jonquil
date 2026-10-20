@@ -1,9 +1,9 @@
 (ns jonquil.app-bundle-test
-  (:require [clojure.java.io :as io]
+  (:require [app-bundle :as ab]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jolt.process :as p]
-            [app-bundle :as ab]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)

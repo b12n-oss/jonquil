@@ -2,7 +2,7 @@
   "The bracket check before Run (unclosed opener, stray closer, the
   REPL/Run hint boundary), Line/Col, and the close-dirty/alert prompts."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.eval :as eval]
             [jonquil.gtk.console-view :as cview]

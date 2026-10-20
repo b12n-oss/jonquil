@@ -40,7 +40,7 @@
   exit code is computed from, never a separate late FAIL that would need
   its own tally line."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
-            [gtk-async :as ga :refer [on-gtk await-until go-row]]
+            [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [gtk-selftest-nrepl.rows :as rows]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]

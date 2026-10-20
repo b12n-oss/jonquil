@@ -2,7 +2,7 @@
   "The caret-anchored popover base and its window-key routing, quick doc,
   and jump to definition."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]

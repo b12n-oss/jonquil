@@ -3,13 +3,13 @@
   preedit, and its routing through the window's own key dispatch."
   (:require [clojure.core.async :refer [<! timeout]]
             [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.gtk.find-bar :as find-bar]
-            [jolt.ffi :as ffi]))
+            [jonquil.gtk.find-bar :as find-bar]))
 
 ;; --- P3.T4: find and replace bar ------------------------------------------
 ;; Each row is self-contained (its own editor/set-text!, open! and query)

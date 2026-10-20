@@ -6,7 +6,7 @@
   exactly one check."
   (:require [clojure.core.async :refer [<! timeout]]
             [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.eval :as eval]
             [jonquil.gtk.console-view :as cview]

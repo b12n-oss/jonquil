@@ -23,9 +23,9 @@
   connection lifecycle itself lives in jonquil.nrepl.connection."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.cljs :as cljs]
-            [jonquil.clj :as clj]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.nrepl.client :as client]

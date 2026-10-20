@@ -3,7 +3,7 @@
   toggling, zoom, and the throw-containment + close-chord rows that
   exercise handle-window-key! directly."
   (:require [clojure.string :as str]
-            [gtk-async :refer [on-gtk await-until go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]

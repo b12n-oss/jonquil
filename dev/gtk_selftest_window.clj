@@ -20,16 +20,16 @@
   only row-fns (the ordered list every row runs in -- the last row really
   closes the window, so order matters), the driver, and -main."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
-            [gtk-async :as ga :refer [on-gtk await-until go-row]]
+            [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.app-open :as app-open]
             [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
             [gtk-selftest-window.console-layout :as console-layout]
             [gtk-selftest-window.contained :as contained]
             [gtk-selftest-window.dialects :as dialects]
-            [gtk-selftest-window.files :as files]
             [gtk-selftest-window.file-tree :as file-tree]
             [gtk-selftest-window.file-tree-pane :as file-tree-pane]
+            [gtk-selftest-window.files :as files]
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]

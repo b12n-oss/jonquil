@@ -26,7 +26,8 @@
 
   Every message it receives is kept, so a test can assert which ops a
   client sent (never interrupt, never close)."
-  (:require [fake-nrepl-core :as core :refer [head live? matches? read-forms wait!]]))
+  (:require [fake-nrepl-core :as core :refer [head live? matches? read-forms
+                                              wait!]]))
 
 (def fork-ops
   ;; The describe reply's ops, measured.

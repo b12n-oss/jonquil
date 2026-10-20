@@ -29,7 +29,8 @@
   relies on: :docs {\"greet\" [\"([w])\" \"Says hi.\"]} and
   :slow {\"(spin)\" 60000}. It writes the port to <dir>/.nrepl-port and
   blocks forever."
-  (:require [fake-nrepl-core :as core :refer [head live? matches? read-forms wait!]]))
+  (:require [fake-nrepl-core :as core :refer [head live? matches? read-forms
+                                              wait!]]))
 
 (def jank-ops ["clone" "completions" "describe" "eval" "load-file" "lookup"])
 

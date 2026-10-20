@@ -3,7 +3,7 @@
   Evaluator protocol, and .jonquil.edn warnings when a file opens."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [gtk-async :refer [await-until on-gtk go-row]]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]

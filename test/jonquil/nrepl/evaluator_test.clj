@@ -9,11 +9,11 @@
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.inspect :as inspect]
-            [jonquil.nrepl.middleware-files :as middleware-files]
             [jonquil.nrepl.child :as child]
             [jonquil.nrepl.child-test :refer [temp-project]]
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.evaluator :as nrepl]
+            [jonquil.nrepl.middleware-files :as middleware-files]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)

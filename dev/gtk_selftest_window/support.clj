@@ -6,7 +6,7 @@
 
   Each row is (fn [ui] ch): a go-row (dev/gtk_async.clj) that records
   exactly one check and returns a channel."
-  (:require [gtk-async :refer [on-gtk await-until]]
+  (:require [gtk-async :refer [await-until on-gtk]]
             [jolt.ffi :as ffi]
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]

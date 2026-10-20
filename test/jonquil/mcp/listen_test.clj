@@ -10,7 +10,11 @@
             [temp-dirs])
   (:import (java.io IOException)
            (java.lang ProcessHandle)
-           (java.net ConnectException InetAddress ServerSocket Socket)))
+           (java.net
+            ConnectException
+            InetAddress
+            ServerSocket
+            Socket)))
 
 (use-fixtures :once temp-dirs/fixture)
 
