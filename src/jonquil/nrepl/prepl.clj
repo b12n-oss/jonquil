@@ -8,27 +8,38 @@
   one line has arrived) and handed to on-reply in arrival order. Lines
   jonquil.cljs-node/parse-reply rejects are skipped. {:tag :closed} is
   delivered exactly once, at EOF, on a read error, or from close!, whichever
-  comes first. A reader blocked on a socket closed from another thread may
+  comes first. Contract: on-reply is never called concurrently, and
+  {:tag :closed} is always its last call (nothing is delivered after it).
+  A reader blocked on a socket closed from another thread may
   never see EOF on Jolt, so close! delivers it itself."
   (:require [jolt.socket]
             [jonquil.cljs-node :as cljs-node]))
 
 (def connect-timeout-ms 2000)
 
-(defn- notify-closed!
-  "Delivers {:tag :closed} once per connection, whoever gets here first."
-  [{:keys [closed-sent? on-reply]}]
-  (when (compare-and-set! closed-sent? false true)
-    (try (on-reply {:tag :closed}) (catch Throwable _ nil))))
+(defn- deliver!
+  "Calls on-reply with m under the delivery lock, unless :closed has gone
+  out already. A throw from on-reply is swallowed."
+  [{:keys [deliver-lock closed-sent? on-reply]} m]
+  (locking deliver-lock
+    (when-not @closed-sent?
+      (try (on-reply m) (catch Throwable _ nil)))))
 
-(defn- read-loop [{:keys [^java.io.BufferedReader in on-reply open?] :as conn}]
+(defn- notify-closed!
+  "Delivers {:tag :closed} once per connection, whoever gets here first,
+  under the same lock as every other delivery so it is the last call."
+  [{:keys [deliver-lock closed-sent? on-reply]}]
+  (locking deliver-lock
+    (when (compare-and-set! closed-sent? false true)
+      (try (on-reply {:tag :closed}) (catch Throwable _ nil)))))
+
+(defn- read-loop [{:keys [^java.io.BufferedReader in open?] :as conn}]
   (try
     (loop []
       (when-let [line (.readLine in)]
         (when-let [m (cljs-node/parse-reply line)]
-          ;; A throwing on-reply loses only that reply, never the reader.
-          (try (on-reply m) (catch Throwable _ nil)))
-        (recur)))
+          (deliver! conn m))
+        (when @open? (recur))))
     (catch Throwable _ nil))
   (reset! open? false)
   (notify-closed! conn))
@@ -37,7 +48,8 @@
   "Connects to host:port and starts the reader thread. Throws
   java.io.IOException when nothing listens (or the connect takes longer than
   2000 ms); the socket is closed before the throw. on-reply is called on the
-  reader thread."
+  reader thread (or from close!), never concurrently, and {:tag :closed} is
+  its last call."
   [host port on-reply]
   (let [sock (java.net.Socket.)]
     (try
@@ -50,6 +62,7 @@
                      (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
                 :out (java.io.OutputStreamWriter. (.getOutputStream sock) "UTF-8")
                 :lock (Object.)
+                :deliver-lock (Object.)
                 :on-reply on-reply
                 :open? (atom true)
                 :closed-sent? (atom false)}
