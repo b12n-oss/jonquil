@@ -1354,7 +1354,9 @@ Completion offers the buffer's names and Clojure core's. Quick
 documentation comes from `cljs.repl/doc` while the process is idle. F12
 jumps to a definition in the same buffer only. There is no stdin and no
 inspector. Output the program prints after an evaluation has answered (a
-timer that fires later, say) still reaches the console, above the prompt.
+timer that fires later, say) still reaches the console, above the prompt,
+except while quick docs are being fetched, when it can end up in the doc
+popup instead.
 
 ### ClojureScript (experimental): attaching to a shadow-cljs build
 
