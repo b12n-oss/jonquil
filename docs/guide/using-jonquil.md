@@ -1390,8 +1390,9 @@ picks another and says so. A loop that never ends freezes the tab until you
 reload it, and an evaluation sent after you closed the tab waits until you
 press Stop.
 
-`js/console.log`, and any output printed after an evaluation finished, go to
-the browser's own console and not to Jonquil's. As with node, there is no
+`println` output reaches Jonquil's console, including output printed after an
+evaluation finished (a timer that fires later), as on node. `js/console.log`
+stays in the browser's own console. As with node, there is no
 stdin and no inspector, F12 stays in the buffer, and completion and quick
 docs work the same way.
 
@@ -2086,8 +2087,8 @@ than being surprises you'd otherwise have to rediscover:
   gone and you reload the tab at the same URL.
 - A loop that never ends freezes the tab until you reload it, and an
   evaluation sent after the tab closed waits until Stop.
-- `js/console.log` and output printed after an evaluation finished go to
-  the browser's own console.
+- `println` output reaches Jonquil's console, even after an evaluation
+  finished, but `js/console.log` stays in the browser's own console.
 - No stdin and no inspector; F12 stays in the buffer.
 - Completion comes from the buffer and Clojure core names, and quick docs
   from `cljs.repl/doc` while the process is idle.

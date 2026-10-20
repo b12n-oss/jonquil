@@ -300,10 +300,35 @@
             (is (= "3" (:printed result)) (pr-str result)))
           (let [{:keys [result out]} (run e "(println \"from-browser\")")]
             (is (= :ok (:status result)) (pr-str result))
-            (is (some #(= [:out "from-browser\n"] %) out) (pr-str out)))
+            ;; The browser REPL sends println's text and its newline as two
+            ;; :out chunks; the console appends them, so compare the text.
+            (is (str/includes? (apply str (map second (filter #(= :out (first %)) out)))
+                               "from-browser\n")
+                (pr-str out)))
           (let [{:keys [result]} (run e "(throw (js/Error. \"boom\"))")]
             (is (= :error (:status result)) (pr-str result)))
           (let [{:keys [result]} (run e "(+ 2 3)")]
             (is (= "5" (:printed result)) (pr-str result)))
+          (let [out (atom []) done (promise)]
+            (ev/eval! e "(js/setTimeout (fn [] (println \"late\")) 300)"
+                      {:run? false
+                       :on-output (fn [k s] (swap! out conj [k s]))
+                       :on-complete (fn [r] (deliver done r))})
+            ;; Output after the answer reaches the console, as on node.
+            (is (= :ok (:status (deref done 60000 :timeout))))
+            (let [late? #(str/includes? (apply str (map second @out)) "late\n")
+                  deadline (+ (System/currentTimeMillis) 5000)]
+              (loop [] (when (and (not (late?)) (< (System/currentTimeMillis) deadline))
+                         (Thread/sleep 50) (recur)))
+              (is (late?) (pr-str @out))))
+          ;; js/console.log stays in the browser's own console.
+          (let [out (atom []) done (promise)]
+            (ev/eval! e "(js/console.log \"via-console\")"
+                      {:run? false
+                       :on-output (fn [k s] (swap! out conj [k s]))
+                       :on-complete (fn [r] (deliver done r))})
+            (is (= :ok (:status (deref done 60000 :timeout))))
+            (Thread/sleep 1000)
+            (is (not (str/includes? (apply str (map second @out)) "via-console")) (pr-str @out)))
           (finally (ev/stop! e))))
       (println "skip: set JONQUIL_BROWSER_LIVE=1 to run the real-browser test (it opens a browser tab)"))))
