@@ -58,9 +58,10 @@
 
 (defn- runtime [ev] (:runtime @(:state ev)))
 
-(defn- live? [ev]
-  (let [{:keys [child conn]} (runtime ev)]
-    (and (child/alive? child) (client/open? conn))))
+(defn- live-runtime? [{:keys [child conn]}]
+  (and (child/alive? child) (client/open? conn)))
+
+(defn- live? [ev] (live-runtime? (runtime ev)))
 
 (defn- teardown!
   "The actual work, run only by whoever is holding start-lock: kills the
@@ -263,7 +264,11 @@
                 (shutdown-runtime! ev))
               nil)
             (catch Throwable e
-              (str "Couldn't start Jolt over nREPL: " (ex-message e))))))
+              ;; child/start! keeps the log of a start that never ran, and
+              ;; names it in ex-data; say where it is.
+              (str "Couldn't start Jolt over nREPL: " (ex-message e)
+                   (when-let [log (:log (ex-data e))]
+                     (when (.exists (java.io.File. ^String log)) (str "\nThe child's log: " log))))))))
     (finally (.unlock start-lock))))
 
 (defn- finish!
@@ -532,21 +537,25 @@
           (docs/symbol-doc 'user sym text pos))
       (catch Throwable _ nil)))
   (limitations [this]
+    ;; One read of the runtime, so a restart between checks can't mix two
+    ;; children's ops into one list.
     (let [rt (runtime this)]
-      (cond-> []
-        (and (live? this) (not (contains? (:ops rt) "jonquil-info")))
-        (conj "Jump to definition stays in this buffer: lookup reports no file or line.")
-        (and (live? this) (not (contains? (:ops rt) "stdin")))
-        (conj "No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead.")
-        (and (live? this) (not (contains? (:ops rt) "inspect-start")))
-        (conj (str "No inspector" (when-let [why (:jonquil-error rt)] (str ": " why))
-                   ". {:runtime :in-process} has one."))
-        (and (live? this) (:fetch-error rt))
-        (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)
-                   ") couldn't be fetched, so this is a plain nREPL server; a new window tries again. Jolt said: "
-                   (:fetch-error rt)))
-        (and (live? this) (not (contains? (:ops rt) "interrupt")))
-        (conj "Stop restarts the runtime: this server has no interrupt op."))))
+      (if-not (live-runtime? rt)
+        []
+        (cond-> []
+          (not (contains? (:ops rt) "jonquil-info"))
+          (conj "Jump to definition stays in this buffer: lookup reports no file or line.")
+          (not (contains? (:ops rt) "stdin"))
+          (conj "No stdin: read-line returns nil and read fails with EOF. Put {:runtime :in-process} in .jonquil.edn to run this project in process instead.")
+          (not (contains? (:ops rt) "inspect-start"))
+          (conj (str "No inspector" (when-let [why (:jonquil-error rt)] (str ": " why))
+                     ". {:runtime :in-process} has one."))
+          (:fetch-error rt)
+          (conj (str "Jolt's nREPL middleware (jolt-lang/nrepl " (:git/tag child/nrepl-git-coord)
+                     ") couldn't be fetched, so this is a plain nREPL server; a new window tries again. Jolt said: "
+                     (:fetch-error rt)))
+          (not (contains? (:ops rt) "interrupt"))
+          (conj "Stop restarts the runtime: this server has no interrupt op.")))))
   ev/ServerHelp
   (offline-candidates [_ prefix text pos extra-context]
     (try (docs/candidates 'user prefix text pos extra-context)
