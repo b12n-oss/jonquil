@@ -152,22 +152,22 @@
   own box (gtk_box_append)."
   ([width max-height] (make-doc-scroll width max-height {}))
   ([width max-height {:keys [fit-width?]}]
-  (let [label (g/gtk-label-new "")
-        scroll (g/gtk-scrolled-window-new)]
-    (g/gtk-widget-add-css-class label "jonquil-doc")
-    (g/gtk-label-set-xalign label 0.0)
-    (g/gtk-label-set-wrap label 1)
-    (g/gtk-label-set-wrap-mode label g/PANGO-WRAP-WORD-CHAR)
-    (g/gtk-widget-set-valign label g/ALIGN-START)
-    (if fit-width?
-      (do (g/gtk-label-set-max-width-chars label fit-width?)
-          (g/gtk-scrolled-window-set-propagate-natural-width scroll 1))
-      (g/gtk-widget-set-size-request scroll width -1))
-    (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
-    (g/gtk-scrolled-window-set-propagate-natural-height scroll 1)
-    (g/gtk-scrolled-window-set-max-content-height scroll max-height)
-    (g/gtk-scrolled-window-set-child scroll label)
-    {:label label :scroll scroll})))
+   (let [label (g/gtk-label-new "")
+         scroll (g/gtk-scrolled-window-new)]
+     (g/gtk-widget-add-css-class label "jonquil-doc")
+     (g/gtk-label-set-xalign label 0.0)
+     (g/gtk-label-set-wrap label 1)
+     (g/gtk-label-set-wrap-mode label g/PANGO-WRAP-WORD-CHAR)
+     (g/gtk-widget-set-valign label g/ALIGN-START)
+     (if fit-width?
+       (do (g/gtk-label-set-max-width-chars label fit-width?)
+           (g/gtk-scrolled-window-set-propagate-natural-width scroll 1))
+       (g/gtk-widget-set-size-request scroll width -1))
+     (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
+     (g/gtk-scrolled-window-set-propagate-natural-height scroll 1)
+     (g/gtk-scrolled-window-set-max-content-height scroll max-height)
+     (g/gtk-scrolled-window-set-child scroll label)
+     {:label label :scroll scroll})))
 
 (defn show-at-caret!
   "Points pp's popover at view's caret and pops it up. probe 2:

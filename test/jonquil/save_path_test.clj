@@ -93,7 +93,7 @@
       (is (.exists tmp))
       (is (= "" (slurp tmp)))
       (is (= (set (map str (java.nio.file.Files/getPosixFilePermissions (.toPath tmp)
-                                                                         (into-array java.nio.file.LinkOption []))))
+                                                                        (into-array java.nio.file.LinkOption []))))
              #{"OWNER_READ" "OWNER_WRITE"}))))
   (testing "a missing target creates nothing"
     (let [d (temp-dir)

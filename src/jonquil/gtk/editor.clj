@@ -457,44 +457,44 @@
   chunked apply would otherwise show a frame with every colour removed."
   ([ed] (paint-async! ed {:defer-first? true}))
   ([ed {:keys [defer-first?]}]
-  (let [{:keys [buf]} ed
-        text (g/buffer-text buf)
-        caret (g/cursor-offset buf)
-        profile @(:profile ed)
-        edit-gen @(:edit-gen ed)
-        gen (:gen (swap! (:paint ed) (fn [p]
-                                       (let [n (inc (:gen p))]
-                                         {:gen n :done? false :full-gen n
-                                          :edit-gen edit-gen :profile profile}))))
-        len (count text)
-        current? (fn [] (and (= gen (:gen @(:paint ed)))
-                             (= edit-gen @(:edit-gen ed))
-                             (not @(:destroyed? ed))))
+   (let [{:keys [buf]} ed
+         text (g/buffer-text buf)
+         caret (g/cursor-offset buf)
+         profile @(:profile ed)
+         edit-gen @(:edit-gen ed)
+         gen (:gen (swap! (:paint ed) (fn [p]
+                                        (let [n (inc (:gen p))]
+                                          {:gen n :done? false :full-gen n
+                                           :edit-gen edit-gen :profile profile}))))
+         len (count text)
+         current? (fn [] (and (= gen (:gen @(:paint ed)))
+                              (= edit-gen @(:edit-gen ed))
+                              (not @(:destroyed? ed))))
         ;; An edit, a newer paint or a destroy drops the rest. The baseline
         ;; is already nil, so re-arming the tick makes it repaint.
-        superseded! (fn [] (reset! (:dirty-at ed) (System/currentTimeMillis)))
-        report (fn [e] (on-gui! (fn [] (report-paint-error! ed e))))]
-    (forget-painted! ed)
-    (future
-      (try
-        (let [plan (paint/paint-plan profile text)
-              spans (nearest-first caret plan)]
-          (on-gui! (fn []
-                     (try
-                       (if-not (current?)
-                         (superseded!)
-                         (paint-chunked! ed [0 len] spans
-                                         {:current? current?
-                                          :done! (fn []
-                                                   (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))
-                                                   (when (= edit-gen @(:edit-gen ed))
-                                                     (set-painted! ed text plan)))
-                                          :superseded! superseded!
-                                          :fail! report
-                                          :defer-first? defer-first?}))
-                       (catch :default e (report e))))))
-        (catch :default e (report e))))
-    nil)))
+         superseded! (fn [] (reset! (:dirty-at ed) (System/currentTimeMillis)))
+         report (fn [e] (on-gui! (fn [] (report-paint-error! ed e))))]
+     (forget-painted! ed)
+     (future
+       (try
+         (let [plan (paint/paint-plan profile text)
+               spans (nearest-first caret plan)]
+           (on-gui! (fn []
+                      (try
+                        (if-not (current?)
+                          (superseded!)
+                          (paint-chunked! ed [0 len] spans
+                                          {:current? current?
+                                           :done! (fn []
+                                                    (swap! (:paint ed) (fn [p] (if (= gen (:gen p)) (assoc p :done? true) p)))
+                                                    (when (= edit-gen @(:edit-gen ed))
+                                                      (set-painted! ed text plan)))
+                                           :superseded! superseded!
+                                           :fail! report
+                                           :defer-first? defer-first?}))
+                        (catch :default e (report e))))))
+         (catch :default e (report e))))
+     nil)))
 
 (defn- full-paint-pending?
   "True while a paint-async! is in flight that will record the baseline
