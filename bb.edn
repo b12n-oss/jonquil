@@ -335,7 +335,7 @@
                r10 (shell {:continue true :extra-env {"JONQUIL_CLOJURE" (str (fs/absolutize "dev/fake-cljs-clojure"))
                                                       "FAKE_CLJS_SLOW_MS" "30000"
                                                       "JONQUIL_OPEN_URL" (str (fs/absolutize "dev/fake-open-url"))
-                                                      "FAKE_OPEN_URL_LOG" (str (fs/path (System/getProperty "java.io.tmpdir") "jonquil-selftest-open-url.log"))}}
+                                                      "FAKE_OPEN_URL_LOG" (str (fs/path (System/getProperty "java.io.tmpdir") (str "jonquil-selftest-open-url-" (System/currentTimeMillis) ".log")))}}
                           "jolt" "-M:selftest-cljs-node")
                ok1 (zero? (:exit r1))
                ok2 (zero? (:exit r2))
@@ -619,7 +619,7 @@
                          "jonquil-attach-test-" "jonquil-jvm-test-" "jonquil-selftest-"
                          "jonquil-selftest-window-settings-" "jonquil-selftest-nrepl-"
                          "jonquil-selftest-loose-" "jonquil-selftest-cljd-" "jonquil-selftest-clj-"
-                         "jonquil-selftest-clj-outside-" "jonquil-selftest-jank-" "jonquil-selftest-cljs-node-" "jonquil-cljs-"
+                         "jonquil-selftest-clj-outside-" "jonquil-selftest-jank-" "jonquil-selftest-cljs-node-" "jonquil-selftest-open-url-" "jonquil-cljs-"
                          "jonquil-selftest-dialect-" "jonquil-selftest-atomic-"
                          "jonquil-selftest-bad-settings-" "jonquil-selftest-badutf8-"
                          "jonquil-selftest-capslock-" "jonquil-selftest-close-fail-"

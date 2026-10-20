@@ -140,12 +140,17 @@
             opened (open-url-log-lines)
             _ (on-gtk ((:stop!* ui)))
             _ (on-gtk ((:open-path! ui) (:file @fixture*)))
-            back? (await-until 5000 20 #(= NOT-RUNNING (label ui)))]
+            back? (await-until 5000 20 #(= NOT-RUNNING (label ui)))
+            ;; Read again now: a second open after the first read would show here.
+            opened-end (open-url-log-lines)
+            _ (.delete (io/file (System/getenv "FAKE_OPEN_URL_LOG")))]
         (on-gtk (support/check :cljs-browser-selected-and-runs
                                (and browser? ok? running? back?
                                     (= 1 (count opened))
+                                    (= opened opened-end)
                                     (boolean (re-matches #"http://127\.0\.0\.1:\d+" (str (first opened)))))
                                {:browser browser? :ok ok? :running running? :back back? :opened opened
+                                :opened-end opened-end
                                 :text (support/since ui mark)}))))))
 
 (defn row-cljs-node-run-prints-value
