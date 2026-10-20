@@ -33,5 +33,6 @@
   (is (= (ns-names-under "test")
          (into (set test-runner/test-namespaces)
                (concat test-runner/live-namespaces test-runner/live-clj-namespaces
+                       test-runner/live-cljs-node-namespaces
                        test-runner/live-jank-namespaces
                        test-runner/live-bb-namespaces test-runner/live-basilisp-namespaces)))))
