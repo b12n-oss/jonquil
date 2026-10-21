@@ -61,8 +61,11 @@
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
+            [jonquil.login-path :as login-path]
             [jonquil.main :as main]
+            [jonquil.nrepl.cljs-child :as cljs-child]
             [jonquil.nrepl.jank-child :as jank-child]
+            [jonquil.tool-path :as tool-path]
             [temp-dirs]))
 
 (def ^:private images-dir "docs/images")
@@ -791,6 +794,63 @@
       (on-gtk (check! :jank (and run-ok? ok1 (zero? exit))
                       {:console (console-text ui) :screenshot-exit exit :screenshot-err err})))))
 
+;; --- ClojureScript scenes (node and the browser) ---------------------------
+;; Run against REAL ClojureScript: the clojure CLI (cljs-child/find-clojure)
+;; and, on node, node on the login PATH. -main writes a temp project with a
+;; deps.edn and src/demo/core.cljs (no shadow-cljs.edn, so Jonquil launches
+;; ClojureScript), plus .jonquil.edn {:cljs {:target :browser}} for the
+;; browser scene, which opens a REAL tab in the default browser. A cold
+;; start compiles ClojureScript first, so the waits are long.
+
+(def ^:private cljs-deps-text
+  "{:paths [\"src\"]\n :deps {org.clojure/clojurescript {:mvn/version \"1.12.42\"}}}\n")
+
+(def ^:private cljs-demo-text
+  "(ns demo.core)
+
+(defn greet
+  \"Says hello to someone.\"
+  [who]
+  (str \"Hello, \" who \"!\"))
+
+(println (greet \"Jonquil\"))
+")
+
+(def ^:private cljs-scenes {:cljs-node "{}\n" :cljs-browser "{:cljs {:target :browser}}\n"})
+
+(defn- cljs-run-demo!
+  "Like clj-run-demo!, with room for a cold ClojureScript start (and, in
+  the browser, the page connecting)."
+  [ui]
+  (go
+    (let [mark (on-gtk (let [m (out-end-offset ui)]
+                         (editor/set-text! (:editor ui) cljs-demo-text)
+                         ((:run!* ui))
+                         m))]
+      (await-until 150000 50 #(and (clj-idle? ui) (str/includes? (since ui mark) "Hello, Jonquil!"))))))
+
+(defn- scene-cljs
+  "Run starts ClojureScript and loads the buffer (a printed line), then
+  two REPL entries: one in the buffer's namespace, one asking the runtime
+  where it is."
+  [id entry expect ui]
+  (go-row id check!
+    (let [run-ok? (<! (cljs-run-demo! ui))
+          m1 (on-gtk (clj-enter! ui "(greet \"again\")"))
+          ok1 (await-until 20000 20 #(and (clj-idle? ui) (str/includes? (since ui m1) "=> \"Hello, again!\"")))
+          m2 (on-gtk (clj-enter! ui entry))
+          ok2 (await-until 20000 20 #(and (clj-idle? ui) (re-find expect (since ui m2))))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path id "png") (own-pid))]
+      (on-gtk (check! id (and run-ok? ok1 ok2 (zero? exit))
+                      {:console (console-text ui) :screenshot-exit exit :screenshot-err err})))))
+
+(defn- scene-cljs-node [ui]
+  (scene-cljs :cljs-node "(.-version js/process)" #"=> \"v\d+" ui))
+
+(defn- scene-cljs-browser [ui]
+  (scene-cljs :cljs-browser "(.-host js/location)" #"=> \"127\.0\.0\.1:\d+\"" ui))
+
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
@@ -822,7 +882,9 @@
    [:clj-source scene-clj-source]
    [:tabs scene-tabs]
    [:file-tree scene-file-tree]
-   [:jank scene-jank]])
+   [:jank scene-jank]
+   [:cljs-node scene-cljs-node]
+   [:cljs-browser scene-cljs-browser]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
@@ -830,6 +892,10 @@
   ;; scene-stop's deadlines add up to 16800 ms on its failing path, and its
   ;; GIF records for 5 s alongside them; run-scene's idle wait adds 2000 ms.
   60000)
+
+(def ^:private CLJS-SCENE-MS
+  ;; A cold ClojureScript start plus the page's 60 s connect bound.
+  200000)
 
 ;; I1: a plain atom flip from the window's own "destroy" signal (-main,
 ;; below, connects it), the same pattern dev/gtk_selftest_window.clj's own
@@ -866,6 +932,15 @@
       (do (log "jank: no jank binary found (set JONQUIL_JANK); nothing captured")
           (System/exit 0))
 
+      (and scene-fn (cljs-scenes scene-id) (nil? (cljs-child/find-clojure)))
+      (do (log (name scene-id) ": no clojure CLI found (set JONQUIL_CLOJURE); nothing captured")
+          (System/exit 0))
+
+      (and (= :cljs-node scene-id)
+           (nil? (tool-path/resolve-program "node" (login-path/path) login-path/executable-file?)))
+      (do (log "cljs-node: no node on the login PATH; nothing captured")
+          (System/exit 0))
+
       (not scene-fn)
       (do (log "usage: jolt -M:shots <scene-id>, one of:"
                (str/join ", " (map (fn [[id _]] (name id)) scenes)))
@@ -878,13 +953,21 @@
                           (io/make-parents f)
                           (spit f jank-demo-text)
                           (.getPath f)))
+            cljs-file (when-let [edn (cljs-scenes scene-id)]
+                        (let [dir (temp-dirs/temp-dir! "jonquil-demoshots-cljs-")
+                              f (io/file dir "src/demo/core.cljs")]
+                          (io/make-parents f)
+                          (spit (io/file dir "deps.edn") cljs-deps-text)
+                          (spit (io/file dir ".jonquil.edn") edn)
+                          (spit f cljs-demo-text)
+                          (.getCanonicalPath f)))
             srv (when (clj-scenes scene-id)
                   (let [srv (clj-server/start!)]
                     (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
                     srv))]
         (try
           (main/start!
-           {:file (or jank-file (when srv (str (:dir srv) "/src/demo/core.clj")))
+           {:file (or jank-file cljs-file (when srv (str (:dir srv) "/src/demo/core.clj")))
             :settings-path (fresh-settings-path)
             :on-ready (fn [ui]
                         (g/g-signal-connect-data (:window ui) "destroy"
@@ -892,7 +975,8 @@
                                                               [:pointer :pointer] :void)
                                                  ffi/null ffi/null g/CONNECT-DEFAULT)
                         (go (<! (timeout 300))
-                            (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))] PER-SCENE-MS check!))
+                            (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))]
+                             (if (cljs-scenes scene-id) CLJS-SCENE-MS PER-SCENE-MS) check!))
                             (<! (timeout 50))
                           ;; I1: scene-close-prompt (or any scene) could leave
                           ;; the buffer dirty with an alert pending if its own
