@@ -371,7 +371,7 @@
                           "find" "run-selection" "close-prompt"
                           "theme-light" "theme-dark" "theme-solarized" "theme-navy"
                           "completion" "quick-doc" "rename" "inspector"
-                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs" "file-tree" "jank" "cljs-node" "cljs-browser"]
+                          "clj-attach" "clj-quick-doc" "clj-full-doc" "clj-inspector" "clj-source" "tabs" "file-tree" "jank" "cljs-node" "cljs-browser" "nrepl-bb"]
                results (mapv (fn [id]
                                (let [;; The console prints the clojure path; a bare name
                                      ;; keeps a home directory out of the image.

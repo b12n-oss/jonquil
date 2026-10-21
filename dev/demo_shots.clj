@@ -48,6 +48,7 @@
             [clojure.string :as str]
             [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [jolt.ffi :as ffi]
+            [jolt.process :as p]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
@@ -851,6 +852,66 @@
 (defn- scene-cljs-browser [ui]
   (scene-cljs :cljs-browser "(.-host js/location)" #"=> \"127\.0\.0\.1:\d+\"" ui))
 
+;; --- nREPL dialect scene (babashka) -----------------------------------------
+;; Runs against a REAL `bb nrepl-server`, started by -main on a free port in a
+;; temp project whose .jonquil.edn names that port (bb writes no port file),
+;; and stopped once the window closes, the same way bb test:bb does it.
+
+(def ^:private nrepl-bb-demo-text
+  "(ns demo.core)
+
+(defn greet
+  \"Says hello to someone.\"
+  [who]
+  (str \"Hello, \" who \"!\"))
+
+(println (greet \"Jonquil\"))
+")
+
+(defn- scene-nrepl-bb
+  "Run connects to babashka and loads the buffer (a printed line), then two
+  REPL entries: one in the buffer's namespace, one asking babashka its
+  version."
+  [ui]
+  (go-row :nrepl-bb check!
+    (let [run-ok? (<! (clj-run-demo! ui nrepl-bb-demo-text))
+          m1 (on-gtk (clj-enter! ui "(greet \"again\")"))
+          ok1 (await-until 10000 20 #(and (clj-idle? ui) (str/includes? (since ui m1) "=> \"Hello, again!\"")))
+          m2 (on-gtk (clj-enter! ui "(System/getProperty \"babashka.version\")"))
+          ok2 (await-until 10000 20 #(and (clj-idle? ui) (re-find #"=> \"\d+\.\d+" (since ui m2))))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :nrepl-bb "png") (own-pid))]
+      (on-gtk (check! :nrepl-bb (and run-ok? ok1 ok2 (zero? exit))
+                      {:console (console-text ui) :screenshot-exit exit :screenshot-err err})))))
+
+(defn- start-bb-nrepl!
+  "Starts bb nrepl-server on a free loopback port in a fresh temp project
+  and waits until it listens. {:file core.clj :proc process}."
+  []
+  (let [dir (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-demoshots-bb-")))
+        port (with-open [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+               (.getLocalPort s))
+        f (io/file dir "src/demo/core.clj")]
+    (io/make-parents f)
+    (spit (io/file dir "bb.edn") "{:paths [\"src\"]}\n")
+    (spit (io/file dir ".jonquil.edn") (str "{:dialect :nrepl :nrepl {:port " port "}}\n"))
+    (spit f nrepl-bb-demo-text)
+    (let [proc (p/process {:dir dir :out (io/file dir "bb.log") :err :out}
+                          (tool-path/resolve-program "bb" (login-path/path) login-path/executable-file?)
+                          "nrepl-server" (str port))]
+      (loop [n 0]
+        (when (and (< n 100)
+                   (not (try (with-open [_ (java.net.Socket. "127.0.0.1" (int port))] true)
+                             (catch Exception _ false))))
+          (Thread/sleep 50) (recur (inc n))))
+      {:file (.getPath f) :proc proc})))
+
+(defn- stop-bb-nrepl! [{:keys [proc]}]
+  (when proc
+    (p/destroy proc)
+    (when (= ::alive (deref proc 2000 ::alive))
+      (.destroyForcibly ^java.lang.Process (:proc proc)))))
+
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
@@ -884,7 +945,8 @@
    [:file-tree scene-file-tree]
    [:jank scene-jank]
    [:cljs-node scene-cljs-node]
-   [:cljs-browser scene-cljs-browser]])
+   [:cljs-browser scene-cljs-browser]
+   [:nrepl-bb scene-nrepl-bb]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
@@ -941,6 +1003,11 @@
       (do (log "cljs-node: no node on the login PATH; nothing captured")
           (System/exit 0))
 
+      (and (= :nrepl-bb scene-id)
+           (nil? (tool-path/resolve-program "bb" (login-path/path) login-path/executable-file?)))
+      (do (log "nrepl-bb: no bb on the login PATH; nothing captured")
+          (System/exit 0))
+
       (not scene-fn)
       (do (log "usage: jolt -M:shots <scene-id>, one of:"
                (str/join ", " (map (fn [[id _]] (name id)) scenes)))
@@ -961,13 +1028,14 @@
                           (spit (io/file dir ".jonquil.edn") edn)
                           (spit f cljs-demo-text)
                           (.getCanonicalPath f)))
+            bb-srv (when (= :nrepl-bb scene-id) (start-bb-nrepl!))
             srv (when (clj-scenes scene-id)
                   (let [srv (clj-server/start!)]
                     (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
                     srv))]
         (try
           (main/start!
-           {:file (or jank-file cljs-file (when srv (str (:dir srv) "/src/demo/core.clj")))
+           {:file (or jank-file cljs-file (:file bb-srv) (when srv (str (:dir srv) "/src/demo/core.clj")))
             :settings-path (fresh-settings-path)
             :on-ready (fn [ui]
                         (g/g-signal-connect-data (:window ui) "destroy"
@@ -993,7 +1061,9 @@
                                (check! :window-close-stuck false
                                        {:reason "window still open after the close; exiting to avoid hanging the run"})
                                (clj-server/stop! srv)
+                               (stop-bb-nrepl! bb-srv)
                                (System/exit 1)))))})
-          (finally (clj-server/stop! srv)))
+          (finally (clj-server/stop! srv)
+                   (stop-bb-nrepl! bb-srv)))
         (temp-dirs/delete-made!)
         (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))

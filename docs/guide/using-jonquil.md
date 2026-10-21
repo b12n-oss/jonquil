@@ -1530,6 +1530,8 @@ For babashka, start the server in the project and name its port, since
 bb nrepl-server 1667
 ```
 
+![An nREPL window attached to babashka after Run: the console connects to the server at 127.0.0.1, prints the program's line, then answers two REPL entries, the second one babashka's version](../images/nrepl-bb.png)
+
 <details>
 <summary><strong>What to expect from babashka</strong></summary>
 

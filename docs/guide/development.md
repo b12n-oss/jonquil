@@ -301,7 +301,7 @@ same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
 <details>
-<summary><strong>The jank, ClojureScript and JVM Clojure scenes</strong></summary>
+<summary><strong>The jank, ClojureScript, nREPL and JVM Clojure scenes</strong></summary>
 
 The `jank` scene runs against a real jank, found the way the app finds it
 (`JONQUIL_JANK`, `PATH`, the usual install folders). With none installed it
@@ -318,6 +318,12 @@ as given, so `bb docs:shots` sets it to the bare name `clojure` for these two
 with `JONQUIL_CLOJURE=clojure jolt -M:shots cljs-node`.
 `cljs-browser` writes `{:cljs {:target :browser}}` to the project's
 `.jonquil.edn` and opens a real tab in the default browser.
+
+The `nrepl-bb` scene starts a real `bb nrepl-server` (the `bb` on the login
+`PATH`) on a free loopback port in a temp project, names that port in the
+project's `.jonquil.edn` as `{:dialect :nrepl}`, and stops the server once
+the window closes, the way `bb test:bb` does. With no `bb` it prints a line
+and exits 0 without an image. Retake it with `jolt -M:shots nrepl-bb`.
 
 The five JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`,
 `clj-inspector` and `clj-source`) run against a real `clojure -M:serve`, started through
