@@ -912,6 +912,99 @@
     (when (= ::alive (deref proc 2000 ::alive))
       (.destroyForcibly ^java.lang.Process (:proc proc)))))
 
+;; --- shadow-cljs scene ----------------------------------------------------
+;; Runs against a REAL shadow-cljs watch: -main writes a temp project
+;; (shadow-cljs from Maven through the clojure CLI, one :node-script build,
+;; every shadow listener on a loopback port it picks itself), installs the
+;; npm package ws that shadow's node client needs, starts the watch, then
+;; node on the build's output, and waits until shadow says the runtime is
+;; ready. Both processes stop once the window closes.
+
+(def ^:private shadow-demo-text
+  "(ns demo.core)
+
+(defn greet
+  \"Says hello to someone.\"
+  [who]
+  (str \"Hello, \" who \"!\"))
+
+(defn main []
+  (println (greet \"Jonquil\"))
+  (js/setInterval (fn []) 60000))
+")
+
+(defn- scene-cljs-shadow
+  "Run attaches to the shadow-cljs build and loads the buffer, then two REPL
+  entries run in node: one in the buffer's namespace, one asking node its
+  version."
+  [ui]
+  (go-row :cljs-shadow check!
+    ;; A shadow-cljs Run answers "; Ran demo.core (3 forms)", not a value line.
+    (let [m0 (on-gtk (let [m (out-end-offset ui)]
+                       (editor/set-text! (:editor ui) shadow-demo-text)
+                       ((:run!* ui))
+                       m))
+          run-ok? (await-until 20000 20 #(and (clj-idle? ui) (str/includes? (since ui m0) "; Ran demo.core")))
+          m1 (on-gtk (clj-enter! ui "(greet \"again\")"))
+          ok1 (await-until 20000 20 #(and (clj-idle? ui) (str/includes? (since ui m1) "=> \"Hello, again!\"")))
+          m2 (on-gtk (clj-enter! ui "(.-version js/process)"))
+          ok2 (await-until 20000 20 #(and (clj-idle? ui) (re-find #"=> \"v\d+" (since ui m2))))
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :cljs-shadow "png") (own-pid))]
+      (on-gtk (check! :cljs-shadow (and run-ok? ok1 ok2 (zero? exit))
+                      {:console (console-text ui) :screenshot-exit exit :screenshot-err err})))))
+
+(defn- login-program [n] (tool-path/resolve-program n (login-path/path) login-path/executable-file?))
+
+(defn- wait-for [ms pred]
+  (let [deadline (+ (System/currentTimeMillis) ms)]
+    (loop [] (cond (pred) true
+                   (> (System/currentTimeMillis) deadline) false
+                   :else (do (Thread/sleep 200) (recur))))))
+
+(defn- stop-procs! [procs]
+  (doseq [proc procs :when proc]
+    (p/destroy proc)
+    (when (= ::alive (deref proc 5000 ::alive))
+      (.destroyForcibly ^java.lang.Process (:proc proc)))))
+
+(defn- start-shadow!
+  "The temp project, the shadow-cljs watch and node, ready to attach to.
+  {:file core.cljs :procs [node shadow]}; throws with the log's tail when a
+  step doesn't finish."
+  []
+  (let [dir (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-demoshots-shadow-")))
+        f (io/file dir "src/demo/core.cljs")
+        shadow-log (io/file dir "shadow.log")
+        node-log (io/file dir "node.log")
+        tail (fn [log] (let [s (try (slurp log) (catch Exception _ ""))] (subs s (max 0 (- (count s) 1500)))))
+        fail! (fn [msg data] (temp-dirs/delete-made!) (throw (ex-info msg data)))]
+    (io/make-parents f)
+    (spit (io/file dir "deps.edn") "{:paths [\"src\"]\n :deps {thheller/shadow-cljs {:mvn/version \"3.2.0\"}}}\n")
+    (spit (io/file dir "shadow-cljs.edn")
+          (str "{:deps true\n :http {:port 0 :host \"127.0.0.1\"}\n :nrepl {:host \"127.0.0.1\"}\n"
+               " :builds {:app {:target :node-script :output-to \"out/app.js\" :main demo.core/main}}}\n"))
+    (spit (io/file dir "package.json") "{\"private\": true}\n")
+    (spit f shadow-demo-text)
+    (let [npm @(p/process {:dir dir :out :string :err :out}
+                          (login-program "npm") "install" "--no-audit" "--no-fund" "--save-dev" "ws")]
+      (when-not (zero? (:exit npm))
+        (fail! "npm install ws failed" {:out (:out npm)})))
+    (let [shadow (p/process {:dir dir :out shadow-log :err :out}
+                            (or (cljs-child/find-clojure) "clojure")
+                            "-M" "-m" "shadow.cljs.devtools.cli" "watch" "app")]
+      (when-not (wait-for 180000 #(and (.exists (io/file dir ".shadow-cljs/nrepl.port"))
+                                       (str/includes? (tail shadow-log) "Build completed")))
+        (stop-procs! [shadow])
+        (fail! "shadow-cljs didn't finish its first build" {:log (tail shadow-log)}))
+      (let [node (p/process {:dir dir :out node-log :err :out}
+                            (login-program "node") "out/app.js")]
+        ;; node's client prints "shadow-cljs - #N ready!" once it connected.
+        (when-not (wait-for 30000 #(str/includes? (tail node-log) "ready!"))
+          (stop-procs! [node shadow])
+          (fail! "the node runtime didn't connect to shadow-cljs" {:node (tail node-log) :shadow (tail shadow-log)}))
+        {:file (.getPath f) :procs [node shadow]}))))
+
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
@@ -946,7 +1039,8 @@
    [:jank scene-jank]
    [:cljs-node scene-cljs-node]
    [:cljs-browser scene-cljs-browser]
-   [:nrepl-bb scene-nrepl-bb]])
+   [:nrepl-bb scene-nrepl-bb]
+   [:cljs-shadow scene-cljs-shadow]])
 
 ;; --- driver: exactly one scene per process --------------------------------
 
@@ -1008,6 +1102,11 @@
       (do (log "nrepl-bb: no bb on the login PATH; nothing captured")
           (System/exit 0))
 
+      (and (= :cljs-shadow scene-id)
+           (or (nil? (cljs-child/find-clojure)) (some nil? (map login-program ["node" "npm"]))))
+      (do (log "cljs-shadow: needs the clojure CLI, node and npm; nothing captured")
+          (System/exit 0))
+
       (not scene-fn)
       (do (log "usage: jolt -M:shots <scene-id>, one of:"
                (str/join ", " (map (fn [[id _]] (name id)) scenes)))
@@ -1029,13 +1128,14 @@
                           (spit f cljs-demo-text)
                           (.getCanonicalPath f)))
             bb-srv (when (= :nrepl-bb scene-id) (start-bb-nrepl!))
+            shadow (when (= :cljs-shadow scene-id) (start-shadow!))
             srv (when (clj-scenes scene-id)
                   (let [srv (clj-server/start!)]
                     (spit (io/file (:dir srv) ".jonquil.edn") "{:dialect :clj}\n")
                     srv))]
         (try
           (main/start!
-           {:file (or jank-file cljs-file (:file bb-srv) (when srv (str (:dir srv) "/src/demo/core.clj")))
+           {:file (or jank-file cljs-file (:file bb-srv) (:file shadow) (when srv (str (:dir srv) "/src/demo/core.clj")))
             :settings-path (fresh-settings-path)
             :on-ready (fn [ui]
                         (g/g-signal-connect-data (:window ui) "destroy"
@@ -1062,8 +1162,10 @@
                                        {:reason "window still open after the close; exiting to avoid hanging the run"})
                                (clj-server/stop! srv)
                                (stop-bb-nrepl! bb-srv)
+                               (stop-procs! (:procs shadow))
                                (System/exit 1)))))})
           (finally (clj-server/stop! srv)
-                   (stop-bb-nrepl! bb-srv)))
+                   (stop-bb-nrepl! bb-srv)
+                   (stop-procs! (:procs shadow))))
         (temp-dirs/delete-made!)
         (System/exit (if (and (seq @results) (every? :ok @results)) 0 1))))))

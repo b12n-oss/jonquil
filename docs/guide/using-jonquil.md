@@ -1429,6 +1429,8 @@ server on port N..." while it does, and then selects the build with
 Typing `:cljs/quit` or `:repl/quit` at the prompt leaves the ClojureScript
 session; the next entry selects the build again.
 
+![A ClojureScript window attached to a shadow-cljs build after Run: the console connects to the shadow-cljs nREPL server, reports the three forms it ran, then answers two REPL entries in node, the second one node's version](../images/cljs-shadow.png)
+
 A `.cljs` file selects this dialect by its extension and by the
 `shadow-cljs.edn` project marker, and `{:dialect :cljs}` in `.jonquil.edn`
 forces it (see [Choosing a dialect](#choosing-a-dialect), which also covers
