@@ -1314,6 +1314,8 @@ to start and nothing to open in a browser. The status bar reads
 ClojureScript support is experimental, and the console says so once when
 the window opens.
 
+![A ClojureScript window on node after Run: the console starts ClojureScript, prints the program's line, then answers two REPL entries in the file's namespace, the second one node's version](../images/cljs-node.png)
+
 You need two tools on the login shell's `PATH`: the Clojure CLI
 (`clojure`, or point `JONQUIL_CLOJURE` at it) and `node`. If `clojure` is
 missing, Run says so and names `JONQUIL_CLOJURE`. Jonquil adds ClojureScript
@@ -1372,6 +1374,8 @@ ignored with a warning, since Jonquil attaches there (unless
 `{:runtime :launch}` is set too). An unknown value, such as `:target :foo`,
 warns and uses node. The tools are the same as for node, except that you
 need a browser in place of `node`.
+
+![A ClojureScript window in the browser after Run: the console starts ClojureScript, opens the page at a 127.0.0.1 URL, prints the program's line, then answers two REPL entries, the second one the page's own host](../images/cljs-browser.png)
 
 On the first Run, Jonquil starts ClojureScript and opens the page in your
 default browser: `open` on macOS, `xdg-open` on Linux, or the command named

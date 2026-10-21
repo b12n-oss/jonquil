@@ -301,12 +301,23 @@ same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
 <details>
-<summary><strong>The jank and JVM Clojure scenes</strong></summary>
+<summary><strong>The jank, ClojureScript and JVM Clojure scenes</strong></summary>
 
 The `jank` scene runs against a real jank, found the way the app finds it
 (`JONQUIL_JANK`, `PATH`, the usual install folders). With none installed it
 prints that and exits 0 without writing an image. Retake it with
 `jolt -M:shots jank`.
+
+The `cljs-node` and `cljs-browser` scenes run real ClojureScript in a temp
+project with a `deps.edn` and no `shadow-cljs.edn`, so Jonquil launches it.
+They need the `clojure` CLI (`JONQUIL_CLOJURE` or the login `PATH`), and
+`cljs-node` needs `node` too. Either one prints a line and exits 0 without
+an image when its tools are missing. The console prints `JONQUIL_CLOJURE`
+as given, so `bb docs:shots` sets it to the bare name `clojure` for these two
+(unless you set it) and no home directory lands in the image. Retake one
+with `JONQUIL_CLOJURE=clojure jolt -M:shots cljs-node`.
+`cljs-browser` writes `{:cljs {:target :browser}}` to the project's
+`.jonquil.edn` and opens a real tab in the default browser.
 
 The five JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`,
 `clj-inspector` and `clj-source`) run against a real `clojure -M:serve`, started through
