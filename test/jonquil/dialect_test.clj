@@ -534,3 +534,44 @@
       (let [attach (assoc launch :runtime :attach)]
         (is (= [false false (:reset-tooltip dialect/cljs)]
                ((juxt :active? :sensitive? :tooltip) (dialect/reset-toggle {} attach true))))))))
+
+(deftest cljs-target-selection-test
+  (let [sel (fn [cfg] (dialect/select all5 (proj #{"deps.edn"} cfg) "/p/a.cljs" nil))
+        shadow (fn [cfg] (dialect/select all5 (proj #{"shadow-cljs.edn"} cfg) "/p/a.cljs" nil))]
+    (testing "a launch selection defaults to node"
+      (let [s (sel nil)]
+        (is (= [:launch :node []] [(:runtime s) (:cljs-target s) (:warnings s)]))))
+    (testing ":browser and :node are taken as written"
+      (is (= [:browser []] ((juxt :cljs-target :warnings) (sel "{:cljs {:target :browser}}"))))
+      (is (= [:node []] ((juxt :cljs-target :warnings) (sel "{:cljs {:target :node}}")))))
+    (testing "an unknown value falls back to node with a warning"
+      (let [s (sel "{:cljs {:target :deno}}")]
+        (is (= :node (:cljs-target s)))
+        (is (= [".jonquil.edn :cljs :target should be :node or :browser, not :deno; using :node"] (:warnings s)))))
+    (testing "an attach selection ignores :target, with a warning"
+      (let [s (shadow "{:cljs {:target :browser}}")]
+        (is (= :attach (:runtime s)))
+        (is (not (contains? s :cljs-target)))
+        (is (= [".jonquil.edn :cljs :target applies only to ClojureScript that Jonquil starts, not shadow-cljs, so it is ignored"]
+               (:warnings s))))
+      (is (= [] (:warnings (shadow "{:cljs {:shadow-build :app}}")))))
+    (testing "a :runtime :attach override in a non-shadow project also ignores it"
+      (let [s (sel "{:dialect :cljs :runtime :attach :cljs {:target :browser}}")]
+        (is (not (contains? s :cljs-target)))
+        (is (= 1 (count (:warnings s))))))
+    (testing "other dialects get no :cljs-target"
+      (is (not (contains? (dialect/select all5 (proj #{"deps.edn"} "{:cljs {:target :browser}}") "/p/a.clj" nil) :cljs-target))))))
+
+(deftest cljs-target-key-label-reset-test
+  (let [sel (fn [cfg] (dialect/select all5 (proj #{"deps.edn"} cfg) "/p/a.cljs" nil))
+        node (sel nil)
+        browser (sel "{:cljs {:target :browser}}")]
+    (testing "switching target builds a new evaluator"
+      (is (not= (dialect/selection-key node) (dialect/selection-key browser)))
+      (is (= (dialect/selection-key node) (dialect/selection-key (sel "{:cljs {:target :node}}")))))
+    (testing "label names the browser"
+      (is (= "ClojureScript (browser) (running)" (dialect/label browser :attached)))
+      (is (= "ClojureScript (browser) (not running)" (dialect/label browser nil)))
+      (is (= "ClojureScript (node) (running)" (dialect/label node :attached))))
+    (testing "Reset starts unticked, like node"
+      (is (= (dialect/reset-toggle {} node true) (dialect/reset-toggle {} browser true))))))

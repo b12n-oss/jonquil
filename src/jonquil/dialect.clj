@@ -332,8 +332,9 @@
   Returns {:profile p :runtime k :project-dir dir-or-nil :source k
   :warnings [str]}, plus :auto-require [sym] when the project's config
   names one and the dialect is :clj, plus :cljs {map} when it names one and
-  the dialect is :cljs, :source one of :config :marker :extension :settings
-  :fallback. A settings default naming a marker-less profile (in practice
+  the dialect is :cljs, plus :cljs-target (:node or :browser, only for a
+  cljs selection that launches its own process), :source one of :config
+  :marker :extension :settings :fallback. A settings default naming a marker-less profile (in practice
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
@@ -392,24 +393,39 @@
         nrepl? (= :nrepl (:id p))
         w5 (if (and nrepl (not nrepl?))
              [(str ".jonquil.edn :nrepl only applies to the nREPL dialect, not " (:name p) ", so it is ignored")]
-             [])]
+             [])
+        ;; :cljs :target picks node or the browser for ClojureScript that
+        ;; Jonquil starts; shadow-cljs (attach) has its own targets.
+        rt (if rt-ok? runtime default-rt)
+        target (when cljs? (get cljs :target))
+        cljs-target (when (and cljs? (= :launch rt))
+                      (if (= :browser target) :browser :node))
+        w6 (cond
+             (and cljs? (= :launch rt) (some? target) (not (#{:node :browser} target)))
+             [(str ".jonquil.edn :cljs :target should be :node or :browser, not " (pr-str target) "; using :node")]
+             (and cljs? (= :attach rt) (some? target))
+             [".jonquil.edn :cljs :target applies only to ClojureScript that Jonquil starts, not shadow-cljs, so it is ignored"]
+             :else [])]
     (cond-> {:profile p
-             :runtime (if rt-ok? runtime default-rt)
+             :runtime rt
              :project-dir (:dir project)
              :source source
-             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5))}
+             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5) (into w6))}
       (and auto-require auto-require?) (assoc :auto-require auto-require)
       (and cljs cljs?) (assoc :cljs cljs)
+      cljs-target (assoc :cljs-target cljs-target)
       (and nrepl nrepl?) (assoc :nrepl nrepl))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
-  runtime, and for an out-of-process runtime the project it runs in. Equal
+  runtime, and for an out-of-process runtime the project it runs in, plus
+  :cljs-target for a cljs launch (node and the browser differ). Equal
   keys keep the window's evaluator when another file opens. The nREPL
   dialect's :nrepl endpoint is part of it, so a changed host or port gets
   a new connection."
-  [{:keys [profile runtime project-dir nrepl]}]
+  [{:keys [profile runtime project-dir nrepl cljs-target]}]
   (cond-> [(:id profile) runtime (when (not= :in-process runtime) project-dir)]
+    cljs-target (conj cljs-target)
     (= :nrepl (:id profile)) (conj nrepl)))
 
 (defn reset-toggle
@@ -448,8 +464,10 @@
   whether it's connected: connection is :attached while the evaluator
   holds a live connection, anything else reads as not running."
   ([selection] (label selection nil))
-  ([{:keys [profile runtime]} connection]
+  ([{:keys [profile runtime cljs-target]} connection]
    (cond
+     (and (= :launch runtime) (= :browser cljs-target))
+     (str "ClojureScript (browser)" (if (= :attached connection) " (running)" " (not running)"))
      (= :attach runtime) (str (get-in profile [:runtime-names :attach] (:name profile)) (if (= :attached connection) " (attached)" " (not running)"))
      (= :launch runtime) (str (get-in profile [:runtime-names :launch] (:name profile)) (if (= :attached connection) " (running)" " (not running)"))
      (= runtime (:evaluator profile)) (:name profile)

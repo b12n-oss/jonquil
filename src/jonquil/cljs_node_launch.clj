@@ -58,23 +58,83 @@
     (require 'cljs.server.node)
     ((resolve 'cljs.server.node/prepl) {:env-opts {:host "127.0.0.1" :port (free-port)}})))
 
+(def ^:private http-port (atom nil))
+
+(def ^:private prebound
+  "The HTTP ServerSocket bound in -main before the ready line, so a taken
+  port is reported at start. The replaced cljs.repl.server/start takes it
+  the first time it runs and clears the atom; later calls bind afresh."
+  (atom nil))
+
+(defn browser-accept
+  "Per connection: a ClojureScript prepl on the browser REPL. The HTTP server
+  comes up on first use (cljs.repl.server/start, replaced to bind loopback)
+  and no browser is launched: Jonquil opens the page."
+  []
+  (require 'cljs.server.browser)
+  ((resolve 'cljs.server.browser/prepl)
+   {:env-opts {:host "127.0.0.1" :port @http-port :launch-browser false}}))
+
+(defn- loopback-start!
+  "Replaces cljs.repl.server/start with the same body bound to 127.0.0.1
+  (ClojureScript's own listens on every interface). Exits 2 when the
+  function isn't the one this was written against."
+  []
+  (require 'cljs.repl.server)
+  (let [v (resolve 'cljs.repl.server/start)
+        loop-var (resolve 'cljs.repl.server/server-loop)
+        state-var (resolve 'cljs.repl.server/state)]
+    (when-not (= '([opts]) (:arglists (meta v)))
+      (binding [*out* *err*]
+        (println (str "jonquil: cljs.repl.server/start has arglists " (:arglists (meta v))
+                      ", not ([opts]); this ClojureScript version isn't supported")))
+      (System/exit 2))
+    (alter-var-root
+     v
+     (fn [_]
+       (fn [opts]
+         (let [[old _] (reset-vals! prebound nil)
+               ss (or old (ServerSocket. (int (:port opts)) 50 (InetAddress/getByName "127.0.0.1")))]
+           (.start (Thread. ((ns-resolve 'clojure.core 'binding-conveyor-fn)
+                             (fn [] (@loop-var opts ss)))))
+           (swap! @state-var (fn [old] (assoc old :socket ss :port (:port opts))))))))))
+
 (defn- destroy-descendants []
   (doseq [p (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current))))]
     (.destroy ^java.lang.ProcessHandle p)))
 
-(defn -main []
-  (when-not (str/includes? (script-text) unpatched)
-    (binding [*out* *err*]
-      (println (str "jonquil: " script " has no " unpatched
-                    " to bind to loopback; this ClojureScript version isn't supported")))
-    (System/exit 2))
-  (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable destroy-descendants))
-  ;; Jonquil holds our stdin for its life, so stdin ending means it is gone.
-  (future (try (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur))))
-               (catch Throwable _ nil))
-          (System/exit 0))
-  (let [ss (server/start-server {:name "jonquil-cljs" :address "127.0.0.1" :port 0
-                                 :accept 'jonquil.cljs-node-launch/accept})]
-    (println "jonquil-cljs-prepl" (.getLocalPort ^ServerSocket ss))
-    (flush)
-    @(promise)))
+(defn -main
+  "No args: ClojureScript on node. [\"browser\" http-port]: the browser REPL."
+  [& args]
+  (let [browser? (= "browser" (first args))]
+    (if browser?
+      (let [port (some-> (second args) parse-long)]
+        (when-not port
+          (binding [*out* *err*]
+            (println "usage: jonquil.cljs-node-launch browser <http-port>"))
+          (System/exit 2))
+        (reset! http-port port)
+        (try (reset! prebound (ServerSocket. (int port) 50 (InetAddress/getByName "127.0.0.1")))
+             (catch java.io.IOException _
+               (println (str "jonquil-cljs-http-port-taken " port))
+               (flush)
+               (System/exit 3)))
+        (loopback-start!))
+      (when-not (str/includes? (script-text) unpatched)
+        (binding [*out* *err*]
+          (println (str "jonquil: " script " has no " unpatched
+                        " to bind to loopback; this ClojureScript version isn't supported")))
+        (System/exit 2)))
+    (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable destroy-descendants))
+    ;; Jonquil holds our stdin for its life, so stdin ending means it is gone.
+    (future (try (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur))))
+                 (catch Throwable _ nil))
+            (System/exit 0))
+    (let [ss (server/start-server {:name "jonquil-cljs" :address "127.0.0.1" :port 0
+                                   :accept (if browser?
+                                             'jonquil.cljs-node-launch/browser-accept
+                                             'jonquil.cljs-node-launch/accept)})]
+      (println (str "jonquil-cljs-prepl " (.getLocalPort ^ServerSocket ss)
+                    (when browser? (str " http://127.0.0.1:" @http-port))))
+      (flush)
+      @(promise))))

@@ -9,13 +9,13 @@
 ;; --- the console's sentences ---
 
 (defn starting-message [clojure-path]
-  (str "; Starting ClojureScript on node (" clojure-path ")..."))
+  (str "; Starting ClojureScript (" clojure-path ")..."))
 
 (def no-clojure-message
   "; ClojureScript on node needs the Clojure CLI (clojure). Install it or set JONQUIL_CLOJURE to its path.")
 
 (defn start-failed-message [text]
-  (str "; ClojureScript on node didn't start: " text))
+  (str "; ClojureScript didn't start: " text))
 
 (def reset-message
   "; Reset on Run: ClojureScript restarts, so this Run starts clean.")
@@ -28,6 +28,29 @@
    "Stop restarts it, so earlier definitions are gone afterwards."
    "No stdin and no inspector; jump to definition stays in this file."
    "Completion uses this file's names and Clojure core's."])
+
+(def browser-limitations
+  ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
+   "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
+   "println output reaches this console, even after an evaluation finished; js/console.log stays in the browser's own console."
+   "No stdin and no inspector; jump to definition stays in this file."])
+
+(defn opened-message [url]
+  (str "; Opened " url " in your browser. Evaluations wait until the page connects."))
+
+(defn reload-message [url]
+  (str "; ClojureScript restarted: reload the browser tab at " url "."))
+
+(defn no-page-message
+  "Shown when a setup waited the page bound and no page connected."
+  [url]
+  (str "; No page has connected yet. Open " url " in a browser, then Run again."))
+
+(defn waiting-line?
+  "True for the :out reply ClojureScript prints while it waits for a page."
+  [reply]
+  (and (= :out (:tag reply))
+       (str/starts-with? (str (:val reply)) "Waiting for browser to connect to ")))
 
 ;; --- launch ---
 
@@ -44,11 +67,13 @@
 
 (defn launch-args
   "The argv that starts the ClojureScript launcher. The -Sdeps pair is
-  added only when add-dep? is true (the project has no ClojureScript)."
-  [{:keys [clojure launcher add-dep?]}]
+  added only when add-dep? is true (the project has no ClojureScript).
+  A :browser target appends `browser <http-port>` for the launcher."
+  [{:keys [clojure launcher add-dep? target http-port]}]
   (vec (concat [clojure]
                (when add-dep? ["-Sdeps" default-deps])
-               ["-M" "-i" launcher "-m" "jonquil.cljs-node-launch"])))
+               ["-M" "-i" launcher "-m" "jonquil.cljs-node-launch"]
+               (when (= :browser target) ["browser" (str http-port)]))))
 
 (defn ready-port
   "The port from the last line that announces `jonquil-cljs-prepl <port>`,
@@ -58,6 +83,14 @@
            (keep #(second (re-find #"jonquil-cljs-prepl (\d+)" %)))
            last
            parse-long))
+
+(defn ready-url
+  "The http URL from the last `jonquil-cljs-prepl <port> <url>` line, or nil
+  when no line carries one (node mode prints the port only)."
+  [log-text]
+  (some->> (str/split-lines (str log-text))
+           (keep #(second (re-find #"jonquil-cljs-prepl \d+ (http://\S+)" %)))
+           last))
 
 (def setup-form
   "(require 'cljs.repl)")

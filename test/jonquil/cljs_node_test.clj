@@ -74,3 +74,46 @@
   (is (= "Jonquil starts and stops its own ClojureScript process."
          (first cljs-node/limitations)))
   (is (not-any? #(re-find #"experimental" %) cljs-node/limitations)))
+
+(deftest launch-args-browser-test
+  (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch" "browser" "9811"]
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :browser :http-port 9811})))
+  (is (= ["/c/clojure" "-Sdeps" cljs-node/default-deps "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch" "browser" "9811"]
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :add-dep? true
+                                 :target :browser :http-port 9811})))
+  (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch"]
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :node :http-port 9811}))))
+
+(deftest ready-url-test
+  (is (= "http://127.0.0.1:9811"
+         (cljs-node/ready-url "x\njonquil-cljs-prepl 55145 http://127.0.0.1:9811\n")))
+  (is (= "http://127.0.0.1:9812"
+         (cljs-node/ready-url "jonquil-cljs-prepl 1 http://127.0.0.1:9811\njonquil-cljs-prepl 2 http://127.0.0.1:9812\n"))
+      "the last line wins")
+  (is (nil? (cljs-node/ready-url "jonquil-cljs-prepl 55145\n")))
+  (is (nil? (cljs-node/ready-url nil)))
+  (is (= 55145 (cljs-node/ready-port "jonquil-cljs-prepl 55145 http://127.0.0.1:9811\n"))))
+
+(deftest waiting-line-test
+  (is (true? (cljs-node/waiting-line? {:tag :out :val "Waiting for browser to connect to http://127.0.0.1:9811 ...\n"})))
+  (is (false? (cljs-node/waiting-line? {:tag :err :val "Waiting for browser to connect to x"})))
+  (is (false? (cljs-node/waiting-line? {:tag :out :val "hello"})))
+  (is (false? (cljs-node/waiting-line? {:tag :ret :val "Waiting for browser to connect to x"})))
+  (is (false? (cljs-node/waiting-line? {:tag :out}))))
+
+(deftest target-neutral-messages-test
+  (is (= "; Starting ClojureScript (/c/clojure)..." (cljs-node/starting-message "/c/clojure")))
+  (is (= "; ClojureScript didn't start: boom" (cljs-node/start-failed-message "boom"))))
+
+(deftest browser-messages-test
+  (is (= ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
+          "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
+          "println output reaches this console, even after an evaluation finished; js/console.log stays in the browser's own console."
+          "No stdin and no inspector; jump to definition stays in this file."]
+         cljs-node/browser-limitations))
+  (is (= "; Opened http://u in your browser. Evaluations wait until the page connects."
+         (cljs-node/opened-message "http://u")))
+  (is (= "; ClojureScript restarted: reload the browser tab at http://u."
+         (cljs-node/reload-message "http://u")))
+  (is (= "; No page has connected yet. Open http://u in a browser, then Run again."
+         (cljs-node/no-page-message "http://u"))))

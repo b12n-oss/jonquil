@@ -89,3 +89,57 @@
                           :cancelled? #(> (- (System/currentTimeMillis) t0) 200)})))
     (is (not (pgrep? "slow-clojure")))
     (is (= before (run-dirs)))))
+
+(defn- fake-script!
+  "An executable script in a fresh temp dir with the given body."
+  [body]
+  (let [f (io/file (temp-dirs/temp-dir! "jonquil-cljs-fake-") "fake-clojure")]
+    (spit f (str "#!/usr/bin/env bash\n" body "\n"))
+    (.setExecutable f true)
+    (.getCanonicalPath f)))
+
+(deftest target-and-http-port-reach-args-fn-test
+  (let [seen (atom nil)
+        spy (fn [opts] (reset! seen opts) (cljs-node/launch-args opts))
+        c (child/start! {:clojure fake-clojure :launcher "l.clj" :args-fn spy
+                         :target :browser :http-port 9123})]
+    (try (is (nil? (:error c)) (str c))
+         (is (= [:browser 9123] ((juxt :target :http-port) @seen)))
+         (is (nil? (:url c)) "the node-shaped fake prints no URL")
+         (finally (child/kill! c)))))
+
+(deftest browser-ready-line-gives-url-test
+  (let [script (fake-script!
+                "echo 'jonquil-cljs-prepl 4455 http://localhost:9123/'\ncat >/dev/null")
+        c (child/start! {:clojure script :launcher "l.clj"
+                         :target :browser :http-port 9123})]
+    (try (is (nil? (:error c)) (str c))
+         (is (= 4455 (:port c)))
+         (is (= "http://localhost:9123/" (:url c)))
+         (finally (child/kill! c)))))
+
+(deftest http-port-taken-test
+  (let [script (fake-script!
+                "echo 'jonquil-cljs-http-port-taken 9123'\nexit 3")
+        before (run-dirs)
+        r (child/start! {:clojure script :launcher "l.clj"
+                         :target :browser :http-port 9123})]
+    (is (= {:error :http-port-taken} r))
+    (is (= before (run-dirs)) "the run dir is removed")))
+
+(deftest node-start-ignores-the-port-taken-marker-test
+  (let [script (fake-script! "echo 'jonquil-cljs-http-port-taken 9123'\nexit 3")
+        r (child/start! {:clojure script :launcher "l.clj" :target :node})]
+    (try (is (not= :http-port-taken (:error r)) (str r))
+         (is (string? (:error r)) (str r))
+         (finally
+           (when-let [log (some->> (:error r) (re-find #"The log: (.+)$") second)]
+             (#'child/delete-tree! (.getParent (io/file log))))))))
+
+(deftest bind-failure-text-without-marker-is-ordinary-failure-test
+  (let [script (fake-script! "echo 'java.net.BindException: Address already in use'\nexit 1")
+        r (child/start! {:clojure script :launcher "l.clj" :target :browser :http-port 9123})]
+    (try (is (string? (:error r)) (str r))
+         (finally
+           (when-let [log (some->> (:error r) (re-find #"The log: (.+)$") second)]
+             (#'child/delete-tree! (.getParent (io/file log))))))))

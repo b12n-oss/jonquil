@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (767 tests, 4264 assertions
-on macOS, 4233 on Linux, measured with `bb linux:test` on 2026-10-20) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (795 tests, 4386 assertions
+on macOS, 4355 on Linux, measured with `bb linux:test` on 2026-10-21) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -41,7 +41,7 @@ and download again when it changes, and `--offline` reuses the cached build.
 The nightly goes first on `PATH` for the run, and the Jolt children pick it
 up too (checked with `ps`, 2026-10-20: 59 tests, 213 assertions on
 `v0.8.23-26-g1dcdf9e4`).
-`bb test:cljs-node` runs a live suite for ClojureScript on node (8 tests, 29 assertions): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, that output printed after an evaluation answered (a `setTimeout`) still arrives, recovery after an error, requiring a project namespace, that Stop kills the whole process tree, and that the listeners are loopback-only. It skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
+`bb test:cljs-node` runs a live suite for ClojureScript on node and in the browser (13 tests, 54 assertions, measured 2026-10-21): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, that output printed after an evaluation answered (a `setTimeout`) still arrives, recovery after an error, requiring a project namespace, that Stop kills the whole process tree, and that the listeners are loopback-only. The browser checks run with no browser: the prepl and the page server listen on loopback only, the HTML is served, the no-page path leaves the process running, Stop then Run keeps the URL, and the launcher prints its usage line for a missing port. One more test drives a real browser and opens a tab, so it runs only with `JONQUIL_BROWSER_LIVE=1` (`JONQUIL_BROWSER_LIVE=1 bb test:cljs-node`, 64 assertions, measured 2026-10-21): values, `println`, an error and recovery, output from a timer after the answer, and `js/console.log` staying in the browser. Without it, it prints a skip line. The suite skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
 
 `bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by
@@ -208,7 +208,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 6 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, and a quit that kills the child. A full run reports 48, 309, 19, 15, 36, 4, 13, 5, 10 and 6 rows
+browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 7 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 309, 19, 15, 36, 4, 13, 5, 10 and 7 rows
 passing, in group order.
 
 </details>

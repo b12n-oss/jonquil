@@ -26,6 +26,8 @@
 
 (def ^:private NOT-RUNNING "ClojureScript (node) (not running)")
 (def ^:private RUNNING "ClojureScript (node) (running)")
+(def ^:private BROWSER-RUNNING "ClojureScript (browser) (running)")
+(def ^:private BROWSER-NOT-RUNNING "ClojureScript (browser) (not running)")
 
 ;; The fixture project, stashed so rows and after-close-checks! (which runs
 ;; after main/start! returns) reach it. :closing holds the pid
@@ -39,6 +41,18 @@
     (spit (io/file d "deps.edn") "{:deps {org.clojure/clojurescript {:mvn/version \"1.12.42\"}}}\n")
     (spit f fixture-core-text)
     (reset! fixture* {:dir (.getCanonicalPath d) :file (.getCanonicalPath f)})))
+
+(defn- browser-fixture!
+  "A second project whose .jonquil.edn selects the browser target. Returns
+  its src/demo/page.cljs path."
+  []
+  (let [d (io/file (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-cljs-browser-"))))
+        f (io/file d "src/demo/page.cljs")]
+    (.mkdirs (.getParentFile f))
+    (spit (io/file d "deps.edn") "{:deps {org.clojure/clojurescript {:mvn/version \"1.12.42\"}}}\n")
+    (spit (io/file d ".jonquil.edn") "{:cljs {:target :browser}}\n")
+    (spit f "(ns demo.page)\n")
+    (.getCanonicalPath f)))
 
 (defn evaluator [ui] ((:evaluator* ui)))
 
@@ -93,6 +107,51 @@
                              (and (= NOT-RUNNING (label ui)) (not ticked?) clickable?)
                              {:label (label ui) :reset-ticked ticked? :reset-clickable clickable?
                               :text (support/console-text ui)})))))
+
+(defn- open-url-log-lines
+  "The URLs dev/fake-open-url recorded, or nil when the log is absent."
+  []
+  (let [f (io/file (System/getenv "FAKE_OPEN_URL_LOG"))]
+    (when (.isFile f) (str/split-lines (slurp f)))))
+
+(defn row-cljs-browser-selected-and-runs
+  "Opening a file of a project with .jonquil.edn {:cljs {:target :browser}}
+  switches the window to the browser evaluator: its label says ClojureScript
+  (browser) isn't running, a Run through the fake prepl prints 3 (the fake
+  needs no page), the label then reads (running), and the opener
+  (JONQUIL_OPEN_URL -> dev/fake-open-url, which logs to FAKE_OPEN_URL_LOG)
+  was called exactly once with http://127.0.0.1:<port>. Opening the node file
+  again restores the node label. Fails at once, before opening anything, when
+  JONQUIL_OPEN_URL or FAKE_OPEN_URL_LOG is unset, so a hand run can't open a
+  real browser tab."
+  [ui]
+  (go-row :cljs-browser-selected-and-runs support/check
+    (if-not (and (System/getenv "JONQUIL_OPEN_URL") (System/getenv "FAKE_OPEN_URL_LOG"))
+      (on-gtk (support/check :cljs-browser-selected-and-runs false
+                             {:reason "JONQUIL_OPEN_URL and FAKE_OPEN_URL_LOG must be set (see bb.edn gtk:selftest); refusing to risk a real browser tab"}))
+      (let [_ (.delete (io/file (System/getenv "FAKE_OPEN_URL_LOG")))
+            page (browser-fixture!)
+            _ (on-gtk ((:open-path! ui) page))
+            browser? (await-until 5000 20 #(= BROWSER-NOT-RUNNING (label ui)))
+            [ok? mark] (run-and-await ui "(+ 1 2)" 30000 #(value-line? % "3"))
+            running? (await-until 2000 20 #(= BROWSER-RUNNING (label ui)))
+            ;; The opener runs as its own process: give its log a moment.
+            _ (await-until 3000 20 #(seq (open-url-log-lines)))
+            opened (open-url-log-lines)
+            _ (on-gtk ((:stop!* ui)))
+            _ (on-gtk ((:open-path! ui) (:file @fixture*)))
+            back? (await-until 5000 20 #(= NOT-RUNNING (label ui)))
+            ;; Read again now: a second open after the first read would show here.
+            opened-end (open-url-log-lines)
+            _ (.delete (io/file (System/getenv "FAKE_OPEN_URL_LOG")))]
+        (on-gtk (support/check :cljs-browser-selected-and-runs
+                               (and browser? ok? running? back?
+                                    (= 1 (count opened))
+                                    (= opened opened-end)
+                                    (boolean (re-matches #"http://127\.0\.0\.1:\d+" (str (first opened)))))
+                               {:browser browser? :ok ok? :running running? :back back? :opened opened
+                                :opened-end opened-end
+                                :text (support/since ui mark)}))))))
 
 (defn row-cljs-node-run-prints-value
   "Run evaluates the buffer in the fake: the console shows 3, the label

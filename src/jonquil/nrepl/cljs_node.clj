@@ -17,6 +17,7 @@
   so overlapping calls from the reader thread and close! are safe."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [jolt.process :as p]
             [jonquil.clj :as clj]
             [jonquil.cljd :as cljd]
             [jonquil.cljs-node :as cljs-node]
@@ -36,7 +37,15 @@
    :help-timeout-ms 3000
    :full-doc-timeout-ms 5000
    ;; nil: cljs-child/start! applies its own default.
-   :start-timeout-ms nil})
+   :start-timeout-ms nil
+   ;; estimate: the page connects ~2.6 s after `open` (measured); the rest is
+   ;; slack for a cold browser.
+   :page-timeout-ms 60000})
+
+(def settle-deadline-ms
+  ;; estimate: a launch notices a Stop within its poll, then kills the tree;
+  ;; the rest is slack (same as jonquil.nrepl.jank).
+  5000)
 
 (def busy-warning
   "; [Warning: Evaluation already in progress. Press Stop to cancel.]\n")
@@ -46,6 +55,9 @@
 (def timeout-doc "No docs: ClojureScript didn't answer in time.")
 
 (def exited-text "Error: the ClojureScript process exited")
+
+(def port-twice-message
+  "; ClojureScript couldn't start: the browser port was in use twice. Try Run again.")
 
 (defn- stopping? [{:keys [state] :as ev}]
   (or (connection/stop-requested? ev) (boolean (:stopped? @state))))
@@ -76,7 +88,8 @@
   ([{:keys [state hooks] :as ev} {:keys [background?]}]
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
-                                                    :used? false :prompt-ns 'cljs.user :drain nil)
+                                                    :used? false :prompt-ns 'cljs.user :drain nil
+                                                    :setup-pending nil)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (:child old)]
@@ -90,31 +103,88 @@
          ((:kill hooks) child)))
      nil)))
 
+(defn- browser? [{:keys [selection]}]
+  (= :browser (:cljs-target selection)))
+
+(defn- free-port
+  "A loopback port the OS just handed out: bind port 0, read it, close it."
+  []
+  (with-open [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (.getLocalPort s)))
+
+(defn- http-port!
+  "The evaluator's HTTP port: chosen once, kept for every launch. With
+  :fresh? a new one replaces it (the launcher found it taken)."
+  [{:keys [state]} fresh?]
+  (:http-port (swap! state (fn [s] (if (and (:http-port s) (not fresh?))
+                                     s
+                                     (assoc s :http-port (free-port)))))))
+
+(defn- launch-child!
+  "Launches once, or twice when the browser's HTTP port was taken. [started
+  port-changed?]."
+  [{:keys [hooks selection] :as ev} clojure launcher]
+  (let [base {:clojure clojure
+              :launcher launcher
+              :project-dir (:project-dir selection)
+              :cancelled? (fn [] (stopping? ev))}
+        go (fn [fresh?]
+             ((:launch hooks) (cond-> base
+                                (browser? ev) (assoc :target :browser
+                                                     :http-port (http-port! ev fresh?)))))
+        started (go false)]
+    (if (= :http-port-taken (:error started))
+      [(go true) true]
+      [started false])))
+
+(defn- await-kills!
+  "A browser launch pre-binds the evaluator's HTTP port, so it waits (bounded
+  by settle-deadline-ms) for background kills to finish: the old JVM would
+  still hold the port, and the launcher would exit 3 and change it under an
+  open tab."
+  [{:keys [state] :as ev}]
+  (let [deadline (+ (System/currentTimeMillis) settle-deadline-ms)]
+    (loop []
+      (when (and (pos? (:killing @state))
+                 (not (stopping? ev))
+                 (< (System/currentTimeMillis) deadline))
+        (Thread/sleep 20)
+        (recur)))))
+
 (defn- ensure-child!
   "nil once a live child is stored in state, else the result to finish the
   evaluation with. A stored child that died, or lost its connection, is
-  killed first. A Stop during the launch kills what it produced."
-  [{:keys [state hooks selection] :as ev} on-output]
+  killed first, and so is one whose late setup failed (it would only report
+  the failure again). A Stop during the launch kills what it produced."
+  [{:keys [state hooks] :as ev} on-output]
   (let [child (:child @state)]
-    (if (and child ((:alive? hooks) child) (prepl/open? (:conn @state)))
+    (if (and child ((:alive? hooks) child) (prepl/open? (:conn @state))
+             (not= :failed (:setup-pending @state)))
       nil
       (do
+        (when (= :failed (:setup-pending @state))
+          (connection/say! on-output :system
+                           (str (cljs-node/start-failed-message "the session setup failed") "\n")))
         (when child (kill-child! ev))
+        (when (browser? ev) (await-kills! ev))
         (if-let [clojure ((:find-clojure hooks))]
           (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
             (if (instance? Throwable launcher)
               {:status :notice :text (cljs-node/start-failed-message (ex-message launcher))}
               (do
                 (connection/say! on-output :system (str (cljs-node/starting-message clojure) "\n"))
-                (let [started ((:launch hooks)
-                               {:clojure clojure
-                                :launcher launcher
-                                :project-dir (:project-dir selection)
-                                :cancelled? (fn [] (stopping? ev))})]
+                (let [[started port-changed?] (launch-child! ev clojure launcher)]
                   (cond
                     (= :cancelled (:error started)) {:status :interrupted}
+                    (= :http-port-taken (:error started)) {:status :notice :text port-twice-message}
                     (:error started) {:status :notice :text (cljs-node/start-failed-message (:error started))}
-                    :else (do (swap! state assoc :child started)
+                    :else (do (swap! state
+                                     (fn [s]
+                                       (cond-> (assoc s :child started)
+                                         (browser? ev)
+                                         (assoc :await-page (str "http://127.0.0.1:" (:http-port s))
+                                                :announce (if (:opened? s) :reload :first)
+                                                :port-changed? port-changed?))))
                               (when (stopping? ev) (kill-child! ev))
                               nil))))))
           {:status :notice :text cljs-node/no-clojure-message})))))
@@ -127,8 +197,10 @@
   ret that is the current exchange's sentinel is recorded in :done-forms in
   the same swap, so exchange! can tell a timeout from a ret that just
   beat it."
-  [{:keys [state]} closed? r]
+  [{:keys [state] :as ev} closed? r]
   (cond
+    (and (browser? ev) (cljs-node/waiting-line? r)) nil
+
     (= :closed (:tag r))
     (when (compare-and-set! closed? false true)
       (swap! state assoc :drain nil)
@@ -147,10 +219,20 @@
     (let [form (when (= :ret (:tag r)) (:form r))
           [old _] (swap-vals! state
                               (fn [s]
-                                (cond
-                                  (and form (= form (:drain s))) (assoc s :drain nil)
-                                  (and form (= form (:sink-form s))) (update s :done-forms conj form)
-                                  :else s)))]
+                                (let [s (if (and form (= form cljs-node/setup-form) (true? (:setup-pending s))
+                                                 (or (= form (:drain s)) (= form (:sink-form s))))
+                                          ;; The setup's answer is recorded here whether
+                                          ;; or not its exchange is still waiting.
+                                          (assoc s :setup-pending (if (:exception r) :failed nil)
+                                                 :ready? (not (:exception r)))
+                                          s)]
+                                  (cond
+                                    (and form (= form (:drain s))) (assoc s :drain nil)
+                                    (and form (= form (:sink-form s))) (update s :done-forms conj form)
+                                    :else s))))]
+      (when (and form (= form (:drain old)) (= form cljs-node/setup-form)
+                 (true? (:setup-pending old)) (not (:exception r)))
+        (connection/notify! ev true))
       (cond
         (:drain old) nil
         (:sink old) ((:sink old) r)))))
@@ -191,13 +273,63 @@
 
 (defn- ret? [r] (= :ret (:tag r)))
 
+(defn- open-url!
+  "Opens url in the default browser: open on macOS, xdg-open elsewhere, or
+  the command named by env JONQUIL_OPEN_URL (given the URL as its only
+  argument) when that is set. True when it started and did not exit
+  non-zero within about a second (a process still running then is reaped in
+  the background), false (never throws) otherwise."
+  ([url] (open-url! url (System/getenv "JONQUIL_OPEN_URL")))
+  ([url override]
+   (try (let [mac? (str/includes? (str/lower-case (str (System/getProperty "os.name"))) "mac")
+              program (if (str/blank? override) (if mac? "open" "xdg-open") override)
+              proc (p/process {:out :discard :err :discard} program url)
+              jp ^java.lang.Process (:proc proc)]
+          ;; A non-zero exit within ~1 s is a failure; still running is fine.
+          (loop [n 0]
+            (cond (not (p/alive? proc)) (zero? (.exitValue jp))
+                  ;; Still running: reap it when it ends, so it can't linger.
+                  (>= n 50) (do (future (try (deref proc) (catch Throwable _ nil)))
+                                true)
+                  :else (do (Thread/sleep 20) (recur (inc n))))))
+        (catch Throwable _ false))))
+
+(defn- announce-page!
+  "Says how the page is reached, once per browser launch: opens it while it
+  has not been opened yet (and says when its port changed on the way), else
+  asks for a reload, or to open the new address when the port changed."
+  [{:keys [state hooks]} on-output]
+  (let [[old _] (swap-vals! state (fn [s] (cond-> (assoc s :announce nil :port-changed? nil)
+                                            (= :first (:announce s)) (assoc :opened? true))))
+        url (:await-page old)
+        changed? (:port-changed? old)
+        say (fn [t] (connection/say! on-output :system (str t "\n")))]
+    (case (:announce old)
+      :first (do (if ((:open-url hooks) url)
+                   (say (cljs-node/opened-message url))
+                   (say (str "; Open " url " in a browser.")))
+                 (when changed?
+                   (say (str "; The browser port changed: the page is at " url "."))))
+      :reload (say (if changed?
+                     (str "; The browser port changed: open " url ".")
+                     (cljs-node/reload-message url)))
+      nil)))
+
 (defn- connect!
   "Connects the prepl to the stored child and runs the setup form. nil when
   ready, else the result to finish with."
   [{:keys [state timings] :as ev}]
   (let [child (:child @state)
+        browser? (browser? ev)
         closed? (atom false)
-        conn (try (prepl/connect! "127.0.0.1" (:port child) (fn [r] (dispatch! ev closed? r)))
+        connect (fn [] (prepl/connect! "127.0.0.1" (:port child) (fn [r] (dispatch! ev closed? r))))
+        ;; A connect right after the previous connection closed was once
+        ;; reset (measured, transient): one retry.
+        conn (try (try (connect)
+                       (catch Throwable e
+                         (if (re-find #"(?i)reset|refused" (str (ex-message e)))
+                           (do (Thread/sleep 300) (connect))
+                           (throw e))))
                   (catch Throwable e e))]
     (if (instance? Throwable conn)
       {:status :notice
@@ -209,11 +341,28 @@
         (if (stopping? ev)
           (do (try (prepl/close! conn) (catch Throwable _ nil))
               {:status :interrupted})
-          (let [[outcome replies] (exchange! ev cljs-node/setup-form ret?
-                                             {:timeout-ms (:setup-timeout-ms timings)})]
+          ;; The browser's setup blocks until a page connects, so the page is
+          ;; announced (and opened) first, and the wait is the page bound.
+          (let [_ (when browser?
+                    (announce-page! ev (:last-output @state))
+                    ;; Before the exchange, so dispatch! records the setup's
+                    ;; answer whichever side of the page bound it lands on.
+                    (swap! state assoc :setup-pending true))
+                [outcome replies] (exchange! ev cljs-node/setup-form ret?
+                                             (if browser?
+                                               {:timeout-ms (:page-timeout-ms timings)
+                                                :sentinel cljs-node/setup-form}
+                                               {:timeout-ms (:setup-timeout-ms timings)}))]
             (cond
               (stopping? ev) {:status :interrupted}
-              (and (= :done outcome) (not-any? :exception replies))
+              (and browser? (true? (:setup-pending @state)) (= :timeout outcome))
+              ;; Keep the child: the setup ret is drained when it arrives and
+              ;; the next evaluation waits for it (await-setup!).
+              {:status :notice :text (cljs-node/no-page-message (:await-page @state))}
+              (and browser? (nil? (:setup-pending @state)) (#{:done :timeout} outcome))
+              (do (connection/notify! ev true)
+                  nil)
+              (and (not browser?) (= :done outcome) (not-any? :exception replies))
               (do (swap! state assoc :ready? true)
                   (connection/notify! ev true)
                   nil)
@@ -222,6 +371,23 @@
                :text (cljs-node/start-failed-message
                       (str "the session setup " (if (= :timeout outcome) "timed out" "failed")
                            (when (:log child) (str ". The log: " (:log child)))))})))))))
+
+(defn- await-setup!
+  "A browser setup that timed out is still pending: wait for its ret, bounded
+  by the page timeout again. nil when ready, else the result to finish with."
+  [{:keys [state timings] :as ev}]
+  (let [url (:await-page @state)
+        deadline (+ (System/currentTimeMillis) (:page-timeout-ms timings))]
+    (loop []
+      (let [{:keys [setup-pending conn]} @state]
+        (cond
+          (stopping? ev) {:status :interrupted}
+          (nil? setup-pending) nil
+          (= :failed setup-pending) {:status :notice
+                                     :text (cljs-node/start-failed-message "the session setup failed")}
+          (not (prepl/open? conn)) {:status :error :error-text exited-text}
+          (> (System/currentTimeMillis) deadline) {:status :notice :text (cljs-node/no-page-message url)}
+          :else (do (Thread/sleep 20) (recur)))))))
 
 (defn- wait-not-helping! [{:keys [state]}]
   (loop [n 0]
@@ -264,11 +430,16 @@
                 (kill-child! ev)
                 (connection/say! on-output :system (str cljs-node/reset-message "\n")))
             problem (or (ensure-child! ev on-output)
-                        (when-not (live? ev)
-                          (or (when (stopping? ev) {:status :interrupted})
-                              (connect! ev))))]
+                        (if (:setup-pending @state)
+                          (await-setup! ev)
+                          (when-not (live? ev)
+                            (or (when (stopping? ev) {:status :interrupted})
+                                (connect! ev)))))]
         (cond
-          problem (do (when (:child @state) (kill-child! ev))
+          problem (do (when (and (:child @state)
+                                 (not (and (= :notice (:status problem)) (true? (:setup-pending @state))
+                                           (prepl/open? (:conn @state)))))
+                        (kill-child! ev))
                       (finish! ev opts problem))
           (stopping? ev) (finish! ev opts {:status :interrupted})
           :else
@@ -371,7 +542,9 @@
   (lookup [this sym _text _pos]
     (try (meta-lookup this sym nil)
          (catch Throwable _ (cljd/no-docs sym timeout-doc))))
-  (limitations [_] cljs-node/limitations)
+  (limitations [_] (if (= :browser (:cljs-target selection))
+                     cljs-node/browser-limitations
+                     cljs-node/limitations))
 
   ev/ServerHelp
   (offline-candidates [_ prefix text pos extra-context]
@@ -393,16 +566,18 @@
   "A ClojureScript-on-node evaluator for a jonquil.dialect/select result,
   with no child yet. opts: :timings (merged over default-timings) and the
   hooks tests fake: :launch (fn [{:keys [clojure launcher project-dir
-  cancelled?]}] child-or-{:error}), :find-clojure, :ensure-launcher,
-  :alive?, :kill."
+  cancelled? target http-port]}] child-or-{:error}), :find-clojure,
+  :ensure-launcher, :alive?, :kill, and :open-url (fn [url] truthy on
+  success), used only for a browser selection (:cljs-target :browser)."
   ([selection] (make-cljs-node selection {}))
-  ([selection {:keys [timings launch find-clojure alive? kill ensure-launcher]}]
+  ([selection {:keys [timings launch find-clojure alive? kill ensure-launcher open-url]}]
    (let [timings (merge default-timings timings)]
      (->CljsNode selection
                  (atom {:running nil :conn nil :child nil :ready? false :sink nil
                         :drain nil :sink-form nil :done-forms #{} :helping false :n 0
                         :prompt-ns 'cljs.user :mode :reset :used? false :stopped? false
-                        :killing 0 :last-output nil})
+                        :killing 0 :last-output nil
+                        :http-port nil :opened? false :await-page nil :announce nil})
                  (atom (eval/create-history))
                  (atom [])
                  timings
@@ -411,12 +586,8 @@
                   :find-clojure (or find-clojure cljs-child/find-clojure)
                   :ensure-launcher (or ensure-launcher files/ensure-launcher!)
                   :alive? (or alive? cljs-child/alive?)
-                  :kill (or kill cljs-child/kill!)}))))
-
-(def settle-deadline-ms
-  ;; estimate: a launch notices a Stop within its poll, then kills the tree;
-  ;; the rest is slack (same as jonquil.nrepl.jank).
-  5000)
+                  :kill (or kill cljs-child/kill!)
+                  :open-url (or open-url open-url!)}))))
 
 (defn settled?
   "True once no evaluation (and so no launch) and no background kill is in

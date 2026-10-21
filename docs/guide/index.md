@@ -18,8 +18,8 @@ code don't cover on their own.
    Clojure and ClojureScript by attaching to a server you started (with
    auto-require for JVM and Jolt projects, and a shadow-cljs build for
    ClojureScript), any other nREPL server (babashka, Basilisp, other
-   hosts), and jank and ClojureScript on node, which Jonquil launches
-   itself.
+   hosts), and jank and ClojureScript on node or in a browser tab, which Jonquil
+   launches itself.
 3. **[Development](development.md)**: the task groups `bb info` prints,
    the unit suite, the self-test and binary-smoke harnesses, screenshots,
    and lint, format, and the git hooks.

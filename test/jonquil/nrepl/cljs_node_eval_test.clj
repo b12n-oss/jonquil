@@ -213,3 +213,238 @@
         "printed output never passes for docs; only the doc form's value counts")
     (is (= "" (#'node/doc-text [{:tag :out :val "only output\n"}] form)))
     (is (= "" (#'node/doc-text [{:tag :ret :form form :exception true :val "{:cause \"x\"}"}] form)))))
+
+;; --- browser mode ---
+
+(def ^:private fake-url "http://127.0.0.1:1234")
+
+(defn- url-of
+  "The page URL of launch n (default the first): built from the HTTP port
+  the evaluator passed to it."
+  ([launches] (url-of launches 0))
+  ([launches n] (str "http://127.0.0.1:" (:http-port (nth @launches n)))))
+
+(defn- with-browser
+  "Like with-node, for a browser selection. f gets srv and a map with :ev,
+  :launches (the opts each launch got), :opened (urls :open-url got) and
+  :kills. launch-results is a seq of overrides for the first launches
+  (e.g. {:error :http-port-taken}); later launches succeed."
+  [fake-opts {:keys [launch-results open-result timings]} f]
+  (let [srv (fake/start! fake-opts)
+        launches (atom []) opened (atom []) kills (atom 0)
+        results (atom (vec launch-results))
+        e (node/make-cljs-node
+           {:profile dialect/cljs :runtime :launch :project-dir nil :cljs-target :browser}
+           {:timings timings
+            :launch (fn [o]
+                      (swap! launches conj o)
+                      (let [r (first @results)]
+                        (swap! results #(vec (rest %)))
+                        (or r {:port (:port srv) :url fake-url :pid -1 :log "/fake/log"})))
+            :open-url (fn [url] (swap! opened conj url) (if (nil? open-result) true open-result))
+            :find-clojure (fn [] "/fake/clojure")
+            :ensure-launcher (fn [] "/fake/launcher.clj")
+            :alive? (fn [_] true)
+            :kill (fn [_] (swap! kills inc))})]
+    (try (f srv {:ev e :launches launches :opened opened :kills kills})
+         (finally (ev/stop! e) (fake/stop! srv)))))
+
+(defn- text-of [out] (apply str (map second out)))
+
+(deftest browser-first-run-opens-once-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev launches opened]}]
+      (let [{:keys [result out]} (run ev "(+ 1 2)" {:run? false})]
+        (is (= "3" (:printed result)))
+        (is (= [(url-of launches)] @opened))
+        (is (str/includes? (text-of out) (cljs-node/opened-message (url-of launches))))
+        (is (= :browser (:target (first @launches))))
+        (is (integer? (:http-port (first @launches)))))
+      (let [{:keys [out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= [(url-of launches)] @opened) "a second evaluation doesn't open again")
+        (is (not (str/includes? (text-of out) "Opened")))))))
+
+(deftest browser-open-url-failure-test
+  (with-browser {} {:open-result false}
+    (fn [_ {:keys [ev launches]}]
+      (let [{:keys [out]} (run ev "1" {:run? false})]
+        (is (str/includes? (text-of out) (str "; Open " (url-of launches) " in a browser.")))
+        (is (not (str/includes? (text-of out) "Opened")))))))
+
+(deftest browser-stop-then-run-reloads-test
+  (with-browser {:slow-ms 5000} {}
+    (fn [srv {:keys [ev launches opened kills]}]
+      (let [done (promise)]
+        (ev/eval! ev "(slow)" {:run? false :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(some (fn [f] (re-find #"slow" f)) (fake/received-forms srv)) 5000))
+        (ev/interrupt! ev)
+        (is (= {:status :interrupted} (deref done 5000 :timeout)))
+        (is (wait-until #(= 1 @kills) 3000)))
+      (let [{:keys [result out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= "2" (:printed result)))
+        (is (str/includes? (text-of out) (cljs-node/reload-message (url-of launches))))
+        (is (= 1 (count @opened)) "no second tab")
+        (is (= 2 (count @launches)))
+        (is (= (:http-port (first @launches)) (:http-port (second @launches)))
+            "the same HTTP port for both launches")))))
+
+(deftest browser-port-taken-relaunches-test
+  (with-browser {} {:launch-results [{:error :http-port-taken}]}
+    (fn [_ {:keys [ev launches opened]}]
+      (let [{:keys [result out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= "2" (:printed result)))
+        (is (= 2 (count @launches)))
+        (is (not= (:http-port (first @launches)) (:http-port (second @launches))))
+        (is (not (str/includes? (text-of out) "restarted")))
+        ;; The page was never opened, so it opens now, at the new address.
+        (is (= [(url-of launches 1)] @opened))
+        (is (str/includes? (text-of out) (cljs-node/opened-message (url-of launches 1))))
+        (is (str/includes? (text-of out) (str "; The browser port changed: the page is at "
+                                              (url-of launches 1) ".")))
+        (is (not (str/includes? (text-of out) "open http://"))))))
+  (with-browser {} {:launch-results [{:error :http-port-taken} {:error :http-port-taken}]}
+    (fn [_ {:keys [ev launches]}]
+      (let [r (:result (run ev "(+ 1 1)" {:run? false}))]
+        (is (= :notice (:status r)))
+        (is (= node/port-twice-message (:text r)))
+        (is (= 2 (count @launches)))))))
+
+(deftest browser-port-change-after-the-first-open-asks-to-open-test
+  (with-browser {} {:launch-results [nil {:error :http-port-taken}]}
+    (fn [_ {:keys [ev launches opened]}]
+      (run ev "(+ 1 1)" {:run? false})
+      (#'node/kill-child! ev)
+      (let [{:keys [out]} (run ev "(+ 1 1)" {:run? false})]
+        (is (= 3 (count @launches)))
+        (is (= 1 (count @opened)) "no second tab")
+        (is (str/includes? (text-of out) (str "; The browser port changed: open " (url-of launches 2) ".")))))))
+
+(deftest waiting-line-is-kept-for-node-test
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [out (atom [])]
+        (ev/eval! ev "(+ 1 1)" {:run? true :on-output (fn [k s] (swap! out conj [k s]))
+                                :on-complete (fn [_])})
+        (is (wait-until #(not (ev/evaluating? ev)) 5000))
+        (#'node/dispatch! ev (atom false) {:tag :out :val "Waiting for browser to connect to x\n"})
+        (is (str/includes? (text-of @out) "Waiting for browser to connect to x"))))))
+
+(deftest browser-waiting-line-is-dropped-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev]}]
+      (let [out (atom [])]
+        (ev/eval! ev "(+ 1 1)" {:run? false :on-output (fn [k s] (swap! out conj [k s]))
+                                :on-complete (fn [_])})
+        (is (wait-until #(not (ev/evaluating? ev)) 5000))
+        (#'node/dispatch! ev (atom false)
+                          {:tag :out :val "Waiting for browser to connect to http://127.0.0.1:1234 ...\n"})
+        (#'node/dispatch! ev (atom false) {:tag :out :val "kept\n"})
+        (is (not (str/includes? (text-of @out) "Waiting for browser")))
+        (is (str/includes? (text-of @out) "kept"))))))
+
+(deftest browser-setup-waits-for-the-page-test
+  ;; The browser's setup form blocks until a page connects: the page is
+  ;; opened first (from the evaluator's own port), the wait is the page
+  ;; bound, the child is kept, and the next Run finishes the setup.
+  (with-browser {:hold-setup-ms 1200} {:timings {:page-timeout-ms 400}}
+    (fn [srv {:keys [ev launches opened kills]}]
+      (let [t0 (System/currentTimeMillis)
+            r (:result (run ev "(+ 1 2)" {:run? false}))
+            url (str "http://127.0.0.1:" (:http-port (first @launches)))]
+        (is (= {:status :notice :text (cljs-node/no-page-message url)} r))
+        (is (< (- (System/currentTimeMillis) t0) 1100) "the notice came at the page bound")
+        (is (= [url] @opened) "opened before the setup finished")
+        (is (zero? @kills) "the child is kept")
+        (is (not (connection/connected? ev)) "not ready until the setup answers")
+        (is (wait-until #(connection/connected? ev) 3000) "the late setup ret makes it ready")
+        (let [r2 (:result (run ev "(+ 1 2)" {:run? false}))]
+          (is (= "3" (:printed r2)) (pr-str r2)))
+        (is (= 1 (count @launches)))
+        (is (zero? @kills))
+        (is (= [url] @opened))
+        (is (= 1 (count (filter #(= cljs-node/setup-form %) (fake/received-forms srv)))))))))
+
+(deftest browser-next-run-waits-for-pending-setup-test
+  (with-browser {:hold-setup-ms 800} {:timings {:page-timeout-ms 300}}
+    (fn [_ {:keys [ev kills]}]
+      (is (= :notice (:status (:result (run ev "(+ 1 2)" {:run? false})))))
+      ;; The setup answers ~500 ms later, inside this Run's own bound.
+      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+        (is (or (= "3" (:printed r)) (= :notice (:status r))) (pr-str r)))
+      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+        (is (= "3" (:printed r)) (pr-str r)))
+      (is (zero? @kills)))))
+
+(deftest browser-failed-late-setup-relaunches-test
+  ;; The setup answers with an exception after the page bound: the child is
+  ;; not kept to report it forever, the next Run launches a fresh one.
+  (with-browser {:hold-setup-ms 500 :fail-setup? true} {:timings {:page-timeout-ms 200}}
+    (fn [_ {:keys [ev launches kills]}]
+      (is (= :notice (:status (:result (run ev "(+ 1 2)" {:run? false})))))
+      (is (zero? @kills) "kept while the setup is pending")
+      (is (wait-until #(= :failed (:setup-pending @(:state ev))) 3000))
+      (let [{:keys [result out]} (run ev "(+ 1 2)" {:run? false})]
+        (is (= 2 (count @launches)) "relaunched")
+        (is (= 1 @kills) "the failed child was killed")
+        (is (= :notice (:status result)) (pr-str result))
+        (is (str/includes? (text-of out) (cljs-node/start-failed-message "the session setup failed")))))))
+
+(deftest browser-setup-failing-inside-the-bound-kills-the-child-test
+  (with-browser {:fail-setup? true} {}
+    (fn [_ {:keys [ev launches kills]}]
+      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+        (is (= :notice (:status r)))
+        (is (str/includes? (:text r) "the session setup failed")))
+      (is (= 1 @kills))
+      (is (nil? (:child @(:state ev))))
+      (is (= 1 (count @launches))))))
+
+(deftest browser-never-opens-an-empty-url-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev opened]}]
+      (run ev "1" {:run? false})
+      (is (seq @opened))
+      (is (every? #(str/starts-with? % "http://127.0.0.1:") @opened)))))
+
+(deftest browser-limitations-test
+  (with-browser {} {}
+    (fn [_ {:keys [ev]}]
+      (is (= cljs-node/browser-limitations (ev/limitations ev)))))
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (is (= cljs-node/limitations (ev/limitations ev))))))
+
+(deftest node-never-opens-a-url-test
+  (let [opened (atom [])]
+    (with-node {} {:open-url (fn [u] (swap! opened conj u) true)}
+      (fn [_ {:keys [ev]}]
+        (run ev "(+ 1 1)" {:run? true})
+        (run ev "(+ 1 1)" {:run? true})
+        (is (empty? @opened))))))
+
+(deftest open-url-leaves-a-slow-opener-running-test
+  (let [dir (java.io.File/createTempFile "jonquil-open" "")
+        _ (.delete dir) _ (.mkdirs dir)
+        slow (java.io.File. dir "slow.sh")]
+    (try
+      (spit slow "#!/bin/sh\nsleep 2\n")
+      (.setExecutable slow true)
+      (is (true? (#'node/open-url! "http://x" (.getPath slow))) "still running after a second is fine")
+      (finally (doseq [f [slow dir]] (.delete f))))))
+
+(deftest open-url-honours-the-override-command-test
+  (let [dir (java.io.File/createTempFile "jonquil-open" "")
+        _ (.delete dir) _ (.mkdirs dir)
+        out (java.io.File. dir "url.txt")
+        script (java.io.File. dir "fake-open.sh")
+        bad (java.io.File. dir "fail.sh")]
+    (try
+      (spit script (str "#!/bin/sh\nprintf '%s' \"$1\" > " (.getPath out) "\n"))
+      (spit bad "#!/bin/sh\nexit 3\n")
+      (.setExecutable script true) (.setExecutable bad true)
+      (is (true? (#'node/open-url! "http://127.0.0.1:4321" (.getPath script))))
+      (is (wait-until #(.exists out) 2000))
+      (is (= "http://127.0.0.1:4321" (slurp out)))
+      (is (false? (#'node/open-url! "http://x" (.getPath bad))) "a non-zero exit is false")
+      (is (false? (#'node/open-url! "http://x" "/no/such/command")) "never throws")
+      (finally (doseq [f [out script bad dir]] (.delete f))))))
