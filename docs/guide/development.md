@@ -298,7 +298,10 @@ each screenshot shows only its own scene's console history instead of every
 earlier scene's leftover output. `bb docs:shots` regenerates every scene in
 one pass; to retake just one, run `jolt -M:shots <scene-id>` directly, the
 same call the task makes per scene, so an unrelated screenshot doesn't shift
-underneath an unrelated review.
+underneath an unrelated review. A full run takes 30 scenes; the last one, on 2026-10-21,
+passed all 30 and retook every image. The `cljs-browser` scene opens a
+browser tab. On a first run the ClojureScript and shadow-cljs scenes can
+download their dependencies, and `clj-full-doc` the ClojureDocs export.
 
 <details>
 <summary><strong>The jank, ClojureScript, shadow-cljs, nREPL and JVM Clojure scenes</strong></summary>
