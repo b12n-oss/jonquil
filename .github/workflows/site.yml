@@ -28,9 +28,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  # v0.3.2 fixes `jolt run build`/`clean` (docs-engine#3); v0.3.1
-  # added heading anchors.
-  DOCS_ENGINE_REF: v0.3.2
+  # v0.4.x adds the nav search box (lunr, bundled under vendor/, with its
+  # index in search-documents.json) and v0.4.3 escapes a bare < the way
+  # GitHub does; v0.3.2 fixed `jolt run build`/`clean` (docs-engine#3).
+  DOCS_ENGINE_REF: v0.4.3
   BASE_PATH: /jonquil
 
 jobs:
