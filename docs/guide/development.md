@@ -301,7 +301,7 @@ same call the task makes per scene, so an unrelated screenshot doesn't shift
 underneath an unrelated review.
 
 <details>
-<summary><strong>The jank, ClojureScript, nREPL and JVM Clojure scenes</strong></summary>
+<summary><strong>The jank, ClojureScript, shadow-cljs, nREPL and JVM Clojure scenes</strong></summary>
 
 The `jank` scene runs against a real jank, found the way the app finds it
 (`JONQUIL_JANK`, `PATH`, the usual install folders). With none installed it
@@ -324,6 +324,16 @@ The `nrepl-bb` scene starts a real `bb nrepl-server` (the `bb` on the login
 project's `.jonquil.edn` as `{:dialect :nrepl}`, and stops the server once
 the window closes, the way `bb test:bb` does. With no `bb` it prints a line
 and exits 0 without an image. Retake it with `jolt -M:shots nrepl-bb`.
+
+The `cljs-shadow` scene runs a real shadow-cljs watch. It writes a temp
+project that takes shadow-cljs 3.2.0 from Maven through the `clojure` CLI,
+with one `:node-script` build and every shadow-cljs listener on a loopback
+port shadow-cljs picks itself. It runs `npm install ws` there (shadow's node
+client needs it), starts the watch, starts `node` on the build's output,
+waits for the runtime's `ready!` line, and stops both once the window closes.
+It needs the `clojure` CLI, `node` and `npm`, and prints a line and exits 0
+without an image when one is missing. Retake it with
+`jolt -M:shots cljs-shadow`.
 
 The five JVM Clojure scenes (`clj-attach`, `clj-quick-doc`, `clj-full-doc`,
 `clj-inspector` and `clj-source`) run against a real `clojure -M:serve`, started through
