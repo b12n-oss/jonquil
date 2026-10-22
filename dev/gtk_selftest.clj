@@ -22,6 +22,12 @@
 (defonce results (atom []))
 (defonce true-fire-count (atom 0))
 
+;; Set only where SUMMARY prints. An early g_application_quit (a row that
+;; really quits) ends g_application_run with the remaining rows never run
+;; and no SUMMARY, while every result recorded so far can still be a PASS;
+;; -main used to exit 0 then. The window group's own finished? is the same.
+(defonce ^:private finished? (atom false))
+
 (defn- check [row ok detail]
   (swap! results conj [row (boolean ok) detail])
   (binding [*out* *err*]
@@ -1363,6 +1369,7 @@
   [app steps]
   (go (<! (ga/run-rows steps PER-ROW-MS check))
       (let [passed (count (filter second @results)) total (count @results)]
+        (reset! finished? true)
         (println (str "SUMMARY " passed " of " total " passed")))
       (<! (timeout 50))
       (on-gtk (g/g-application-quit app))))
@@ -1393,4 +1400,7 @@
                              (cb/callable activate [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-application-run app 0 ffi/null)
-    (System/exit (if (and (seq @results) (every? second @results)) 0 1))))
+    (when-not @finished?
+      (binding [*out* *err*]
+        (println "[gtk-selftest] run ended before the last row; no SUMMARY, exiting 1")))
+    (System/exit (if (and @finished? (seq @results) (every? second @results)) 0 1))))

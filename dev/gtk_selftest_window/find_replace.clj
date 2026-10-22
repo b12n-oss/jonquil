@@ -285,24 +285,36 @@
   bar (which focuses the query), then drives the WINDOW's own key
   dispatch with Escape: the bar must close, focus must return to the
   editor, and the program must STILL be running (stopped in this row's
-  own cleanup, not by the Escape press)."
+  own cleanup, not by the Escape press).
+
+  Each condition is waited for in its own step: the bar is open and holds
+  focus before Escape is sent, and a wrong Stop gets a full second to print
+  \"; interrupted\" before the row reads that it didn't. Doing all of it in
+  one GTK step, as this row once did, passed with the bug in place: the
+  Stop's interrupt hadn't landed yet when still-running? was read."
   [ui]
   (go-row :window-escape-closes-bar-while-running support/check
     (let [ed (:editor ui) fb (:find-bar ui) win (:window ui)
+          bar-focused? #(let [f (g/gtk-root-get-focus win)]
+                          (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb))))))
           _ (on-gtk (editor/set-text! ed "(loop [] (recur))")
                     ((:run!* ui)))
-          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))]
-      (on-gtk (find-bar/open! fb :find)
-              (let [handled ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
-                    bar-visible (g/gtk-widget-get-visible (:box fb))
-                    focus-is-editor? (= (g/gtk-root-get-focus win) (:view ed))
-                    still-running? (eval/evaluating? (:ctx (:session ui)))]
-                (support/check :window-escape-closes-bar-while-running
-                               (and started? (= 1 handled) (zero? bar-visible)
-                                    focus-is-editor? still-running?)
-                               {:started started? :handled handled :bar-visible bar-visible
-                                :focus-is-editor focus-is-editor? :still-running still-running?})
-                ((:stop!* ui))))
+          started? (await-until 2000 20 #(eval/evaluating? (:ctx (:session ui))))
+          _ (on-gtk (find-bar/open! fb :find))
+          opened? (await-until 2000 20 #(and (not (zero? (g/gtk-widget-get-visible (:box fb))))
+                                             (bar-focused?)))
+          [mark handled] (on-gtk [(support/out-end-offset ui)
+                                  ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)])
+          closed? (await-until 2000 20 #(and (zero? (g/gtk-widget-get-visible (:box fb)))
+                                             (= (g/gtk-root-get-focus win) (:view ed))))
+          interrupted? (await-until 1000 20 #(str/includes? (support/since ui mark) "; interrupted"))
+          still-running? (on-gtk (eval/evaluating? (:ctx (:session ui))))]
+      (support/check :window-escape-closes-bar-while-running
+                     (and started? opened? (= 1 handled) closed? (not interrupted?) still-running?)
+                     {:started started? :opened opened? :handled handled :closed closed?
+                      :interrupted interrupted? :still-running still-running?})
+      (on-gtk (find-bar/close! fb)
+              ((:stop!* ui)))
       (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
 
 (defn row-window-escape-yields-preedit-while-running

@@ -35,6 +35,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - ClojureScript in the browser: an evaluation sent after the page's tab closed fails within a couple of seconds, naming the URL to reload, instead of waiting until Stop.
 - ClojureScript: when the session setup fails, the message names the child's log and the log is kept; before, the message sometimes named a log that was already deleted.
 - ClojureScript on node: node picks its own loopback port and tells the launcher, so another program can no longer take the port between the launcher choosing it and node binding it.
+- The editor group of the GTK self-test exits 1 when the app quits before its last row, as the window group already did, and the find bar's Escape-while-running row can no longer pass without opening the bar.
 - The GTK self-test presses Stop when a row leaves an evaluation running (one that threw before its own Stop), so a single failing row no longer fails every row after it with "Evaluation already in progress".
 - Logs and run folders a failed start keeps for its error message, and what a killed child leaves behind, are deleted from the temp folder after a day instead of staying there for good. A folder a running child still uses is left alone.
 - When out-of-process Jolt falls back to a plain nREPL server, the logs of the attempts it gave up on are deleted instead of left in the temp folder.
