@@ -67,6 +67,24 @@
             (>= (- (System/currentTimeMillis) t0) deadline-ms) false
             :else (do (<! (timeout interval-ms)) (recur))))))
 
+(defn ready-for-row?
+  "A row's start: parks until (idle?) or deadline-ms. An engine still busy
+  then was left running by an earlier row (one that threw before its own
+  Stop, say), so this presses Stop (stop!, on the GTK thread), says so on
+  stderr, and waits deadline-ms again. Still busy after that, it records
+  (record! :row-skipped-busy false ...) and returns false, and the caller
+  skips the row. Without the Stop every later row failed with
+  \"Evaluation already in progress\" after waiting out its own deadlines."
+  [{:keys [idle? stop! deadline-ms]} record!]
+  (or (await-until deadline-ms 20 idle?)
+      (do (binding [*out* *err*]
+            (println "[selftest] engine still busy" deadline-ms "ms after the last row; pressing Stop"))
+          (on-gtk (stop!))
+          (or (await-until deadline-ms 20 idle?)
+              (do (record! :row-skipped-busy false
+                           {:reason "engine still busy after Stop; row skipped" :deadline-ms deadline-ms})
+                  false)))))
+
 (defn settle
   "Parks for n more 20 ms ticks after a text condition passed, so the frame
   repaints before a screenshot reads it. A settle for painting, never a

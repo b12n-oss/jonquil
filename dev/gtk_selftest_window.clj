@@ -20,7 +20,7 @@
   only row-fns (the ordered list every row runs in -- the last row really
   closes the window, so order matters), the driver, and -main."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
-            [gtk-async :as ga :refer [await-until go-row on-gtk]]
+            [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-window.app-open :as app-open]
             [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
@@ -46,6 +46,7 @@
             [gtk-selftest-window.themes :as themes]
             [gtk-selftest-window.window-keys :as window-keys]
             [jolt.ffi :as ffi]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :as cb]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
@@ -371,18 +372,25 @@
 (def ^:private PER-ROW-MS
   ;; A row that FAILs waits out every deadline on its path. The longest path
   ;; is run-repl/row-reset-vs-accumulate's four 3000 ms waits (12000 ms),
-  ;; plus run-row's 2000 ms idle wait; the whole run takes about 5 s.
+  ;; plus run-row's idle wait (2000 ms, twice when it has to press Stop);
+  ;; the whole run takes about 5 s.
   30000)
 
 (defn- run-row
   "Resets the editor and the console's input, waits (up to 2000 ms) for the
-  engine to go idle, then runs row and parks until its channel delivers."
+  engine to go idle (else presses Stop, see
+  gtk-async/ready-for-row?), then runs row and parks until its channel delivers."
   [ui row]
   (go-row :row-reset support/check
     (on-gtk (editor/set-text! (:editor ui) "")
             (cview/clear-input! (:console ui)))
-    (await-until 2000 20 #(support/idle? ui))
-    (<! (row ui))))
+    ;; The window's live evaluator, not support/idle?'s starting :session:
+    ;; the tabs rows switch the window to ClojureDart and back, which leaves
+    ;; a new in-process evaluator, and Stop acts on the live one.
+    (when (ga/ready-for-row? {:idle? #(not (ev/evaluating? ((:evaluator* ui))))
+                              :stop! (:stop!* ui) :deadline-ms 2000}
+                             support/check)
+      (<! (row ui)))))
 
 ;; P2.T10 fix round 1, Important #2: removing run-rows!'s old unconditional
 ;; close made row-command-chord-close the only way out, so a REGRESSION in
