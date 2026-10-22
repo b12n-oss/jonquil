@@ -83,16 +83,18 @@
   the child and kills its process tree. Idempotent. With :background? the
   kill runs in a future (Stop calls this on the GTK thread, and a JVM plus
   node can take a second or two to die); :killing counts kills in flight,
-  and settled? waits for them, so quitting never cuts one off."
+  and settled? waits for them, so quitting never cuts one off. With
+  :keep-log? the run dir stays, so a message that names the log still
+  points at a file."
   ([ev] (kill-child! ev {}))
-  ([{:keys [state hooks] :as ev} {:keys [background?]}]
+  ([{:keys [state hooks] :as ev} {:keys [background? keep-log?]}]
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
                                                     :used? false :prompt-ns 'cljs.user :drain nil
                                                     :setup-pending nil)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
-     (when-let [child (:child old)]
+     (when-let [child (cond-> (:child old) keep-log? (dissoc :run-dir))]
        ;; Said now, not when the kill ends: a background kill can finish after
        ;; the next evaluation's child connected, and must not contradict it.
        (connection/notify! ev false)
@@ -102,6 +104,14 @@
                       (finally (swap! state update :killing dec))))
          ((:kill hooks) child)))
      nil)))
+
+(defn- setup-failed
+  "The notice for a setup that failed or timed out, naming the child's log,
+  which kill-child! :keep-log? leaves on disk."
+  [what child]
+  {:status :notice
+   :text (cljs-node/start-failed-message
+          (str what (when (:log child) (str ". The log: " (:log child)))))})
 
 (defn- browser? [{:keys [selection]}]
   (= :browser (:cljs-target selection)))
@@ -161,11 +171,11 @@
     (if (and child ((:alive? hooks) child) (prepl/open? (:conn @state))
              (not= :failed (:setup-pending @state)))
       nil
-      (do
-        (when (= :failed (:setup-pending @state))
+      (let [failed? (= :failed (:setup-pending @state))]
+        (when failed?
           (connection/say! on-output :system
-                           (str (cljs-node/start-failed-message "the session setup failed") "\n")))
-        (when child (kill-child! ev))
+                           (str (:text (setup-failed "the session setup failed" child)) "\n")))
+        (when child (kill-child! ev {:keep-log? failed?}))
         (when (browser? ev) (await-kills! ev))
         (if-let [clojure ((:find-clojure hooks))]
           (let [launcher (try ((:ensure-launcher hooks)) (catch Throwable e e))]
@@ -332,10 +342,8 @@
                            (throw e))))
                   (catch Throwable e e))]
     (if (instance? Throwable conn)
-      {:status :notice
-       :text (cljs-node/start-failed-message
-              (str "couldn't connect to port " (:port child) ": " (ex-message conn)
-                   (when (:log child) (str ". The log: " (:log child)))))}
+      (do (kill-child! ev {:keep-log? true})
+          (setup-failed (str "couldn't connect to port " (:port child) ": " (ex-message conn)) child))
       (do
         (swap! state assoc :conn conn)
         (if (stopping? ev)
@@ -367,10 +375,9 @@
                   (connection/notify! ev true)
                   nil)
               :else
-              {:status :notice
-               :text (cljs-node/start-failed-message
-                      (str "the session setup " (if (= :timeout outcome) "timed out" "failed")
-                           (when (:log child) (str ". The log: " (:log child)))))})))))))
+              (do (kill-child! ev {:keep-log? true})
+                  (setup-failed (str "the session setup " (if (= :timeout outcome) "timed out" "failed"))
+                                child)))))))))
 
 (defn- await-setup!
   "A browser setup that timed out is still pending: wait for its ret, bounded
@@ -383,8 +390,9 @@
         (cond
           (stopping? ev) {:status :interrupted}
           (nil? setup-pending) nil
-          (= :failed setup-pending) {:status :notice
-                                     :text (cljs-node/start-failed-message "the session setup failed")}
+          (= :failed setup-pending) (let [child (:child @state)]
+                                      (kill-child! ev {:keep-log? true})
+                                      (setup-failed "the session setup failed" child))
           (not (prepl/open? conn)) {:status :error :error-text exited-text}
           (> (System/currentTimeMillis) deadline) {:status :notice :text (cljs-node/no-page-message url)}
           :else (do (Thread/sleep 20) (recur)))))))
