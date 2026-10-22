@@ -5,7 +5,10 @@
   (jonquil.nrepl.cljs-node-files) and writes it to a cache folder.
 
   It serves a prepl on a loopback port the OS picks, prints the ready line
-  `jonquil-cljs-prepl <port>`, and exits when stdin ends, taking node with it."
+  `jonquil-cljs-prepl <port>`, and exits when stdin ends, taking node with it.
+  node picks its own port too: it binds port 0 and writes the port it got
+  to a file the patched create-socket reads, so no other process can take
+  the port between a probe and node's bind."
   (:require [clojure.core.server :as server]
             [clojure.java.io :as io]
             [clojure.string :as str])
@@ -15,9 +18,28 @@
 
 (def ^:private script "cljs/repl/node_repl.js")
 (def ^:private unpatched ".listen(PORT);")
-(def ^:private patched ".listen(PORT, \"127.0.0.1\");")
 
 (defn- script-text [] (slurp (io/resource script)))
+
+(def ^:private run-dir
+  "This JVM's own folder for the patched script and node's port files."
+  (delay (.toFile (Files/createTempDirectory "jonquil-cljs-" (make-array FileAttribute 0)))))
+
+(defn- port-file
+  "Where node writes the port it bound for the env whose :port is token."
+  [token]
+  (io/file @run-dir (str "port-" token)))
+
+(defn- patched
+  "The listen call that binds node to 127.0.0.1 on a port the OS picks, then
+  writes that port to port-<PORT> in dir through a rename, so a reader never
+  sees half the number. PORT is the env's token, not a port."
+  [^java.io.File dir]
+  (str ".listen(0, \"127.0.0.1\", function () {"
+       " var fs = require(\"fs\");"
+       " var f = " (pr-str (str (.getPath dir) "/port-")) " + PORT;"
+       " fs.writeFileSync(f + \".tmp\", String(this.address().port));"
+       " fs.renameSync(f + \".tmp\", f); });"))
 
 (def ^:private patched-url
   "The patched script, written once per JVM. deleteOnExit runs in reverse
@@ -25,13 +47,13 @@
   file last: the file goes first, then each folder is empty when its turn
   comes."
   (delay
-    (let [dir (.toFile (Files/createTempDirectory "jonquil-cljs-" (make-array FileAttribute 0)))
+    (let [dir @run-dir
           f (io/file dir script)]
       (io/make-parents f)
       (doseq [d (reverse (take-while some? (iterate #(.getParentFile ^java.io.File %) (.getParentFile f))))
               :when (.startsWith (.getPath ^java.io.File d) (.getPath dir))]
         (.deleteOnExit ^java.io.File d))
-      (spit f (str/replace (script-text) unpatched patched))
+      (spit f (str/replace (script-text) unpatched (patched dir)))
       (.deleteOnExit f)
       (.toURL (.toURI f)))))
 
@@ -46,9 +68,7 @@
       (getResource [n]
         (if (= n script) url (proxy-super getResource n))))))
 
-(defn- free-port []
-  (with-open [s (ServerSocket. 0 0 (InetAddress/getByName "127.0.0.1"))]
-    (.getLocalPort s)))
+(def ^:private next-token (atom 0))
 
 (defn accept
   "Per connection: a ClojureScript prepl on node, bound to loopback."
@@ -56,7 +76,33 @@
   (let [t (Thread/currentThread)]
     (.setContextClassLoader t (loopback-loader (.getContextClassLoader t)))
     (require 'cljs.server.node)
-    ((resolve 'cljs.server.node/prepl) {:env-opts {:host "127.0.0.1" :port (free-port)}})))
+    ((resolve 'cljs.server.node/prepl) {:env-opts {:host "127.0.0.1" :port (swap! next-token inc)}})))
+
+(defn- port-file-socket!
+  "Replaces cljs.repl.node/create-socket, which setup calls every 50 ms until
+  node answers, with one that reads the port node wrote for this env's token
+  and connects to it. A missing file throws, as a refused connect does, so
+  setup tries again. The file goes once the connect succeeds. Exits 2 when
+  the function isn't the one this was written against."
+  []
+  (require 'cljs.repl.node)
+  (let [v (resolve 'cljs.repl.node/create-socket)
+        orig @v]
+    (when-not (= '([host port]) (:arglists (meta v)))
+      (binding [*out* *err*]
+        (println (str "jonquil: cljs.repl.node/create-socket has arglists " (:arglists (meta v))
+                      ", not ([host port]); this ClojureScript version isn't supported")))
+      (System/exit 2))
+    (alter-var-root
+     v
+     (fn [_]
+       (fn [host token]
+         (let [f (port-file token)
+               port (or (parse-long (str/trim (slurp f)))
+                        (throw (ex-info "no port in node's port file" {:file (str f)})))
+               s (orig host port)]
+           (.delete ^java.io.File f)
+           s))))))
 
 (def ^:private http-port (atom nil))
 
@@ -120,11 +166,12 @@
                (flush)
                (System/exit 3)))
         (loopback-start!))
-      (when-not (str/includes? (script-text) unpatched)
-        (binding [*out* *err*]
-          (println (str "jonquil: " script " has no " unpatched
-                        " to bind to loopback; this ClojureScript version isn't supported")))
-        (System/exit 2)))
+      (do (when-not (str/includes? (script-text) unpatched)
+            (binding [*out* *err*]
+              (println (str "jonquil: " script " has no " unpatched
+                            " to bind to loopback; this ClojureScript version isn't supported")))
+            (System/exit 2))
+          (port-file-socket!)))
     (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable destroy-descendants))
     ;; Jonquil holds our stdin for its life, so stdin ending means it is gone.
     (future (try (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur))))

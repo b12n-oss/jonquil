@@ -32,6 +32,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - Typing in the rename popover no longer triggers window shortcuts: Cmd/Ctrl+W, Cmd/Ctrl+T, F5 and the rest go to the entry, so a rename can't close or switch the tab or Run it. Escape still closes the popover.
 - Quick doc and the completion preview recover from a lookup that failed once, instead of showing nothing for that name until the next evaluation, and a lookup that a Run overtakes no longer brings back the doc from before the Run.
 - When out-of-process Jolt can't start, the console's message says where the child's log is.
+- ClojureScript on node: node picks its own loopback port and tells the launcher, so another program can no longer take the port between the launcher choosing it and node binding it.
 - When out-of-process Jolt falls back to a plain nREPL server, the logs of the attempts it gave up on are deleted instead of left in the temp folder.
 - An evaluation error that arrives with no message reads "Error: evaluation failed" rather than a bare "Error: ".
 - Jump to definition keeps working on Jolt newer than v0.8.23, which records a required namespace's file by its classpath name (`demo/util.clj`) rather than a path: Jonquil now looks that name up on the classpath, in process and out.
