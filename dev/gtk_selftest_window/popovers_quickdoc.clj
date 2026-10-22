@@ -488,14 +488,19 @@
   (go-row :quick-doc-fits-its-text support/check
     (let [hp (:help-popover ui)
           width (fn [] (g/gtk-widget-get-width (:scroll hp)))
-          shown-width (fn [text]
+          ;; Waits for a width other than prev's: right after the short doc
+          ;; hides, the scroller still reports its width, so a positive
+          ;; width alone could read the short one again before the long
+          ;; doc's layout lands. A popover that never resizes fails after
+          ;; the 2 s wait.
+          shown-width (fn [text prev]
                         (on-gtk (help-popover/show-doc! hp text))
-                        (await-until 2000 20 #(pos? (width)))
+                        (await-until 2000 20 #(let [w (width)] (and (pos? w) (not= prev w))))
                         (let [w (on-gtk (width))]
                           (on-gtk (popover/hide! hp))
                           w))
-          short-w (shown-width "user/f\n([])\nShort.")
-          long-w (shown-width (str "user/g\n([x])\n" (apply str (repeat 30 "word "))))]
+          short-w (shown-width "user/f\n([])\nShort." nil)
+          long-w (shown-width (str "user/g\n([x])\n" (apply str (repeat 30 "word "))) short-w)]
       (on-gtk (support/check :quick-doc-fits-its-text
                              (and (pos? short-w) (< (* 2 short-w) long-w) (<= long-w 700))
                              {:short short-w :long long-w})))))

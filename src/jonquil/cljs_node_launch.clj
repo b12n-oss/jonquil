@@ -145,6 +145,148 @@
                              (fn [] (@loop-var opts ss)))))
            (swap! @state-var (fn [old] (assoc old :socket ss :port (:port opts))))))))))
 
+(defn- peer-gone?
+  "True when the page's end of a held connection has closed: a read that
+  ends (-1) or fails, rather than timing out, means nothing is listening
+  there. The page sent its whole request already, so a live one has nothing
+  more to read."
+  [^java.net.Socket conn]
+  (or (.isClosed conn)
+      (try (.setSoTimeout conn 1)
+           (neg? (.read (.getInputStream conn)))
+           (catch java.net.SocketTimeoutException _ false)
+           (catch java.io.IOException _ true)
+           (finally (try (.setSoTimeout conn 0) (catch Throwable _ nil))))))
+
+(def ^:private page-gone?
+  "Set when the only queued page connections were closed, or the page said
+  goodbye (page-bye!), until a live one turns up again (the page reloaded
+  and posted)."
+  (atom false))
+
+(defn- gone-message []
+  (str "the page is gone (its tab closed or left the page): reload http://127.0.0.1:"
+       @http-port " and evaluate again"))
+
+(def ^:private reload-grace-ms
+  "How long an evaluation waits for a page once the last one has gone, so a
+  Run pressed right after a reload finds the reloaded page."
+  2000)
+
+(defn- live-connection!
+  "Replaces cljs.repl.server/connection, which hands an evaluation the
+  connection a page holds open for it, or waits for one. Its own check is
+  .isClosed, which a page closing its end doesn't change, so an evaluation
+  sent after the tab closed was written into a dead socket and waited for
+  an answer until Stop. This one drops connections whose page has gone and,
+  when that leaves none, waits reload-grace-ms for a page, then throws. With
+  none queued from the start (the setup, before any page connected) it waits
+  as before. Exits 2 when the function isn't the one this was written
+  against."
+  []
+  (let [v (resolve 'cljs.repl.server/connection)
+        lock @(resolve 'cljs.repl.server/lock)
+        ^java.util.LinkedList connq @(resolve 'cljs.repl.server/connq)
+        ^java.util.LinkedList promiseq @(resolve 'cljs.repl.server/promiseq)]
+    (when-not (= '([]) (:arglists (meta v)))
+      (binding [*out* *err*]
+        (println (str "jonquil: cljs.repl.server/connection has arglists " (:arglists (meta v))
+                      ", not ([]); this ClojureScript version isn't supported")))
+      (System/exit 2))
+    (alter-var-root
+     v
+     (fn [_]
+       (fn []
+         (let [p (promise)
+               gone? (locking lock
+                       (let [[conn dropped?] (loop [dropped? false]
+                                               (if-let [c (.poll connq)]
+                                                 (if (peer-gone? c)
+                                                   (do (try (.close ^java.net.Socket c) (catch Throwable _ nil))
+                                                       (recur true))
+                                                   [c dropped?])
+                                                 [nil dropped?]))]
+                         (if conn
+                           (do (reset! page-gone? false) (deliver p conn) false)
+                           (do (.offer promiseq p)
+                               (when dropped? (reset! page-gone? true))
+                               @page-gone?))))]
+           (when (and gone?
+                      (= ::none (deref p reload-grace-ms ::none))
+                      ;; Still queued: take it back, unless a page delivered
+                      ;; to it in between.
+                      (locking lock (.remove promiseq p) (not (realized? p))))
+             (throw (ex-info (gone-message)
+                             {})))
+           (when (and gone? (realized? p)) (reset! page-gone? false))
+           p))))))
+
+(def ^:private page-gen
+  "Counts the pages that connected (each :ready). A goodbye names the page
+  it came from, so a reload's late goodbye can't close the new page's
+  connection."
+  (atom 0))
+
+(def ^:dynamic ^:private *bye-gen*
+  "Bound while the :ready handler runs, to the connecting page's number:
+  send-for-eval then appends the pagehide listener to that page's setup."
+  nil)
+
+(defn- bye-js
+  "Plain JS for a page: on pagehide (tab closed, reloaded or navigated away)
+  it beacons {:type :jonquil/bye :gen gen} to the REPL server. Chrome holds
+  the page's open connection for about a minute after it leaves (measured
+  2026-10-22: 56 s from about:blank to CLOSE_WAIT), so the socket alone
+  can't tell the server in time."
+  [gen]
+  (str "\n;(function(){var u=location.origin+'/';"
+       "window.addEventListener('pagehide',function(){"
+       "try{navigator.sendBeacon(u,'{:type :jonquil/bye :gen " gen "}')}catch(e){}});})();"))
+
+(defn- page-bye!
+  "Wires the pagehide goodbye: send-for-eval appends bye-js to the setup the
+  :ready handler sends each page that connects, and a :jonquil/bye post from
+  the current page drops the queued connections, marks the page gone, and
+  fails an evaluation still waiting for that page's answer. A goodbye from
+  an earlier page is ignored. Exits 2 when send-for-eval or the :ready
+  handler isn't the one this was written against."
+  []
+  (require 'cljs.repl.browser)
+  (let [sfe (resolve 'cljs.repl.browser/send-for-eval)
+        orig-sfe @sfe
+        handle-post @(resolve 'cljs.repl.browser/handle-post)
+        orig-ready (get-method handle-post :ready)
+        return-value (resolve 'cljs.repl.browser/return-value)
+        send-and-close @(resolve 'cljs.repl.server/send-and-close)
+        lock @(resolve 'cljs.repl.server/lock)
+        ^java.util.LinkedList connq @(resolve 'cljs.repl.server/connq)]
+    (when-not (and (= '([form return-value-fn] [conn form return-value-fn]) (:arglists (meta sfe)))
+                   orig-ready return-value)
+      (binding [*out* *err*]
+        (println (str "jonquil: cljs.repl.browser/send-for-eval has arglists " (:arglists (meta sfe))
+                      " or no :ready handler; this ClojureScript version isn't supported")))
+      (System/exit 2))
+    (alter-var-root
+     sfe
+     (fn [_]
+       (fn
+         ([form f] (orig-sfe form f))
+         ([conn form f] (orig-sfe conn (if *bye-gen* (str form (bye-js *bye-gen*)) form) f)))))
+    (.addMethod ^clojure.lang.MultiFn handle-post :ready
+                (fn [m conn opts]
+                  (binding [*bye-gen* (swap! page-gen inc)]
+                    (orig-ready m conn opts))))
+    (.addMethod ^clojure.lang.MultiFn handle-post :jonquil/bye
+                (fn [{:keys [gen]} conn _]
+                  (when (= gen @page-gen)
+                    (locking lock
+                      (doseq [c connq] (try (.close ^java.net.Socket c) (catch Throwable _ nil)))
+                      (.clear connq)
+                      (reset! page-gone? true))
+                    (@return-value (pr-str {:status :error
+                                            :value (gone-message)})))
+                  (send-and-close conn 200 "ok")))))
+
 (defn- destroy-descendants []
   (doseq [p (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current))))]
     (.destroy ^java.lang.ProcessHandle p)))
@@ -165,7 +307,9 @@
                (println (str "jonquil-cljs-http-port-taken " port))
                (flush)
                (System/exit 3)))
-        (loopback-start!))
+        (loopback-start!)
+        (live-connection!)
+        (page-bye!))
       (do (when-not (str/includes? (script-text) unpatched)
             (binding [*out* *err*]
               (println (str "jonquil: " script " has no " unpatched

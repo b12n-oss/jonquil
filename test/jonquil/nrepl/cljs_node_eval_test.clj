@@ -227,11 +227,12 @@
 (defn- with-browser
   "Like with-node, for a browser selection. f gets srv and a map with :ev,
   :launches (the opts each launch got), :opened (urls :open-url got) and
-  :kills. launch-results is a seq of overrides for the first launches
-  (e.g. {:error :http-port-taken}); later launches succeed."
+  :kills, plus :killed (each child the kill hook got). launch-results is a
+  seq of overrides for the first launches (e.g. {:error :http-port-taken});
+  later launches succeed."
   [fake-opts {:keys [launch-results open-result timings]} f]
   (let [srv (fake/start! fake-opts)
-        launches (atom []) opened (atom []) kills (atom 0)
+        launches (atom []) opened (atom []) kills (atom 0) killed (atom [])
         results (atom (vec launch-results))
         e (node/make-cljs-node
            {:profile dialect/cljs :runtime :launch :project-dir nil :cljs-target :browser}
@@ -240,13 +241,14 @@
                       (swap! launches conj o)
                       (let [r (first @results)]
                         (swap! results #(vec (rest %)))
-                        (or r {:port (:port srv) :url fake-url :pid -1 :log "/fake/log"})))
+                        (or r {:port (:port srv) :url fake-url :pid -1 :log "/fake/log"
+                               :run-dir "/fake/run"})))
             :open-url (fn [url] (swap! opened conj url) (if (nil? open-result) true open-result))
             :find-clojure (fn [] "/fake/clojure")
             :ensure-launcher (fn [] "/fake/launcher.clj")
             :alive? (fn [_] true)
-            :kill (fn [_] (swap! kills inc))})]
-    (try (f srv {:ev e :launches launches :opened opened :kills kills})
+            :kill (fn [c] (swap! kills inc) (swap! killed conj c))})]
+    (try (f srv {:ev e :launches launches :opened opened :kills kills :killed killed})
          (finally (ev/stop! e) (fake/stop! srv)))))
 
 (defn- text-of [out] (apply str (map second out)))
@@ -379,7 +381,7 @@
   ;; The setup answers with an exception after the page bound: the child is
   ;; not kept to report it forever, the next Run launches a fresh one.
   (with-browser {:hold-setup-ms 500 :fail-setup? true} {:timings {:page-timeout-ms 200}}
-    (fn [_ {:keys [ev launches kills]}]
+    (fn [_ {:keys [ev launches kills killed]}]
       (is (= :notice (:status (:result (run ev "(+ 1 2)" {:run? false})))))
       (is (zero? @kills) "kept while the setup is pending")
       (is (wait-until #(= :failed (:setup-pending @(:state ev))) 3000))
@@ -387,15 +389,18 @@
         (is (= 2 (count @launches)) "relaunched")
         (is (= 1 @kills) "the failed child was killed")
         (is (= :notice (:status result)) (pr-str result))
-        (is (str/includes? (text-of out) (cljs-node/start-failed-message "the session setup failed")))))))
+        (is (str/includes? (text-of out) (cljs-node/start-failed-message
+                                          "the session setup failed. The log: /fake/log")))
+        (is (nil? (:run-dir (first @killed))) "the kill keeps the run dir, so the log stays")))))
 
 (deftest browser-setup-failing-inside-the-bound-kills-the-child-test
   (with-browser {:fail-setup? true} {}
-    (fn [_ {:keys [ev launches kills]}]
+    (fn [_ {:keys [ev launches kills killed]}]
       (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
         (is (= :notice (:status r)))
-        (is (str/includes? (:text r) "the session setup failed")))
+        (is (str/includes? (:text r) "the session setup failed. The log: /fake/log") (:text r)))
       (is (= 1 @kills))
+      (is (nil? (:run-dir (first @killed))) "the log stays")
       (is (nil? (:child @(:state ev))))
       (is (= 1 (count @launches))))))
 
@@ -448,3 +453,51 @@
       (is (false? (#'node/open-url! "http://x" (.getPath bad))) "a non-zero exit is false")
       (is (false? (#'node/open-url! "http://x" "/no/such/command")) "never throws")
       (finally (doseq [f [out script bad dir]] (.delete f))))))
+
+(deftest node-setup-failure-keeps-and-names-the-log-test
+  ;; A failed setup names the child's log, and the kill leaves the run dir
+  ;; (the log's folder) on disk; a plain Stop still removes it.
+  (let [srv (fake/start! {:fail-setup? true})
+        killed (atom [])
+        {:keys [ev]} (make-test-node srv {:launch (fn [_] {:port (:port srv) :pid -1 :log "/fake/log"
+                                                            :run-dir "/fake/run"})
+                                          :kill (fn [c] (swap! killed conj c))})]
+    (try
+      (let [r (:result (run ev "(+ 1 2)" {:run? false}))]
+        (is (= {:status :notice
+                :text (cljs-node/start-failed-message "the session setup failed. The log: /fake/log")}
+               r)))
+      (is (= 1 (count @killed)))
+      (is (nil? (:run-dir (first @killed))))
+      (is (nil? (:child @(:state ev))))
+      (finally (ev/stop! ev) (fake/stop! srv))))
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [killed (atom [])
+            ev (assoc ev :hooks (assoc (:hooks ev) :kill (fn [c] (swap! killed conj c))))]
+        (swap! (:state ev) assoc :child {:pid -1 :run-dir "/fake/run"})
+        (#'node/kill-child! ev)
+        (is (= "/fake/run" (:run-dir (first @killed))) "without :keep-log? the run dir goes")))))
+
+(deftest connect-failure-keeps-and-names-the-log-test
+  ;; The child's port refuses the connection: the notice names the log and
+  ;; the kill leaves the run dir.
+  (let [dead (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))
+        port (.getLocalPort dead)
+        _ (.close dead)
+        killed (atom [])
+        e (node/make-cljs-node
+           {:profile dialect/cljs :runtime :launch :project-dir nil}
+           {:launch (fn [_] {:port port :pid -1 :log "/fake/log" :run-dir "/fake/run"})
+            :find-clojure (fn [] "/fake/clojure")
+            :ensure-launcher (fn [] "/fake/launcher.clj")
+            :alive? (fn [_] true)
+            :kill (fn [c] (swap! killed conj c))})]
+    (try
+      (let [r (:result (run e "(+ 1 2)" {:run? false}))]
+        (is (= :notice (:status r)) (pr-str r))
+        (is (str/includes? (:text r) (str "couldn't connect to port " port)) (:text r))
+        (is (str/ends-with? (:text r) ". The log: /fake/log") (:text r)))
+      (is (= 1 (count @killed)))
+      (is (nil? (:run-dir (first @killed))) "the log stays")
+      (finally (ev/stop! e)))))

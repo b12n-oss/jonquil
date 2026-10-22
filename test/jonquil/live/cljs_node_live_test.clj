@@ -282,6 +282,126 @@
         (is (str/includes? text (cljs-node-msg/reload-message url)) text))
       (finally (ev/stop! e)))))
 
+(defn- page-post!
+  "Opens a connection to the browser REPL server at url and POSTs body as the
+  page's client does. Returns the socket; its response is the next form.
+  held is set to the socket before the POST is written, so a test that
+  closes @held after an evaluation answered closes this one."
+  [url held body]
+  (let [[_ host port] (re-find #"http://([^:]+):(\d+)" url)
+        sock (java.net.Socket. ^String host (int (parse-long port)))
+        _ (reset! held sock)
+        w (io/writer (.getOutputStream sock))]
+    (.write w (str "POST / HTTP/1.1\r\nHost: " host ":" port "\r\n"
+                   "Content-Type: text/plain\r\nContent-Length: " (count body) "\r\n\r\n" body))
+    (.flush w)
+    sock))
+
+(defn- fake-page!
+  "A page without a browser, speaking the browser REPL's protocol: it posts
+  :ready, then answers every form it's sent with a nil :result on a fresh
+  connection, which the server holds until the next form. held is an atom
+  with the connection the page is holding; closing it (and setting stop?)
+  is the tab closing. Each response the page reads (the forms it was sent)
+  is conj'd onto the optional seen atom."
+  ([url held stop?] (fake-page! url held stop? (atom [])))
+  ([url held stop? seen]
+  (future
+    (try
+      (loop [sock (page-post! url held (pr-str {:repl "main" :type :ready :content nil :order 0}))
+             order 1]
+        (swap! seen conj (slurp (io/reader (.getInputStream ^java.net.Socket sock))))
+        (.close ^java.net.Socket sock)
+        (when-not @stop?
+          (recur (page-post! url held (pr-str {:repl "main" :type :result :order order
+                                          :content (pr-str {:status :success :value "nil"})}))
+                 (inc order))))
+      (catch Throwable _ nil)))))
+
+(deftest browser-closed-tab-fails-fast-live
+  ;; After the page's tab closed, an evaluation fails at once with a reload
+  ;; hint instead of waiting until Stop, and works again once a page is
+  ;; back. A fake page stands in for the browser: no browser opens.
+  (let [held (atom nil) stop? (atom false) url-seen (atom nil)
+        e (cljs-node/make-cljs-node (browser-selection)
+                                    {:timings {:page-timeout-ms 60000}
+                                     :open-url (fn [url] (reset! url-seen url) (fake-page! url held stop?) true)})]
+    (try
+      (let [{:keys [result]} (run e "(+ 1 2)")]
+        (is (= :ok (:status result)) (pr-str result)))
+      (reset! stop? true)
+      (.close ^java.net.Socket @held)
+      (doseq [_ [1 2]]
+        (let [t0 (System/currentTimeMillis)
+              {:keys [result]} (run e "(+ 1 2)")]
+          (is (= :error (:status result)) (pr-str result))
+          (is (str/includes? (str (:error-text result)) (str "reload " @url-seen)) (pr-str result))
+          (is (< (- (System/currentTimeMillis) t0) 5000) "failed at once, not at Stop")))
+      (reset! stop? false)
+      (fake-page! @url-seen held stop?)
+      (let [{:keys [result]} (run e "(+ 1 2)")]
+        (is (= :ok (:status result)) (pr-str result)))
+      (finally (reset! stop? true)
+               (some-> ^java.net.Socket @held .close)
+               (ev/stop! e)))))
+
+(defn- page-bye!
+  "Posts the goodbye the pagehide listener beacons, for page number gen."
+  [url gen]
+  (with-open [s ^java.net.Socket (page-post! url (atom nil) (pr-str {:type :jonquil/bye :gen gen}))]
+    (slurp (io/reader (.getInputStream s)))))
+
+(deftest browser-page-bye-fails-fast-live
+  ;; Chrome keeps a page's open connection for about a minute after the
+  ;; page leaves, so the server learns of it from the pagehide beacon
+  ;; instead. The fake page keeps its socket open, as Chrome does: the
+  ;; goodbye alone makes the next evaluation fail fast. After a reload the
+  ;; old page's late goodbye is ignored. No browser opens.
+  (let [held (atom nil) stop? (atom false) url-seen (atom nil) seen (atom [])
+        e (cljs-node/make-cljs-node (browser-selection)
+                                    {:timings {:page-timeout-ms 60000}
+                                     :open-url (fn [url] (reset! url-seen url)
+                                                 (fake-page! url held stop? seen) true)})]
+    (try
+      (let [{:keys [result]} (run e "(+ 1 2)")]
+        (is (= :ok (:status result)) (pr-str result)))
+      (is (str/includes? (first @seen) "pagehide") "the page's setup installs the listener")
+      (is (str/includes? (first @seen) ":gen 1") (subs (first @seen) 0 (min 200 (count (first @seen)))))
+      ;; The page leaves just as an evaluation goes out: it reads the form
+      ;; but never answers, and posts nothing more. The goodbye completes
+      ;; that evaluation with the error.
+      (reset! stop? true)
+      (let [done (promise)]
+        (ev/eval! e "(+ 1 2)" {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (Thread/sleep 1000)
+        (is (not (realized? done)) "still waiting for the page")
+        (page-bye! @url-seen 1)
+        (let [r (deref done 5000 :timeout)]
+          (is (= :error (:status r)) (pr-str r))
+          (is (str/includes? (str (:error-text r)) (str "reload " @url-seen)) (pr-str r))))
+      ;; Later evaluations fail fast too.
+      (let [t0 (System/currentTimeMillis)
+            {:keys [result]} (run e "(+ 1 2)")]
+        (is (= :error (:status result)) (pr-str result))
+        (is (str/includes? (str (:error-text result)) (str "reload " @url-seen)) (pr-str result))
+        (is (< (- (System/currentTimeMillis) t0) 5000) "failed at once"))
+      ;; The reload: a second page connects (number 2), then the first
+      ;; page's goodbye arrives late and changes nothing.
+      (some-> ^java.net.Socket @held .close)
+      (let [held2 (atom nil) stop2? (atom false) seen2 (atom [])]
+        (try
+          (fake-page! @url-seen held2 stop2? seen2)
+          (let [{:keys [result]} (run e "(+ 1 2)")]
+            (is (= :ok (:status result)) (pr-str result)))
+          (is (str/includes? (first @seen2) ":gen 2"))
+          (page-bye! @url-seen 1)
+          (let [{:keys [result]} (run e "(+ 1 2)")]
+            (is (= :ok (:status result)) "a stale goodbye is ignored"))
+          (finally (reset! stop2? true) (some-> ^java.net.Socket @held2 .close))))
+      (finally (reset! stop? true)
+               (some-> ^java.net.Socket @held .close)
+               (ev/stop! e)))))
+
 (deftest launcher-without-a-port-prints-usage-live
   (let [r @(p/process {:out :string :err :string :dir *dir*}
                       (cljs-child/find-clojure) "-M" "-i" (files/ensure-launcher!)
@@ -330,5 +450,15 @@
             (is (= :ok (:status (deref done 60000 :timeout))))
             (Thread/sleep 1000)
             (is (not (str/includes? (apply str (map second @out)) "via-console")) (pr-str @out)))
+          ;; Leaving the page closes its connection as a closed tab does:
+          ;; the next evaluation fails fast instead of waiting for Stop.
+          (let [{:keys [result]} (run e "(js/setTimeout (fn [] (set! (.-location js/window) \"about:blank\")) 300)")]
+            (is (= :ok (:status result)) (pr-str result)))
+          (Thread/sleep 2000)
+          (let [t0 (System/currentTimeMillis)
+                {:keys [result]} (run e "(+ 1 2)")]
+            (is (= :error (:status result)) (pr-str result))
+            (is (str/includes? (str (:error-text result)) "the page is gone") (pr-str result))
+            (is (< (- (System/currentTimeMillis) t0) 10000) "failed fast"))
           (finally (ev/stop! e))))
       (println "skip: set JONQUIL_BROWSER_LIVE=1 to run the real-browser test (it opens a browser tab)"))))

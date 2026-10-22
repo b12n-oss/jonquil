@@ -622,7 +622,11 @@ Five namespaces and one launcher make it up:
   replies until the sentinel's `:ret`. Input that ends inside a form is
   refused before sending, since the reader would wait for the rest. Stop,
   Reset on Run and a close kill the child, because nothing can interrupt it.
-  Help evaluates `cljs.repl/doc` only while idle; a help that times out
+  A setup that fails or times out kills the child with `:keep-log? true`,
+  which leaves the run dir, so the message's "The log: <path>" still points
+  at a file; every other kill removes it. Like a failed start's, a kept run
+  dir stays in the temp folder: the next launch can't remove it, since the
+  setup-failed path relaunches right after naming the log. Help evaluates `cljs.repl/doc` only while idle; a help that times out
   leaves its sentinel in `:drain`, and replies up to that `:ret` are dropped
   before the next evaluation's are read.
 
@@ -645,6 +649,31 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   socket the first time, and exits 2 if the function's arglists differ. The
   prepl is `cljs.server.browser/prepl` with `:launch-browser false`, and the
   ready line carries the page URL.
+- The page holds a connection open that the server answers with the next
+  form. `cljs.repl.server/connection` checks only `.isClosed`, which the
+  page closing its end doesn't change, so after the tab closed an evaluation
+  went into a dead socket and waited until Stop. The launcher replaces it
+  (arglists checked the same way) with one that drops a queued connection
+  whose read ends or fails instead of timing out after 1 ms. When that
+  leaves none, it waits 2 s for a page, since a Run pressed right after a
+  reload races the reloaded page's first post, then throws "the page is
+  gone ... reload <url>", which the prepl answers as an error. With nothing
+  queued from the start, as during the setup, it waits as before.
+- That socket check alone isn't enough in Chrome, which keeps a page's open
+  connection for about a minute after the page leaves (measured: 56 s from
+  a navigation to `about:blank` until the socket reached `CLOSE_WAIT`). So
+  the page says goodbye itself. The launcher wraps the `:ready` handler,
+  which each page that connects (a reload included) posts first, and
+  `send-for-eval`, so the setup that handler sends carries a `pagehide`
+  listener. On `pagehide` (tab closed, reloaded or navigated away) the
+  listener sends `navigator.sendBeacon` with `{:type :jonquil/bye :gen N}`,
+  N being that page's number. A `:jonquil/bye` handler for the current page
+  closes the queued connections, marks the page gone, and completes an
+  evaluation still waiting for that page's answer with the same error. A
+  goodbye from an earlier page is ignored, so a reload's late beacon can't
+  close the new page's connection. A page busy running a form can't fire
+  `pagehide` until the form finishes, so a tab closed during a long
+  evaluation still leaves it waiting until Stop.
 - `jonquil.nrepl.cljs-node` picks the HTTP port once per window and keeps it
   across restarts. On a launch it announces the page (`open-url!`: `open`,
   `xdg-open` or `JONQUIL_OPEN_URL`) before the setup form, because the
