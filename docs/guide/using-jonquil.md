@@ -47,6 +47,8 @@ finishes with the result on its own line: `=> 3`, say, for whatever the
 last form evaluates to. The status label tracks the run and settles back
 on `Ready` when it's done.
 
+![A second Run while (loop [] (recur)) is still running: the console warns that an evaluation is already in progress](../images/run-while-running.png)
+
 `docs/demos/hello.clj` is the simplest case: it prints a line, leaves a
 value behind, and shows exactly that shape.
 
@@ -180,9 +182,13 @@ same tab, or REPL entries, created (libraries you've required stay loaded, since
 won't bring them back), then evaluates the Definitions pane fresh. Uncheck
 it, and Run stops clearing first: later Runs build on whatever earlier
 ones already defined, the same way the REPL prompt always does. In a
-ClojureDart or JVM Clojure window the box shows unticked and greyed out,
-since Jonquil can't clear namespaces out of an app or a JVM it doesn't
-own; switch back to a Jolt file and your own setting returns.
+window attached to a runtime you started (ClojureDart, JVM Clojure,
+shadow-cljs or an nREPL server) the box shows unticked and greyed out,
+since Jonquil can't clear namespaces out of an app or a process it doesn't
+own. ClojureScript that Jonquil launches, on node or in the browser, starts
+unticked too but you can tick it, because a reset there restarts
+ClojureScript and that takes a few seconds. Switch back to a Jolt file and
+your own setting returns.
 
 `docs/demos/reset.clj` walks through the difference with a small,
 self-contained experiment: run it once with the box checked, delete a
@@ -1389,7 +1395,7 @@ on node, with your code running in the tab.
 Each window gets one URL, `http://127.0.0.1:` and a port Jonquil picks the
 first time and keeps. Stop and Reset on Run restart ClojureScript, because
 nothing can interrupt the page, and the console then asks you to reload the
-tab at the same URL. If something else took that port meanwhile, Jonquil
+tab at the same URL. Reset on Run starts unticked, as it does on node. If something else took that port meanwhile, Jonquil
 picks another and says so. A loop that never ends freezes the tab until you
 reload it, and an evaluation sent after you closed the tab waits until you
 press Stop.
@@ -1626,7 +1632,7 @@ the file first." rather than running the code in `user`.
 
 jank has no interrupt, so Stop kills the process and starts a fresh one:
 "; Stopped. jank restarted, so earlier definitions are gone." Reset on
-Run is on by default, as it is for every other runtime. With it ticked, a
+Run is on by default here, as it is for Jolt. With it ticked, a
 Run restarts jank first ("; Reset: restarted jank."), but only when the
 process has already served a request: the first Run just starts jank and
 prints no Reset line. Uncheck it and Run builds on whatever the process
@@ -2070,7 +2076,7 @@ than being surprises you'd otherwise have to rediscover:
 </details>
 
 <details>
-<summary><strong>ClojureScript on node</strong> (6)</summary>
+<summary><strong>ClojureScript on node</strong> (5)</summary>
 
 - Jonquil starts and stops its own process, which needs the Clojure CLI
   and `node` on the login shell's `PATH`. Its prepl and node socket are

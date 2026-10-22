@@ -115,11 +115,12 @@ copy is left. After a plain `bb app:bundle`, delete `./Jonquil.app` or run
 
 ### Where tools come from in a Finder launch
 
-A Finder or Dock launch inherits a bare `PATH`, without Homebrew, so `jolt`
-and `jank` wouldn't be found. When Jonquil's `PATH` has none of
+A Finder or Dock launch inherits a bare `PATH`, without Homebrew, so `jolt`,
+`jank`, `clojure` and `node` wouldn't be found. When Jonquil's `PATH` has none of
 `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`, it asks
 your login shell once, in the background (`$SHELL -il -c`, zsh when `SHELL`
-is unset), and hands the answer to the Jolt child and to jank. If the shell
+is unset), and hands the answer to the Jolt child, to jank and to the
+ClojureScript launcher. If the shell
 takes more than 5 seconds but had already printed its `PATH`, Jonquil uses
 that. If the shell fails, or times out with nothing usable printed, or prints
 no `PATH`, Jonquil keeps the `PATH` it has and adds whichever of those four
