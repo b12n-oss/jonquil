@@ -1408,7 +1408,11 @@ say it's leaving until its code finishes.
 evaluation finished (a timer that fires later), as on node. So does
 `js/console.log` (and `info`, `warn`, `error`, `debug`): it still logs in
 the browser's devtools, and its arguments also print to Jonquil's console,
-joined by spaces, with a non-string printed as `pr-str` would. As with node, there is no
+joined by spaces, with a non-string printed as `pr-str` would. It arrives
+in batches a tenth of a second apart, at most 100,000 characters each (a
+note counts what was dropped). Format strings such as `%s` aren't applied
+on Jonquil's side, and in devtools each log's source link now points at
+Jonquil's wrapper instead of the line that logged. As with node, there is no
 stdin and no inspector, F12 stays in the buffer, and completion and quick
 docs work the same way.
 

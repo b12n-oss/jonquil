@@ -108,7 +108,7 @@
 (deftest browser-messages-test
   (is (= ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
           "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
-          "println output reaches this console, even after an evaluation finished; js/console.log stays in the browser's own console."
+          "println and js/console.log output reach this console, even after an evaluation finished; console.log still logs in the browser too."
           "No stdin and no inspector; jump to definition stays in this file."]
          cljs-node/browser-limitations))
   (is (= "; Opened http://u in your browser. Evaluations wait until the page connects."
