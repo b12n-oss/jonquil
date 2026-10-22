@@ -24,6 +24,7 @@
             [jolt.process :as p]
             [jolt.socket]
             [jonquil.login-path :as login-path]
+            [jonquil.nrepl.leftovers :as leftovers]
             [jonquil.nrepl.middleware-files :as middleware-files]
             [jonquil.tool-path :as tool-path]))
 
@@ -227,6 +228,7 @@
   in the range works or the child won't answer. On any throw the spawned
   child is ended."
   [dir source]
+  (leftovers/prune!)
   (let [dir (.getCanonicalPath (io/file dir))
         spawned (atom nil)]
     (try

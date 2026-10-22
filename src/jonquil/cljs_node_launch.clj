@@ -45,7 +45,7 @@
   "The patched script, written once per JVM. deleteOnExit runs in reverse
   registration order, so the folders are registered outermost first and the
   file last: the file goes first, then each folder is empty when its turn
-  comes."
+  comes. The pid file is registered after the script, so it goes first."
   (delay
     (let [dir @run-dir
           f (io/file dir script)]
@@ -55,6 +55,10 @@
         (.deleteOnExit ^java.io.File d))
       (spit f (str/replace (script-text) unpatched (patched dir)))
       (.deleteOnExit f)
+      ;; Jonquil's leftovers prune skips a folder whose pid is running.
+      (let [pid (io/file dir "pid")]
+        (spit pid (str (.pid (java.lang.ProcessHandle/current))))
+        (.deleteOnExit pid))
       (.toURL (.toURI f)))))
 
 (defn- loopback-loader

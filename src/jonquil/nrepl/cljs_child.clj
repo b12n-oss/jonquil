@@ -4,10 +4,11 @@
   in the log, and kill the whole process tree again.
 
   The launcher picks its own port, so there is no port scan here. The run
-  directory holds server.log. The process runs in the project directory
-  when there is one (so deps.edn and the project's paths apply), else in
-  the run dir. A failed start keeps the log and names it, so the user can
-  read what clojure said; a cancelled start and a killed child leave
+  directory holds server.log and the child's pid (for nrepl.leftovers). The
+  process runs in the project directory when there is one (so deps.edn and
+  the project's paths apply), else in the run dir. A failed start keeps the
+  log and names it, so the user can read what clojure said, and the next
+  start a day later prunes it; a cancelled start and a killed child leave
   nothing behind. The child keeps the stdin pipe open until kill!: the
   launcher ends on its EOF."
   (:require [clojure.java.io :as io]
@@ -15,6 +16,7 @@
             [jolt.process :as p]
             [jonquil.cljs-node :as cljs-node]
             [jonquil.login-path :as login-path]
+            [jonquil.nrepl.leftovers :as leftovers]
             [jonquil.tool-path :as tool-path]))
 
 (def default-timeout-ms
@@ -110,6 +112,7 @@
   :args-fn (default cljs-node/launch-args; a test seam; it receives
   :target and :http-port too)."
   [{:keys [clojure launcher project-dir timeout-ms cancelled? args-fn target http-port]}]
+  (leftovers/prune!)
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         args-fn (or args-fn cljs-node/launch-args)
         ;; :dir must be canonical absolute: a relative or symlinked one
@@ -137,6 +140,7 @@
       (let [proc spawned
             child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
                    :log log :stdin (:in proc)}
+            _ (leftovers/write-pid! run-dir (:pid child))
             ;; A failure keeps the log (the error names it), so only the
             ;; process dies; a cancel leaves nothing.
             fail (fn [text] (kill-process! child)
