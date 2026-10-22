@@ -617,6 +617,17 @@ Five namespaces and one launcher make it up:
 - `jonquil.nrepl.prepl` is the client for ClojureScript's prepl: line-
   delimited EDN over a socket, one reader thread, replies delivered to a
   handler that drops anything after `:closed`.
+- `jonquil.nrepl.leftovers` removes what children leave in the temp folder:
+  a run dir kept for its log (`jonquil-cljs-run-`), a Jolt start's kept log
+  (`jonquil-nrepl-<n>.log`), and whatever a SIGKILL left behind
+  (`jonquil-cljs-`, `jonquil-jank-run-`). Every Jolt, ClojureScript and jank
+  start calls `prune!`, which deletes the ones untouched for a day, the same
+  age as `prune-old!`'s. With no project a child runs inside its run dir, so
+  each run dir holds a `pid` file (the launcher writes its own) and a folder
+  whose pid is still running is skipped at any age. A folder with no `pid`
+  file (an older Jonquil's) waits a week instead, since its compile output
+  sits in subfolders the age check doesn't read. Symlinks are never
+  touched.
 - `jonquil.nrepl.cljs-node` is the `Evaluator`. A prepl has no request ids,
   so each evaluation sends its forms followed by a sentinel form and reads
   replies until the sentinel's `:ret`. Input that ends inside a form is
@@ -624,9 +635,8 @@ Five namespaces and one launcher make it up:
   Reset on Run and a close kill the child, because nothing can interrupt it.
   A setup that fails or times out kills the child with `:keep-log? true`,
   which leaves the run dir, so the message's "The log: <path>" still points
-  at a file; every other kill removes it. Like a failed start's, a kept run
-  dir stays in the temp folder: the next launch can't remove it, since the
-  setup-failed path relaunches right after naming the log. Help evaluates `cljs.repl/doc` only while idle; a help that times out
+  at a file; every other kill removes it. A kept run dir, like a failed
+  start's, stays until `jonquil.nrepl.leftovers` prunes it (below). Help evaluates `cljs.repl/doc` only while idle; a help that times out
   leaves its sentinel in `:drain`, and replies up to that `:ret` are dropped
   before the next evaluation's are read.
 

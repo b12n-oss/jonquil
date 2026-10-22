@@ -83,14 +83,15 @@
                           "jolt" "-e"
                           (str "(do (require 'jonquil.nrepl.child)"
                                " (let [c (jonquil.nrepl.child/start! " (pr-str dir) " nil)]"
-                               " (println :child-pid (:pid c)) (flush))"
+                               " (println :child-pid (:pid c) (:log c)) (flush))"
                                " (jolt.host/park-until-interrupt))"))
         rdr (io/reader (:out parent))
         line (loop [n 0] (let [l (.readLine ^java.io.BufferedReader rdr)]
                            (cond (nil? l) nil
                                  (str/starts-with? l ":child-pid") l
                                  (< n 200) (recur (inc n)))))
-        pid (some-> line (str/split #" ") second parse-long)]
+        [_ pid-text log] (some-> line (str/split #" "))
+        pid (some-> pid-text parse-long)]
     (try
       (is pid (str "the parent printed its child's pid: " line))
       (when pid
@@ -101,7 +102,9 @@
       (finally
         (force-kill! parent)
         (when (and pid (.isPresent (java.lang.ProcessHandle/of pid)))
-          (clojure.java.shell/sh "kill" "-9" (str pid)))))))
+          (clojure.java.shell/sh "kill" "-9" (str pid)))
+        ;; no kill! ran for this child, so its log is still on disk
+        (when log (io/delete-file log true))))))
 
 (deftest launch-args-with-the-inspector-test
   (with-login-path "/nonexistent-jonquil:/fake-home-for-test/.local/bin"

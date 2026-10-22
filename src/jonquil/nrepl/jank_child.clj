@@ -16,7 +16,8 @@
             [clojure.string :as str]
             [jolt.process :as p]
             [jonquil.login-path :as login-path]
-            [jonquil.nrepl.connection :as connection]))
+            [jonquil.nrepl.connection :as connection]
+            [jonquil.nrepl.leftovers :as leftovers]))
 
 (defn- absolute [path]
   (str (.normalize (.toAbsolutePath (.toPath (io/file path))))))
@@ -143,6 +144,7 @@
   the run dir first. opts: :binary (required), :module-path, :timeout-ms,
   :cancelled?."
   [{:keys [binary module-path timeout-ms cancelled?]}]
+  (leftovers/prune!)
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         ;; :dir must be canonical absolute: a relative or symlinked one
         ;; makes the spawn misbehave (see nrepl.child).
@@ -165,6 +167,7 @@
       (let [proc spawned
             child {:proc proc :pid (.pid ^java.lang.Process (:proc proc)) :run-dir run-dir
                    :stdin (:in proc)}
+            _ (leftovers/write-pid! run-dir (:pid child))
             fail (fn [e] (kill! child) {:error e})
             t0 (System/currentTimeMillis)]
         ;; Anything thrown while waiting (cancelled?, reading the port)
