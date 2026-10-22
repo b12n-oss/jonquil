@@ -820,8 +820,8 @@
      (get-gvalue! settings "gtk-interface-color-scheme" (gtk-interface-color-scheme-get-type)
                   g-value-get-enum)))
 
-;; --- fix wave item 7: the CSS rows read the provider's own serialisation,
-;; not the code-css atom mirror. gtk_css_provider_to_string:
+;; --- fix wave item 7: the CSS rows read the provider's own serialisation.
+;; gtk_css_provider_to_string:
 ;; gtkcssprovider.h:46 (gtk4 4.22.4, GDK_AVAILABLE_IN_ALL), fixed arity
 ;; (provider) -> a newly allocated char* the caller frees -- buffer-text's
 ;; own pattern (:pointer, then ptr->string, then g_free).

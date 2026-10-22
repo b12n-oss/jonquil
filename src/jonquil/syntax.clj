@@ -556,25 +556,10 @@
           to-remove (take (- (count m) max-size) sorted-entries)]
       (apply dissoc m (map first to-remove)))))
 
+;; Doc lookups are cached in jonquil.docs/symbol-doc, keyed by namespace;
+;; upstream's cache here keyed by name alone, so the same name in two
+;; namespaces could be served the other's doc. It had no callers and is gone.
 (defonce buffer-symbols-cache (atom {}))
-(defonce docstring-cache (atom {}))
-
-(defn get-cached-symbol-doc
-  "Retrieves doc information map for `sym-name`, with bounded caching.
-   Caches runtime/special-form doc lookups and buffer lookups."
-  ([sym-name]
-   (get-cached-symbol-doc sym-name nil nil))
-  ([sym-name ^String text]
-   (get-cached-symbol-doc sym-name text nil))
-  ([sym-name ^String text pos]
-   (let [k (if (and text (not (str/blank? text)))
-             [(str sym-name) (hash text) pos]
-             (str sym-name))]
-     (if-let [hit (get @docstring-cache k)]
-       hit
-       (let [res (get-symbol-doc sym-name text pos)]
-         (swap! docstring-cache (fn [m] (prune-cache (assoc m k res) 512)))
-         res)))))
 
 (def all-core-builtins
   "Cached set of all clojure.core public var names combined with syntax core-builtins."

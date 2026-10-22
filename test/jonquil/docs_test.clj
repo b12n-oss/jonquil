@@ -55,6 +55,21 @@
     (is (not= (docs/symbol-doc 'user "zork" t1 0) (docs/symbol-doc 'user "zork" t2 0))
         "a changed buffer isn't served the old doc")))
 
+(deftest the-same-name-in-two-namespaces-keeps-its-own-doc-test
+  ;; The cache upstream's syntax kept was keyed by name alone, so the second
+  ;; namespace was served the first one's doc.
+  (docs/clear-doc-cache!)
+  (doseq [[n doc] [['p4.docs.twin-a "From a."] ['p4.docs.twin-b "From b."]]]
+    (create-ns n)
+    (binding [*ns* (the-ns n)]
+      (eval '(clojure.core/refer-clojure))
+      (eval (list 'defn 'twin doc '[x] 'x))))
+  (try
+    (is (= "From a." (:doc (docs/symbol-doc 'p4.docs.twin-a "twin" "" 0))))
+    (is (= "From b." (:doc (docs/symbol-doc 'p4.docs.twin-b "twin" "" 0))) "not a's cached doc")
+    (is (= "From a." (:doc (docs/symbol-doc 'p4.docs.twin-a "twin" "" 0))) "and a's is still a's")
+    (finally (remove-ns 'p4.docs.twin-a) (remove-ns 'p4.docs.twin-b))))
+
 (deftest a-failed-lookup-is-not-cached-test
   (docs/clear-doc-cache!)
   (let [calls (atom 0)]
