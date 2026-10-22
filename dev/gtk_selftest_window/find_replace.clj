@@ -287,11 +287,12 @@
   editor, and the program must STILL be running (stopped in this row's
   own cleanup, not by the Escape press).
 
-  Each condition is waited for in its own step: the bar is open and holds
-  focus before Escape is sent, and a wrong Stop gets a full second to print
-  \"; interrupted\" before the row reads that it didn't. Doing all of it in
-  one GTK step, as this row once did, passed with the bug in place: the
-  Stop's interrupt hadn't landed yet when still-running? was read."
+  The bar must be open and hold focus before Escape is sent, and a wrong
+  Stop is read from the context's stop-requested flag, which stop-eval!
+  sets at once, in the same step as the Escape. This row once opened the
+  bar, sent Escape and read still-running? in one GTK step, and so passed
+  when the bar never opened: Escape then fell through to Stop, whose
+  interrupt hadn't landed yet."
   [ui]
   (go-row :window-escape-closes-bar-while-running support/check
     (let [ed (:editor ui) fb (:find-bar ui) win (:window ui)
@@ -303,16 +304,16 @@
           _ (on-gtk (find-bar/open! fb :find))
           opened? (await-until 2000 20 #(and (not (zero? (g/gtk-widget-get-visible (:box fb))))
                                              (bar-focused?)))
-          [mark handled] (on-gtk [(support/out-end-offset ui)
-                                  ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)])
+          [handled stop-requested?]
+          (on-gtk [((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil)
+                   (boolean (some-> @(:running-state (:ctx (:session ui))) :stop-requested deref))])
           closed? (await-until 2000 20 #(and (zero? (g/gtk-widget-get-visible (:box fb)))
                                              (= (g/gtk-root-get-focus win) (:view ed))))
-          interrupted? (await-until 1000 20 #(str/includes? (support/since ui mark) "; interrupted"))
           still-running? (on-gtk (eval/evaluating? (:ctx (:session ui))))]
       (support/check :window-escape-closes-bar-while-running
-                     (and started? opened? (= 1 handled) closed? (not interrupted?) still-running?)
-                     {:started started? :opened opened? :handled handled :closed closed?
-                      :interrupted interrupted? :still-running still-running?})
+                     (and started? opened? (= 1 handled) (not stop-requested?) closed? still-running?)
+                     {:started started? :opened opened? :handled handled :stop-requested stop-requested?
+                      :closed closed? :still-running still-running?})
       (on-gtk (find-bar/close! fb)
               ((:stop!* ui)))
       (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
