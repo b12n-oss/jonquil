@@ -60,7 +60,7 @@
 (defn row-theme-css
   "dark's code-css (jonquil.theme/code-css) at the default font size, read
   back from the shared GtkCssProvider's OWN serialisation (:code-css*
-  calls gtk_css_provider_to_string, not the code-css atom mirror).
+  calls gtk_css_provider_to_string).
   Measured (2026-09-26): GTK normalises hex
   colours to rgb(r,g,b) and re-orders/re-indents the declarations, but
   keeps \"font-size: <n>px;\" verbatim -- background-color rgb(0,0,0),

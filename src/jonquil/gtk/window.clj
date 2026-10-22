@@ -1979,17 +1979,10 @@
 
 (defn- reload-code-css!
   "Loads theme t's CSS (jonquil.theme/code-css) at font size px into the
-  one shared GtkCssProvider, and remembers the CSS string in code-css
-  (TH.T4, an atom kept for now; fix wave item 7 moved :code-css*'s own
-  self-test read to the provider's own gtk_css_provider_to_string
-  serialisation instead, via g/css-provider-string, so this mirror is no
-  longer read anywhere -- left in place since removing it threads a
-  parameter change through five functions for no behavioural gain, out of
-  scope for this item)."
-  [provider t px code-css]
-  (let [css (theme/code-css t px)]
-    (reset! code-css css)
-    (g/gtk-css-provider-load-from-string provider css)))
+  one shared GtkCssProvider. The self-test's :code-css* reads the CSS back
+  from the provider itself (g/css-provider-string), so nothing keeps a copy."
+  [provider t px]
+  (g/gtk-css-provider-load-from-string provider (theme/code-css t px)))
 
 (defn- do-zoom!
   "Cmd/Ctrl+=/-/0: the next font size from commands/zoom (P3.T1), reloaded
@@ -1997,10 +1990,10 @@
   activate!) so both views resize live -- probe 4's measured behaviour.
   TH.T4: reloads under the CURRENT theme (theme-name), not a fixed one, so
   a zoom never drops back to the default theme's colours."
-  [provider zoom-px theme-name code-css direction]
+  [provider zoom-px theme-name direction]
   (let [px (commands/zoom @zoom-px direction)]
     (reset! zoom-px px)
-    (reload-code-css! provider (theme/theme @theme-name) px code-css)))
+    (reload-code-css! provider (theme/theme @theme-name) px)))
 
 (defn- apply-window-theme!
   "TH.T4: applies theme k to the editor, console, find bar, the shared CSS
@@ -2014,14 +2007,14 @@
   gtk-interface-color-scheme, instead (g/set-color-scheme!, measured
   live to darken the chrome exactly as the old boolean did -- see
   ffi.clj's own citation)."
-  [{:keys [tabs cv provider zoom-px theme-name code-css]} k]
+  [{:keys [tabs cv provider zoom-px theme-name]} k]
   (let [t (theme/theme k)]
     ;; Tabs plan P2.T2: every tab's editor and find bar, not just one.
     (doseq [{:keys [ed fb]} @tabs]
       (editor/apply-theme! ed t)
       (find-bar/apply-theme! fb t))
     (cview/apply-theme! cv t)
-    (reload-code-css! provider t @zoom-px code-css)
+    (reload-code-css! provider t @zoom-px)
     (g/set-color-scheme! (g/gtk-settings-get-default) (:dark? t))
     (reset! theme-name k))
   nil)
@@ -3153,11 +3146,8 @@
         _ (reset! *cv cv)
         provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
-        ;; TH.T4: the active theme's name and the last CSS string loaded,
-        ;; kept next to zoom-px -- TH.T5 loads theme-name's initial value
-        ;; from settings. code-css is now write-only (fix wave item 7:
-        ;; :code-css* reads the CSS provider itself instead) -- see
-        ;; reload-code-css!'s docstring.
+        ;; TH.T4: the active theme's name, kept next to zoom-px -- TH.T5
+        ;; loads its initial value from settings.
         theme-name (atom theme/default-theme)
         ;; Auto theme: what the user picked (:auto or a theme key), the
         ;; function that asks the system (repointed by a self-test hook),
@@ -3167,7 +3157,6 @@
         system-dark-fn* (atom appearance/system-dark?)
         poll-armed? (atom false)
         arm-count (atom 0)
-        code-css (atom nil)
         ;; P4.T3: this window's own registry of P4 popovers (completion,
         ;; quick doc, rename -- P4.T4-T7 register theirs via
         ;; register-popover-fn as they're created); close-popovers-fn is
@@ -3314,9 +3303,9 @@
         toggle-focus-fn (fn [] (do-toggle-focus! win (:ed (active-tab)) cv))
         clear-console-fn (fn [] (do-clear-console! cv))
         clear-last-fn (fn [] (do-clear-last-output! cv))
-        zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name code-css direction))
+        zoom-fn (fn [direction] (do-zoom! provider zoom-px theme-name direction))
         theme-ctx {:tabs tabs :cv cv :provider provider :zoom-px zoom-px :theme-name theme-name
-                   :code-css code-css :settings-path settings-path* :status-label status-label
+                   :settings-path settings-path* :status-label status-label
                    :evaluating? evaluating-fn :theme-choice theme-choice
                    :system-dark-fn* system-dark-fn* :poll-armed? poll-armed?
                    :arm-count arm-count :closing? closing?}
@@ -3785,9 +3774,8 @@
                  ;; TH.T4 self-test hooks: applies a theme (never saves --
                  ;; TH.T5's job), reads back the active theme name, and
                  ;; reads back the shared CSS provider's OWN serialisation
-                 ;; (fix wave item 7 -- the code-css atom was a mirror the
-                 ;; rows could drift from; g/css-provider-string asks the
-                 ;; provider itself instead).
+                 ;; (g/css-provider-string asks the provider itself, so a
+                 ;; row can't read a copy that drifted from it).
                    :set-theme!* set-theme-fn
                    :theme-name* (fn [] @theme-name)
                  ;; Auto theme: the choice (:auto or a theme key), repoints
