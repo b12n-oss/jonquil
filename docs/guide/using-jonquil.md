@@ -1356,7 +1356,8 @@ at a port the OS picks, and the node process it drives listens on a second
 socket. ClojureScript's stock node script (`cljs/repl/node_repl.js`)
 listens on every network interface, so Jonquil's launcher rewrites that one
 line at run time, in a copy it writes to a temporary folder and removes on
-exit, and the socket then listens on `127.0.0.1` only. If a ClojureScript
+exit, and the socket then listens on `127.0.0.1` only, on a port node gets
+from the OS and reports back, so no other program can take it first. If a ClojureScript
 version changes that line, the launcher refuses to start rather than leave
 the socket open, and the console says why. Neither listener checks who's
 connecting, which is the same exposure as Jonquil's own nREPL children: while

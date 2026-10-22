@@ -597,10 +597,19 @@ Five namespaces and one launcher make it up:
   `jonquil-cljs-prepl <port>`, and exits when its stdin ends, which is how a
   crashed Jonquil takes the child down. ClojureScript's `node_repl.js` listens
   on every interface, so the launcher serves a patched copy of it through a
-  classloader: the one line `.listen(PORT);` becomes
-  `.listen(PORT, "127.0.0.1");`, and if a ClojureScript version doesn't
-  contain that line the launcher exits with an error. The copy lives in a
-  temp folder that `deleteOnExit` removes.
+  classloader: the one line `.listen(PORT);` becomes a listen on port 0 at
+  `127.0.0.1`, and if a ClojureScript version doesn't contain that line the
+  launcher exits with an error. node then writes the port the OS gave it to
+  `port-<PORT>` in the copy's folder (through a rename), with `PORT` now a
+  per-env token rather than a port. The launcher replaces
+  `cljs.repl.node/create-socket`, which `setup` calls every 50 ms until node
+  answers, with one that reads that file, connects to the port in it and
+  deletes it; a missing file throws like a refused connect, so `setup` just
+  tries again. ClojureScript's own way, a port picked in the JVM and bound
+  later by node, left a gap in which another process could take the port, and
+  `setup` would then connect to that process. The function's arglists are
+  checked first, as for the browser's `cljs.repl.server/start`. The copy
+  lives in a temp folder that `deleteOnExit` removes.
 - `jonquil.nrepl.cljs-child` finds `clojure` (`JONQUIL_CLOJURE`, else the
   login shell's `PATH`), starts the launcher in the project directory with
   stdin held open, waits for the ready line (60 s, since a first run
