@@ -1405,8 +1405,14 @@ leaves that evaluation waiting until you press Stop, because the page can't
 say it's leaving until its code finishes.
 
 `println` output reaches Jonquil's console, including output printed after an
-evaluation finished (a timer that fires later), as on node. `js/console.log`
-stays in the browser's own console. As with node, there is no
+evaluation finished (a timer that fires later), as on node. So does
+`js/console.log` (and `info`, `warn`, `error`, `debug`): it still logs in
+the browser's devtools, and its arguments also print to Jonquil's console,
+joined by spaces, with a non-string printed as `pr-str` would. It arrives
+in batches a tenth of a second apart, at most 100,000 characters each (a
+note counts what was dropped). Format strings such as `%s` aren't applied
+on Jonquil's side, and in devtools each log's source link now points at
+Jonquil's wrapper instead of the line that logged. As with node, there is no
 stdin and no inspector, F12 stays in the buffer, and completion and quick
 docs work the same way.
 
@@ -2106,8 +2112,8 @@ than being surprises you'd otherwise have to rediscover:
 - A loop that never ends freezes the tab until you reload it, and an
   evaluation sent after the tab closed fails until you reload it. One
   still running when the tab closed waits until Stop.
-- `println` output reaches Jonquil's console, even after an evaluation
-  finished, but `js/console.log` stays in the browser's own console.
+- `println` and `js/console.log` output reach Jonquil's console, even after
+  an evaluation finished; `console.log` still logs in the browser too.
 - No stdin and no inspector; F12 stays in the buffer.
 - Completion comes from the buffer and Clojure core names, and quick docs
   from `cljs.repl/doc` while the process is idle.

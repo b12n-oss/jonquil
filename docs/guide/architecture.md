@@ -675,7 +675,21 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   the page says goodbye itself. The launcher wraps the `:ready` handler,
   which each page that connects (a reload included) posts first, and
   `send-for-eval`, so the setup that handler sends carries a `pagehide`
-  listener. On `pagehide` (tab closed, reloaded or navigated away) the
+  listener. The same setup wraps the page's `console.log`, `info`, `warn`,
+  `error` and `debug`: each still calls the browser's own, then queues its
+  arguments, joined by spaces, for `clojure.browser.repl/repl-print`, the
+  path `println` takes to the prepl's `:out`. The queue goes out as one
+  `repl-print` every 100 ms, at most 100,000 characters of it, with a note
+  counting the rest. Every print is its own numbered post, and after
+  `:ready` the server starts from whichever number arrives first, so a
+  print that beat the setup's own `:result` would leave that result, and
+  the page's connection, unhandled until a reload; the delay keeps the
+  first console send well behind it. Batching also keeps a page that logs
+  in a loop to a few posts a second, since a post that fails all of the
+  client's 10 retries leaves a gap the server's ordering never gets past.
+  `println` has both races in ClojureScript's own client, unchanged here. A
+  `busy` flag stops a console call made synchronously while forwarding
+  (inside `pr-str`, say) from forwarding again. On `pagehide` (tab closed, reloaded or navigated away) the
   listener sends `navigator.sendBeacon` with `{:type :jonquil/bye :gen N}`,
   N being that page's number. A `:jonquil/bye` handler for the current page
   closes the queued connections, marks the page gone, and completes an

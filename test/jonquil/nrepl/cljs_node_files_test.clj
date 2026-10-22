@@ -10,7 +10,8 @@
 (deftest launcher-text-is-the-source-test
   (is (str/includes? cljs-node-files/launcher-text "(ns jonquil.cljs-node-launch"))
   (is (str/includes? cljs-node-files/launcher-text ".listen(0, \\\"127.0.0.1\\\", function () {"))
-  (is (str/includes? cljs-node-files/launcher-text "cljs.repl.node/create-socket")))
+  (is (str/includes? cljs-node-files/launcher-text "cljs.repl.node/create-socket"))
+  (is (str/includes? cljs-node-files/launcher-text "p=clojure.browser.repl.repl_print")))
 
 (deftest ensure-launcher-writes-once-test
   (let [base (str (temp-dirs/temp-dir! "jonquil-cljs-node-files-"))
