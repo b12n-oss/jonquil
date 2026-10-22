@@ -226,9 +226,16 @@ GTK thread never parks. A go block runs on its own OS thread, the default
 which hop onto the GTK thread and park the go block until the call
 finishes; a row's body never calls GTK directly. When a row throws,
 `go-row` catches it, records a FAIL, and the run moves on to the next row.
-In the window group, the driver clears the editor and the console's input
-before each row and waits for the engine to go idle, so one row's
-leftovers don't leak into the next. Every driver closes its window through
+The window driver and every dialect driver clear the editor and the
+console's input before each row and wait for the engine to go idle, so one
+row's leftovers don't leak into the next. An engine still busy at that
+deadline was left running by an earlier row, usually one that threw before
+its own Stop, so `gtk-async/ready-for-row?` presses Stop and waits once
+more. If that frees it, the row runs on an idle engine and only the row
+that threw fails. Otherwise the row is skipped with a `:row-skipped-busy`
+FAIL instead of failing slowly with "Evaluation already in progress".
+Where Stop can't interrupt (shadow-cljs ignores it), that means every
+later row is skipped, even rows that never evaluate. Every driver closes its window through
 `gtk-async/close-window-bounded!`, which asks the window to close and then
 waits a bounded time for it to go away. If it's still open, the run
 records a FAIL and exits 1 instead of hanging.

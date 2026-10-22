@@ -10,7 +10,7 @@
   close-forced fallback only, and after-close-checks! runs once
   main/start! returns, before SUMMARY."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
-            [gtk-async :as ga :refer [await-until go-row on-gtk]]
+            [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-jank.rows :as rows]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
@@ -36,19 +36,21 @@
 (def ^:private PER-ROW-MS
   ;; estimate: the longest row is row-jank-reset-restarts (two Runs, each
   ;; up to 15000 ms of child start plus connect on a loaded machine), plus
-  ;; run-row's own 10000 ms idle wait.
-  45000)
+  ;; run-row's own idle wait (10000 ms, twice when it has to press Stop).
+  55000)
 
 (defn- run-row
   "Resets the editor and the console's input, waits (up to 10000 ms) for
-  the evaluator to go idle, then runs row and parks until its channel
+  the evaluator to go idle (else presses Stop, see
+  gtk-async/ready-for-row?), then runs row and parks until its channel
   delivers."
   [ui row]
   (go-row :row-reset support/check
     (on-gtk (editor/set-text! (:editor ui) "")
             (cview/clear-input! (:console ui)))
-    (await-until 10000 20 #(rows/idle? ui))
-    (<! (row ui))))
+    (when (ga/ready-for-row? {:idle? #(rows/idle? ui) :stop! (:stop!* ui) :deadline-ms 10000}
+                             support/check)
+      (<! (row ui)))))
 
 (defonce ^:private finished? (atom false))
 

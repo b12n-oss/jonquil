@@ -40,7 +40,7 @@
   exit code is computed from, never a separate late FAIL that would need
   its own tally line."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
-            [gtk-async :as ga :refer [await-until go-row on-gtk]]
+            [gtk-async :as ga :refer [go-row on-gtk]]
             [gtk-selftest-nrepl.rows :as rows]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
@@ -76,19 +76,21 @@
 (def ^:private PER-ROW-MS
   ;; estimate (D2.T5's row tables): row-nrepl-close-kills-child's own
   ;; failing path plus its shell waits and runs is about 35000 ms, plus
-  ;; run-row's 20000 ms idle wait.
-  60000)
+  ;; run-row's idle wait (20000 ms, twice when it has to press Stop).
+  80000)
 
 (defn- run-row
   "Resets the editor and the console's input, waits (up to 20000 ms) for
-  the nREPL evaluator to go idle, then runs row and parks until its
+  the nREPL evaluator to go idle (else presses Stop, see
+  gtk-async/ready-for-row?), then runs row and parks until its
   channel delivers."
   [ui row]
   (go-row :row-reset support/check
     (on-gtk (editor/set-text! (:editor ui) "")
             (cview/clear-input! (:console ui)))
-    (await-until 20000 20 #(rows/idle? ui))
-    (<! (row ui))))
+    (when (ga/ready-for-row? {:idle? #(rows/idle? ui) :stop! (:stop!* ui) :deadline-ms 20000}
+                             support/check)
+      (<! (row ui)))))
 
 ;; Same reasoning as gtk-selftest-window's own finished? -- set only where
 ;; SUMMARY prints, so an early quit can never report every result so far
