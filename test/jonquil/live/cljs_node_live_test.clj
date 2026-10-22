@@ -366,6 +366,7 @@
       (let [{:keys [result]} (run e "(+ 1 2)")]
         (is (= :ok (:status result)) (pr-str result)))
       (is (str/includes? (first @seen) "pagehide") "the page's setup installs the listener")
+      (is (str/includes? (first @seen) "clojure.browser.repl.repl_print") "and the console forwarding")
       (is (str/includes? (first @seen) ":gen 1") (subs (first @seen) 0 (min 200 (count (first @seen)))))
       ;; The page leaves just as an evaluation goes out: it reads the form
       ;; but never answers, and posts nothing more. The goodbye completes
@@ -441,15 +442,19 @@
               (loop [] (when (and (not (late?)) (< (System/currentTimeMillis) deadline))
                          (Thread/sleep 50) (recur)))
               (is (late?) (pr-str @out))))
-          ;; js/console.log stays in the browser's own console.
+          ;; js/console.log reaches Jonquil's console too, its arguments
+          ;; joined by spaces, a non-string one printed as pr-str would.
           (let [out (atom []) done (promise)]
-            (ev/eval! e "(js/console.log \"via-console\")"
+            (ev/eval! e "(js/console.log \"via-console\" 42 :kw)"
                       {:run? false
                        :on-output (fn [k s] (swap! out conj [k s]))
                        :on-complete (fn [r] (deliver done r))})
             (is (= :ok (:status (deref done 60000 :timeout))))
-            (Thread/sleep 1000)
-            (is (not (str/includes? (apply str (map second @out)) "via-console")) (pr-str @out)))
+            (let [seen? #(str/includes? (apply str (map second @out)) "via-console 42 :kw\n")
+                  deadline (+ (System/currentTimeMillis) 5000)]
+              (loop [] (when (and (not (seen?)) (< (System/currentTimeMillis) deadline))
+                         (Thread/sleep 50) (recur)))
+              (is (seen?) (pr-str @out))))
           ;; Leaving the page closes its connection as a closed tab does:
           ;; the next evaluation fails fast instead of waiting for Stop.
           (let [{:keys [result]} (run e "(js/setTimeout (fn [] (set! (.-location js/window) \"about:blank\")) 300)")]

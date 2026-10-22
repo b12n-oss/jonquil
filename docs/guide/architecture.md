@@ -675,7 +675,12 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   the page says goodbye itself. The launcher wraps the `:ready` handler,
   which each page that connects (a reload included) posts first, and
   `send-for-eval`, so the setup that handler sends carries a `pagehide`
-  listener. On `pagehide` (tab closed, reloaded or navigated away) the
+  listener. The same setup wraps the page's `console.log`, `info`, `warn`,
+  `error` and `debug`: each still calls the browser's own, then hands its
+  arguments, joined by spaces, to `clojure.browser.repl/repl-print`, the
+  path `println` takes to the prepl's `:out`. A flag stops a console call
+  made while forwarding (the REPL client's own "Could not send") from
+  looping. On `pagehide` (tab closed, reloaded or navigated away) the
   listener sends `navigator.sendBeacon` with `{:type :jonquil/bye :gen N}`,
   N being that page's number. A `:jonquil/bye` handler for the current page
   closes the queued connections, marks the page gone, and completes an

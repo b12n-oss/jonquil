@@ -233,7 +233,8 @@
 
 (def ^:dynamic ^:private *bye-gen*
   "Bound while the :ready handler runs, to the connecting page's number:
-  send-for-eval then appends the pagehide listener to that page's setup."
+  send-for-eval then appends the console forwarding and the pagehide
+  listener to that page's setup."
   nil)
 
 (defn- bye-js
@@ -247,8 +248,27 @@
        "window.addEventListener('pagehide',function(){"
        "try{navigator.sendBeacon(u,'{:type :jonquil/bye :gen " gen "}')}catch(e){}});})();"))
 
+(def ^:private console-js
+  "Plain JS for a page: console.log, info, warn, error and debug still log in
+  the browser and also print to Jonquil's console, through the browser
+  REPL's own clojure.browser.repl/repl-print, the path println takes. A
+  string prints as it is, any other value as pr-str prints it, and the
+  arguments are joined by spaces. busy keeps a console call made while
+  forwarding (the REPL's own \"Could not send\") from looping, and the outer
+  try keeps a page without the REPL client from failing its setup."
+  (str "\n;(function(){try{var c=window.console,p=clojure.browser.repl.repl_print,busy=false;"
+       "if(!c||c.__jonquil)return;c.__jonquil=true;"
+       "['log','info','warn','error','debug'].forEach(function(k){var o=c[k];"
+       "if(typeof o!=='function')return;"
+       "c[k]=function(){o.apply(c,arguments);if(busy)return;busy=true;"
+       "try{p(Array.prototype.map.call(arguments,function(a){"
+       "if(typeof a==='string')return a;"
+       "try{return cljs.core.pr_str(a)}catch(e){return String(a)}}).join(' ')+'\\n')}"
+       "catch(e){}finally{busy=false}}});}catch(e){}})();"))
+
 (defn- page-bye!
-  "Wires the pagehide goodbye: send-for-eval appends bye-js to the setup the
+  "Wires the pagehide goodbye and the console forwarding: send-for-eval
+  appends console-js and bye-js to the setup the
   :ready handler sends each page that connects, and a :jonquil/bye post from
   the current page drops the queued connections, marks the page gone, and
   fails an evaluation still waiting for that page's answer. A goodbye from
@@ -275,7 +295,7 @@
      (fn [_]
        (fn
          ([form f] (orig-sfe form f))
-         ([conn form f] (orig-sfe conn (if *bye-gen* (str form (bye-js *bye-gen*)) form) f)))))
+         ([conn form f] (orig-sfe conn (if *bye-gen* (str form console-js (bye-js *bye-gen*)) form) f)))))
     (.addMethod ^clojure.lang.MultiFn handle-post :ready
                 (fn [m conn opts]
                   (binding [*bye-gen* (swap! page-gen inc)]
