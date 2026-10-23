@@ -143,7 +143,7 @@
                                               {:syms analyzer-syms :prompt-ns 'cljs.user
                                                :text analyzer-buf :prefix "deep."}))))))
     (is (not (contains? (cands "twice") "twice")) "a candidate equal to the prefix is dropped")
-    (is (= [{:symbol "mapcat" :category :user}]
+    (is (= [{:symbol "mapcat" :category :core}]
            (cljs-node/analyzer-candidates {:syms analyzer-syms :prompt-ns nil :text nil :prefix "map"}))
         "nil text and prompt-ns never throw; cljs.core still answers")))
 

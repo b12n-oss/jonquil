@@ -302,11 +302,13 @@
 
 (defn candidate-sort-key
   "candidates' sort key for cand under the typed prefix: exact-prefix
-  matches first, then category (:user, :special, :builtin, anything else
-  last), then the name, case-insensitively."
+  matches first, then category (:user, :special, :builtin, :core for a
+  core name only the analyzer knows, anything else last), then the name,
+  case-insensitively. :core and :remote rank after :builtin on purpose:
+  the analyzer's names append to today's offline order, never reorder it."
   [prefix {:keys [symbol category]}]
   [(if (str/starts-with? symbol prefix) 0 1)
-   (case category :user 0 :special 1 :builtin 2 3)
+   (case category :user 0 :special 1 :builtin 2 :core 3 4)
    (str/lower-case symbol)
    symbol])
 

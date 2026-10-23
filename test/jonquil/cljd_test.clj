@@ -152,4 +152,5 @@
 
 (deftest candidate-sort-key-test
   (is (= [0 0 "map" "map"] (cljd/candidate-sort-key "ma" {:symbol "map" :category :user})))
-  (is (= [1 3 "a.b/map" "a.b/map"] (cljd/candidate-sort-key "x" {:symbol "a.b/map" :category :remote}))))
+  (is (= [1 3 "mapcat" "mapcat"] (cljd/candidate-sort-key "x" {:symbol "mapcat" :category :core})))
+  (is (= [1 4 "a.b/map" "a.b/map"] (cljd/candidate-sort-key "x" {:symbol "a.b/map" :category :remote}))))

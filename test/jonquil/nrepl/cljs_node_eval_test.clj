@@ -547,9 +547,10 @@
     (fn [srv {:keys [ev]}]
       (is (= :ok (:status (:result (run ev "(def a 1)" {:run? true})))))
       (let [syms (offered ev "str/u")]
-        (is (pos? (apropos-sends srv)) "the complete tried a fetch")
+        (is (= 1 (apropos-sends srv)) "the complete tried a fetch")
         (is (not (contains? syms "str/upper-case")) (pr-str syms)))
-      (is (contains? (offered ev "ma") "map") "offline still answers"))))
+      (is (contains? (offered ev "ma") "map") "offline still answers")
+      (is (= 1 (apropos-sends srv)) "a garbage answer buys no second attempt"))))
 
 (deftest fetch-timeout-drains-and-eval-recovers-test
   (with-node {:apropos-val "(cljs.user/twice)" :hold-apropos-ms 400}
@@ -561,9 +562,21 @@
       ;; the drain discipline
       (is (contains? (offered ev "ma") "map"))
       (is (= 1 (apropos-sends srv)))
+      (is (contains? (offered ev "ma") "map"))
+      (is (= 1 (apropos-sends srv)) "a timeout buys no second attempt")
       (is (= :ok (:status (:result (run ev "(+ 1 2)" {:run? false})))))
       (is (contains? (offered ev "ma") "map") "one new attempt per stale mark")
       (is (= 2 (apropos-sends srv))))))
+
+(deftest core-names-sort-with-the-builtins-test
+  ;; typing ma must still land on map: analyzer cljs.core names are
+  ;; :builtin, never :user, so they can't outrank the offline builtins
+  (with-node {:apropos-val "(cljs.core/make-hierarchy cljs.core/map-indexed)"} {}
+    (fn [_srv {:keys [ev]}]
+      (run ev "(def a 1)" {:run? true})
+      (let [cands (ev/complete ev "ma" alias-buf 0 nil)]
+        (is (contains? (set (map :symbol cands)) "map-indexed") (pr-str cands))
+        (is (= "map" (:symbol (first cands))) (pr-str (take 3 cands)))))))
 
 (deftest dead-child-completes-offline-test
   (with-node {:apropos-val "(cljs.user/twice)"} {}

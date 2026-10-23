@@ -182,10 +182,12 @@
 (defn analyzer-candidates
   "Completion candidates from the analyzer's qualified symbols (syms),
   spelled the way the buffer can use them: a short name for prompt-ns's
-  own and cljs.core's (:user), alias/name for a namespace the buffer's ns
-  form aliases (:user), the bare name the buffer refers (:user), and the
-  full qualified name only when prefix contains / or . (:remote, so it
-  sorts after everything offline). Case-insensitive prefix match, the
+  own (:user) and cljs.core's (:core, ranking after the offline builtins,
+  so a core name the offline list lacks can't outrank it: typing ma must
+  still land on map), alias/name
+  for a namespace the buffer's ns form aliases (:user), the bare name the
+  buffer refers (:user), and the full qualified name only when prefix
+  contains / or . (:remote, so it sorts after everything offline). Case-insensitive prefix match, the
   prefix itself dropped, distinct by :symbol, unsorted. Never throws."
   [{:keys [syms prompt-ns text prefix]}]
   (let [prefix (or prefix "")
@@ -199,7 +201,8 @@
                :let [ns-str (namespace sym) nm (name sym)]
                :when ns-str
                [s cat] (cond-> []
-                         (or (= ns-str pns) (= ns-str "cljs.core")) (conj [nm :user])
+                         (= ns-str pns) (conj [nm :user])
+                         (and (= ns-str "cljs.core") (not= ns-str pns)) (conj [nm :core])
                          (contains? ns->alias ns-str) (conj [(str (get ns->alias ns-str) "/" nm) :user])
                          (= ns-str (get refers nm)) (conj [nm :user])
                          qualified-ok? (conj [(str sym) :remote]))

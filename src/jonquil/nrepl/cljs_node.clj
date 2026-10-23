@@ -495,10 +495,12 @@
               (case outcome
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
-                        (finish! ev opts result)
                         ;; the analyzer may know new names now; the next
-                        ;; completion's backstop fetches them
-                        (swap! state assoc :analyzer-stale? true))
+                        ;; completion's backstop fetches them. Marked
+                        ;; before finish!, so a completion racing
+                        ;; on-complete can't miss the mark (review M2)
+                        (swap! state assoc :analyzer-stale? true)
+                        (finish! ev opts result))
                 (if (stopping? ev)
                   (finish! ev opts {:status :interrupted})
                   (do (kill-child! ev)
@@ -584,7 +586,10 @@
     (try
       (let [offline (cljd/candidates (:profile selection) prefix text pos extra-context)]
         (try
-          (when (and (or (nil? (:analyzer-syms @state)) (:analyzer-stale? @state))
+          ;; stale alone arms the fetch: an empty cache must not, or a
+          ;; failed fetch (a gone page, say) would retry on every
+          ;; completion and hold :helping ~2 s each time (review I1)
+          (when (and (:analyzer-stale? @state)
                      (live? this) (nil? (:running @state)))
             ;; the fetch runs here, on ask-help!'s worker, never after an
             ;; evaluation (see fetch-syms!'s docstring)

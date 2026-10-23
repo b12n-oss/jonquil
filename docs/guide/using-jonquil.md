@@ -645,7 +645,8 @@ Candidates come from Clojure's special forms and core built-ins, whatever
 the Definitions pane itself defines, and whatever your program has
 defined by running or by typing at the prompt. Each row names where it
 came from: `special`, `builtin`, `buffer` for a name this file defines,
-and `user` for the rest. The list is as tall as its names, up to eight
+`user` for the rest and, for launched ClojureScript's analyzer names,
+`core` (a cljs.core public) or `remote` (a fully-qualified one). The list is as tall as its names, up to eight
 rows, and scrolls past that.
 
 When a server answers completion (JVM Clojure, ClojureScript, any nREPL
@@ -1363,7 +1364,15 @@ the socket open, and the console says why. Neither listener checks who's
 connecting, which is the same exposure as Jonquil's own nREPL children: while
 the window is open, any user on this machine could send code to the process.
 
-Completion offers the buffer's names and Clojure core's. Quick
+Completion offers the buffer's names and Clojure core's, and once
+something ran, the publics of every namespace the session loaded, asked
+from the compiler's analyzer. Names arrive spelled the way this buffer can
+use them: `str/upper-case` when the ns form aliases `clojure.string` as
+`str`, bare names for the current namespace and anything referred, and a
+full `some.ns/name` once the prefix contains a `.` or `/`. The list
+refreshes on the first completion after each evaluation, and today's
+candidates keep their order: the analyzer's extras append (rows labelled
+`core` for cljs.core names, `remote` for fully-qualified ones). Quick
 documentation comes from `cljs.repl/doc` while the process is idle. F12
 jumps to a definition in the same buffer only. There is no stdin and no
 inspector. Output the program prints after an evaluation has answered (a
@@ -2095,8 +2104,9 @@ than being surprises you'd otherwise have to rediscover:
   gone afterwards.
 - No stdin and no inspector.
 - F12 stays in the buffer.
-- Completion comes from the buffer and Clojure core names, and quick
-  docs from `cljs.repl/doc` while the process is idle.
+- Completion offers the buffer and Clojure core names and, once something
+  ran, every loaded namespace's publics, spelled by the buffer's ns form;
+  quick docs come from `cljs.repl/doc` while the process is idle.
 
 </details>
 
@@ -2115,8 +2125,9 @@ than being surprises you'd otherwise have to rediscover:
 - `println` and `js/console.log` output reach Jonquil's console, even after
   an evaluation finished; `console.log` still logs in the browser too.
 - No stdin and no inspector; F12 stays in the buffer.
-- Completion comes from the buffer and Clojure core names, and quick docs
-  from `cljs.repl/doc` while the process is idle.
+- Completion offers the buffer and Clojure core names and, once something
+  ran, every loaded namespace's publics, spelled by the buffer's ns form;
+  quick docs come from `cljs.repl/doc` while the process is idle.
 
 </details>
 
