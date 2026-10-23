@@ -647,7 +647,9 @@ defined by running or by typing at the prompt. Each row names where it
 came from: `special`, `builtin`, `buffer` for a name this file defines,
 `user` for the rest and, for launched ClojureScript's analyzer names,
 `core` (a cljs.core public) or `remote` (a fully-qualified one). The list is as tall as its names, up to eight
-rows, and scrolls past that.
+rows, and scrolls past that. Caret-anchored popups (this one, quick docs
+and rename) follow the caret while the view scrolls, and hide once the
+caret scrolls out of view.
 
 When a server answers completion (JVM Clojure, ClojureScript, any nREPL
 server, Jolt out of process, jank), Jonquil asks it without making you

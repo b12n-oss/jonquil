@@ -198,6 +198,28 @@
   (reset! (:open? pp) false)
   nil)
 
+(defn caret-visible?
+  "True when view's caret rectangle intersects its visible text rectangle
+  (both in buffer coordinates)."
+  [view]
+  (let [[cx cy cw ch] (g/caret-buffer-rect view)
+        [vx vy vw vh] (g/text-view-visible-rect view)]
+    (and (< cx (+ vx vw)) (> (+ cx (max 1 cw)) vx)
+         (< cy (+ vy vh)) (> (+ cy ch) vy))))
+
+(defn follow-caret!
+  "A scroll moved the text under pp's OPEN popover: re-points it at the
+  caret's new rectangle (show-at-caret!, the clean repositioning path), or
+  hides it once the caret left the visible text, so it never floats over
+  unrelated lines. A no-op while closed. GTK-thread only, like show and
+  hide (value-changed handlers run there)."
+  [pp]
+  (when @(:open? pp)
+    (if (caret-visible? (:view pp))
+      (show-at-caret! pp)
+      (hide! pp)))
+  nil)
+
 (defn open?
   "True between show-at-caret! and hide! on this popover."
   [pp]

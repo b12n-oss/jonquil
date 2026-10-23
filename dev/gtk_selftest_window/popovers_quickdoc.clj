@@ -6,6 +6,7 @@
             [gtk-selftest-window.support :as support]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
+            [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -504,3 +505,61 @@
       (on-gtk (support/check :quick-doc-fits-its-text
                              (and (pos? short-w) (< (* 2 short-w) long-w) (<= long-w 700))
                              {:short short-w :long long-w})))))
+
+(def ^:private filler
+  "Ten chars per line, so offsets stay easy to count."
+  ";; filler\n")
+
+(defn row-quick-doc-follows-scroll
+  "P4 parked item: with quick doc open, scrolling the view re-points the
+  popover at the caret's new rectangle (a small scroll), and hides it once
+  the caret leaves the visible text (a large one). gtk_adjustment_set_value
+  emits value-changed synchronously on the GTK thread, so each read after
+  an on-gtk set sees the handler's work done."
+  [ui]
+  (go-row :quick-doc-follows-scroll support/check
+    (let [ed (:editor ui) hp (:help-popover ui)
+          ;; an earlier row can leave the view scrolled, and the scroll
+          ;; settles a frame after set-text!: anchor at 0 before opening,
+          ;; so the popover opens pointed at settled coordinates
+          vadj (on-gtk (editor/set-text! ed (str (apply str (repeat 10 filler))
+                                                 "(map inc [1])\n"
+                                                 (apply str (repeat 200 filler))))
+                       (let [va (g/gtk-scrollable-get-vadjustment (:view ed))]
+                         (g/gtk-adjustment-set-value va 0.0)
+                         va))
+          _ (await-until 2000 20 #(zero? (long (g/gtk-adjustment-get-value vadj))))
+          _ (on-gtk (support/place-cursor! (:buf ed) 102)
+                    (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK))
+          opened? (await-until 2000 20 #(popover/open? hp))
+          y0 (on-gtk (second (g/popover-pointing-to (:popover hp))))
+          _ (on-gtk (g/gtk-adjustment-set-value vadj 100.0))
+          [open-small y1] (on-gtk [(popover/open? hp)
+                                   (second (g/popover-pointing-to (:popover hp)))])
+          _ (on-gtk (g/gtk-adjustment-set-value vadj 1500.0))
+          open-large (on-gtk (popover/open? hp))]
+      (on-gtk (support/check :quick-doc-follows-scroll
+                             (and opened? open-small (< y1 y0) (false? open-large))
+                             {:opened opened? :open-small open-small :y0 y0 :y1 y1
+                              :open-large open-large})
+              (popover/hide! hp)
+              (g/gtk-adjustment-set-value (g/gtk-scrollable-get-vadjustment (:view ed)) 0.0)))))
+
+(defn row-completion-hides-when-caret-scrolls-away
+  "Completion's popup is caret-anchored too: once the caret scrolls out of
+  the visible text, it hides instead of floating over unrelated lines."
+  [ui]
+  (go-row :completion-hides-when-caret-scrolls-away support/check
+    (let [ed (:editor ui) c (:completion ui)
+          _ (on-gtk (editor/set-text! ed (str "(ma\n" (apply str (repeat 200 filler))))
+                    (support/place-cursor! (:buf ed) 3)
+                    ((:complete!* ui)))
+          opened? (await-until 2000 20 #(popover/open? c))
+          vadj (on-gtk (g/gtk-scrollable-get-vadjustment (:view ed)))
+          _ (on-gtk (g/gtk-adjustment-set-value vadj 1500.0))
+          open-after (on-gtk (popover/open? c))]
+      (on-gtk (support/check :completion-hides-when-caret-scrolls-away
+                             (and opened? (false? open-after))
+                             {:opened opened? :open-after open-after})
+              (when (popover/open? c) (completion/close! c))
+              (g/gtk-adjustment-set-value (g/gtk-scrollable-get-vadjustment (:view ed)) 0.0)))))

@@ -128,7 +128,7 @@ handlers a person would use rather than the internal functions directly.
 
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 309 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 311 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
@@ -208,7 +208,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 7 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 309, 19, 15, 36, 4, 13, 5, 10 and 7 rows
+browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 7 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 311, 19, 15, 36, 4, 13, 5, 10 and 7 rows
 passing, in group order.
 
 </details>
