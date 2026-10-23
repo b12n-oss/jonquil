@@ -16,7 +16,11 @@
   (is (str/includes? cljs-node-files/launcher-text ":jonquil/ping"))
   (is (str/includes? cljs-node-files/launcher-text "jonquil-gen:"))
   (is (str/includes? cljs-node-files/launcher-text "e>=750") "the orphan give-up cap")
-  (is (str/includes? cljs-node-files/launcher-text "location.reload")))
+  (is (str/includes? cljs-node-files/launcher-text "location.reload"))
+  (is (str/includes? cljs-node-files/launcher-text "mkfifo") "node makes the stdin FIFO")
+  (is (str/includes? cljs-node-files/launcher-text "stdin:") "the ready line carries the token")
+  (is (str/includes? cljs-node-files/launcher-text "\"rw\"")
+      "the relay opens the FIFO read-write, so the open never blocks"))
 
 (deftest ensure-launcher-writes-once-test
   (let [base (str (temp-dirs/temp-dir! "jonquil-cljs-node-files-"))
