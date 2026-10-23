@@ -4,7 +4,8 @@
   (EDN lines from cljs.repl's prepl). No sockets, no processes and no GTK:
   receives text and maps."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [jonquil.cljd :as cljd]))
 
 ;; --- the console's sentences ---
 
@@ -155,3 +156,58 @@
     :err [:err (:val reply)]
     :tap [:out (str "tap> " (:val reply) "\n")]
     nil))
+
+;; --- analyzer completion (the compiler side knows every loaded ns) -------
+
+(def apropos-form
+  "Asks the compiler for every public var: cljs.repl/apropos is a macro, so
+  the analyzer answers at compile time and the runtime returns a literal.
+  Measured 2026-10-22: 1,302 symbols, 28,189 chars printed, 23-44 ms."
+  "(cljs.repl/apropos #\"\")")
+
+(def ^:private syms-cap
+  "The most analyzer symbols kept from one fetch. estimate: 15x a fresh
+  session's 1,302."
+  20000)
+
+(defn parse-apropos
+  "The apropos ret's :val as a vector of symbols, capped at syms-cap;
+  nil for anything else (unreadable, not a sequence, non-symbols)."
+  [val]
+  (when (string? val)
+    (let [v (try (edn/read-string val) (catch Throwable _ nil))]
+      (when (and (sequential? v) (seq v) (every? symbol? v))
+        (vec (take syms-cap v))))))
+
+(defn analyzer-candidates
+  "Completion candidates from the analyzer's qualified symbols (syms),
+  spelled the way the buffer can use them: a short name for prompt-ns's
+  own and cljs.core's (:user), alias/name for a namespace the buffer's ns
+  form aliases (:user), the bare name the buffer refers (:user), and the
+  full qualified name only when prefix contains / or . (:remote, so it
+  sorts after everything offline). Case-insensitive prefix match, the
+  prefix itself dropped, distinct by :symbol, unsorted. Never throws."
+  [{:keys [syms prompt-ns text prefix]}]
+  (let [prefix (or prefix "")
+        lower (str/lower-case prefix)
+        match? (fn [s] (and (not= s prefix) (str/starts-with? (str/lower-case s) lower)))
+        {:keys [aliases refers]} (cljd/buffer-ns-refs text)
+        ns->alias (reduce-kv (fn [m a n] (assoc m n a)) {} aliases)
+        qualified-ok? (or (str/includes? prefix "/") (str/includes? prefix "."))
+        pns (str (or prompt-ns ""))]
+    (->> (for [sym syms
+               :let [ns-str (namespace sym) nm (name sym)]
+               :when ns-str
+               [s cat] (cond-> []
+                         (or (= ns-str pns) (= ns-str "cljs.core")) (conj [nm :user])
+                         (contains? ns->alias ns-str) (conj [(str (get ns->alias ns-str) "/" nm) :user])
+                         (= ns-str (get refers nm)) (conj [nm :user])
+                         qualified-ok? (conj [(str sym) :remote]))
+               :when (match? s)]
+           {:symbol s :category cat})
+         (reduce (fn [[seen out] c]
+                   (if (contains? seen (:symbol c))
+                     [seen out]
+                     [(conj seen (:symbol c)) (conj out c)]))
+                 [#{} []])
+         second)))
