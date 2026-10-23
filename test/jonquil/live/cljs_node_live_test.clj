@@ -564,12 +564,18 @@
               (is (seen?) (pr-str @out))
               (Thread/sleep 500)
               (is (= 1 (times)) "forwarded once, not once per hook")))
-          ;; Stop then Run: the tab reloads itself once the new process
-          ;; answers its ping, and the evaluation needs no manual reload
-          (ev/stop! e)
-          (let [{:keys [result]} (run e "(+ 4 5)")]
-            (is (= :ok (:status result)) (pr-str result))
-            (is (= "9" (:printed result)) (pr-str result)))
+          ;; Reset on Run restarts the process (ev/stop! would end the
+          ;; evaluator for good): the tab reloads itself once the new
+          ;; process answers its ping, and the evaluation needs no manual
+          ;; reload
+          (ev/set-mode! e :reset)
+          (let [done (promise)]
+            (ev/eval! e "(+ 4 5)" {:run? true :on-output (fn [_ _])
+                                   :on-complete (fn [r] (deliver done r))})
+            (let [result (deref done 120000 :timeout)]
+              (is (= :ok (:status result)) (pr-str result))
+              (is (= "9" (:printed result)) (pr-str result))))
+          (ev/set-mode! e :accumulate)
           ;; Leaving the page closes its connection as a closed tab does:
           ;; the next evaluation fails fast instead of waiting for Stop.
           (let [{:keys [result]} (run e "(js/setTimeout (fn [] (set! (.-location js/window) \"about:blank\")) 300)")]
