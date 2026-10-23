@@ -91,7 +91,7 @@
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
                                                     :used? false :prompt-ns 'cljs.user :drain nil
-                                                    :setup-pending nil :analyzer-syms nil)
+                                                    :setup-pending nil :analyzer-syms nil :analyzer-stale? nil)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (cond-> (:child old) keep-log? (dissoc :run-dir))]
@@ -430,11 +430,17 @@
 (defn- fetch-syms!
   "Fetches the analyzer's full symbol list (cljs-node/apropos-form) into
   :analyzer-syms, bounded like a doc lookup; skipped while anything runs
-  or helps, or with no live child. An answer that isn't a symbol list
-  (cljs-node/parse-apropos nil) changes nothing. Never throws."
+  or helps, or with no live child. Claiming the fetch clears
+  :analyzer-stale?, so each completed evaluation buys one attempt: a page
+  that went away can't cost the help budget on every keystroke. An answer
+  that isn't a symbol list (cljs-node/parse-apropos nil) changes nothing.
+  Never throws. It must never ride after an evaluation on its own: sent to
+  a browser page that just left, it held up the closed-tab fail-fast (8 s
+  measured, 2026-10-23) and made quick docs answer busy."
   [{:keys [state timings] :as ev}]
   (let [[old _] (swap-vals! state (fn [s] (if (or (:running s) (:helping s)) s (assoc s :helping true))))]
     (when-not (or (:running old) (:helping old))
+      (swap! state assoc :analyzer-stale? nil)
       (if-not (live? ev)
         (swap! state assoc :helping false)
         (try
@@ -490,9 +496,9 @@
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
                         (finish! ev opts result)
-                        ;; eager refetch: the analyzer may know new names now
-                        (when (and (live? ev) (not (stopping? ev)))
-                          (fetch-syms! ev)))
+                        ;; the analyzer may know new names now; the next
+                        ;; completion's backstop fetches them
+                        (swap! state assoc :analyzer-stale? true))
                 (if (stopping? ev)
                   (finish! ev opts {:status :interrupted})
                   (do (kill-child! ev)
@@ -578,8 +584,10 @@
     (try
       (let [offline (cljd/candidates (:profile selection) prefix text pos extra-context)]
         (try
-          (when (and (nil? (:analyzer-syms @state)) (live? this) (nil? (:running @state)))
-            ;; backstop: a missed eager fetch (it timed out, say)
+          (when (and (or (nil? (:analyzer-syms @state)) (:analyzer-stale? @state))
+                     (live? this) (nil? (:running @state)))
+            ;; the fetch runs here, on ask-help!'s worker, never after an
+            ;; evaluation (see fetch-syms!'s docstring)
             (fetch-syms! this))
           (let [syms (:analyzer-syms @state)
                 have (into #{} (map :symbol) offline)
