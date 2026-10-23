@@ -178,6 +178,8 @@
    popovers-quickdoc/row-jump-none
    popovers-quickdoc/row-jump-to-a-run-file
    popovers-quickdoc/row-jump-shadowed-param
+   popovers-quickdoc/row-quick-doc-ctrl-shift-f1-does-nothing
+   rename-menus/row-rename-ctrl-shift-f6-does-nothing
    popovers-quickdoc/row-quick-doc-follows-scroll
    popovers-quickdoc/row-completion-hides-when-caret-scrolls-away
    completion/row-repl-completion-hides-when-input-scrolls-away

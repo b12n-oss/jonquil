@@ -709,12 +709,13 @@
 
 (defn- shift-only?
   "P4 keys whose own chord is Shift-based (quick doc's Shift+F1, rename's
-  Shift+F6): Shift held and Meta NOT held, the same P4 rule control-only?
-  applies to the Control-based chords above -- Cmd+Shift+<key> must not
-  also match."
+  Shift+F6): Shift held and NONE of Meta, Control or Alt, the same P4 rule
+  control-only? applies to the Control-based chords above --
+  Cmd/Ctrl/Alt+Shift+<key> must not also match (the parked P4 item:
+  Ctrl+Shift+F1/F6 used to trigger quick doc and rename)."
   [state]
   (and (not (zero? (bit-and state g/SHIFT-MASK)))
-       (zero? (bit-and state g/META-MASK))))
+       (zero? (bit-and state (bit-or g/META-MASK g/CONTROL-MASK g/ALT-MASK)))))
 
 (defn- no-modifiers?
   "True when none of Shift, Control, Meta or Alt is held -- F12's own P4
@@ -810,6 +811,19 @@
   (or (contains? #{KEY-F KEY-L} keyval)
       (and (< keyval 0x1000) (keycode-fallback? OS-NAME keycode state))))
 
+(defn- event-matches-f-or-l?
+  "gdk_key_event_matches against the letters f and l with the event's own
+  modifiers: layout-aware, so on a non-QWERTY layout the chord follows the
+  LETTER, which neither the raw keyval (Option-translated on macOS) nor
+  the hardware keycode (a physical position) can promise. nil-safe: the
+  self-test rows call handle-key! without an event and rely on the pure
+  checks above."
+  [event state]
+  (and event (not (ffi/null? event))
+       (let [mods (bit-and state (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK g/SHIFT-MASK))]
+         (or (= g/KEY-MATCH-EXACT (g/gdk-key-event-matches event KEY-F mods))
+             (= g/KEY-MATCH-EXACT (g/gdk-key-event-matches event KEY-L mods))))))
+
 (defn handle-key!
   "The editor's key dispatch (P3.T2), first match wins. Returns
   1 when it handled the key, 0 otherwise -- the key controller (on-key,
@@ -833,8 +847,9 @@
   press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
   would act on the flash's own selection instead of the buffer's real
   one."
-  ([ed keyval0 state] (handle-key! ed keyval0 0 state))
-  ([ed keyval0 keycode state]
+  ([ed keyval0 state] (handle-key! ed keyval0 0 state nil))
+  ([ed keyval0 keycode state] (handle-key! ed keyval0 keycode state nil))
+  ([ed keyval0 keycode state event]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
          cfns @(:completion-fns ed)]
      (when-not (modifier-keyval? keyval)
@@ -878,7 +893,9 @@
        (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
        (do-format-all! ed)
 
-       (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode state))
+       (and (command-chord? state) (alt-held? state)
+            (or (alt-chord-f-or-l? keyval keycode state)
+                (event-matches-f-or-l? event state)))
        (do-format-selection! ed)
 
        (and (command-chord? state) (= keyval KEY-Y) (not @(:read-only? ed)))
@@ -957,17 +974,22 @@
   synthetic keyval/keycode/state, exactly as on-key does.
 
   Two arities, mirroring handle-key!'s own."
-  ([ed keyval0 state] (dispatch-key! ed keyval0 0 state))
-  ([ed keyval0 keycode state]
+  ([ed keyval0 state] (dispatch-key! ed keyval0 0 state nil))
+  ([ed keyval0 keycode state] (dispatch-key! ed keyval0 keycode state nil))
+  ([ed keyval0 keycode state event]
    (try
-     (handle-key! ed keyval0 keycode state)
+     (handle-key! ed keyval0 keycode state event)
      (catch :default e
        (when-let [f @(:on-error-fn ed)] (f (str "; key: " (ex-message e))))
        1))))
 
 (defn- on-key [ed]
-  (fn [_ctl keyval keycode state _data]
-    (dispatch-key! ed keyval keycode state)))
+  (fn [ctl keyval keycode state _data]
+    ;; the live event (nullable) lets the format chord match the letter
+    ;; on any layout (event-matches-f-or-l?); rows calling handle-key!
+    ;; directly have no event and use the pure checks
+    (dispatch-key! ed keyval keycode state
+                   (g/gtk-event-controller-get-current-event ctl))))
 
 ;; --- construction ----------------------------------------------------------
 

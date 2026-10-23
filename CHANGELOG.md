@@ -9,6 +9,8 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - `.jonquil.edn` `{:cljs {:target :browser :forward-console? false}}` keeps the browser page's `console.log` out of Jonquil's console, for debugging through devtools with real source links; `println` still arrives.
+- The format chord (Cmd/Ctrl+Option+F or L) matches the letter on any keyboard layout, through GTK's layout-aware key matching; Ctrl+Shift+F6 and Ctrl+Shift+F1 no longer trigger rename and quick doc.
+- A browser tab whose Jonquil window closed stops its keep-fresh ping after about ten minutes instead of polling the port forever.
 - ClojureScript in the browser: the tab reloads itself after Stop or Reset on Run, once the new process is listening, instead of asking you to reload it by hand.
 - ClojureScript: a Run or REPL entry no longer waits out an in-flight completion fetch or quick-doc lookup (up to ~2 s against a browser tab that just closed); the evaluation cancels it.
 - ClojureScript completion (node and browser) offers every loaded namespace's publics, asked from the compiler's analyzer on the first completion after an evaluation, spelled the way the buffer's ns form can use them: `str/upper-case` behind an alias, bare names for the current namespace and anything referred, and full `some.ns/name` once the prefix contains a `.` or `/`.

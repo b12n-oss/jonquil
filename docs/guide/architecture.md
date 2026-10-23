@@ -711,10 +711,12 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   close the new page's connection. The same setup carries a keep-fresh
   ping: the page POSTs `{:type :jonquil/ping}` (every five seconds while
   healthy, once a second for the first thirty after the server stops
-  answering), a handler answers the process's generation (a UUID picked at
-  launcher start), and a different answer means a new process owns the
-  port, so the page reloads itself; the fresh page carries the new
-  generation, so there is no loop. A page busy running a form can't fire
+  answering, giving up after ~150 failures, about ten minutes), a handler
+  answers the process's generation (a UUID picked at launcher start,
+  prefixed `jonquil-gen:`), and a different prefixed answer means a new
+  process owns the port, so the page reloads itself; the fresh page
+  carries the new generation, so there is no loop, and an unprefixed 200
+  (another program owns the port now) ends the loop. A page busy running a form can't fire
   `pagehide` until the form finishes, so a tab closed during a long
   evaluation still leaves it waiting until Stop.
 - `jonquil.nrepl.cljs-node` picks the HTTP port once per window and keeps it
