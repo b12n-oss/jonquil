@@ -8,6 +8,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- ClojureScript on node: `read-line` works the way it does on Jolt. The status bar says `Waiting for input`, the next console line answers the read instead of being evaluated, Cmd/Ctrl+D ends input for one read, and Stop frees a waiting read by restarting the process. The launcher relays Jonquil's lines into a FIFO in its own temp folder and the session defines `cljs.core/read-line` to read it, so plain `(read-line)` compiles without warnings in any namespace. The browser target still has no stdin.
 - `.jonquil.edn` `{:cljs {:target :browser :forward-console? false}}` keeps the browser page's `console.log` out of Jonquil's console, for debugging through devtools with real source links; `println` still arrives.
 - Ctrl+Shift+F6 and Ctrl+Shift+F1 no longer trigger rename and quick doc; those chords are Shift-only.
 - A browser tab whose server never comes back stops its keep-fresh ping after about an hour instead of polling the port forever, and a later port owner rejecting the ping can't keep the loop alive.

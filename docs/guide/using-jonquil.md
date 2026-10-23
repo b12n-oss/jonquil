@@ -134,13 +134,17 @@ question, waits, and prints the answer back once you press Return.
 Cmd/Ctrl+D sends end-of-input while a program is waiting this way, the
 same signal `read-line` would see from a closed pipe on the command line.
 
-This works with Jolt in process and out of process. Out of process,
+This works with Jolt in process and out of process, and with launched
+ClojureScript on node. Out of process,
 Jonquil's own nREPL middleware in the Jolt child asks for each line, a
 `print`ed prompt shows before the wait, and Stop frees a read that's
 waiting (see [Running Jolt out of process](#running-jolt-out-of-process)).
 One difference: in process, Cmd/Ctrl+D closes input for the rest of the
 run; out of process it ends only the read that's waiting, and the next
-`read-line` waits again, as JVM nREPL does.
+`read-line` waits again, as JVM nREPL does. ClojureScript on node follows
+the out-of-process shape: Cmd/Ctrl+D ends one read, the next one waits,
+and Stop frees a waiting read by restarting the process, as Stop on that
+dialect always does.
 
 <details>
 <summary><strong>Text you typed while the program was running</strong></summary>
@@ -1376,8 +1380,16 @@ refreshes on the first completion after each evaluation, and today's
 candidates keep their order: the analyzer's extras append (rows labelled
 `core` for cljs.core names, `remote` for fully-qualified ones). Quick
 documentation comes from `cljs.repl/doc` while the process is idle. F12
-jumps to a definition in the same buffer only. There is no stdin and no
-inspector. Output the program prints after an evaluation has answered (a
+jumps to a definition in the same buffer only. `read-line` works the way
+it does on Jolt: the status label switches to `Waiting for input`, the
+next line you type at the prompt answers the read instead of being
+evaluated, Cmd/Ctrl+D ends input for that one read (`read-line` answers
+nil and a later read waits again), and Stop frees a waiting read by
+restarting the process. Under the hood the launcher relays Jonquil's
+lines into a pipe in its own temp folder and the session defines
+`cljs.core/read-line` to read it, so plain `(read-line)` compiles with no
+warning in any namespace. There is no inspector. Output the program
+prints after an evaluation has answered (a
 timer that fires later, say) still reaches the console, above the prompt,
 including while quick docs are being fetched.
 
@@ -2113,7 +2125,8 @@ than being surprises you'd otherwise have to rediscover:
   unauthenticated loopback listeners.
 - Stop and Reset on Run restart the process, so earlier definitions are
   gone afterwards.
-- No stdin and no inspector.
+- `read-line` waits for a line typed at the console prompt; Cmd/Ctrl+D
+  ends input for one read. No inspector.
 - F12 stays in the buffer.
 - Completion offers the buffer and Clojure core names and, once something
   ran, every loaded namespace's publics, spelled by the buffer's ns form;
