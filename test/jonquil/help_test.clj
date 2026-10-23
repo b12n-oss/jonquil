@@ -179,3 +179,56 @@
     (is (= "That's the current name." (help/rename-problem s "greet")))
     (is (= "Can't rename 'greet' to 'a b'." (help/rename-problem s "a b")))
     (is (= "Put the caret on a symbol first." (help/rename-problem (snap "; x" 2) "y")))))
+
+(deftest jump-target-for-let-modifier-test
+  ;; [x xs :let [y (f x)] :when y]: the :let pair's vector binds like let's
+  (let [text "(for [x xs :let [y (inc x)] :when y] (+ y 1))"]
+    ;; y bound at 17, used at 34 (:when) and 40 (body)
+    (doseq [c [34 40]]
+      (is (= {:kind :buffer :offset 17} (help/jump-target (snap text c) nil)) (str "caret " c)))
+    (testing "destructuring inside :let binds too"
+      (let [text "(doseq [p ps :let [{:keys [a]} p]] (str a))"]
+        ;; a bound at 27, used at 40
+        (is (= {:kind :buffer :offset 27} (help/jump-target (snap text 40) nil)))))
+    (testing ":when/:while still bind nothing"
+      (let [text "(for [x xs :when flag] (+ x flag))"]
+        (is (nil? (help/jump-target (snap text 28) nil)) "flag has no binding")))))
+
+(deftest jump-target-letfn-params-test
+  ;; a letfn entry's own params bind inside its body
+  (let [text "(letfn [(twice [x] (* 2 x))] (twice 3))"]
+    ;; x bound at 16, used at 24
+    (is (= {:kind :buffer :offset 16} (help/jump-target (snap text 24) nil)))
+    (testing "the entry's name still binds in the letfn body"
+      (is (= {:kind :buffer :offset 9} (help/jump-target (snap text 30) nil)))))
+  (testing "a multi-arity entry's clause params bind in that clause"
+    (let [text "(letfn [(f ([a] a) ([a b] (+ a b)))] (f 1))"]
+      ;; first clause: a bound at 13, used at 16
+      (is (= {:kind :buffer :offset 13} (help/jump-target (snap text 16) nil)))
+      ;; second clause: a bound at 21, used at 30
+      (is (= {:kind :buffer :offset 21} (help/jump-target (snap text 30) nil))))))
+
+(deftest jump-target-percent-args-test
+  ;; %, %1..%9 and %& inside #(...) resolve to the #( that binds them
+  (let [text "(map #(+ % 2) [1])"]
+    ;; % used at 9; the #( opens at 5
+    (is (= {:kind :buffer :offset 5} (help/jump-target (snap text 9) nil))))
+  (let [text "(mapv #(f %1 %&) [1] [2])"]
+    (is (= {:kind :buffer :offset 6} (help/jump-target (snap text 10) nil)))
+    (is (= {:kind :buffer :offset 6} (help/jump-target (snap text 13) nil))))
+  (testing "a % outside any #() still resolves nothing"
+    (is (nil? (help/jump-target (snap "(+ % 1)" 3) nil)))))
+
+(deftest jump-target-percent-as-plain-name-test
+  ;; outside #(), % is a legal ordinary name; the #( short-circuit must
+  ;; not swallow it (review finding 1)
+  (is (= {:kind :buffer :offset 6} (help/jump-target (snap "(let [% 1] %)" 11) nil)))
+  (is (= {:kind :buffer :offset 5} (help/jump-target (snap "(fn [%] (inc %))" 13) nil))))
+
+(deftest jump-target-when-modifier-argument-test
+  ;; :when's argument isn't a pattern: a name used there binds to the
+  ;; OUTER scope, never to the :when form (review, sharper than the nil pin)
+  (let [text "(let [y 1] (for [x xs :when y] y))"]
+    ;; outer y at 6; the :when use at 29 and the body use at 32
+    (doseq [c [29 32]]
+      (is (= {:kind :buffer :offset 6} (help/jump-target (snap text c) nil)) (str "caret " c)))))
