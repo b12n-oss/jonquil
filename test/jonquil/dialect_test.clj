@@ -544,6 +544,23 @@
     (testing ":browser and :node are taken as written"
       (is (= [:browser []] ((juxt :cljs-target :warnings) (sel "{:cljs {:target :browser}}"))))
       (is (= [:node []] ((juxt :cljs-target :warnings) (sel "{:cljs {:target :node}}")))))
+    (testing ":forward-console? reaches the selection for a browser launch"
+      (is (false? (:cljs-console? (sel "{:cljs {:target :browser :forward-console? false}}"))))
+      (is (true? (:cljs-console? (sel "{:cljs {:target :browser}}"))))
+      (is (true? (:cljs-console? (sel "{:cljs {:target :browser :forward-console? true}}"))))
+      (is (nil? (:cljs-console? (sel "{:cljs {:target :node :forward-console? false}}")))
+          "node has no console hook; the key is browser-only")
+      (is (not= (dialect/selection-key (sel "{:cljs {:target :browser}}"))
+                (dialect/selection-key (sel "{:cljs {:target :browser :forward-console? false}}")))
+          "flipping the option rebuilds the evaluator, so it can't be silently dropped")
+      (is (= (dialect/selection-key (sel "{:cljs {:target :browser}}"))
+             (dialect/selection-key (sel "{:cljs {:target :browser :forward-console? true}}")))
+          "spelling the default changes nothing"))
+    (testing "a non-boolean :forward-console? warns and forwards"
+      (let [s (sel "{:cljs {:target :browser :forward-console? :off}}")]
+        (is (true? (:cljs-console? s)))
+        (is (= [".jonquil.edn :cljs :forward-console? should be true or false, not :off; forwarding stays on"]
+               (:warnings s)))))
     (testing "an unknown value falls back to node with a warning"
       (let [s (sel "{:cljs {:target :deno}}")]
         (is (= :node (:cljs-target s)))

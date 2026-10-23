@@ -141,7 +141,8 @@
         go (fn [fresh?]
              ((:launch hooks) (cond-> base
                                 (browser? ev) (assoc :target :browser
-                                                     :http-port (http-port! ev fresh?)))))
+                                                     :http-port (http-port! ev fresh?)
+                                                     :console? (not (false? (:cljs-console? selection)))))))
         started (go false)]
     (if (= :http-port-taken (:error started))
       [(go true) true]
@@ -610,7 +611,7 @@
     (try (meta-lookup this sym nil)
          (catch Throwable _ (cljd/no-docs sym timeout-doc))))
   (limitations [_] (if (= :browser (:cljs-target selection))
-                     cljs-node/browser-limitations
+                     (cljs-node/browser-limitations (not (false? (:cljs-console? selection))))
                      cljs-node/limitations))
 
   ev/ServerHelp

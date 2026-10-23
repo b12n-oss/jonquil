@@ -9,6 +9,25 @@
   (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch"]
          (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :add-dep? false}))))
 
+(deftest launch-args-browser-console-test
+  (let [base {:clojure "/c" :launcher "/l.clj" :add-dep? false :target :browser :http-port 7}]
+    (is (= ["/c" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch" "browser" "7"]
+           (cljs-node/launch-args base))
+        "forwarding on needs no flag")
+    (is (= ["/c" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch" "browser" "7" "no-console"]
+           (cljs-node/launch-args (assoc base :console? false))))
+    (is (= ["/c" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch"]
+           (cljs-node/launch-args {:clojure "/c" :launcher "/l.clj" :add-dep? false :console? false}))
+        "node ignores the flag")))
+
+(deftest browser-limitations-console-off-test
+  (let [on (cljs-node/browser-limitations true)
+        off (cljs-node/browser-limitations false)]
+    (is (some #(str/includes? % "js/console.log output reach this console") on))
+    (is (some #(str/includes? % "js/console.log stays in the browser") off))
+    (is (= (count on) (count off)))
+    (is (not= on off))))
+
 (deftest needs-cljs-dep-test
   (is (true? (cljs-node/needs-cljs-dep? nil)))
   (is (true? (cljs-node/needs-cljs-dep? "{:deps {}}")))
@@ -111,7 +130,7 @@
           "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
           "println and js/console.log output reach this console, even after an evaluation finished; console.log still logs in the browser too."
           "No stdin and no inspector; jump to definition stays in this file."]
-         cljs-node/browser-limitations))
+         (cljs-node/browser-limitations true)))
   (is (= "; Opened http://u in your browser. Evaluations wait until the page connects."
          (cljs-node/opened-message "http://u")))
   (is (= "; ClojureScript restarted: reload the browser tab at http://u."

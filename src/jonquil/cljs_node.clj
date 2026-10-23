@@ -30,10 +30,16 @@
    "No stdin and no inspector; jump to definition stays in this file."
    "Completion offers this file's names, Clojure core's and, once something ran, every loaded namespace's."])
 
-(def browser-limitations
+(defn browser-limitations
+  "The browser target's limitation lines; console? is the selection's
+  :cljs-console? (false swaps the forwarding line for where the output
+  actually goes)."
+  [console?]
   ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
    "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
-   "println and js/console.log output reach this console, even after an evaluation finished; console.log still logs in the browser too."
+   (if console?
+     "println and js/console.log output reach this console, even after an evaluation finished; console.log still logs in the browser too."
+     "println output reaches this console, even after an evaluation finished; js/console.log stays in the browser (forward-console? is off).")
    "No stdin and no inspector; jump to definition stays in this file."])
 
 (defn opened-message [url]
@@ -69,12 +75,16 @@
 (defn launch-args
   "The argv that starts the ClojureScript launcher. The -Sdeps pair is
   added only when add-dep? is true (the project has no ClojureScript).
-  A :browser target appends `browser <http-port>` for the launcher."
-  [{:keys [clojure launcher add-dep? target http-port]}]
+  A :browser target appends `browser <http-port>` for the launcher, plus
+  `no-console` when :console? is false ({:cljs {:forward-console? false}}),
+  which keeps the page's console out of Jonquil; node ignores the flag."
+  [{:keys [clojure launcher add-dep? target http-port console?]}]
   (vec (concat [clojure]
                (when add-dep? ["-Sdeps" default-deps])
                ["-M" "-i" launcher "-m" "jonquil.cljs-node-launch"]
-               (when (= :browser target) ["browser" (str http-port)]))))
+               (when (= :browser target)
+                 (cond-> ["browser" (str http-port)]
+                   (false? console?) (conj "no-console"))))))
 
 (defn ready-port
   "The port from the last line that announces `jonquil-cljs-prepl <port>`,

@@ -199,9 +199,12 @@
         (let [name-col (nth (reverse (str/split (str/trim row) #"\s+")) 1)]
           (is (str/starts-with? name-col "127.0.0.1:") row))))))
 
-(defn- browser-selection []
-  {:profile dialect/cljs :runtime :launch :project-dir *dir*
-   :cljs {:target :browser} :cljs-target :browser})
+(defn- browser-selection
+  ([] (browser-selection {}))
+  ([extra]
+   (merge {:profile dialect/cljs :runtime :launch :project-dir *dir*
+           :cljs {:target :browser} :cljs-target :browser}
+          extra)))
 
 (defn- http-get
   "[status body] of a GET to url, through curl (Jolt's URL has no http handler)."
@@ -425,6 +428,21 @@
       (finally (reset! stop? true)
                (some-> ^java.net.Socket @held .close)
                (ev/stop! e)))))
+
+(deftest browser-console-off-setup-lacks-the-hook-live
+  ;; {:cljs {:forward-console? false}}: the page's setup still carries the
+  ;; pagehide goodbye but not the console hook, so devtools keeps real
+  ;; source links. The fake page sees the raw setup text.
+  (let [held (atom nil) stop? (atom false) seen (atom [])
+        e (cljs-node/make-cljs-node (browser-selection {:cljs-console? false})
+                                    {:timings {:page-timeout-ms 60000}
+                                     :open-url (fn [url] (fake-page! url held stop? seen) true)})]
+    (try
+      (let [{:keys [result]} (run e "(+ 1 2)")]
+        (is (= :ok (:status result)) (pr-str result)))
+      (is (str/includes? (first @seen) "pagehide") "the goodbye stays")
+      (is (not (str/includes? (first @seen) "c.__jonquil")) "the console hook is off")
+      (finally (ev/stop! e)))))
 
 (deftest launcher-without-a-port-prints-usage-live
   (let [r @(p/process {:out :string :err :string :dir *dir*}
