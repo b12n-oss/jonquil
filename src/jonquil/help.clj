@@ -191,12 +191,14 @@
 ;; branch, via scoped-for?, below), for/doseq's own bindings vector,
 ;; fn/defn/defn-/defmacro params (every arity, and only a REAL arity
 ;; clause -- fix wave item 1a's bare-arity-clause? -- never quoted or
-;; literal data that merely looks like one), and letfn's names. Vector and
+;; literal data that merely looks like one), letfn's names and each letfn
+;; entry's own params (letfn-entry?), for/doseq's :let vectors, and
+;; %-shaped names inside #() (resolved to the #( itself). Vector and
 ;; map destructuring patterns are unpacked recursively (:keys/:strs/:syms/
 ;; :as, & for a vector's rest); :or is skipped, since its defaults
 ;; reference already-bound names rather than introducing new ones. Not
-;; covered (see the fixwave report): for's own :let clause, and any other
-;; macro that introduces bindings under a different shape.
+;; covered: any other macro that introduces bindings under a different
+;; shape.
 
 ;; Fix wave item 1b: when-let/when-some/when-first share let's own
 ;; [pattern val ...] bindings-vector shape (bindings-vector-names doesn't
@@ -313,22 +315,30 @@
           (pairwise-patterns (form-children tokens matches vs ve))))
 
 (defn- for-doseq-names
-  "for/doseq's own bindings vector: [pattern seq-expr pattern seq-expr ...],
-  skipping (not unpacking) a :when/:while/:let modifier and its one
-  following form -- :let's own bindings aren't covered, see the ns note
-  above this section."
+  "for/doseq's own bindings vector: [pattern seq-expr pattern seq-expr ...].
+  A :let modifier's own vector binds exactly as let's does (destructuring
+  included); :when and :while bind nothing, and their one following form
+  is skipped."
   [^String text tokens matches vs ve]
   (loop [cs (form-children tokens matches vs ve) acc []]
     (if (or (empty? cs) (nil? (second cs)))
       acc
-      (let [[c0s c0e] (first cs)]
-        (if (contains? #{":when" ":while" ":let"} (subs text c0s c0e))
+      (let [[c0s c0e] (first cs)
+            modifier (subs text c0s c0e)]
+        (cond
+          (= ":let" modifier)
+          (recur (drop 2 cs)
+                 (let [[ls le] (second cs)]
+                   (into acc (bindings-vector-names text tokens matches ls le))))
+          (contains? #{":when" ":while"} modifier)
           (recur (drop 2 cs) acc)
+          :else
           (recur (drop 2 cs) (into acc (binding-names text tokens matches c0s c0e))))))))
 
 (defn- letfn-names
   "letfn's own bindings vector: a list of (name [params] body) per entry --
-  only the names, not each function's own params (see the ns note above)."
+  only the names here; each entry binds its own params as its own
+  ancestor (letfn-entry?, in ancestor-names)."
   [text tokens matches vs ve]
   (mapcat (fn [[ls le]]
             (when-let [[ns ne] (first (form-children tokens matches ls le))]
@@ -351,6 +361,20 @@
           (= ch \() nil
           :else (recur (rest cs)))))))
 
+(defn- letfn-entry?
+  "Whether the '(' form spanning [open close] is one of letfn's own
+  entries, (name [params] body) or (name ([a] ...) ...): its innermost
+  enclosing '(' is a letfn form and [open close] sits inside that form's
+  bindings vector."
+  [^String text tokens matches open close]
+  (boolean
+   (when-let [[popen pclose] (first (enclosing-parens text matches open))]
+     (let [pchildren (form-children tokens matches popen pclose)]
+       (when-let [[h0s h0e] (first pchildren)]
+         (and (= "letfn" (subs text h0s h0e))
+              (when-let [[vs ve] (second pchildren)]
+                (and (= \[ (.charAt text vs)) (< vs open) (< close ve)))))))))
+
 (defn- bare-arity-clause?
   "Whether the '(' at open is one of a multi-arity fn/defn/defn-/defmacro
   form's own clause lists, not quoted or literal data that merely LOOKS
@@ -368,7 +392,10 @@
   (when-let [[popen pclose] (first (enclosing-parens text matches open))]
     (let [pchildren (form-children tokens matches popen pclose)]
       (when-let [[h0s h0e] (first pchildren)]
-        (and (contains? fn-like-forms (subs text h0s h0e))
+        (and (or (contains? fn-like-forms (subs text h0s h0e))
+                 ;; a letfn entry in multi-arity mode: its clause lists
+                 ;; are bare arity clauses too
+                 (letfn-entry? text tokens matches popen pclose))
              (nil? (fn-arity-params text (rest pchildren))))))))
 
 (defn- ancestor-names
@@ -398,6 +425,12 @@
             (when-let [[vs ve] (second children)] (letfn-names text tokens matches vs ve))
 
             (contains? fn-like-forms op)
+            (when-let [[vs ve] (fn-arity-params text (rest children))]
+              (params-vector-names text tokens matches vs ve))
+
+            ;; a letfn entry (name [params] body): its params bind in its
+            ;; body; a multi-arity entry's clauses are bare arity clauses
+            (letfn-entry? text tokens matches open close)
             (when-let [[vs ve] (fn-arity-params text (rest children))]
               (params-vector-names text tokens matches vs ve))
 
@@ -439,18 +472,29 @@
   [text pos sym-name]
   (let [{:keys [matches]} (syntax/compute-brackets text)
         tokens (non-comment-tokens text)]
-    (some (fn [[open close]]
-            (when (scoped-for? text tokens matches open close pos)
-              (last (filter #(= sym-name (:symbol %))
-                            (ancestor-names text tokens matches open close)))))
-          (enclosing-parens text matches pos))))
+    (or
+     ;; #()'s own args have no textual binding site: the innermost
+     ;; enclosing #( binds them (the reader rewrites % inside #(), so it
+     ;; wins over any outer binding), and jump lands on the lambda itself
+     (when (re-matches #"%(?:[1-9]|&)?" sym-name)
+       (some (fn [[open _close]]
+               (when (and (pos? open) (= \# (.charAt ^String text (dec open))))
+                 {:symbol sym-name :start (dec open) :end open}))
+             (enclosing-parens text matches pos)))
+     ;; outside any #(), % is an ordinary name and walks like one
+     (some (fn [[open close]]
+             (when (scoped-for? text tokens matches open close pos)
+               (last (filter #(= sym-name (:symbol %))
+                             (ancestor-names text tokens matches open close)))))
+           (enclosing-parens text matches pos)))))
 
 (defn jump-target
   "Where jump to definition goes from snapshot: {:kind :buffer :offset n} for
   a definition in the buffer, else {:kind :external :doc d} when doc-info (a
   jonquil.docs/symbol-doc result for the target symbol) found a var, else
   nil. Resolution order: the nearest enclosing local binding of the target
-  symbol (local-binding, above) in scope at its own start; then a top-level
+  symbol (local-binding, above; a %-shaped name inside #() resolves to the
+  #( itself) in scope at its own start; then a top-level
   def* anywhere in the buffer (syntax/find-definition called with NO pos,
   so only its top-level half runs -- its own local search is scope-less and
   would wrongly favour an earlier USE over an unbound name's own nil, see
