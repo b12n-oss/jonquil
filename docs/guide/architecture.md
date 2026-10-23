@@ -711,7 +711,9 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   close the new page's connection. The same setup carries a keep-fresh
   ping: the page POSTs `{:type :jonquil/ping}` (every five seconds while
   healthy, once a second for the first thirty after the server stops
-  answering, giving up after ~150 failures, about ten minutes), a handler
+  answering, giving up after ~750 failures, about an hour in a foreground
+  tab; a non-200 answer counts as a failure, so a later owner rejecting
+  POST / doesn't keep the loop alive), a handler
   answers the process's generation (a UUID picked at launcher start,
   prefixed `jonquil-gen:`), and a different prefixed answer means a new
   process owns the port, so the page reloads itself; the fresh page

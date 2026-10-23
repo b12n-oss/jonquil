@@ -827,18 +827,6 @@
 ;; own pattern (:pointer, then ptr->string, then g_free).
 (ffi/defcfn gtk-css-provider-to-string "gtk_css_provider_to_string" [:pointer] :pointer)
 
-;; gdk_key_event_matches: gdk/gdkevents.h -- GdkKeyMatch
-;; gdk_key_event_matches (GdkEvent*, guint keyval, GdkModifierType state).
-;; Fixed arity. GdkKeyMatch: NONE 0, PARTIAL 1, EXACT 2 (same header). It
-;; consults the keymap's other levels/groups, so a chord matches the LETTER
-;; on any layout, where a raw keyval or hardware keycode can't.
-(ffi/defcfn gdk-key-event-matches "gdk_key_event_matches" [:pointer :int :int] :int)
-(def KEY-MATCH-EXACT 2)
-;; gtk_event_controller_get_current_event: gtkeventcontroller.h --
-;; GdkEvent* gtk_event_controller_get_current_event (GtkEventController*),
-;; nullable (only non-null while the controller handles an event).
-(ffi/defcfn gtk-event-controller-get-current-event
-  "gtk_event_controller_get_current_event" [:pointer] :pointer)
 
 (defn css-provider-string
   "provider's current stylesheet as a Clojure string. Probe (2026-09-26):
