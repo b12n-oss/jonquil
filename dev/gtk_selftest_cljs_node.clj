@@ -27,6 +27,7 @@
    rows/row-cljs-node-run-prints-value
    rows/row-cljs-node-run-error-line
    rows/row-cljs-node-stop-restarts
+   rows/row-cljs-read-line
    rows/row-cljs-node-close-kills-child])
 
 (def ^:private PER-ROW-MS
