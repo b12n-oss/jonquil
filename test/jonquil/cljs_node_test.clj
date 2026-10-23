@@ -173,3 +173,43 @@
   (is (nil? (cljs-node/parse-apropos "(a.b/c 3)")) "non-symbols")
   (is (nil? (cljs-node/parse-apropos nil)))
   (is (= 20000 (count (cljs-node/parse-apropos (pr-str (repeat 20001 'a.b/c)))))))
+
+;; --- read-line: ready-line stdin token, reader forms, markers -------------
+
+(deftest ready-stdin-test
+  (is (= "/tmp/x/input" (cljs-node/ready-stdin "jonquil-cljs-prepl 123 stdin:/tmp/x/input")))
+  (is (= :none (cljs-node/ready-stdin "jonquil-cljs-prepl 123 stdin:none")))
+  (is (nil? (cljs-node/ready-stdin "jonquil-cljs-prepl 123")) "an older launcher")
+  (is (nil? (cljs-node/ready-stdin "jonquil-cljs-prepl 123 http://127.0.0.1:8000")) "the browser line")
+  (is (= "/b/input" (cljs-node/ready-stdin "noise\njonquil-cljs-prepl 1 stdin:/a/input\njonquil-cljs-prepl 2 stdin:/b/input"))
+      "the last ready line wins, as ready-port does")
+  (is (= 123 (cljs-node/ready-port "jonquil-cljs-prepl 123 stdin:/tmp/x/input"))
+      "the token doesn't disturb the port parse"))
+
+(deftest reader-setup-text-test
+  (let [t (cljs-node/reader-setup-text "/tmp/run/input" ":jonquil.eval/end-9")]
+    (is (str/includes? t "(in-ns 'cljs.core)"))
+    (is (str/includes? t "(declare read-line)"))
+    (is (str/includes? t "(in-ns 'cljs.user)"))
+    (is (str/includes? t (pr-str "/tmp/run/input")))
+    (is (str/includes? t cljs-node/need-input-marker))
+    (is (str/includes? t cljs-node/got-input-marker))
+    (is (str/includes? t cljs-node/input-eof-marker))
+    (is (str/ends-with? t ":jonquil.eval/end-9"))))
+
+(deftest reader-unavailable-text-test
+  (let [t (cljs-node/reader-unavailable-text "the launcher couldn't create its input pipe" ":jonquil.eval/end-3")]
+    (is (str/includes? t "(declare read-line)"))
+    (is (str/includes? t "read-line isn't available: the launcher couldn't create its input pipe"))
+    (is (not (str/includes? t "openSync")) "no FIFO path in the thrower")
+    (is (str/ends-with? t ":jonquil.eval/end-3"))))
+
+(deftest strip-input-markers-test
+  (let [need (str cljs-node/need-input-marker "\n")
+        got (str cljs-node/got-input-marker "\n")]
+    (is (= ["" [:need-input]] (cljs-node/strip-input-markers need)))
+    (is (= ["before\nafter\n" [:need-input :got-input]]
+           (cljs-node/strip-input-markers (str "before\n" need "after\n" got)))
+        "coalesced user text survives byte-for-byte")
+    (is (= ["plain text\n" []] (cljs-node/strip-input-markers "plain text\n")))
+    (is (= ["" [:need-input :got-input]] (cljs-node/strip-input-markers (str need got))))))
