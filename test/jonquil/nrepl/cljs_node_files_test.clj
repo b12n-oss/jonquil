@@ -15,6 +15,7 @@
   (is (str/includes? cljs-node-files/launcher-text "no-console"))
   (is (str/includes? cljs-node-files/launcher-text ":jonquil/ping"))
   (is (str/includes? cljs-node-files/launcher-text "jonquil-gen:"))
+  (is (str/includes? cljs-node-files/launcher-text "e>=750") "the orphan give-up cap")
   (is (str/includes? cljs-node-files/launcher-text "location.reload")))
 
 (deftest ensure-launcher-writes-once-test

@@ -160,6 +160,20 @@
                                (and (= 0 handled) (not (popover/open? rp)))
                                {:handled handled :open (popover/open? rp)}))))))
 
+(defn row-rename-ctrl-shift-f6-does-nothing
+  "0xffc3 (F6) with SHIFT and CONTROL together: shift-only? must reject the
+  Control side as it already rejects Meta (the parked P4 item: Ctrl+Shift+F6
+  also triggered rename), so the chord falls through unhandled."
+  [ui]
+  (go-row :rename-ctrl-shift-f6-does-nothing support/check
+    (on-gtk (let [ed (:editor ui) rp (:rename-popover ui)]
+              (editor/set-text! ed "(map inc [1])")
+              (support/place-cursor! (:buf ed) 2)
+              (let [handled (editor/handle-key! ed support/KEY-F6 (bit-or g/SHIFT-MASK g/CONTROL-MASK))]
+                (support/check :rename-ctrl-shift-f6-does-nothing
+                               (and (= 0 handled) (not (popover/open? rp)))
+                               {:handled handled :open (popover/open? rp)}))))))
+
 (defn row-rename-closed-signal-syncs
   "Context bullet #1: gtk_popover_popdown called DIRECTLY (never
   jonquil.gtk.popover/hide!) still leaves :open? false -- jonquil.gtk.

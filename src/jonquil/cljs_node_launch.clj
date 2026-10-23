@@ -307,7 +307,13 @@
   server stops answering (a restart usually follows at once), then every
   five again. An answer naming another generation means a new process
   owns this port (a restart), so the page reloads itself; the fresh page
-  carries the new generation, so there is no reload loop. One loop per
+  carries the new generation, so there is no reload loop. A non-200 answer
+  counts as a failure too (Jonquil's handler always answers 200, and a
+  program that later owns the port may answer 404 or 501 to POST /), and a
+  page whose server never answers right gives up after ~750 failed pings,
+  about an hour in a foreground tab, so an orphaned tab stops POSTing
+  eventually; a Run after the give-up needs the tab reloaded by hand, as
+  reload-message says. One loop per
   window (__jonquil_ping), bfcache restores included. The answer is
   prefixed (gen-prefix), so a 200 from some other program that later owns
   the port ends the loop instead of reloading the page into it (review
@@ -316,11 +322,11 @@
   (str "\n;(function(){try{if(window.__jonquil_ping)return;window.__jonquil_ping=true;"
        "var g=" (pr-str gen) ",p=\"jonquil-gen:\",d=5000,e=0;"
        "function next(){setTimeout(tick,d)}"
-       "function fail(){e++;d=e<30?1000:5000;next()}"
+       "function fail(){e++;if(e>=750)return;d=e<30?1000:5000;next()}"
        "function tick(){var x=new XMLHttpRequest();"
        "x.open(\"POST\",location.origin+\"/\",true);x.timeout=4000;"
        "x.onload=function(){var r=(x.responseText||\"\");"
-       "if(x.status!==200){e=0;d=5000;next()}"
+       "if(x.status!==200){fail()}"
        "else if(r.indexOf(p)!==0){}"
        "else if(r!==g){location.reload()}"
        "else{e=0;d=5000;next()}};"

@@ -47,7 +47,8 @@
 
 (defn reload-message [url]
   (str "; ClojureScript restarted: the browser tab at " url
-       " reloads itself (reload by hand if it was frozen or closed)."))
+       " reloads itself (reload by hand if it was frozen or closed,"
+       " or stopped checking after an idle hour)."))
 
 (defn no-page-message
   "Shown when a setup waited the page bound and no page connected."

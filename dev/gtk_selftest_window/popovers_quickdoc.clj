@@ -327,6 +327,20 @@
                                (and (= 0 handled) (not (popover/open? hp)))
                                {:handled handled :open (popover/open? hp)}))))))
 
+(defn row-quick-doc-ctrl-shift-f1-does-nothing
+  "0xffbe (F1) with SHIFT and CONTROL together: shift-only? must reject the
+  Control side as it already rejects Meta (the parked P4 item: Ctrl+Shift+F1
+  also triggered quick doc), so the chord falls through unhandled."
+  [ui]
+  (go-row :quick-doc-ctrl-shift-f1-does-nothing support/check
+    (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
+              (editor/set-text! ed "(map inc [1])")
+              (support/place-cursor! (:buf ed) 2)
+              (let [handled (editor/handle-key! ed KEY-F1 (bit-or g/SHIFT-MASK g/CONTROL-MASK))]
+                (support/check :quick-doc-ctrl-shift-f1-does-nothing
+                               (and (= 0 handled) (not (popover/open? hp)))
+                               {:handled handled :open (popover/open? hp)}))))))
+
 (defn row-quick-doc-after-define
   "A lookup before anything defines the name must not keep serving
   :not-found once a REPL entry defines it. Looks up quickdocdefme -- a

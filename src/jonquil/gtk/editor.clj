@@ -709,12 +709,13 @@
 
 (defn- shift-only?
   "P4 keys whose own chord is Shift-based (quick doc's Shift+F1, rename's
-  Shift+F6): Shift held and Meta NOT held, the same P4 rule control-only?
-  applies to the Control-based chords above -- Cmd+Shift+<key> must not
-  also match."
+  Shift+F6): Shift held and NONE of Meta, Control or Alt, the same P4 rule
+  control-only? applies to the Control-based chords above --
+  Cmd/Ctrl/Alt+Shift+<key> must not also match (the parked P4 item:
+  Ctrl+Shift+F1/F6 used to trigger quick doc and rename)."
   [state]
   (and (not (zero? (bit-and state g/SHIFT-MASK)))
-       (zero? (bit-and state g/META-MASK))))
+       (zero? (bit-and state (bit-or g/META-MASK g/CONTROL-MASK g/ALT-MASK)))))
 
 (defn- no-modifiers?
   "True when none of Shift, Control, Meta or Alt is held -- F12's own P4
@@ -809,6 +810,7 @@
   [keyval keycode state]
   (or (contains? #{KEY-F KEY-L} keyval)
       (and (< keyval 0x1000) (keycode-fallback? OS-NAME keycode state))))
+
 
 (defn handle-key!
   "The editor's key dispatch (P3.T2), first match wins. Returns
