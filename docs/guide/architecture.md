@@ -633,6 +633,16 @@ Five namespaces and one launcher make it up:
   replies until the sentinel's `:ret`. Input that ends inside a form is
   refused before sending, since the reader would wait for the rest. Stop,
   Reset on Run and a close kill the child, because nothing can interrupt it.
+  Completion merges the offline candidates with the analyzer's: the first
+  completion after an evaluation sends `(cljs.repl/apropos #"")` through
+  the same exchange (a macro, so the compiler answers and the runtime
+  returns a literal; 1,302 symbols, 28 KB, 23-44 ms measured), capped at
+  20,000 symbols, under the quick-doc budget and the same `:helping`
+  guard. The evaluation itself only marks the cache stale: a fetch riding
+  after an evaluation held up the browser's closed-tab fail-fast (8 s
+  measured) and made quick docs answer busy. Pure code
+  (`cljs-node/analyzer-candidates`, `cljd/buffer-ns-refs`) spells each
+  qualified name the way the buffer can use it.
   A setup that fails or times out kills the child with `:keep-log? true`,
   which leaves the run dir, so the message's "The log: <path>" still points
   at a file; every other kill removes it. A kept run dir, like a failed

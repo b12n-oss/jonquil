@@ -28,7 +28,7 @@
   ["Jonquil starts and stops its own ClojureScript process."
    "Stop restarts it, so earlier definitions are gone afterwards."
    "No stdin and no inspector; jump to definition stays in this file."
-   "Completion uses this file's names and Clojure core's."])
+   "Completion offers this file's names, Clojure core's and, once something ran, every loaded namespace's."])
 
 (def browser-limitations
   ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
