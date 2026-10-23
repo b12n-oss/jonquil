@@ -14,6 +14,7 @@
   (is (str/includes? cljs-node-files/launcher-text "p=clojure.browser.repl.repl_print"))
   (is (str/includes? cljs-node-files/launcher-text "no-console"))
   (is (str/includes? cljs-node-files/launcher-text ":jonquil/ping"))
+  (is (str/includes? cljs-node-files/launcher-text "jonquil-gen:"))
   (is (str/includes? cljs-node-files/launcher-text "location.reload")))
 
 (deftest ensure-launcher-writes-once-test

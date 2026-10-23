@@ -378,9 +378,12 @@
                (ev/stop! e)))))
 
 (defn- page-bye!
-  "Posts the goodbye the pagehide listener beacons, for page number gen."
-  [url gen]
-  (with-open [s ^java.net.Socket (page-post! url (atom nil) (pr-str {:type :jonquil/bye :gen gen}))]
+  "Posts the goodbye the pagehide listener beacons, for page number gen of
+  the server whose ping answers srv (the goodbye names its server, so a
+  reloaded page's old goodbye can't match the new process)."
+  [url srv gen]
+  (with-open [s ^java.net.Socket (page-post! url (atom nil)
+                                             (pr-str {:type :jonquil/bye :srv srv :gen gen}))]
     (slurp (io/reader (.getInputStream s)))))
 
 (deftest browser-page-bye-fails-fast-live
@@ -411,7 +414,7 @@
         (ev/eval! e "(+ 1 2)" {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
         (Thread/sleep 1000)
         (is (not (realized? done)) "still waiting for the page")
-        (page-bye! @url-seen 1)
+        (page-bye! @url-seen (ping-gen @url-seen) 1)
         (let [r (deref done 5000 :timeout)]
           (is (= :error (:status r)) (pr-str r))
           (is (str/includes? (str (:error-text r)) (str "reload " @url-seen)) (pr-str r))))
@@ -430,9 +433,15 @@
           (let [{:keys [result]} (run e "(+ 1 2)")]
             (is (= :ok (:status result)) (pr-str result)))
           (is (str/includes? (first @seen2) ":gen 2"))
-          (page-bye! @url-seen 1)
+          (page-bye! @url-seen (ping-gen @url-seen) 1)
           (let [{:keys [result]} (run e "(+ 1 2)")]
             (is (= :ok (:status result)) "a stale goodbye is ignored"))
+          ;; another process's goodbye (an auto-reloaded page's old one,
+          ;; say) names its server; the right gen with the wrong server
+          ;; changes nothing either
+          (page-bye! @url-seen "jonquil-gen:another-process" 2)
+          (let [{:keys [result]} (run e "(+ 1 2)")]
+            (is (= :ok (:status result)) "a goodbye for another server is ignored"))
           (finally (reset! stop2? true) (some-> ^java.net.Socket @held2 .close))))
       (finally (reset! stop? true)
                (some-> ^java.net.Socket @held .close)
@@ -451,7 +460,8 @@
       (is (= :ok (:status (:result (run e "(+ 1 2)")))))
       (let [gen0 (ping-gen @url-seen)
             gen0' (ping-gen @url-seen)]
-        (is (seq gen0) "a live server answers its generation")
+        (is (str/starts-with? (str gen0) "jonquil-gen:")
+            "the answer is prefixed, so a foreign 200 can't read as a restart")
         (is (= gen0 gen0') "stable within one process")
         (reset! stop? true)
         ;; Reset on Run restarts the child (ev/stop! would end the
@@ -568,14 +578,15 @@
           ;; evaluator for good): the tab reloads itself once the new
           ;; process answers its ping, and the evaluation needs no manual
           ;; reload
-          (ev/set-mode! e :reset)
-          (let [done (promise)]
-            (ev/eval! e "(+ 4 5)" {:run? true :on-output (fn [_ _])
-                                   :on-complete (fn [r] (deliver done r))})
-            (let [result (deref done 120000 :timeout)]
-              (is (= :ok (:status result)) (pr-str result))
-              (is (= "9" (:printed result)) (pr-str result))))
-          (ev/set-mode! e :accumulate)
+          (try
+            (ev/set-mode! e :reset)
+            (let [done (promise)]
+              (ev/eval! e "(+ 4 5)" {:run? true :on-output (fn [_ _])
+                                     :on-complete (fn [r] (deliver done r))})
+              (let [result (deref done 120000 :timeout)]
+                (is (= :ok (:status result)) (pr-str result))
+                (is (= "9" (:printed result)) (pr-str result))))
+            (finally (ev/set-mode! e :accumulate)))
           ;; Leaving the page closes its connection as a closed tab does:
           ;; the next evaluation fails fast instead of waiting for Stop.
           (let [{:keys [result]} (run e "(js/setTimeout (fn [] (set! (.-location js/window) \"about:blank\")) 300)")]

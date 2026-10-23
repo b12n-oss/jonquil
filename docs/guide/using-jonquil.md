@@ -1409,7 +1409,9 @@ first time and keeps. Stop and Reset on Run restart ClojureScript, because
 nothing can interrupt the page, and the tab reloads itself once the new
 process is listening: the page pings the server every five seconds while
 healthy (once a second for the first half minute after it stops answering)
-and reloads when a different process answers. Reset on Run starts unticked, as it does on node. If something else took that port meanwhile, Jonquil
+and reloads when a different process answers. A tab that can't run its
+ping, frozen in an endless loop or closed, still needs a reload or reopen
+by hand. Reset on Run starts unticked, as it does on node. If something else took that port meanwhile, Jonquil
 picks another and says so. A loop that never ends freezes the tab until you
 reload it. An evaluation sent after you closed the tab fails within a couple
 of seconds with an error that names the URL to reload, and works again once
@@ -2126,7 +2128,8 @@ than being surprises you'd otherwise have to rediscover:
   through `open`, `xdg-open` or `JONQUIL_OPEN_URL`. Its prepl and page
   server are unauthenticated loopback listeners.
 - Stop and Reset on Run restart ClojureScript, so earlier definitions are
-  gone; the tab reloads itself once the new process is listening.
+  gone; the tab reloads itself once the new process is listening (a frozen
+  or closed tab still needs a hand).
 - A loop that never ends freezes the tab until you reload it, and an
   evaluation sent after the tab closed fails until you reload it. One
   still running when the tab closed waits until Stop.

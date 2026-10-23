@@ -46,7 +46,8 @@
   (str "; Opened " url " in your browser. Evaluations wait until the page connects."))
 
 (defn reload-message [url]
-  (str "; ClojureScript restarted: the browser tab at " url " reloads itself."))
+  (str "; ClojureScript restarted: the browser tab at " url
+       " reloads itself (reload by hand if it was frozen or closed)."))
 
 (defn no-page-message
   "Shown when a setup waited the page bound and no page connected."

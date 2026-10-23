@@ -133,7 +133,7 @@
          (cljs-node/browser-limitations true)))
   (is (= "; Opened http://u in your browser. Evaluations wait until the page connects."
          (cljs-node/opened-message "http://u")))
-  (is (= "; ClojureScript restarted: the browser tab at http://u reloads itself."
+  (is (= "; ClojureScript restarted: the browser tab at http://u reloads itself (reload by hand if it was frozen or closed)."
          (cljs-node/reload-message "http://u")))
   (is (= "; No page has connected yet. Open http://u in a browser, then Run again."
          (cljs-node/no-page-message "http://u"))))

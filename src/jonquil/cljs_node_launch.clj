@@ -239,14 +239,17 @@
 
 (defn- bye-js
   "Plain JS for a page: on pagehide (tab closed, reloaded or navigated away)
-  it beacons {:type :jonquil/bye :gen gen} to the REPL server. Chrome holds
-  the page's open connection for about a minute after it leaves (measured
-  2026-10-22: 56 s from about:blank to CLOSE_WAIT), so the socket alone
-  can't tell the server in time."
-  [gen]
+  it beacons {:type :jonquil/bye :srv server :gen gen} to the REPL server.
+  Chrome holds the page's open connection for about a minute after it
+  leaves (measured 2026-10-22: 56 s from about:blank to CLOSE_WAIT), so the
+  socket alone can't tell the server in time. The goodbye names its server
+  (review 2026-10-23): page generations restart at 1 in every process, so
+  after an auto-reload the OLD page's late goodbye could match the NEW
+  page's generation; the server ignores a goodbye for another server."
+  [server gen]
   (str "\n;(function(){var u=location.origin+'/';"
        "window.addEventListener('pagehide',function(){"
-       "try{navigator.sendBeacon(u,'{:type :jonquil/bye :gen " gen "}')}catch(e){}});})();"))
+       "try{navigator.sendBeacon(u,'{:type :jonquil/bye :srv " (pr-str server) " :gen " gen "}')}catch(e){}});})();"))
 
 (def ^:private console-flush-ms
   "How long forwarded console text gathers before one repl-print sends it.
@@ -292,9 +295,10 @@
        "catch(e){}finally{busy=false}}});}catch(e){}})();"))
 
 (def ^:private server-gen
-  "This process's identity for the page's keep-fresh ping: a restart
-  answers a different one, and the page reloads itself."
-  (str (java.util.UUID/randomUUID)))
+  "This process's identity for the page's keep-fresh ping (prefixed so a
+  foreign server's 200 is never mistaken for a restart): a restart answers
+  a different one, and the page reloads itself."
+  (str "jonquil-gen:" (java.util.UUID/randomUUID)))
 
 (defn- ping-js
   "Plain JS for a page: polls the REPL server (the same POST path the bye
@@ -304,16 +308,22 @@
   five again. An answer naming another generation means a new process
   owns this port (a restart), so the page reloads itself; the fresh page
   carries the new generation, so there is no reload loop. One loop per
-  window (__jonquil_ping), bfcache restores included."
+  window (__jonquil_ping), bfcache restores included. The answer is
+  prefixed (gen-prefix), so a 200 from some other program that later owns
+  the port ends the loop instead of reloading the page into it (review
+  2026-10-23: SPA dev servers answer any POST / with 200 and a body)."
   [gen]
   (str "\n;(function(){try{if(window.__jonquil_ping)return;window.__jonquil_ping=true;"
-       "var g=" (pr-str gen) ",d=5000,e=0;"
+       "var g=" (pr-str gen) ",p=\"jonquil-gen:\",d=5000,e=0;"
        "function next(){setTimeout(tick,d)}"
        "function fail(){e++;d=e<30?1000:5000;next()}"
        "function tick(){var x=new XMLHttpRequest();"
        "x.open(\"POST\",location.origin+\"/\",true);x.timeout=4000;"
        "x.onload=function(){var r=(x.responseText||\"\");"
-       "if(x.status===200&&r&&r!==g){location.reload()}else{e=0;d=5000;next()}};"
+       "if(x.status!==200){e=0;d=5000;next()}"
+       "else if(r.indexOf(p)!==0){}"
+       "else if(r!==g){location.reload()}"
+       "else{e=0;d=5000;next()}};"
        "x.onerror=x.ontimeout=fail;"
        "try{x.send(\"{:type :jonquil/ping}\")}catch(ex){fail()}}"
        "next();}catch(ex){}})();"))
@@ -351,7 +361,7 @@
          ([conn form f] (orig-sfe conn
                                   (if *bye-gen*
                                     (str form (when console? console-js)
-                                         (ping-js server-gen) (bye-js *bye-gen*))
+                                         (ping-js server-gen) (bye-js server-gen *bye-gen*))
                                     form)
                                   f)))))
     (.addMethod ^clojure.lang.MultiFn handle-post :ready
@@ -363,8 +373,8 @@
                   ;; the page's keep-fresh poll: answer who owns this port
                   (send-and-close conn 200 server-gen)))
     (.addMethod ^clojure.lang.MultiFn handle-post :jonquil/bye
-                (fn [{:keys [gen]} conn _]
-                  (when (= gen @page-gen)
+                (fn [{:keys [srv gen]} conn _]
+                  (when (and (= srv server-gen) (= gen @page-gen))
                     (locking lock
                       (doseq [c connq] (try (.close ^java.net.Socket c) (catch Throwable _ nil)))
                       (.clear connq)
