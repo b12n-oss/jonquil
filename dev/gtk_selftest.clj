@@ -62,7 +62,9 @@
   elapses; true or false. A condition-based replacement for a fixed sleep:
   it waits for any dirty-flip left pending from an EARLIER row's edit to
   actually fire and be counted, so the caller's own baseline isn't captured
-  mid-flip. Reads only the atom, never GTK."
+  mid-flip. The stability window is wall-clock, which can't prove the main
+  loop turned (a frozen loop reads as stable), so a trailing on-gtk round
+  trip proves it, as settle's does (M1)."
   [deadline-ms]
   (let [t0 (System/currentTimeMillis)]
     (loop [last-seen @true-fire-count
@@ -72,7 +74,7 @@
             t (System/currentTimeMillis)]
         (cond
           (not= now last-seen) (recur now t)
-          (>= (- t stable-since) 40) true
+          (>= (- t stable-since) 40) (do (on-gtk nil) true)
           (>= (- t t0) deadline-ms) false
           :else (recur now stable-since))))))
 

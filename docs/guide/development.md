@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (820 tests, 4494 assertions
-on macOS, 4463 on Linux, measured with `bb linux:test` on 2026-10-23) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (825 tests, 4510 assertions
+on macOS, 4479 on Linux, measured with `bb linux:test` on 2026-10-23) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (820 tests and 4463 assertions, 31
+reports fewer assertions than macOS (825 tests and 4479 assertions, 31
 fewer, measured 2026-10-22).
 
 <details>
@@ -219,7 +219,10 @@ passing, in group order.
 Each row is a core.async go block that reads top to bottom instead of a
 chain of nested callbacks. `gtk-async/run-rows` drives the rows strictly in
 order, and a per-row timeout records a FAIL rather than letting one stuck
-row hang the whole run. The one hard rule underneath every harness: the
+row hang the whole run. The overdue row is abandoned at its next harness
+call (`call-gtk` and everything over it, `ga/sh`, the nREPL rows'
+`sh-within`), so its body can't act into the rows after it; the throw
+fires once, so the row's own `finally` still closes what it opened. The one hard rule underneath every harness: the
 GTK thread never parks. A go block runs on its own OS thread, the default
 `:thread` backend, so every GTK, editor, or console call goes through
 `on-gtk` or an `await-until` predicate from `dev/gtk_async.clj`, both of

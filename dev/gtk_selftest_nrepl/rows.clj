@@ -6,7 +6,7 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [gtk-async :refer [await-until go-row on-gtk]]
+            [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.tabs :as tabs]
             [jonquil.evaluator :as ev]
@@ -110,10 +110,13 @@
 
 (defn- sh-within
   "(apply shell/sh args) on its own thread (a/thread); its result map, or
-  nil after 5000 ms. Parks, so call it from a go block."
+  nil after 5000 ms. Parks, so call it from a go block. Checks the row the
+  way ga/sh does: a timed-out row must not signal the next row's child."
   [args]
+  (ga/check-row!)
   (let [ch (a/thread (apply shell/sh args))
         [r port] (a/alts! [ch (timeout 5000)])]
+    (ga/check-row!)
     (when (= port ch) r)))
 
 (defn own-child-pid
