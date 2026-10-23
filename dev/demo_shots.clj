@@ -142,6 +142,7 @@
   every interval-ms up to deadline-ms. Returns the last windows read,
   whether or not pred? passed. Never touches the GTK thread."
   [pid deadline-ms interval-ms pred?]
+  (ga/assert-off-gtk! "await-windows")
   (let [t0 (System/currentTimeMillis)]
     (loop []
       (let [ws (windows pid)]
