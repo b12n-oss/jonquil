@@ -187,6 +187,13 @@
       (ev/send-input! e "two")
       (let [r (deref done 60000 :timeout)]
         (is (= "\"one+two\"" (:printed r)) (pr-str r))))
+    ;; an empty line answers "", never nil (review I1: cljs split-lines
+    ;; pops the trailing "" of "\n", so (first []) was nil)
+    (let [{:keys [done]} (eval-async e "(read-line)")]
+      (is (wait-until #(ev/waiting-for-input? e) 10000))
+      (ev/send-input! e "")
+      (let [r (deref done 60000 :timeout)]
+        (is (= "\"\"" (:printed r)) (pr-str r))))
     ;; EOF answers that one read nil; a later read still works
     (let [{:keys [done]} (eval-async e "(read-line)")]
       (is (wait-until #(ev/waiting-for-input? e) 10000))

@@ -673,7 +673,14 @@
     nil)
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (:waiting-input? @state)))
-  (send-input! [this text] (send-stdin-line! this (str text "\n")))
+  (send-input! [this text]
+    ;; one line only, cut at the first newline (review I2): a Shift+Return
+    ;; multi-line send must not leave lines in the FIFO to answer a LATER
+    ;; evaluation's read, and a trailing newline must not become a phantom
+    ;; empty answer
+    (let [text (str text)
+          i (str/index-of text "\n")]
+      (send-stdin-line! this (str (if i (subs text 0 i) text) "\n"))))
   (send-eof! [this] (send-stdin-line! this (str cljs-node/input-eof-marker "\n")))
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))

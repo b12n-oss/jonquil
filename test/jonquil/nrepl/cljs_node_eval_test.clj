@@ -736,3 +736,23 @@
         (ev/interrupt! ev)
         (is (= :interrupted (:status (deref done 10000 :timeout))))
         (is (wait-until #(false? (ev/waiting-for-input? ev)) 3000) "Stop resets waiting")))))
+
+(deftest a-multi-line-send-feeds-one-read-test
+  ;; review I2: Shift+Return can put newlines in the console's input, and
+  ;; a send must still feed exactly one line, or the rest sits in the
+  ;; pipe and answers a LATER evaluation's read without waiting.
+  (with-stdin-node {}
+    (fn [_ {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(str \"got:\" (read-line))"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000))
+        (ev/send-input! ev "a\nb")
+        (is (= "\"got:a\"" (:printed (deref done 10000 :timeout)))))
+      (let [done (promise)]
+        (ev/eval! ev "(read-line)"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (= :timeout (deref done 1500 :timeout))
+            "the second read waits; no stale line fed it")
+        (ev/send-input! ev "c")
+        (is (= "\"c\"" (:printed (deref done 10000 :timeout))))))))

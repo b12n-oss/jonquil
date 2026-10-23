@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (846 tests, 4599 assertions
-on macOS, 4568 on Linux, measured with `bb linux:test` on 2026-10-23) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (847 tests, 4605 assertions
+on macOS, 4574 on Linux, measured with `bb linux:test` on 2026-10-23) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (846 tests and 4568 assertions, 31
+reports fewer assertions than macOS (847 tests and 4574 assertions, 31
 fewer, measured 2026-10-23).
 
 <details>
@@ -41,7 +41,7 @@ and download again when it changes, and `--offline` reuses the cached build.
 The nightly goes first on `PATH` for the run, and the Jolt children pick it
 up too (checked with `ps`, 2026-10-20: 59 tests, 213 assertions on
 `v0.8.23-26-g1dcdf9e4`).
-`bb test:cljs-node` runs a live suite for ClojureScript on node and in the browser (20 tests, 108 assertions, measured 2026-10-23): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, that output printed after an evaluation answered (a `setTimeout`) still arrives, recovery after an error, requiring a project namespace, that `read-line` waits for `send-input!` (two reads in one evaluation, EOF answering one read nil, Stop freeing a waiting read, and a warning-free compile of plain `(read-line)` in a Run buffer's own ns), that Stop kills the whole process tree, that the listeners are loopback-only, and that completion offers analyzer names after a Run (aliased and short spellings both). The browser checks run with no browser: the prepl and the page server listen on loopback only, the HTML is served, the no-page path leaves the process running, Stop then Run keeps the URL, and the launcher prints its usage line for a missing port. Two more drive a fake page over the browser REPL's own HTTP protocol: one closes the page's socket, one keeps it open and sends the `pagehide` goodbye instead (as Chrome does), and both check that evaluations then fail fast and work again after a reload. One more test drives a real browser and opens a tab, so it runs only with `JONQUIL_BROWSER_LIVE=1` (`JONQUIL_BROWSER_LIVE=1 bb test:cljs-node`, 127 assertions, measured 2026-10-23): values, `println`, an error and recovery, output from a timer after the answer, `js/console.log` reaching Jonquil's console, completion offering a Run's own `defn` from the analyzer, and an evaluation failing fast after the tab moves to `about:blank`. Without it, it prints a skip line. The suite skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
+`bb test:cljs-node` runs a live suite for ClojureScript on node and in the browser (20 tests, 110 assertions, measured 2026-10-23): it launches a real `clojure` with `node` through the same launcher the app uses, and checks that definitions persist within a Run, that `println` streams, that output printed after an evaluation answered (a `setTimeout`) still arrives, recovery after an error, requiring a project namespace, that `read-line` waits for `send-input!` (two reads in one evaluation, EOF answering one read nil, Stop freeing a waiting read, and a warning-free compile of plain `(read-line)` in a Run buffer's own ns), that Stop kills the whole process tree, that the listeners are loopback-only, and that completion offers analyzer names after a Run (aliased and short spellings both). The browser checks run with no browser: the prepl and the page server listen on loopback only, the HTML is served, the no-page path leaves the process running, Stop then Run keeps the URL, and the launcher prints its usage line for a missing port. Two more drive a fake page over the browser REPL's own HTTP protocol: one closes the page's socket, one keeps it open and sends the `pagehide` goodbye instead (as Chrome does), and both check that evaluations then fail fast and work again after a reload. One more test drives a real browser and opens a tab, so it runs only with `JONQUIL_BROWSER_LIVE=1` (`JONQUIL_BROWSER_LIVE=1 bb test:cljs-node`, 127 assertions, measured 2026-10-23): values, `println`, an error and recovery, output from a timer after the answer, `js/console.log` reaching Jonquil's console, completion offering a Run's own `defn` from the analyzer, and an evaluation failing fast after the tab moves to `about:blank`. Without it, it prints a skip line. The suite skips, exiting 0, when `clojure` or `node` is missing, and a first run can download ClojureScript and the Closure Compiler.
 
 `bb test:clj` runs a third, separate suite (15 tests, 57 assertions)
 against a real `clojure -M:serve`, started fresh for the suite by

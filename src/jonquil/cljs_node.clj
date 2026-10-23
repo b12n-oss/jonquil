@@ -153,8 +153,13 @@
                   " buf (js/Buffer.alloc 65536)"
                   " n (.readSync fs fd buf 0 65536 nil)"
                   " _ (.closeSync fs fd)"
+                  ;; cut at indexOf, never split-lines: cljs split-lines
+                  ;; pops the trailing "" of "\n", so an empty line would
+                  ;; answer nil, as Cmd/Ctrl+D does (review I1, measured
+                  ;; against ClojureScript 1.12.42 and live node)
                   " s (.toString buf \"utf8\" 0 n)"
-                  " line (first (clojure.string/split-lines s))]"
+                  " i (.indexOf s \"\\n\")"
+                  " line (if (neg? i) s (.substring s 0 i))]"
                   " (*print-err-fn* " (pr-str (str got-input-marker "\n")) ")"
                   " (when-not (or (zero? n) (= line " (pr-str input-eof-marker) "))"
                   " line)))))")
