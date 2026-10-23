@@ -1422,8 +1422,9 @@ in batches a tenth of a second apart, at most 100,000 characters each (a
 note counts what was dropped). Format strings such as `%s` aren't applied
 on Jonquil's side, and in devtools each log's source link now points at
 Jonquil's wrapper instead of the line that logged. When that gets in the
-way of debugging through devtools, `{:cljs {:forward-console? false}}` in
-`.jonquil.edn` turns the forwarding off: `console.log` then stays in the
+way of debugging through devtools, `:forward-console? false` in
+`.jonquil.edn`'s `:cljs` map (`{:cljs {:target :browser :forward-console? false}}`)
+turns the forwarding off: `console.log` then stays in the
 browser with its real source links, and `println` still reaches Jonquil. As with node, there is no
 stdin and no inspector, F12 stays in the buffer, and completion and quick
 docs work the same way.
@@ -2127,8 +2128,8 @@ than being surprises you'd otherwise have to rediscover:
   still running when the tab closed waits until Stop.
 - `println` and `js/console.log` output reach Jonquil's console, even after
   an evaluation finished; `console.log` still logs in the browser too
-  (`{:cljs {:forward-console? false}}` keeps it there alone, with devtools'
-  real source links).
+  (`:forward-console? false` in the `:cljs` map keeps it there alone, with
+  devtools' real source links).
 - No stdin and no inspector; F12 stays in the buffer.
 - Completion offers the buffer and Clojure core names and, once something
   ran, every loaded namespace's publics, spelled by the buffer's ns form;

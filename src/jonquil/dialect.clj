@@ -402,8 +402,12 @@
                       (if (= :browser target) :browser :node))
         ;; :cljs :forward-console? turns the browser page's console hook
         ;; off; node has no hook, so the key is browser-only
-        cljs-console? (when (= :browser cljs-target)
-                        (not (false? (get cljs :forward-console?))))
+        fc (get cljs :forward-console?)
+        cljs-console? (when (= :browser cljs-target) (not (false? fc)))
+        w7 (if (and (= :browser cljs-target) (some? fc) (not (boolean? fc)))
+             [(str ".jonquil.edn :cljs :forward-console? should be true or false, not "
+                   (pr-str fc) "; forwarding stays on")]
+             [])
         w6 (cond
              (and cljs? (= :launch rt) (some? target) (not (#{:node :browser} target)))
              [(str ".jonquil.edn :cljs :target should be :node or :browser, not " (pr-str target) "; using :node")]
@@ -414,7 +418,7 @@
              :runtime rt
              :project-dir (:dir project)
              :source source
-             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5) (into w6))}
+             :warnings (-> (vec warnings) (into w1) (into w2) (into w3) (into w4) (into w5) (into w6) (into w7))}
       (and auto-require auto-require?) (assoc :auto-require auto-require)
       (and cljs cljs?) (assoc :cljs cljs)
       cljs-target (assoc :cljs-target cljs-target)
@@ -424,13 +428,16 @@
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
   runtime, and for an out-of-process runtime the project it runs in, plus
-  :cljs-target for a cljs launch (node and the browser differ). Equal
-  keys keep the window's evaluator when another file opens. The nREPL
-  dialect's :nrepl endpoint is part of it, so a changed host or port gets
-  a new connection."
-  [{:keys [profile runtime project-dir nrepl cljs-target]}]
+  :cljs-target for a cljs launch (node and the browser differ), and the
+  browser's :cljs-console?, so an edited :forward-console? rebuilds the
+  evaluator instead of being silently dropped. Equal keys keep the
+  window's evaluator when another file opens. The nREPL dialect's :nrepl
+  endpoint is part of it, so a changed host or port gets a new
+  connection."
+  [{:keys [profile runtime project-dir nrepl cljs-target cljs-console?]}]
   (cond-> [(:id profile) runtime (when (not= :in-process runtime) project-dir)]
     cljs-target (conj cljs-target)
+    (some? cljs-console?) (conj cljs-console?)
     (= :nrepl (:id profile)) (conj nrepl)))
 
 (defn reset-toggle

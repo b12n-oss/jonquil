@@ -102,9 +102,10 @@
   (let [seen (atom nil)
         spy (fn [opts] (reset! seen opts) (cljs-node/launch-args opts))
         c (child/start! {:clojure fake-clojure :launcher "l.clj" :args-fn spy
-                         :target :browser :http-port 9123})]
+                         :target :browser :http-port 9123 :console? false})]
     (try (is (nil? (:error c)) (str c))
-         (is (= [:browser 9123] ((juxt :target :http-port) @seen)))
+         (is (= [:browser 9123 false] ((juxt :target :http-port :console?) @seen))
+             "start! passes the console flag through to the argv")
          (is (nil? (:url c)) "the node-shaped fake prints no URL")
          (finally (child/kill! c)))))
 
