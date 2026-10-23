@@ -178,6 +178,9 @@
    popovers-quickdoc/row-jump-none
    popovers-quickdoc/row-jump-to-a-run-file
    popovers-quickdoc/row-jump-shadowed-param
+   popovers-quickdoc/row-quick-doc-follows-scroll
+   popovers-quickdoc/row-completion-hides-when-caret-scrolls-away
+   completion/row-repl-completion-hides-when-input-scrolls-away
    completion/row-completion-opens
    completion/row-completion-sized-to-rows-and-labelled
    completion/row-completion-single-inserts

@@ -2591,6 +2591,18 @@
     ;; move or focus leaving the editor.
     (register-popover-fn help-pop)
     (register-popover-fn full-doc-pop)
+    ;; P4 parked item (done): a scroll moves the text, so every open
+    ;; caret-anchored popover of this tab follows the caret, or hides once
+    ;; it leaves the visible text (jonquil.gtk.popover/follow-caret!).
+    ;; value-changed fires on the GTK thread; both axes, one handler.
+    (let [follow (callable (fn [_adj _data]
+                                (doseq [p (tab/popovers t)]
+                                  (popover/follow-caret! p))
+                                nil)
+                              [:pointer :pointer] :void)]
+      (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view ed))
+                   (g/gtk-scrollable-get-hadjustment (:view ed))]]
+        (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
@@ -3220,6 +3232,16 @@
                           :snapshot-fn (fn [] (cview/input-snapshot cv))
                           :apply-op! (fn [result] (cview/apply-input-op! cv result))})
         repl-complete-fn (fn [] (do-repl-complete! cv ev* repl-completion status-label))
+        ;; the console's completion is caret-anchored too: scrolling the
+        ;; Interactions pane follows or hides it, as a tab's editor does
+        ;; for its popovers (wire-tab!)
+        _ (let [follow (callable (fn [_adj _data]
+                                   (popover/follow-caret! repl-completion)
+                                   nil)
+                                 [:pointer :pointer] :void)]
+            (doseq [adj [(g/gtk-scrollable-get-vadjustment (:view cv))
+                         (g/gtk-scrollable-get-hadjustment (:view cv))]]
+              (g/g-signal-connect-data adj "value-changed" follow ffi/null ffi/null g/CONNECT-DEFAULT)))
         run-fn (fn [] (do-run! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
         stop-fn (fn [] (do-stop! ev* cv))
         open-fn (fn [] (do-open! cv win (fn [p] (open-file! @*tab-ctx p))))

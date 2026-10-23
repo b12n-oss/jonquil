@@ -954,6 +954,38 @@
         [(ffi/read out :int 0) (ffi/read out :int 4) w h])
       (finally (ffi/free it) (ffi/free loc) (ffi/free out)))))
 
+;; gtk_text_view_get_visible_rect: gtktextview.h -- void
+;; gtk_text_view_get_visible_rect (GtkTextView*, GdkRectangle*). Fixed
+;; arity; the rectangle comes back in BUFFER coordinates (the visible
+;; window of the buffer), the same space get_iter_location uses.
+(ffi/defcfn gtk-text-view-get-visible-rect "gtk_text_view_get_visible_rect"
+  [:pointer :pointer] :void)
+
+(defn text-view-visible-rect
+  "The buffer-coordinate rectangle of view's visible text, [x y w h]."
+  [view]
+  (let [loc (ffi/alloc 16)]
+    (try
+      (gtk-text-view-get-visible-rect view loc)
+      [(ffi/read loc :int 0) (ffi/read loc :int 4)
+       (ffi/read loc :int 8) (ffi/read loc :int 12)]
+      (finally (ffi/free loc)))))
+
+(defn caret-buffer-rect
+  "The insert mark's rectangle in view's BUFFER coordinates, [x y w h]:
+  caret-window-rect without the window translation, for comparing against
+  text-view-visible-rect."
+  [view]
+  (let [buf (gtk-text-view-get-buffer view)
+        it (ffi/alloc ITER-BYTES)
+        loc (ffi/alloc 16)]
+    (try
+      (gtk-text-buffer-get-iter-at-mark buf it (gtk-text-buffer-get-insert buf))
+      (gtk-text-view-get-iter-location view it loc)
+      [(ffi/read loc :int 0) (ffi/read loc :int 4)
+       (ffi/read loc :int 8) (ffi/read loc :int 12)]
+      (finally (ffi/free it) (ffi/free loc)))))
+
 (defn popover-pointing-to
   "Reads back popover's own pointing-to rectangle (P4 probe 2:
   gtk_popover_get_pointing_to) as [x y w h]."
