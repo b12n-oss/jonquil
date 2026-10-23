@@ -39,6 +39,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 - Typing in the rename popover no longer triggers window shortcuts: Cmd/Ctrl+W, Cmd/Ctrl+T, F5 and the rest go to the entry, so a rename can't close or switch the tab or Run it. Escape still closes the popover.
 - Quick doc and the completion preview recover from a lookup that failed once, instead of showing nothing for that name until the next evaluation, and a lookup that a Run overtakes no longer brings back the doc from before the Run.
 - When out-of-process Jolt can't start, the console's message says where the child's log is.
+- Jump to definition (F12) follows bindings from `for`/`doseq` `:let` modifiers and `letfn` function parameters, and lands on the enclosing `#(` for `%` arguments, instead of answering "No definition found".
 - Completion, quick-doc and rename popovers follow the caret while the editor scrolls, and hide once the caret scrolls out of view, instead of staying put over unrelated text.
 - ClojureScript in the browser: an evaluation sent after the page's tab closed fails within a couple of seconds, naming the URL to reload, instead of waiting until Stop.
 - ClojureScript: when the session setup fails, the message names the child's log and the log is kept; before, the message sometimes named a log that was already deleted.
