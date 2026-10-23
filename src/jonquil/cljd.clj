@@ -248,6 +248,70 @@
                   (partition 2 1 toks)))))
     []))
 
+(defn buffer-ns-refs
+  "The buffer's ns-form require map: {:aliases {alias-str ns-str}
+  :refers {name-str ns-str}} from each [lib :as a], [lib :as-alias a] and
+  [lib :refer [x y]] vector (:refer :all contributes nothing; a string lib
+  such as \"dart:io\" counts without its quotes). {:aliases {} :refers {}}
+  when there's no ns form, and junk never throws."
+  [text]
+  (let [empty-refs {:aliases {} :refers {}}]
+    (try
+      (if-let [form (:text (ns-form text))]
+        (let [toks (filterv (fn [[t]] (not= :comment t)) (syntax/tokenize form))
+              word (fn [[t s e]] (let [w (subs form s e)]
+                                   (if (= :string t) (str/replace w "\"" "") w)))
+              n (count toks)]
+          (loop [i 0 lib nil acc empty-refs]
+            (if (>= i n)
+              acc
+              (let [[t :as tok] (nth toks i)
+                    w (word tok)]
+                (cond
+                  ;; a vector opens: its first symbol or string is the lib
+                  (and (= :bracket t) (= "[" w))
+                  (let [j (loop [j (inc i)]
+                            (when-let [[t2] (and (< j n) (nth toks j))]
+                              (cond (#{:symbol :special-form :builtin :string} t2) j
+                                    (= :metatag t2) (recur (inc j))
+                                    :else nil)))]
+                    (recur (inc i) (when j (word (nth toks j))) acc))
+                  (and (= :bracket t) (= "]" w))
+                  (recur (inc i) nil acc)
+                  (and lib (= :keyword t) (#{":as" ":as-alias"} w)
+                       (when-let [[t2] (and (< (inc i) n) (nth toks (inc i)))]
+                         (#{:symbol :special-form :builtin} t2)))
+                  (recur (+ i 2) lib (assoc-in acc [:aliases (word (nth toks (inc i)))] lib))
+                  ;; :refer [a b]: each name maps to lib; :refer :all is skipped
+                  (and lib (= :keyword t) (= ":refer" w)
+                       (when-let [[t2 :as tok2] (and (< (inc i) n) (nth toks (inc i)))]
+                         (and (= :bracket t2) (= "[" (word tok2)))))
+                  (let [[j acc] (loop [j (+ i 2) acc acc]
+                                  (if-let [[t2 :as tok2] (and (< j n) (nth toks j))]
+                                    (if (and (= :bracket t2) (= "]" (word tok2)))
+                                      [(inc j) acc]
+                                      (recur (inc j)
+                                             (if (#{:symbol :special-form :builtin} t2)
+                                               (assoc-in acc [:refers (word tok2)] lib)
+                                               acc)))
+                                    [j acc]))]
+                    (recur (long j) lib acc))
+                  :else (recur (inc i) lib acc))))))
+        empty-refs)
+      (catch Throwable _ empty-refs))))
+
+(defn candidate-sort-key
+  "candidates' sort key for cand under the typed prefix: exact-prefix
+  matches first, then category (:user, :special, :builtin, :core for a
+  core name only the analyzer knows, anything else last), then the name,
+  case-insensitively. :core and :remote rank after :builtin on purpose:
+  the analyzer's names append to today's offline order, never reorder it."
+  [prefix {:keys [symbol category]}]
+  [(if (str/starts-with? symbol prefix) 0 1)
+   (case category :user 0 :special 1 :builtin 2 :core 3 4)
+   (str/lower-case symbol)
+   symbol])
+
 (defn candidates
   "Offline completion for a ClojureDart buffer, in jonquil.docs/candidates'
   shape ([{:symbol :category}]): the buffer's own definitions and symbols,
@@ -276,9 +340,4 @@
                (for [s special-forms :when (match? s)] {:symbol s :category :special})
                (for [s builtins :when (and (match? s) (not (contains? special-forms s)))]
                  {:symbol s :category :builtin}))]
-    (vec (sort-by (fn [{:keys [symbol category]}]
-                    [(if (str/starts-with? symbol prefix) 0 1)
-                     (case category :user 0 :special 1 :builtin 2 3)
-                     (str/lower-case symbol)
-                     symbol])
-                  cands))))
+    (vec (sort-by (fn [c] (candidate-sort-key prefix c)) cands))))

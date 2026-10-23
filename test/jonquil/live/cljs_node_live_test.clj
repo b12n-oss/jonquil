@@ -131,6 +131,29 @@
       (is (= :ok (:status result)) (pr-str [result out]))
       (is (= "\"hi x\"" (:printed result)) (pr-str result)))))
 
+(def ^:private completion-src
+  "(ns my.app (:require [clojure.string :as str]))\n(defn twice [x] (* 2 x))")
+
+(deftest completion-from-the-analyzer-live
+  (with-cljs [e (make)]
+    ;; before anything ran there is no child: offline names answer alone
+    (is (some (fn [c] (= "map" (:symbol c))) (ev/complete e "ma" "" 0 nil)))
+    (let [done (promise)]
+      (ev/eval! e completion-src {:run? true
+                                  :on-output (fn [_ _])
+                                  :on-complete (fn [r] (deliver done r))})
+      (is (= :ok (:status (deref done 60000 :timeout)))))
+    (let [offers? (fn [prefix sym]
+                    (some (fn [c] (= sym (:symbol c)))
+                          (ev/complete e prefix completion-src 0 nil)))
+          deadline (+ (System/currentTimeMillis) 10000)]
+      ;; the fetch lands just after the Run answers
+      (loop [] (when (and (not (offers? "str/u" "str/upper-case"))
+                          (< (System/currentTimeMillis) deadline))
+                 (Thread/sleep 100) (recur)))
+      (is (offers? "str/u" "str/upper-case") "an aliased name from the analyzer")
+      (is (offers? "tw" "twice") "the Run's own defn, spelled short"))))
+
 (defn- node-pids
   "The pids among pids whose command's first word ends with node."
   [pids]
@@ -430,6 +453,15 @@
             (is (= :error (:status result)) (pr-str result)))
           (let [{:keys [result]} (run e "(+ 2 3)")]
             (is (= "5" (:printed result)) (pr-str result)))
+          ;; completion from the analyzer, measured on the browser target
+          (let [{:keys [result]} (run e "(defn twice [x] (* 2 x))")]
+            (is (= :ok (:status result)) (pr-str result)))
+          (let [offers? (fn [] (some (fn [c] (= "twice" (:symbol c)))
+                                     (ev/complete e "tw" "" 0 nil)))
+                deadline (+ (System/currentTimeMillis) 10000)]
+            (loop [] (when (and (not (offers?)) (< (System/currentTimeMillis) deadline))
+                       (Thread/sleep 100) (recur)))
+            (is (offers?) "analyzer names after a Run in the real browser"))
           (let [out (atom []) done (promise)]
             (ev/eval! e "(js/setTimeout (fn [] (println \"late\")) 300)"
                       {:run? false

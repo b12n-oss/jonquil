@@ -94,3 +94,12 @@
       (send! c "(str \"slow\")\n")
       (is (= ::none (recv c 100)))
       (is (= "\"slow\"" (:val (recv c 2000)))))))
+
+(deftest apropos-val-answers-without-eval-test
+  (with-fake {:apropos-val "(a.b/c d.e/f)"}
+    (fn [srv c]
+      (send! c "(cljs.repl/apropos #\"\")\n")
+      (let [r (recv c 2000)]
+        (is (= "(a.b/c d.e/f)" (:val r)))
+        (is (not (:exception r))))
+      (is (some #(re-find #"apropos" %) (fake/received-forms srv)) "the form is recorded"))))

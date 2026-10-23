@@ -1,5 +1,6 @@
 (ns jonquil.cljs-node-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.cljs-node :as cljs-node]))
 
 (deftest launch-args-test
@@ -117,3 +118,39 @@
          (cljs-node/reload-message "http://u")))
   (is (= "; No page has connected yet. Open http://u in a browser, then Run again."
          (cljs-node/no-page-message "http://u"))))
+
+(def ^:private analyzer-syms
+  '[clojure.string/upper-case clojure.set/union cljs.user/twice cljs.core/mapcat deep.ns/hidden])
+
+(def ^:private analyzer-buf
+  "(ns cljs.user (:require [clojure.string :as str] [clojure.set :refer [union]]))")
+
+(deftest analyzer-candidates-test
+  (let [cands (fn [prefix] (set (map :symbol (cljs-node/analyzer-candidates
+                                              {:syms analyzer-syms :prompt-ns 'cljs.user
+                                               :text analyzer-buf :prefix prefix}))))]
+    (is (contains? (cands "str/u") "str/upper-case"))
+    (is (contains? (cands "tw") "twice") "prompt-ns publics by short name")
+    (is (contains? (cands "map") "mapcat") "cljs.core by short name")
+    (is (contains? (cands "un") "union") "referred name")
+    (is (not (contains? (cands "hid") "deep.ns/hidden")) "bare prefix: no qualified names")
+    (is (empty? (filter (fn [s] (str/includes? s "/")) (cands "cl")))
+        "a bare cl drowns in nothing")
+    (is (contains? (cands "deep.") "deep.ns/hidden"))
+    (is (contains? (cands "deep.ns/h") "deep.ns/hidden"))
+    (is (= :remote (:category (first (filter (fn [c] (= "deep.ns/hidden" (:symbol c)))
+                                             (cljs-node/analyzer-candidates
+                                              {:syms analyzer-syms :prompt-ns 'cljs.user
+                                               :text analyzer-buf :prefix "deep."}))))))
+    (is (not (contains? (cands "twice") "twice")) "a candidate equal to the prefix is dropped")
+    (is (= [{:symbol "mapcat" :category :core}]
+           (cljs-node/analyzer-candidates {:syms analyzer-syms :prompt-ns nil :text nil :prefix "map"}))
+        "nil text and prompt-ns never throw; cljs.core still answers")))
+
+(deftest parse-apropos-test
+  (is (= '[a.b/c d.e/f] (cljs-node/parse-apropos "(a.b/c d.e/f)")))
+  (is (nil? (cljs-node/parse-apropos "3")))
+  (is (nil? (cljs-node/parse-apropos "(a.b/c")))
+  (is (nil? (cljs-node/parse-apropos "(a.b/c 3)")) "non-symbols")
+  (is (nil? (cljs-node/parse-apropos nil)))
+  (is (= 20000 (count (cljs-node/parse-apropos (pr-str (repeat 20001 'a.b/c)))))))

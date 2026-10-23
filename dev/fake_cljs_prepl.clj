@@ -87,7 +87,14 @@
                 (Thread/sleep (long (:hold-setup-ms opts))))
               (when (and (:slow-ms opts) (str/includes? text "slow"))
                 (Thread/sleep (long (:slow-ms opts))))
-              (let [result (if (and (:fail-setup? opts) (re-find #"\(require\s+'cljs\.repl" text))
+              (when (and (:hold-apropos-ms opts) (str/includes? text "cljs.repl/apropos"))
+                (Thread/sleep (long (:hold-apropos-ms opts))))
+              (if (and (:apropos-val opts) (str/includes? text "cljs.repl/apropos"))
+                ;; the real prepl expands the macro on the compiler side;
+                ;; this sandbox can't, so the answer is canned
+                (do (send! w lock {:tag :ret :val (:apropos-val opts) :ns current :ms 0 :form text})
+                    (recur more current setup?))
+                (let [result (if (and (:fail-setup? opts) (re-find #"\(require\s+'cljs\.repl" text))
                              {:out "" :exception true :val (error-val (ex-info "no page" {}))}
                              (eval-form (create-ns (symbol current)) (strip-setup form)))]
                 (if (and (:exception result) (:wedge-on-throw-without-setup? opts) (not setup?))
@@ -98,7 +105,7 @@
                       (send! w lock {:tag :out :val (:out result)}))
                     (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
                                          (when (:exception result) {:exception true})))
-                    (recur more new-ns setup?))))))
+                    (recur more new-ns setup?)))))))
           (when-let [line (and (not @stopped?) (.readLine in))]
             (recur (str buf line "\n") current setup?))))
       (catch Throwable _ nil)
@@ -113,7 +120,11 @@
   :hold-setup-ms  sleep this long before answering (require 'cljs.repl),
             as the browser prepl does until a page connects
   :fail-setup?  answer (require 'cljs.repl) with an exception (after any
-            :hold-setup-ms), as a browser setup that fails late would"
+            :hold-setup-ms), as a browser setup that fails late would
+  :apropos-val  answer a form holding cljs.repl/apropos with this string
+            as :val, without evaluating (this sandbox can't expand the
+            macro); the form is still recorded
+  :hold-apropos-ms  sleep this long before answering such a form"
   ([] (start! {}))
   ([opts]
    (let [ss (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))

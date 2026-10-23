@@ -8,6 +8,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- ClojureScript completion (node and browser) offers every loaded namespace's publics, asked from the compiler's analyzer on the first completion after an evaluation, spelled the way the buffer's ns form can use them: `str/upper-case` behind an alias, bare names for the current namespace and anything referred, and full `some.ns/name` once the prefix contains a `.` or `/`.
 - Guide screenshots for ClojureScript on node, in the browser and attached to a shadow-cljs build, and for the nREPL dialect attached to babashka. Four new `bb docs:shots` scenes (`cljs-node`, `cljs-browser`, `cljs-shadow`, `nrepl-bb`) take them against the real runtimes, each in its own temp project, and stop whatever they started afterwards.
 - ClojureScript in the browser: `js/console.log`, `info`, `warn`, `error` and `debug` print to Jonquil's console as well as the browser's devtools.
 - ClojureScript in the browser (experimental): `.jonquil.edn {:cljs {:target :browser}}` in a project without `shadow-cljs.edn` runs the launched ClojureScript in a browser tab instead of node. The first Run opens the page in the default browser (or through `JONQUIL_OPEN_URL`) and waits up to 60 seconds for it; Stop and Reset on Run restart ClojureScript and ask you to reload the tab at the same URL. Both listeners are loopback-only (ClojureScript's browser REPL server would otherwise bind every interface), and unauthenticated like the node runtime.

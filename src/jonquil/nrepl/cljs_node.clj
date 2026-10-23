@@ -91,7 +91,7 @@
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
                                                     :used? false :prompt-ns 'cljs.user :drain nil
-                                                    :setup-pending nil)
+                                                    :setup-pending nil :analyzer-syms nil :analyzer-stale? nil)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (cond-> (:child old) keep-log? (dissoc :run-dir))]
@@ -427,6 +427,39 @@
         (let [m (or (ex-message e) "")]
           (when (str/starts-with? m "EOF") (str "Error: " m)))))))
 
+(defn- fetch-syms!
+  "Fetches the analyzer's full symbol list (cljs-node/apropos-form) into
+  :analyzer-syms, bounded like a doc lookup; skipped while anything runs
+  or helps, or with no live child. Claiming the fetch clears
+  :analyzer-stale?, so each completed evaluation buys one attempt: a page
+  that went away can't cost the help budget on every keystroke. An answer
+  that isn't a symbol list (cljs-node/parse-apropos nil) changes nothing.
+  Never throws. It must never ride after an evaluation on its own: sent to
+  a browser page that just left, it held up the closed-tab fail-fast (8 s
+  measured, 2026-10-23) and made quick docs answer busy."
+  [{:keys [state timings] :as ev}]
+  (let [[old _] (swap-vals! state (fn [s] (if (or (:running s) (:helping s)) s (assoc s :helping true))))]
+    (when-not (or (:running old) (:helping old))
+      (swap! state assoc :analyzer-stale? nil)
+      (if-not (live? ev)
+        (swap! state assoc :helping false)
+        (try
+          (let [sentinel-form (next-sentinel! ev)
+                form cljs-node/apropos-form
+                [outcome replies] (exchange! ev (str form "\n" sentinel-form)
+                                             (fn [r] (and (ret? r) (= sentinel-form (:form r))))
+                                             {:sentinel sentinel-form
+                                              :on-output (:last-output @state)
+                                              :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
+            (when (= :done outcome)
+              (when-let [syms (some (fn [r]
+                                      (when (and (ret? r) (= form (:form r)) (not (:exception r)))
+                                        (cljs-node/parse-apropos (:val r))))
+                                    replies)]
+                (swap! state assoc :analyzer-syms syms))))
+          (catch Throwable _ nil)
+          (finally (swap! state assoc :helping false)))))))
+
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
   (try
@@ -462,6 +495,11 @@
               (case outcome
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
+                        ;; the analyzer may know new names now; the next
+                        ;; completion's backstop fetches them. Marked
+                        ;; before finish!, so a completion racing
+                        ;; on-complete can't miss the mark (review M2)
+                        (swap! state assoc :analyzer-stale? true)
                         (finish! ev opts result))
                 (if (stopping? ev)
                   (finish! ev opts {:status :interrupted})
@@ -544,9 +582,30 @@
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
-  (complete [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
-         (catch Throwable _ [])))
+  (complete [this prefix text pos extra-context]
+    (try
+      (let [offline (cljd/candidates (:profile selection) prefix text pos extra-context)]
+        (try
+          ;; stale alone arms the fetch: an empty cache must not, or a
+          ;; failed fetch (a gone page, say) would retry on every
+          ;; completion and hold :helping ~2 s each time (review I1)
+          (when (and (:analyzer-stale? @state)
+                     (live? this) (nil? (:running @state)))
+            ;; the fetch runs here, on ask-help!'s worker, never after an
+            ;; evaluation (see fetch-syms!'s docstring)
+            (fetch-syms! this))
+          (let [syms (:analyzer-syms @state)
+                have (into #{} (map :symbol) offline)
+                extra (remove #(contains? have (:symbol %))
+                              (cljs-node/analyzer-candidates
+                               {:syms syms :prompt-ns (:prompt-ns @state)
+                                :text text :prefix prefix}))]
+            (if (seq extra)
+              (vec (sort-by (fn [c] (cljd/candidate-sort-key (or prefix "") c))
+                            (concat offline extra)))
+              offline))
+          (catch Throwable _ offline)))
+      (catch Throwable _ [])))
   (lookup [this sym _text _pos]
     (try (meta-lookup this sym nil)
          (catch Throwable _ (cljd/no-docs sym timeout-doc))))

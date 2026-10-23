@@ -137,3 +137,20 @@
     (testing "nothing from the in-process Jolt runtime: a clojure.core var no profile set names"
       (is (empty? (syms "ns-publics")))
       (is (empty? (syms "requiring-resolve"))))))
+
+(deftest buffer-ns-refs-test
+  (is (= {:aliases {"str" "clojure.string" "cs" "clojure.set"}
+          :refers {"union" "clojure.set" "diff" "clojure.set"}}
+         (cljd/buffer-ns-refs
+          "(ns my.app (:require [clojure.string :as str]\n [clojure.set :as cs :refer [union diff]]))\n(defn f [x] x)")))
+  (is (= {:aliases {} :refers {}} (cljd/buffer-ns-refs "(+ 1 2)")))
+  (is (= {:aliases {} :refers {}} (cljd/buffer-ns-refs nil)))
+  ;; junk never throws: unclosed form, :refer :all, metadata
+  (is (map? (cljd/buffer-ns-refs "(ns a (:require [b.c :as")))
+  (is (= {} (:refers (cljd/buffer-ns-refs "(ns a (:require [b.c :refer :all]))"))))
+  (is (= {"m" "b.c"} (:aliases (cljd/buffer-ns-refs "(ns a (:require ^:keep [b.c :as m]))")))))
+
+(deftest candidate-sort-key-test
+  (is (= [0 0 "map" "map"] (cljd/candidate-sort-key "ma" {:symbol "map" :category :user})))
+  (is (= [1 3 "mapcat" "mapcat"] (cljd/candidate-sort-key "x" {:symbol "mapcat" :category :core})))
+  (is (= [1 4 "a.b/map" "a.b/map"] (cljd/candidate-sort-key "x" {:symbol "a.b/map" :category :remote}))))
