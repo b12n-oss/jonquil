@@ -8,7 +8,8 @@
   each evaluation sends its code followed by a sentinel form and reads
   replies until the sentinel's ret. Stop kills the child (no interrupt), so
   earlier definitions are gone afterwards. Help evaluates (cljs.repl/doc x)
-  only while idle; a help that times out leaves its sentinel in :drain, and
+  only while idle; a help that times out (or that an evaluation cancelled)
+  leaves its sentinel in :drain, and
   replies up to its ret are dropped before the next evaluation's are read.
 
   Replies reach the state through one handler per connection. It drops
@@ -204,7 +205,8 @@
   "Routes one reply of one connection. closed? is that connection's own
   flag: a reply after its :closed is dropped, and :closed itself is
   delivered once. A ret whose :form is the pending :drain sentinel (a help
-  that timed out) clears :drain and is dropped with everything before it. A
+  that timed out or was cancelled) clears :drain and is dropped with
+  everything before it. A
   ret that is the current exchange's sentinel is recorded in :done-forms in
   the same swap, so exchange! can tell a timeout from a ret that just
   beat it."
@@ -250,13 +252,16 @@
 
 (defn- exchange!
   "Sends text and collects the replies until (done? reply) or :closed or
-  timeout-ms. [outcome replies], outcome :done, :closed or :timeout. Output
-  replies go to on-output as they arrive when it is given. With :sentinel
-  (the form whose ret ends the exchange), the end of the exchange is one
-  swap: it clears the sink and, on a timeout whose sentinel ret has not
-  arrived, sets :drain to it, so the late ret is dropped by dispatch! and
-  nothing else is."
-  [{:keys [state]} text done? {:keys [on-output timeout-ms sentinel]}]
+  timeout-ms. [outcome replies], outcome :done, :closed, :timeout or
+  :cancelled. Output replies go to on-output as they arrive when it is
+  given. With :sentinel (the form whose ret ends the exchange), the end of
+  the exchange is one swap: it clears the sink and, on a timeout or a
+  cancel whose sentinel ret has not arrived, sets :drain to it, so the
+  late ret is dropped by dispatch! and nothing else is. With :cancel-key,
+  a fn ending the exchange with :cancelled sits at that state key while it
+  runs (how wait-not-helping! lets an evaluation cancel a help exchange);
+  a stale cancel after the exchange ended is a no-op."
+  [{:keys [state]} text done? {:keys [on-output timeout-ms sentinel cancel-key]}]
   (let [p (promise)
         replies (atom [])
         sink (fn [r]
@@ -267,7 +272,8 @@
                        (when-let [[k t] (cljs-node/output-of r)]
                          (connection/say! on-output k t)))
                      (when (done? r) (deliver p :done)))))]
-    (swap! state assoc :sink sink :sink-form sentinel)
+    (swap! state (fn [s] (cond-> (assoc s :sink sink :sink-form sentinel)
+                           cancel-key (assoc cancel-key (fn [] (deliver p :cancelled))))))
     (let [outcome (try (prepl/send! (:conn @state) text)
                        (if timeout-ms (deref p timeout-ms :timeout) (deref p))
                        (catch Throwable _ :closed))]
@@ -275,8 +281,10 @@
              (fn [s]
                (let [arrived? (contains? (:done-forms s) sentinel)]
                  (cond-> (if (= sentinel (:sink-form s)) (assoc s :sink nil :sink-form nil) s)
+                   cancel-key (assoc cancel-key nil)
                    sentinel (update :done-forms disj sentinel)
-                   (and sentinel (= :timeout outcome) (not arrived?)) (assoc :drain sentinel)))))
+                   (and sentinel (#{:timeout :cancelled} outcome) (not arrived?))
+                   (assoc :drain sentinel)))))
       [outcome @replies])))
 
 (defn- next-sentinel! [{:keys [state]}]
@@ -398,11 +406,20 @@
           (> (System/currentTimeMillis) deadline) {:status :notice :text (cljs-node/no-page-message url)}
           :else (do (Thread/sleep 20) (recur)))))))
 
-(defn- wait-not-helping! [{:keys [state]}]
-  (loop [n 0]
-    (when (and (:helping @state) (< n 700))
-      (Thread/sleep 10)
-      (recur (inc n)))))
+(defn- wait-not-helping!
+  "An evaluation outranks help: cancels an in-flight help exchange (its
+  sentinel drains like a timeout's, see exchange!), then waits out the
+  milliseconds the helper needs to release :helping; without the cancel a
+  Run could wait a help budget, ~2 s against a page that just closed."
+  [{:keys [state]}]
+  (when (:helping @state)
+    (loop [n 0]
+      (when (and (:helping @state) (< n 700))
+        ;; re-read each tick: the helper claims :helping a moment before
+        ;; exchange! stores the cancel fn, and deliver is idempotent
+        (when-let [cancel (:help-cancel @state)] (cancel))
+        (Thread/sleep 10)
+        (recur (inc n))))))
 
 (defn- eval-text [prompt-ns {:keys [run? ns-source]} code sentinel-form]
   (let [buffer-ns (when (and (not run?) ns-source) (clj/buffer-ns ns-source))
@@ -450,6 +467,7 @@
                 [outcome replies] (exchange! ev (str form "\n" sentinel-form)
                                              (fn [r] (and (ret? r) (= sentinel-form (:form r))))
                                              {:sentinel sentinel-form
+                                              :cancel-key :help-cancel
                                               :on-output (:last-output @state)
                                               :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
             (when (= :done outcome)
@@ -548,12 +566,14 @@
               [outcome replies] (exchange! ev (str form "\n" sentinel-form)
                                            (fn [r] (and (ret? r) (= sentinel-form (:form r))))
                                            {:sentinel sentinel-form
+                                            :cancel-key :help-cancel
                                             :on-output (:last-output @state)
                                             :timeout-ms (or timeout-ms (ev/help-timeout (:help-timeout-ms timings)))})]
           (if (= :done outcome)
             (let [t (doc-text replies form)]
               (cljd/no-docs sym (if (str/blank? t) (str "No docs for " sym) t)))
-            (cljd/no-docs sym timeout-doc)))
+            ;; cancelled = an evaluation arrived: that's busy, not slow
+            (cljd/no-docs sym (if (= :cancelled outcome) busy-doc timeout-doc))))
         (finally (swap! state assoc :helping false))))))
 
 (defrecord CljsNode [selection state history listeners timings hooks]

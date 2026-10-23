@@ -588,3 +588,43 @@
         (is (contains? (offered ev "ma") "map") "offline answers with the child gone")
         (is (not (contains? (offered ev "tw") "twice")) "the cache died with the child")
         (is (= before (apropos-sends srv)) "no backstop fetch against a dead child")))))
+
+;; --- an evaluation cancels an in-flight help exchange ---------------------
+
+(deftest an-evaluation-cancels-an-in-flight-fetch-test
+  ;; the fake holds the apropos answer 2000 ms; the arriving evaluation
+  ;; must cancel the fetch (helping clears in ms), and the held reply must
+  ;; drain without touching the evaluation's own result
+  (with-node {:apropos-val "(cljs.user/twice)" :hold-apropos-ms 2000} {}
+    (fn [_srv {:keys [ev]}]
+      (is (= :ok (:status (:result (run ev "(def a 1)" {:run? true})))))
+      (let [fetching (future (offered ev "tw"))]
+        (is (wait-until #(:helping @(:state ev)) 2000) "the fetch is in flight")
+        (let [done (promise)]
+          (ev/eval! ev "(+ 1 2)" {:run? false :on-output (fn [_ _])
+                                  :on-complete (fn [r] (deliver done r))})
+          (is (wait-until #(not (:helping @(:state ev))) 1000)
+              "the evaluation cancelled the fetch instead of waiting it out (2000 ms held)")
+          (let [r (deref done 10000 :timeout)]
+            (is (= {:status :ok :printed "3"} (select-keys r [:status :printed]))
+                "the held apropos reply drained; the evaluation's own answer is clean")))
+        (is (set? @fetching) "the cancelled complete still answered (offline)")
+        (is (not (contains? @fetching "twice")) "a cancelled fetch fills no cache")))))
+
+(deftest an-evaluation-cancels-an-in-flight-lookup-test
+  ;; same shape for quick docs: the doc form holds (its source says slow),
+  ;; the evaluation cancels, and the lookup answers busy-doc
+  (with-node {:slow-ms 2000} {}
+    (fn [_srv {:keys [ev]}]
+      (is (= "1" (:printed (:result (run ev "1" {:run? false})))))
+      (let [looking (future (ev/lookup ev 'slow "" 0))]
+        (is (wait-until #(:helping @(:state ev)) 2000) "the lookup is in flight")
+        (let [done (promise)]
+          (ev/eval! ev "(+ 20 22)" {:run? false :on-output (fn [_ _])
+                                    :on-complete (fn [r] (deliver done r))})
+          (is (wait-until #(not (:helping @(:state ev))) 1000)
+              "the evaluation cancelled the lookup (2000 ms held)")
+          (is (= {:status :ok :printed "42"}
+                 (select-keys (deref done 10000 :timeout) [:status :printed]))))
+        (is (= node/busy-doc (:doc @looking))
+            "a lookup an evaluation cancelled answers busy, not timed out")))))
