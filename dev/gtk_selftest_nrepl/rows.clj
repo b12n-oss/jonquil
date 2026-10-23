@@ -113,6 +113,7 @@
   nil after 5000 ms. Parks, so call it from a go block. Checks the row the
   way ga/sh does: a timed-out row must not signal the next row's child."
   [args]
+  (ga/assert-off-gtk! "sh-within")
   (ga/check-row!)
   (let [ch (a/thread (apply shell/sh args))
         [r port] (a/alts! [ch (timeout 5000)])]

@@ -604,7 +604,7 @@
     (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Waiting for input")]
-      (when-not ok (check! :read-line-waiting false {:reason "status never showed Waiting for input"})))
+      (check! :read-line-waiting ok {:want "status shows Waiting for input"}))
     (cg-key! pid "f6")
     (type-text! pid "kim")
     (cg-key! pid "return")
@@ -770,7 +770,7 @@
     (type-text! pid "findme")
     (cg-key! pid "return")
     (let [{:keys [ok]} (wait-for-ocr! pid 5000 "findme")]
-      (when-not ok (check! :find-setup false {:reason "\"findme\" never showed in OCR after Return"})))
+      (check! :find-setup ok {:want "\"findme\" in OCR after Return"}))
     (let [win (window-for pid)
           scale (or (:scale win) 2.0)
           wx (:x win) wy (:y win)
@@ -952,7 +952,7 @@
     (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 3000 "Running")]
-      (when-not ok (check! :loop-started false {:reason "status never showed Running"})))
+      (check! :loop-started ok {:want "status shows Running"}))
     (cg-key! pid "escape")
     (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "interrupted")
           stopped (wait-for-ocr! pid 3000 "Stopped")]
@@ -979,7 +979,7 @@
     (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 4000 "tick")]
-      (when-not ok (check! :forever-started false {:reason "no tick output seen"})))
+      (check! :forever-started ok {:want "tick output"}))
     (cg-key! pid "escape")
     (let [{:keys [ok last]} (wait-for-ocr! pid 5000 "Stopped")
           responsive (seq (windows-edn! pid))]
@@ -1120,7 +1120,7 @@
     (ensure-window! pid 8000)
     (cg-key! pid "f5")
     (let [{:keys [ok]} (wait-for-ocr! pid 4000 "tick")]
-      (when-not ok (check! :close-while-running-setup false {:reason "no tick output before closing"})))
+      (check! :close-while-running-setup ok {:want "tick output before closing"}))
     (cg-key! pid "command + w")
     (let [exit (deref proc 5000 ::timeout)
           log-text (try (slurp log) (catch Exception _ ""))
@@ -1167,7 +1167,7 @@
     (ensure-window! pid 8000)
     (cg-key! pid "command + shift + m")
     (let [{:keys [ok]} (wait-for-ocr! pid 5000 "Theme: dark")]
-      (when-not ok (check! :theme-persists-cycle false {:reason "status never showed Theme: dark"})))
+      (check! :theme-persists-cycle ok {:want "status shows Theme: dark"}))
     (let [settings-path (str smoke-xdg-config-home "/jonquil/settings.edn")
           saved (try (edn/read-string (slurp settings-path)) (catch Exception _ ::unreadable))]
       (check! :theme-persists-saved (= {:theme :dark} saved)

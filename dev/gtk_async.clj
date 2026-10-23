@@ -65,6 +65,15 @@
   [e]
   (boolean (::abandoned (ex-data e))))
 
+(defn assert-off-gtk!
+  "Throws when called on the GTK thread, where a parking helper's take
+  would freeze the main loop (spike probe: a 300 ms <! there advanced 0
+  idle ticks). call-gtk always checked; sh and settle here, and the nREPL
+  rows' sh-within, refuse by construction too. who names the helper."
+  [who]
+  (when (gtk-thread?)
+    (throw (ex-info (str who " on the GTK thread would block the main loop") {}))))
+
 (defn gui-ch
   "Runs f on the GTK thread via on-gui! and returns a promise-chan of {:ok v}
   or {:err e}. The try matters: on-gui!'s drain swallows a throw, and then
@@ -80,8 +89,7 @@
   called on the GTK thread."
   [f]
   (check-row!)
-  (when (gtk-thread?)
-    (throw (ex-info "call-gtk on the GTK thread would block the main loop" {})))
+  (assert-off-gtk! "call-gtk")
   (let [{:keys [ok err]} (<! (gui-ch f))]
     (check-row!)
     (if err (throw err) ok)))
@@ -133,6 +141,7 @@
   restores it: it can only return once the GTK thread has actually run
   the thunk."
   [n]
+  (assert-off-gtk! "settle")
   (<! (timeout (* 20 n)))
   (on-gtk nil))
 
@@ -140,6 +149,7 @@
   "clojure.java.shell/sh on its own thread (a/thread); parks until the
   subprocess exits and returns its result map."
   [& args]
+  (assert-off-gtk! "sh")
   (check-row!)
   (let [r (<! (a/thread (apply shell/sh args)))]
     (check-row!)

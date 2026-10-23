@@ -101,3 +101,18 @@
   (let [done (promise)]
     (go (deliver done (:exit (ga/sh "true"))))
     (is (= 0 (deref done 5000 :timeout)))))
+
+(deftest parking-helpers-refuse-the-gtk-thread-test
+  ;; call-gtk always refused to run on the GTK thread (a take there freezes
+  ;; the main loop); the other parking helpers refuse by construction too
+  (with-redefs [ga/gtk-thread? (constantly true)]
+    (doseq [[who f] [["sh" #(ga/sh "true")]
+                     ["settle" #(ga/settle 1)]
+                     ["call-gtk" #(ga/call-gtk (fn [] nil))]]]
+      (let [done (promise)]
+        (go (deliver done (try (f) ::no-throw
+                               (catch :default e (ex-message e)))))
+        (let [r (deref done 5000 :timeout)]
+          (is (string? r) (str who ": " (pr-str r)))
+          (when (string? r)
+            (is (re-find #"GTK thread" r) (str who ": " r))))))))
