@@ -31,6 +31,40 @@
   []
   (= 1 (g-main-context-is-owner (g-main-context-default))))
 
+;; --- row abandonment -------------------------------------------------------
+;; run-rows gives each row a generation and bumps its run's counter when the
+;; row outlives its deadline, so a stale body can't act into the next row:
+;; the parking helpers (call-gtk and everything over it, sh, and the nREPL
+;; rows' sh-within) check the row is still current and otherwise throw a
+;; marked error that go-row swallows (the :row-timeout FAIL already told
+;; the story). The throw fires ONCE per row: it unwinds the body at its
+;; first helper call, and the row's own finally then runs its cleanup
+;; helpers unchecked, so an abandoned row still closes its tabs and windows
+;; (review 2026-10-23: skipping cleanup left state that poisoned every
+;; later row, worse than the late cleanup it replaced). Bindings convey
+;; into go blocks and across parks (probed 2026-10-23), so the row's
+;; identity rides a dynamic var; code outside a row has no binding and is
+;; never checked, and each run-rows owns its counter, so two runs could
+;; never stale each other's rows.
+
+(def ^:dynamic ^:private *row-ctx*
+  "nil outside rows; [run-counter-atom gen thrown?-atom] inside one."
+  nil)
+
+(defn check-row!
+  "The abandonment check every parking helper runs (public for sh-within
+  in the nREPL rows): throws, once, when this row was timed out by
+  run-rows; a no-op outside rows and after the row's single throw."
+  []
+  (when-let [[counter g thrown?] *row-ctx*]
+    (when (and (not= g @counter) (compare-and-set! thrown? false true))
+      (throw (ex-info "the row outlived its timeout and was abandoned" {::abandoned true})))))
+
+(defn abandoned-throw?
+  "True for the error check-row! throws."
+  [e]
+  (boolean (::abandoned (ex-data e))))
+
 (defn gui-ch
   "Runs f on the GTK thread via on-gui! and returns a promise-chan of {:ok v}
   or {:err e}. The try matters: on-gui!'s drain swallows a throw, and then
@@ -45,9 +79,11 @@
   returns f's value, or rethrows f's exception here. Throws at once when
   called on the GTK thread."
   [f]
+  (check-row!)
   (when (gtk-thread?)
     (throw (ex-info "call-gtk on the GTK thread would block the main loop" {})))
   (let [{:keys [ok err]} (<! (gui-ch f))]
+    (check-row!)
     (if err (throw err) ok)))
 
 (defmacro on-gtk
@@ -104,7 +140,10 @@
   "clojure.java.shell/sh on its own thread (a/thread); parks until the
   subprocess exits and returns its result map."
   [& args]
-  (<! (a/thread (apply shell/sh args))))
+  (check-row!)
+  (let [r (<! (a/thread (apply shell/sh args)))]
+    (check-row!)
+    r))
 
 (defn screenshot
   "cgevent screenshot of pid's window into path; parks until it exits."
@@ -118,24 +157,34 @@
   [row-id record! & body]
   `(go (try ~@body :done
             (catch :default e#
-              (~record! ~row-id false {:threw (ex-message e#)})
-              :threw))))
+              (if (abandoned-throw? e#)
+                :abandoned
+                (do (~record! ~row-id false {:threw (ex-message e#)})
+                    :threw))))))
 
 (defn run-rows
   "Runs steps strictly in order. Each step is a zero-argument fn returning a
   channel, and the next step starts only once that channel delivers or
   per-step-ms has passed. A step that times out is recorded as
   (record! :row-timeout false {:index i :timeout-ms per-step-ms}), and the
-  run goes on with the next step. Returns a channel that delivers :done
-  after the last step."
+  run goes on with the next step, while the overdue row is abandoned: its
+  next parking-helper call throws a marked error, once, that go-row
+  swallows, so a stale body can't act into the next row while its own
+  finally still cleans up (see the section comment above check-row!).
+  Returns a channel that delivers :done after the last step."
   [steps per-step-ms record!]
-  (go (loop [i 0 steps (seq steps)]
-        (when steps
-          (let [ch ((first steps))
-                [_ port] (a/alts! [ch (timeout per-step-ms)])]
-            (when-not (= port ch)
-              (record! :row-timeout false {:index i :timeout-ms per-step-ms}))
-            (recur (inc i) (next steps)))))
+  (go (let [counter (atom 0)]
+        (loop [i 0 steps (seq steps)]
+          (when steps
+            (let [g (swap! counter inc)
+                  ch (binding [*row-ctx* [counter g (atom false)]] ((first steps)))
+                  [_ port] (a/alts! [ch (timeout per-step-ms)])]
+              (when-not (= port ch)
+                ;; abandon the overdue row at once: its next helper call
+                ;; throws instead of acting (see check-row!)
+                (swap! counter inc)
+                (record! :row-timeout false {:index i :timeout-ms per-step-ms}))
+              (recur (inc i) (next steps))))))
       :done))
 
 (defn close-window-bounded!
