@@ -723,3 +723,29 @@
                              (and (= ["zzq-a  buffer" "zzq-b  buffer"] (:rows few))
                                   (< (* 2 (:h few)) (:h many)))
                              {:few few :many-h (:h many)})))))
+
+(defn row-repl-completion-hides-when-input-scrolls-away
+  "The console's completion popup is caret-anchored too: with enough
+  output above the prompt, scrolling the Interactions pane to its top
+  moves the input line out of view, and the popup hides instead of
+  floating over old output (the editor's own rows pin the follow
+  geometry; the console shares the same follow-caret! wiring)."
+  [ui]
+  (go-row :repl-completion-hides-when-input-scrolls-away support/check
+    (let [cv (:console ui) c (:repl-completion ui)
+          vadj (on-gtk (cview/append! cv :out (apply str (repeat 80 ";; filler\n")))
+                       (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(ma" -1 1)
+                       ((:repl-complete!* ui))
+                       (g/gtk-scrollable-get-vadjustment (:view cv)))
+          opened? (await-until 2000 20 #(popover/open? c))
+          ;; append! drains on a later GTK tick and the console then
+          ;; auto-scrolls to the bottom: wait that out, or the scroll to
+          ;; the top below would find the buffer still short
+          grew? (await-until 3000 20 #(> (g/gtk-adjustment-get-value vadj) 50.0))
+          _ (on-gtk (g/gtk-adjustment-set-value vadj 0.0))
+          open-after (on-gtk (popover/open? c))]
+      (on-gtk (support/check :repl-completion-hides-when-input-scrolls-away
+                             (and opened? grew? (false? open-after))
+                             {:opened opened? :grew grew? :open-after open-after})
+              (when (popover/open? c) (completion/close! c))
+              (cview/clear-input! (:console ui))))))

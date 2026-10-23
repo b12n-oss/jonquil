@@ -528,7 +528,6 @@
                        (let [va (g/gtk-scrollable-get-vadjustment (:view ed))]
                          (g/gtk-adjustment-set-value va 0.0)
                          va))
-          _ (await-until 2000 20 #(zero? (long (g/gtk-adjustment-get-value vadj))))
           _ (on-gtk (support/place-cursor! (:buf ed) 102)
                     (editor/handle-key! ed support/KEY-Q g/CONTROL-MASK))
           opened? (await-until 2000 20 #(popover/open? hp))
@@ -539,7 +538,7 @@
           _ (on-gtk (g/gtk-adjustment-set-value vadj 1500.0))
           open-large (on-gtk (popover/open? hp))]
       (on-gtk (support/check :quick-doc-follows-scroll
-                             (and opened? open-small (< y1 y0) (false? open-large))
+                             (and opened? open-small (= 100 (- y0 y1)) (false? open-large))
                              {:opened opened? :open-small open-small :y0 y0 :y1 y1
                               :open-large open-large})
               (popover/hide! hp)
