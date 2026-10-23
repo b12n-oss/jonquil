@@ -91,7 +91,7 @@
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
                                                     :used? false :prompt-ns 'cljs.user :drain nil
-                                                    :setup-pending nil)
+                                                    :setup-pending nil :analyzer-syms nil)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (cond-> (:child old) keep-log? (dissoc :run-dir))]
@@ -427,6 +427,33 @@
         (let [m (or (ex-message e) "")]
           (when (str/starts-with? m "EOF") (str "Error: " m)))))))
 
+(defn- fetch-syms!
+  "Fetches the analyzer's full symbol list (cljs-node/apropos-form) into
+  :analyzer-syms, bounded like a doc lookup; skipped while anything runs
+  or helps, or with no live child. An answer that isn't a symbol list
+  (cljs-node/parse-apropos nil) changes nothing. Never throws."
+  [{:keys [state timings] :as ev}]
+  (let [[old _] (swap-vals! state (fn [s] (if (or (:running s) (:helping s)) s (assoc s :helping true))))]
+    (when-not (or (:running old) (:helping old))
+      (if-not (live? ev)
+        (swap! state assoc :helping false)
+        (try
+          (let [sentinel-form (next-sentinel! ev)
+                form cljs-node/apropos-form
+                [outcome replies] (exchange! ev (str form "\n" sentinel-form)
+                                             (fn [r] (and (ret? r) (= sentinel-form (:form r))))
+                                             {:sentinel sentinel-form
+                                              :on-output (:last-output @state)
+                                              :timeout-ms (ev/help-timeout (:help-timeout-ms timings))})]
+            (when (= :done outcome)
+              (when-let [syms (some (fn [r]
+                                      (when (and (ret? r) (= form (:form r)) (not (:exception r)))
+                                        (cljs-node/parse-apropos (:val r))))
+                                    replies)]
+                (swap! state assoc :analyzer-syms syms))))
+          (catch Throwable _ nil)
+          (finally (swap! state assoc :helping false)))))))
+
 (defn- run-worker!
   [{:keys [state] :as ev} code {:keys [run? on-output on-status-change] :as opts}]
   (try
@@ -462,7 +489,10 @@
               (case outcome
                 :done (let [result (cljs-node/fold-replies replies sentinel-form)]
                         (when (:ns result) (swap! state assoc :prompt-ns (:ns result)))
-                        (finish! ev opts result))
+                        (finish! ev opts result)
+                        ;; eager refetch: the analyzer may know new names now
+                        (when (and (live? ev) (not (stopping? ev)))
+                          (fetch-syms! ev)))
                 (if (stopping? ev)
                   (finish! ev opts {:status :interrupted})
                   (do (kill-child! ev)
@@ -544,9 +574,25 @@
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
-  (complete [_ prefix text pos extra-context]
-    (try (cljd/candidates (:profile selection) prefix text pos extra-context)
-         (catch Throwable _ [])))
+  (complete [this prefix text pos extra-context]
+    (try
+      (let [offline (cljd/candidates (:profile selection) prefix text pos extra-context)]
+        (try
+          (when (and (nil? (:analyzer-syms @state)) (live? this) (nil? (:running @state)))
+            ;; backstop: a missed eager fetch (it timed out, say)
+            (fetch-syms! this))
+          (let [syms (:analyzer-syms @state)
+                have (into #{} (map :symbol) offline)
+                extra (remove #(contains? have (:symbol %))
+                              (cljs-node/analyzer-candidates
+                               {:syms syms :prompt-ns (:prompt-ns @state)
+                                :text text :prefix prefix}))]
+            (if (seq extra)
+              (vec (sort-by (fn [c] (cljd/candidate-sort-key (or prefix "") c))
+                            (concat offline extra)))
+              offline))
+          (catch Throwable _ offline)))
+      (catch Throwable _ [])))
   (lookup [this sym _text _pos]
     (try (meta-lookup this sym nil)
          (catch Throwable _ (cljd/no-docs sym timeout-doc))))

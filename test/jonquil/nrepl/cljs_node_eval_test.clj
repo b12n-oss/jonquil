@@ -90,6 +90,9 @@
   (with-node {} {}
     (fn [srv {:keys [ev]}]
       (is (= "2" (:printed (:result (run ev "(+ 1 1)" {:run? false})))))
+      ;; the evaluation's eager analyzer fetch sends two more forms
+      ;; (apropos + its sentinel); wait them out before the baseline
+      (is (wait-until #(= 5 (count (fake/received-forms srv))) 3000) "the fetch landed")
       (let [before (count (fake/received-forms srv))]
         (doseq [code ["\"abc" "(+ 1 2) #_" "(+ 1 2) '" "(+ 1 2) @" "\\"]]
           (let [r (:result (run ev code {:run? false}))]
@@ -157,6 +160,9 @@
   (with-node {:slow-ms 1500} {:timings {:help-timeout-ms 200}}
     (fn [_ {:keys [ev]}]
       (is (= "1" (:printed (:result (run ev "1" {:run? false})))))
+      ;; the evaluation's eager analyzer fetch holds :helping briefly;
+      ;; a lookup during it would answer busy-doc, not timeout-doc
+      (is (wait-until #(not (:helping @(:state ev))) 2000))
       (is (= node/timeout-doc (:doc (ev/lookup ev 'slow "" 0))))
       (let [r (:result (run ev "(+ 20 22)" {:run? false}))]
         (is (= {:status :ok :printed "42"} (select-keys r [:status :printed])))))))
@@ -501,3 +507,68 @@
       (is (= 1 (count @killed)))
       (is (nil? (:run-dir (first @killed))) "the log stays")
       (finally (ev/stop! e)))))
+
+;; --- analyzer completion -------------------------------------------------
+
+(def ^:private alias-buf
+  "(ns cljs.user (:require [clojure.string :as str] [clojure.set :refer [union]]))")
+
+(defn- apropos-sends [srv]
+  (count (filter #(str/includes? % "cljs.repl/apropos") (fake/received-forms srv))))
+
+(defn- offered [e prefix]
+  (set (map :symbol (ev/complete e prefix alias-buf 0 nil))))
+
+(deftest completion-offers-analyzer-names-after-a-run-test
+  (with-node {:apropos-val "(clojure.string/upper-case cljs.user/twice)"} {}
+    (fn [srv {:keys [ev]}]
+      (is (= :ok (:status (:result (run ev "(def a 1)" {:run? true})))))
+      (is (wait-until #(pos? (apropos-sends srv)) 3000) "the fetch went out after the Run")
+      (is (wait-until #(contains? (offered ev "str/u") "str/upper-case") 3000)
+          (pr-str (offered ev "str/u")))
+      (is (contains? (offered ev "tw") "twice") "prompt-ns name, spelled short"))))
+
+(deftest a-second-run-refetches-test
+  (with-node {:apropos-val "(cljs.user/twice)"} {}
+    (fn [srv {:keys [ev]}]
+      (run ev "(def a 1)" {:run? true})
+      (is (wait-until #(= 1 (apropos-sends srv)) 3000))
+      (run ev "(def b 2)" {:run? true})
+      (is (wait-until #(= 2 (apropos-sends srv)) 3000) "each completed evaluation refetches"))))
+
+(deftest completion-before-any-run-is-offline-test
+  (with-node {} {}
+    (fn [_srv {:keys [ev launches]}]
+      (is (contains? (offered ev "ma") "map") "builtins answer offline")
+      (is (zero? @launches) "completion never launches the child"))))
+
+(deftest garbage-apropos-leaves-completion-offline-test
+  (with-node {:apropos-val "(a.b/c"} {}
+    (fn [srv {:keys [ev]}]
+      (is (= :ok (:status (:result (run ev "(def a 1)" {:run? true})))))
+      (is (wait-until #(pos? (apropos-sends srv)) 3000))
+      (Thread/sleep 100)
+      (let [syms (offered ev "str/u")]
+        (is (not (contains? syms "str/upper-case")) (pr-str syms)))
+      (is (contains? (offered ev "ma") "map") "offline still answers"))))
+
+(deftest fetch-timeout-drains-and-eval-recovers-test
+  (with-node {:apropos-val "(cljs.user/twice)" :hold-apropos-ms 400}
+    {:timings {:help-timeout-ms 50}}
+    (fn [srv {:keys [ev]}]
+      (is (= :ok (:status (:result (run ev "(def a 1)" {:run? true})))))
+      (is (wait-until #(pos? (apropos-sends srv)) 3000))
+      ;; the fetch times out (50 ms budget, 400 ms hold); the next
+      ;; evaluation must still answer through the drain discipline
+      (is (= :ok (:status (:result (run ev "(+ 1 2)" {:run? false}))))))))
+
+(deftest dead-child-completes-offline-test
+  (with-node {:apropos-val "(cljs.user/twice)"} {}
+    (fn [srv {:keys [ev]}]
+      (run ev "(def a 1)" {:run? true})
+      (is (wait-until #(pos? (apropos-sends srv)) 3000))
+      (ev/stop! ev)
+      (let [before (apropos-sends srv)]
+        (is (contains? (offered ev "ma") "map") "offline answers with the child gone")
+        (is (not (contains? (offered ev "tw") "twice")) "the cache died with the child")
+        (is (= before (apropos-sends srv)) "no backstop fetch against a dead child")))))
