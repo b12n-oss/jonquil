@@ -685,8 +685,9 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   the page says goodbye itself. The launcher wraps the `:ready` handler,
   which each page that connects (a reload included) posts first, and
   `send-for-eval`, so the setup that handler sends carries a `pagehide`
-  listener. The same setup wraps the page's `console.log`, `info`, `warn`,
-  `error` and `debug`: each still calls the browser's own, then queues its
+  listener. The same setup, unless the launcher was started with
+  `no-console` (`{:cljs {:forward-console? false}}`), wraps the page's
+  `console.log`, `info`, `warn`, `error` and `debug`: each still calls the browser's own, then queues its
   arguments, joined by spaces, for `clojure.browser.repl/repl-print`, the
   path `println` takes to the prepl's `:out`. The queue goes out as one
   `repl-print` every 100 ms, at most 100,000 characters of it, with a note

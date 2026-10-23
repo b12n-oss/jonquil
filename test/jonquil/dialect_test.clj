@@ -544,6 +544,12 @@
     (testing ":browser and :node are taken as written"
       (is (= [:browser []] ((juxt :cljs-target :warnings) (sel "{:cljs {:target :browser}}"))))
       (is (= [:node []] ((juxt :cljs-target :warnings) (sel "{:cljs {:target :node}}")))))
+    (testing ":forward-console? reaches the selection for a browser launch"
+      (is (false? (:cljs-console? (sel "{:cljs {:target :browser :forward-console? false}}"))))
+      (is (true? (:cljs-console? (sel "{:cljs {:target :browser}}"))))
+      (is (true? (:cljs-console? (sel "{:cljs {:target :browser :forward-console? true}}"))))
+      (is (nil? (:cljs-console? (sel "{:cljs {:target :node :forward-console? false}}")))
+          "node has no console hook; the key is browser-only"))
     (testing "an unknown value falls back to node with a warning"
       (let [s (sel "{:cljs {:target :deno}}")]
         (is (= :node (:cljs-target s)))

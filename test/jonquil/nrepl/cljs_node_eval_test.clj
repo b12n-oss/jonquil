@@ -414,7 +414,7 @@
 (deftest browser-limitations-test
   (with-browser {} {}
     (fn [_ {:keys [ev]}]
-      (is (= cljs-node/browser-limitations (ev/limitations ev)))))
+      (is (= (cljs-node/browser-limitations true) (ev/limitations ev)))))
   (with-node {} {}
     (fn [_ {:keys [ev]}]
       (is (= cljs-node/limitations (ev/limitations ev))))))

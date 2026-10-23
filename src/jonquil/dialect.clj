@@ -400,6 +400,10 @@
         target (when cljs? (get cljs :target))
         cljs-target (when (and cljs? (= :launch rt))
                       (if (= :browser target) :browser :node))
+        ;; :cljs :forward-console? turns the browser page's console hook
+        ;; off; node has no hook, so the key is browser-only
+        cljs-console? (when (= :browser cljs-target)
+                        (not (false? (get cljs :forward-console?))))
         w6 (cond
              (and cljs? (= :launch rt) (some? target) (not (#{:node :browser} target)))
              [(str ".jonquil.edn :cljs :target should be :node or :browser, not " (pr-str target) "; using :node")]
@@ -414,6 +418,7 @@
       (and auto-require auto-require?) (assoc :auto-require auto-require)
       (and cljs cljs?) (assoc :cljs cljs)
       cljs-target (assoc :cljs-target cljs-target)
+      (some? cljs-console?) (assoc :cljs-console? cljs-console?)
       (and nrepl nrepl?) (assoc :nrepl nrepl))))
 
 (defn selection-key

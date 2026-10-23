@@ -292,14 +292,15 @@
        "catch(e){}finally{busy=false}}});}catch(e){}})();"))
 
 (defn- page-bye!
-  "Wires the pagehide goodbye and the console forwarding: send-for-eval
-  appends console-js and bye-js to the setup the
+  "Wires the pagehide goodbye and, with :console? (the default), the
+  console forwarding: send-for-eval appends console-js and bye-js to the
+  setup the
   :ready handler sends each page that connects, and a :jonquil/bye post from
   the current page drops the queued connections, marks the page gone, and
   fails an evaluation still waiting for that page's answer. A goodbye from
   an earlier page is ignored. Exits 2 when send-for-eval or the :ready
   handler isn't the one this was written against."
-  []
+  [{:keys [console?]}]
   (require 'cljs.repl.browser)
   (let [sfe (resolve 'cljs.repl.browser/send-for-eval)
         orig-sfe @sfe
@@ -320,7 +321,11 @@
      (fn [_]
        (fn
          ([form f] (orig-sfe form f))
-         ([conn form f] (orig-sfe conn (if *bye-gen* (str form console-js (bye-js *bye-gen*)) form) f)))))
+         ([conn form f] (orig-sfe conn
+                                  (if *bye-gen*
+                                    (str form (when console? console-js) (bye-js *bye-gen*))
+                                    form)
+                                  f)))))
     (.addMethod ^clojure.lang.MultiFn handle-post :ready
                 (fn [m conn opts]
                   (binding [*bye-gen* (swap! page-gen inc)]
@@ -341,7 +346,9 @@
     (.destroy ^java.lang.ProcessHandle p)))
 
 (defn -main
-  "No args: ClojureScript on node. [\"browser\" http-port]: the browser REPL."
+  "No args: ClojureScript on node. [\"browser\" http-port]: the browser
+  REPL; a trailing \"no-console\" leaves the page's console unforwarded
+  ({:cljs {:forward-console? false}})."
   [& args]
   (let [browser? (= "browser" (first args))]
     (if browser?
@@ -358,7 +365,7 @@
                (System/exit 3)))
         (loopback-start!)
         (live-connection!)
-        (page-bye!))
+        (page-bye! {:console? (not (some #(= "no-console" %) args))}))
       (do (when-not (str/includes? (script-text) unpatched)
             (binding [*out* *err*]
               (println (str "jonquil: " script " has no " unpatched

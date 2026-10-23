@@ -108,10 +108,10 @@
   lines and \"The log: <path>\"; the log is kept), or {:error :cancelled}
   when (cancelled?) turns true. Every failure kills the tree. opts:
   :clojure and :launcher (required), :project-dir, :timeout-ms,
-  :cancelled?, :target (:node or :browser), :http-port (browser only),
-  :args-fn (default cljs-node/launch-args; a test seam; it receives
-  :target and :http-port too)."
-  [{:keys [clojure launcher project-dir timeout-ms cancelled? args-fn target http-port]}]
+  :cancelled?, :target (:node or :browser), :http-port and :console?
+  (browser only), :args-fn (default cljs-node/launch-args; a test seam; it
+  receives :target, :http-port and :console? too)."
+  [{:keys [clojure launcher project-dir timeout-ms cancelled? args-fn target http-port console?]}]
   (leftovers/prune!)
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         args-fn (or args-fn cljs-node/launch-args)
@@ -130,7 +130,7 @@
         add-dep? (cljs-node/needs-cljs-dep?
                   (when (.isFile deps-file) (try (slurp deps-file) (catch Exception _ nil))))
         argv (args-fn {:clojure clojure :launcher launcher :add-dep? add-dep?
-                       :target target :http-port http-port})
+                       :target target :http-port http-port :console? console?})
         spawned (try (apply p/process (process-options {:dir dir :log log}) argv)
                      (catch Exception e
                        (delete-tree! run-dir)
