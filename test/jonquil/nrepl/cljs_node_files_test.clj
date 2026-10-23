@@ -12,7 +12,10 @@
   (is (str/includes? cljs-node-files/launcher-text ".listen(0, \\\"127.0.0.1\\\", function () {"))
   (is (str/includes? cljs-node-files/launcher-text "cljs.repl.node/create-socket"))
   (is (str/includes? cljs-node-files/launcher-text "p=clojure.browser.repl.repl_print"))
-  (is (str/includes? cljs-node-files/launcher-text "no-console")))
+  (is (str/includes? cljs-node-files/launcher-text "no-console"))
+  (is (str/includes? cljs-node-files/launcher-text ":jonquil/ping"))
+  (is (str/includes? cljs-node-files/launcher-text "jonquil-gen:"))
+  (is (str/includes? cljs-node-files/launcher-text "location.reload")))
 
 (deftest ensure-launcher-writes-once-test
   (let [base (str (temp-dirs/temp-dir! "jonquil-cljs-node-files-"))

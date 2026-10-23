@@ -127,13 +127,13 @@
 
 (deftest browser-messages-test
   (is (= ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
-          "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
+          "Stop restarts ClojureScript; the tab reloads itself. A loop that never ends freezes the tab until you reload it by hand."
           "println and js/console.log output reach this console, even after an evaluation finished; console.log still logs in the browser too."
           "No stdin and no inspector; jump to definition stays in this file."]
          (cljs-node/browser-limitations true)))
   (is (= "; Opened http://u in your browser. Evaluations wait until the page connects."
          (cljs-node/opened-message "http://u")))
-  (is (= "; ClojureScript restarted: reload the browser tab at http://u."
+  (is (= "; ClojureScript restarted: the browser tab at http://u reloads itself (reload by hand if it was frozen or closed)."
          (cljs-node/reload-message "http://u")))
   (is (= "; No page has connected yet. Open http://u in a browser, then Run again."
          (cljs-node/no-page-message "http://u"))))

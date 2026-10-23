@@ -36,7 +36,7 @@
   actually goes)."
   [console?]
   ["Jonquil starts and stops its own ClojureScript process; your code runs in the browser tab it opened."
-   "Stop restarts ClojureScript; reload the tab afterwards. A loop that never ends freezes the tab until you reload it."
+   "Stop restarts ClojureScript; the tab reloads itself. A loop that never ends freezes the tab until you reload it by hand."
    (if console?
      "println and js/console.log output reach this console, even after an evaluation finished; console.log still logs in the browser too."
      "println output reaches this console, even after an evaluation finished; js/console.log stays in the browser (forward-console? is off).")
@@ -46,7 +46,8 @@
   (str "; Opened " url " in your browser. Evaluations wait until the page connects."))
 
 (defn reload-message [url]
-  (str "; ClojureScript restarted: reload the browser tab at " url "."))
+  (str "; ClojureScript restarted: the browser tab at " url
+       " reloads itself (reload by hand if it was frozen or closed)."))
 
 (defn no-page-message
   "Shown when a setup waited the page bound and no page connected."
