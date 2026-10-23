@@ -21,6 +21,13 @@
   (:require [clojure.string :as str]
             [clojure.walk :as walk]))
 
+;; The stdin-dance protocol constants, spelled out rather than required
+;; from jonquil.cljs-node: the :fake-cljs alias runs this file alone, and
+;; the evaluator unit tests prove the spellings agree end to end.
+(def ^:private need-input-marker "\u0001jonquil:need-input\u0001")
+(def ^:private got-input-marker "\u0001jonquil:got-input\u0001")
+(def ^:private input-eof-marker "\u0001jonquil:eof\u0001")
+
 (defn- cljs-repl-require? [x]
   (and (seq? x) (= 'require (first x))
        (some (fn [a] (and (seq? a) (= 'quote (first a)) (= 'cljs.repl (second a))))
@@ -42,14 +49,49 @@
 
 (defn- eval-form
   "Evaluates form in the sandbox ns. Returns {:out s} plus :val, or
-  :exception true with :val the error map's pr-str."
-  [ns-obj form]
-  (let [sw (java.io.StringWriter.)]
-    (try
-      (let [v (binding [*ns* ns-obj *out* sw] (eval form))]
-        {:out (str sw) :val (pr-str v)})
-      (catch Throwable e
-        {:out (str sw) :exception true :val (error-val e)}))))
+  :exception true with :val the error map's pr-str. With in-text, *in* is
+  bound to it, so read-line inside the form reads that (the stdin dance)."
+  ([ns-obj form] (eval-form ns-obj form nil))
+  ([ns-obj form in-text]
+   (let [sw (java.io.StringWriter.)
+         rdr (java.io.BufferedReader. (java.io.StringReader. (str in-text)))]
+     (try
+       (let [v (binding [*ns* ns-obj *out* sw *in* rdr] (eval form))]
+         {:out (str sw) :val (pr-str v)})
+       (catch Throwable e
+         {:out (str sw) :exception true :val (error-val e)})))))
+
+;; --- the stdin dance (read-line over the child's stdin, 2026-10-23) -------
+
+(defn- read-line-set!?
+  "True for the reader setup's own form, (set! cljs.core/read-line F): the
+  real prepl compiles it, this sandbox can't (set! needs a thread-bound
+  var), so it's answered without evaluating."
+  [form]
+  (and (seq? form) (= 'set! (first form)) (= 'cljs.core/read-line (second form))))
+
+(defn- thrower-message
+  "The unavailable-reader's message when form carries one, else nil (the
+  FIFO reader)."
+  [form]
+  (->> (tree-seq coll? seq form)
+       (filter #(and (string? %) (str/starts-with? % "read-line isn't available")))
+       first))
+
+(defn- take-input-line!
+  "The next line for a read-line dance: the head of :stdin-queue (the
+  :stdin-script lines first, then whatever the stdin reader thread added),
+  or nil (EOF) when the stream ended, the server stopped, or there is no
+  stream to wait on. Blocks by polling, as the real FIFO read blocks."
+  [{:keys [opts stdin-queue stdin-eof? stopped?]}]
+  (loop []
+    (let [[old _] (swap-vals! stdin-queue (fn [q] (if (seq q) (subvec q 1) q)))]
+      (cond
+        (seq old) (first old)
+        (or @stopped?
+            (nil? (:stdin-in opts))
+            (realized? stdin-eof?)) nil
+        :else (do (Thread/sleep 10) (recur))))))
 
 (defn- ns-after
   "The ns name to report once form has run: the one an (ns X) or
@@ -71,12 +113,14 @@
         [form text (subs buf end)])
       (catch Throwable _ nil))))
 
-(defn- serve-connection! [{:keys [opts forms stopped?]} ^java.net.Socket sock]
+(defn- serve-connection! [{:keys [opts forms stopped?] :as srv} ^java.net.Socket sock]
   ;; Lines are read with readLine and forms cut from the buffer: on Jolt a
   ;; reader over the socket blocks until it has more than one line.
   (let [in (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
         w (java.io.OutputStreamWriter. (.getOutputStream sock) "UTF-8")
-        lock (Object.)]
+        lock (Object.)
+        ;; set when the reader setup defined read-line as a thrower
+        thrower (atom nil)]
     (try
       (loop [buf "" current "cljs.user" setup? false]
         (if-let [[form text more] (next-form buf)]
@@ -89,23 +133,51 @@
                 (Thread/sleep (long (:slow-ms opts))))
               (when (and (:hold-apropos-ms opts) (str/includes? text "cljs.repl/apropos"))
                 (Thread/sleep (long (:hold-apropos-ms opts))))
-              (if (and (:apropos-val opts) (str/includes? text "cljs.repl/apropos"))
+              (cond
+                (and (:apropos-val opts) (str/includes? text "cljs.repl/apropos"))
                 ;; the real prepl expands the macro on the compiler side;
                 ;; this sandbox can't, so the answer is canned
                 (do (send! w lock {:tag :ret :val (:apropos-val opts) :ns current :ms 0 :form text})
                     (recur more current setup?))
+
+                (read-line-set!? form)
+                (do (reset! thrower (thrower-message form))
+                    (send! w lock {:tag :ret :val "nil" :ns current :ms 0 :form text})
+                    (recur more current setup?))
+
+                (and @thrower (re-find #"\(read-line\)" text))
+                (let [msg @thrower]
+                  (send! w lock {:tag :ret :exception true :ns current :ms 0 :form text
+                                 :val (pr-str {:via [{:type "Error" :message msg}] :cause msg})})
+                  (recur more current setup?))
+
+                (and (:stdin-dance? opts) (re-find #"\(read-line\)" text))
+                (do (send! w lock {:tag :err :val (str need-input-marker "\n")})
+                    (let [line (take-input-line! srv)
+                          eof? (or (nil? line) (= line input-eof-marker))
+                          result (eval-form (create-ns (symbol current)) (strip-setup form)
+                                            (if eof? "" (str line "\n")))
+                          new-ns (ns-after form current)]
+                      (send! w lock {:tag :err :val (str got-input-marker "\n")})
+                      (when (seq (:out result))
+                        (send! w lock {:tag :out :val (:out result)}))
+                      (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
+                                           (when (:exception result) {:exception true})))
+                      (recur more new-ns setup?)))
+
+                :else
                 (let [result (if (and (:fail-setup? opts) (re-find #"\(require\s+'cljs\.repl" text))
-                             {:out "" :exception true :val (error-val (ex-info "no page" {}))}
-                             (eval-form (create-ns (symbol current)) (strip-setup form)))]
-                (if (and (:exception result) (:wedge-on-throw-without-setup? opts) (not setup?))
-                  ;; the real bug: never answer again, just drain until EOF
-                  (loop [] (when (and (.readLine in) (not @stopped?)) (recur)))
-                  (let [new-ns (ns-after form current)]
-                    (when (seq (:out result))
-                      (send! w lock {:tag :out :val (:out result)}))
-                    (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
-                                         (when (:exception result) {:exception true})))
-                    (recur more new-ns setup?)))))))
+                               {:out "" :exception true :val (error-val (ex-info "no page" {}))}
+                               (eval-form (create-ns (symbol current)) (strip-setup form)))]
+                  (if (and (:exception result) (:wedge-on-throw-without-setup? opts) (not setup?))
+                    ;; the real bug: never answer again, just drain until EOF
+                    (loop [] (when (and (.readLine in) (not @stopped?)) (recur)))
+                    (let [new-ns (ns-after form current)]
+                      (when (seq (:out result))
+                        (send! w lock {:tag :out :val (:out result)}))
+                      (send! w lock (merge {:tag :ret :val (:val result) :ns new-ns :ms 0 :form text}
+                                           (when (:exception result) {:exception true})))
+                      (recur more new-ns setup?)))))))
           (when-let [line (and (not @stopped?) (.readLine in))]
             (recur (str buf line "\n") current setup?))))
       (catch Throwable _ nil)
@@ -124,13 +196,33 @@
   :apropos-val  answer a form holding cljs.repl/apropos with this string
             as :val, without evaluating (this sandbox can't expand the
             macro); the form is still recorded
-  :hold-apropos-ms  sleep this long before answering such a form"
+  :hold-apropos-ms  sleep this long before answering such a form
+  :stdin-dance?  a form whose text holds (read-line) answers as the real
+            reader does: an :err need-input marker, one input line (from
+            :stdin-script first, then :stdin-in), an :err got-input
+            marker, then the form's ret with read-line bound to that line
+            (nil for the EOF marker or a closed stream)
+  :stdin-script  input lines handed to the dance in order, before :stdin-in
+  :stdin-in  an InputStream a reader thread feeds the dance from (the
+            child's own stdin in -main); stop! closes it"
   ([] (start! {}))
   ([opts]
    (let [ss (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))
          srv {:opts opts :server ss :port (.getLocalPort ss)
               :forms (atom []) :conns (atom []) :futures (atom [])
+              :stdin-queue (atom (vec (:stdin-script opts)))
+              :stdin-eof? (promise)
               :stopped? (atom false)}]
+     (when-let [^java.io.InputStream stdin (:stdin-in opts)]
+       (future
+         (try
+           (let [r (java.io.BufferedReader. (java.io.InputStreamReader. stdin "UTF-8"))]
+             (loop []
+               (when-let [line (.readLine r)]
+                 (swap! (:stdin-queue srv) conj line)
+                 (recur))))
+           (catch Throwable _ nil)
+           (finally (deliver (:stdin-eof? srv) true)))))
      (future
        (try
          (loop []
@@ -153,6 +245,8 @@
   connection threads."
   [srv]
   (reset! (:stopped? srv) true)
+  (when-let [in (:stdin-in (:opts srv))]
+    (try (.close ^java.io.InputStream in) (catch Throwable _ nil)))
   (try (.close (java.net.Socket. "127.0.0.1" (int (:port srv)))) (catch Throwable _ nil))
   (try (.close ^java.net.ServerSocket (:server srv)) (catch Throwable _ nil))
   (doseq [s @(:conns srv)] (try (.close ^java.net.Socket s) (catch Throwable _ nil)))
@@ -167,9 +261,15 @@
 
 (defn -main [& _]
   (let [slow (System/getenv "FAKE_CLJS_SLOW_MS")
-        srv (start! (cond-> {} slow (assoc :slow-ms (parse-long slow))))]
-    (println (str "jonquil-cljs-prepl " (:port srv)))
+        ;; The dance reads the process's own stdin: the lines Jonquil's
+        ;; send-input! writes, as the real launcher's relay does. The
+        ;; announced token is openly fake; the reader setup it provokes is
+        ;; intercepted (read-line-set!?), never opened as a path.
+        srv (start! (cond-> {:stdin-dance? true :stdin-in System/in}
+                      slow (assoc :slow-ms (parse-long slow))))]
+    (println (str "jonquil-cljs-prepl " (:port srv) " stdin:fake"))
     (flush)
-    (while (not= -1 (.read System/in)))
+    ;; stdin EOF still means Jonquil is gone: the reader thread sees it.
+    @(:stdin-eof? srv)
     (stop! srv)
     (System/exit 0)))

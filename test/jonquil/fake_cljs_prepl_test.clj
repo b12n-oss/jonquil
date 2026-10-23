@@ -103,3 +103,12 @@
         (is (= "(a.b/c d.e/f)" (:val r)))
         (is (not (:exception r))))
       (is (some #(re-find #"apropos" %) (fake/received-forms srv)) "the form is recorded"))))
+
+(deftest stdin-dance-test
+  (with-fake {:stdin-dance? true :stdin-script ["abc"]}
+    (fn [_ c]
+      (send! c "(str \"got:\" (read-line))\n")
+      (let [m1 (recv c 2000) m2 (recv c 2000) m3 (recv c 2000)]
+        (is (= {:tag :err :val "\u0001jonquil:need-input\u0001\n"} m1))
+        (is (= {:tag :err :val "\u0001jonquil:got-input\u0001\n"} m2))
+        (is (= [:ret "\"got:abc\""] ((juxt :tag :val) m3)))))))
