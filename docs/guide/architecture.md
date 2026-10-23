@@ -640,7 +640,9 @@ Five namespaces and one launcher make it up:
   20,000 symbols, under the quick-doc budget and the same `:helping`
   guard. The evaluation itself only marks the cache stale: a fetch riding
   after an evaluation held up the browser's closed-tab fail-fast (8 s
-  measured) and made quick docs answer busy. Pure code
+  measured) and made quick docs answer busy. An evaluation arriving while
+  a fetch or doc lookup is in flight cancels it (the exchange's sentinel
+  drains as on a timeout), so a Run never waits a help budget out. Pure code
   (`cljs-node/analyzer-candidates`, `cljd/buffer-ns-refs`) spells each
   qualified name the way the buffer can use it.
   A setup that fails or times out kills the child with `:keep-log? true`,
