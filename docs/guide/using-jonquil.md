@@ -1406,8 +1406,10 @@ on node, with your code running in the tab.
 
 Each window gets one URL, `http://127.0.0.1:` and a port Jonquil picks the
 first time and keeps. Stop and Reset on Run restart ClojureScript, because
-nothing can interrupt the page, and the console then asks you to reload the
-tab at the same URL. Reset on Run starts unticked, as it does on node. If something else took that port meanwhile, Jonquil
+nothing can interrupt the page, and the tab reloads itself once the new
+process is listening: the page pings the server every five seconds while
+healthy (once a second for the first half minute after it stops answering)
+and reloads when a different process answers. Reset on Run starts unticked, as it does on node. If something else took that port meanwhile, Jonquil
 picks another and says so. A loop that never ends freezes the tab until you
 reload it. An evaluation sent after you closed the tab fails within a couple
 of seconds with an error that names the URL to reload, and works again once
@@ -2124,7 +2126,7 @@ than being surprises you'd otherwise have to rediscover:
   through `open`, `xdg-open` or `JONQUIL_OPEN_URL`. Its prepl and page
   server are unauthenticated loopback listeners.
 - Stop and Reset on Run restart ClojureScript, so earlier definitions are
-  gone and you reload the tab at the same URL.
+  gone; the tab reloads itself once the new process is listening.
 - A loop that never ends freezes the tab until you reload it, and an
   evaluation sent after the tab closed fails until you reload it. One
   still running when the tab closed waits until Stop.

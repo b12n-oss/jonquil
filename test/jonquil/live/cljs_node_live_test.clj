@@ -279,6 +279,12 @@
           (is (pid-alive? pid) "the child is still alive")))
       (finally (ev/stop! e)))))
 
+(defn- ping-gen
+  "POSTs the page's keep-fresh ping to url and returns the server
+  generation it answers (the response body)."
+  [url]
+  (str/trim (sh-out "curl" "-s" "-m" "5" "-X" "POST" "--data" "{:type :jonquil/ping}" url)))
+
 (deftest browser-stop-then-run-keeps-the-url-live
   ;; Stop kills in the background, and the next Run launches while the old
   ;; JVM may still hold the pre-bound HTTP port. The Run waits for the kill,
@@ -393,6 +399,9 @@
         (is (= :ok (:status result)) (pr-str result)))
       (is (str/includes? (first @seen) "pagehide") "the page's setup installs the listener")
       (is (str/includes? (first @seen) "c.__jonquil") "and the console forwarding")
+      ;; the long-poll body JSON-escapes slashes, so the keyword reads
+      ;; :jonquil\/ping there
+      (is (str/includes? (first @seen) ":jonquil\\/ping") "and the keep-fresh ping loop")
       (is (str/includes? (first @seen) ":gen 1") (subs (first @seen) 0 (min 200 (count (first @seen)))))
       ;; The page leaves just as an evaluation goes out: it reads the form
       ;; but never answers, and posts nothing more. The goodbye completes
@@ -428,6 +437,53 @@
       (finally (reset! stop? true)
                (some-> ^java.net.Socket @held .close)
                (ev/stop! e)))))
+
+(deftest browser-restart-changes-the-ping-generation-live
+  ;; the page's keep-fresh loop reloads on a generation change: while a
+  ;; server is up (a page connected, so it accepts), the ping answers a
+  ;; stable generation; a restarted server answers a different one
+  (let [held (atom nil) stop? (atom false) url-seen (atom nil)
+        e (cljs-node/make-cljs-node (browser-selection)
+                                    {:timings {:page-timeout-ms 60000}
+                                     :open-url (fn [url] (reset! url-seen url)
+                                                 (fake-page! url held stop?) true)})]
+    (try
+      (is (= :ok (:status (:result (run e "(+ 1 2)")))))
+      (let [gen0 (ping-gen @url-seen)
+            gen0' (ping-gen @url-seen)]
+        (is (seq gen0) "a live server answers its generation")
+        (is (= gen0 gen0') "stable within one process")
+        (reset! stop? true)
+        ;; Reset on Run restarts the child (ev/stop! would end the
+        ;; evaluator for good, and interrupt! while idle kills nothing);
+        ;; the auto-reloaded page is played by a fresh fake page at the
+        ;; same URL
+        (let [stop2? (atom false)
+              done (promise)
+              pid0 (:pid (:child @(:state e)))]
+          (ev/set-mode! e :reset)
+          (ev/eval! e "(+ 2 3)" {:run? true :on-output (fn [_ _])
+                                 :on-complete (fn [r] (deliver done r))})
+          ;; start the "reloaded" page only once the NEW child is up and
+          ;; listening: this fake page never retries a refused connect
+          (let [deadline (+ (System/currentTimeMillis) 30000)
+                new-child? (fn [] (let [c (:child @(:state e))]
+                                    (boolean (and c (not= pid0 (:pid c)) (:port c)))))]
+            (loop [] (when (and (not (new-child?))
+                                (< (System/currentTimeMillis) deadline))
+                       (Thread/sleep 50) (recur)))
+            (is (new-child?) "the relaunch brought a new child up"))
+          (Thread/sleep 300)
+          (fake-page! @url-seen held stop2?)
+          ;; the fake page answers every form with a nil result, so the
+          ;; status is the assertion, as in the sibling fake-page tests
+          (is (= :ok (:status (deref done 60000 :timeout))))
+          (let [gen1 (ping-gen @url-seen)]
+            (is (seq gen1))
+            (is (not= gen0 gen1)
+                "a restarted server answers a new generation, so the old page reloads itself"))
+          (reset! stop2? true)))
+      (finally (ev/stop! e)))))
 
 (deftest browser-console-off-setup-lacks-the-hook-live
   ;; {:cljs {:forward-console? false}}: the page's setup still carries the
@@ -508,6 +564,12 @@
               (is (seen?) (pr-str @out))
               (Thread/sleep 500)
               (is (= 1 (times)) "forwarded once, not once per hook")))
+          ;; Stop then Run: the tab reloads itself once the new process
+          ;; answers its ping, and the evaluation needs no manual reload
+          (ev/stop! e)
+          (let [{:keys [result]} (run e "(+ 4 5)")]
+            (is (= :ok (:status result)) (pr-str result))
+            (is (= "9" (:printed result)) (pr-str result)))
           ;; Leaving the page closes its connection as a closed tab does:
           ;; the next evaluation fails fast instead of waiting for Stop.
           (let [{:keys [result]} (run e "(js/setTimeout (fn [] (set! (.-location js/window) \"about:blank\")) 300)")]
