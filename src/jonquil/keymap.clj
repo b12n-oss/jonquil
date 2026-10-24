@@ -9,7 +9,9 @@
   :cmd, which means Control or Meta on every platform, as command-chord?
   always has. Every :mods modifier must be held, no :not modifier may be,
   and a modifier in neither set is ignored, the way the cond clauses it
-  replaces behave.")
+  replaces behave."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]))
 
 (def MODIFIER-MASKS
   "GDK modifier bits, from gdktypes.h. Copied rather than read from
@@ -82,3 +84,14 @@
              (some (complement binding-keys) (keys b))
              (conj (str "has unknown keys " (pr-str (remove binding-keys (keys b))))))]
      (str "binding " i " " p))))
+
+(defmacro ^:private embedded-text
+  "The text of classpath file path, read when this form is compiled (the
+  installed app has no source tree, as jonquil.nrepl.cljs-node-files
+  explains)."
+  [path]
+  (slurp (io/resource path)))
+
+(def shipped
+  "The shipped keymap, {scope [bindings...]}, from jonquil/keymap.edn."
+  (edn/read-string (embedded-text "jonquil/keymap.edn")))

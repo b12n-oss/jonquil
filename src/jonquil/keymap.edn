@@ -1,0 +1,41 @@
+;; The shipped keymap (plugins design, Part 1). Read by jonquil.keymap/shipped
+;; when Jonquil is compiled. Each scope is an ORDERED vector: the first binding
+;; that matches wins, as in the cond it replaces. :cmd is Control or Meta.
+;;
+;; :window holds slice S1's block, in the block's own order: the plain
+;; command chords that jonquil.gtk.window/on-window-key's slot dispatches,
+;; after the clauses still in its cond (rename guard, F5, the Escape chain,
+;; find-nav, F6 and the source panel's Cmd+Shift+O). Shift-qualified
+;; bindings sit ahead of their plain forms, so the plain one never sees them.
+{:window
+ [{:key "r" :mods #{:cmd} :command :run/run}
+  {:key "o" :mods #{:cmd} :command :file/open}
+  {:key "s" :mods #{:cmd :shift} :command :file/save-as}
+  {:key "s" :mods #{:cmd} :command :file/save}
+  {:key "w" :mods #{:cmd} :command :tab/close}
+  {:key "e" :mods #{:cmd :shift} :command :tree/toggle}
+  {:key "e" :mods #{:cmd} :not #{:shift} :command :run/selection}
+  ;; :not #{:alt}: Cmd+Alt+L and Cmd+Alt+F are the editor's format chords
+  {:key "l" :mods #{:cmd :shift} :not #{:alt} :command :console/clear-last-output}
+  {:key "l" :mods #{:cmd} :not #{:alt} :command :console/clear}
+  {:key "f" :mods #{:cmd} :not #{:alt :shift} :command :find/open}
+  {:key "h" :mods #{:cmd} :command :find/open-replace}
+  {:keys #{"equal" "plus"} :mods #{:cmd} :command :view/zoom-in}
+  {:key "minus" :mods #{:cmd} :command :view/zoom-out}
+  {:key "0" :mods #{:cmd} :command :view/zoom-reset}
+  {:key "1" :mods #{:cmd} :command :tab/select :args {:n 1}}
+  {:key "2" :mods #{:cmd} :command :tab/select :args {:n 2}}
+  {:key "3" :mods #{:cmd} :command :tab/select :args {:n 3}}
+  {:key "4" :mods #{:cmd} :command :tab/select :args {:n 4}}
+  {:key "5" :mods #{:cmd} :command :tab/select :args {:n 5}}
+  {:key "6" :mods #{:cmd} :command :tab/select :args {:n 6}}
+  {:key "7" :mods #{:cmd} :command :tab/select :args {:n 7}}
+  {:key "8" :mods #{:cmd} :command :tab/select :args {:n 8}}
+  ;; 9 is the last tab, whatever the count
+  {:key "9" :mods #{:cmd} :command :tab/select :args {:n 9}}
+  {:key "t" :mods #{:cmd} :command :tab/new}
+  {:key "m" :mods #{:cmd :shift} :command :view/cycle-theme}
+  {:key "i" :mods #{:cmd :shift} :command :inspect/form}
+  {:key "i" :mods #{:cmd} :command :inspect/last}
+  {:key "braceright" :mods #{:cmd} :command :tab/next}
+  {:key "braceleft" :mods #{:cmd} :command :tab/previous}]}
