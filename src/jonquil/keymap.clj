@@ -9,7 +9,10 @@
   :cmd, which means Control or Meta on every platform, as command-chord?
   always has. Every :mods modifier must be held, no :not modifier may be,
   and a modifier in neither set is ignored, the way the cond clauses it
-  replaces behave."
+  replaces behave.
+
+  A binding may name a fixed :outcome (:handled or :to-gtk) instead of a
+  :command; dispatch answers it without running anything."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -27,7 +30,7 @@
   ;; gdkkeysyms.h values for the names that aren't their own character
   {"equal" 0x03d "plus" 0x02b "minus" 0x02d
    "braceright" 0x07d "braceleft" 0x07b
-   "F3" 0xffc0 "F6" 0xffc3})
+   "F3" 0xffc0 "F6" 0xffc3 "Escape" 0xff1b})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a
@@ -50,6 +53,8 @@
 (defn- key-names [{:keys [key] :as binding}]
   (if key [key] (:keys binding)))
 
+(def ^:private outcomes #{:handled :to-gtk})
+
 (defn matches?
   "True when keyval is the binding's key (or one of its keys), every :mods
   modifier is held, no :not modifier is, and every :when condition holds.
@@ -71,7 +76,22 @@
   ([bindings keyval state holds?]
    (some #(when (matches? % keyval state holds?) %) bindings)))
 
-(def ^:private binding-keys #{:key :keys :mods :not :when :command :args})
+(defn dispatch
+  "Walks bindings in order, over those that match keyval and state (with
+  holds?), until one answers: a binding's fixed :outcome, or what (run!
+  binding) returns for its command. :handled and :to-gtk (the key is
+  GTK's, so stop here) are answers; :next, or nil for an unregistered
+  command, moves on to the next matching binding. :unmatched when the
+  bindings run out."
+  [bindings keyval state {:keys [holds? run!]}]
+  (or (some (fn [b]
+              (when (matches? b keyval state holds?)
+                (let [o (if (contains? b :outcome) (:outcome b) (run! b))]
+                  (when (contains? outcomes o) o))))
+            bindings)
+      :unmatched))
+
+(def ^:private binding-keys #{:key :keys :mods :not :when :command :args :outcome})
 
 (defn problems
   "What's wrong with bindings, one sentence each naming the binding's
@@ -90,8 +110,14 @@
              (conj (str "names an unknown key " (pr-str (remove key-value names))))
              (some (complement modifiers) mods)
              (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
-             (not (contains? command-ids (:command b)))
+             (and (contains? b :command) (contains? b :outcome))
+             (conj "has both :command and :outcome")
+             (and (not (contains? b :command)) (not (contains? b :outcome)))
+             (conj "has neither :command nor :outcome")
+             (and (contains? b :command) (not (contains? command-ids (:command b))))
              (conj (str "names an unregistered command " (pr-str (:command b))))
+             (and (contains? b :outcome) (not (contains? outcomes (:outcome b))))
+             (conj (str "names an unknown outcome " (pr-str (:outcome b)) ", not :handled or :to-gtk"))
              (and (contains? b :when) (not (vector? (:when b))))
              (conj ":when isn't a vector")
              (and (vector? (:when b)) (some (complement condition-ids) (:when b)))
