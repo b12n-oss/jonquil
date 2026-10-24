@@ -102,7 +102,21 @@
          (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :add-dep? true
                                  :target :browser :http-port 9811})))
   (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch"]
-         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :node :http-port 9811}))))
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :node :http-port 9811})))
+  (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch" "browser" "9811" "token:tok-1"]
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :browser :http-port 9811
+                                 :page-token "tok-1"})))
+  (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch" "browser" "9811" "no-console" "token:tok-1"]
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :browser :http-port 9811
+                                 :console? false :page-token "tok-1"}))
+      "the token rides after no-console")
+  (is (= ["/c/clojure" "-M" "-i" "/l.clj" "-m" "jonquil.cljs-node-launch"]
+         (cljs-node/launch-args {:clojure "/c/clojure" :launcher "/l.clj" :target :node :http-port 9811
+                                 :page-token "tok-1"}))
+      "node argv never carries the token"))
+
+(deftest page-url-test
+  (is (= "http://127.0.0.1:9811/?t=tok-1" (cljs-node/page-url 9811 "tok-1"))))
 
 (deftest ready-url-test
   (is (= "http://127.0.0.1:9811"

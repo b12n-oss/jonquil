@@ -737,7 +737,17 @@ the runtime attaches). The same evaluator, child and launcher serve both:
   prefixed `jonquil-gen:`), and a different prefixed answer means a new
   process owns the port, so the page reloads itself; the fresh page
   carries the new generation, so there is no loop, and an unprefixed 200
-  (another program owns the port now) ends the loop. A page busy running a form can't fire
+  (another program owns the port now) ends the loop. The page URL carries
+  a per-window token (`/?t=<uuid>`, minted once per window by the
+  evaluator, passed as the launcher's `token:` argument): the launcher
+  prepends one `:get` handler to `cljs.repl.server/handlers` that answers
+  a request for `/` or `/index.html` bearing ANOTHER window's `t` with a
+  script-free "close this tab" page, so an orphan tab's reload can't join
+  a new session on its recycled port, while a bare request (a hand-typed
+  URL) falls through and serves. A launcher started without a `token:`
+  argument installs no gate. This closes the reload path; the client's
+  own bounded POST retries remain a seconds-wide residual (ROADMAP). A
+  page busy running a form can't fire
   `pagehide` until the form finishes, so a tab closed during a long
   evaluation still leaves it waiting until Stop.
 - `jonquil.nrepl.cljs-node` picks the HTTP port once per window and keeps it

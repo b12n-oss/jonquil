@@ -1416,8 +1416,12 @@ open it yourself. The process keeps running, so the next Run carries on as
 soon as a page has connected. Evaluation, errors and output work as they do
 on node, with your code running in the tab.
 
-Each window gets one URL, `http://127.0.0.1:` and a port Jonquil picks the
-first time and keeps. Stop and Reset on Run restart ClojureScript, because
+Each window gets one URL, `http://127.0.0.1:` with a port Jonquil picks the
+first time and keeps, plus a `?t=` token naming the window, so a leftover
+tab from an older session can't wander into a new one that reuses the
+port: it gets a plain page saying the session is over and to close the
+tab. (Retyping the address by hand without the token still works.) Stop
+and Reset on Run restart ClojureScript, because
 nothing can interrupt the page, and the tab reloads itself once the new
 process is listening: the page pings the server every five seconds while
 healthy (once a second for the first half minute after it stops answering)
@@ -2143,7 +2147,9 @@ than being surprises you'd otherwise have to rediscover:
   server are unauthenticated loopback listeners.
 - Stop and Reset on Run restart ClojureScript, so earlier definitions are
   gone; the tab reloads itself once the new process is listening (a frozen
-  or closed tab still needs a hand).
+  or closed tab still needs a hand). A tab from an older session that
+  finds its port reused by a new one is turned away with a "close this
+  tab" page instead of joining it.
 - A loop that never ends freezes the tab until you reload it, and an
   evaluation sent after the tab closed fails until you reload it. One
   still running when the tab closed waits until Stop.

@@ -132,6 +132,16 @@
                                      s
                                      (assoc s :http-port (free-port)))))))
 
+(defn- page-token!
+  "The window's token, minted once and kept for every launch (kill-child!
+  never resets it): the launcher gates page requests with it, so a stale
+  tab from another window is turned away while this window's tab reloads
+  itself across restarts."
+  [{:keys [state]}]
+  (:page-token (swap! state (fn [s] (if (:page-token s)
+                                      s
+                                      (assoc s :page-token (str (java.util.UUID/randomUUID))))))))
+
 (defn- launch-child!
   "Launches once, or twice when the browser's HTTP port was taken. [started
   port-changed?]."
@@ -144,6 +154,7 @@
              ((:launch hooks) (cond-> base
                                 (browser? ev) (assoc :target :browser
                                                      :http-port (http-port! ev fresh?)
+                                                     :page-token (page-token! ev)
                                                      :console? (not (false? (:cljs-console? selection)))))))
         started (go false)]
     (if (= :http-port-taken (:error started))
@@ -195,7 +206,7 @@
                                      (fn [s]
                                        (cond-> (assoc s :child started)
                                          (browser? ev)
-                                         (assoc :await-page (str "http://127.0.0.1:" (:http-port s))
+                                         (assoc :await-page (cljs-node/page-url (:http-port s) (:page-token s))
                                                 :announce (if (:opened? s) :reload :first)
                                                 :port-changed? port-changed?))))
                               (when (stopping? ev) (kill-child! ev))
