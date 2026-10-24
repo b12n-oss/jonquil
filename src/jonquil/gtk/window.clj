@@ -2233,8 +2233,17 @@
   a binding's key and modifiers match, so source-keys' :focused? still
   never runs for a key other than O. The keymap's ctx is this function's
   argument map plus the active tab's find-bar fns (kctx), so the registry
-  never reaches GTK itself."
-  [{:keys [run-fn stop-fn evaluating? win active-tab close-popovers-fn pane close-inspector-fn status-label source-keys tree-keys]
+  never reaches GTK itself.
+
+  Plugins PL1 slice S3: the Escape chain described above (find bar,
+  popovers, inspector, source panel, tree menu, tree, Stop, bare Escape)
+  is the top of the keymap too, in the same order, and the slot now sits
+  right after F5. Commands answer an outcome through jonquil.keymap/
+  dispatch: :handled is 1; :to-gtk is 0 and stops there, which keeps the
+  find bar's own 0 and bare Escape's 0 away from Stop; :next (the popover
+  close that closed nothing) goes on to the next binding. Only an
+  :unmatched key reaches the Cmd/Ctrl+[ clauses."
+  [{:keys [run-fn win active-tab pane status-label source-keys]
     :as ctx}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
@@ -2247,55 +2256,42 @@
             kctx (assoc ctx
                         :find-bar-navigable? #(find-bar/nav-ready? fb)
                         :find-next! #(find-bar/find-next! fb)
-                        :find-prev! #(find-bar/find-prev! fb))]
+                        :find-prev! #(find-bar/find-prev! fb)
+                        :find-bar-focused? #(find-bar-focused? win fb)
+                        :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
+                        :inspector-focused? #(inspector-pane/focused? pane win))]
         (cond
           ;; Typing in the rename popover's entry: every key but Escape
           ;; is the entry's, so Cmd/Ctrl+W, T, R, F5 and the rest can't
           ;; close, switch or Run the tab mid-rename. Escape goes on to
-          ;; the popover clause below, which closes it.
+          ;; the keymap's popover binding below, which closes it.
           (and (not= keyval KEY-ESCAPE) (rename-focused? win (:rename-pop (active-tab)))) 0
           (= keyval KEY-F5) (do (run-fn) 1)
-          (and (= keyval KEY-ESCAPE) (find-bar-focused? win fb))
-          (find-bar/handle-key! fb keyval0 state)
-          (and (= keyval KEY-ESCAPE) (close-popovers-fn)) 1
-          ;; P2.T2 (ruling 8): the inspector panel closes on Escape, after
-          ;; every other popover above and before Stop below.
-          (and (= keyval KEY-ESCAPE) (inspector-pane/focused? pane win))
-          (do (close-inspector-fn) 1)
-          (and (= keyval KEY-ESCAPE) ((:focused? source-keys)))
-          (do ((:close! source-keys)) 1)
-          ;; File-tree final review finding 4: Escape in the tree hands focus
-          ;; back to the editor, ahead of Stop.
-          ;; File-ops plan T4: the tree's own menu or name entry closes on
-          ;; Escape first; the clause below would otherwise send focus to the
-          ;; editor, since the popover sits inside the tree pane.
-          (and (= keyval KEY-ESCAPE) tree-keys ((:focused? tree-keys)) ((:menu-open? tree-keys)))
-          (do ((:close-menu! tree-keys)) 1)
-          (and (= keyval KEY-ESCAPE) tree-keys ((:focused? tree-keys)))
-          (do ((:leave! tree-keys)) 1)
-          (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
-          (= keyval KEY-ESCAPE) 0
-          ;; Plugins PL1, the keymap slot: everything from here down to the
+          ;; Plugins PL1, the keymap slot: everything below F5 down to the
           ;; Cmd/Ctrl+[ clauses is data, jonquil/keymap.edn's :window vector
-          ;; run through jonquil.command-registry. Slice S2 (F3 and Cmd+G
-          ;; while the find bar can navigate, F6, the source panel's
-          ;; Cmd+Shift+O) sits on top of slice S1 (the plain command chords).
-          ;; One clause in their old place, so every clause above and below
-          ;; keeps its precedence; later slices grow it upward.
-          (some? (when-let [b (km/resolve-binding
-                               (:window km/shipped) keyval state
-                               (cmd-registry/holds-fn cmd-registry/window-conditions kctx))]
-                   (cmd-registry/run-command! cmd-registry/window-commands b kctx)
-                   b))
-          1
-          (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
-          (do ((:back! source-keys)) 1)
-          ;; Anywhere else, back from a jump into a tab (open-in-tab!);
-          ;; with none to go back from the key passes on as before.
-          (and (command-chord? state) (= keyval KEY-BRACKETLEFT) (:jump-back! source-keys)
-               ((:jump-back! source-keys)))
-          1
-          :else 0))
+          ;; run through jonquil.command-registry. Slice S3 (the Escape
+          ;; chain: find bar, popovers, inspector, source panel, tree menu,
+          ;; tree, Stop, bare Escape) sits on top of S2 (F3 and Cmd+G while
+          ;; the find bar can navigate, F6, the source panel's Cmd+Shift+O)
+          ;; and S1 (the plain command chords). dispatch answers :handled
+          ;; (1), :to-gtk (0, GTK's, as the find bar's IME 0 and bare
+          ;; Escape must be) or :unmatched, and only then do the clauses
+          ;; below get the key; S4 takes them and F5 and retires this cond.
+          :else
+          (case (km/dispatch (:window km/shipped) keyval state
+                             {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
+                              :run! #(cmd-registry/run-command! cmd-registry/window-commands % kctx)})
+            :handled 1
+            :to-gtk 0
+            (cond
+              (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
+              (do ((:back! source-keys)) 1)
+              ;; Anywhere else, back from a jump into a tab (open-in-tab!);
+              ;; with none to go back from the key passes on as before.
+              (and (command-chord? state) (= keyval KEY-BRACKETLEFT) (:jump-back! source-keys)
+                   ((:jump-back! source-keys)))
+              1
+              :else 0))))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
         1))))
