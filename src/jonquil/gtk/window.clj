@@ -22,6 +22,7 @@
             [jolt.ffi :as ffi]
             [jonquil.cljd :as cljd]
             [jonquil.cljs :as cljs]
+            [jonquil.command-registry :as cmd-registry]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.dialect :as dialect]
@@ -47,6 +48,7 @@
             [jonquil.gtk.trash :as trash]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
+            [jonquil.keymap :as km]
             [jonquil.last-session :as last-session]
             [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach]
@@ -64,41 +66,20 @@
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
 
-;; --- keys (values from gdkkeysyms.h; KEY-R is a P2.T7 addition)
-;; ----------------------------------------------------------------------
+;; --- keys (values from gdkkeysyms.h) -------------------------------------
+;; The plain command chords' keys live in jonquil/keymap.edn since plugins
+;; PL1 slice S1 (names resolved by jonquil.keymap/key-value); these are the
+;; ones the cond clauses still name.
 
 (def ^:private KEY-F5 0xffc2)
 (def ^:private KEY-ESCAPE 0xff1b)
-(def ^:private KEY-R 0x72)
+;; the source panel's Cmd/Ctrl+Shift+O
 (def ^:private KEY-O 0x6f)
-(def ^:private KEY-S 0x73)
-(def ^:private KEY-W 0x77)
-;; P3.T3 additions (values read from gdkkeysyms.h 2026-09-24).
+;; P3.T3 addition (value read from gdkkeysyms.h 2026-09-24).
 (def ^:private KEY-F6 0xffc3)
-(def ^:private KEY-E 0x065)
-(def ^:private KEY-L 0x06c)
-(def ^:private KEY-EQUAL 0x03d)
-(def ^:private KEY-PLUS 0x02b)
-(def ^:private KEY-MINUS 0x02d)
-(def ^:private KEY-0 0x030)
-;; P3.T4 additions.
-(def ^:private KEY-F 0x066)
-(def ^:private KEY-H 0x068)
-;; TH.T5 addition (gdkkeysyms.h:459, GDK_KEY_m).
-(def ^:private KEY-M 0x06d)
-;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_i), same lowercase-ascii
-;; convention as every other single-letter chord above.
-(def ^:private KEY-I 0x069)
 ;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_bracketleft), the source panel's
 ;; own Cmd/Ctrl+[ back chord.
 (def ^:private KEY-BRACKETLEFT 0x05b)
-;; Tabs plan P2.T3 (spike §2, measured on macOS): Cmd/Ctrl+Shift+] and [
-;; arrive as braceright/braceleft, Cmd/Ctrl+T as t, the digits as 1-9.
-(def ^:private KEY-T 0x074)
-(def ^:private KEY-BRACERIGHT 0x07d)
-(def ^:private KEY-BRACELEFT 0x07b)
-(def ^:private KEY-1 0x031)
-(def ^:private KEY-9 0x039)
 
 (defn- command-chord?
   "A command chord is Control or Meta, so the same shortcut works on
@@ -108,15 +89,6 @@
 
 (defn- shift-held? [state]
   (not (zero? (bit-and state g/SHIFT-MASK))))
-
-(defn- alt-held?
-  "Guards Cmd/Ctrl+L (clear console) and Cmd/Ctrl+Shift+L (clear last
-  output) from also matching editor.clj's Cmd/Ctrl+Alt+L (format current
-  line): the window-level key controller runs in the capture phase,
-  before the editor's own, so without this guard Cmd+Alt+L would be
-  swallowed here and never reach it."
-  [state]
-  (not (zero? (bit-and state g/ALT-MASK))))
 
 ;; --- title -------------------------------------------------------------
 
@@ -2248,12 +2220,20 @@
   signal emission and killing the process. The find bar's own handle-key!/
   handle-nav-key! stay unwrapped on their own account -- this only
   contains a throw because they happen to be called from inside this same
-  function."
-  [{:keys [run-fn stop-fn open-fn save-fn save-as-fn close-fn
-           run-selection-fn toggle-focus-fn clear-console-fn clear-last-fn zoom-fn evaluating?
-           win active-tab open-find-fn open-replace-fn theme-cycle-fn close-popovers-fn
-           inspect-last-fn inspect-form-fn pane close-inspector-fn
-           status-label source-keys new-tab-fn step-tab-fn digit-tab-fn toggle-tree-fn tree-keys]}]
+  function.
+
+  Plugins PL1 slice S1: the plain command chords (Cmd/Ctrl+R, O, S and
+  Shift+S, W, Shift+E and E, Shift+L and L, F, H, zoom, 1-9, T, Shift+M,
+  Shift+I and I, Shift+] and [) are no longer cond clauses: one slot clause
+  in their old place resolves the lowered keyval against jonquil/keymap.edn's
+  :window bindings (jonquil.keymap) and runs the command with this
+  function's own argument map as ctx (jonquil.command-registry). The order
+  and guards above (Shift-first pairs, :not #{:alt} on L and F) carry over
+  into the keymap's order. Cmd/Ctrl+R now sits below the source panel's
+  Cmd/Ctrl+Shift+O, which only matches O. A differential test
+  (keymap_window_oracle_test) checks the keymap against the old clauses."
+  [{:keys [run-fn stop-fn toggle-focus-fn evaluating? win active-tab close-popovers-fn pane close-inspector-fn status-label source-keys tree-keys]
+    :as ctx}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
@@ -2290,44 +2270,17 @@
           ;; is open, wherever focus is (1 only when the bar acted).
           (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
           (and (= keyval KEY-F6) (not (shift-held? state))) (do (toggle-focus-fn) 1)
-          (and (command-chord? state) (= keyval KEY-R)) (do (run-fn) 1)
           (and (command-chord? state) (shift-held? state) (= keyval KEY-O) ((:focused? source-keys)))
           (do ((:open! source-keys)) 1)
-          (and (command-chord? state) (= keyval KEY-O)) (do (open-fn) 1)
-          (and (command-chord? state) (shift-held? state) (= keyval KEY-S)) (do (save-as-fn) 1)
-          (and (command-chord? state) (= keyval KEY-S)) (do (save-fn) 1)
-          (and (command-chord? state) (= keyval KEY-W)) (do (close-fn) 1)
-                    ;; File-tree plan P2.T2: Cmd/Ctrl+Shift+E shows or hides the tree
-          ;; (spike §6: E with Shift, lowered to e), ahead of Run Selection,
-          ;; which now needs Shift up.
-          (and (command-chord? state) (shift-held? state) (= keyval KEY-E)) (do (toggle-tree-fn) 1)
-          (and (command-chord? state) (not (shift-held? state)) (= keyval KEY-E)) (do (run-selection-fn) 1)
-          ;; Cmd/Ctrl+Shift+L, ahead of plain Cmd/Ctrl+L below -- see this
-          ;; docstring's own citation.
-          (and (command-chord? state) (not (alt-held? state)) (shift-held? state) (= keyval KEY-L))
-          (do (clear-last-fn) 1)
-          (and (command-chord? state) (not (alt-held? state)) (= keyval KEY-L)) (do (clear-console-fn) 1)
-          (and (command-chord? state) (not (alt-held? state)) (not (shift-held? state)) (= keyval KEY-F))
-          (do (open-find-fn) 1)
-          (and (command-chord? state) (= keyval KEY-H)) (do (open-replace-fn) 1)
-          (and (command-chord? state) (contains? #{KEY-EQUAL KEY-PLUS} keyval)) (do (zoom-fn :in) 1)
-          (and (command-chord? state) (= keyval KEY-MINUS)) (do (zoom-fn :out) 1)
-          (and (command-chord? state) (= keyval KEY-0)) (do (zoom-fn :reset) 1)
-          ;; Tabs plan P2.T3: Cmd/Ctrl+1-8 pick a tab, 9 the last; a digit
-          ;; past the last tab is still consumed.
-          (and (command-chord? state) (<= KEY-1 keyval KEY-9))
-          (do (digit-tab-fn (- keyval (dec KEY-1))) 1)
-          (and (command-chord? state) (= keyval KEY-T)) (do (new-tab-fn) 1)
-          (and (command-chord? state) (shift-held? state) (= keyval KEY-M)) (do (theme-cycle-fn) 1)
-          ;; P2.T2: Cmd/Ctrl+Shift+I (inspect-form-fn) ahead of plain
-          ;; Cmd/Ctrl+I (inspect-last-fn), same Shift-first ordering
-          ;; Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
-          (and (command-chord? state) (shift-held? state) (= keyval KEY-I)) (do (inspect-form-fn) 1)
-          (and (command-chord? state) (= keyval KEY-I)) (do (inspect-last-fn) 1)
-                    ;; Tabs plan P2.T3: next and previous tab, wrapping. Ahead of the
-          ;; source panel's Cmd/Ctrl+[, which is a different keyval.
-          (and (command-chord? state) (= keyval KEY-BRACERIGHT)) (do (step-tab-fn 1) 1)
-          (and (command-chord? state) (= keyval KEY-BRACELEFT)) (do (step-tab-fn -1) 1)
+          ;; Plugins PL1 slice S1: the plain command chords (Cmd/Ctrl+R through
+          ;; Cmd/Ctrl+Shift+[ and ]) are data now, jonquil/keymap.edn's :window
+          ;; vector run through jonquil.command-registry. One clause, here, in
+          ;; the block's old place, so every clause above and below keeps its
+          ;; precedence; later slices grow it upward.
+          (some? (when-let [b (km/resolve-binding (:window km/shipped) keyval state)]
+                   (cmd-registry/run-command! cmd-registry/window-commands b ctx)
+                   b))
+          1
           (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
           (do ((:back! source-keys)) 1)
           ;; Anywhere else, back from a jump into a tab (open-in-tab!);

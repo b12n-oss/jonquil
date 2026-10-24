@@ -10,7 +10,8 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]
-            [jonquil.gtk.window :as window]))
+            [jonquil.gtk.window :as window]
+            [jonquil.keymap :as km]))
 
 (defn row-escape-yields-when-idle
   "M5: the window-level capture controller used to consume Escape even
@@ -38,6 +39,17 @@
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
 ;; Shift bit set in state -- window.clj's own copy is private.
 (def ^:private KEY-S-CAPS 0x53)
+(defn row-keymap-masks-match-gdk
+  "jonquil.keymap copies the GDK modifier bits so it loads without GTK
+  (plugins PL1 S1); this pins the copies against jonquil.gtk.ffi's, the
+  values the window's key controller actually reports."
+  [ui]
+  (go-row :keymap-masks-match-gdk support/check
+    (on-gtk (let [want {:shift g/SHIFT-MASK :ctrl g/CONTROL-MASK :alt g/ALT-MASK
+                        :super g/SUPER-MASK :meta g/META-MASK}]
+              (support/check :keymap-masks-match-gdk (= want km/MODIFIER-MASKS)
+                             {:keymap km/MODIFIER-MASKS :gdk want :window (some? (:window ui))})))))
+
 (defn row-command-chord-capslock
   "M4: shortcuts compared the raw keyval, so Caps Lock -- which makes GDK
   report the UPPERCASE keyval with no Shift bit set -- broke Ctrl+S (and
