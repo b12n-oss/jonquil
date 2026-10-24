@@ -594,8 +594,13 @@ Five namespaces and one launcher make it up:
   never loads it: `jonquil.nrepl.cljs-node-files` embeds its text when Jonquil
   is compiled and writes it under the cache folder. It serves a prepl
   (`cljs.server.node/prepl`) on a loopback port the OS picks, prints
-  `jonquil-cljs-prepl <port>`, and exits when its stdin ends, which is how a
-  crashed Jonquil takes the child down. ClojureScript's `node_repl.js` listens
+  `jonquil-cljs-prepl <port> stdin:<path>`, and exits when its stdin ends,
+  which is how a crashed Jonquil takes the child down. The `stdin:` token
+  names a FIFO (`mkfifo`) the launcher makes in its own temp folder
+  (`stdin:none` when that failed), and the stdin watcher doubles as the
+  relay: each line Jonquil writes goes into the FIFO, through a `"rw"`
+  open, which never blocks on a FIFO where a write-only open would wait
+  for `read-line`'s first reader. ClojureScript's `node_repl.js` listens
   on every interface, so the launcher serves a patched copy of it through a
   classloader: the one line `.listen(PORT);` becomes a listen on port 0 at
   `127.0.0.1`, and if a ClojureScript version doesn't contain that line the
@@ -645,6 +650,20 @@ Five namespaces and one launcher make it up:
   drains as on a timeout), so a Run never waits a help budget out. Pure code
   (`cljs-node/analyzer-candidates`, `cljd/buffer-ns-refs`) spells each
   qualified name the way the buffer can use it.
+  `read-line` rides the FIFO: after the `(require 'cljs.repl)` setup, a
+  second sentinel exchange defines `cljs.core/read-line` (via `in-ns` +
+  `declare`, so plain `(read-line)` compiles warning-free anywhere) as a
+  blocking FIFO read bracketed by two `*print-err-fn*` marker lines, which
+  the prepl tags `:err` and `dispatch!` strips while flipping
+  `:waiting-input?` (a raw fd 2 write vanishes: the node child's stderr is
+  pumped nowhere, measured). `send-input!` and `send-eof!` are gated: one
+  swap turning `:waiting-input?` false picks a single writer, so a line
+  that lost the race against completion is dropped, as Jolt's middleware
+  drops one. EOF is a dedicated marker line the reader answers nil for,
+  freeing one read while the pipe stays open. When the launcher announces
+  `stdin:none`, or the reader setup fails, `read-line` is defined to throw
+  a clear message and the console says so once; the session is otherwise
+  unchanged.
   A setup that fails or times out kills the child with `:keep-log? true`,
   which leaves the run dir, so the message's "The log: <path>" still points
   at a file; every other kill removes it. A kept run dir, like a failed

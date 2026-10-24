@@ -12,6 +12,7 @@
             [jolt.process :as proc]
             [jonquil.cljs-node :as cljs-node]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.nrepl.cljs-node :as nrepl-cljs-node]
@@ -198,6 +199,30 @@
                              (and before old (= before old) started? stopped? gone? answered? new (not= old new))
                              {:before before :old old :new new :started started? :stopped stopped? :gone gone?
                               :answered answered? :text (str (support/since ui mark) (support/since ui mark2))})))))
+
+(defn row-cljs-read-line
+  "A Run calling (read-line) waits for the console prompt: the status says
+  Waiting for input, the typed line answers the read through the fake's
+  stdin dance (the same stdin pipe the real launcher relays), the result
+  line reaches the console, and the status returns to Ready."
+  [ui]
+  (go-row :cljs-read-line support/check
+    (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (:editor ui) "(str \"typed:\" (read-line))")
+                         ((:run!* ui))
+                         m))
+          waiting? (await-until 20000 20 #(= "Waiting for input" (g/label-text (:status-label ui))))
+          _ (on-gtk (let [cv (:console ui)]
+                      (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "World" -1 1)
+                      (cview/handle-return! cv false)))
+          answered? (await-until 5000 20 #(and (idle? ui)
+                                               (value-line? (support/since ui mark) "\"typed:World\"")))
+          ready? (await-until 2000 20 #(= "Ready" (g/label-text (:status-label ui))))]
+      (on-gtk (support/check :cljs-read-line
+                             (and waiting? answered? ready?)
+                             {:waiting waiting? :answered answered? :ready ready?
+                              :status (g/label-text (:status-label ui))
+                              :text (support/since ui mark)})))))
 
 (defn row-cljs-node-close-kills-child
   "The deliberately LAST row: records the child's pid, then fires the app's

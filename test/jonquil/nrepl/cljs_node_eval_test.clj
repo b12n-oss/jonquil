@@ -15,7 +15,11 @@
   (let [launches (atom 0) kills (atom 0)
         e (node/make-cljs-node
            {:profile dialect/cljs :runtime :launch :project-dir nil}
-           (merge {:launch (fn [_] (swap! launches inc) {:port (:port srv) :pid -1 :log "/fake/log"})
+           (merge {:launch (fn [_] (swap! launches inc)
+                             {:port (:port srv) :pid -1 :log "/fake/log"
+                              ;; a real-looking path: the reader setup embeds
+                              ;; it, the fake intercepts the set!
+                              :stdin-path (str (System/getProperty "java.io.tmpdir") "/jonquil-fake-input")})
                    :find-clojure (fn [] "/fake/clojure")
                    :ensure-launcher (fn [] "/fake/launcher.clj")
                    :alive? (fn [_] true)
@@ -628,3 +632,127 @@
                  (select-keys (deref done 10000 :timeout) [:status :printed]))))
         (is (= node/busy-doc (:doc @looking))
             "a lookup an evaluation cancelled answers busy, not timed out")))))
+
+;; --- read-line over the stdin pipe (stdin design, 2026-10-23) --------------
+
+(defn- with-stdin-node
+  "with-node for the stdin dance: the fake takes input lines from a pipe
+  the launch hook's child map writes (its :stdin), so send-input! reaches
+  the fake the way it reaches the real child's relay."
+  [fake-opts f]
+  (let [in (java.io.PipedInputStream.)
+        pout (java.io.PipedOutputStream. in)
+        srv (fake/start! (assoc fake-opts :stdin-dance? true :stdin-in in))
+        n (make-test-node srv {:launch (fn [_] {:port (:port srv) :pid -1 :log "/fake/log"
+                                                :stdin pout :stdin-path "/fake/input"})})]
+    (try (f srv n)
+         (finally (ev/stop! (:ev n)) (fake/stop! srv)
+                  (try (.close pout) (catch Throwable _ nil))))))
+
+(deftest read-line-waits-and-takes-input-test
+  (with-stdin-node {}
+    (fn [_ {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(str \"got:\" (read-line))"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000) "the need-input marker flips waiting")
+        (ev/send-input! ev "abc")
+        (is (= {:status :ok :printed "\"got:abc\""}
+               (select-keys (deref done 10000 :timeout) [:status :printed])))
+        (is (false? (ev/waiting-for-input? ev)))))))
+
+(deftest markers-never-reach-the-console-test
+  (with-stdin-node {:stdin-script ["abc"]}
+    (fn [_ {:keys [ev]}]
+      (let [{:keys [result out]} (run ev "(str \"got:\" (read-line))" {:run? false})]
+        (is (= "\"got:abc\"" (:printed result)))
+        (is (not-any? #(str/includes? (str (second %)) "\u0001") out)
+            (pr-str (filterv #(str/includes? (str (second %)) "\u0001") out)))))))
+
+(deftest a-second-send-writes-nothing-test
+  (with-stdin-node {}
+    (fn [srv {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(str \"got:\" (read-line))"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000))
+        (ev/send-input! ev "one")
+        (ev/send-input! ev "two")
+        (is (= "\"got:one\"" (:printed (deref done 10000 :timeout))))
+        (Thread/sleep 150)
+        (is (empty? @(:stdin-queue srv))
+            "the claimed send wrote one line; the second, nothing")))))
+
+(deftest stdin-none-defines-a-thrower-test
+  (let [srv (fake/start! {})
+        {:keys [ev]} (make-test-node srv {:launch (fn [_] {:port (:port srv) :pid -1 :log "/fake/log"
+                                                           :stdin-path :none})})]
+    (try
+      (let [{:keys [result out]} (run ev "(read-line)" {:run? false})]
+        (is (= :error (:status result)) (pr-str result))
+        (is (str/includes? (str (:error-text result)) "read-line isn't available")
+            (str (:error-text result)))
+        (is (= 1 (count (re-seq #"read-line isn't available this session" (text-of out))))
+            "connect! said its console line once"))
+      (finally (ev/stop! ev) (fake/stop! srv)))))
+
+(deftest a-user-line-equal-to-a-marker-is-swallowed-test
+  (with-node {} {}
+    (fn [_ {:keys [ev]}]
+      (let [out (atom [])]
+        (ev/eval! ev "(+ 1 1)" {:run? false :on-output (fn [k s] (swap! out conj [k s]))
+                                :on-complete (fn [_])})
+        (is (wait-until #(not (ev/evaluating? ev)) 5000))
+        (#'node/dispatch! ev (atom false) {:tag :err :val (str cljs-node/need-input-marker "\n")})
+        (is (not-any? #(str/includes? (str (second %)) "\u0001") @out)
+            "a user line equal to the marker line is swallowed (the accepted cost)")
+        (is (true? (ev/waiting-for-input? ev)) "and it reads as a waiting signal")
+        (#'node/dispatch! ev (atom false) {:tag :err :val (str cljs-node/got-input-marker "\n")})
+        (is (false? (ev/waiting-for-input? ev)))))))
+
+(deftest send-eof-answers-nil-test
+  (with-stdin-node {}
+    (fn [_ {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(read-line)"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000))
+        (ev/send-eof! ev)
+        (is (= "nil" (:printed (deref done 10000 :timeout))) "EOF answers that one read nil"))
+      (let [done (promise)]
+        (ev/eval! ev "(read-line)"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000) "a later read still waits after one EOF")
+        (ev/send-input! ev "x")
+        (is (= "\"x\"" (:printed (deref done 10000 :timeout))))))))
+
+(deftest kill-resets-waiting-test
+  (with-stdin-node {}
+    (fn [_ {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(read-line)"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000))
+        (ev/interrupt! ev)
+        (is (= :interrupted (:status (deref done 10000 :timeout))))
+        (is (wait-until #(false? (ev/waiting-for-input? ev)) 3000) "Stop resets waiting")))))
+
+(deftest a-multi-line-send-feeds-one-read-test
+  ;; review I2: Shift+Return can put newlines in the console's input, and
+  ;; a send must still feed exactly one line, or the rest sits in the
+  ;; pipe and answers a LATER evaluation's read without waiting.
+  (with-stdin-node {}
+    (fn [_ {:keys [ev]}]
+      (let [done (promise)]
+        (ev/eval! ev "(str \"got:\" (read-line))"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (wait-until #(ev/waiting-for-input? ev) 5000))
+        (ev/send-input! ev "a\nb")
+        (is (= "\"got:a\"" (:printed (deref done 10000 :timeout)))))
+      (let [done (promise)]
+        (ev/eval! ev "(read-line)"
+                  {:run? false :on-output (fn [_ _]) :on-complete (fn [r] (deliver done r))})
+        (is (= :timeout (deref done 1500 :timeout))
+            "the second read waits; no stale line fed it")
+        (ev/send-input! ev "c")
+        (is (= "\"c\"" (:printed (deref done 10000 :timeout))))))))

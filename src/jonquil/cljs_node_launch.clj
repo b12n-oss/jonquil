@@ -389,6 +389,42 @@
                                             :value (gone-message)})))
                   (send-and-close conn 200 "ok")))))
 
+(defn- make-fifo!
+  "The stdin FIFO's absolute path, created as input in this JVM's own temp
+  folder (never the working directory: that is the user's project), or nil
+  when mkfifo failed, with one stderr line saying why. read-line is then
+  unavailable; the session is otherwise unchanged."
+  []
+  (let [f (io/file @run-dir "input")]
+    (try
+      (let [exit (.waitFor (.start (ProcessBuilder. ["mkfifo" (.getPath f)])))]
+        (if (zero? exit)
+          (do (.deleteOnExit f) (.getPath f))
+          (binding [*out* *err*]
+            (println (str "jonquil: mkfifo " (.getPath f) " exited " exit
+                          "; read-line won't be available"))
+            nil)))
+      (catch Exception e
+        (binding [*out* *err*]
+          (println (str "jonquil: mkfifo failed (" (.getMessage e)
+                        "); read-line won't be available")))
+        nil))))
+
+(defn- relay-stdin!
+  "Relays this process's stdin into the FIFO, a line at a time, so a blocked
+  read-line in node gets the line Jonquil sends. The FIFO is opened \"rw\":
+  a read-write open never blocks on a FIFO, where a write-only open would
+  wait for read-line's first reader. Returns when stdin ends; the caller
+  exits, and closing the FIFO's only writer makes a blocked read return
+  0 bytes, which read-line maps to nil."
+  [^String path]
+  (with-open [raf (java.io.RandomAccessFile. path "rw")
+              in (io/reader System/in :encoding "UTF-8")]
+    (loop []
+      (when-let [line (.readLine ^java.io.BufferedReader in)]
+        (.write raf (.getBytes (str line "\n") java.nio.charset.StandardCharsets/UTF_8))
+        (recur)))))
+
 (defn- destroy-descendants []
   (doseq [p (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current))))]
     (.destroy ^java.lang.ProcessHandle p)))
@@ -420,16 +456,21 @@
                             " to bind to loopback; this ClojureScript version isn't supported")))
             (System/exit 2))
           (port-file-socket!)))
-    (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable destroy-descendants))
-    ;; Jonquil holds our stdin for its life, so stdin ending means it is gone.
-    (future (try (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur))))
-                 (catch Throwable _ nil))
-            (System/exit 0))
-    (let [ss (server/start-server {:name "jonquil-cljs" :address "127.0.0.1" :port 0
-                                   :accept (if browser?
-                                             'jonquil.cljs-node-launch/browser-accept
-                                             'jonquil.cljs-node-launch/accept)})]
-      (println (str "jonquil-cljs-prepl " (.getLocalPort ^ServerSocket ss)
-                    (when browser? (str " http://127.0.0.1:" @http-port))))
+    (let [fifo (when-not browser? (make-fifo!))]
+      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable destroy-descendants))
+      ;; Jonquil holds our stdin for its life, so stdin ending means it is
+      ;; gone. On node the watcher doubles as the read-line relay.
+      (future (try (if fifo
+                     (relay-stdin! fifo)
+                     (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur)))))
+                   (catch Throwable _ nil))
+              (System/exit 0))
+      (let [ss (server/start-server {:name "jonquil-cljs" :address "127.0.0.1" :port 0
+                                     :accept (if browser?
+                                               'jonquil.cljs-node-launch/browser-accept
+                                               'jonquil.cljs-node-launch/accept)})]
+        (println (str "jonquil-cljs-prepl " (.getLocalPort ^ServerSocket ss)
+                      (when browser? (str " http://127.0.0.1:" @http-port))
+                      (when-not browser? (str " stdin:" (or fifo "none"))))))
       (flush)
       @(promise))))

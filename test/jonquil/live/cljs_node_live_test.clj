@@ -154,6 +154,82 @@
       (is (offers? "str/u" "str/upper-case") "an aliased name from the analyzer")
       (is (offers? "tw" "twice") "the Run's own defn, spelled short"))))
 
+(defn- wait-until [pred ms]
+  (let [deadline (+ (System/currentTimeMillis) ms)]
+    (loop [] (cond (pred) true
+                   (> (System/currentTimeMillis) deadline) false
+                   :else (do (Thread/sleep 50) (recur))))))
+
+(defn- eval-async
+  "Starts an evaluation without waiting. {:done promise :out atom}."
+  [e code]
+  (let [done (promise) out (atom [])]
+    (ev/eval! e code {:run? false
+                      :on-output (fn [k s] (swap! out conj [k s]))
+                      :on-complete (fn [r] (deliver done r))})
+    {:done done :out out}))
+
+(deftest read-line-live
+  (with-cljs [e (make)]
+    ;; one read, fed by send-input!
+    (let [{:keys [done out]} (eval-async e "(str \"got:\" (read-line))")]
+      (is (wait-until #(ev/waiting-for-input? e) 60000) "the waiting signal arrives")
+      (ev/send-input! e "from-test")
+      (let [r (deref done 60000 :timeout)]
+        (is (= {:status :ok :printed "\"got:from-test\""}
+               (select-keys r [:status :printed])) (pr-str [r @out])))
+      (is (false? (ev/waiting-for-input? e))))
+    ;; two sequential reads in one evaluation
+    (let [{:keys [done]} (eval-async e "(let [a (read-line) b (read-line)] (str a \"+\" b))")]
+      (is (wait-until #(ev/waiting-for-input? e) 10000))
+      (ev/send-input! e "one")
+      (is (wait-until #(ev/waiting-for-input? e) 10000) "the second read waits in turn")
+      (ev/send-input! e "two")
+      (let [r (deref done 60000 :timeout)]
+        (is (= "\"one+two\"" (:printed r)) (pr-str r))))
+    ;; an empty line answers "", never nil (review I1: cljs split-lines
+    ;; pops the trailing "" of "\n", so (first []) was nil)
+    (let [{:keys [done]} (eval-async e "(read-line)")]
+      (is (wait-until #(ev/waiting-for-input? e) 10000))
+      (ev/send-input! e "")
+      (let [r (deref done 60000 :timeout)]
+        (is (= "\"\"" (:printed r)) (pr-str r))))
+    ;; EOF answers that one read nil; a later read still works
+    (let [{:keys [done]} (eval-async e "(read-line)")]
+      (is (wait-until #(ev/waiting-for-input? e) 10000))
+      (ev/send-eof! e)
+      (let [r (deref done 60000 :timeout)]
+        (is (= "nil" (:printed r)) (pr-str r))))
+    (let [{:keys [done]} (eval-async e "(read-line)")]
+      (is (wait-until #(ev/waiting-for-input? e) 10000) "a read after EOF still waits")
+      (ev/send-input! e "later")
+      (is (= "\"later\"" (:printed (deref done 60000 :timeout)))))
+    ;; Stop frees a waiting read; the next evaluation runs
+    (let [{:keys [done]} (eval-async e "(read-line)")]
+      (is (wait-until #(ev/waiting-for-input? e) 10000))
+      (ev/interrupt! e)
+      (let [r (deref done 10000 :timeout)]
+        (is (contains? #{:interrupted :error} (:status r)) (pr-str r)))
+      (is (wait-until #(false? (ev/waiting-for-input? e)) 5000)))
+    (let [{:keys [result]} (run e "(+ 2 3)")]
+      (is (= "5" (:printed result)) (pr-str result)))))
+
+(deftest read-line-compiles-clean-live
+  ;; A Run of a buffer with its own ns calling plain (read-line): the
+  ;; in-ns/declare setup means no compiler WARNING anywhere in the output.
+  (with-cljs [e (make)]
+    (let [src "(ns demo.reader)\n(defn ask [] (read-line))\n(ask)"
+          done (promise) out (atom [])]
+      (ev/eval! e src {:run? true
+                       :on-output (fn [k s] (swap! out conj [k s]))
+                       :on-complete (fn [r] (deliver done r))})
+      (is (wait-until #(ev/waiting-for-input? e) 60000) (pr-str @out))
+      (ev/send-input! e "fed")
+      (let [r (deref done 60000 :timeout)]
+        (is (= "\"fed\"" (:printed r)) (pr-str [r @out])))
+      (is (not (str/includes? (apply str (map second @out)) "WARNING"))
+          (pr-str @out)))))
+
 (defn- node-pids
   "The pids among pids whose command's first word ends with node."
   [pids]

@@ -144,3 +144,10 @@
          (finally
            (when-let [log (some->> (:error r) (re-find #"The log: (.+)$") second)]
              (#'child/delete-tree! (.getParent (io/file log))))))))
+
+(deftest ready-line-carries-the-stdin-token-test
+  (let [c (child/start! {:clojure fake-clojure :launcher "l.clj"})]
+    (try
+      (is (nil? (:error c)) (str c))
+      (is (= "fake" (:stdin-path c)) "start! parses the fake launcher's stdin token")
+      (finally (child/kill! c)))))

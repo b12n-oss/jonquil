@@ -27,7 +27,7 @@
 (def limitations
   ["Jonquil starts and stops its own ClojureScript process."
    "Stop restarts it, so earlier definitions are gone afterwards."
-   "No stdin and no inspector; jump to definition stays in this file."
+   "read-line waits for a line typed at this prompt; Cmd/Ctrl+D ends input for one read. No inspector; jump to definition stays in this file."
    "Completion offers this file's names, Clojure core's and, once something ran, every loaded namespace's."])
 
 (defn browser-limitations
@@ -107,6 +107,96 @@
 
 (def setup-form
   "(require 'cljs.repl)")
+
+;; --- read-line over the launcher's FIFO (stdin design, 2026-10-23) --------
+
+(def need-input-marker
+  "Printed via *print-err-fn* just before read-line blocks; dispatch!
+  strips it and flips waiting-input? (never a raw fd write: the node
+  child's fd 2 is pumped nowhere, measured)."
+  "\u0001jonquil:need-input\u0001")
+
+(def got-input-marker
+  "Printed via *print-err-fn* right after a read returns."
+  "\u0001jonquil:got-input\u0001")
+
+(def input-eof-marker
+  "The line send-eof! writes: the reader answers nil for it, freeing ONE
+  read (Jolt parity), while the relay pipe stays open for later reads."
+  "\u0001jonquil:eof\u0001")
+
+(defn ready-stdin
+  "The stdin token of the last ready line: the FIFO's absolute path,
+  :none when the launcher couldn't make one, nil when the line carries no
+  token (an older launcher, or the browser line)."
+  [log-text]
+  (some->> (str/split-lines (str log-text))
+           (keep #(second (re-find #"jonquil-cljs-prepl \d+.* stdin:(\S+)" %)))
+           last
+           (#(if (= "none" %) :none %))))
+
+(defn reader-setup-text
+  "The forms (newline-joined, ending with sentinel-form) that define
+  cljs.core/read-line as a blocking FIFO read bracketed by the markers.
+  The in-ns/declare pair makes plain (read-line) compile everywhere with
+  no warning (spike finding 3)."
+  [fifo-path sentinel-form]
+  (str/join "\n"
+            ["(in-ns 'cljs.core)"
+             "(declare read-line)"
+             "(in-ns 'cljs.user)"
+             (str "(set! cljs.core/read-line"
+                  " (fn []"
+                  " (let [fs (js/require \"fs\")]"
+                  " (*print-err-fn* " (pr-str (str need-input-marker "\n")) ")"
+                  " (let [fd (.openSync fs " (pr-str fifo-path) " \"r\")"
+                  " buf (js/Buffer.alloc 65536)"
+                  " n (.readSync fs fd buf 0 65536 nil)"
+                  " _ (.closeSync fs fd)"
+                  ;; cut at indexOf, never split-lines: cljs split-lines
+                  ;; pops the trailing "" of "\n", so an empty line would
+                  ;; answer nil, as Cmd/Ctrl+D does (review I1, measured
+                  ;; against ClojureScript 1.12.42 and live node)
+                  " s (.toString buf \"utf8\" 0 n)"
+                  " i (.indexOf s \"\\n\")"
+                  " line (if (neg? i) s (.substring s 0 i))]"
+                  " (*print-err-fn* " (pr-str (str got-input-marker "\n")) ")"
+                  " (when-not (or (zero? n) (= line " (pr-str input-eof-marker) "))"
+                  " line)))))")
+             sentinel-form]))
+
+(defn reader-unavailable-text
+  "The same framing, but read-line throws a clear message: the session
+  works, and a call site fails loudly instead of a ReferenceError."
+  [reason sentinel-form]
+  (str/join "\n"
+            ["(in-ns 'cljs.core)"
+             "(declare read-line)"
+             "(in-ns 'cljs.user)"
+             (str "(set! cljs.core/read-line"
+                  " (fn [] (throw (js/Error. "
+                  (pr-str (str "read-line isn't available: " reason)) "))))")
+             sentinel-form]))
+
+(defn strip-input-markers
+  "[clean-text events] for an :err chunk: marker lines (and their
+  newlines) are removed, events is the markers' order (:need-input,
+  :got-input), and everything else is kept byte-for-byte. A chunk may
+  coalesce a marker with user stderr, so this scans within the chunk."
+  [s]
+  (let [need (str need-input-marker "\n")
+        got (str got-input-marker "\n")]
+    (loop [s (str s) events []]
+      (let [ni (str/index-of s need)
+            gi (str/index-of s got)]
+        (cond
+          (and ni (or (nil? gi) (< ni gi)))
+          (recur (str (subs s 0 ni) (subs s (+ ni (count need))))
+                 (conj events :need-input))
+          gi
+          (recur (str (subs s 0 gi) (subs s (+ gi (count got))))
+                 (conj events :got-input))
+          :else [s events])))))
 
 (defn sentinel
   "The form that ends an evaluation. Its ret marks where the buffer's output ends."

@@ -92,7 +92,8 @@
    (let [[old _] (swap-vals! state (fn [s]
                                      (cond-> (assoc s :child nil :conn nil :ready? false
                                                     :used? false :prompt-ns 'cljs.user :drain nil
-                                                    :setup-pending nil :analyzer-syms nil :analyzer-stale? nil)
+                                                    :setup-pending nil :analyzer-syms nil :analyzer-stale? nil
+                                                    :waiting-input? false)
                                        (and background? (:child s)) (update :killing inc))))]
      (when (:conn old) (try (prepl/close! (:conn old)) (catch Throwable _ nil)))
      (when-let [child (cond-> (:child old) keep-log? (dissoc :run-dir))]
@@ -201,15 +202,44 @@
                               nil))))))
           {:status :notice :text cljs-node/no-clojure-message})))))
 
+(defn- say-waiting!
+  "Calls the running evaluation's :on-wait-input with waiting?, as the
+  other stdin-capable evaluators do (the status label follows it). Never
+  throws."
+  [{:keys [state]} waiting?]
+  (when-let [f (:on-wait-input (:opts (:running @state)))]
+    (try (f waiting?) (catch Throwable _ nil))))
+
+(declare dispatch-reply!)
+
 (defn- dispatch!
   "Routes one reply of one connection. closed? is that connection's own
   flag: a reply after its :closed is dropped, and :closed itself is
-  delivered once. A ret whose :form is the pending :drain sentinel (a help
+  delivered once. An :err reply first passes
+  cljs-node/strip-input-markers: marker lines flip :waiting-input? and are
+  swallowed, so they never reach a console (a user line spelled exactly
+  like one takes the same fate, the accepted cost). A ret whose :form is
+  the pending :drain sentinel (a help
   that timed out or was cancelled) clears :drain and is dropped with
   everything before it. A
   ret that is the current exchange's sentinel is recorded in :done-forms in
   the same swap, so exchange! can tell a timeout from a ret that just
   beat it."
+  [{:keys [state] :as ev} closed? r]
+  (let [r (if (and (= :err (:tag r)) (string? (:val r)) (not @closed?))
+            (let [[clean events] (cljs-node/strip-input-markers (:val r))]
+              (when (seq events)
+                (let [waiting? (= :need-input (last events))]
+                  (swap! state assoc :waiting-input? waiting?)
+                  (say-waiting! ev waiting?)))
+              (when-not (and (seq events) (= "" clean))
+                (assoc r :val clean)))
+            r)]
+    (when r
+      (dispatch-reply! ev closed? r))))
+
+(defn- dispatch-reply!
+  "dispatch!'s routing, after the :err marker pass."
   [{:keys [state] :as ev} closed? r]
   (cond
     (and (browser? ev) (cljs-node/waiting-line? r)) nil
@@ -334,6 +364,32 @@
                      (cljs-node/reload-message url)))
       nil)))
 
+(def read-line-unavailable-message
+  "; read-line isn't available this session.")
+
+(defn- setup-read-line!
+  "The node session's second setup exchange: defines cljs.core/read-line
+  over the launcher's FIFO, or as a thrower when the launcher has no pipe
+  (:stdin-path :none or missing), so a call site fails loudly instead of a
+  ReferenceError. Degrades, never fails the session: taking the thrower
+  path, an :exception answer or a timeout each say one console line and
+  the session goes on. Always nil."
+  [{:keys [state timings] :as ev}]
+  (let [fifo (:stdin-path (:child @state))
+        sentinel-form (next-sentinel! ev)
+        text (if (string? fifo)
+               (cljs-node/reader-setup-text fifo sentinel-form)
+               (cljs-node/reader-unavailable-text
+                "the launcher couldn't create its input pipe" sentinel-form))
+        [outcome replies] (exchange! ev text
+                                     (fn [r] (and (ret? r) (= sentinel-form (:form r))))
+                                     {:sentinel sentinel-form
+                                      :timeout-ms (:setup-timeout-ms timings)})]
+    (when (or (not (string? fifo)) (not= :done outcome) (some :exception replies))
+      (connection/say! (:last-output @state) :system
+                       (str read-line-unavailable-message "\n")))
+    nil))
+
 (defn- connect!
   "Connects the prepl to the stored child and runs the setup form. nil when
   ready, else the result to finish with."
@@ -381,6 +437,7 @@
                   nil)
               (and (not browser?) (= :done outcome) (not-any? :exception replies))
               (do (swap! state assoc :ready? true)
+                  (setup-read-line! ev)
                   (connection/notify! ev true)
                   nil)
               :else
@@ -576,6 +633,24 @@
             (cljd/no-docs sym (if (= :cancelled outcome) busy-doc timeout-doc))))
         (finally (swap! state assoc :helping false))))))
 
+(defn- send-stdin-line!
+  "Writes one newline-terminated line to the child's stdin pipe (the
+  launcher's relay feeds it to the FIFO), only when a read waits: one
+  swap-vals! turning :waiting-input? false picks a single writer, so a
+  second Return, or one that lost the race against completion or EOF, is
+  dropped rather than carried into a later evaluation (Jolt's middleware
+  behavior, measured). The :got-input marker's flip stays as the belt."
+  [{:keys [state] :as ev} line]
+  (let [[old _] (swap-vals! state (fn [s] (cond-> s (:waiting-input? s) (assoc :waiting-input? false))))]
+    (when (:waiting-input? old)
+      (when-let [stdin (:stdin (:child @state))]
+        (try
+          (.write ^java.io.OutputStream stdin (.getBytes ^String line "UTF-8"))
+          (.flush ^java.io.OutputStream stdin)
+          (catch Throwable _ nil)))
+      (say-waiting! ev false))
+    nil))
+
 (defrecord CljsNode [selection state history listeners timings hooks]
   ev/Evaluator
   (start! [_] nil)
@@ -597,9 +672,16 @@
         (kill-child! this {:background? true})))
     nil)
   (evaluating? [_] (some? (:running @state)))
-  (waiting-for-input? [_] false)
-  (send-input! [_ _] nil)
-  (send-eof! [_] nil)
+  (waiting-for-input? [_] (boolean (:waiting-input? @state)))
+  (send-input! [this text]
+    ;; one line only, cut at the first newline (review I2): a Shift+Return
+    ;; multi-line send must not leave lines in the FIFO to answer a LATER
+    ;; evaluation's read, and a trailing newline must not become a phantom
+    ;; empty answer
+    (let [text (str text)
+          i (str/index-of text "\n")]
+      (send-stdin-line! this (str (if i (subs text 0 i) text) "\n"))))
+  (send-eof! [this] (send-stdin-line! this (str cljs-node/input-eof-marker "\n")))
   (history [_] history)
   (prompt-ns [_] (:prompt-ns @state))
   (set-mode! [_ mode] (swap! state assoc :mode mode) nil)
@@ -664,7 +746,7 @@
                  (atom {:running nil :conn nil :child nil :ready? false :sink nil
                         :drain nil :sink-form nil :done-forms #{} :helping false :n 0
                         :prompt-ns 'cljs.user :mode :reset :used? false :stopped? false
-                        :killing 0 :last-output nil
+                        :killing 0 :last-output nil :waiting-input? false
                         :http-port nil :opened? false :await-page nil :announce nil})
                  (atom (eval/create-history))
                  (atom [])

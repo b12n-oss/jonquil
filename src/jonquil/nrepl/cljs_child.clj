@@ -152,7 +152,8 @@
             (let [text (read-log log)
                   port (cljs-node/ready-port text)]
               (cond
-                port (assoc child :port port :url (cljs-node/ready-url text))
+                port (assoc child :port port :url (cljs-node/ready-url text)
+                            :stdin-path (cljs-node/ready-stdin text))
                 (and (= :browser target) (port-taken? text))
                 (do (kill! child) {:error :http-port-taken})
                 (and cancelled? (cancelled?)) (do (kill! child) {:error :cancelled})
