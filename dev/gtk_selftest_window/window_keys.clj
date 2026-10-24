@@ -36,6 +36,20 @@
                      {:idle-result idle-result :started started?
                       :running-result running-result :stopped stopped?}))))
 
+(defn row-f5-runs-the-buffer
+  "F5 is a keymap binding since plugins PL1 S4, and no other row presses
+  it outside a rename (rename-entry-keeps-window-keys checks it's held
+  back there). Sends F5 through the exact fn the \"key-pressed\" signal
+  calls: it must answer 1 and Run the buffer."
+  [ui]
+  (go-row :f5-runs-the-buffer support/check
+    (let [[mark handled] (on-gtk (editor/set-text! (:editor ui) "(+ 40 2)")
+                                 (let [m (support/out-end-offset ui)]
+                                   [m ((:handle-window-key! ui) nil 0xffc2 0 0 nil)]))
+          ran? (await-until 3000 20 #(str/includes? (support/since ui mark) "42"))]
+      (support/check :f5-runs-the-buffer (and (= 1 handled) ran?)
+                     {:handled handled :ran ran? :out (support/since ui mark)}))))
+
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
 ;; Shift bit set in state -- window.clj's own copy is private.
 (def ^:private KEY-S-CAPS 0x53)

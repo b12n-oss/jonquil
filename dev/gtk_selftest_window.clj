@@ -68,6 +68,7 @@
    run-repl/row-typed-ahead-not-evaluated
    run-repl/row-console-history-down-empty
    window-keys/row-escape-yields-when-idle
+   window-keys/row-f5-runs-the-buffer
    window-keys/row-command-chord-capslock
    window-keys/row-keymap-masks-match-gdk
    close-prerun/row-repl-eof-no-editor-hint

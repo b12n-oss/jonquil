@@ -66,23 +66,6 @@
             [jonquil.tabs :as tabs]
             [jonquil.theme :as theme]))
 
-;; --- keys (values from gdkkeysyms.h) -------------------------------------
-;; Most chords' keys live in jonquil/keymap.edn since plugins PL1 (names
-;; resolved by jonquil.keymap/key-value); these are the ones the cond
-;; clauses still name.
-
-(def ^:private KEY-F5 0xffc2)
-(def ^:private KEY-ESCAPE 0xff1b)
-;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_bracketleft), the source panel's
-;; own Cmd/Ctrl+[ back chord.
-(def ^:private KEY-BRACKETLEFT 0x05b)
-
-(defn- command-chord?
-  "A command chord is Control or Meta, so the same shortcut works on
-  Linux and macOS."
-  [state]
-  (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
-
 ;; --- title -------------------------------------------------------------
 
 (defn- file-name [path]
@@ -1253,7 +1236,7 @@
   pane's root and focuses the editor -- the pane keeps its state, so the
   next open replaces it). Used both as the pane's own on-close (its Close
   button, or Escape while the rows view itself has focus) and the
-  window-level Escape clause (ruling 8, below)."
+  window keymap's :inspector/close Escape binding (ruling 8, below)."
   [right ed]
   (hide-right-panel! right :inspector)
   (editor/focus! ed))
@@ -1425,10 +1408,10 @@
 (defn- close-popovers!
   "Closes every OPEN popover in popovers (jonquil.gtk.popover/hide!) except
   skip, when given, and returns whether any OTHER one was open -- the
-  window's own :close-popovers!*, which on-window-key's Escape clause
-  calls (with no skip) ahead of the evaluating? Stop clause, so closing a
-  popover during a run must happen here, before Escape can also Stop the
-  program. A caller about to show or reposition skip passes it here
+  window's own :close-popovers!*, which the window keymap's
+  :popover/close-all Escape binding calls (with no skip) ahead of the Stop
+  binding, so closing a popover during a run must happen here, before
+  Escape can also Stop the program. A caller about to show or reposition skip passes it here
   instead, so hiding and reshowing the SAME popover within one frame never
   happens -- repositioning an already open popover
   (jonquil.gtk.popover/show-at-caret!) is the clean path."
@@ -2103,195 +2086,68 @@
           (reset! h new-hist)
           text)))))
 
-;; --- window-level keys: F5, Escape, a command chord plus R/O/S/W ----------
+;; --- window-level keys: jonquil/keymap.edn's :window, all of them --------
 
 (defn- on-window-key
-  "evaluating? is (fn [] bool), read live from the engine. M5: the window
-  consumes Escape (to Stop) only while something is actually evaluating;
-  otherwise it returns 0 so Escape can reach an IME composition (or GTK's
-  own default handling) instead of being swallowed here every time.
+  "The window's capture-phase key handler. Every key goes through
+  jonquil.command-registry/window-answer: one fixed stage (while the
+  tab-rename entry has focus, every key but Escape is the entry's, so Run,
+  close and tab switches can't fire mid-rename), then jonquil/keymap.edn's
+  :window bindings, first match wins, run through the command registry.
+  A command answers :handled (1), :to-gtk (0, the key is GTK's: stop) or
+  :next (try the next matching binding). keymap_window_oracle_test checks
+  the whole answer against the cond this replaced (plugins PL1 S1-S4).
 
-  M4: keyval is normalised with gdk_keyval_to_lower before every
-  comparison below. Caps Lock reports the UPPERCASE keyval with no Shift
-  bit set, so comparing the raw keyval against lowercase KEY-R/O/S/W broke
-  those chords under Caps Lock; lower-casing first makes Ctrl+R/O/S/W fire
-  regardless of Caps Lock, while Save As's own Shift requirement is still
-  checked separately via the modifier mask, not the keyval's case.
+  M4: keyval is lowered with gdk_keyval_to_lower first. Caps Lock reports
+  the UPPERCASE keyval with no Shift bit, so the chords match whatever Caps
+  Lock says, while a binding's own :shift still reads the modifier mask.
 
-  P2.T10: a command chord plus W closes the window, normalised and checked
-  the same way as R/O/S. gtk_window_close fires the same close-request
-  handler a real close-button click or OS window-close would
-  (close-request-fn): since P3.T5 that asks before closing a dirty buffer,
-  and otherwise calls g_application_quit -- so this needs no prompt or quit
-  call of its own. Since tabs (P2.T3) close-fn closes the active tab and
-  only reaches gtk_window_close on the last one (close-tab!).
+  M5: Escape Stops a running program only while one is evaluating;
+  otherwise it answers 0, so an IME composition or GTK's own handling gets
+  it. Before Stop, Escape goes to the focused find bar (whose own 0, an IME
+  preedit composing, is final and goes to GTK, never to Stop), then closes
+  any open popover, the focused inspector panel, the focused source panel,
+  the file tree's open menu, or leaves the focused tree, in that order,
+  without Stopping.
 
-  Tabs plan P2.T3: Cmd/Ctrl+T (new-tab-fn), Cmd/Ctrl+Shift+] and [
-  (step-tab-fn, keyvals braceright/braceleft, spike §2) and Cmd/Ctrl+1-9
-  (digit-tab-fn) -- the digits after the zoom clauses, so Cmd/Ctrl+0 stays
-  Reset zoom.
+  ctx is the window's map of fns, which the commands and conditions read;
+  kctx adds the active tab's find-bar reads and actions and the focus
+  checks, so the registry never touches GTK. source-keys ({:focused?
+  :close! :back! :open!}, plus an optional :jump-back!, each a no-arg fn)
+  is the source panel's: Escape closes it when focused, Cmd/Ctrl+Shift+O
+  opens its location in the window, Cmd/Ctrl+[ steps its history back, and
+  anywhere else Cmd/Ctrl+[ goes back from a jump that opened a tab
+  (:jump-back! true when it went back, else the key passes on). tree-keys
+  ({:focused? :leave! :menu-open? :close-menu!}) is the file tree's, and a
+  window without a tree passes nil; F2, Delete, Cmd/Ctrl+BackSpace,
+  Shift+F10 and Menu match no binding, so they reach the tree's own
+  handler.
 
-  P3.T4: the find bar's own handle-key! is checked FIRST for Escape, before
-  evaluating? even runs -- see find-bar-focused?'s docstring for why this
-  can't just rely on the bar's own (separately wired) capture-phase
-  controller. Cmd+F/Cmd+H open the bar; Alt and Shift are excluded from
-  Cmd+F so it doesn't shadow editor.clj's Cmd+Alt+F (format selection) or
-  Cmd+Shift+F (format all), the same guard style KEY-L already uses
-  against Cmd+Alt+L.
-
-  P3.T4 fix round 1: when the bar has focus, handle-key!'s OWN return
-  value is this clause's final answer -- 1 (closed) or 0 (an IME preedit
-  composition is active, per handle-key!'s own docstring). It must NOT be
-  coerced into always-1-or-fall-through: a 0 has to fall all the way
-  through to GTK's default handling (the composing entry's own IM
-  context), never into evaluating?'s Stop below, or Escape would cancel
-  the running program instead of the IME composition.
-
-  P3 fix wave I4: F3/Cmd+G (next match) and Shift+F3/Cmd+Shift+G
-  (previous) go to the find bar whenever it is open, so they also work
-  with focus in the editor or the console (since plugins PL1 S2, through
-  the keymap's find-nav bindings).
-
-  TH.T5: Cmd/Ctrl+Shift+M cycles the theme. keyval is already lower-cased
-  above, so Shift+M's 0x04d becomes 0x06d the same way every other letter
-  chord here is normalised; this clause doesn't consult the editor's IME
-  state, same as every other window-level chord.
-
-  P4.T3, two measured key-order changes (probe 4):
-  - The F6 clause now also requires (not (shift-held? state)): plain F6
-    (findings #4) toggles focus as before, but Shift+F6 no longer matches
-    it, so Shift+F6 (rename, P4.T7) falls all the way through to :else and
-    reaches the editor -- before this it never got there, since this
-    clause had no modifier check and ran first.
-  - A new clause, ahead of the evaluating? Stop clause: when
-    close-popovers-fn finds any P4 popover open, Escape closes it and
-    returns 1 without touching evaluating? at all, so closing a popover
-    during a run never also Stops the program.
-
-  P2.T2 (ruling 8): a further clause, after the popover one above and
-  still ahead of the evaluating? Stop clause -- when the inspector
-  panel's own rows view has focus, Escape closes the panel and focuses
-  the editor, without touching evaluating? at all, same reasoning as the
-  popover clause just above it. Cmd/Ctrl+Shift+I (inspect-form-fn) is
-  checked ahead of plain Cmd/Ctrl+I (inspect-last-fn), the same
-  Shift-first ordering Cmd/Ctrl+Shift+L uses against plain Cmd/Ctrl+L.
-
-  source-keys ({:focused? :close! :back! :open!}, each a no-arg fn) is the
-  source panel's own key clauses (source-panel spec): Escape closes it
-  when focused, directly after the inspector's own Escape clause above;
-  Cmd/Ctrl+Shift+O opens its current location into the window when it's
-  focused, ahead of the plain Cmd/Ctrl+O clause below; and Cmd/Ctrl+[
-  steps its history back when it's focused, ahead of :else. Every one of
-  these three only fires while (:focused? source-keys) is true, so none
-  of them touch a key meant for the editor or the console. Its optional
-  :jump-back! (a no-arg fn, true when it went back) takes Cmd/Ctrl+[
-  anywhere else after a jump that opened a tab, and passes the key on when
-  there's no such jump.
-
-  tree-keys ({:focused? :leave! :menu-open? :close-menu!}, each a no-arg
-  fn) is the file tree's: :focused? is true while focus is anywhere in the
-  tree pane (its menu popover and name entry included, since the popover
-  hangs off the pane), :leave! gives focus back to the active editor,
-  :menu-open? reads the pane's menu state and :close-menu! pops the menu
-  down. Escape with the tree focused and its menu open closes the menu;
-  with the tree focused and no menu, it calls :leave!. Both sit ahead of
-  the Stop clause. F2, Delete, Cmd/Ctrl+BackSpace, Shift+F10 and Menu match
-  no clause here, so they reach the tree's own key handler.
-
-  Clear Last Output (Cmd/Ctrl+Shift+L, CIDER's C-c C-o): its own clause
-  sits directly ABOVE the plain Cmd/Ctrl+L clause, since that one doesn't
-  itself exclude Shift -- cond takes the first match, so putting the
-  Shift-qualified clause first is what keeps plain Cmd/Ctrl+L (no Shift)
-  clearing everything, exactly as before; the old clause needed no change
-  of its own.
-
-  Fix wave item 1 (I2, parked item a): the whole handler runs inside
-  try/catch, the same containment editor/dispatch-key! gives the editor's
-  own key path. A throw from any clause below -- run-fn, do-zoom!/do-
-  cycle-theme!/do-toggle-focus!/do-clear-console!/do-clear-last-output!/
-  do-run-selection! included -- is reported through set-status! and the
-  key still counts as consumed (1), instead of escaping into GTK's own
-  signal emission and killing the process. The find bar's own handle-key!
-  stays unwrapped on its own account -- this only contains a throw
-  because the keymap's :find/bar-key calls it from inside this function.
-
-  Plugins PL1 slice S1: the plain command chords (Cmd/Ctrl+R, O, S and
-  Shift+S, W, Shift+E and E, Shift+L and L, F, H, zoom, 1-9, T, Shift+M,
-  Shift+I and I, Shift+] and [) are no longer cond clauses: one slot clause
-  in their old place resolves the lowered keyval against jonquil/keymap.edn's
-  :window bindings (jonquil.keymap) and runs the command with this
-  function's own argument map as ctx (jonquil.command-registry). The order
-  and guards above (Shift-first pairs, :not #{:alt} on L and F) carry over
-  into the keymap's order. Cmd/Ctrl+R now sits below the source panel's
-  Cmd/Ctrl+Shift+O, which only matches O. A differential test
-  (keymap_window_oracle_test) checks the keymap against the old clauses.
-
-  Plugins PL1 slice S2: the three clauses directly above (F3/Cmd+G through
-  find-bar/handle-nav-key!, plain F6, the source panel's Cmd/Ctrl+Shift+O)
-  joined the slot, which then sat right after the bare-Escape 0. They need
-  :when conditions (:find-bar-navigable, :source-focused), asked only once
-  a binding's key and modifiers match, so source-keys' :focused? still
-  runs only for the keys whose clauses read it (O, Escape, Cmd/Ctrl+[). The keymap's ctx is this function's
-  argument map plus the active tab's find-bar fns (kctx), so the registry
-  never reaches GTK itself.
-
-  Plugins PL1 slice S3: the Escape chain described above (find bar,
-  popovers, inspector, source panel, tree menu, tree, Stop, bare Escape)
-  is the top of the keymap too, in the same order, and the slot now sits
-  right after F5. Commands answer an outcome through jonquil.keymap/
-  dispatch: :handled is 1; :to-gtk is 0 and stops there, which keeps the
-  find bar's own 0 and bare Escape's 0 away from Stop; :next (the popover
-  close that closed nothing) goes on to the next binding. Only an
-  :unmatched key reaches the Cmd/Ctrl+[ clauses."
-  [{:keys [run-fn win active-tab pane status-label source-keys]
-    :as ctx}]
+  The whole answer runs inside try/catch, the same containment
+  editor/dispatch-key! gives the editor: a throw from any condition or
+  command is reported through set-status! and the key counts as used (1),
+  instead of escaping into GTK's signal emission and killing the process."
+  [{:keys [win active-tab pane status-label] :as ctx}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
             ;; Tabs plan P2.T2: the find bar is the active tab's.
             fb (:fb (active-tab))
             ;; the keymap's ctx for this key: the handler's own argument map
-            ;; plus the active tab's find-bar reads and actions as fns, so
-            ;; jonquil.command-registry never touches GTK itself
+            ;; plus the active tab's find-bar and focus reads and actions as
+            ;; fns, so jonquil.command-registry never touches GTK itself
             kctx (assoc ctx
                         :find-bar-navigable? #(find-bar/nav-ready? fb)
                         :find-next! #(find-bar/find-next! fb)
                         :find-prev! #(find-bar/find-prev! fb)
                         :find-bar-focused? #(find-bar-focused? win fb)
                         :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
-                        :inspector-focused? #(inspector-pane/focused? pane win))]
-        (cond
-          ;; Typing in the rename popover's entry: every key but Escape
-          ;; is the entry's, so Cmd/Ctrl+W, T, R, F5 and the rest can't
-          ;; close, switch or Run the tab mid-rename. Escape goes on to
-          ;; the keymap's popover binding below, which closes it.
-          (and (not= keyval KEY-ESCAPE) (rename-focused? win (:rename-pop (active-tab)))) 0
-          (= keyval KEY-F5) (do (run-fn) 1)
-          ;; Plugins PL1, the keymap slot: everything below F5 down to the
-          ;; Cmd/Ctrl+[ clauses is data, jonquil/keymap.edn's :window vector
-          ;; run through jonquil.command-registry. Slice S3 (the Escape
-          ;; chain: find bar, popovers, inspector, source panel, tree menu,
-          ;; tree, Stop, bare Escape) sits on top of S2 (F3 and Cmd+G while
-          ;; the find bar can navigate, F6, the source panel's Cmd+Shift+O)
-          ;; and S1 (the plain command chords). dispatch answers :handled
-          ;; (1), :to-gtk (0, GTK's, as the find bar's IME 0 and bare
-          ;; Escape must be) or :unmatched, and only then do the clauses
-          ;; below get the key; S4 takes them and F5 and retires this cond.
-          :else
-          (case (km/dispatch (:window km/shipped) keyval state
-                             {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
-                              :run! #(cmd-registry/run-command! cmd-registry/window-commands % kctx)})
-            :handled 1
-            :to-gtk 0
-            (cond
-              (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))
-              (do ((:back! source-keys)) 1)
-              ;; Anywhere else, back from a jump into a tab (open-in-tab!);
-              ;; with none to go back from the key passes on as before.
-              (and (command-chord? state) (= keyval KEY-BRACKETLEFT) (:jump-back! source-keys)
-                   ((:jump-back! source-keys)))
-              1
-              :else 0))))
+                        :inspector-focused? #(inspector-pane/focused? pane win)
+                        :rename-focused? #(rename-focused? win (:rename-pop (active-tab))))]
+        (cmd-registry/window-answer
+         (:window km/shipped) keyval state
+         {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
+          :run! #(cmd-registry/run-command! cmd-registry/window-commands % kctx)}))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
         1))))
@@ -3128,7 +2984,7 @@
         ;; P4.T3: this window's own registry of P4 popovers (completion,
         ;; quick doc, rename -- P4.T4-T7 register theirs via
         ;; register-popover-fn as they're created); close-popovers-fn is
-        ;; what the window's own Escape clause and :close-popovers!* call.
+        ;; what the window keymap's Escape binding and :close-popovers!* call.
         ;; It takes an optional popover to skip -- a caller about to show
         ;; or reposition ITS OWN popover passes it here, so that one is
         ;; never hidden and reshown within the same frame.
@@ -3785,7 +3641,7 @@
                  ;; and a new launch (off until that launch's restore).
                    :session-live!* (fn [on?] (reset! (:session-live? @*tab-ctx) on?))
                  ;; P4.T3: the window's own popover registry -- close-
-                 ;; popovers-fn is exactly what the new Escape clause calls;
+                 ;; popovers-fn is exactly what the keymap's Escape binding calls;
                  ;; register-popover-fn is how a popover (a self-test row's
                  ;; own test popover today, completion/quick-doc/rename from
                  ;; P4.T4-T7 on) joins that registry.

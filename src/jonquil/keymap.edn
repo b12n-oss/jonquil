@@ -40,7 +40,8 @@
   {:key "w" :mods #{:cmd} :command :tab/close}
   {:key "e" :mods #{:cmd :shift} :command :tree/toggle}
   {:key "e" :mods #{:cmd} :not #{:shift} :command :run/selection}
-  ;; :not #{:alt}: Cmd+Alt+L and Cmd+Alt+F are the editor's format chords
+  ;; :not #{:alt}: Cmd+Alt+L and Cmd+Alt+F are the editor's format chords,
+  ;; and Cmd+Shift+F (format all) is the editor's too
   {:key "l" :mods #{:cmd :shift} :not #{:alt} :command :console/clear-last-output}
   {:key "l" :mods #{:cmd} :not #{:alt} :command :console/clear}
   {:key "f" :mods #{:cmd} :not #{:alt :shift} :command :find/open}
