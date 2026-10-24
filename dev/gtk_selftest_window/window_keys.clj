@@ -51,7 +51,8 @@
                      {:handled handled :ran ran? :out (support/since ui mark)}))))
 
 ;; The uppercase keyval GDK reports for Ctrl+S under Caps Lock, with no
-;; Shift bit set in state -- window.clj's own copy is private.
+;; Shift bit set in state;
+;; window.clj keeps none, since its keys live in jonquil/keymap.edn.
 (def ^:private KEY-S-CAPS 0x53)
 (defn row-keymap-masks-match-gdk
   "jonquil.keymap copies the GDK modifier bits so it loads without GTK
@@ -166,7 +167,8 @@
                              (and (= 1 handled) status-ok?)
                              {:handled handled :status (g/label-text (:status-label ui))})))))
 
-;; The shared key table (gdkkeysyms.h) -- window.clj's own copy is private.
+;; The shared key table (gdkkeysyms.h);
+;; window.clj keeps none, since its keys live in jonquil/keymap.edn.
 (def ^:private KEY-W 0x77)
 (defn row-command-chord-close
   "Closes WHILE a program is running, not idle, since the eval worker's

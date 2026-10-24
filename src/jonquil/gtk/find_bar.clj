@@ -47,8 +47,8 @@
 (def ^:private KEY-G 0x067)
 
 (defn- command-chord?
-  "A command chord is Control or Meta, duplicated here since
-  it's private in jonquil.gtk.window/jonquil.gtk.editor too."
+  "A command chord is Control or Meta, duplicated here since it's private
+  in jonquil.gtk.editor too (the keymap's :cmd means the same)."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 

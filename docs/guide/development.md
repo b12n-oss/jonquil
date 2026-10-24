@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 72 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (868 tests, 13994 assertions
-on macOS, 13963 on Linux, measured with `bb linux:test` on 2026-10-24) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (871 tests, 13441 assertions
+on macOS, 13410 on Linux, measured with `bb linux:test` on 2026-10-24) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (868 tests and 13963 assertions, 31
+reports fewer assertions than macOS (871 tests and 13410 assertions, 31
 fewer, measured 2026-10-24).
 
 <details>
@@ -128,7 +128,7 @@ handlers a person would use rather than the internal functions directly.
 
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 315 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 316 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
@@ -208,7 +208,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 8 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, a `(read-line)` answered at the console prompt (the fake dances the stdin markers and reads the line off its own stdin, the pipe the real launcher relays), and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 315, 19, 15, 36, 4, 13, 5, 10 and 8 rows
+browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 8 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, a `(read-line)` answered at the console prompt (the fake dances the stdin markers and reads the line off its own stdin, the pipe the real launcher relays), and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 316, 19, 15, 36, 4, 13, 5, 10 and 8 rows
 passing, in group order.
 
 </details>

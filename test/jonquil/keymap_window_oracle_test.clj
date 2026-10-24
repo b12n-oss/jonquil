@@ -56,7 +56,8 @@
 
 (def ^:private keyvals
   ;; every keyval the block names, then some it doesn't: a, g, F5, Escape,
-  ;; bracketleft (the source panel's back chord, kept in on-window-key)
+  ;; bracketleft (the source panel's back chord); F5 and bracketleft are
+  ;; keymap bindings since S4, checked by keymap-matches-legacy-window-test
   (concat [0x72 0x6f 0x73 0x77 0x065 0x06c 0x066 0x068 0x03d 0x02b 0x02d 0x030]
           (range 0x031 0x03a)
           [0x074 0x06d 0x069 0x07d 0x07b]

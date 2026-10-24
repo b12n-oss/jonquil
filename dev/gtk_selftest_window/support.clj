@@ -126,7 +126,8 @@
 
 ;; --- key constants used by more than one feature area ------------------
 
-;; The shared key table (gdkkeysyms.h) -- window.clj's own copy is private.
+;; The shared key table (gdkkeysyms.h);
+;; window.clj keeps none, since its keys live in jonquil/keymap.edn.
 (def KEY-ESCAPE 0xff1b)
 (def KEY-RETURN 0xff0d)
 (def KEY-F6 0xffc3)

@@ -670,9 +670,8 @@
   {KEY-PARENRIGHT \) KEY-BRACKETRIGHT \] KEY-BRACERIGHT \}})
 
 (defn- command-chord?
-  "A command chord is Control or Meta, as in Phase 2
-  (jonquil.gtk.window/command-chord?, duplicated here since it's private
-  there too)."
+  "A command chord is Control or Meta, as in Phase 2 (the keymap's :cmd
+  means the same, jonquil.keymap)."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 
@@ -916,7 +915,7 @@
        ;; round 1: it used to check shift-held? alone, so Cmd+Shift+F6
        ;; also matched, the same gap Shift+F1 had above) rather than
        ;; control-only?, since this is a Shift-based chord, not a
-       ;; Control-based one. window.clj's own F6 clause already lets
+       ;; Control-based one. The window keymap's F6 binding already lets
        ;; Shift+F6 fall through to here (P4.T3's own key-order change);
        ;; F2 has no other clause to collide with, and no-modifiers?
        ;; already rejects Meta on its own.

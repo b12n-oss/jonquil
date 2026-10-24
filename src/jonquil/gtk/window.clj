@@ -3833,7 +3833,7 @@
   the window's own settings path; :load-settings!* re-runs the startup load
   against any path; :settings-path!* is self-test-only (row-theme-save-
   failure-reported), repointing the window's own settings path. :close-popovers!*
-  is what the window's own Escape clause calls (P4.T3); :register-popover!*
+  is what the window keymap's :popover/close-all Escape binding calls (P4.T3); :register-popover!*
   joins a jonquil.gtk.popover map to this window's registry so
   :close-popovers!* knows about it -- P4.T4-T7's completion/quick-doc/
   rename popovers register theirs the same way a self-test row's own test
