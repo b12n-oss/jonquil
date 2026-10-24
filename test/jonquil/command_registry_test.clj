@@ -24,9 +24,11 @@
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)
-               [:find/next :find/previous :focus/toggle :source/open-here])
+               [:find/next :find/previous :focus/toggle :source/open-here
+                :find/bar-key :popover/close-all :inspector/close :source/close
+                :tree/close-menu :tree/leave :run/stop])
          (set (keys registry/window-commands)))
-      "exactly the S1 and S2 commands")
+      "exactly the S1, S2 and S3 commands")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))
@@ -64,3 +66,39 @@
 
 (deftest unknown-command-runs-nothing-test
   (is (nil? (registry/run-command! registry/window-commands {:command :no/such} {}))))
+
+(deftest s3-escape-commands-answer-outcomes-test
+  (let [calls (atom [])
+        rec (fn [k answer] (fn [& _] (swap! calls conj k) answer))
+        ctx (fn [bar popovers]
+              {:find-bar-key! (rec :find-bar-key! bar)
+               :close-popovers-fn (rec :close-popovers-fn popovers)
+               :close-inspector-fn (rec :close-inspector-fn nil)
+               :source-keys {:close! (rec :close! nil)}
+               :tree-keys {:close-menu! (rec :close-menu! nil) :leave! (rec :leave! nil)}
+               :stop-fn (rec :stop-fn nil)})
+        run (fn [id c] (reset! calls []) [(registry/run-command! registry/window-commands {:command id} c) @calls])]
+    (is (= [:handled [:find-bar-key!]] (run :find/bar-key (ctx 1 nil))) "the bar's 1 is :handled")
+    (is (= [:to-gtk [:find-bar-key!]] (run :find/bar-key (ctx 0 nil))) "the bar's 0 goes to GTK")
+    (is (= [:handled [:close-popovers-fn]] (run :popover/close-all (ctx nil true))))
+    (is (= [:next [:close-popovers-fn]] (run :popover/close-all (ctx nil nil))) "closed nothing: the chain goes on")
+    (doseq [[id k] [[:inspector/close :close-inspector-fn] [:source/close :close!]
+                    [:tree/close-menu :close-menu!] [:tree/leave :leave!] [:run/stop :stop-fn]]]
+      (is (= [:handled [k]] (run id (ctx nil nil))) (str id)))))
+
+(deftest s3-escape-conditions-test
+  (let [holds (fn [ctx id] ((registry/holds-fn registry/window-conditions ctx) id))
+        tree (fn [focused? menu?] {:focused? (constantly focused?) :menu-open? (constantly menu?)})]
+    (is (true? (holds {:find-bar-focused? (constantly true)} :find-bar-focused)))
+    (is (false? (holds {:find-bar-focused? (constantly false)} :find-bar-focused)))
+    (is (true? (holds {:inspector-focused? (constantly true)} :inspector-focused)))
+    (is (false? (holds {:inspector-focused? (constantly nil)} :inspector-focused)))
+    (is (true? (holds {:evaluating? (constantly true)} :evaluating)))
+    (is (false? (holds {:evaluating? (constantly false)} :evaluating)))
+    (is (true? (holds {:tree-keys (tree true false)} :tree-focused)))
+    (is (false? (holds {:tree-keys (tree false true)} :tree-focused)))
+    (is (true? (holds {:tree-keys (tree false true)} :tree-menu-open)))
+    (is (false? (holds {:tree-keys (tree true false)} :tree-menu-open)))
+    ;; Review Focus 5: a window with no tree
+    (is (false? (holds {:tree-keys nil} :tree-focused)) "no tree-keys: not focused, no throw")
+    (is (false? (holds {:tree-keys nil} :tree-menu-open)) "no tree-keys: no menu, no throw")))

@@ -1,10 +1,11 @@
 (ns jonquil.keymap-window-oracle-test
-  "The Part 1 differential gate for slice S1 (plugins design): the shipped
-  keymap must pick the same command as the cond block it replaced in
-  jonquil.gtk.window/on-window-key, for every key the block names (and a
-  few it doesn't) under every modifier combination.
+  "The Part 1 differential gate (plugins design): the shipped keymap must
+  do what the cond clauses it replaced in jonquil.gtk.window/on-window-key
+  did, for every key they name (and a few they don't) under every modifier
+  combination and condition state. One oracle per slice: legacy-block (S1),
+  legacy-slot (S2, on top of S1) and legacy-escape (S3, on top of S2).
 
-  legacy-block is that block transcribed from window.clj at 82bf741
+  legacy-block is S1's block transcribed from window.clj at 82bf741
   (identical at b49a276), Cmd/Ctrl+R through the KEY-BRACELEFT step
   clause, with only these substitutions: the Cmd/Ctrl+Shift+O source
   clause is dropped (it stays in on-window-key, ahead of the slot); each
@@ -70,9 +71,17 @@
   (some-> (km/resolve-binding (:window km/shipped) keyval state)
           ((juxt :command #(or (:args %) {})))))
 
+(def ^:private KEY-ESCAPE 0xff1b)
+
+;; S1's and S2's matrices ask resolve-binding for the first match, which
+;; isn't what runs once outcomes exist (slice S3): Escape's chain is data
+;; now and keymap-matches-legacy-escape-test checks it, and every other
+;; key, through dispatch.
+(def ^:private non-escape-keyvals (remove #{KEY-ESCAPE} keyvals))
+
 (deftest keymap-matches-legacy-test
   (is (= 32 (count (distinct states))))
-  (doseq [kv keyvals st states]
+  (doseq [kv non-escape-keyvals st states]
     (let [old (legacy-block kv st) new (keymap-answer kv st)]
       (is (= old new)
           (str "keyval " (format "0x%x" kv) " state " st ": legacy " (pr-str old) " keymap " (pr-str new))))))
@@ -110,13 +119,114 @@
 
 (deftest keymap-matches-legacy-slot-test
   (is (= 8 (count condition-states)))
-  (doseq [kv (concat keyvals [0xffc0 0xffc3 0x67]) st states cs condition-states]
+  (doseq [kv (concat non-escape-keyvals [0xffc0 0xffc3]) st states cs condition-states]
     (let [old (legacy-slot kv st cs)
           new (some-> (km/resolve-binding (:window km/shipped) kv st (holds-for cs))
                       ((juxt :command #(or (:args %) {}))))]
       (is (= old new)
           (str "keyval " (format "0x%x" kv) " state " st " " (pr-str cs)
                ": legacy " (pr-str old) " keymap " (pr-str new))))))
+
+
+;; --- slice S3: outcomes, and the Escape chain above S2 ---------------------
+
+(defn- legacy-escape
+  "Slice S3's oracle: on-window-key's Escape chain (window.clj at a1fe230),
+  from the find bar's clause through the bare-Escape 0, then S2's
+  legacy-slot. Answers [outcome calls]: outcome is :handled (the old 1),
+  :to-gtk (the old 0 from the bar or bare Escape) or :unmatched (on to the
+  clauses below the slot), and calls are the [command-id args] whose
+  action ran, in order. The bar's handle-key! and close-popovers-fn are
+  opaque here: cs gives their answers (bar-answer-1?, popover-closed?), and
+  close-popovers-fn counts as a call whenever its clause is reached, since
+  the old cond ran it to find out. tree? false is a window with no
+  tree-keys."
+  [keyval state {:keys [bar-focused? bar-answer-1? popover-closed? inspector-focused?
+                        source-focused? tree? tree-focused? tree-menu-open? evaluating?]
+                 :as cs}]
+  (let [pop [:popover/close-all {}]]
+    (cond
+      (and (= keyval KEY-ESCAPE) bar-focused?)
+      [(if bar-answer-1? :handled :to-gtk) [[:find/bar-key {}]]]
+      (and (= keyval KEY-ESCAPE) popover-closed?) [:handled [pop]]
+      (and (= keyval KEY-ESCAPE) inspector-focused?) [:handled [pop [:inspector/close {}]]]
+      (and (= keyval KEY-ESCAPE) source-focused?) [:handled [pop [:source/close {}]]]
+      (and (= keyval KEY-ESCAPE) tree? tree-focused? tree-menu-open?)
+      [:handled [pop [:tree/close-menu {}]]]
+      (and (= keyval KEY-ESCAPE) tree? tree-focused?) [:handled [pop [:tree/leave {}]]]
+      (and (= keyval KEY-ESCAPE) evaluating?) [:handled [pop [:run/stop {}]]]
+      (= keyval KEY-ESCAPE) [:to-gtk [pop]]
+      :else (if-let [call (legacy-slot keyval state cs)]
+              [:handled [call]]
+              [:unmatched []]))))
+
+(def ^:private escape-flags
+  [:bar-focused? :bar-answer-1? :popover-closed? :inspector-focused?
+   :tree? :tree-focused? :tree-menu-open? :evaluating?])
+
+(defn- flag-states [flags]
+  (for [n (range (bit-shift-left 1 (count flags)))]
+    (into {} (map-indexed (fn [i f] [f (bit-test n i)]) flags))))
+
+(defn- fake-ctx
+  "The per-key ctx the registry's conditions read, faked from cs, so the
+  matrix asks the real window-conditions (tree-keys nil included)."
+  [{:keys [preedit? open? source-focused? bar-focused? inspector-focused?
+           tree? tree-focused? tree-menu-open? evaluating?]}]
+  {:find-bar-navigable? (constantly (and open? (not preedit?)))
+   :source-keys {:focused? (constantly source-focused?)}
+   :find-bar-focused? (constantly bar-focused?)
+   :inspector-focused? (constantly inspector-focused?)
+   :tree-keys (when tree? {:focused? (constantly tree-focused?)
+                           :menu-open? (constantly tree-menu-open?)})
+   :evaluating? (constantly evaluating?)})
+
+(defn- keymap-escape
+  "The keymap's answer for the same cell: dispatch over the shipped :window
+  vector with the real conditions, and a run! that records each command it
+  runs and answers what the command would: the bar's 1 or 0, the popover
+  close's closed-something or :next, :handled for the rest."
+  [keyval state {:keys [bar-answer-1? popover-closed?] :as cs}]
+  (let [calls (atom [])
+        run! (fn [b]
+               (swap! calls conj [(:command b) (or (:args b) {})])
+               (case (:command b)
+                 :find/bar-key (if bar-answer-1? :handled :to-gtk)
+                 :popover/close-all (if popover-closed? :handled :next)
+                 :handled))
+        outcome (km/dispatch (:window km/shipped) keyval state
+                             {:holds? (registry/holds-fn registry/window-conditions (fake-ctx cs))
+                              :run! run!})]
+    [outcome @calls]))
+
+(defn- mismatches [cells]
+  (keep (fn [[kv st cs]]
+          (let [old (legacy-escape kv st cs) new (keymap-escape kv st cs)]
+            (when (not= old new)
+              (str "keyval " (format "0x%x" kv) " state " st " " (pr-str cs)
+                   ": legacy " (pr-str old) " keymap " (pr-str new)))))
+        cells))
+
+(deftest keymap-matches-legacy-escape-test
+  ;; Escape crossed with every modifier subset, every Escape flag and S2's
+  ;; condition states (Review Focus 1-4), then every other key with the
+  ;; Escape flags all off and all on, which must not leak into them
+  (let [esc-flags (flag-states escape-flags)
+        escape-cells (for [st states ef esc-flags cs condition-states]
+                       [KEY-ESCAPE st (merge cs ef)])
+        all-off (zipmap escape-flags (repeat false))
+        all-on (zipmap escape-flags (repeat true))
+        other-cells (for [kv (concat non-escape-keyvals [0xffc0 0xffc3]) st states
+                          cs condition-states ef [all-off all-on]]
+                      [kv st (merge cs ef)])
+        t0 (System/nanoTime)
+        bad (vec (mismatches (concat escape-cells other-cells)))
+        ms (quot (- (System/nanoTime) t0) 1000000)]
+    (println (str "keymap-matches-legacy-escape-test: "
+                  (+ (count escape-cells) (count other-cells)) " cells in " ms " ms"))
+    (is (= 256 (count esc-flags)))
+    (is (= 65536 (count escape-cells)))
+    (is (zero? (count bad)) (str (count bad) " mismatches, first: " (pr-str (take 3 bad))))))
 
 (deftest shipped-keymap-resolves-test
   (is (= [] (km/problems (:window km/shipped) (set (keys registry/window-commands))

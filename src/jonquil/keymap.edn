@@ -3,11 +3,23 @@
 ;; that matches wins, as in the cond it replaces. :cmd is Control or Meta.
 ;;
 ;; :window holds what jonquil.gtk.window/on-window-key's slot dispatches,
-;; after the clauses still in its cond (the rename guard, F5 and the Escape
-;; chain): slices S2 then S1, each in the old cond's order. Shift-qualified
+;; after the clauses still in its cond (the rename guard and F5): slices S3,
+;; S2 then S1, each in the old cond's order. Shift-qualified
 ;; bindings sit ahead of their plain forms, so the plain one never sees them.
 {:window
- [;; slice S2: the clauses that sat directly above S1's block, in their
+ [;; slice S3: the Escape chain, in the old cond's order. No modifier
+  ;; checks, as the old clauses had none. A command answers an outcome:
+  ;; the popover close answers :next when nothing was open, so the chain
+  ;; goes on; bare Escape with nothing to close or Stop is GTK's (M5).
+  {:key "Escape" :when [:find-bar-focused] :command :find/bar-key}
+  {:key "Escape" :command :popover/close-all}
+  {:key "Escape" :when [:inspector-focused] :command :inspector/close}
+  {:key "Escape" :when [:source-focused] :command :source/close}
+  {:key "Escape" :when [:tree-focused :tree-menu-open] :command :tree/close-menu}
+  {:key "Escape" :when [:tree-focused] :command :tree/leave}
+  {:key "Escape" :when [:evaluating] :command :run/stop}
+  {:key "Escape" :outcome :to-gtk}
+  ;; slice S2: the clauses that sat directly above S1's block, in their
   ;; order. F3 and Cmd+G are find-bar/handle-nav-key!'s own four branches,
   ;; guarded by its two checks (the bar is open, no IME composition).
   {:key "F3" :mods #{:shift} :when [:find-bar-navigable] :command :find/previous}
