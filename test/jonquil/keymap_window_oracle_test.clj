@@ -127,7 +127,6 @@
           (str "keyval " (format "0x%x" kv) " state " st " " (pr-str cs)
                ": legacy " (pr-str old) " keymap " (pr-str new))))))
 
-
 ;; --- slice S3: outcomes, and the Escape chain above S2 ---------------------
 
 (defn- legacy-escape

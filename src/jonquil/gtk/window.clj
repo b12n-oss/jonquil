@@ -2148,8 +2148,9 @@
   the running program instead of the IME composition.
 
   P3 fix wave I4: F3/Cmd+G (next match) and Shift+F3/Cmd+Shift+G
-  (previous) go to find-bar/handle-nav-key! whenever the bar is open, so
-  they also work with focus in the editor or the console.
+  (previous) go to the find bar whenever it is open, so they also work
+  with focus in the editor or the console (since plugins PL1 S2, through
+  the keymap's find-nav bindings).
 
   TH.T5: Cmd/Ctrl+Shift+M cycles the theme. keyval is already lower-cased
   above, so Shift+M's 0x04d becomes 0x06d the same way every other letter
@@ -2210,10 +2211,9 @@
   cycle-theme!/do-toggle-focus!/do-clear-console!/do-clear-last-output!/
   do-run-selection! included -- is reported through set-status! and the
   key still counts as consumed (1), instead of escaping into GTK's own
-  signal emission and killing the process. The find bar's own handle-key!/
-  handle-nav-key! stay unwrapped on their own account -- this only
-  contains a throw because they happen to be called from inside this same
-  function.
+  signal emission and killing the process. The find bar's own handle-key!
+  stays unwrapped on its own account -- this only contains a throw
+  because the keymap's :find/bar-key calls it from inside this function.
 
   Plugins PL1 slice S1: the plain command chords (Cmd/Ctrl+R, O, S and
   Shift+S, W, Shift+E and E, Shift+L and L, F, H, zoom, 1-9, T, Shift+M,
@@ -2228,10 +2228,10 @@
 
   Plugins PL1 slice S2: the three clauses directly above (F3/Cmd+G through
   find-bar/handle-nav-key!, plain F6, the source panel's Cmd/Ctrl+Shift+O)
-  joined the slot, which now sits right after the bare-Escape 0. They need
+  joined the slot, which then sat right after the bare-Escape 0. They need
   :when conditions (:find-bar-navigable, :source-focused), asked only once
   a binding's key and modifiers match, so source-keys' :focused? still
-  never runs for a key other than O. The keymap's ctx is this function's
+  runs only for the keys whose clauses read it (O, Escape, Cmd/Ctrl+[). The keymap's ctx is this function's
   argument map plus the active tab's find-bar fns (kctx), so the registry
   never reaches GTK itself.
 

@@ -1,9 +1,10 @@
 (ns jonquil.command-registry
   "Commands as data (plugins design, Part 1): an id, one doc line, a scope
   and a (fn [ctx args]) that does the work and answers an outcome
-  (:handled, :to-gtk or :next, as jonquil.keymap/dispatch reads it). ctx is the map the window's key
-  handler already receives (run-fn, save-fn and the rest), so a command is
-  a plain function a test can call with a fake ctx. No GTK here.
+  (:handled, :to-gtk or :next, as jonquil.keymap/dispatch reads it). ctx
+  is the map the window's key handler already receives (run-fn, save-fn
+  and the rest), so a command is a plain function a test can call with a
+  fake ctx. No GTK here.
 
   Slice S1 registers the window's plain chords; later slices add the rest
   of the window's and the editor's, menus and the context menu read the

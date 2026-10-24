@@ -89,7 +89,6 @@
     (km/resolve-binding [b] 0x6f st holds?)
     (is (= [:a] @calls) ":a is false, so :b is never asked")))
 
-
 (deftest dispatch-test
   (let [ran (atom [])
         run! (fn [answers] (fn [b] (swap! ran conj (:command b)) (get answers (:command b))))
