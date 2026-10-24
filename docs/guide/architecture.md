@@ -64,9 +64,17 @@ these:
   into the keymap, in its old order: the find bar (whose own 0, an IME
   composing, is `:to-gtk` and never reaches Stop), popovers (`:next` when
   none was open), the inspector, the source panel, the tree menu, the
-  tree, Stop while evaluating, and a bare `:to-gtk`. The slot now sits
+  tree, Stop while evaluating, and a bare `:to-gtk`. The slot then sat
   right after F5, and its oracle crosses Escape with all eight states the
-  chain reads.
+  chain reads. Slice S4 (2026-10-24) retired the cond. F5 became the
+  first binding and the two Cmd/Ctrl+[ back clauses the last, the jump
+  back answering `:next` when there's nothing to go back from. The rename
+  guard (while the tab-rename entry has focus, every key but Escape is the
+  entry's) covers a class of keys, so it stays a fixed stage ahead of the
+  keymap, as the spec keeps the editor's preedit yield, and asks the named
+  condition `:rename-focused`. `window-answer` holds that stage and the
+  dispatch and answers 1 or 0. It is the whole of `on-window-key` now,
+  and the oracle drives it over the full handler's transcription.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
@@ -197,7 +205,7 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 - `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its repaint after an edit keeps a baseline of what its tags show now (`:painted`). On a future, off the GTK thread, it computes the new plan and `paint/plan-diff` against that baseline, then applies only the changed range a chunk per main-loop turn, nearest the caret first. With no baseline it falls back to a full `paint-async!`. `dirty?` compares lengths before it copies the buffer, and `jonquil.syntax/tokenize` reuses its last result when it gets the identical string again, so a 20,000-line file stays responsive while typing. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
 - `jonquil.gtk.find-bar`: the find and replace bar, with its own `handle-key!` and match highlighting through a `search-match` tag.
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
-- `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, the rename guard and the Cmd/Ctrl+[ back clauses in its cond; Escape and the command chords go through the keymap slot, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.
+- `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (all of them through `jonquil.command-registry/window-answer` and the keymap, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.
 
 P4 added three more, all built on a shared popover base:
 
@@ -275,7 +283,7 @@ The editor's and the console's context menus (Shift+F10, or a right click) come 
 
 None of these ask a server on the GTK thread. An evaluator whose help asks one implements `ev/ServerHelp` (every attach evaluator, out-of-process Jolt and jank), and the window asks it through `ev/ask-help!`: the request runs on a worker with `ev/*help-timeout-ms*` bound to 3000 ms in place of the evaluator's own 300 ms, and the GTK thread waits only `ev/help-grace-ms` (25 ms) for it. An answer in that time is used exactly as the synchronous path always did, so a local server behaves as before, single-candidate commit included. A later one goes to a callback that hands it to `on-gui!`. For completion that's `arrived!`: the popup opened at once on `offline-candidates` (`help/waiting-state`, which stays open with no names and is never single), and the late list merges in through `help/arrive`, keeping the selected name, but only while it's still the newest request (`:gen`), from the window's current evaluator, for an open popup whose editor still exists and whose text and caret haven't moved. The doc preview does the same under its own `:doc-gen`. Quick doc, jump and the source panel's jump go through `jonquil.gtk.window/ask-lookup!`, which shows "Looking up X..." and acts on a late answer only while the caret is still on that symbol in a live, active tab (or a showing source panel), placed against the text as it is then. Jump checks the buffer first (`help/jump-target` with no doc), so a definition in the file never waits. A request that a newer one superseded before it went out is skipped, and a throw inside one comes back as `{::error message}` (`ev/help-error`) so the window can say so. In-process Jolt doesn't implement `ServerHelp` and is asked directly, as before.
 
-The key-dispatch wrappers carry the same guarantee down at the keyboard level. `jonquil.gtk.editor/dispatch-key!` wraps `handle-key!` in `try`/`catch`, and `jonquil.gtk.window`'s window-level key handler wraps its own `cond` the same way: either throw is reported through the status bar rather than escaping into GTK's signal emission, and the key still counts as consumed (returns 1) instead of falling through into a second, unrelated action or killing the process.
+The key-dispatch wrappers carry the same guarantee down at the keyboard level. `jonquil.gtk.editor/dispatch-key!` wraps `handle-key!` in `try`/`catch`, and `jonquil.gtk.window`'s window-level key handler wraps its `window-answer` call the same way: either throw is reported through the status bar rather than escaping into GTK's signal emission, and the key still counts as consumed (returns 1) instead of falling through into a second, unrelated action or killing the process.
 
 ## Dialects and evaluators
 

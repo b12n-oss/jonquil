@@ -2,12 +2,15 @@
 ;; when Jonquil is compiled. Each scope is an ORDERED vector: the first binding
 ;; that matches wins, as in the cond it replaces. :cmd is Control or Meta.
 ;;
-;; :window holds what jonquil.gtk.window/on-window-key's slot dispatches,
-;; after the clauses still in its cond (the rename guard and F5): slices S3,
-;; S2 then S1, each in the old cond's order. Shift-qualified
+;; :window is the whole of jonquil.gtk.window/on-window-key, after one fixed
+;; stage (jonquil.command-registry/window-answer: while the tab-rename entry
+;; has focus, every key but Escape is the entry's). Slices S4's F5, S3, S2,
+;; S1, then S4's Cmd/Ctrl+[, each in the old cond's order. Shift-qualified
 ;; bindings sit ahead of their plain forms, so the plain one never sees them.
 {:window
- [;; slice S3: the Escape chain, in the old cond's order. No modifier
+ [;; slice S4: F5 runs the buffer, whatever the modifiers
+  {:key "F5" :command :run/run}
+  ;; slice S3: the Escape chain, in the old cond's order. No modifier
   ;; checks, as the old clauses had none. A command answers an outcome:
   ;; the popover close answers :next when nothing was open, so the chain
   ;; goes on; bare Escape with nothing to close or Stop is GTK's (M5).
@@ -37,7 +40,8 @@
   {:key "w" :mods #{:cmd} :command :tab/close}
   {:key "e" :mods #{:cmd :shift} :command :tree/toggle}
   {:key "e" :mods #{:cmd} :not #{:shift} :command :run/selection}
-  ;; :not #{:alt}: Cmd+Alt+L and Cmd+Alt+F are the editor's format chords
+  ;; :not #{:alt}: Cmd+Alt+L and Cmd+Alt+F are the editor's format chords,
+  ;; and Cmd+Shift+F (format all) is the editor's too
   {:key "l" :mods #{:cmd :shift} :not #{:alt} :command :console/clear-last-output}
   {:key "l" :mods #{:cmd} :not #{:alt} :command :console/clear}
   {:key "f" :mods #{:cmd} :not #{:alt :shift} :command :find/open}
@@ -60,4 +64,9 @@
   {:key "i" :mods #{:cmd :shift} :command :inspect/form}
   {:key "i" :mods #{:cmd} :command :inspect/last}
   {:key "braceright" :mods #{:cmd} :command :tab/next}
-  {:key "braceleft" :mods #{:cmd} :command :tab/previous}]}
+  {:key "braceleft" :mods #{:cmd} :command :tab/previous}
+  ;; slice S4: Cmd/Ctrl+[ steps the focused source panel back; anywhere
+  ;; else it goes back from a jump into a tab, and with none to go back
+  ;; from answers :next, so the key passes on
+  {:key "bracketleft" :mods #{:cmd} :when [:source-focused] :command :source/back}
+  {:key "bracketleft" :mods #{:cmd} :command :source/jump-back}]}

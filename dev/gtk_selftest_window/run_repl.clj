@@ -318,7 +318,8 @@
                                (and produced? (= "user=> abc" text) (= "abc" input))
                                {:produced produced? :text text :input input}))))))
 
-;; The shared key table (gdkkeysyms.h) -- window.clj's own copy is private.
+;; The shared key table (gdkkeysyms.h);
+;; window.clj keeps none, since its keys live in jonquil/keymap.edn.
 (def ^:private KEY-L 0x06c)
 
 (defn row-clear-last-two-entries
@@ -411,7 +412,7 @@
 
 (defn row-clear-console-key-regression
   "Regression check (brief Test 4): with the new Shift-qualified clause
-  now sitting ahead of it in on-window-key's cond, plain Cmd/Ctrl+L (no
+  now sitting ahead of it in the window keymap, plain Cmd/Ctrl+L (no
   Shift) must still clear the WHOLE output history, exactly as before.
   Driven through the real key-controller fn (:handle-window-key!), not
   the raw :clear-console!* hook row-clear-console above already covers,
