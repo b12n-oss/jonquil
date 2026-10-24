@@ -34,6 +34,9 @@
     jonquil.mcp.listen-test
     jonquil.session-test
     jonquil.commands-test
+    jonquil.keymap-test
+    jonquil.command-registry-test
+    jonquil.keymap-window-oracle-test
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test
