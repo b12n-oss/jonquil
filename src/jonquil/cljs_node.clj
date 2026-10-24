@@ -79,14 +79,26 @@
   added only when add-dep? is true (the project has no ClojureScript).
   A :browser target appends `browser <http-port>` for the launcher, plus
   `no-console` when :console? is false ({:cljs {:forward-console? false}}),
-  which keeps the page's console out of Jonquil; node ignores the flag."
-  [{:keys [clojure launcher add-dep? target http-port console?]}]
+  which keeps the page's console out of Jonquil, plus `token:<uuid>` when
+  :page-token is given (the window's token; the launcher gates stale
+  tabs with it). Node ignores both."
+  [{:keys [clojure launcher add-dep? target http-port console? page-token]}]
   (vec (concat [clojure]
                (when add-dep? ["-Sdeps" default-deps])
                ["-M" "-i" launcher "-m" "jonquil.cljs-node-launch"]
                (when (= :browser target)
                  (cond-> ["browser" (str http-port)]
-                   (false? console?) (conj "no-console"))))))
+                   (false? console?) (conj "no-console")
+                   (and (string? page-token) (not (str/blank? page-token)))
+                   (conj (str "token:" page-token)))))))
+
+(defn page-url
+  "The address of a browser window's page: the token names the window, so
+  a stale tab's reload against a port a NEW window recycled is turned
+  away (the launcher's gate), while the same window's restarts keep
+  serving it."
+  [http-port token]
+  (str "http://127.0.0.1:" http-port "/?t=" token))
 
 (defn ready-port
   "The port from the last line that announces `jonquil-cljs-prepl <port>`,
