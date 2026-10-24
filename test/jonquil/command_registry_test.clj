@@ -26,9 +26,9 @@
   (is (= (into (conj (set (keys expected)) :tab/select)
                [:find/next :find/previous :focus/toggle :source/open-here
                 :find/bar-key :popover/close-all :inspector/close :source/close
-                :tree/close-menu :tree/leave :run/stop])
+                :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the S1, S2 and S3 commands")
+      "exactly the S1-S4 commands")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))
@@ -102,3 +102,41 @@
     ;; Review Focus 5: a window with no tree
     (is (false? (holds {:tree-keys nil} :tree-focused)) "no tree-keys: not focused, no throw")
     (is (false? (holds {:tree-keys nil} :tree-menu-open)) "no tree-keys: no menu, no throw")))
+
+(deftest s4-source-commands-test
+  (let [calls (atom [])
+        rec (fn [k answer] (fn [& _] (swap! calls conj k) answer))
+        run (fn [id ctx] (reset! calls []) [(registry/run-command! registry/window-commands {:command id} ctx) @calls])]
+    (is (= [:handled [:back!]] (run :source/back {:source-keys {:back! (rec :back! nil)}})))
+    (is (= [:handled [:jump-back!]] (run :source/jump-back {:source-keys {:jump-back! (rec :jump-back! true)}})))
+    (is (= [:next [:jump-back!]] (run :source/jump-back {:source-keys {:jump-back! (rec :jump-back! nil)}}))
+        "nothing to go back from: the key passes on")
+    ;; Review Focus 3: a window with no jump-back fn
+    (is (= [:next []] (run :source/jump-back {:source-keys {}})) "no :jump-back!: :next, no throw")
+    (is (= [:next []] (run :source/jump-back {})) "no source-keys at all")))
+
+(deftest s4-rename-condition-test
+  (let [holds (fn [v] ((registry/holds-fn registry/window-conditions {:rename-focused? (constantly v)})
+                       :rename-focused))]
+    (is (true? (holds true)))
+    (is (false? (holds nil)))))
+
+(deftest window-answer-test
+  (let [asked (atom []) ran (atom [])
+        holds? (fn [rename?] (fn [id] (swap! asked conj id) (and rename? (= id :rename-focused))))
+        run! (fn [answer] (fn [b] (swap! ran conj (:command b)) answer))
+        bs [{:key "r" :mods #{:cmd} :command :x} {:key "Escape" :command :esc}
+            {:key "Escape" :outcome :to-gtk}]
+        ans (fn [kv st rename? answer]
+              (reset! asked []) (reset! ran [])
+              (registry/window-answer bs kv st {:holds? (holds? rename?) :run! (run! answer)}))]
+    (is (= 0 (ans 0x72 4 true :handled)) "rename focused: Cmd+R is the entry's")
+    (is (= [] @ran) "and nothing ran")
+    (is (= [:rename-focused] @asked) "only the rename condition was asked")
+    (is (= 1 (ans 0xff1b 0 true :handled)) "Escape during a rename goes on to the keymap")
+    (is (= [:esc] @ran))
+    (is (= [] @asked) "Escape never asks the rename condition")
+    (is (= 1 (ans 0x72 4 false :handled)) ":handled is 1")
+    (is (= 0 (ans 0x72 4 false :to-gtk)) ":to-gtk is 0")
+    (is (= 0 (ans 0xff1b 0 false :next)) "the fixed :to-gtk is 0")
+    (is (= 0 (ans 0x61 0 false :handled)) ":unmatched is 0")))

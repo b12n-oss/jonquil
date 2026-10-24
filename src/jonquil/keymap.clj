@@ -30,7 +30,7 @@
   ;; gdkkeysyms.h values for the names that aren't their own character
   {"equal" 0x03d "plus" 0x02b "minus" 0x02d
    "braceright" 0x07d "braceleft" 0x07b
-   "F3" 0xffc0 "F6" 0xffc3 "Escape" 0xff1b})
+   "F3" 0xffc0 "F5" 0xffc2 "F6" 0xffc3 "Escape" 0xff1b "bracketleft" 0x05b})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a

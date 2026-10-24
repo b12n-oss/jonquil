@@ -18,6 +18,8 @@
   (is (= 0xffc0 (km/key-value "F3")))
   (is (= 0xffc3 (km/key-value "F6")))
   (is (= 0xff1b (km/key-value "Escape")))
+  (is (= 0xffc2 (km/key-value "F5")))
+  (is (= 0x5b (km/key-value "bracketleft")))
   (is (nil? (km/key-value "nope"))))
 
 (deftest matches-test

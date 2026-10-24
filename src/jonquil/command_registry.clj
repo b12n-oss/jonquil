@@ -8,7 +8,8 @@
 
   Slice S1 registers the window's plain chords; later slices add the rest
   of the window's and the editor's, menus and the context menu read the
-  same table, and Part 2's plugins add their own.")
+  same table, and Part 2's plugins add their own."
+  (:require [jonquil.keymap :as km]))
 
 (defn- call [k & args]
   (fn [ctx _args] (apply (get ctx k) args) :handled))
@@ -59,7 +60,15 @@
                      :run (fn [ctx _args] ((:close-menu! (:tree-keys ctx))) :handled)}
    :tree/leave {:doc "Leave the file tree for the editor." :scope :window
                 :run (fn [ctx _args] ((:leave! (:tree-keys ctx))) :handled)}
-   :run/stop {:doc "Stop the running evaluation." :scope :window :run (call :stop-fn)}})
+   :run/stop {:doc "Stop the running evaluation." :scope :window :run (call :stop-fn)}
+   ;; slice S4: the source panel's Cmd/Ctrl+[ back chord, and anywhere
+   ;; else the jump back into the tab a jump left (open-in-tab!), passing
+   ;; the key on when there's nothing to go back from
+   :source/back {:doc "Step the source panel's history back." :scope :window
+                 :run (fn [ctx _args] ((:back! (:source-keys ctx))) :handled)}
+   :source/jump-back {:doc "Go back from the last jump into a tab." :scope :window
+                      :run (fn [ctx _args]
+                             (if (some-> (:source-keys ctx) :jump-back! (#(%))) :handled :next))}})
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])
@@ -72,7 +81,8 @@
    ;; a window with no tree has no tree-keys
    :tree-focused (fn [ctx] (some-> (:tree-keys ctx) :focused? (#(%))))
    :tree-menu-open (fn [ctx] (some-> (:tree-keys ctx) :menu-open? (#(%))))
-   :evaluating (fn [ctx] ((:evaluating? ctx)))})
+   :evaluating (fn [ctx] ((:evaluating? ctx)))
+   :rename-focused (fn [ctx] ((:rename-focused? ctx)))})
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named
@@ -88,3 +98,24 @@
   [registry binding ctx]
   (when-let [{f :run} (get registry (:command binding))]
     (f ctx (or (:args binding) {}))))
+
+(def ^:private KEY-ESCAPE (km/key-value "Escape"))
+
+(defn window-answer
+  "on-window-key's whole answer for a lowered keyval and a modifier state,
+  1 (used up) or 0 (GTK's): first the rename stage, then the keymap.
+
+  The rename stage is the one window rule that isn't a chord. While the
+  tab-rename entry has focus every key but Escape is the entry's, so Run,
+  close and switch can't fire mid-rename; Escape goes on to the keymap,
+  whose popover binding closes the entry. It covers a class of keys, so it
+  stays a fixed stage ahead of the keymap, as the plugins design keeps the
+  editor's preedit yield, and asks the named condition :rename-focused.
+
+  Then jonquil.keymap/dispatch over bindings with holds? and run!: :handled
+  is 1, :to-gtk and :unmatched are 0."
+  [bindings keyval state {:keys [holds?] :as opts}]
+  (cond
+    (and (not= keyval KEY-ESCAPE) (holds? :rename-focused)) 0
+    (= :handled (km/dispatch bindings keyval state opts)) 1
+    :else 0))

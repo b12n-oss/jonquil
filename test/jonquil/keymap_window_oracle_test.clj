@@ -3,7 +3,8 @@
   do what the cond clauses it replaced in jonquil.gtk.window/on-window-key
   did, for every key they name (and a few they don't) under every modifier
   combination and condition state. One oracle per slice: legacy-block (S1),
-  legacy-slot (S2, on top of S1) and legacy-escape (S3, on top of S2).
+  legacy-slot (S2, on top of S1), legacy-escape (S3, on top of S2) and
+  legacy-window (S4, the whole handler, on top of S3).
 
   legacy-block is S1's block transcribed from window.clj at 82bf741
   (identical at b49a276), Cmd/Ctrl+R through the KEY-BRACELEFT step
@@ -74,14 +75,15 @@
 (def ^:private KEY-ESCAPE 0xff1b)
 
 ;; S1's and S2's matrices ask resolve-binding for the first match, which
-;; isn't what runs once outcomes exist (slice S3): Escape's chain is data
-;; now and keymap-matches-legacy-escape-test checks it, and every other
-;; key, through dispatch.
-(def ^:private non-escape-keyvals (remove #{KEY-ESCAPE} keyvals))
+;; isn't what runs once outcomes exist (slice S3). Escape, F5 and
+;; bracketleft are bindings of their own now (S3, S4), so these matrices
+;; leave them out; keymap-matches-legacy-window-test checks them, and every
+;; other key, through window-answer.
+(def ^:private slot-keyvals (remove #{KEY-ESCAPE 0xffc2 0x5b} keyvals))
 
 (deftest keymap-matches-legacy-test
   (is (= 32 (count (distinct states))))
-  (doseq [kv non-escape-keyvals st states]
+  (doseq [kv slot-keyvals st states]
     (let [old (legacy-block kv st) new (keymap-answer kv st)]
       (is (= old new)
           (str "keyval " (format "0x%x" kv) " state " st ": legacy " (pr-str old) " keymap " (pr-str new))))))
@@ -119,7 +121,7 @@
 
 (deftest keymap-matches-legacy-slot-test
   (is (= 8 (count condition-states)))
-  (doseq [kv (concat non-escape-keyvals [0xffc0 0xffc3]) st states cs condition-states]
+  (doseq [kv (concat slot-keyvals [0xffc0 0xffc3]) st states cs condition-states]
     (let [old (legacy-slot kv st cs)
           new (some-> (km/resolve-binding (:window km/shipped) kv st (holds-for cs))
                       ((juxt :command #(or (:args %) {}))))]
@@ -180,51 +182,82 @@
                            :menu-open? (constantly tree-menu-open?)})
    :evaluating? (constantly evaluating?)})
 
-(defn- keymap-escape
-  "The keymap's answer for the same cell: dispatch over the shipped :window
-  vector with the real conditions, and a run! that records each command it
-  runs and answers what the command would: the bar's 1 or 0, the popover
-  close's closed-something or :next, :handled for the rest."
-  [keyval state {:keys [bar-answer-1? popover-closed?] :as cs}]
+(defn- keymap-window
+  "The keymap's answer for the same cell: window-answer, which is what
+  on-window-key calls, over the shipped :window vector with the real
+  conditions, and a run! that records each command it runs and answers
+  what the command would: the bar's 1 or 0, the popover close's
+  closed-something or :next, the jump back's went-back or :next, and
+  :handled for the rest."
+  [keyval state {:keys [bar-answer-1? popover-closed? jumped? rename-focused?] :as cs}]
   (let [calls (atom [])
         run! (fn [b]
                (swap! calls conj [(:command b) (or (:args b) {})])
                (case (:command b)
                  :find/bar-key (if bar-answer-1? :handled :to-gtk)
                  :popover/close-all (if popover-closed? :handled :next)
+                 :source/jump-back (if jumped? :handled :next)
                  :handled))
-        outcome (km/dispatch (:window km/shipped) keyval state
-                             {:holds? (registry/holds-fn registry/window-conditions (fake-ctx cs))
-                              :run! run!})]
-    [outcome @calls]))
+        ctx (assoc (fake-ctx cs) :rename-focused? (constantly rename-focused?))
+        answer (registry/window-answer (:window km/shipped) keyval state
+                                       {:holds? (registry/holds-fn registry/window-conditions ctx)
+                                        :run! run!})]
+    [answer @calls]))
+
+;; --- slice S4: the rename guard, F5 and Cmd/Ctrl+[; no cond left ----------
+
+(defn- legacy-window
+  "Slice S4's oracle: the whole of on-window-key's cond at 9f5ba46, the
+  rename guard, F5, the keymap slot (S3's legacy-escape, on top of S2 and
+  S1) and the two Cmd/Ctrl+[ clauses below it, answering [answer calls]
+  with answer the old 1 or 0. jumped? is the jump-back fn's answer; an
+  absent :jump-back! passes the key on the same way, which the registry
+  test covers."
+  [keyval state {:keys [rename-focused? source-focused? jumped?] :as cs}]
+  (cond
+    (and (not= keyval KEY-ESCAPE) rename-focused?) [0 []]
+    (= keyval 0xffc2) [1 [[:run/run {}]]]
+    :else
+    (let [[outcome calls] (legacy-escape keyval state cs)]
+      (case outcome
+        :handled [1 calls]
+        :to-gtk [0 calls]
+        (cond
+          (and (command-chord? state) (= keyval 0x5b) source-focused?) [1 [[:source/back {}]]]
+          (and (command-chord? state) (= keyval 0x5b)) [(if jumped? 1 0) [[:source/jump-back {}]]]
+          :else [0 []])))))
+
+(def ^:private s4-flags [:rename-focused? :jumped?])
 
 (defn- mismatches [cells]
   (keep (fn [[kv st cs]]
-          (let [old (legacy-escape kv st cs) new (keymap-escape kv st cs)]
+          (let [old (legacy-window kv st cs) new (keymap-window kv st cs)]
             (when (not= old new)
               (str "keyval " (format "0x%x" kv) " state " st " " (pr-str cs)
                    ": legacy " (pr-str old) " keymap " (pr-str new)))))
         cells))
 
-(deftest keymap-matches-legacy-escape-test
-  ;; Escape crossed with every modifier subset, every Escape flag and S2's
-  ;; condition states (Review Focus 1-4), then every other key with the
-  ;; Escape flags all off and all on, which must not leak into them
+(deftest keymap-matches-legacy-window-test
+  ;; Escape crossed with every modifier subset, every Escape flag, S2's
+  ;; condition states and S4's two flags; then every other key with the
+  ;; Escape flags all off and all on, which must not leak into them.
+  ;; Replaces S3's Escape-only test, which stopped at dispatch.
   (let [esc-flags (flag-states escape-flags)
-        escape-cells (for [st states ef esc-flags cs condition-states]
-                       [KEY-ESCAPE st (merge cs ef)])
+        s4 (flag-states s4-flags)
+        escape-cells (for [st states ef esc-flags cs condition-states f s4]
+                       [KEY-ESCAPE st (merge cs ef f)])
         all-off (zipmap escape-flags (repeat false))
         all-on (zipmap escape-flags (repeat true))
-        other-cells (for [kv (concat non-escape-keyvals [0xffc0 0xffc3]) st states
-                          cs condition-states ef [all-off all-on]]
-                      [kv st (merge cs ef)])
+        other-cells (for [kv (concat (remove #{KEY-ESCAPE} keyvals) [0xffc0 0xffc3]) st states
+                          cs condition-states ef [all-off all-on] f s4]
+                      [kv st (merge cs ef f)])
         t0 (System/nanoTime)
         bad (vec (mismatches (concat escape-cells other-cells)))
         ms (quot (- (System/nanoTime) t0) 1000000)]
-    (println (str "keymap-matches-legacy-escape-test: "
+    (println (str "keymap-matches-legacy-window-test: "
                   (+ (count escape-cells) (count other-cells)) " cells in " ms " ms"))
     (is (= 256 (count esc-flags)))
-    (is (= 65536 (count escape-cells)))
+    (is (= 262144 (count escape-cells)))
     (is (zero? (count bad)) (str (count bad) " mismatches, first: " (pr-str (take 3 bad))))))
 
 (deftest shipped-keymap-resolves-test
