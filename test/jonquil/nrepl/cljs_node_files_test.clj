@@ -20,7 +20,12 @@
   (is (str/includes? cljs-node-files/launcher-text "mkfifo") "node makes the stdin FIFO")
   (is (str/includes? cljs-node-files/launcher-text "stdin:") "the ready line carries the token")
   (is (str/includes? cljs-node-files/launcher-text "\"rw\"")
-      "the relay opens the FIFO read-write, so the open never blocks"))
+      "the relay opens the FIFO read-write, so the open never blocks")
+  (is (str/includes? cljs-node-files/launcher-text "token:") "the window-token argument")
+  (is (str/includes? cljs-node-files/launcher-text "/?t=") "the tokened URL spelling")
+  (is (str/includes? cljs-node-files/launcher-text "Close this tab.") "the stale page's ruled copy")
+  (is (str/includes? cljs-node-files/launcher-text "cljs.repl.server/handlers")
+      "the stale-tab gate reaches the GET handler vector"))
 
 (deftest ensure-launcher-writes-once-test
   (let [base (str (temp-dirs/temp-dir! "jonquil-cljs-node-files-"))

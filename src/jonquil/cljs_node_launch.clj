@@ -110,6 +110,12 @@
 
 (def ^:private http-port (atom nil))
 
+(def ^:private page-token
+  "The owning window's token (the `token:<uuid>` argument), carried in the
+  page URL as /?t=<token>. nil when the caller sent none: then no gate
+  installs and every URL stays bare, as before the token existed."
+  (atom nil))
+
 (def ^:private prebound
   "The HTTP ServerSocket bound in -main before the ready line, so a taken
   port is reported at start. The replaced cljs.repl.server/start takes it
@@ -169,8 +175,11 @@
   (atom false))
 
 (defn- gone-message []
+  ;; Byte for byte the URL Jonquil opened (the fail-fast live tests pin
+  ;; "reload <opened-url>" verbatim), so the token spelling matches
+  ;; jonquil.cljs-node/page-url exactly.
   (str "the page is gone (its tab closed or left the page): reload http://127.0.0.1:"
-       @http-port " and evaluate again"))
+       @http-port (when-let [t @page-token] (str "/?t=" t)) " and evaluate again"))
 
 (def ^:private reload-grace-ms
   "How long an evaluation waits for a page once the last one has gone, so a
@@ -389,6 +398,53 @@
                                             :value (gone-message)})))
                   (send-and-close conn 200 "ok")))))
 
+(defn- query-token
+  "The t parameter's value in a query string, or nil when none."
+  [query-str]
+  (some #(when (str/starts-with? % "t=") (subs % 2))
+        (str/split (str query-str) #"&")))
+
+(def ^:private stale-page
+  "What a tab from another session gets instead of the REPL page: no
+  script at all, so nothing pings and nothing reconnects."
+  (str "<html><head><meta charset=\"utf-8\"><title>Jonquil</title></head><body>"
+       "<h2>This tab belongs to an older Jonquil session.</h2>"
+       "<p>Close this tab.</p>"
+       "</body></html>"))
+
+(defn- stale-tab-gate!
+  "Turns away a page request carrying another window's token: the FIRST
+  :get entry in cljs.repl.server/handlers (dispatch takes the first whose
+  pred answers true) serves stale-page when / or /index.html is asked for
+  with a t parameter that differs from this launcher's token. A request
+  with no t at all (a hand-typed URL, a pre-token tab) falls through to
+  the stock handlers. Exits 2 when the handler table isn't the shape this
+  was written against."
+  []
+  (require 'cljs.repl.server)
+  (let [handlers @(resolve 'cljs.repl.server/handlers)
+        send-and-close @(resolve 'cljs.repl.server/send-and-close)
+        entry? (fn [m] (and (map? m) (fn? (:pred m)) (fn? (:handler m))))
+        token @page-token]
+    (when-not (and (instance? clojure.lang.Atom handlers)
+                   (map? @handlers)
+                   (vector? (:get @handlers))
+                   (seq (:get @handlers))
+                   (every? entry? (:get @handlers)))
+      (binding [*out* *err*]
+        (println (str "jonquil: cljs.repl.server/handlers isn't a vector of :get {:pred :handler}"
+                      " entries; this ClojureScript version isn't supported")))
+      (System/exit 2))
+    (swap! handlers update :get
+           (fn [v]
+             (into [{:pred (fn [{:keys [path query-str]} _ _]
+                             (and (contains? #{"/" "/index.html"} path)
+                                  (some? (query-token query-str))
+                                  (not= token (query-token query-str))))
+                     :handler (fn [_request conn _opts]
+                                (send-and-close conn 200 stale-page "text/html" "UTF-8"))}]
+                   v)))))
+
 (defn- make-fifo!
   "The stdin FIFO's absolute path, created as input in this JVM's own temp
   folder (never the working directory: that is the user's project), or nil
@@ -447,9 +503,13 @@
                (println (str "jonquil-cljs-http-port-taken " port))
                (flush)
                (System/exit 3)))
+        (reset! page-token (some #(when (str/starts-with? % "token:") (subs % 6)) args))
         (loopback-start!)
         (live-connection!)
-        (page-bye! {:console? (not (some #(= "no-console" %) args))}))
+        ;; page-bye!'s require of cljs.repl.browser registers the stock
+        ;; :get handlers; the gate prepends to them, so it goes after.
+        (page-bye! {:console? (not (some #(= "no-console" %) args))})
+        (when @page-token (stale-tab-gate!)))
       (do (when-not (str/includes? (script-text) unpatched)
             (binding [*out* *err*]
               (println (str "jonquil: " script " has no " unpatched
