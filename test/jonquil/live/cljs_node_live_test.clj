@@ -214,6 +214,23 @@
     (let [{:keys [result]} (run e "(+ 2 3)")]
       (is (= "5" (:printed result)) (pr-str result)))))
 
+(deftest read-line-unavailable-live
+  ;; A launcher that couldn't make its input pipe announces stdin:none;
+  ;; the session then defines read-line as a thrower. Real node compiles
+  ;; that form (the fake only intercepts it): a call fails with the clear
+  ;; message, the console says so once, and the session goes on.
+  (with-cljs [e (cljs-node/make-cljs-node
+                 {:profile dialect/cljs :runtime :launch :project-dir *dir*}
+                 {:launch (fn [o] (assoc (cljs-child/start! o) :stdin-path :none))})]
+    (let [{:keys [result out]} (run e "(read-line)")
+          text (apply str (map second out))]
+      (is (= :error (:status result)) (pr-str [result out]))
+      (is (str/includes? (str (:error-text result) text) "read-line isn't available")
+          (pr-str [result out]))
+      (is (= 1 (count (re-seq #"read-line isn't available this session" text))) text))
+    (let [{:keys [result]} (run e "(+ 1 2)")]
+      (is (= "3" (:printed result)) (pr-str result)))))
+
 (deftest read-line-compiles-clean-live
   ;; A Run of a buffer with its own ns calling plain (read-line): the
   ;; in-ns/declare setup means no compiler WARNING anywhere in the output.

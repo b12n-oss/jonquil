@@ -438,43 +438,46 @@
     (swap! handlers update :get
            (fn [v]
              (into [{:pred (fn [{:keys [path query-str]} _ _]
-                             (and (contains? #{"/" "/index.html"} path)
-                                  (some? (query-token query-str))
-                                  (not= token (query-token query-str))))
+                             (let [t (query-token query-str)]
+                               (and (contains? #{"/" "/index.html"} path)
+                                    (some? t)
+                                    (not= token t))))
                      :handler (fn [_request conn _opts]
                                 (send-and-close conn 200 stale-page "text/html" "UTF-8"))}]
                    v)))))
 
 (defn- make-fifo!
-  "The stdin FIFO's absolute path, created as input in this JVM's own temp
-  folder (never the working directory: that is the user's project), or nil
-  when mkfifo failed, with one stderr line saying why. read-line is then
-  unavailable; the session is otherwise unchanged."
+  "The stdin FIFO, created as input in this JVM's own temp folder (never the
+  working directory: that is the user's project) and opened \"rw\": a
+  read-write open never blocks on a FIFO, where a write-only open would
+  wait for read-line's first reader. {:path p :raf open-file}, or nil when
+  mkfifo or the open failed, with one stderr line saying why. Opened here,
+  before the ready line, so both failures take the one stdin:none path: an
+  open that failed later, in the relay, used to exit the whole launcher
+  (measured: before its ready line, so the session never started). read-line
+  is then unavailable; the session is otherwise unchanged."
   []
-  (let [f (io/file @run-dir "input")]
+  (let [f (io/file @run-dir "input")
+        unavailable (fn [why]
+                      (binding [*out* *err*]
+                        (println (str "jonquil: " why "; read-line won't be available")))
+                      nil)]
     (try
       (let [exit (.waitFor (.start (ProcessBuilder. ["mkfifo" (.getPath f)])))]
         (if (zero? exit)
-          (do (.deleteOnExit f) (.getPath f))
-          (binding [*out* *err*]
-            (println (str "jonquil: mkfifo " (.getPath f) " exited " exit
-                          "; read-line won't be available"))
-            nil)))
+          (do (.deleteOnExit f)
+              {:path (.getPath f) :raf (java.io.RandomAccessFile. (.getPath f) "rw")})
+          (unavailable (str "mkfifo " (.getPath f) " exited " exit))))
       (catch Exception e
-        (binding [*out* *err*]
-          (println (str "jonquil: mkfifo failed (" (.getMessage e)
-                        "); read-line won't be available")))
-        nil))))
+        (unavailable (str "couldn't make the input pipe (" (.getMessage e) ")"))))))
 
 (defn- relay-stdin!
-  "Relays this process's stdin into the FIFO, a line at a time, so a blocked
-  read-line in node gets the line Jonquil sends. The FIFO is opened \"rw\":
-  a read-write open never blocks on a FIFO, where a write-only open would
-  wait for read-line's first reader. Returns when stdin ends; the caller
-  exits, and closing the FIFO's only writer makes a blocked read return
-  0 bytes, which read-line maps to nil."
-  [^String path]
-  (with-open [raf (java.io.RandomAccessFile. path "rw")
+  "Relays this process's stdin into the FIFO make-fifo! opened, a line at a
+  time, so a blocked read-line in node gets the line Jonquil sends.
+  Returns when stdin ends; the caller exits, and closing the FIFO's only
+  writer makes a blocked read return 0 bytes, which read-line maps to nil."
+  [^java.io.RandomAccessFile fifo-raf]
+  (with-open [raf fifo-raf
               in (io/reader System/in :encoding "UTF-8")]
     (loop []
       (when-let [line (.readLine ^java.io.BufferedReader in)]
@@ -521,7 +524,7 @@
       ;; Jonquil holds our stdin for its life, so stdin ending means it is
       ;; gone. On node the watcher doubles as the read-line relay.
       (future (try (if fifo
-                     (relay-stdin! fifo)
+                     (relay-stdin! (:raf fifo))
                      (let [in System/in] (loop [] (when-not (neg? (.read in)) (recur)))))
                    (catch Throwable _ nil))
               (System/exit 0))
@@ -531,6 +534,6 @@
                                                'jonquil.cljs-node-launch/accept)})]
         (println (str "jonquil-cljs-prepl " (.getLocalPort ^ServerSocket ss)
                       (when browser? (str " http://127.0.0.1:" @http-port))
-                      (when-not browser? (str " stdin:" (or fifo "none"))))))
+                      (when-not browser? (str " stdin:" (or (:path fifo) "none"))))))
       (flush)
       @(promise))))

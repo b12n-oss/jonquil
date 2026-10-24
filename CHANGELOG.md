@@ -36,6 +36,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- ClojureScript on node: when the launcher made its `read-line` pipe but couldn't open it, the whole session failed to start (the launcher exited before its ready line). It now opens the pipe up front, so that failure takes the same path as a failed `mkfifo`: the session runs, and `read-line` throws "read-line isn't available" with one console line saying so.
 - jank: Stop returns at once instead of holding the window while jank dies. ClojureScript on node: output the program prints while quick docs are fetched goes to the console instead of the doc popup.
 - ClojureScript on node: Stop returns at once instead of holding the window while the process dies, and output the program prints after an evaluation answered (a `setTimeout`) reaches the console. The child's run folder, and jank's, is created owner-only with an unguessable name.
 - Typing in the rename popover no longer triggers window shortcuts: Cmd/Ctrl+W, Cmd/Ctrl+T, F5 and the rest go to the entry, so a rename can't close or switch the tab or Run it. Escape still closes the popover.

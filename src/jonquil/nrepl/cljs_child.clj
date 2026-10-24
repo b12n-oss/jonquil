@@ -100,7 +100,9 @@
 (defn start!
   "Starts the launcher with clojure in a fresh <tmpdir>/jonquil-cljs-run-<suffix>
   and waits for its ready line. Returns {:proc :pid :port :url :run-dir :log
-  :stdin} (:url is the page URL of a browser launch, nil for node), or
+  :stdin :stdin-path} (:url is the bare page address from a browser
+  launch's ready line, nil for node; the URL Jonquil opens carries the
+  window's ?t= token on top, see cljs-node/page-url), or
   {:error :http-port-taken} when a :browser launch's log has the
   launcher's `jonquil-cljs-http-port-taken <port>` line (it exits 3) (the tree is killed and the run dir
   removed), or {:error text} when the process exits early or timeout-ms
