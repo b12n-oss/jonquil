@@ -52,6 +52,8 @@
     jonquil.nrepl.cljs-node
     jonquil.runtime-registry
     jonquil.commands
+    jonquil.keymap
+    jonquil.command-registry
     jonquil.help
     jonquil.source
     jonquil.tabs

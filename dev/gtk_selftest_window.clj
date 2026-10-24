@@ -69,6 +69,7 @@
    run-repl/row-console-history-down-empty
    window-keys/row-escape-yields-when-idle
    window-keys/row-command-chord-capslock
+   window-keys/row-keymap-masks-match-gdk
    close-prerun/row-repl-eof-no-editor-hint
    files/row-open-refuses-dirty
    files/row-open-invalid-utf8
