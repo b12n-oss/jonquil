@@ -348,7 +348,7 @@
       (let [{:keys [result]} (run e "(+ 1 2)")
             url (first @opened)]
         (is (some? url))
-        (is (re-find #"^http://127\.0\.0\.1:\d+$" (str url)) (pr-str url))
+        (is (re-find #"^http://127\.0\.0\.1:\d+/\?t=[-0-9a-f]+$" (str url)) (pr-str url))
         (is (= {:status :notice :text (cljs-node-msg/no-page-message url)} result) (pr-str result))
         (let [pid (cljs-node/child-pid e)]
           (is (some? pid))
@@ -384,7 +384,8 @@
             url (first @opened)
             text (apply str (map second out))]
         (is (= {:status :notice :text (cljs-node-msg/no-page-message url)} result) (pr-str result))
-        (is (= url (:url (:child @(:state e)))) "the second launch served the same address")
+        (is (= url (cljs-node-msg/page-url (:http-port @(:state e)) (:page-token @(:state e))))
+            "the second launch served the same tokened address")
         (is (= 1 (count @opened)) "no second tab")
         (is (not (str/includes? text "port changed")) text)
         (is (str/includes? text (cljs-node-msg/reload-message url)) text))
@@ -425,6 +426,40 @@
                                           :content (pr-str {:status :success :value "nil"})}))
                  (inc order))))
       (catch Throwable _ nil)))))
+
+(deftest browser-stale-token-gate-live
+  ;; A page request carrying another window's token gets the script-free
+  ;; "close this tab" page; bare and right-token requests serve the real
+  ;; page, and a stale hit leaves the session working. No browser opens.
+  (let [opened (atom [])
+        e (cljs-node/make-cljs-node (browser-selection)
+                                    {:timings {:page-timeout-ms 4000}
+                                     :open-url (fn [url] (swap! opened conj url) true)})]
+    (try
+      (run e "(+ 1 2)") ; the no-page notice; the HTTP server is up now
+      (let [token (:page-token @(:state e))
+            base (str "http://127.0.0.1:" (:http-port @(:state e)))
+            stale? (fn [[status body]]
+                     (and (= 200 status)
+                          (str/includes? body "Close this tab.")
+                          (not (str/includes? body "<script"))))
+            page? (fn [[status body]]
+                    (and (= 200 status) (str/includes? body "main.js")))]
+        (is (and (string? token) (not (str/blank? token))))
+        (is (page? (http-get (str base "/"))) "a bare request serves the page (hand-typed URL)")
+        (is (page? (http-get (str base "/?t=" token))) "the right token serves the page")
+        (is (stale? (http-get (str base "/?t=wrong"))) "a wrong token is turned away")
+        (is (stale? (http-get (str base "/?x=1&t=wrong"))) "t needn't be the first parameter")
+        (is (stale? (http-get (str base "/index.html?t=wrong"))) "the /index.html alias is gated too")
+        ;; the session still works: a page connects and an evaluation answers
+        (let [held (atom nil) stop? (atom false)]
+          (try
+            (fake-page! (first @opened) held stop?)
+            (let [{:keys [result]} (run e "(+ 1 2)")]
+              (is (= :ok (:status result)) (pr-str result)))
+            (finally (reset! stop? true)
+                     (some-> ^java.net.Socket @held .close)))))
+      (finally (ev/stop! e)))))
 
 (deftest browser-closed-tab-fails-fast-live
   ;; After the page's tab closed, an evaluation fails at once with a reload
