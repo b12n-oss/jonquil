@@ -17,6 +17,7 @@
   (is (= 0x7b (km/key-value "braceleft")))
   (is (= 0xffc0 (km/key-value "F3")))
   (is (= 0xffc3 (km/key-value "F6")))
+  (is (= 0xff1b (km/key-value "Escape")))
   (is (nil? (km/key-value "nope"))))
 
 (deftest matches-test
@@ -45,6 +46,7 @@
   (let [ids #{:x}]
     (is (= [] (km/problems [{:key "r" :mods #{:cmd} :not #{:alt} :command :x :args {:n 1}}] ids)))
     (is (= [] (km/problems [{:key "r" :when [:c] :command :x}] ids #{:c})))
+    (is (= [] (km/problems [{:key "r" :outcome :to-gtk} {:key "s" :outcome :handled}] ids)))
     (testing "one problem per rule, naming the binding's position"
       (doseq [[b why] [[{:mods #{:cmd} :command :x} "neither :key nor :keys"]
                        [{:key "r" :keys #{"s"} :command :x} "both :key and :keys"]
@@ -55,7 +57,10 @@
                        [{:key "r" :command :y} "unregistered command"]
                        [{:key "r" :command :x :whenever [:z]} "unknown binding key"]
                        [{:key "r" :command :x :when [:nope]} "unregistered condition"]
-                       [{:key "r" :command :x :when :c} ":when isn't a vector"]]]
+                       [{:key "r" :command :x :when :c} ":when isn't a vector"]
+                       [{:key "r" :outcome :bogus} "unknown outcome"]
+                       [{:key "r" :command :x :outcome :to-gtk} "both :command and :outcome"]
+                       [{:key "r"} "neither :command nor :outcome"]]]
         (let [ps (km/problems [{:key "a" :command :x} b] ids #{:c})]
           (is (= 1 (count ps)) (str why ": " (pr-str ps)))
           (is (str/includes? (str (first ps)) "binding 1") (str why ": " (pr-str ps))))))))
@@ -84,3 +89,38 @@
     (km/resolve-binding [b] 0x6f st holds?)
     (is (= [:a] @calls) ":a is false, so :b is never asked")))
 
+(deftest dispatch-test
+  (let [ran (atom [])
+        run! (fn [answers] (fn [b] (swap! ran conj (:command b)) (get answers (:command b))))
+        esc 0xff1b
+        a {:key "Escape" :command :a}
+        b {:key "Escape" :command :b}]
+    (testing ":next moves on to the next matching binding"
+      (is (= :handled (km/dispatch [a b] esc 0 {:holds? (constantly true)
+                                                 :run! (run! {:a :next :b :handled})})))
+      (is (= [:a :b] @ran)))
+    (testing "a fixed outcome answers without running anything after it"
+      (reset! ran [])
+      (is (= :to-gtk (km/dispatch [{:key "Escape" :outcome :to-gtk} b] esc 0
+                                  {:holds? (constantly true) :run! (run! {:b :handled})})))
+      (is (= [] @ran)))
+    (testing ":to-gtk from a command stops the walk"
+      (reset! ran [])
+      (is (= :to-gtk (km/dispatch [a b] esc 0 {:holds? (constantly true)
+                                                :run! (run! {:a :to-gtk :b :handled})})))
+      (is (= [:a] @ran)))
+    (testing "no match is :unmatched"
+      (reset! ran [])
+      (is (= :unmatched (km/dispatch [a b] 0x72 0 {:holds? (constantly true)
+                                                    :run! (run! {:a :handled})})))
+      (is (= [] @ran)))
+    (testing "an unregistered command (run! answers nil) moves on"
+      (reset! ran [])
+      (is (= :handled (km/dispatch [a b] esc 0 {:holds? (constantly true)
+                                                 :run! (run! {:b :handled})})))
+      (is (= [:a :b] @ran)))
+    (testing "a :when that doesn't hold skips the binding without running it"
+      (reset! ran [])
+      (is (= :handled (km/dispatch [(assoc a :when [:c]) b] esc 0
+                                   {:holds? (constantly false) :run! (run! {:a :handled :b :handled})})))
+      (is (= [:b] @ran)))))

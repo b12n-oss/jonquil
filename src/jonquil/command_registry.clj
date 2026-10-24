@@ -1,8 +1,10 @@
 (ns jonquil.command-registry
   "Commands as data (plugins design, Part 1): an id, one doc line, a scope
-  and a (fn [ctx args]) that does the work. ctx is the map the window's key
-  handler already receives (run-fn, save-fn and the rest), so a command is
-  a plain function a test can call with a fake ctx. No GTK here.
+  and a (fn [ctx args]) that does the work and answers an outcome
+  (:handled, :to-gtk or :next, as jonquil.keymap/dispatch reads it). ctx
+  is the map the window's key handler already receives (run-fn, save-fn
+  and the rest), so a command is a plain function a test can call with a
+  fake ctx. No GTK here.
 
   Slice S1 registers the window's plain chords; later slices add the rest
   of the window's and the editor's, menus and the context menu read the
@@ -43,14 +45,34 @@
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
    :source/open-here {:doc "Open the source panel's file in the window." :scope :window
-                      :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}})
+                      :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}
+   ;; slice S3: the Escape chain, each command answering an outcome. The
+   ;; find bar's own answer is final: its 0 (an IME composing) is GTK's.
+   :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window
+                  :run (fn [ctx _args] (if (= 1 ((:find-bar-key! ctx))) :handled :to-gtk))}
+   :popover/close-all {:doc "Close any open popover." :scope :window
+                       :run (fn [ctx _args] (if ((:close-popovers-fn ctx)) :handled :next))}
+   :inspector/close {:doc "Close the inspector panel." :scope :window :run (call :close-inspector-fn)}
+   :source/close {:doc "Close the source panel." :scope :window
+                  :run (fn [ctx _args] ((:close! (:source-keys ctx))) :handled)}
+   :tree/close-menu {:doc "Close the file tree's menu." :scope :window
+                     :run (fn [ctx _args] ((:close-menu! (:tree-keys ctx))) :handled)}
+   :tree/leave {:doc "Leave the file tree for the editor." :scope :window
+                :run (fn [ctx _args] ((:leave! (:tree-keys ctx))) :handled)}
+   :run/stop {:doc "Stop the running evaluation." :scope :window :run (call :stop-fn)}})
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])
   over the per-key ctx on-window-key builds, which carries the GTK reads as
   fns, so nothing here touches GTK."
   {:find-bar-navigable (fn [ctx] ((:find-bar-navigable? ctx)))
-   :source-focused (fn [ctx] ((:focused? (:source-keys ctx))))})
+   :source-focused (fn [ctx] ((:focused? (:source-keys ctx))))
+   :find-bar-focused (fn [ctx] ((:find-bar-focused? ctx)))
+   :inspector-focused (fn [ctx] ((:inspector-focused? ctx)))
+   ;; a window with no tree has no tree-keys
+   :tree-focused (fn [ctx] (some-> (:tree-keys ctx) :focused? (#(%))))
+   :tree-menu-open (fn [ctx] (some-> (:tree-keys ctx) :menu-open? (#(%))))
+   :evaluating (fn [ctx] ((:evaluating? ctx)))})
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named
@@ -60,8 +82,9 @@
 
 (defn run-command!
   "Runs the binding's command from registry with ctx and the binding's
-  :args, returning what the command returns; nil when the id isn't
-  registered."
+  :args, returning what the command returns, an outcome for
+  jonquil.keymap/dispatch (:handled, :to-gtk or :next); nil when the id
+  isn't registered."
   [registry binding ctx]
   (when-let [{f :run} (get registry (:command binding))]
     (f ctx (or (:args binding) {}))))

@@ -39,8 +39,8 @@ these:
   shipped bindings live in `src/jonquil/keymap.edn`, read when Jonquil is
   compiled, because the installed app has no source tree. The window
   dispatches them through one **slot** clause in `on-window-key`'s cond,
-  placed where the plain chords used to be, so every clause above and
-  below keeps its precedence. Later slices grow the slot upward until the
+  first placed where the plain chords used to be, so every clause above
+  and below kept its precedence. Later slices grow the slot upward until the
   cond is gone. `keymap_window_oracle_test` checks the keymap against a
   transcription of the replaced clauses, for every key they named and all
   32 modifier combinations. Slice S2 (2026-10-24) added `:when`: a vector
@@ -52,9 +52,21 @@ these:
   argument map plus the active tab's find-bar reads and actions as fns, so
   the registry never touches GTK. S2 moved F3 and Cmd/Ctrl+G (while the
   find bar can navigate), plain F6 and the source panel's
-  Cmd/Ctrl+Shift+O into the slot, which now sits right below the bare
+  Cmd/Ctrl+Shift+O into the slot, which then sat right below the bare
   Escape clause. The oracle crosses every key and modifier set with each
-  combination of the three states those clauses read.
+  combination of the three states those clauses read. Slice S3
+  (2026-10-24) gave commands an outcome: `:handled` (the key is used up),
+  `:to-gtk` (stop here and let GTK have it) or `:next` (not mine after
+  all, try the next matching binding). A binding can name a fixed
+  `:outcome` instead of a command. `dispatch` walks the matching bindings
+  and runs each command until one answers `:handled` or `:to-gtk`, and
+  says `:unmatched` when it runs out. That let the whole Escape chain move
+  into the keymap, in its old order: the find bar (whose own 0, an IME
+  composing, is `:to-gtk` and never reaches Stop), popovers (`:next` when
+  none was open), the inspector, the source panel, the tree menu, the
+  tree, Stop while evaluating, and a bare `:to-gtk`. The slot now sits
+  right after F5, and its oracle crosses Escape with all eight states the
+  chain reads.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
@@ -185,7 +197,7 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 - `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its repaint after an edit keeps a baseline of what its tags show now (`:painted`). On a future, off the GTK thread, it computes the new plan and `paint/plan-diff` against that baseline, then applies only the changed range a chunk per main-loop turn, nearest the caret first. With no baseline it falls back to a full `paint-async!`. `dirty?` compares lengths before it copies the buffer, and `jonquil.syntax/tokenize` reuses its last result when it gets the identical string again, so a 20,000-line file stays responsive while typing. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
 - `jonquil.gtk.find-bar`: the find and replace bar, with its own `handle-key!` and match highlighting through a `search-match` tag.
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
-- `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, Esc and the focus-dependent clauses in its cond; the plain command chords go through the keymap slot, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.
+- `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, the rename guard and the Cmd/Ctrl+[ back clauses in its cond; Escape and the command chords go through the keymap slot, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.
 
 P4 added three more, all built on a shared popover base:
 

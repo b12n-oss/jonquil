@@ -317,9 +317,10 @@
 (defn handle-nav-key!
   "F3/command+g (next match) and Shift+F3/command+shift+g (previous) while
   the bar is open: 1 when handled, 0 otherwise, and always 0 while either
-  entry has an IME preedit active. P3 fix wave I4: window.clj's
-  on-window-key calls this too, so these keys work with focus in the
-  editor, not only inside the bar; handle-key! (below) delegates to it."
+  entry has an IME preedit active. handle-key! (below) delegates to it
+  for keys inside the bar. With focus in the editor or the console the
+  window's keymap does the same work (plugins PL1 S2), through nav-ready?,
+  find-next! and find-prev!."
   [fb keyval0 state]
   (let [keyval (g/gdk-keyval-to-lower keyval0)]
     (cond
