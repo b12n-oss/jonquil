@@ -307,6 +307,13 @@
     (and (not (ffi/null? f))
          (or (= f (:replace-btn fb)) (= f (:replace-all-btn fb))))))
 
+(defn nav-ready?
+  "True when find-next/previous can act: the bar is open and neither entry
+  has an IME preedit composing. The window's keymap asks this before F3 and
+  command+g (plugins PL1 S2); handle-nav-key! below uses the same guard."
+  [fb]
+  (and (not @(:preedit-active? fb)) (open? fb)))
+
 (defn handle-nav-key!
   "F3/command+g (next match) and Shift+F3/command+shift+g (previous) while
   the bar is open: 1 when handled, 0 otherwise, and always 0 while either
@@ -316,8 +323,7 @@
   [fb keyval0 state]
   (let [keyval (g/gdk-keyval-to-lower keyval0)]
     (cond
-      @(:preedit-active? fb) 0
-      (not (open? fb)) 0
+      (not (nav-ready? fb)) 0
       (and (= keyval KEY-F3) (shift-held? state)) (do (find-prev! fb) 1)
       (= keyval KEY-F3) (do (find-next! fb) 1)
       (and (command-chord? state) (shift-held? state) (= keyval KEY-G)) (do (find-prev! fb) 1)
