@@ -214,6 +214,53 @@
     (let [{:keys [result]} (run e "(+ 2 3)")]
       (is (= "5" (:printed result)) (pr-str result)))))
 
+(deftest read-line-unavailable-live
+  ;; A launcher that couldn't make its input pipe announces stdin:none;
+  ;; the session then defines read-line as a thrower. Real node compiles
+  ;; that form (the fake only intercepts it): a call fails with the clear
+  ;; message, the console says so once, and the session goes on.
+  (with-cljs [e (cljs-node/make-cljs-node
+                 {:profile dialect/cljs :runtime :launch :project-dir *dir*}
+                 {:launch (fn [o] (assoc (cljs-child/start! o) :stdin-path :none))})]
+    (let [{:keys [result out]} (run e "(read-line)")
+          text (apply str (map second out))]
+      (is (= :error (:status result)) (pr-str [result out]))
+      (is (str/includes? (str (:error-text result) text) "read-line isn't available")
+          (pr-str [result out]))
+      (is (= 1 (count (re-seq #"read-line isn't available this session" text))) text))
+    (let [{:keys [result]} (run e "(+ 1 2)")]
+      (is (= "3" (:printed result)) (pr-str result)))))
+
+(deftest launcher-fifo-open-failure-degrades-live
+  ;; make-fifo! must turn a FIFO that was made but can't be opened into
+  ;; stdin:none: when the "rw" open lived in the relay, its failure exited
+  ;; the launcher before its ready line (measured 2026-10-24). A fake
+  ;; mkfifo first on PATH makes a directory, so mkfifo succeeds and the
+  ;; open fails ("Is a directory").
+  (let [bin (io/file (temp-dirs/temp-dir! "jonquil-fake-mkfifo-"))
+        fake (io/file bin "mkfifo")
+        log (io/file (temp-dirs/temp-dir! "jonquil-fifo-open-") "out.log")
+        _ (spit fake "#!/bin/sh\nmkdir \"$1\"\n")
+        _ (.setExecutable fake true)
+        proc (p/process {:dir *dir* :out log :err :out
+                         :extra-env {"PATH" (str (.getCanonicalPath bin) ":" (System/getenv "PATH"))}}
+                        (cljs-child/find-clojure) "-M" "-i" (files/ensure-launcher!)
+                        "-m" "jonquil.cljs-node-launch")]
+    (try
+      (let [text (fn [] (try (slurp log) (catch Throwable _ "")))
+            ready (loop [n 0]
+                    (let [l (some #(when (str/includes? % "jonquil-cljs-prepl") %)
+                                  (str/split-lines (text)))]
+                      (cond l l
+                            (or (> n 900) (not (p/alive? proc))) nil
+                            :else (do (Thread/sleep 100) (recur (inc n))))))]
+        (is (some? ready) (text))
+        (is (str/ends-with? (str ready) " stdin:none") (pr-str ready))
+        (Thread/sleep 2000)
+        (is (p/alive? proc) "the launcher outlives the failed open")
+        (is (str/includes? (text) "read-line won't be available") (text)))
+      (finally (p/destroy-tree proc)))))
+
 (deftest read-line-compiles-clean-live
   ;; A Run of a buffer with its own ns calling plain (read-line): the
   ;; in-ns/declare setup means no compiler WARNING anywhere in the output.

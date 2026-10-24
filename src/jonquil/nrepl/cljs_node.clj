@@ -747,7 +747,8 @@
   "A ClojureScript-on-node evaluator for a jonquil.dialect/select result,
   with no child yet. opts: :timings (merged over default-timings) and the
   hooks tests fake: :launch (fn [{:keys [clojure launcher project-dir
-  cancelled? target http-port]}] child-or-{:error}), :find-clojure,
+  cancelled? target http-port console? page-token]}] child-or-{:error}),
+  :find-clojure,
   :ensure-launcher, :alive?, :kill, and :open-url (fn [url] truthy on
   success), used only for a browser selection (:cljs-target :browser)."
   ([selection] (make-cljs-node selection {}))

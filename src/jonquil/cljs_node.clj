@@ -191,10 +191,12 @@
              sentinel-form]))
 
 (defn strip-input-markers
-  "[clean-text events] for an :err chunk: marker lines (and their
-  newlines) are removed, events is the markers' order (:need-input,
-  :got-input), and everything else is kept byte-for-byte. A chunk may
-  coalesce a marker with user stderr, so this scans within the chunk."
+  "[clean-text events] for an :err chunk: every marker followed by its
+  newline is removed wherever it sits in the chunk (not only as a whole
+  line: a chunk may coalesce a marker with user stderr), events is the
+  markers' order (:need-input, :got-input), and everything else is kept
+  byte-for-byte. User text containing a marker and newline is swallowed
+  the same way, the accepted cost of U+0001 framing."
   [s]
   (let [need (str need-input-marker "\n")
         got (str got-input-marker "\n")]
