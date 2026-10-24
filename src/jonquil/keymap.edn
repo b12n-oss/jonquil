@@ -2,13 +2,23 @@
 ;; when Jonquil is compiled. Each scope is an ORDERED vector: the first binding
 ;; that matches wins, as in the cond it replaces. :cmd is Control or Meta.
 ;;
-;; :window holds slice S1's block, in the block's own order: the plain
-;; command chords that jonquil.gtk.window/on-window-key's slot dispatches,
-;; after the clauses still in its cond (rename guard, F5, the Escape chain,
-;; find-nav, F6 and the source panel's Cmd+Shift+O). Shift-qualified
+;; :window holds what jonquil.gtk.window/on-window-key's slot dispatches,
+;; after the clauses still in its cond (the rename guard, F5 and the Escape
+;; chain): slices S2 then S1, each in the old cond's order. Shift-qualified
 ;; bindings sit ahead of their plain forms, so the plain one never sees them.
 {:window
- [{:key "r" :mods #{:cmd} :command :run/run}
+ [;; slice S2: the clauses that sat directly above S1's block, in their
+  ;; order. F3 and Cmd+G are find-bar/handle-nav-key!'s own four branches,
+  ;; guarded by its two checks (the bar is open, no IME composition).
+  {:key "F3" :mods #{:shift} :when [:find-bar-navigable] :command :find/previous}
+  {:key "F3" :when [:find-bar-navigable] :command :find/next}
+  {:key "g" :mods #{:cmd :shift} :when [:find-bar-navigable] :command :find/previous}
+  {:key "g" :mods #{:cmd} :when [:find-bar-navigable] :command :find/next}
+  ;; plain F6; Shift+F6 is rename, which the editor gets
+  {:key "F6" :not #{:shift} :command :focus/toggle}
+  {:key "o" :mods #{:cmd :shift} :when [:source-focused] :command :source/open-here}
+  ;; slice S1: the plain command chords
+  {:key "r" :mods #{:cmd} :command :run/run}
   {:key "o" :mods #{:cmd} :command :file/open}
   {:key "s" :mods #{:cmd :shift} :command :file/save-as}
   {:key "s" :mods #{:cmd} :command :file/save}

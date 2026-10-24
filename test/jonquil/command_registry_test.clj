@@ -23,8 +23,10 @@
    :tab/next [:step-tab-fn 1] :tab/previous [:step-tab-fn -1]})
 
 (deftest each-command-calls-its-fn-test
-  (is (= (conj (set (keys expected)) :tab/select) (set (keys registry/window-commands)))
-      "exactly the S1 commands")
+  (is (= (into (conj (set (keys expected)) :tab/select)
+               [:find/next :find/previous :focus/toggle :source/open-here])
+         (set (keys registry/window-commands)))
+      "exactly the S1 and S2 commands")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))
@@ -38,6 +40,27 @@
   (doseq [[id c] registry/window-commands]
     (is (and (string? (:doc c)) (seq (:doc c))) (str id))
     (is (= :window (:scope c)) (str id))))
+
+(deftest s2-commands-call-their-ctx-fns-test
+  (let [calls (atom [])
+        rec (fn [k] (fn [& _] (swap! calls conj k) nil))
+        ctx {:find-next! (rec :find-next!) :find-prev! (rec :find-prev!)
+             :toggle-focus-fn (rec :toggle-focus-fn)
+             :source-keys {:open! (rec :open!)}}]
+    (doseq [[id k] [[:find/next :find-next!] [:find/previous :find-prev!]
+                    [:focus/toggle :toggle-focus-fn] [:source/open-here :open!]]]
+      (reset! calls [])
+      (is (= :handled (registry/run-command! registry/window-commands {:command id} ctx)) (str id))
+      (is (= [k] @calls) (str id)))))
+
+(deftest window-conditions-test
+  (let [ctx (fn [nav? focused?] {:find-bar-navigable? (constantly nav?)
+                                 :source-keys {:focused? (constantly focused?)}})]
+    (is (true? ((registry/holds-fn registry/window-conditions (ctx true false)) :find-bar-navigable)))
+    (is (false? ((registry/holds-fn registry/window-conditions (ctx false true)) :find-bar-navigable)))
+    (is (true? ((registry/holds-fn registry/window-conditions (ctx false true)) :source-focused)))
+    (is (false? ((registry/holds-fn registry/window-conditions (ctx true true)) :no-such-condition))
+        "an unknown condition is false")))
 
 (deftest unknown-command-runs-nothing-test
   (is (nil? (registry/run-command! registry/window-commands {:command :no/such} {}))))
