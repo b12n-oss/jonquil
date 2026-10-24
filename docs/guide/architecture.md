@@ -27,6 +27,23 @@ these:
 - `jonquil.commands`: the run-selection text, the form Run Form sends,
   the pre-Run bracket check, next/prev match, replace-current and
   replace-all, the format operations, and the zoom sizes.
+- `jonquil.keymap` and `jonquil.command-registry` (plugins Part 1, slice
+  S1, 2026-10-24): key bindings and commands as data. `jonquil.keymap`
+  matches a lowered keyval and a GDK modifier state against an ordered
+  binding vector, first match wins. A binding names `:key` (or `:keys`),
+  `:mods` that must be held and `:not` that must be up, with `:cmd`
+  meaning Control or Meta on every platform. Anything in neither set is
+  ignored. `jonquil.command-registry` maps a command id to a doc line and
+  a `(fn [ctx args])`, where ctx is the map the window's key handler
+  already receives, so a command is a plain function a test can call. The
+  shipped bindings live in `src/jonquil/keymap.edn`, read when Jonquil is
+  compiled, because the installed app has no source tree. The window
+  dispatches them through one **slot** clause in `on-window-key`'s cond,
+  placed where the plain chords used to be, so every clause above and
+  below keeps its precedence. Later slices grow the slot upward until the
+  cond is gone. `keymap_window_oracle_test` checks the keymap against a
+  transcription of the replaced clauses, for every key they named and all
+  32 modifier combinations.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
@@ -157,7 +174,7 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 - `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its repaint after an edit keeps a baseline of what its tags show now (`:painted`). On a future, off the GTK thread, it computes the new plan and `paint/plan-diff` against that baseline, then applies only the changed range a chunk per main-loop turn, nearest the caret first. With no baseline it falls back to a full `paint-async!`. `dirty?` compares lengths before it copies the buffer, and `jonquil.syntax/tokenize` reuses its last result when it gets the identical string again, so a 20,000-line file stays responsive while typing. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
 - `jonquil.gtk.find-bar`: the find and replace bar, with its own `handle-key!` and match highlighting through a `search-match` tag.
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
-- `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, Esc, Cmd/Ctrl+R/O/S), the file dialogs, and the wiring between `jonquil.session` and the two views.
+- `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (F5, Esc and the focus-dependent clauses in its cond; the plain command chords go through the keymap slot, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.
 
 P4 added three more, all built on a shared popover base:
 
