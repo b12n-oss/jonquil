@@ -224,9 +224,10 @@
 
 (defn- url-of
   "The page URL of launch n (default the first): built from the HTTP port
-  the evaluator passed to it."
+  and the window token the evaluator passed to it."
   ([launches] (url-of launches 0))
-  ([launches n] (str "http://127.0.0.1:" (:http-port (nth @launches n)))))
+  ([launches n] (str "http://127.0.0.1:" (:http-port (nth @launches n))
+                     "/?t=" (:page-token (nth @launches n)))))
 
 (defn- with-browser
   "Like with-node, for a browser selection. f gets srv and a map with :ev,
@@ -325,6 +326,20 @@
         (is (= 1 (count @opened)) "no second tab")
         (is (str/includes? (text-of out) (str "; The browser port changed: open " (url-of launches 2) ".")))))))
 
+(deftest browser-token-survives-relaunch-test
+  ;; Review Focus 5: the window's token outlives the child, or the tab's
+  ;; self-reload (PR #94) would be turned away by its own window's gate.
+  (with-browser {} {}
+    (fn [_ {:keys [ev launches opened]}]
+      (is (= "3" (:printed (:result (run ev "(+ 1 2)" {:run? false})))))
+      (#'node/kill-child! ev)
+      (is (= "4" (:printed (:result (run ev "(+ 2 2)" {:run? false})))))
+      (let [[a b] (map :page-token @launches)]
+        (is (= 2 (count @launches)))
+        (is (and (string? a) (not (str/blank? a))) (pr-str a))
+        (is (= a b) "both launches carry the same window token"))
+      (is (= [(url-of launches)] @opened) "one tab, at the tokened URL"))))
+
 (deftest waiting-line-is-kept-for-node-test
   (with-node {} {}
     (fn [_ {:keys [ev]}]
@@ -356,7 +371,7 @@
     (fn [srv {:keys [ev launches opened kills]}]
       (let [t0 (System/currentTimeMillis)
             r (:result (run ev "(+ 1 2)" {:run? false}))
-            url (str "http://127.0.0.1:" (:http-port (first @launches)))]
+            url (url-of launches)]
         (is (= {:status :notice :text (cljs-node/no-page-message url)} r))
         (is (< (- (System/currentTimeMillis) t0) 1100) "the notice came at the page bound")
         (is (= [url] @opened) "opened before the setup finished")
