@@ -43,7 +43,18 @@ these:
   below keeps its precedence. Later slices grow the slot upward until the
   cond is gone. `keymap_window_oracle_test` checks the keymap against a
   transcription of the replaced clauses, for every key they named and all
-  32 modifier combinations.
+  32 modifier combinations. Slice S2 (2026-10-24) added `:when`: a vector
+  of named conditions, all of which must hold. `resolve-binding` asks them
+  through a `holds?` fn only once a binding's key and modifiers match, in
+  order, stopping at the first false, the short-circuit order of the `and`s
+  it replaces. Conditions live beside the commands (`window-conditions`) as
+  functions over ctx. `on-window-key` builds a per-key ctx, its own
+  argument map plus the active tab's find-bar reads and actions as fns, so
+  the registry never touches GTK. S2 moved F3 and Cmd/Ctrl+G (while the
+  find bar can navigate), plain F6 and the source panel's
+  Cmd/Ctrl+Shift+O into the slot, which now sits right below the bare
+  Escape clause. The oracle crosses every key and modifier set with each
+  combination of the three states those clauses read.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.

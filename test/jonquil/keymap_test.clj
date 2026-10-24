@@ -15,6 +15,8 @@
   (is (= 0x3d (km/key-value "equal")))
   (is (= 0x2b (km/key-value "plus")))
   (is (= 0x7b (km/key-value "braceleft")))
+  (is (= 0xffc0 (km/key-value "F3")))
+  (is (= 0xffc3 (km/key-value "F6")))
   (is (nil? (km/key-value "nope"))))
 
 (deftest matches-test
@@ -42,6 +44,7 @@
 (deftest problems-test
   (let [ids #{:x}]
     (is (= [] (km/problems [{:key "r" :mods #{:cmd} :not #{:alt} :command :x :args {:n 1}}] ids)))
+    (is (= [] (km/problems [{:key "r" :when [:c] :command :x}] ids #{:c})))
     (testing "one problem per rule, naming the binding's position"
       (doseq [[b why] [[{:mods #{:cmd} :command :x} "neither :key nor :keys"]
                        [{:key "r" :keys #{"s"} :command :x} "both :key and :keys"]
@@ -50,7 +53,34 @@
                        [{:key "r" :mods #{:hyper} :command :x} "unknown modifier"]
                        [{:key "r" :not #{:hyper} :command :x} "unknown modifier in :not"]
                        [{:key "r" :command :y} "unregistered command"]
-                       [{:key "r" :command :x :when [:z]} "unknown binding key"]]]
-        (let [ps (km/problems [{:key "a" :command :x} b] ids)]
+                       [{:key "r" :command :x :whenever [:z]} "unknown binding key"]
+                       [{:key "r" :command :x :when [:nope]} "unregistered condition"]
+                       [{:key "r" :command :x :when :c} ":when isn't a vector"]]]
+        (let [ps (km/problems [{:key "a" :command :x} b] ids #{:c})]
           (is (= 1 (count ps)) (str why ": " (pr-str ps)))
           (is (str/includes? (str (first ps)) "binding 1") (str why ": " (pr-str ps))))))))
+
+(deftest when-test
+  (let [b {:key "o" :mods #{:cmd :shift} :when [:a :b] :command :x}
+        st (bit-or ctrl shift)]
+    (is (km/matches? b 0x6f st #{:a :b}) "every condition holds")
+    (is (not (km/matches? b 0x6f st #{:a})) "one condition false")
+    (is (not (km/matches? b 0x6f st (constantly false))))
+    (is (not (km/matches? b 0x6f st)) "a :when binding never matches without holds?")
+    (is (= :x (:command (km/resolve-binding [b] 0x6f st #{:a :b}))))
+    (is (km/matches? {:key "r" :mods #{:cmd}} 0x72 ctrl) "the 3-arity still works without :when")))
+
+(deftest when-order-test
+  ;; conditions run only after the key and modifiers match, in order,
+  ;; stopping at the first false (Review Focus 4)
+  (let [calls (atom [])
+        holds? (fn [id] (swap! calls conj id) (= id :b))
+        b {:key "o" :mods #{:cmd :shift} :when [:a :b] :command :x}
+        st (bit-or ctrl shift)]
+    (km/resolve-binding [b] 0x72 st holds?)
+    (is (= [] @calls) "another key: no condition is asked")
+    (km/resolve-binding [b] 0x6f ctrl holds?)
+    (is (= [] @calls) "modifiers don't match: no condition is asked")
+    (km/resolve-binding [b] 0x6f st holds?)
+    (is (= [:a] @calls) ":a is false, so :b is never asked")))
+

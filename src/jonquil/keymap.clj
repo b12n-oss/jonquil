@@ -26,7 +26,8 @@
 (def ^:private named-keys
   ;; gdkkeysyms.h values for the names that aren't their own character
   {"equal" 0x03d "plus" 0x02b "minus" 0x02d
-   "braceright" 0x07d "braceleft" 0x07b})
+   "braceright" 0x07d "braceleft" 0x07b
+   "F3" 0xffc0 "F6" 0xffc3})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a
@@ -51,23 +52,33 @@
 
 (defn matches?
   "True when keyval is the binding's key (or one of its keys), every :mods
-  modifier is held and no :not modifier is."
-  [binding keyval state]
-  (and (contains? (set (map key-value (key-names binding))) keyval)
-       (every? #(held? state %) (:mods binding))
-       (not-any? #(held? state %) (:not binding))))
+  modifier is held, no :not modifier is, and every :when condition holds.
+  The conditions are asked through holds? (fn [id] bool), in order, only
+  once the key and modifiers have matched, stopping at the first false:
+  the short-circuit order of the cond clauses the keymap replaces, so a
+  focus check never runs for a key it couldn't concern. Without holds?
+  a binding with :when never matches."
+  ([binding keyval state] (matches? binding keyval state (constantly false)))
+  ([binding keyval state holds?]
+   (and (contains? (set (map key-value (key-names binding))) keyval)
+        (every? #(held? state %) (:mods binding))
+        (not-any? #(held? state %) (:not binding))
+        (every? #(boolean (holds? %)) (:when binding)))))
 
 (defn resolve-binding
   "The first binding in bindings that matches, or nil."
-  [bindings keyval state]
-  (some #(when (matches? % keyval state) %) bindings))
+  ([bindings keyval state] (resolve-binding bindings keyval state (constantly false)))
+  ([bindings keyval state holds?]
+   (some #(when (matches? % keyval state holds?) %) bindings)))
 
-(def ^:private binding-keys #{:key :keys :mods :not :command :args})
+(def ^:private binding-keys #{:key :keys :mods :not :when :command :args})
 
 (defn problems
   "What's wrong with bindings, one sentence each naming the binding's
-  position, given the registered command ids. Empty when all is well."
-  [bindings command-ids]
+  position, given the registered command and condition ids. Empty when all
+  is well."
+  ([bindings command-ids] (problems bindings command-ids #{}))
+  ([bindings command-ids condition-ids]
   (vec
    (for [[i b] (map-indexed vector bindings)
          :let [names (key-names b)
@@ -81,9 +92,14 @@
              (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
              (not (contains? command-ids (:command b)))
              (conj (str "names an unregistered command " (pr-str (:command b))))
+             (and (contains? b :when) (not (vector? (:when b))))
+             (conj ":when isn't a vector")
+             (and (vector? (:when b)) (some (complement condition-ids) (:when b)))
+             (conj (str "names an unregistered condition "
+                        (pr-str (remove condition-ids (:when b)))))
              (some (complement binding-keys) (keys b))
              (conj (str "has unknown keys " (pr-str (remove binding-keys (keys b))))))]
-     (str "binding " i " " p))))
+     (str "binding " i " " p)))))
 
 (defmacro ^:private embedded-text
   "The text of classpath file path, read when this form is compiled (the

@@ -67,16 +67,12 @@
             [jonquil.theme :as theme]))
 
 ;; --- keys (values from gdkkeysyms.h) -------------------------------------
-;; The plain command chords' keys live in jonquil/keymap.edn since plugins
-;; PL1 slice S1 (names resolved by jonquil.keymap/key-value); these are the
-;; ones the cond clauses still name.
+;; Most chords' keys live in jonquil/keymap.edn since plugins PL1 (names
+;; resolved by jonquil.keymap/key-value); these are the ones the cond
+;; clauses still name.
 
 (def ^:private KEY-F5 0xffc2)
 (def ^:private KEY-ESCAPE 0xff1b)
-;; the source panel's Cmd/Ctrl+Shift+O
-(def ^:private KEY-O 0x6f)
-;; P3.T3 addition (value read from gdkkeysyms.h 2026-09-24).
-(def ^:private KEY-F6 0xffc3)
 ;; P2.T2 addition (gdkkeysyms.h, GDK_KEY_bracketleft), the source panel's
 ;; own Cmd/Ctrl+[ back chord.
 (def ^:private KEY-BRACKETLEFT 0x05b)
@@ -86,9 +82,6 @@
   Linux and macOS."
   [state]
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
-
-(defn- shift-held? [state]
-  (not (zero? (bit-and state g/SHIFT-MASK))))
 
 ;; --- title -------------------------------------------------------------
 
@@ -2231,14 +2224,30 @@
   and guards above (Shift-first pairs, :not #{:alt} on L and F) carry over
   into the keymap's order. Cmd/Ctrl+R now sits below the source panel's
   Cmd/Ctrl+Shift+O, which only matches O. A differential test
-  (keymap_window_oracle_test) checks the keymap against the old clauses."
-  [{:keys [run-fn stop-fn toggle-focus-fn evaluating? win active-tab close-popovers-fn pane close-inspector-fn status-label source-keys tree-keys]
+  (keymap_window_oracle_test) checks the keymap against the old clauses.
+
+  Plugins PL1 slice S2: the three clauses directly above (F3/Cmd+G through
+  find-bar/handle-nav-key!, plain F6, the source panel's Cmd/Ctrl+Shift+O)
+  joined the slot, which now sits right after the bare-Escape 0. They need
+  :when conditions (:find-bar-navigable, :source-focused), asked only once
+  a binding's key and modifiers match, so source-keys' :focused? still
+  never runs for a key other than O. The keymap's ctx is this function's
+  argument map plus the active tab's find-bar fns (kctx), so the registry
+  never reaches GTK itself."
+  [{:keys [run-fn stop-fn evaluating? win active-tab close-popovers-fn pane close-inspector-fn status-label source-keys tree-keys]
     :as ctx}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
             ;; Tabs plan P2.T2: the find bar is the active tab's.
-            fb (:fb (active-tab))]
+            fb (:fb (active-tab))
+            ;; the keymap's ctx for this key: the handler's own argument map
+            ;; plus the active tab's find-bar reads and actions as fns, so
+            ;; jonquil.command-registry never touches GTK itself
+            kctx (assoc ctx
+                        :find-bar-navigable? #(find-bar/nav-ready? fb)
+                        :find-next! #(find-bar/find-next! fb)
+                        :find-prev! #(find-bar/find-prev! fb))]
         (cond
           ;; Typing in the rename popover's entry: every key but Escape
           ;; is the entry's, so Cmd/Ctrl+W, T, R, F5 and the rest can't
@@ -2266,19 +2275,17 @@
           (do ((:leave! tree-keys)) 1)
           (and (= keyval KEY-ESCAPE) (evaluating?)) (do (stop-fn) 1)
           (= keyval KEY-ESCAPE) 0
-          ;; P3 fix wave I4: F3/Cmd+G and their Shift forms whenever the bar
-          ;; is open, wherever focus is (1 only when the bar acted).
-          (= 1 (find-bar/handle-nav-key! fb keyval0 state)) 1
-          (and (= keyval KEY-F6) (not (shift-held? state))) (do (toggle-focus-fn) 1)
-          (and (command-chord? state) (shift-held? state) (= keyval KEY-O) ((:focused? source-keys)))
-          (do ((:open! source-keys)) 1)
-          ;; Plugins PL1 slice S1: the plain command chords (Cmd/Ctrl+R through
-          ;; Cmd/Ctrl+Shift+[ and ]) are data now, jonquil/keymap.edn's :window
-          ;; vector run through jonquil.command-registry. One clause, here, in
-          ;; the block's old place, so every clause above and below keeps its
-          ;; precedence; later slices grow it upward.
-          (some? (when-let [b (km/resolve-binding (:window km/shipped) keyval state)]
-                   (cmd-registry/run-command! cmd-registry/window-commands b ctx)
+          ;; Plugins PL1, the keymap slot: everything from here down to the
+          ;; Cmd/Ctrl+[ clauses is data, jonquil/keymap.edn's :window vector
+          ;; run through jonquil.command-registry. Slice S2 (F3 and Cmd+G
+          ;; while the find bar can navigate, F6, the source panel's
+          ;; Cmd+Shift+O) sits on top of slice S1 (the plain command chords).
+          ;; One clause in their old place, so every clause above and below
+          ;; keeps its precedence; later slices grow it upward.
+          (some? (when-let [b (km/resolve-binding
+                               (:window km/shipped) keyval state
+                               (cmd-registry/holds-fn cmd-registry/window-conditions kctx))]
+                   (cmd-registry/run-command! cmd-registry/window-commands b kctx)
                    b))
           1
           (and (command-chord? state) (= keyval KEY-BRACKETLEFT) ((:focused? source-keys)))

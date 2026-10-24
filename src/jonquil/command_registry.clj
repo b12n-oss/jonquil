@@ -36,7 +36,27 @@
                   :run (call :inspect-form-fn)}
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
-   :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}})
+   :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
+   ;; slice S2: the clauses that sat above S1's block
+   :find/next {:doc "Go to the next find match." :scope :window :run (call :find-next!)}
+   :find/previous {:doc "Go to the previous find match." :scope :window :run (call :find-prev!)}
+   :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
+                  :run (call :toggle-focus-fn)}
+   :source/open-here {:doc "Open the source panel's file in the window." :scope :window
+                      :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}})
+
+(def window-conditions
+  "Named conditions a window binding's :when can ask for, each (fn [ctx])
+  over the per-key ctx on-window-key builds, which carries the GTK reads as
+  fns, so nothing here touches GTK."
+  {:find-bar-navigable (fn [ctx] ((:find-bar-navigable? ctx)))
+   :source-focused (fn [ctx] ((:focused? (:source-keys ctx))))})
+
+(defn holds-fn
+  "The holds? a binding's :when is asked through: true when the named
+  condition in conditions holds for ctx; false for an unknown id."
+  [conditions ctx]
+  (fn [id] (if-let [f (get conditions id)] (boolean (f ctx)) false)))
 
 (defn run-command!
   "Runs the binding's command from registry with ctx and the binding's

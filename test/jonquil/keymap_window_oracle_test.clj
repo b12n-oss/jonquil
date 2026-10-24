@@ -77,8 +77,50 @@
       (is (= old new)
           (str "keyval " (format "0x%x" kv) " state " st ": legacy " (pr-str old) " keymap " (pr-str new))))))
 
+;; --- slice S2: the three clauses above the S1 block -----------------------
+
+(defn- legacy-slot
+  "Slice S2's oracle: the find-nav, F6 and Cmd+Shift+O-source clauses that
+  sat directly above the S1 slot in on-window-key (window.clj at 6f3909b),
+  then the S1 block. The find-nav clause is find-bar/handle-nav-key!'s own
+  body inlined (find_bar.clj at 6f3909b): preedit? and open? are its two
+  guards. Same substitution rules as legacy-block."
+  [keyval state {:keys [preedit? open? source-focused?]}]
+  (or (cond
+        preedit? nil
+        (not open?) nil
+        (and (= keyval 0xffc0) (shift-held? state)) [:find/previous {}]
+        (= keyval 0xffc0) [:find/next {}]
+        (and (command-chord? state) (shift-held? state) (= keyval 0x67)) [:find/previous {}]
+        (and (command-chord? state) (= keyval 0x67)) [:find/next {}]
+        :else nil)
+      (cond
+        (and (= keyval 0xffc3) (not (shift-held? state))) [:focus/toggle {}]
+        (and (command-chord? state) (shift-held? state) (= keyval 0x6f) source-focused?)
+        [:source/open-here {}]
+        :else (legacy-block keyval state))))
+
+(def ^:private condition-states
+  (for [p [false true] o [false true] f [false true]]
+    {:preedit? p :open? o :source-focused? f}))
+
+(defn- holds-for [{:keys [preedit? open? source-focused?]}]
+  {:find-bar-navigable (and open? (not preedit?))
+   :source-focused source-focused?})
+
+(deftest keymap-matches-legacy-slot-test
+  (is (= 8 (count condition-states)))
+  (doseq [kv (concat keyvals [0xffc0 0xffc3 0x67]) st states cs condition-states]
+    (let [old (legacy-slot kv st cs)
+          new (some-> (km/resolve-binding (:window km/shipped) kv st (holds-for cs))
+                      ((juxt :command #(or (:args %) {}))))]
+      (is (= old new)
+          (str "keyval " (format "0x%x" kv) " state " st " " (pr-str cs)
+               ": legacy " (pr-str old) " keymap " (pr-str new))))))
+
 (deftest shipped-keymap-resolves-test
-  (is (= [] (km/problems (:window km/shipped) (set (keys registry/window-commands))))))
+  (is (= [] (km/problems (:window km/shipped) (set (keys registry/window-commands))
+                         (set (keys registry/window-conditions))))))
 
 (deftest format-chords-pass-through-test
   ;; Review Focus 2: Cmd+Alt+L and Cmd+Alt+F belong to the editor
