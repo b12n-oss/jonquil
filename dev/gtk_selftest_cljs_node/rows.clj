@@ -149,7 +149,7 @@
                                (and browser? ok? running? back?
                                     (= 1 (count opened))
                                     (= opened opened-end)
-                                    (boolean (re-matches #"http://127\.0\.0\.1:\d+" (str (first opened)))))
+                                    (boolean (re-matches #"http://127\.0\.0\.1:\d+/\?t=[-0-9a-f]+" (str (first opened)))))
                                {:browser browser? :ok ok? :running running? :back back? :opened opened
                                 :opened-end opened-end
                                 :text (support/since ui mark)}))))))
