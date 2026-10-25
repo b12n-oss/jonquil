@@ -2267,7 +2267,7 @@
 
 (defn- remove-tab!
   "Takes tab id out of the window, in the spike's order: out of tabs first
-  (so the switch-page remove_page fires never resolves to it), its four
+  (so the switch-page remove_page fires never resolves to it), its five
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."

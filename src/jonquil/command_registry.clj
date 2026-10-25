@@ -8,8 +8,8 @@
 
   Slices S1-S4 register the window's chords and S5-S6 the editor's; S7's
   context menus read the same table (editor-menu, console-menu,
-  menu-items); in later slices the palette does too, and Part 2's plugins
-  add their own."
+  menu-items), S8's command palette lists it (run-command-in), and Part 2's
+  plugins add their own."
   (:require [jonquil.keymap :as km]))
 
 (defn- call [k & args]
@@ -130,8 +130,10 @@
 (def console-commands
   "The console's context-menu commands (slice S7). The console's keys stay
   in jonquil.gtk.console-view, outside Part 1's two key chains."
+  ;; :palette? false: its popup takes keys only while the console has focus,
+  ;; and a palette run hands focus back to the editor (review fix I3)
   {:console/complete {:doc "Complete the symbol at the console's caret." :scope :console
-                      :run (act :complete!)}})
+                      :palette? false :run (act :complete!)}})
 
 (def commands
   "Every registered command, the three scopes merged; ids never collide

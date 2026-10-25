@@ -178,3 +178,41 @@
       (on-gtk (close! ui)
               (support/check :palette-throw-contained (and status-ok? (= "(+ 1 2)" text))
                              {:status (g/label-text status) :text text})))))
+
+(defn row-palette-closes-its-own-tab
+  "Review fix I1: running Close the tab from a second tab's palette frees
+  that tab's editor view while the palette's posted refocus is still
+  queued. The refocus must hold its own ref on the view and skip a view
+  that's no longer in a window: the process lives, the first tab is left,
+  and no GTK warning is printed for the dead view (the selftest's output
+  is the witness for that part)."
+  [ui]
+  (go-row :palette-closes-its-own-tab support/check
+    (let [n0 (on-gtk (count ((:tabs* ui))))
+          _ (on-gtk ((:new-tab!* ui))
+                    (let [t ((:active-tab* ui)) p (:palette t)]
+                      ((:open-palette!* ui))
+                      (palette/set-query! p "close the tab")
+                      (palette/run-selected! p)))
+          settled? (await-until 2000 20 #(= n0 (count ((:tabs* ui)))))
+          _ (await-until 300 20 (constantly false))
+          n1 (on-gtk (count ((:tabs* ui))))]
+      (on-gtk (support/check :palette-closes-its-own-tab (and settled? (= n0 n1))
+                             {:before n0 :after n1})))))
+
+(defn row-palette-arrow-keys
+  "Review fix I2: Up and Down, through the entry controller's own handler,
+  move the selection and are taken (1); another key isn't (0)."
+  [ui]
+  (go-row :palette-arrow-keys support/check
+    (on-gtk (let [p (:palette ui)]
+              ((:open-palette!* ui))
+              (let [down (palette/handle-key! p 0xff54)
+                    i1 (:index @(:state p))
+                    up (palette/handle-key! p 0xff52)
+                    i0 (:index @(:state p))
+                    other (palette/handle-key! p 0x061)]
+                (close! ui)
+                (support/check :palette-arrow-keys
+                               (and (= 1 down up) (= 1 i1) (= 0 i0) (= 0 other))
+                               {:down down :up up :i1 i1 :i0 i0 :other other}))))))

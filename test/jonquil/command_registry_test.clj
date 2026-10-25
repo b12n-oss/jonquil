@@ -243,7 +243,7 @@
 
 (deftest palette-hidden-commands-test
   (is (= #{:find/bar-key :popover/close-all :source/open-here :source/close :source/back
-           :source/jump-back :tree/close-menu :tree/leave :tab/select :palette/open}
+           :source/jump-back :tree/close-menu :tree/leave :tab/select :palette/open :console/complete}
          (set (keep (fn [[id c]] (when (false? (:palette? c)) id)) registry/commands)))))
 
 (deftest run-command-in-test
