@@ -460,3 +460,23 @@
                                     (= 1 h3) (= [8 11] sel3))
                                {:focus-is-editor focus-is-editor? :initial initial
                                 :h1 h1 :sel1 sel1 :h2 h2 :sel2 sel2 :h3 h3 :sel3 sel3}))))))
+
+(defn row-find-preedit-ends-at-close
+  "A composition the bar was closed over (Escape, a click elsewhere) may
+  never report its end, so open! starts with none: after closing with the
+  preedit flag still set and opening again, F3 goes to the next match."
+  [ui]
+  (go-row :find-preedit-ends-at-close support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui)]
+              (try
+                (editor/set-text! ed "foo bar foo")
+                (find-bar/open! fb :find)
+                (g/gtk-editable-set-text (:query fb) "foo")
+                (reset! (:preedit-active? fb) true)
+                (find-bar/close! fb)
+                (find-bar/open! fb :find)
+                (let [f3 (find-bar/handle-key! fb 0xffc0 0)]
+                  (support/check :find-preedit-ends-at-close (= 1 f3) {:f3 f3}))
+                (finally
+                  (reset! (:preedit-active? fb) false)
+                  (find-bar/close! fb)))))))

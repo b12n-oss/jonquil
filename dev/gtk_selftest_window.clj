@@ -134,6 +134,7 @@
    find-replace/row-find-typing-keeps-caret
    find-replace/row-find-return-in-replacement
    find-replace/row-window-find-keys-editor-focused
+   find-replace/row-find-preedit-ends-at-close
    close-prerun/row-line-col-typing
    close-prerun/row-close-dismissed
    close-prerun/row-close-save-failed
@@ -220,6 +221,7 @@
    rename-menus/row-rename-cmd-does-nothing
    rename-menus/row-rename-cmd-shift-f6-does-nothing
    rename-menus/row-rename-closed-signal-syncs
+   rename-menus/row-rename-escape-refocuses-editor
    rename-menus/row-rename-entry-keeps-window-keys
    rename-menus/row-menu-actions
    rename-menus/row-menu-actions-console-complete

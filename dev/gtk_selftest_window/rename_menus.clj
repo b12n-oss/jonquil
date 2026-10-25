@@ -197,6 +197,28 @@
                              (and opened? closed?)
                              {:opened opened? :closed closed?})))))
 
+(defn row-rename-escape-refocuses-editor
+  "Escape closes the rename popover and the editor has focus again, not
+  the editor's scrolled window: GTK moves focus to the popover's parent
+  once it unmaps, after its \"closed\" handler has run, so the handler's
+  own grab used to be undone (found with the command palette, slice S8)."
+  [ui]
+  (go-row :rename-escape-refocuses-editor support/check
+    (let [ed (:editor ui) rp (:rename-popover ui)
+          _ (on-gtk (editor/set-text! ed "(map inc [1])")
+                    (support/place-cursor! (:buf ed) 2)
+                    (editor/handle-key! ed support/KEY-F6 g/SHIFT-MASK))
+          entry? (await-until 2000 20 #(let [f (g/gtk-root-get-focus (:window ui))]
+                                         (and (not (ffi/null? f))
+                                              (not (zero? (g/gtk-widget-is-ancestor f (:popover rp)))))))
+          hesc (on-gtk ((:handle-window-key! ui) ffi/null support/KEY-ESCAPE 0 0 ffi/null))
+          closed? (await-until 1000 20 #(not (popover/open? rp)))
+          focused? (await-until 2000 20 #(= (:view ed) (g/gtk-root-get-focus (:window ui))))]
+      (on-gtk (when (popover/open? rp) (popover/hide! rp))
+              (support/check :rename-escape-refocuses-editor
+                             (and entry? (= 1 hesc) closed? focused?)
+                             {:entry entry? :escape hesc :closed closed? :focused focused?})))))
+
 (def ^:private KEY-T 0x074)
 (def ^:private KEY-W 0x077)
 (def ^:private KEY-F5 0xffc2)
