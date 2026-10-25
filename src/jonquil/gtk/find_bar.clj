@@ -184,8 +184,15 @@
   whichever other widget held it). The reorder makes the query's own
   select_region the LAST thing to touch selection at all, so nothing after
   it can revoke it -- independent of grab_focus order or window/OS focus
-  timing, which a probe confirmed is not itself the deciding factor here."
+  timing, which a probe confirmed is not itself the deciding factor here.
+
+  The preedit flag starts false. If focus left the bar mid-composition and
+  the input method never reported the composition's end, the flag stays
+  set while the bar stays open, and every key but typing yields (Escape,
+  F3, Return; nav-ready? is false too, so F3 from the editor does
+  nothing). Cmd/Ctrl+F or H, which call this, are the way out."
   [fb mode]
+  (reset! (:preedit-active? fb) false)
   (g/gtk-widget-set-visible (:box fb) 1)
   (let [replace? (= mode :replace)]
     (doseq [w (:replace-widgets fb)] (g/gtk-widget-set-visible w (if replace? 1 0))))

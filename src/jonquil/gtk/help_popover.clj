@@ -24,9 +24,7 @@
   more than quick doc's summary. show-full-doc! raises its max content
   height (60% of the window's own height) before popping it up, since
   unlike the quick-doc popover it can't size itself once at construction."
-  (:require [jolt.ffi :as ffi]
-            [jonquil.gtk.callbacks :refer [callable]]
-            [jonquil.gtk.ffi :as g]
+  (:require [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]))
 
 ;; Fix wave item 2: wide enough for a real docstring line's hard break to
@@ -129,8 +127,9 @@
   \"closed\" handler (jonquil.gtk.popover/make-popover's own autohide
   branch already connects the first, to keep :open? in sync) that gives
   keyboard focus back to view -- every close path (Enter's own hide!,
-  GTK's own Escape/click-outside) ends in this same signal, so this is the
-  one place that needs to run regardless of which path closed it. Returns
+  GTK's own Escape/click-outside) ends in this same signal. It's
+  jonquil.gtk.popover/refocus-view-on-close!, which posts the grab until
+  GTK has finished closing; a grab in the handler itself was undone. Returns
   the jonquil.gtk.popover map plus :entry and :problem-label."
   [view]
   (let [entry (g/gtk-entry-new)
@@ -144,10 +143,7 @@
     (g/gtk-box-append box entry)
     (g/gtk-box-append box problem-label)
     (popover/set-child! pp box)
-    (g/g-signal-connect-data (:popover pp) "closed"
-                             (callable (fn [_pop _data] (g/gtk-widget-grab-focus view) nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (popover/refocus-view-on-close! pp)
     (assoc pp :entry entry :problem-label problem-label)))
 
 (defn show-rename!

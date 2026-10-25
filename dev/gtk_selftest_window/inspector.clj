@@ -620,7 +620,9 @@
   did. A program running ((Thread/sleep 5000) via Run), the def prompt
   open (continuing from row-inspect-cols-match's own open panel):
   Escape must close the prompt and leave the program running, then Stop
-  ends it cleanly."
+  ends it cleanly. The rows view has keyboard focus again once the prompt
+  has closed, not the inspector's scrolled window (the in-handler grab GTK
+  undid, found with the rename popover)."
   [ui]
   (go-row :row-inspect-def-prompt-escape-safe support/check
     (let [pane (:inspector ui) cv (:console ui) dp (:def-popover pane)
@@ -633,14 +635,16 @@
       (let [prompt-open? (await-until 2000 20 #(popover/open? dp))
             handled (on-gtk ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil))
             prompt-closed? (await-until 2000 20 #(not (popover/open? dp)))
-            still-running? (not (support/idle? ui))]
+            still-running? (not (support/idle? ui))
+            view-focused? (await-until 2000 20 #(= (:view pane) (g/gtk-root-get-focus (:window ui))))]
         (on-gtk ((:stop!* ui)))
         (let [stopped? (await-until 3000 20 #(support/idle? ui))]
           (support/check :row-inspect-def-prompt-escape-safe
                          (and running? prompt-open? (= 1 handled) prompt-closed?
-                              still-running? stopped?)
+                              still-running? stopped? view-focused?)
                          {:running running? :prompt-open prompt-open? :handled handled
                           :prompt-closed prompt-closed? :still-running still-running?
+                          :view-focused view-focused?
                           :stopped stopped? :text (support/since ui mark)}))))))
 
 ;; The "ev* swap hides the panel" minor (apply-selection!, window.clj) has

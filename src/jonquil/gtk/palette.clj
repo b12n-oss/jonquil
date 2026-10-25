@@ -12,7 +12,7 @@
   with the entry's command id, so a command that opens a popover of its own
   isn't closed by the palette's close."
   (:require [jolt.ffi :as ffi]
-            [jonquil.gtk.callbacks :refer [callable on-gui!]]
+            [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]
             [jonquil.palette :as data]))
@@ -84,18 +84,6 @@
       KEY-PAGE-DOWN (do (move! pal PAGE-STEP) 1)
       0)))
 
-(defn- refocus!
-  "Gives view focus back, unless something other than view's own container
-  (where GTK leaves it when a popover parented there unmaps) holds it, or
-  view is no longer in a window (its tab closed: Close the tab run from
-  this palette, or Cmd/Ctrl+W while it was open)."
-  [view]
-  (let [root (g/gtk-widget-get-root view)]
-    (when-not (ffi/null? root)
-      (let [f (g/gtk-root-get-focus root)]
-        (when (or (ffi/null? f) (= f (g/gtk-widget-get-parent view)))
-          (g/gtk-widget-grab-focus view))))))
-
 (defn make-palette
   "Builds the palette on view (an editor's GtkTextView): the
   jonquil.gtk.popover map (autohide, below the caret) plus :entry,
@@ -158,24 +146,9 @@
     ;; input method, its own bindings) sees keys first in the bubble phase
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-CAPTURE)
     (g/gtk-widget-add-controller entry keyctl)
-    ;; every close path ends in "closed", so focus goes back to the editor
-    ;; from here, whichever path closed it. Posted (on-gui!), not done in
-    ;; the handler: GTK moves focus to the popover's parent (the editor's
-    ;; scrolled window) once the popover unmaps, after "closed" runs, so a
-    ;; grab here is undone (measured: the root's focus was the scrolled
-    ;; window, not the view). And only while focus is still there or
-    ;; nowhere: a command the palette just ran may have focused a popover of
-    ;; its own (rename's entry), which this must not take back. The posted
-    ;; thunk holds its own ref on view: a command run from here can close
-    ;; the tab, which finalizes view before the thunk runs (review fix I1,
-    ;; measured: gtk_widget_get_root on the freed view failed GTK_IS_WIDGET)
-    (g/g-signal-connect-data (:popover pp) "closed"
-                             (callable (fn [_pop _data]
-                                         (g/g-object-ref view)
-                                         (on-gui! #(try (refocus! view) (finally (g/g-object-unref view))))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; every close path gives the editor focus back, once GTK has finished
+    ;; closing (see jonquil.gtk.popover/refocus-view-on-close!)
+    (popover/refocus-view-on-close! pp)
     pal))
 
 (defn set-handlers!

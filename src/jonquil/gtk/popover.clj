@@ -65,7 +65,7 @@
   value. Every non-autohide popover (completion, quick doc) never has
   anything connected here and is unaffected."
   (:require [jolt.ffi :as ffi]
-            [jonquil.gtk.callbacks :refer [callable]]
+            [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]))
 
 (defn- rect-alloc [[x y w h]]
@@ -224,3 +224,38 @@
   "True between show-at-caret! and hide! on this popover."
   [pp]
   @(:open? pp))
+
+(defn- refocus!
+  "Gives view focus back, unless something other than view's own container
+  (where GTK leaves it when a popover parented there unmaps) holds it, or
+  view is no longer in a window (its tab closed while the popover was
+  open, or by a command run from it)."
+  [view]
+  (let [root (g/gtk-widget-get-root view)]
+    (when-not (ffi/null? root)
+      (let [f (g/gtk-root-get-focus root)]
+        (when (or (ffi/null? f) (= f (g/gtk-widget-get-parent view)))
+          (g/gtk-widget-grab-focus view))))))
+
+(defn refocus-view-on-close!
+  "Connects pp's \"closed\" signal so that, whichever path closed it (hide!,
+  GTK's own Escape or click outside), its view gets keyboard focus back.
+
+  Posted (on-gui!), not done in the handler: GTK moves focus to the
+  popover's parent (the view's scrolled window) once the popover unmaps,
+  after \"closed\" has run, so a grab in the handler is undone (measured
+  with the command palette in slice S8, and then on the rename popover:
+  the root's focus was the scrolled window, not the view). And only while
+  focus is still there or nowhere, so a popover a command just opened
+  keeps the focus it took. The posted thunk holds its own ref on the view,
+  since closing a tab can finalize it before the thunk runs."
+  [pp]
+  (let [view (:view pp)]
+    (g/g-signal-connect-data (:popover pp) "closed"
+                             (callable (fn [_pop _data]
+                                         (g/g-object-ref view)
+                                         (on-gui! #(try (refocus! view) (finally (g/g-object-unref view))))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    nil))
