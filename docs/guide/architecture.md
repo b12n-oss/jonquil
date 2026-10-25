@@ -181,7 +181,16 @@ these:
   `plugin-registry/gui-turn` on the GTK thread against the tab with that
   id (like `mcp.window/gui-call`, except a turn that missed its 5 s
   deadline is abandoned, so a call reported as timed out never lands
-  later). Slice P4 (2026-10-25) made a change take effect
+  later). Slice P5b (2026-10-26) added the `:eval` effect. `ev/eval!`
+  takes `:quiet`, which the two Jolt runtimes honour (`ev/QuietEval`): no
+  history entry, the prompt namespace and `*1` `*2` `*3` `*e` unchanged.
+  In process that's a skipped `repl-vars` shift; a Jolt child gets the
+  code wrapped by `ops/quiet-code`, which binds `*ns*` to the buffer's
+  namespace around a `load-string`, pre-shifts `*1` `*2` as
+  `keeping-history` does, and prints the value after a random token, which
+  the evaluator splits off before anything reaches `on-output`.
+  `plugin-registry/await-eval!` waits on the plugin's worker and stops an
+  eval that times out. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure

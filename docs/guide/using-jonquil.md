@@ -1750,8 +1750,8 @@ works, for example
 
 A plugin is one Clojure file that adds editor commands and the keys that
 run them. This is the first part of plugin support: a plugin's `:edit`
-and `:run` commands work now, with the `:console` and `:buffer` effects,
-and `:eval`, hooks and agent proposals come later.
+and `:run` commands work now, with the `:console`, `:buffer` and `:eval`
+effects, and hooks and agent proposals come later.
 
 Plugin files live in a `plugins` folder beside the settings file, so
 `~/.config/jonquil/plugins/` (or `$XDG_CONFIG_HOME/jonquil/plugins/`). A
@@ -1813,11 +1813,24 @@ switch tabs while it works.
 |---|---|
 | `:console` | `(p/print! ctx s)` prints a line on the console, `(p/status! ctx s)` shows it on the status bar |
 | `:buffer` | `(p/buffer-text ctx)`, `(p/replace-text! ctx text)` (one undo step), `(p/open! ctx path)`, which opens a file in a tab and returns its id; `(assoc ctx ::p/tab id)` acts on that tab |
+| `:eval` | `(p/eval! ctx code)` evaluates quietly and returns `{:value :out :err}`; `(p/repl! ctx code)` evaluates at the console and returns `{:value :out}`. Both take `{:timeout-ms n}` as a third argument |
 
 Calling a function whose effect the plugin didn't declare throws "this
 plugin didn't declare :buffer", and a tab that has closed throws "that tab
-was closed". `:eval` is accepted but its functions, `p/eval!` and
-`p/repl!`, aren't there yet and throw saying so. A throw from a `:run`
+was closed".
+
+`p/eval!` runs the code in the tab's namespace (the one its `ns` form
+names, once that exists), and the console never hears of it. It adds
+nothing to the REPL history, and `*1`, `*2`, `*3` and `*e` are what they
+were before it. `:value` is the printed value, the text the console would
+show after `=> `, and a throw from the code comes back as `:error` with
+`:value` nil. It works with the Jolt dialect for now, in process or in a
+child, and on any other dialect it says to use `p/repl!`, which
+evaluates as if you'd typed the code at the console and works everywhere.
+Either one waits up to 10 seconds by default and then stops the eval and
+throws "the eval took longer than 10000 ms and was stopped". It also
+throws "the REPL is busy" while something else is running, and
+`p/eval!` stops code that reads from the console. A throw from a `:run`
 command shows on the status bar and the console with the plugin's id.
 One run of a command goes at a time: pressing its key again while it's
 still working says it's still running, and nothing can stop a command
