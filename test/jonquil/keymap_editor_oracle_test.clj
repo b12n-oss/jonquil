@@ -13,7 +13,14 @@
   masks, which a window self-test row pins); alt-chord-f-or-l? takes os
   and calls the public editor/keycode-fallback?; KEY-* become editor.clj's
   literal values. :unmatched is the old fall-through to the typing
-  clauses. Needs GTK4 installed (jonquil.gtk.editor), no display."
+  clauses.
+
+  Slice S6 adds the whole-editor gate: legacy-editor transcribes the whole
+  cond of handle-key! at 7f6fa07 (preedit, the completion popup, Cmd/Ctrl+
+  Enter, plain Return, the S5 slot, the typing clauses), and
+  jonquil.command-registry/editor-answer over the shipped keymap must answer
+  the same and call the same things, over every stage answer. Needs GTK4
+  installed (jonquil.gtk.editor), no display."
   (:require [clojure.test :refer [deftest is]]
             [jonquil.command-registry :as registry]
             [jonquil.gtk.editor :as editor]
@@ -61,10 +68,16 @@
      :format-selection! (one edit-1?) :redo! (one can-redo?) :writable? (constantly writable?)
      :quick-doc! (constantly nil) :jump! (constantly nil) :rename! (constantly nil)}))
 
+(def ^:private slot-bindings
+  ;; S5's slot sat below the Run Form clause, so its bindings are the
+  ;; :editor keymap without Run Form; keymap-matches-legacy-editor-test
+  ;; covers Run Form
+  (vec (remove #(= :run/form (:command %)) (:editor km/shipped))))
+
 (defn- keymap-chords [keyval keycode state os cs]
   (let [calls (atom [])
         ctx (fake-ctx cs)
-        outcome (km/dispatch (:editor km/shipped) keyval state
+        outcome (km/dispatch slot-bindings keyval state
                              {:holds? (registry/holds-fn registry/editor-conditions ctx)
                               :run! (fn [b] (swap! calls conj (:command b))
                                       (registry/run-command! registry/editor-commands b ctx))
@@ -107,3 +120,58 @@
 (deftest shipped-editor-keymap-resolves-test
   (is (= [] (km/problems (:editor km/shipped) (set (keys registry/editor-commands))
                          (set (keys registry/editor-conditions))))))
+
+;; --- slice S6: the whole editor --------------------------------------------
+
+(defn- plain-return? [keyval state]
+  (and (contains? #{0xff0d 0xff8d} keyval) (not (bits? state :shift :ctrl :meta))))
+
+(defn- legacy-editor
+  "handle-key!'s cond at 7f6fa07, each stage's answer read from cs."
+  [keyval keycode state os {:keys [preedit? popup-1? return-1? typing-1?] :as cs}]
+  (let [one (fn [b] (if b 1 0))]
+    (cond
+      preedit? [0 []]
+      popup-1? [1 [:popup]]
+      (and (command-chord? state) (contains? #{0xff0d 0xff8d} keyval)) [1 [:popup :run/form]]
+      (plain-return? keyval state) [(one return-1?) [:popup :typing]]
+      :else (let [[outcome calls] (legacy-chords keyval keycode state os cs)]
+              (case outcome
+                :handled [1 (into [:popup] calls)]
+                :to-gtk [0 (into [:popup] calls)]
+                [(one typing-1?) [:popup :typing]])))))
+
+(defn- keymap-editor [keyval keycode state os {:keys [preedit? popup-1? return-1? typing-1?] :as cs}]
+  (let [calls (atom [])
+        one (fn [b] (if b 1 0))
+        ctx (assoc (fake-ctx cs) :preedit-active? (constantly preedit?) :run-form! (constantly nil))
+        answer (registry/editor-answer
+                (:editor km/shipped) keyval state
+                {:holds? (registry/holds-fn registry/editor-conditions ctx)
+                 :run! (fn [b] (swap! calls conj (:command b))
+                         (registry/run-command! registry/editor-commands b ctx))
+                 :physical (editor/physical-key os keyval keycode state)
+                 :popup-key! (fn [] (swap! calls conj :popup) (one popup-1?))
+                 ;; the real typing-key! tries plain Return first
+                 :typing-key! (fn [] (swap! calls conj :typing)
+                                (one (if (plain-return? keyval state) return-1? typing-1?)))})]
+    [answer @calls]))
+
+(def ^:private stage-states
+  (for [cs command-states p [false true] u [false true] r [false true] t [false true]]
+    (assoc cs :preedit? p :popup-1? u :return-1? r :typing-1? t)))
+
+(deftest keymap-matches-legacy-editor-test
+  (let [cells (for [kv (conj keyvals 0xff8d) kc [0 3] st states cs stage-states]
+                [kv kc st "Mac OS X" cs])
+        t0 (System/nanoTime)
+        bad (vec (keep (fn [[kv kc st os cs]]
+                         (let [old (legacy-editor kv kc st os cs) new (keymap-editor kv kc st os cs)]
+                           (when (not= old new)
+                             (str "keyval " (format "0x%x" kv) " keycode " kc " state " st " "
+                                  (pr-str cs) ": legacy " (pr-str old) " keymap " (pr-str new)))))
+                       cells))
+        ms (quot (- (System/nanoTime) t0) 1000000)]
+    (println (str "keymap-matches-legacy-editor-test: " (count cells) " cells in " ms " ms"))
+    (is (= 128 (count stage-states)))
+    (is (zero? (count bad)) (str (count bad) " mismatches, first: " (pr-str (take 3 bad))))))

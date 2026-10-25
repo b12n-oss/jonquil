@@ -1,5 +1,5 @@
 (ns jonquil.command-registry-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]))
 
 (def ^:private ctx-fns
@@ -150,10 +150,11 @@
                           :format-all! (rec :format-all! answer)
                           :format-selection! (rec :format-selection! answer)
                           :redo! (rec :redo! answer) :quick-doc! (rec :quick-doc! answer)
-                          :jump! (rec :jump! answer) :rename! (rec :rename! answer)})
+                          :jump! (rec :jump! answer) :rename! (rec :rename! answer)
+                          :run-form! (rec :run-form! answer)})
         run (fn [id c] (reset! calls []) [(registry/run-command! registry/editor-commands {:command id} c) @calls])]
     (is (= #{:completion/open :edit/toggle-comment :edit/format-all :edit/format-selection :edit/redo
-             :help/quick-doc :help/jump :edit/rename}
+             :help/quick-doc :help/jump :edit/rename :run/form}
            (set (keys registry/editor-commands))))
     (doseq [[id k] [[:edit/toggle-comment :toggle-comment!] [:edit/format-all :format-all!]
                     [:edit/format-selection :format-selection!] [:edit/redo :redo!]]]
@@ -162,7 +163,7 @@
     ;; Review Focus 5: these answer :handled whatever their fn returns, nil
     ;; included (no completion or quick-doc fn registered)
     (doseq [[id k] [[:completion/open :complete!] [:help/quick-doc :quick-doc!]
-                    [:help/jump :jump!] [:edit/rename :rename!]]]
+                    [:help/jump :jump!] [:edit/rename :rename!] [:run/form :run-form!]]]
       (is (= [:handled [k]] (run id (ctx nil))) (str id)))))
 
 (deftest every-editor-command-is-documented-test
@@ -174,3 +175,39 @@
   (let [holds (fn [v] ((registry/holds-fn registry/editor-conditions {:writable? (constantly v)}) :writable))]
     (is (true? (holds true)))
     (is (false? (holds false)))))
+
+;; --- slice S6: Run Form and the editor's fixed stages ----------------------
+
+(deftest editor-preedit-condition-test
+  (let [holds (fn [v] ((registry/holds-fn registry/editor-conditions {:preedit-active? (constantly v)})
+                       :preedit-active))]
+    (is (true? (holds true)))
+    (is (false? (holds false)))))
+
+(deftest editor-answer-test
+  (let [asked (atom []) ran (atom [])
+        bs [{:key "r" :mods #{:cmd} :command :x}]
+        ans (fn [kv {:keys [preedit? popup answer typing]}]
+              (reset! asked []) (reset! ran [])
+              (registry/editor-answer bs kv 4
+                                      {:holds? (fn [id] (swap! asked conj id) (and preedit? (= id :preedit-active)))
+                                       :run! (fn [b] (swap! ran conj (:command b)) answer)
+                                       :popup-key! (fn [] (swap! ran conj :popup) popup)
+                                       :typing-key! (fn [] (swap! ran conj :typing) typing)}))]
+    (testing "a composing preedit yields every key, asking nothing else"
+      (is (= 0 (ans 0x72 {:preedit? true :popup 1 :answer :handled :typing 1})))
+      (is (= [] @ran))
+      (is (= [:preedit-active] @asked)))
+    (testing "the popup's 1 is final"
+      (is (= 1 (ans 0x72 {:popup 1 :answer :handled :typing 1})))
+      (is (= [:popup] @ran)))
+    (testing "the popup's 0 or nil goes on to the keymap"
+      (doseq [p [0 nil]]
+        (is (= 1 (ans 0x72 {:popup p :answer :handled :typing 0})))
+        (is (= [:popup :x] @ran))
+        (is (= 0 (ans 0x72 {:popup p :answer :to-gtk :typing 1})))
+        (is (= [:popup :x] @ran))))
+    (testing "no binding matches: the typing stages answer"
+      (is (= 1 (ans 0x61 {:popup 0 :typing 1})))
+      (is (= [:popup :typing] @ran))
+      (is (= 0 (ans 0x61 {:popup 0 :typing 0}))))))

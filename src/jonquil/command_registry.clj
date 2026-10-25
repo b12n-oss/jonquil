@@ -6,7 +6,7 @@
   rest; the editor's thunks), so a command is a plain function a test can
   call with a fake ctx. No GTK here.
 
-  Slices S1-S4 register the window's chords and S5 the editor's; in later
+  Slices S1-S4 register the window's chords and S5-S6 the editor's; in later
   slices menus and the context menu read the same table, and Part 2's
   plugins add their own."
   (:require [jonquil.keymap :as km]))
@@ -105,12 +105,15 @@
    :edit/redo {:doc "Redo." :scope :editor :run (edit :redo!)}
    :help/quick-doc {:doc "Show the docs for the symbol at the caret." :scope :editor :run (act :quick-doc!)}
    :help/jump {:doc "Jump to the definition of the symbol at the caret." :scope :editor :run (act :jump!)}
-   :edit/rename {:doc "Rename the symbol at the caret." :scope :editor :run (act :rename!)}})
+   :edit/rename {:doc "Rename the symbol at the caret." :scope :editor :run (act :rename!)}
+   ;; slice S6
+   :run/form {:doc "Run the form at the caret." :scope :editor :run (act :run-form!)}})
 
 (def editor-conditions
   "Named conditions an editor binding's :when can ask for, over the same
   per-key ctx."
-  {:writable (fn [ctx] ((:writable? ctx)))})
+  {:writable (fn [ctx] ((:writable? ctx)))
+   :preedit-active (fn [ctx] ((:preedit-active? ctx)))})
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named
@@ -147,3 +150,27 @@
     (and (not= keyval KEY-ESCAPE) (holds? :rename-focused)) 0
     (= :handled (km/dispatch bindings keyval state opts)) 1
     :else 0))
+
+(defn editor-answer
+  "jonquil.gtk.editor/handle-key!'s whole answer for a lowered keyval and a
+  modifier state, 1 (used up) or 0 (GTK's), as the plugins design orders
+  it: preedit yield, completion popup, editor keymap, typing stages.
+
+  Three of those stages stay code, not bindings, because each covers a
+  class of keys. While a preedit is composing every key is the input
+  method's, so the named condition :preedit-active answers 0 before
+  anything else is asked. An open completion popup gets first look at its
+  own keys through the popup-key! thunk; its 1 is final, and its 0 or nil
+  goes on. The typing-key! thunk (smart enter, auto-pairs, Backspace, Tab
+  and indent) answers only once no binding matched.
+
+  Between them, jonquil.keymap/dispatch over bindings with holds?, run!
+  and physical: :handled is 1 and :to-gtk is 0."
+  [bindings keyval state {:keys [holds? popup-key! typing-key!] :as opts}]
+  (cond
+    (holds? :preedit-active) 0
+    (= 1 (popup-key!)) 1
+    :else (case (km/dispatch bindings keyval state opts)
+            :handled 1
+            :to-gtk 0
+            (typing-key!))))
