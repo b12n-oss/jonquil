@@ -36,7 +36,7 @@
   (support/place-cursor! (:buf ed) (inc (str/index-of rename-fixture "(greet 1)"))))
 
 ;; P4.T7: this file's own private copy (measured against gdkkeysyms.h,
-;; same value jonquil.gtk.editor's own KEY-F2 uses); KEY-F6 above already
+;; the key the editor keymap names "F2"); KEY-F6 above already
 ;; covers Shift+F6.
 (def ^:private KEY-F2 0xffbf)
 

@@ -730,8 +730,8 @@
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-D 0x64)
 
-;; P4.T6 addition (gdkkeysyms.h:380, same value jonquil.gtk.editor's own
-;; KEY-SPACE cites): Ctrl+Space opens/commits the REPL completion popup.
+;; P4.T6 addition (gdkkeysyms.h:380, the editor keymap's "space"):
+;; Ctrl+Space opens/commits the REPL completion popup.
 (def ^:private KEY-SPACE 0x020)
 
 (defn- command-chord?

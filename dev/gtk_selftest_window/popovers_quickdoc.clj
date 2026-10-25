@@ -186,8 +186,8 @@
 ;; --- P4.T4: quick doc and jump to definition -------------------------------
 
 ;; The shared key table, this file's own private copies (measured
-;; against gdkkeysyms.h, same values editor.clj's own KEY-Q/KEY-B/KEY-F1/
-;; KEY-F12 use).
+;; against gdkkeysyms.h, the keys the editor keymap names "q", "b", "F1"
+;; and "F12").
 (def ^:private KEY-B 0x062)
 (def ^:private KEY-F1 0xffbe)
 (def ^:private KEY-F12 0xffc9)
