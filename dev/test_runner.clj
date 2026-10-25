@@ -38,6 +38,8 @@
     jonquil.command-registry-test
     jonquil.keymap-shipped-test
     jonquil.palette-test
+    jonquil.plugin-test
+    jonquil.plugin-check-test
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test
