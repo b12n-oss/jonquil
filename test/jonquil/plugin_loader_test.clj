@@ -55,10 +55,11 @@
     (is (= #{:p3l-a :p3l-b} (set (keys (:plugins registry)))) (pr-str lines))
     (is (some #(= :p3l-a/wrap (:command %)) (reg/bindings registry :editor)))))
 
-(deftest load-all-run-commands-named-test
-  (let [d (dir-with [["p3l-run.clj" (source "p3l-run" :extra "\n              {:id :p3l-run/say :doc \"Say.\" :scope :window :run (fn [_ _] nil)}")]])
-        {:keys [lines]} (load-dir d)]
-    (is (some #(str/includes? % "p3l-run: its :run commands wait for effects") lines) (pr-str lines))))
+(deftest load-all-run-commands-installed-test
+  (let [d (dir-with [["p3l-run.clj" (source "p3l-run" :extra "\n              {:id :p3l-run/say :doc \"Say.\" :scope :window :run (fn [_] nil)}")]])
+        {:keys [registry lines]} (load-dir d)]
+    (is (= ["plugin p3l-run loaded (2 commands)"] lines))
+    (is (contains? (reg/commands registry) :p3l-run/say))))
 
 (deftest skipped-names-are-lines-test
   (let [{:keys [lines]} (load-dir (dir-with [["Nope.clj" "x"]]))]
