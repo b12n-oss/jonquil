@@ -782,3 +782,34 @@
         (is (= "[true false]" (:printed r)) "the list loaded this time; the stopped request never ran")
         (is (some #(= [:system "; auto-require: arslow2.core\n"] %) out) "tried again"))
       (finally (ev/stop! e)))))
+
+(defn- run-quiet [e code ns-source]
+  (let [done (promise) out (atom [])]
+    (ev/eval! e code {:quiet "jonquil-quiet-test:" :ns-source ns-source
+                      :on-output (fn [k s] (swap! out conj [k s]))
+                      :on-complete (fn [r] (deliver done r))})
+    [(deref done 20000 :timeout) @out]))
+
+(deftest quiet-eval-keeps-history-live-test
+  ;; plugins P5b: a :quiet eval on a Jolt child leaves the REPL as it was
+  (let [dir (temp-project) e (make dir)]
+    (try
+      (is (nil? (ev/start! e)))
+      (is (satisfies? ev/QuietEval e))
+      (run e "(ns demo.quiet) (def here :q)" false)
+      (run e "(in-ns 'user)" false)
+      (doseq [c ["1" "2" "3"]] (run e c false))
+      (run e "(throw (ex-info \"e1\" {}))" false)
+      (let [items (:items @(ev/history e))
+            prompt (ev/prompt-ns e)
+            [r out] (run-quiet e "(println \"side\") (+ 40 2)" nil)]
+        (is (= :ok (:status r)))
+        (is (= "42" (:printed r)))
+        (is (= [[:out "side\n"]] out) "the token line never reaches on-output")
+        (is (= {:status :error :error-text "Error: e2"}
+               (select-keys (first (run-quiet e "(throw (ex-info \"e2\" {}))" nil)) [:status :error-text])))
+        (is (= ":q" (:printed (first (run-quiet e "here" "(ns demo.quiet)")))) "the buffer's namespace")
+        (is (= items (:items @(ev/history e))) "no history entry")
+        (is (= prompt (ev/prompt-ns e)) "the prompt namespace didn't move")
+        (is (= "[3 2 1 \"e1\"]" (:printed (first (run e "[*1 *2 *3 (ex-message *e)]" false))))))
+      (finally (ev/stop! e)))))
