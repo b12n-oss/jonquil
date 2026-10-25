@@ -49,7 +49,6 @@
             [jonquil.gtk.trash :as trash]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
-            [jonquil.keymap :as km]
             [jonquil.last-session :as last-session]
             [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach]
@@ -60,6 +59,7 @@
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
             [jonquil.palette :as pal-data]
+            [jonquil.plugin-registry :as plugin-registry]
             [jonquil.runtime-registry :as registry]
             [jonquil.save-path :as save-path]
             [jonquil.session]
@@ -2162,8 +2162,10 @@
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
             kctx (window-key-ctx ctx keyval0 state)]
+        ;; plugins P3: the live plugins' :window bindings ahead of the
+        ;; shipped ones (a plugin may bind a built-in window command)
         (cmd-registry/window-answer
-         (:window km/shipped) keyval state
+         (plugin-registry/window-bindings @plugin-registry/live) keyval state
          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
           :run! #(cmd-registry/run-command! cmd-registry/window-commands % kctx)}))
       (catch :default e
@@ -2443,7 +2445,8 @@
      palette
      {:on-run (fn [id]
                 (try
-                  (cmd-registry/run-command-in id {:window (window-key-ctx window-key-args 0 0)
+                  (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
+                                               id {:window (window-key-ctx window-key-args 0 0)
                                                    :editor (editor/key-ctx ed)
                                                    :console {:complete! repl-complete-fn}})
                   (catch :default e
@@ -3219,10 +3222,13 @@
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         ;; slice S8: the palette lists the registry's commands and opens on
         ;; the active tab, whose palette runs the picked one
-        open-palette-fn (fn [] (palette/open! (:palette (active-tab))
-                                              (pal-data/entries {:commands cmd-registry/commands
-                                                                 :keymap km/shipped
-                                                                 :os (System/getProperty "os.name")})))
+        open-palette-fn (fn [] (let [plugins @plugin-registry/live]
+                                 (palette/open! (:palette (active-tab))
+                                                (pal-data/entries
+                                                 {:commands (plugin-registry/all-commands plugins)
+                                                  :keymap {:window (plugin-registry/window-bindings plugins)
+                                                           :editor (plugin-registry/editor-bindings plugins)}
+                                                  :os (System/getProperty "os.name")}))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         window-key-args {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn

@@ -260,7 +260,7 @@
         ctxs {:window {:run-fn (rec :window :run-fn)}
               :editor {:indent! (rec :editor :indent!)}
               :console {:complete! (rec :console :complete!)}}
-        run (fn [id] (reset! calls []) [(registry/run-command-in id ctxs) @calls])]
+        run (fn [id] (reset! calls []) [(registry/run-command-in registry/commands id ctxs) @calls])]
     (is (= [:handled [[:window :run-fn]]] (run :run/run)))
     (is (= [:handled [[:editor :indent!]]] (run :edit/indent)))
     (is (= [:handled [[:console :complete!]]] (run :console/complete)))

@@ -196,13 +196,14 @@
         menu))
 
 (defn run-command-in
-  "Runs the command id from commands with the ctx for its own :scope, out
-  of ctxs {:window c :editor c :console c}: the ctx that scope's key
-  handler builds, so the palette runs a command as its key would. Answers
-  the outcome; nil when id isn't registered."
-  [id ctxs]
-  (when-let [{:keys [scope]} (get commands id)]
-    (run-command! commands {:command id} (get ctxs scope))))
+  "Runs the command id from table (commands, or that and the live plugins'
+  commands) with the ctx for its own :scope, out of ctxs {:window c
+  :editor c :console c}: the ctx that scope's key handler builds, so the
+  palette runs a command as its key would. Answers the outcome; nil when
+  id isn't in table."
+  [table id ctxs]
+  (when-let [{:keys [scope]} (get table id)]
+    (run-command! table {:command id} (get ctxs scope))))
 
 (def ^:private KEY-ESCAPE (km/key-value "Escape"))
 

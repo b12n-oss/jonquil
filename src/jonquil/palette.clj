@@ -39,9 +39,9 @@
 
 (defn entries
   "Every command in commands without :palette? false, sorted by doc, as
-  {:id :doc :chords [label ...] :source \"built-in\"}. :chords are the
-  labels of the :window then :editor bindings in keymap that name the
-  command, in keymap order, without repeats."
+  {:id :doc :chords [label ...] :source s}, s \"built-in\" or the plugin's
+  id name. :chords are the labels of the :window then :editor bindings in
+  keymap that name the command, in keymap order, without repeats."
   [{:keys [commands keymap os]}]
   (let [bindings (concat (:window keymap) (:editor keymap))]
     (->> commands
