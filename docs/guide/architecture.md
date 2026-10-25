@@ -178,8 +178,10 @@ these:
   each call), runs on a future one run per command at a time, and reports
   a throw with the plugin's id. The functions come from
   `plugin-registry/effects`, which the window sets; each is a
-  `mcp.window/gui-call` turn on the GTK thread against the tab with that
-  id. Slice P4 (2026-10-25) made a change take effect
+  `plugin-registry/gui-turn` on the GTK thread against the tab with that
+  id (like `mcp.window/gui-call`, except a turn that missed its 5 s
+  deadline is abandoned, so a call reported as timed out never lands
+  later). Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
