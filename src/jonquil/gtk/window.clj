@@ -3629,6 +3629,9 @@
     ;; each a turn on the GTK thread (it runs on a worker) acting on the
     ;; tab with that id, which may have closed since the command started
     (let [turn (fn [f] (plugin-registry/gui-turn on-gui! f 5000))
+          ;; as the MCP's stop: never interrupt an idle evaluator (an attach
+          ;; evaluator would detach)
+          stop-eval! (fn [] (turn #(when (ev/evaluating? @ev*) (ev/interrupt! @ev*))))
           tab-of (fn [id] (or (some #(when (= id (:id %)) %) @tabs)
                               (throw (ex-info "that tab was closed" {}))))]
       (reset! plugin-registry/effects
@@ -3644,6 +3647,38 @@
                         (turn #(let [r (open-file! @*tab-ctx (str path))]
                                  (when (and (map? r) (:error r)) (throw (ex-info (str (:error r)) {})))
                                  (:id (active-tab)))))
+               ;; plugins P5b: both run through the tab's id, on the
+               ;; plugin's worker; await-eval! stops one that times out
+               :eval! (fn [id code opts]
+                        (when-not (plugin-registry/quiet-capable? @ev*)
+                          (throw (ex-info "p/eval! works with Jolt for now; p/repl! works with every dialect" {})))
+                        (plugin-registry/await-eval!
+                         {:timeout-ms (:timeout-ms opts)
+                          :interrupt! stop-eval!
+                          :fire (fn [cbs]
+                                  (turn #(let [t (tab-of id)]
+                                           (ev/eval! @ev* code (assoc cbs :quiet (str "jonquil-quiet-" (random-uuid) ":")
+                                                                      :ns-source (editor/editor-text (:ed t))
+                                                                      :owner id)))))}))
+               :repl! (fn [id code opts]
+                        (dissoc (plugin-registry/await-eval!
+                                 {:timeout-ms (:timeout-ms opts)
+                                  :interrupt! stop-eval!
+                                  ;; the person can answer a read at the console
+                                  :input-stops? false
+                                  :fire (fn [{:keys [on-output on-complete]}]
+                                          (turn #(let [t (tab-of id)
+                                                       busy (atom nil)]
+                                                   (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
+                                                              code {:ns-source (editor/editor-text (:ed t)) :owner id}
+                                                              (fn [m]
+                                                                (if-let [w (:busy m)]
+                                                                  (reset! busy w)
+                                                                  (let [{:keys [result output]} (:done m)]
+                                                                    (on-output :out output)
+                                                                    (on-complete result)))))
+                                                   @busy)))})
+                                :err))
                :report! (fn [line]
                           (on-gui! #(do (cview/append! cv :system (str "; " line "\n"))
                                         (g/gtk-label-set-text status-label (str "; " line)))))}))
