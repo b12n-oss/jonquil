@@ -116,3 +116,90 @@
                                  (and (= 1 handled) (= "(a b)" text) status?)
                                  {:handled handled :text text :status (g/label-text (:status-label ui))
                                   :lines lines})))))))
+
+;; --- plugins P4: reload, a failed reload, save-to-reload, a removed file --
+
+(def ^:private KEY-K 0x06b)
+
+(defn- source-on
+  "source for id, with its binding on key instead of J."
+  [id key]
+  (str/replace (source id) ":key \"j\"" (str ":key \"" key "\"")))
+
+(defn- wraps-on? [ui keyval]
+  (on-gtk (let [ed (:editor ui)]
+            (editor/set-text! ed "(a b)")
+            (support/place-cursor! (:buf ed) 1)
+            (editor/handle-key! ed keyval ctrl-alt)
+            (= "(when (a b))" (editor/editor-text ed)))))
+
+(defn row-plugin-reload-picks-up-a-change
+  "Rewrite the file to bind K, Reload Plugins: J no longer wraps, K does."
+  [ui]
+  (go-row :plugin-reload-picks-up-a-change support/check
+    (with-plugins ui {"p4-wrap.clj" (source "p4-wrap")}
+      (fn [_]
+        (let [j0 (wraps-on? ui KEY-J)
+              _ (spit (io/file ((:plugins-dir* ui)) "p4-wrap.clj") (source-on "p4-wrap" "k"))
+              lines ((:reload-plugins!* ui))
+              j1 (wraps-on? ui KEY-J)
+              k1 (wraps-on? ui KEY-K)]
+          (support/check :plugin-reload-picks-up-a-change (and j0 (not j1) k1)
+                         {:j-before j0 :j-after j1 :k-after k1 :lines lines}))))))
+
+(defn row-plugin-reload-failure-keeps-old
+  "A cut-off rewrite: the old version stays live, the console says so, and
+  the file is left exactly as written."
+  [ui]
+  (go-row :plugin-reload-failure-keeps-old support/check
+    (with-plugins ui {"p4-keep.clj" (source "p4-keep")}
+      (fn [_]
+        (let [f (io/file ((:plugins-dir* ui)) "p4-keep.clj")
+              broken "(ns jonquil.plugins.p4-keep\n  (:require [jonquil.plugin :as p]))\n(p/defplugin {:id :p4-keep\n"
+              _ (spit f broken)
+              lines ((:reload-plugins!* ui))
+              j (wraps-on? ui KEY-J)
+              on-disk (slurp f)]
+          (support/check :plugin-reload-failure-keeps-old
+                         (and j (= broken on-disk)
+                              (some #(str/includes? % "skipped: line") lines)
+                              (some #(str/includes? % "the previous version stays live") lines))
+                         {:j j :lines lines :file-unchanged (= broken on-disk)}))))))
+
+(defn row-plugin-save-reloads
+  "Saving a plugin file from a tab reloads it: the first tab's text is
+  saved to the plugin's path, then K wraps. The tab's path and text are put
+  back afterwards."
+  [ui]
+  (go-row :plugin-save-reloads support/check
+    (with-plugins ui {"p4-save.clj" (source "p4-save")}
+      (fn [_]
+        (let [t (on-gtk ((:active-tab* ui)))
+              old-path @(:path t)
+              old-text (on-gtk (editor/editor-text (:editor ui)))
+              target (str (io/file ((:plugins-dir* ui)) "p4-save.clj"))]
+          (try
+            (on-gtk (editor/set-text! (:editor ui) (source-on "p4-save" "k"))
+                    ((:save-to! ui) target))
+            (let [k? (await-until 10000 50 #(contains? (set (map :key (plugin-registry/bindings @plugin-registry/live :editor))) "k"))
+                  k (wraps-on? ui KEY-K)]
+              (support/check :plugin-save-reloads (and k? k) {:registered k? :k k}))
+            (finally
+              (on-gtk (reset! (:path t) old-path)
+                      (editor/set-text! (:editor ui) old-text)
+                      (editor/mark-saved! (:editor ui))))))))))
+
+(defn row-plugin-removed-file
+  "Delete a loaded plugin's file and Reload Plugins: its key stops working
+  and the console says its file is gone."
+  [ui]
+  (go-row :plugin-removed-file support/check
+    (with-plugins ui {"p4-gone.clj" (source "p4-gone")}
+      (fn [_]
+        (let [j0 (wraps-on? ui KEY-J)
+              _ (io/delete-file (io/file ((:plugins-dir* ui)) "p4-gone.clj"))
+              lines ((:reload-plugins!* ui))
+              j1 (wraps-on? ui KEY-J)]
+          (support/check :plugin-removed-file
+                         (and j0 (not j1) (some #(= "plugin p4-gone removed: its file is gone" %) lines))
+                         {:j-before j0 :j-after j1 :lines lines}))))))
