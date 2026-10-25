@@ -1802,8 +1802,10 @@ would take a key you type, so it's refused with that reason, and so is an
 editor binding the window always takes first (Cmd+Alt+W is the window's
 Cmd+W, which ignores Alt). A chord a built-in already uses loads with a
 warning naming that command. Plugins load, and take their keys, in id
-order, so when two share a chord the one whose id sorts first wins, and
-the other loads with a warning that its binding never fires. Plugin bindings
+order, so when two share a chord the one whose id sorts first gets it
+first, and the other loads with a warning: that its binding never fires,
+or, when the first one's binding is guarded or can pass the key on, that
+it fires only when the first doesn't. Plugin bindings
 come ahead of the built-in ones, and their commands show in the command
 palette with the plugin's id as the source.
 

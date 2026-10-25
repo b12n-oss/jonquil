@@ -237,3 +237,59 @@
     (is (:ok? r) (pr-str r))
     (is (mentions? r :warnings "plugin p-a"))
     (is (mentions? r :warnings "never fires"))))
+
+;; --- review of 140c969: every case walked as dispatch walks it -------------
+
+(defn- with-earlier
+  "request with earlier plugin p-a's bindings bs (tagged) ahead of the
+  shipped ones in their scopes; p-a's own command :p-a/x is :editor."
+  [bs]
+  (reduce (fn [req [scope b]]
+            (update-in req [:keymap scope] #(into [(assoc b :plugin/source :p-a)] %)))
+          (assoc-in request [:registered :p-a/x] {:scope :editor :passes? false :plugin :p-a})
+          bs))
+
+(defn- check-with [req defs] (pc/validate (assoc req :file-id "wrap-when" :definitions defs)))
+
+(deftest guarded-earlier-binding-is-sometimes-test
+  ;; a guarded earlier binding takes the chord only while its guard holds
+  (doseq [[why bs defs]
+          [["editor vs guarded earlier editor"
+            [[:editor {:key "j" :mods #{:cmd :alt} :when [:writable] :command :p-a/x}]] [good]]
+           ["window vs guarded earlier window"
+            [[:window {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :run/run}]]
+            [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/say}])]]
+           ["editor vs guarded earlier window"
+            [[:window {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :run/run}]] [good]]]]
+    (let [r (check-with (with-earlier bs) defs)]
+      (is (:ok? r) (str why " " (pr-str r)))
+      (is (not (mentions? r :warnings "never fires")) (str why " " (pr-str r)))
+      (is (mentions? r :warnings "plugin p-a") (str why " " (pr-str r))))))
+
+(deftest built-in-unreachable-survives-an-earlier-plugin-test
+  ;; a guarded earlier plugin binding ahead of the built-in Cmd+R: the
+  ;; built-in still always takes it, so it's the load-blocking problem
+  (let [r (check-with (with-earlier [[:window {:key "r" :mods #{:cmd} :when [:tree-focused] :command :run/run}]])
+                      [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (false? (:ok? r)) (pr-str r))
+    (is (mentions? r :problems "can never fire"))
+    (is (mentions? r :problems ":run/run"))
+    (is (mentions? r :warnings "plugin p-a"))))
+
+(deftest unconditional-earlier-plugin-is-never-fires-test
+  (doseq [[why bs defs]
+          [["editor vs earlier editor" [[:editor {:key "j" :mods #{:cmd :alt} :command :p-a/x}]] [good]]
+           ["editor vs earlier window" [[:window {:key "j" :mods #{:cmd :alt} :command :run/run}]] [good]]
+           ["window vs earlier window" [[:window {:key "j" :mods #{:cmd :alt} :command :run/run}]]
+            [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/say}])]]]]
+    (let [r (check-with (with-earlier bs) defs)]
+      (is (:ok? r) (str why " " (pr-str r)))
+      (is (mentions? r :warnings "never fires") (str why " " (pr-str r))))))
+
+(deftest window-over-earlier-editor-takes-it-test
+  ;; the window sees keys first, so this one takes the earlier editor chord
+  (let [r (check-with (with-earlier [[:editor {:key "j" :mods #{:cmd :alt} :command :p-a/x}]])
+                      [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/say}])])]
+    (is (:ok? r))
+    (is (mentions? r :warnings "takes that chord from plugin p-a"))
+    (is (not (mentions? r :warnings "never fires")))))
