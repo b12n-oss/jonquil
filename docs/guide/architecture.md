@@ -145,7 +145,19 @@ these:
   uses, or one the window takes only sometimes, is a warning naming that
   command. `:passes? true` on the three window commands that can hand the
   key on (`:popover/close-all`, `:source/jump-back`, `:find/bar-key`) is
-  how it tells the two apart.
+  how it tells the two apart. Slice P2 (2026-10-25) added the API's first
+  helpers, `form-at-caret` (the form Run Form would send) and `wrap-form`,
+  and `jonquil.plugin-protocol`, the one function every change to the live
+  plugin set will go through. `run-protocol` loads a candidate file
+  (`load-string` with `*ns*` and the collector bound, a reader or compiler
+  error named with its line, the namespace checked), validates it, and
+  soaks each `:edit` command on six fixture snapshots under a 2 s timeout,
+  checking each result's op shape. The shape check runs inside the timed
+  call with printing bounded, so a lazy or endless result can't hang it. A
+  command that doesn't answer in time is reported once and its other
+  fixtures are skipped, since `future-cancel` can't stop CPU-bound code in
+  process (an agent's proposal is soaked in a separate process later).
+  Nothing goes live yet.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
