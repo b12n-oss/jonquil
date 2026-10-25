@@ -63,6 +63,8 @@
   {:key "m" :mods #{:cmd :shift} :command :view/cycle-theme}
   {:key "i" :mods #{:cmd :shift} :command :inspect/form}
   {:key "i" :mods #{:cmd} :command :inspect/last}
+  ;; slice S8: the command palette
+  {:key "p" :mods #{:cmd :shift} :command :palette/open}
   {:key "braceright" :mods #{:cmd} :command :tab/next}
   {:key "braceleft" :mods #{:cmd} :command :tab/previous}
   ;; slice S4: Cmd/Ctrl+[ steps the focused source panel back; anywhere

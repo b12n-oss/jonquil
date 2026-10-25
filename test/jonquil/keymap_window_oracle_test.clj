@@ -270,3 +270,10 @@
   (let [ctrl-alt (bit-or (:ctrl M) (:alt M))]
     (is (nil? (keymap-answer 0x06c ctrl-alt)))
     (is (nil? (keymap-answer 0x066 ctrl-alt)))))
+
+(deftest palette-chord-test
+  ;; slice S8: Cmd/Ctrl+Shift+P opens the palette; P was bound nowhere before
+  (is (= [:palette/open {}] (keymap-answer 0x70 (bit-or (:ctrl M) (:shift M)))))
+  (is (= [:palette/open {}] (keymap-answer 0x70 (bit-or (:meta M) (:shift M)))))
+  (doseq [st [(:ctrl M) (:shift M) 0]]
+    (is (nil? (keymap-answer 0x70 st)) (str "state " st))))

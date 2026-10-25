@@ -54,6 +54,7 @@
     jonquil.commands
     jonquil.keymap
     jonquil.command-registry
+    jonquil.palette
     jonquil.help
     jonquil.source
     jonquil.tabs
