@@ -38,6 +38,7 @@
     jonquil.command-registry-test
     jonquil.keymap-window-oracle-test
     jonquil.keymap-editor-oracle-test
+    jonquil.menu-oracle-test
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test

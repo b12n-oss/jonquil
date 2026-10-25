@@ -7,6 +7,7 @@
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]))
 
@@ -299,3 +300,41 @@
       (on-gtk (support/check :menu-action-throw-is-contained
                              (and status-ok? (= "(+ 1 2)" text))
                              {:status (g/label-text status) :text text})))))
+
+(defn row-menu-items-all-resolve
+  "Slice S7, Review Focus 1: the editor menu's items now run commands over
+  a menu ctx wire-tab! builds, and an item whose ctx entry is missing
+  throws only when picked, which install-context-menu!'s try/catch turns
+  into \"; <action>: ...\" in the status bar. So this fires, through
+  :activate-menu-action!*, each item with no live row of its own (run-form,
+  complete, jump, quick-doc and toggle-comment have theirs) and checks the
+  status bar never shows that catch format, closing what each one opens.
+  set-status! posts the label update through on-gui!, the queue on-gtk
+  uses too, so each status is read in the on-gtk after its fire. inspect-
+  last and inspect-form are left out: each starts an eval and an inspector
+  that later rows read."
+  [ui]
+  (go-row :menu-items-all-resolve support/check
+    (let [ed (:editor ui) rp (:rename-popover ui) fb (:find-bar ui)
+          status (:status-label ui) activate! (:activate-menu-action!* ui)
+          _ (on-gtk (editor/set-text! ed "(+ 1 2)")
+                    (support/place-cursor! (:buf ed) 1))
+          results (loop [actions ["rename" "indent" "unindent" "format-all" "format-selection" "find" "replace"]
+                         acc []]
+                    (if-let [action (first actions)]
+                      (let [extra (on-gtk (g/gtk-label-set-text status "")
+                                          (activate! action)
+                                          (case action
+                                            "rename" (let [open? (popover/open? rp)] (popover/hide! rp) open?)
+                                            "indent" (editor/editor-text ed)
+                                            ("find" "replace") (find-bar/close! fb)
+                                            nil))
+                            text (on-gtk (g/label-text status))]
+                        (recur (rest actions)
+                               (conj acc [action (not (str/includes? text (str "; " action ":"))) text extra])))
+                      acc))]
+      (on-gtk (support/check :menu-items-all-resolve
+                             (and (every? second results)
+                                  (true? (nth (results 0) 3))
+                                  (not= "(+ 1 2)" (nth (results 1) 3)))
+                             {:results results})))))
