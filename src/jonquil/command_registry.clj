@@ -2,13 +2,13 @@
   "Commands as data (plugins design, Part 1): an id, one doc line, a scope
   and a (fn [ctx args]) that does the work and answers an outcome
   (:handled, :to-gtk or :next, as jonquil.keymap/dispatch reads it). ctx
-  is the map the window's key handler already receives (run-fn, save-fn
-  and the rest), so a command is a plain function a test can call with a
-  fake ctx. No GTK here.
+  is the map the key handler builds (the window's run-fn, save-fn and the
+  rest; the editor's thunks), so a command is a plain function a test can
+  call with a fake ctx. No GTK here.
 
-  Slice S1 registers the window's plain chords; later slices add the rest
-  of the window's and the editor's, menus and the context menu read the
-  same table, and Part 2's plugins add their own."
+  Slices S1-S4 register the window's chords and S5 the editor's; in later
+  slices menus and the context menu read the same table, and Part 2's
+  plugins add their own."
   (:require [jonquil.keymap :as km]))
 
 (defn- call [k & args]
@@ -83,6 +83,34 @@
    :tree-menu-open (fn [ctx] (some-> (:tree-keys ctx) :menu-open? (#(%))))
    :evaluating (fn [ctx] ((:evaluating? ctx)))
    :rename-focused (fn [ctx] ((:rename-focused? ctx)))})
+
+(defn- edit [k]
+  (fn [ctx _args] (if (= 1 ((get ctx k))) :handled :to-gtk)))
+
+(defn- act [k]
+  (fn [ctx _args] ((get ctx k)) :handled))
+
+(def editor-commands
+  "The editor's chords (slice S5). ctx is the per-key map
+  jonquil.gtk.editor/handle-key! builds, each entry a thunk that reads the
+  editor's state when it runs. An edit answers what the old clause did: its
+  1 is :handled and its 0 (nothing changed, or nothing to redo) is GTK's.
+  The rest are :handled once the chord matches, whatever their fn finds,
+  and with no fn registered, so GTK never inserts the key."
+  {:completion/open {:doc "Open completion, or commit its only candidate." :scope :editor
+                     :run (act :complete!)}
+   :edit/toggle-comment {:doc "Comment or uncomment the lines." :scope :editor :run (edit :toggle-comment!)}
+   :edit/format-all {:doc "Format the buffer." :scope :editor :run (edit :format-all!)}
+   :edit/format-selection {:doc "Format the selection." :scope :editor :run (edit :format-selection!)}
+   :edit/redo {:doc "Redo." :scope :editor :run (edit :redo!)}
+   :help/quick-doc {:doc "Show the docs for the symbol at the caret." :scope :editor :run (act :quick-doc!)}
+   :help/jump {:doc "Jump to the definition of the symbol at the caret." :scope :editor :run (act :jump!)}
+   :edit/rename {:doc "Rename the symbol at the caret." :scope :editor :run (act :rename!)}})
+
+(def editor-conditions
+  "Named conditions an editor binding's :when can ask for, over the same
+  per-key ctx."
+  {:writable (fn [ctx] ((:writable? ctx)))})
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named

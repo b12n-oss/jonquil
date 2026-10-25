@@ -140,3 +140,37 @@
     (is (= 0 (ans 0x72 4 false :to-gtk)) ":to-gtk is 0")
     (is (= 0 (ans 0xff1b 0 false :next)) "the fixed :to-gtk is 0")
     (is (= 0 (ans 0x61 0 false :handled)) ":unmatched is 0")))
+
+;; --- slice S5: the editor's commands ---------------------------------------
+
+(deftest editor-commands-answer-outcomes-test
+  (let [calls (atom [])
+        rec (fn [k answer] (fn [] (swap! calls conj k) answer))
+        ctx (fn [answer] {:complete! (rec :complete! answer) :toggle-comment! (rec :toggle-comment! answer)
+                          :format-all! (rec :format-all! answer)
+                          :format-selection! (rec :format-selection! answer)
+                          :redo! (rec :redo! answer) :quick-doc! (rec :quick-doc! answer)
+                          :jump! (rec :jump! answer) :rename! (rec :rename! answer)})
+        run (fn [id c] (reset! calls []) [(registry/run-command! registry/editor-commands {:command id} c) @calls])]
+    (is (= #{:completion/open :edit/toggle-comment :edit/format-all :edit/format-selection :edit/redo
+             :help/quick-doc :help/jump :edit/rename}
+           (set (keys registry/editor-commands))))
+    (doseq [[id k] [[:edit/toggle-comment :toggle-comment!] [:edit/format-all :format-all!]
+                    [:edit/format-selection :format-selection!] [:edit/redo :redo!]]]
+      (is (= [:handled [k]] (run id (ctx 1))) (str id " 1 is :handled"))
+      (is (= [:to-gtk [k]] (run id (ctx 0))) (str id " 0 is GTK's")))
+    ;; Review Focus 5: these answer :handled whatever their fn returns, nil
+    ;; included (no completion or quick-doc fn registered)
+    (doseq [[id k] [[:completion/open :complete!] [:help/quick-doc :quick-doc!]
+                    [:help/jump :jump!] [:edit/rename :rename!]]]
+      (is (= [:handled [k]] (run id (ctx nil))) (str id)))))
+
+(deftest every-editor-command-is-documented-test
+  (doseq [[id c] registry/editor-commands]
+    (is (and (string? (:doc c)) (seq (:doc c))) (str id))
+    (is (= :editor (:scope c)) (str id))))
+
+(deftest editor-writable-condition-test
+  (let [holds (fn [v] ((registry/holds-fn registry/editor-conditions {:writable? (constantly v)}) :writable))]
+    (is (true? (holds true)))
+    (is (false? (holds false)))))

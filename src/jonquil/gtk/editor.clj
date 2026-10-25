@@ -810,6 +810,14 @@
   (or (contains? #{KEY-F KEY-L} keyval)
       (and (< keyval 0x1000) (keycode-fallback? OS-NAME keycode state))))
 
+(defn physical-key
+  "The physical key's name, \"f\" or \"l\", for the editor keymap's
+  :physical? format-selection binding, or nil. Pure, so a test can pass
+  any os: the macOS half of alt-chord-f-or-l?, which handle-key! below
+  keeps until the keymap slot replaces it."
+  [os keyval keycode state]
+  (when (and (< keyval 0x1000) (keycode-fallback? os keycode state))
+    (if (= keycode MAC-KEYCODE-F) "f" "l")))
 
 (defn handle-key!
   "The editor's key dispatch (P3.T2), first match wins. Returns
