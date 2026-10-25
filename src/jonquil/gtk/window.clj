@@ -59,6 +59,7 @@
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
             [jonquil.palette :as pal-data]
+            [jonquil.plugin-loader :as plugin-loader]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.runtime-registry :as registry]
             [jonquil.save-path :as save-path]
@@ -2934,7 +2935,31 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
-(defn- activate! [app {:keys [file dir cwd on-ready settings-path]}]
+(defn- load-plugins!
+  "Loads the user's plugin files (jonquil.plugin-loader/load-all) on the
+  calling thread, which mustn't be the GTK thread (a soak can take
+  seconds), then swaps the live registry and prints each line on the
+  console on the GTK thread, waiting up to 5 s for that. Answers the lines.
+  A throw is one console line, and the live registry is left as it was."
+  [settings-path cv]
+  (let [lines (try
+                (let [{:keys [registry lines]} (plugin-loader/load-all
+                                                {:dir (plugin-loader/plugins-dir settings-path)
+                                                 :os (System/getProperty "os.name")})
+                      done (promise)]
+                  (on-gui! (fn []
+                             (reset! plugin-registry/live registry)
+                             (doseq [l lines] (cview/append! cv :system (str "; " l "\n")))
+                             (deliver done true)))
+                  (deref done 5000 nil)
+                  lines)
+                (catch Throwable e
+                  (let [l (str "loading plugins failed: " (ex-message e))]
+                    (on-gui! #(cview/append! cv :system (str "; " l "\n")))
+                    [l])))]
+    lines))
+
+(defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
         ;; impossible path so a save can be forced to fail without ever
@@ -3566,6 +3591,10 @@
                                (editor/focus! (:ed t)))
                              (finally (live!)))))
           (live!))))
+    ;; plugins P3: the user's plugins load off the GTK thread once the
+    ;; window is up; keys pressed before the swap see none yet
+    (when-not (false? plugins?)
+      (future (load-plugins! @settings-path* cv)))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
       ;; objects, so every existing row keeps working unchanged; rows that
@@ -3727,6 +3756,10 @@
                  ;; Cmd/Ctrl+Shift+P calls to open it
                    :palette palette
                    :open-palette!* open-palette-fn
+                 ;; plugins P3: load the plugin folder now (call it off the
+                 ;; GTK thread; it returns the console lines), and the folder
+                   :load-plugins!* (fn [] (load-plugins! @settings-path* cv))
+                   :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
