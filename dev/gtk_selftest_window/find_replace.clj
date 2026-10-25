@@ -462,9 +462,12 @@
                                 :h1 h1 :sel1 sel1 :h2 h2 :sel2 sel2 :h3 h3 :sel3 sel3}))))))
 
 (defn row-find-preedit-ends-at-close
-  "A composition the bar was closed over (Escape, a click elsewhere) may
-  never report its end, so open! starts with none: after closing with the
-  preedit flag still set and opening again, F3 goes to the next match."
+  "A composition whose end the input method never reported (focus left the
+  bar mid-composition) leaves the preedit flag set while the bar stays
+  open, and every key but typing yields; Cmd/Ctrl+F or H opening the bar
+  again is the way out, so open! starts with none. The flag is set by hand
+  here, then the bar is opened again: F3 goes to the next match, moving
+  the editor's selection from the first foo to the second."
   [ui]
   (go-row :find-preedit-ends-at-close support/check
     (on-gtk (let [ed (:editor ui) fb (:find-bar ui)]
@@ -473,10 +476,13 @@
                 (find-bar/open! fb :find)
                 (g/gtk-editable-set-text (:query fb) "foo")
                 (reset! (:preedit-active? fb) true)
-                (find-bar/close! fb)
                 (find-bar/open! fb :find)
-                (let [f3 (find-bar/handle-key! fb 0xffc0 0)]
-                  (support/check :find-preedit-ends-at-close (= 1 f3) {:f3 f3}))
+                (let [before (g/selection-offsets (:buf ed))
+                      f3 (find-bar/handle-key! fb 0xffc0 0)
+                      after (g/selection-offsets (:buf ed))]
+                  (support/check :find-preedit-ends-at-close
+                                 (and (= 1 f3) (= [0 3] before) (= [8 11] after))
+                                 {:f3 f3 :before before :after after}))
                 (finally
                   (reset! (:preedit-active? fb) false)
                   (find-bar/close! fb)))))))

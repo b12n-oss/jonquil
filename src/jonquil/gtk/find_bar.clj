@@ -186,10 +186,11 @@
   it can revoke it -- independent of grab_focus order or window/OS focus
   timing, which a probe confirmed is not itself the deciding factor here.
 
-  The preedit flag starts false: no composition is under way in an entry
-  that's about to take focus, and one the bar was closed over (Escape, a
-  click elsewhere) may never have reported its end, which left every key
-  but typing ignored on the next open."
+  The preedit flag starts false. If focus left the bar mid-composition and
+  the input method never reported the composition's end, the flag stays
+  set while the bar stays open, and every key but typing yields (Escape,
+  F3, Return; nav-ready? is false too, so F3 from the editor does
+  nothing). Cmd/Ctrl+F or H, which call this, are the way out."
   [fb mode]
   (reset! (:preedit-active? fb) false)
   (g/gtk-widget-set-visible (:box fb) 1)

@@ -461,15 +461,11 @@
     ;; Escape/click-outside close it themselves (autohide true), and the
     ;; popover's own "closed" signal (jonquil.gtk.popover/make-popover)
     ;; already keeps its :open? atom in sync -- this connects a SECOND
-    ;; "closed" handler, mirroring help-popover/make-rename-popover, to
-    ;; give keyboard focus back to the rows view whichever way it closed.
-    (g/g-signal-connect-data (:popover def-popover) "closed"
-                             (callable (fn [_pop _data]
-                                         (try (g/gtk-widget-grab-focus view)
-                                              (catch :default _ nil))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; "closed" handler, as the rename popover does, to give keyboard focus
+    ;; back to the rows view whichever way it closed, once GTK has finished
+    ;; closing (jonquil.gtk.popover/refocus-view-on-close!: a grab in the
+    ;; handler itself was undone, leaving focus on the scrolled window)
+    (popover/refocus-view-on-close! def-popover)
     (g/g-signal-connect-data def-entry "activate"
                              (callable (fn [_entry _data]
                                          (try
