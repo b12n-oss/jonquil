@@ -266,3 +266,24 @@
   (is (not (contains? (ops/doc-info "map" [{:name "map" :ns "clojure.core" :file "" :status ["done"]}]) :file))
       "babashka's empty :file is no file")
   (is (= "/x.clj" (:file (ops/doc-info "f" [{:name "f" :ns "u" :file "/x.clj" :line 3}])))))
+
+(defn- run-quiet
+  "quiet-code's output in this process, the root *1 *2 put back after (the
+  wrap moves them, as it would a server's)."
+  [code token]
+  (let [r1 *1 r2 *2]
+    (try (with-out-str (load-string (ops/quiet-code code token)))
+         (finally (alter-var-root #'*1 (constantly r1)) (alter-var-root #'*2 (constantly r2))))))
+
+(deftest quiet-code-test
+  (is (= {:out "hi\n" :value "3"} (ops/quiet-result (run-quiet "(println \"hi\") (+ 1 2)" "TOK:") "TOK:")))
+  (is (= {:out "" :error "boom"} (ops/quiet-result (run-quiet "(throw (ex-info \"boom\" {}))" "TOK:") "TOK:"))
+      "a throw comes back as data, not out of the eval")
+  (is (= {:out "" :value "1"} (ops/quiet-result (run-quiet "1 ; a trailing comment" "TOK:") "TOK:"))
+      "a trailing comment doesn't swallow the wrap"))
+
+(deftest quiet-result-test
+  ;; a line that looks like the token line but isn't this call's stays :out
+  (let [out (str "OTHER:{:value \"9\"}\n" "\nTOK:{:value \"3\"}")]
+    (is (= {:out "OTHER:{:value \"9\"}\n" :value "3"} (ops/quiet-result out "TOK:"))))
+  (is (= {:out "plain"} (ops/quiet-result "plain" "TOK:"))))

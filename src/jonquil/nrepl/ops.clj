@@ -201,6 +201,36 @@
        " (clojure.core/alter-var-root (var clojure.core/*1) (clojure.core/constantly o2))"
        " o1)"))
 
+(defn quiet-code
+  "Wraps code for an eval that leaves the user's history alone: *1, *2 and
+  *3 come out as they were (keeping-history's pre-shift, returning the old
+  *1), and a throw is caught inside, so the server never sets *e. The
+  value, or the error's message, comes back as the last thing printed: a
+  newline, token, then (pr-str {:value printed-value}) or {:error msg},
+  for quiet-result to split off. code ends with a newline, so a trailing
+  comment can't swallow the wrap."
+  [code token]
+  (str "(clojure.core/let [o1 clojure.core/*1 o2 clojure.core/*2 o3 clojure.core/*3"
+       " r (try {:value (clojure.core/binding [clojure.core/*print-length* 1000]"
+       " (clojure.core/pr-str (do " code "\n)))}"
+       " (catch :default e {:error (clojure.core/or (clojure.core/ex-message e) (clojure.core/str e))}))]"
+       " (clojure.core/print (clojure.core/str \"\\n\" " (pr-str token) " (clojure.core/pr-str r)))"
+       " (clojure.core/flush)"
+       " (clojure.core/alter-var-root (var clojure.core/*2) (clojure.core/constantly o3))"
+       " (clojure.core/alter-var-root (var clojure.core/*1) (clojure.core/constantly o2))"
+       " o1)"))
+
+(defn quiet-result
+  "out, the text a quiet-code eval printed, split at its last token line:
+  {:out what-came-before :value s} or {:out ... :error msg}; {:out out} when
+  token isn't there."
+  [out token]
+  (let [i (str/last-index-of out (str "\n" token))]
+    (if-let [m (when i (try (read-string (subs out (+ i 1 (count token))))
+                            (catch :default _ nil)))]
+      (merge {:out (subs out 0 i)} (select-keys m [:value :error]))
+      {:out out})))
+
 (defn reset-code
   "Code for the child that removes each namespace in names that exists,
   then `user`, and recreates `user`: the in-process Reset on Run's rule
