@@ -69,8 +69,9 @@ these:
   chain reads. Slice S4 (2026-10-24) retired the cond. F5 became the
   first binding and the two Cmd/Ctrl+[ back clauses the last, the jump
   back answering `:next` when there's nothing to go back from. The rename
-  guard (while the tab-rename entry has focus, every key but Escape is the
-  entry's) covers a class of keys, so it stays a fixed stage ahead of the
+  guard (while the rename popover's entry has focus, every key but Escape
+  is the entry's; since S8's follow-up the command palette's entry too)
+  covers a class of keys, so it stays a fixed stage ahead of the
   keymap, as the spec keeps the editor's preedit yield, and asks the named
   condition `:rename-focused`. `window-answer` holds that stage and the
   dispatch and answers 1 or 0. It is the whole of `on-window-key` now,

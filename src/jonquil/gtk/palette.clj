@@ -4,8 +4,9 @@
   tab's editor view like the rename popover. Autohide is on, so it's modal
   for typing and GTK closes it on a click outside; the window's
   capture-phase key handler still sees every key first, so Escape closes it
-  through the popover registry (:popover/close-all) and window chords keep
-  working. Up, Down, PageUp and PageDown move the selection; Return in the
+  through the popover registry (:popover/close-all); every other window
+  shortcut waits while the entry has focus, as in the rename popover
+  (jonquil.command-registry/window-answer's fixed stage). Up, Down, PageUp and PageDown move the selection; Return in the
   entry or a click on a row runs the selected entry. Running hides the
   popover first, then calls the on-run handler set-handlers! installed
   with the entry's command id, so a command that opens a popover of its own

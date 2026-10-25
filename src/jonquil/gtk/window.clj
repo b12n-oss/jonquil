@@ -2112,13 +2112,15 @@
            ;; the rename popover's entry and the command palette's (slice S8
            ;; follow-up): either one keeps every key but Escape
            :rename-focused? #(let [t (active-tab)]
-                               (or (rename-focused? win (:rename-pop t)) (rename-focused? win (:palette t)))))))
+                               (or (rename-focused? win (:rename-pop t))
+                                   (rename-focused? win (:palette t)))))))
 
 (defn- on-window-key
   "The window's capture-phase key handler. Every key goes through
   jonquil.command-registry/window-answer: one fixed stage (while the
-  tab-rename entry has focus, every key but Escape is the entry's, so Run,
-  close and tab switches can't fire mid-rename), then jonquil/keymap.edn's
+  rename popover's or the command palette's entry has focus, every key but
+  Escape is the entry's, so Run, close and tab switches can't fire
+  mid-typing), then jonquil/keymap.edn's
   :window bindings, first match wins, run through the command registry.
   A command answers :handled (1), :to-gtk (0, the key is GTK's: stop) or
   :next (try the next matching binding). keymap_window_oracle_test checks

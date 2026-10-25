@@ -756,8 +756,9 @@ Comment even though its description says "Comment or uncomment the
 lines." Up and Down move the selection, and Return or a click runs it on
 the tab you opened the palette from, exactly as its key would. Escape
 closes it. While you type in it, the window's own shortcuts wait, as they
-do in the rename box, so Cmd/Ctrl+W or F5 can't fire mid-word. A few commands that only make sense inside their own key,
-such as the steps Escape walks through or "go to tab 3", aren't listed.
+do in the rename box, so Cmd/Ctrl+W or F5 can't fire mid-word. A few
+commands that only make sense inside their own key, such as the steps
+Escape walks through or "go to tab 3", aren't listed.
 
 ### Freeing Ctrl+Space on macOS
 

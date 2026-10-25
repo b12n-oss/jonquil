@@ -18,6 +18,9 @@
             [jonquil.palette :as pal-data]))
 
 (def ^:private KEY-P 0x070)
+(def ^:private KEY-T 0x074)
+(def ^:private KEY-W 0x077)
+(def ^:private KEY-F5 0xffc2)
 
 (defn- open-by-chord!
   "Cmd/Ctrl+Shift+P through the window's own key handler, as
@@ -47,9 +50,9 @@
     (let [p (:palette ui)
           tabs0 (on-gtk ((:open-palette!* ui)) (count ((:tabs* ui))))
           focused? (await-until 2000 20 #(focus-in? ui (:popover p)))
-          [ht hw hf5 tabs1 open?] (on-gtk [((:handle-window-key! ui) ffi/null 0x074 0 g/META-MASK ffi/null)
-                                           ((:handle-window-key! ui) ffi/null 0x077 0 g/META-MASK ffi/null)
-                                           ((:handle-window-key! ui) ffi/null 0xffc2 0 0 ffi/null)
+          [ht hw hf5 tabs1 open?] (on-gtk [((:handle-window-key! ui) ffi/null KEY-T 0 g/META-MASK ffi/null)
+                                           ((:handle-window-key! ui) ffi/null KEY-W 0 g/META-MASK ffi/null)
+                                           ((:handle-window-key! ui) ffi/null KEY-F5 0 0 ffi/null)
                                            (count ((:tabs* ui)))
                                            (popover/open? p)])
           hesc (on-gtk ((:handle-window-key! ui) ffi/null support/KEY-ESCAPE 0 0 ffi/null))
