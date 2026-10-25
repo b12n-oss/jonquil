@@ -40,6 +40,7 @@
     jonquil.palette-test
     jonquil.plugin-test
     jonquil.plugin-check-test
+    jonquil.plugin-protocol-test
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test
