@@ -7,7 +7,6 @@
   touches no GTK, and never throws."
   (:require [clojure.java.io :as io]
             [jonquil.command-registry :as cmd-registry]
-            [jonquil.keymap :as km]
             [jonquil.plugin-check :as plugin-check]
             [jonquil.plugin-protocol :as protocol]
             [jonquil.plugin-registry :as plugin-registry]))
@@ -32,7 +31,9 @@
      :skipped (vec (sort (for [f cljs :when (not (ok? f))] (.getName ^java.io.File f))))}))
 
 (def ^:private conditions
-  (into (set (keys cmd-registry/window-conditions)) (keys cmd-registry/editor-conditions)))
+  ;; per scope, so a binding's :when is checked against its own scope's
+  {:window (set (keys cmd-registry/window-conditions))
+   :editor (set (keys cmd-registry/editor-conditions))})
 
 (defn- load-one
   "One file through the protocol against reg (the built-ins plus the
@@ -43,7 +44,11 @@
       [reg [(str "plugin " id " skipped: " (ex-message text))]]
       (let [request (plugin-check/request-from-registry
                      {:commands (plugin-registry/all-commands reg) :conditions conditions
-                      :keymap km/shipped :os os})
+                      ;; the plugins already loaded count like shipped bindings, so a
+                      ;; chord one takes is warned about, or unreachable, for the next
+                      :keymap {:window (plugin-registry/window-bindings reg)
+                               :editor (plugin-registry/editor-bindings reg)}
+                      :os os})
             r (try (protocol/run-protocol {:where :in-process :source text :file-id id :request request})
                    (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]}))]
         (if (:ok? r)
@@ -51,7 +56,7 @@
                 edits (count (filter #(fn? (:edit %)) (:commands d)))
                 runs (count (filter #(fn? (:run %)) (:commands d)))]
             [(plugin-registry/install reg (:id d) {:definition d :source text :file path :layer :user})
-             (cond-> [(str "plugin " id " loaded (" edits " commands)")]
+             (cond-> [(str "plugin " id " loaded (" edits (if (= 1 edits) " command)" " commands)"))]
                true (into (map #(str "plugin " id ": " %) (:warnings r)))
                (pos? runs) (conj (str "plugin " id ": its :run commands wait for effects, a later slice")))])
           [reg (mapv #(str "plugin " id " skipped: " %) (:problems r))])))))

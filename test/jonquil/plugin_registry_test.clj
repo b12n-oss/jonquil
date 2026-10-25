@@ -67,3 +67,16 @@
   (let [r (reg/remove-plugin (with (plugin "p3-a" (fn [s] s))) :p3-a)]
     (is (= {} (reg/commands r)))
     (is (= (:editor km/shipped) (reg/editor-bindings r)))))
+
+(deftest edit-op-checked-on-the-live-buffer-test
+  ;; an op that's wrong for the buffer it ran on isn't applied, and the
+  ;; throw names the plugin (review I4)
+  (let [r (with (plugin "p3-oob" (fn [_] {:edits [[0 999 "x"]] :caret 0})))
+        applied (atom [])
+        e (try (cmd-registry/run-command! (reg/commands r) {:command :p3-oob/wrap}
+                                          {:snapshot (constantly {:text "(a)" :caret 0 :sel-start 0 :sel-end 0})
+                                           :apply-op! #(swap! applied conj %)})
+               nil (catch :default e e))]
+    (is (some? e))
+    (is (str/starts-with? (ex-message e) "plugin p3-oob: "))
+    (is (= [] @applied))))

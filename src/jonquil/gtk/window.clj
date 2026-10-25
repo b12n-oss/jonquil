@@ -3878,7 +3878,8 @@
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :dir path-or-nil :cwd path-or-nil :on-ready (fn [ui])
-  :settings-path path-or-nil}, where :dir (a directory launch) and :cwd root
+  :settings-path path-or-nil :plugins? bool}, :plugins? false skipping the
+  user's plugins (plugins P3), where :dir (a directory launch) and :cwd root
   the file tree (jonquil.file-tree/root-for) and
   :settings-path defaults to (jonquil.settings/settings-path) -- every
   self-test/docs-shots/smoke harness must pass its own isolated path so it
@@ -3936,7 +3937,9 @@
   context-menu items by its unprefixed action name, exactly as
   install-context-menu!'s own docstring describes. :palette (slice S8) is
   the first tab's jonquil.gtk.palette map and :open-palette!* what
-  Cmd/Ctrl+Shift+P calls to open the active tab's. :complete!* (P4.T5) is
+  Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
+  P3) loads the plugin folder now, off the GTK thread, answering the
+  console lines, and :plugins-dir* names that folder. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
   and jonquil.gtk.completion/state read it back.

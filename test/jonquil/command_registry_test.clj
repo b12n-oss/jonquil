@@ -137,7 +137,7 @@
     (is (= [:entry-focused] @asked) "only the entry condition was asked")
     (is (= 1 (ans 0xff1b 0 true :handled)) "Escape during a rename goes on to the keymap")
     (is (= [:esc] @ran))
-    (is (= [] @asked) "Escape never asks the rename condition")
+    (is (= [] @asked) "Escape never asks the entry condition")
     (is (= 1 (ans 0x72 4 false :handled)) ":handled is 1")
     (is (= 0 (ans 0x72 4 false :to-gtk)) ":to-gtk is 0")
     (is (= 0 (ans 0xff1b 0 false :next)) "the fixed :to-gtk is 0")

@@ -42,7 +42,7 @@
                      ["p3l-bad.clj" "(ns jonquil.plugins.p3l-bad\n  (:require [jonquil.plugin :as p]))\n(p/defplugin {:id :p3l-bad\n"]])
         {:keys [registry lines]} (load-dir d)]
     (is (= #{:p3l-good} (set (keys (:plugins registry)))))
-    (is (some #(= "plugin p3l-good loaded (1 commands)" %) lines) (pr-str lines))
+    (is (some #(= "plugin p3l-good loaded (1 command)" %) lines) (pr-str lines))
     (is (some #(str/starts-with? % "plugin p3l-bad skipped: line ") lines) (pr-str lines))
     (is (= :user (get-in registry [:plugins :p3l-good :layer])))))
 
@@ -71,3 +71,14 @@
 
 (deftest plugins-dir-test
   (is (= "/x/jonquil/plugins" (loader/plugins-dir "/x/jonquil/settings.edn"))))
+
+(deftest same-chord-warns-test
+  ;; review I2: a later plugin on an earlier one's chord is warned about
+  (let [d (dir-with [["p3l-x.clj" (source "p3l-x")] ["p3l-y.clj" (source "p3l-y")]])
+        {:keys [lines]} (load-dir d)]
+    (is (some #(and (str/starts-with? % "plugin p3l-y: ") (str/includes? % "plugin p3l-x's :p3l-x/wrap")) lines)
+        (pr-str lines))))
+
+(deftest one-command-is-singular-test
+  (let [{:keys [lines]} (load-dir (dir-with [["p3l-one.clj" (source "p3l-one")]]))]
+    (is (some #(= "plugin p3l-one loaded (1 command)" %) lines) (pr-str lines))))

@@ -24,19 +24,30 @@
   *ns* restored afterwards: {:definitions [...] :problems [...]}. Never
   throws; a load error is a problem with its line when it has one, and a
   file that doesn't end in jonquil.plugins.<file-id> is a problem too. The
-  namespace the file made stays loaded."
-  [{:keys [source file-id]}]
-  (binding [*ns* *ns* p/*definitions* (atom [])]
-    (let [threw (try (load-string source) nil (catch Throwable e e))
-          defs @p/*definitions*
-          ns-now (str (ns-name *ns*))
-          wanted (str "jonquil.plugins." file-id)]
-      {:definitions defs
-       :problems (cond
-                   threw [(load-problem threw)]
-                   (not= wanted ns-now)
-                   [(str "the file's namespace is " ns-now "; a plugin file's is " wanted)]
-                   :else [])})))
+  load runs in a future given load-ms (default 5000): a file that loops at
+  top level is a problem then, so the caller goes on (it may keep running;
+  future-cancel can't stop CPU-bound code). The namespace the file made
+  stays loaded."
+  [{:keys [source file-id load-ms] :or {load-ms 5000}}]
+  (let [wanted (str "jonquil.plugins." file-id)
+        f (future
+            (binding [*ns* *ns* p/*definitions* (atom [])]
+              (let [threw (try (load-string source) nil (catch Throwable e e))
+                    defs @p/*definitions*
+                    ns-now (str (ns-name *ns*))]
+                {:definitions defs
+                 :problems (cond
+                             threw [(load-problem threw)]
+                             (not= wanted ns-now)
+                             [(str "the file's namespace is " ns-now "; a plugin file's is " wanted)]
+                             :else [])})))
+        v (deref f load-ms ::timeout)]
+    (if (= ::timeout v)
+      (do (future-cancel f)
+          {:definitions []
+           :problems [(str "loading the file didn't finish in " load-ms " ms; it may keep running in this "
+                           "process until Jonquil quits")]})
+      v)))
 
 (def ^:private form-text "(defn f [x] (inc x))")
 

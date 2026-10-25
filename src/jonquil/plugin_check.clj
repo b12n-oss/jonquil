@@ -30,8 +30,12 @@
   hand the key on, answering :next or :to-gtk), with conditions, keymap and
   os as given."
   [{:keys [commands conditions keymap os]}]
-  {:registered (into {} (map (fn [[id c]] [id {:scope (:scope c) :passes? (true? (:passes? c))}])) commands)
-   :conditions (set conditions) :keymap keymap :os os})
+  {:registered (into {} (map (fn [[id c]] [id (cond-> {:scope (:scope c) :passes? (true? (:passes? c))}
+                                                 (:plugin c) (assoc :plugin (:plugin c)))]))
+                     commands)
+   ;; a set (any scope), or {:window #{...} :editor #{...}}, so a binding's
+   ;; :when is checked against its own scope's conditions
+   :conditions (if (map? conditions) conditions (set conditions)) :keymap keymap :os os})
 
 (defn- blank-string? [s] (not (and (string? s) (not (str/blank? s)))))
 
@@ -218,8 +222,10 @@
      ;; one warning per shadowed command, naming the first chord that takes it
      :warnings (vec (for [[c cell] (reduce (fn [acc [c _ :as x]] (if (some #(= c (first %)) acc) acc (conj acc x)))
                                            [] shadows)]
-                      (str "binding " i " (" (label cell) ") takes that chord from the built-in "
-                           (pr-str c))))}))
+                      (str "binding " i " (" (label cell) ") takes that chord from "
+                           (if-let [pl (:plugin (get registered c))]
+                             (str "plugin " (name pl) "'s " (pr-str c))
+                             (str "the built-in " (pr-str c))))))}))
 
 (defn- bindings-check
   "km/problems over the plugin's bindings, then the scope, typing,
@@ -236,7 +242,14 @@
       (not (vector? bs)) {:problems [":bindings isn't a vector"] :warnings []}
       :else
       (reduce (fn [acc [i b]]
-                (let [ps (when (map? b) (km/problems [b] ids (set (when (coll? conditions) conditions))))]
+                (let [scope-of (:scope (get known (when (map? b) (:command b))))
+                      conds (cond
+                              (map? conditions) (set (if (contains? conditions scope-of)
+                                                       (get conditions scope-of)
+                                                       (apply concat (vals conditions))))
+                              (coll? conditions) (set conditions)
+                              :else #{})
+                      ps (when (map? b) (km/problems [b] ids conds))]
                   (cond
                     (not (map? b)) (update acc :problems conj (str "binding " i " isn't a map"))
                     (seq ps) (update acc :problems into

@@ -145,3 +145,19 @@
   (let [r (run (source "p2-iso") "p2-iso" :where :isolated)]
     (is (false? (:ok? r)))
     (is (= 1 (count (:problems r))))))
+
+(def stop-spin (atom false))
+
+(deftest load-deadline-test
+  ;; a file that loops at top level is a problem after :load-ms, so the
+  ;; files after it still load (review I1)
+  (reset! stop-spin false)
+  (let [t0 (System/currentTimeMillis)
+        r (try (protocol/load-candidate
+                {:source "(ns jonquil.plugins.p2-spin)\n(loop [] (when-not @jonquil.plugin-protocol-test/stop-spin (recur)))\n"
+                 :file-id "p2-spin" :load-ms 200})
+               (finally (reset! stop-spin true)))
+        ms (- (System/currentTimeMillis) t0)]
+    (is (= 1 (count (:problems r))) (pr-str r))
+    (is (str/includes? (first (:problems r)) "didn't finish"))
+    (is (< ms 2000) (str ms " ms"))))

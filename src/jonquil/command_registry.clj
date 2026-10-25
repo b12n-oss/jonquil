@@ -209,9 +209,9 @@
 
 (defn window-answer
   "on-window-key's whole answer for a lowered keyval and a modifier state,
-  1 (used up) or 0 (GTK's): first the rename stage, then the keymap.
+  1 (used up) or 0 (GTK's): first the entry stage, then the keymap.
 
-  The rename stage is the one window rule that isn't a chord. While the
+  The entry stage is the one window rule that isn't a chord. While the
   rename popover's entry or the command palette's has focus every key but
   Escape is the entry's, so Run, close and switch can't fire mid-typing;
   Escape goes on to the keymap, whose popover binding closes the entry. It covers a class of keys, so it

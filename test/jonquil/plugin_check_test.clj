@@ -203,3 +203,21 @@
 (deftest meta-and-super-labels-test
   (is (mentions? (bind {:key "w" :mods #{:meta} :command :wrap-when/say}) :warnings "Meta+W"))
   (is (mentions? (bind {:key "a" :mods #{:super} :command :wrap-when/say}) :problems "Super+A")))
+
+(deftest conditions-per-scope-test
+  ;; with conditions given per scope, a binding's :when must name its own
+  ;; scope's (review I3: :tree-focused is a window condition)
+  (let [per-scope (assoc request :conditions {:window (set (keys registry/window-conditions))
+                                              :editor (set (keys registry/editor-conditions))})
+        run (fn [b] (pc/validate (assoc per-scope :file-id "wrap-when" :definitions [(assoc both :bindings [b])])))]
+    (is (one-problem (run {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :wrap-when/wrap})))
+    (is (:ok? (run {:key "j" :mods #{:cmd :alt} :when [:writable] :command :wrap-when/wrap})))
+    (is (:ok? (run {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :wrap-when/say})))))
+
+(deftest plugin-shadow-names-the-plugin-test
+  (let [req (-> request
+                (assoc-in [:registered :p-a/wrap] {:scope :editor :passes? false :plugin :p-a})
+                (update-in [:keymap :editor] #(into [{:key "j" :mods #{:cmd :alt} :command :p-a/wrap}] %)))
+        r (pc/validate (assoc req :file-id "wrap-when" :definitions [good]))]
+    (is (:ok? r))
+    (is (mentions? r :warnings "plugin p-a's :p-a/wrap"))))

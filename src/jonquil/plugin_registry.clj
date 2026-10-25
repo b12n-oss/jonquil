@@ -8,7 +8,8 @@
   from live. :run commands wait for effects (a later slice), so they and
   the bindings to them aren't here."
   (:require [jonquil.command-registry :as cmd-registry]
-            [jonquil.keymap :as km]))
+            [jonquil.keymap :as km]
+            [jonquil.plugin-protocol :as protocol]))
 
 (defn empty-registry [] {:plugins {}})
 
@@ -26,18 +27,23 @@
 
 (defn- edit-command
   "A registry command running a plugin's :edit: the op it returns on the
-  ctx's snapshot is applied (:handled), nil leaves the key to GTK as a
-  built-in edit that changed nothing does (:to-gtk). A throw comes back
-  naming the plugin, for the handler's catch to report."
+  ctx's snapshot is checked against that snapshot (the soak only saw
+  fixtures) and applied (:handled); nil leaves the key to GTK as a built-in
+  edit that changed nothing does (:to-gtk). A throw, a bad op (nothing is
+  applied) or a failed apply comes back naming the plugin, for the
+  handler's catch to report."
   [plugin-id edit]
   (fn [ctx _args]
-    (let [op (try (edit ((:snapshot ctx)))
-                  (catch Throwable e
-                    (throw (ex-info (str "plugin " (name plugin-id) ": " (or (ex-message e) (str e)))
-                                    {:plugin plugin-id} e))))]
-      (if op
-        (do ((:apply-op! ctx) op) :handled)
-        :to-gtk))))
+    (let [fail (fn [msg e] (throw (ex-info (str "plugin " (name plugin-id) ": " msg) {:plugin plugin-id} e)))
+          snap ((:snapshot ctx))
+          op (try (edit snap) (catch Throwable e (fail (or (ex-message e) (str e)) e)))]
+      (if (nil? op)
+        :to-gtk
+        (if-let [why (binding [*print-length* 10 *print-level* 3]
+                       (protocol/edit-result-problem snap op))]
+          (fail why nil)
+          (do (try ((:apply-op! ctx) op) (catch Throwable e (fail (or (ex-message e) (str e)) e)))
+              :handled))))))
 
 (defn commands
   "{command-id {:doc :scope :plugin :run}} for every installed plugin's
