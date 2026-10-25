@@ -151,10 +151,11 @@
                           :format-selection! (rec :format-selection! answer)
                           :redo! (rec :redo! answer) :quick-doc! (rec :quick-doc! answer)
                           :jump! (rec :jump! answer) :rename! (rec :rename! answer)
-                          :run-form! (rec :run-form! answer)})
+                          :run-form! (rec :run-form! answer)
+                          :indent! (rec :indent! answer) :unindent! (rec :unindent! answer)})
         run (fn [id c] (reset! calls []) [(registry/run-command! registry/editor-commands {:command id} c) @calls])]
     (is (= #{:completion/open :edit/toggle-comment :edit/format-all :edit/format-selection :edit/redo
-             :help/quick-doc :help/jump :edit/rename :run/form}
+             :help/quick-doc :help/jump :edit/rename :run/form :edit/indent :edit/unindent}
            (set (keys registry/editor-commands))))
     (doseq [[id k] [[:edit/toggle-comment :toggle-comment!] [:edit/format-all :format-all!]
                     [:edit/format-selection :format-selection!] [:edit/redo :redo!]]]
@@ -163,7 +164,8 @@
     ;; Review Focus 5: these answer :handled whatever their fn returns, nil
     ;; included (no completion or quick-doc fn registered)
     (doseq [[id k] [[:completion/open :complete!] [:help/quick-doc :quick-doc!]
-                    [:help/jump :jump!] [:edit/rename :rename!] [:run/form :run-form!]]]
+                    [:help/jump :jump!] [:edit/rename :rename!] [:run/form :run-form!]
+                    [:edit/indent :indent!] [:edit/unindent :unindent!]]]
       (is (= [:handled [k]] (run id (ctx nil))) (str id)))))
 
 (deftest every-editor-command-is-documented-test
@@ -211,3 +213,26 @@
       (is (= 1 (ans 0x61 {:popup 0 :typing 1})))
       (is (= [:popup :typing] @ran))
       (is (= 0 (ans 0x61 {:popup 0 :typing 0}))))))
+
+;; --- slice S7: the context menus -------------------------------------------
+
+(deftest console-commands-test
+  (let [calls (atom [])
+        ctx {:complete! (fn [] (swap! calls conj :complete!) nil)}]
+    (is (= #{:console/complete} (set (keys registry/console-commands))))
+    (is (= :handled (registry/run-command! registry/console-commands {:command :console/complete} ctx)))
+    (is (= [:complete!] @calls))))
+
+(deftest commands-ids-are-disjoint-test
+  (is (= (count registry/commands)
+         (+ (count registry/window-commands) (count registry/editor-commands)
+            (count registry/console-commands))))
+  (doseq [[id c] registry/commands]
+    (is (and (string? (:doc c)) (seq (:doc c))) (str id))))
+
+(deftest every-menu-item-is-registered-test
+  (doseq [menu [registry/editor-menu registry/console-menu]]
+    (doseq [{:keys [command label]} menu]
+      (is (contains? registry/commands command) (str label " names " command)))
+    (is (apply distinct? (map :label menu)))
+    (is (apply distinct? (map :action menu)))))

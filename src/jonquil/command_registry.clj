@@ -6,9 +6,10 @@
   rest; the editor's thunks), so a command is a plain function a test can
   call with a fake ctx. No GTK here.
 
-  Slices S1-S4 register the window's chords and S5-S6 the editor's; in later
-  slices menus and the context menu read the same table, and Part 2's
-  plugins add their own."
+  Slices S1-S4 register the window's chords and S5-S6 the editor's; S7's
+  context menus read the same table (editor-menu, console-menu,
+  menu-items); in later slices the palette does too, and Part 2's plugins
+  add their own."
   (:require [jonquil.keymap :as km]))
 
 (defn- call [k & args]
@@ -107,13 +108,52 @@
    :help/jump {:doc "Jump to the definition of the symbol at the caret." :scope :editor :run (act :jump!)}
    :edit/rename {:doc "Rename the symbol at the caret." :scope :editor :run (act :rename!)}
    ;; slice S6
-   :run/form {:doc "Run the form at the caret." :scope :editor :run (act :run-form!)}})
+   :run/form {:doc "Run the form at the caret." :scope :editor :run (act :run-form!)}
+   ;; slice S7: the context menu's, with no binding, since Tab is a typing
+   ;; stage
+   :edit/indent {:doc "Indent the lines." :scope :editor :run (act :indent!)}
+   :edit/unindent {:doc "Unindent the lines." :scope :editor :run (act :unindent!)}})
 
 (def editor-conditions
   "Named conditions an editor binding's :when can ask for, over the same
   per-key ctx."
   {:writable (fn [ctx] ((:writable? ctx)))
    :preedit-active (fn [ctx] ((:preedit-active? ctx)))})
+
+(def console-commands
+  "The console's context-menu commands (slice S7). The console's keys stay
+  in jonquil.gtk.console-view, outside Part 1's two key chains."
+  {:console/complete {:doc "Complete the symbol at the console's caret." :scope :console
+                      :run (act :complete!)}})
+
+(def commands
+  "Every registered command, the three scopes merged; ids never collide
+  (command_registry_test pins it)."
+  (merge window-commands editor-commands console-commands))
+
+(def editor-menu
+  "The editor's context menu (slice S7), in its order: each item's label,
+  the action name it's installed under (\"p4.<action>\") and the command
+  it runs."
+  [{:label "Run Form" :action "run-form" :command :run/form}
+   {:label "Jump to Definition" :action "jump" :command :help/jump}
+   {:label "Rename Symbol" :action "rename" :command :edit/rename}
+   {:label "Quick Documentation" :action "quick-doc" :command :help/quick-doc}
+   {:label "Inspect Last Result" :action "inspect-last" :command :inspect/last}
+   {:label "Inspect Form" :action "inspect-form" :command :inspect/form}
+   {:label "Complete" :action "complete" :command :completion/open}
+   {:label "Toggle Comment" :action "toggle-comment" :command :edit/toggle-comment}
+   {:label "Format All" :action "format-all" :command :edit/format-all}
+   {:label "Format Selection" :action "format-selection" :command :edit/format-selection}
+   {:label "Indent" :action "indent" :command :edit/indent}
+   {:label "Unindent" :action "unindent" :command :edit/unindent}
+   {:label "Find" :action "find" :command :find/open}
+   {:label "Replace" :action "replace" :command :find/open-replace}])
+
+(def console-menu
+  "The console's context menu (slice S7)."
+  [{:label "Complete" :action "complete" :command :console/complete}
+   {:label "Clear Last Output" :action "clear-last-output" :command :console/clear-last-output}])
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named
@@ -129,6 +169,16 @@
   [registry binding ctx]
   (when-let [{f :run} (get registry (:command binding))]
     (f ctx (or (:args binding) {}))))
+
+(defn menu-items
+  "menu's items as jonquil.gtk.window/install-context-menu! takes them,
+  [[label action thunk] ...] in menu order, each thunk running its command
+  from commands with ctx. A command's outcome is ignored, as a menu item
+  has no key to hand on."
+  [menu ctx]
+  (mapv (fn [{:keys [label action command]}]
+          [label action #(run-command! commands {:command command} ctx)])
+        menu))
 
 (def ^:private KEY-ESCAPE (km/key-value "Escape"))
 
