@@ -188,8 +188,12 @@
   "Shows entries in pal, all of them, the first selected, with the entry
   cleared; pops up at the caret and only then focuses the entry, since a
   later call touching selection can revoke an earlier one's (as
-  jonquil.gtk.help-popover/show-rename! does)."
+  jonquil.gtk.help-popover/show-rename! does). No composition can be
+  under way in an entry that's about to take focus, so it starts with none:
+  one the palette was closed over (Escape, a click outside) may never have
+  reported its end."
   [pal entries]
+  (reset! (:preedit-active? pal) false)
   (reset! (:state pal) {:all entries :shown entries :index 0})
   (g/gtk-editable-set-text (:entry pal) "")
   (render! pal)
