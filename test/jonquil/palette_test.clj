@@ -49,6 +49,13 @@
   (is (= "Indent the lines.  built-in"
          (palette/row-text {:doc "Indent the lines." :chords [] :source "built-in"}))))
 
+(deftest plugin-source-test
+  (let [cmds (assoc registry/commands :p3-x/wrap {:doc "Wrap it." :scope :editor :plugin :p3-x
+                                                  :run (fn [_ _] :handled)})
+        e (some #(when (= :p3-x/wrap (:id %)) %)
+                (palette/entries {:commands cmds :keymap km/shipped :os "Linux"}))]
+    (is (= "p3-x" (:source e)))))
+
 (deftest move-test
   (let [st {:shown [:a :b :c] :index 0}]
     (is (= 1 (:index (palette/move st 1))))

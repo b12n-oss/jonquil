@@ -47,7 +47,7 @@
     (->> commands
          (remove (fn [[_ c]] (false? (:palette? c))))
          (map (fn [[id c]]
-                {:id id :doc (:doc c) :source "built-in"
+                {:id id :doc (:doc c) :source (if-let [p (:plugin c)] (name p) "built-in")
                  :chords (vec (distinct (for [b bindings :when (= id (:command b))]
                                           (chord-label b os))))}))
          (sort-by :doc)
