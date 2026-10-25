@@ -742,8 +742,9 @@
 
 (defn- control-only?
   "P4.T6's own rule for the completion chord (00-overview.md's global
-  constraints, the same rule jonquil.gtk.editor's own control-only? checks
-  for quick doc/jump/completion there): Control held and Meta NOT held,
+  constraints, the same rule the editor keymap spells :mods #{:ctrl}
+  :not #{:meta} for quick doc/jump/completion there): Control held and
+  Meta NOT held,
   unlike command-chord? above which treats either as the same chord."
   [state]
   (and (not (zero? (bit-and state g/CONTROL-MASK)))

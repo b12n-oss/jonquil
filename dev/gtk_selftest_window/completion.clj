@@ -219,8 +219,8 @@
 (defn row-completion-closes-on-space
   "Open, then completion/handle-key! and editor/handle-key! must both
   return 0 for a plain space (I3, the same check row-completion-keys-
-  reach-editor makes for p/Backspace/Left -- control-only? in editor.clj's
-  own Ctrl+Space clause rejects a bare space, mask 0). Only then insert a
+  reach-editor makes for p/Backspace/Left -- the editor keymap's
+  Ctrl+Space binding needs Control, so a bare space, mask 0, misses it). Only then insert a
   space with insert_interactive_at_cursor: help/prefix-at is nil right
   after the space, so refine! closes the popover -- no poll, same
   synchronous reasoning as completion-keys-reach-editor."
@@ -272,7 +272,7 @@
       (on-gtk (completion/close! c)))))
 
 (defn row-completion-cmd-space-nothing
-  "0x20 with META only: control-only? rejects it (CONTROL-MASK checked,
+  "0x20 with META only: the Ctrl+Space binding rejects it (CONTROL-MASK checked,
   META-MASK rejected, the P4 rule), so the chord falls through unhandled
   and no popover opens."
   [ui]

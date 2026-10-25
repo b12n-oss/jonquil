@@ -133,7 +133,7 @@
                   (popover/hide! rp)))))))
 
 (defn row-rename-cmd-does-nothing
-  "0xffbf (F2) with META only: no-modifiers? rejects it (the P4 rule),
+  "0xffbf (F2) with META only: :exact #{} rejects it (the P4 rule),
   same reasoning as every other P4 chord's own cmd-does-nothing row, so
   the chord falls through unhandled and no popover opens."
   [ui]
@@ -147,7 +147,7 @@
                                {:handled handled :open (popover/open? rp)}))))))
 
 (defn row-rename-cmd-shift-f6-does-nothing
-  "0xffc3 (F6) with SHIFT and META together: shift-only? rejects it
+  "0xffc3 (F6) with SHIFT and META together: :exact #{:shift} rejects it
   (checking shift-held? alone would treat this chord the same as plain
   Shift+F6), so the chord falls through unhandled and no popover opens."
   [ui]
@@ -161,7 +161,7 @@
                                {:handled handled :open (popover/open? rp)}))))))
 
 (defn row-rename-ctrl-shift-f6-does-nothing
-  "0xffc3 (F6) with SHIFT and CONTROL together: shift-only? must reject the
+  "0xffc3 (F6) with SHIFT and CONTROL together: :exact #{:shift} must reject the
   Control side as it already rejects Meta (the parked P4 item: Ctrl+Shift+F6
   also triggered rename), so the chord falls through unhandled."
   [ui]
