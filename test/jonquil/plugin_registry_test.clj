@@ -235,3 +235,23 @@
     (reset! reg/effects (assoc (recording-effects (atom [])) :eval! (fn [& _]) :repl! (fn [& _])))
     (go! r "p5b-ctx")
     (is (= #{:eval! :repl!} (set (keys (::p/impl (deref seen 2000 nil))))))))
+
+(deftest await-eval-review-fixes-test
+  ;; review I1: a dialect's :notice result (no runtime, app asleep) is its
+  ;; text, not an NPE from error-text
+  (is (= {:value nil :out "" :err "" :error "; No runtime is connected."}
+         (reg/await-eval! {:fire (fake-fire {:status :notice :text "; No runtime is connected."}) :interrupt! (fn [])})))
+  ;; review I2/I3: Jonquil's own lines (a restart, auto-require) reach
+  ;; :on-notice, the code's :out/:err don't
+  (let [notices (atom [])
+        r (reg/await-eval! {:fire (fake-fire {:status :ok :printed "1"}
+                                             :outs [[:out "o"] [:system "; Stop restarted the Jolt runtime\n"] [:error "; bad\n"]])
+                            :interrupt! (fn [])
+                            :on-notice (fn [k t] (swap! notices conj [k t]))})]
+    (is (= "o" (:out r)))
+    (is (= [[:system "; Stop restarted the Jolt runtime\n"] [:error "; bad\n"]] @notices)))
+  ;; a :timeout-ms that isn't a positive number throws before anything starts
+  (let [fired (atom 0)]
+    (is (= ":timeout-ms must be a positive number of milliseconds"
+           (ex-message (await-thrown {:fire (fn [_] (swap! fired inc) nil) :interrupt! (fn []) :timeout-ms "500"}))))
+    (is (zero? @fired))))

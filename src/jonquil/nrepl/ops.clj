@@ -234,6 +234,23 @@
       (merge {:out (subs out 0 i)} (select-keys m [:value :error]))
       {:out out})))
 
+(defn quiet-reply
+  "A quiet-code eval's reply from what it printed: [result' out-before-the-
+  token-line]. On :ok, result' carries the token line's value as :printed,
+  or its error as an :error; an :ok with no token line is an error too,
+  since the reply's own :printed is the person's old *1 the wrap returned.
+  Anything else (a Stop, a lost connection) stands, out passed on as it
+  came."
+  [result token out]
+  (let [{:keys [value error] :as q} (quiet-result out token)]
+    (if (= :ok (:status result))
+      [(cond
+         value (assoc result :printed value)
+         :else (-> result (dissoc :printed)
+                   (assoc :status :error :error-text (str "Error: " (or error "the quiet eval's answer was lost")))))
+       (:out q)]
+      [result out])))
+
 (defn reset-code
   "Code for the child that removes each namespace in names that exists,
   then `user`, and recreates `user`: the in-process Reset on Run's rule

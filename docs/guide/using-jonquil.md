@@ -1825,10 +1825,16 @@ nothing to the REPL history, and `*1`, `*2`, `*3` and `*e` are what they
 were before it. `:value` is the printed value, the text the console would
 show after `=> `, and a throw from the code comes back as `:error` with
 `:value` nil. It works with the Jolt dialect for now, in process or in a
-child, and on any other dialect it says to use `p/repl!`, which
-evaluates as if you'd typed the code at the console and works everywhere.
-Either one waits up to 10 seconds by default and then stops the eval and
-throws "the eval took longer than 10000 ms and was stopped". It also
+child, and on any other dialect it says to use `p/repl!`, which works
+everywhere. `p/repl!` evaluates at the console the way Run Selection
+does: the code is echoed, its output and result show, it goes into the
+history, and it runs in the tab's namespace. Either one waits up to 10
+seconds by default and then stops the eval and throws "the eval took
+longer than 10000 ms and was stopped". Stopping it is the same as
+pressing Stop, so for Jolt running as a child (a project with a
+`deps.edn`), code that doesn't stop about a second after the interrupt makes Jonquil restart
+the child, and its definitions are gone. The console says so when that
+happens, as it says when Jolt auto-requires your project's namespaces. It also
 throws "the REPL is busy" while something else is running, and
 `p/eval!` stops code that reads from the console. A throw from a `:run`
 command shows on the status bar and the console with the plugin's id.

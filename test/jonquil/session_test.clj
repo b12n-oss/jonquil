@@ -246,3 +246,14 @@
     (is (= :ok (:status (run ev/eval! s "(+ 1 2)" {:quiet "T" :ns-source "(ns no.such.quiet)"})))
         "a buffer namespace that doesn't exist yet falls back to the prompt's")
     (remove-ns 'jonquil.quiet-buf)))
+
+(deftest quiet-eval-auto-require-reaches-the-console-test
+  ;; review I3: a quiet eval that's the first in a project window still
+  ;; tells the person about the auto-require, as Jonquil's own line
+  (let [s (session/make-session)
+        dir (str (temp-dirs/temp-dir! "jonquil-quiet-ar-"))
+        out (atom [])]
+    (swap! (:state s) assoc :project-dir dir :auto-require '[clojure.set] :auto-require-dir dir)
+    (is (= :ok (:status (run ev/eval! s "1" {:quiet "T" :on-output (fn [k t] (swap! out conj [k t]))}))))
+    (is (some (fn [[k t]] (and (= :system k) (re-find #"auto-require: clojure.set" t))) @out) (pr-str @out))
+    (is (not-any? (fn [[k t]] (and (= :out k) (re-find #"auto-require" t))) @out))))

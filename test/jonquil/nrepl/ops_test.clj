@@ -296,3 +296,16 @@
   (let [out (str "OTHER:{:value \"9\"}\n" "\nTOK:{:value \"3\"}")]
     (is (= {:out "OTHER:{:value \"9\"}\n" :value "3"} (ops/quiet-result out "TOK:"))))
   (is (= {:out "plain"} (ops/quiet-result "plain" "TOK:"))))
+
+(deftest quiet-reply-test
+  ;; review I4: the wrap returns the person's old *1, so an :ok reply whose
+  ;; token line is missing must never hand that back as the value
+  (is (= [{:status :ok :printed "42" :ns 'user} "side\n"]
+         (ops/quiet-reply {:status :ok :printed "OLD-STAR-1" :ns 'user} "TOK:" "side\n\nTOK:{:value \"42\"}")))
+  (is (= [{:status :error :error-text "Error: boom" :ns 'user} ""]
+         (ops/quiet-reply {:status :ok :printed "OLD" :ns 'user} "TOK:" "\nTOK:{:error \"boom\"}")))
+  (is (= [{:status :error :error-text "Error: the quiet eval's answer was lost" :ns 'user} "x"]
+         (ops/quiet-reply {:status :ok :printed "OLD-STAR-1" :ns 'user} "TOK:" "x")))
+  (is (= [{:status :interrupted} "partial"]
+         (ops/quiet-reply {:status :interrupted} "TOK:" "partial"))
+      "a Stop or a lost connection stands, its output passed on"))

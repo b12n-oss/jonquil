@@ -400,17 +400,12 @@
           (on-output :system (str (clj/auto-require-failed auto-require-retry) "\n")))))))
 
 (defn- quiet-finish
-  "A :quiet eval's result from what it printed: the token line's value or
-  error in place of the old *1 the wrap returned, and the output before
-  that line passed on, once. Without the token line (a Stop, a lost
-  connection) result stands and the output goes on as it came."
+  "A :quiet eval's result (ops/quiet-reply), its output before the token
+  line passed on once."
   [result token out on-output]
-  (let [{:keys [value error] :as q} (ops/quiet-result out token)]
-    (when (and on-output (seq (:out q))) (on-output :out (:out q)))
-    (cond
-      (and (= :ok (:status result)) error) (-> result (dissoc :printed) (assoc :status :error :error-text (str "Error: " error)))
-      (and (= :ok (:status result)) value) (assoc result :printed value)
-      :else result)))
+  (let [[result out] (ops/quiet-reply result token out)]
+    (when (and on-output (seq out)) (on-output :out out))
+    result))
 
 (defn- run-worker!
   [ev code {:keys [run? on-output on-status-change] :as opts}]

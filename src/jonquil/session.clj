@@ -168,7 +168,13 @@
                             ;; dependencies, which mustn't freeze the window.
                             :before-eval (when dir (fn []
                                                      (roots/use-project-deps! dir)
-                                                     (auto-require! ctx state dir)))
+                                                     (if (and (:quiet opts) (:on-output opts))
+                                                       ;; a quiet eval's *out* is the plugin's:
+                                                       ;; the auto-require lines are the person's
+                                                       (let [s (with-out-str (binding [*err* *out*]
+                                                                               (auto-require! ctx state dir)))]
+                                                         (when (seq s) ((:on-output opts) :system s)))
+                                                       (auto-require! ctx state dir))))
                             :ns-name ns-sym
                             :on-complete
                             (fn [result]

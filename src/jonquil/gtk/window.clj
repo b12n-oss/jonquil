@@ -3632,6 +3632,8 @@
           ;; as the MCP's stop: never interrupt an idle evaluator (an attach
           ;; evaluator would detach)
           stop-eval! (fn [] (turn #(when (ev/evaluating? @ev*) (ev/interrupt! @ev*))))
+          ;; Jonquil's own lines during a plugin's eval reach the console
+          notice! (fn [kind text] (on-gui! #(cview/append! cv kind text)))
           tab-of (fn [id] (or (some #(when (= id (:id %)) %) @tabs)
                               (throw (ex-info "that tab was closed" {}))))]
       (reset! plugin-registry/effects
@@ -3650,22 +3652,27 @@
                ;; plugins P5b: both run through the tab's id, on the
                ;; plugin's worker; await-eval! stops one that times out
                :eval! (fn [id code opts]
-                        (when-not (plugin-registry/quiet-capable? @ev*)
-                          (throw (ex-info "p/eval! works with Jolt for now; p/repl! works with every dialect" {})))
                         (plugin-registry/await-eval!
                          {:timeout-ms (:timeout-ms opts)
                           :interrupt! stop-eval!
+                          :on-notice notice!
                           :fire (fn [cbs]
-                                  (turn #(let [t (tab-of id)]
-                                           (ev/eval! @ev* code (assoc cbs :quiet (str "jonquil-quiet-" (random-uuid) ":")
-                                                                      :ns-source (editor/editor-text (:ed t))
-                                                                      :owner id)))))}))
+                                  ;; the dialect is checked on the evaluator the
+                                  ;; eval goes to, in the same turn (review I5)
+                                  (turn #(let [t (tab-of id)
+                                               e @ev*]
+                                           (when-not (plugin-registry/quiet-capable? e)
+                                             (throw (ex-info "p/eval! works with Jolt for now; p/repl! works with every dialect" {})))
+                                           (ev/eval! e code (assoc cbs :quiet (str "jonquil-quiet-" (random-uuid) ":")
+                                                                   :ns-source (editor/editor-text (:ed t))
+                                                                   :owner id)))))}))
                :repl! (fn [id code opts]
                         (dissoc (plugin-registry/await-eval!
                                  {:timeout-ms (:timeout-ms opts)
                                   :interrupt! stop-eval!
                                   ;; the person can answer a read at the console
                                   :input-stops? false
+                                  :on-notice notice!
                                   :fire (fn [{:keys [on-output on-complete]}]
                                           (turn #(let [t (tab-of id)
                                                        busy (atom nil)]
