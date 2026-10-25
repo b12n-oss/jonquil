@@ -122,10 +122,14 @@
   ([bindings command-ids condition-ids]
   (vec
    (for [[i b] (map-indexed vector bindings)
-         :let [names (key-names b)
+         :let [coll-of (fn [k] (let [v (get b k)] (when (coll? v) v)))
+               names (if (:key b) [(:key b)] (coll-of :keys))
                exact (when (set? (:exact b)) (:exact b))
-               mods (concat (:mods b) (:not b) exact)]
+               mods (concat (coll-of :mods) (coll-of :not) exact)]
          p (cond-> []
+             (and (contains? b :keys) (not (coll? (:keys b)))) (conj ":keys isn't a set of key names")
+             (and (contains? b :mods) (not (coll? (:mods b)))) (conj ":mods isn't a set")
+             (and (contains? b :not) (not (coll? (:not b)))) (conj ":not isn't a set")
              (and (nil? (:key b)) (nil? (:keys b))) (conj "has neither :key nor :keys")
              (and (:key b) (:keys b)) (conj "has both :key and :keys")
              (some #(nil? (key-value %)) names)

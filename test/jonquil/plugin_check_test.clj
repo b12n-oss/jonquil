@@ -153,3 +153,46 @@
     (let [r (bind b)]
       (is (one-problem r) (pr-str b))
       (is (mentions? r :problems "bindings: ") (pr-str b)))))
+
+;; --- review fixes ----------------------------------------------------------
+
+(deftest conditional-window-binding-is-not-unreachable-test
+  ;; the window takes these only sometimes: a :when guard (Cmd+G while the
+  ;; find bar can navigate), a command that can pass the key on (Escape's
+  ;; popover close, Cmd+['s jump back), the chain's own :to-gtk end
+  (doseq [[b shadowed] [[{:key "g" :mods #{:cmd} :command :wrap-when/wrap} ":find/next"]
+                        [{:key "Escape" :command :wrap-when/wrap} ":find/bar-key"]
+                        [{:key "bracketleft" :mods #{:cmd} :command :wrap-when/wrap} ":source/back"]]]
+    (let [r (bind b)]
+      (is (:ok? r) (pr-str b r))
+      (is (mentions? r :warnings shadowed) (pr-str b r)))))
+
+(deftest malformed-bindings-never-throw-test
+  (doseq [b [{:key "j" :mods :cmd :command :wrap-when/wrap}
+             {:key "j" :mods 5 :command :wrap-when/wrap}
+             {:key "j" :not :alt :mods #{:cmd} :command :wrap-when/wrap}
+             {:keys :j :mods #{:cmd} :command :wrap-when/wrap}]]
+    (let [r (try (bind b) (catch :default e {:threw (ex-message e)}))]
+      (is (nil? (:threw r)) (str (pr-str b) " threw " (:threw r)))
+      (is (one-problem r) (pr-str b r))))
+  (doseq [cs [:x 5]]
+    (let [r (try (check [(assoc good :commands cs)]) (catch :default e {:threw (ex-message e)}))]
+      (is (nil? (:threw r)) (str cs " threw " (:threw r)))
+      (is (false? (:ok? r))))))
+
+(deftest request-conditions-as-any-collection-test
+  (doseq [cs [nil [] [:writable]]]
+    (let [r (try (pc/validate (assoc request :conditions cs :file-id "wrap-when"
+                                      :definitions [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :when [:writable]
+                                                                            :command :wrap-when/wrap}])]))
+                 (catch :default e {:threw (ex-message e)}))]
+      (is (nil? (:threw r)) (str (pr-str cs) " threw " (:threw r))))))
+
+(deftest bad-command-scope-is-one-problem-test
+  (let [r (check [(assoc both :commands [(assoc (first (:commands both)) :scope :console)]
+                         :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap}])])]
+    (is (one-problem r) (pr-str r))))
+
+(deftest meta-and-super-labels-test
+  (is (mentions? (bind {:key "w" :mods #{:meta} :command :wrap-when/say}) :warnings "Meta+W"))
+  (is (mentions? (bind {:key "a" :mods #{:super} :command :wrap-when/say}) :problems "Super+A")))

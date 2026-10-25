@@ -19,6 +19,8 @@
     :ctrl "Ctrl"
     :alt (if mac? "Option" "Alt")
     :shift "Shift"
+    :meta "Meta"
+    :super "Super"
     (name m)))
 
 (defn chord-label
@@ -30,7 +32,7 @@
   [binding os]
   (let [mac? (= "Mac OS X" os)
         mods (or (:exact binding) (:mods binding) #{})
-        prefix (apply str (for [m [:cmd :ctrl :alt :shift] :when (contains? mods m)]
+        prefix (apply str (for [m [:cmd :ctrl :meta :super :alt :shift] :when (contains? mods m)]
                             (str (modifier-label m mac?) "+")))
         ks (if (:key binding) [(:key binding)] (sort (:keys binding)))]
     (str/join ", " (distinct (map #(str prefix (key-label %)) ks)))))

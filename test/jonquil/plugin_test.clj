@@ -10,6 +10,9 @@
                  @p/*definitions*)]
       (is (= [:a :b] (map :id defs)))
       (is (every? #(let [l (::p/line %)] (or (nil? l) (integer? l))) defs))))
+  (testing "a non-map argument is recorded as it is, for the validator to name"
+    (let [defs (binding [p/*definitions* (atom [])] (p/defplugin [1 2]) @p/*definitions*)]
+      (is (= [[1 2]] defs))))
   (testing "outside a load it throws"
     (let [e (try (p/defplugin {:id :a}) nil (catch :default e e))]
       (is (some? e))

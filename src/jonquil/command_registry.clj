@@ -50,9 +50,9 @@
                       :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}
    ;; slice S3: the Escape chain, each command answering an outcome. The
    ;; find bar's own answer is final: its 0 (an IME composing) is GTK's.
-   :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window :palette? false
+   :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window :palette? false :passes? true
                   :run (fn [ctx _args] (if (= 1 ((:find-bar-key! ctx))) :handled :to-gtk))}
-   :popover/close-all {:doc "Close any open popover." :scope :window :palette? false
+   :popover/close-all {:doc "Close any open popover." :scope :window :palette? false :passes? true
                        :run (fn [ctx _args] (if ((:close-popovers-fn ctx)) :handled :next))}
    :inspector/close {:doc "Close the inspector panel." :scope :window :run (call :close-inspector-fn)}
    :source/close {:doc "Close the source panel." :scope :window :palette? false
@@ -68,8 +68,13 @@
    :source/back {:doc "Step the source panel's history back." :scope :window :palette? false
                  :run (fn [ctx _args] ((:back! (:source-keys ctx))) :handled)}
    :source/jump-back {:doc "Go back from the last jump into a tab." :scope :window :palette? false
+                      :passes? true
                       :run (fn [ctx _args]
                              (if (some-> (:source-keys ctx) :jump-back! (#(%))) :handled :next))}
+   ;; :passes? true (plugins P1) marks a command that can answer :next or
+   ;; :to-gtk, so the key may reach the editor after it; the plugin
+   ;; validator reads it to tell an unreachable plugin binding from one the
+   ;; window only sometimes takes.
    ;; slice S8. :palette? false marks a command that only works inside the
    ;; key chain guarding it (a focus, an Escape step, a tab number), so the
    ;; palette leaves it out

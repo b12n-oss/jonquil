@@ -26,9 +26,11 @@
 
 (defn request-from-registry
   "The data part of a validate request: commands (id -> a registry entry)
-  reduced to {id {:scope s}}, with conditions, keymap and os as given."
+  reduced to {id {:scope s :passes? b}} (:passes? marks a command that can
+  hand the key on, answering :next or :to-gtk), with conditions, keymap and
+  os as given."
   [{:keys [commands conditions keymap os]}]
-  {:registered (into {} (map (fn [[id c]] [id {:scope (:scope c)}])) commands)
+  {:registered (into {} (map (fn [[id c]] [id {:scope (:scope c) :passes? (true? (:passes? c))}])) commands)
    :conditions (set conditions) :keymap keymap :os os})
 
 (defn- blank-string? [s] (not (and (string? s) (not (str/blank? s)))))
@@ -125,7 +127,9 @@
 (def ^:private typing-keyvals
   ;; the editor's typing stages: smart enter, Tab and Shift+Tab, Backspace
   ;; across a pair (jonquil.gtk.editor/typing-key!); and below 0x100 every
-  ;; printable key, which GTK types
+  ;; printable key, which GTK types. Tab, ISO_Left_Tab and BackSpace have no
+  ;; key name a binding can use today (jonquil.keymap/key-value); they're
+  ;; here so naming them later can't open a hole
   #{0xff0d 0xff8d 0xff09 0xfe20 0xff08})
 
 (defn- typing-key? [kv] (or (< kv 0x100) (contains? typing-keyvals kv)))
@@ -136,8 +140,10 @@
   "The chord key name k makes under state st, as a person reads it."
   [k st os]
   (let [held (fn [m] (not (zero? (bit-and st (get M m)))))]
+    ;; Meta is Cmd on macOS; elsewhere it's its own key, as is Super
     (palette/chord-label {:key k :exact (cond-> #{}
-                                          (held :meta) (conj :cmd)
+                                          (held :meta) (conj (if (= "Mac OS X" os) :cmd :meta))
+                                          (held :super) (conj :super)
                                           (held :ctrl) (conj :ctrl)
                                           (held :alt) (conj :alt)
                                           (held :shift) (conj :shift))}
@@ -154,22 +160,45 @@
 (defn- shipped-command [bindings kv st]
   (:command (km/resolve-binding bindings kv st (constantly true))))
 
+(defn- window-take
+  "How the shipped window keymap treats key kv under state st, walking its
+  matching bindings in order as jonquil.keymap/dispatch does:
+  [:always cmd] when an unconditional binding whose command never hands
+  the key on takes it before anything could let it through; [:sometimes
+  cmd] when the first match is guarded (:when) or can hand it on
+  (registered :passes?); nil when no binding takes it or the walk hands it
+  to GTK (a fixed :to-gtk), so the editor gets it."
+  [window kv st registered]
+  (loop [[b & more] (filter #(km/matches? % kv st (constantly true)) window) first-cmd nil]
+    (cond
+      (nil? b) (when first-cmd [:sometimes first-cmd])
+      (:outcome b) (when first-cmd [:sometimes first-cmd])
+      (and (empty? (:when b)) (not (:passes? (get registered (:command b)))))
+      [(if first-cmd :sometimes :always) (or first-cmd (:command b))]
+      :else (recur more (or first-cmd (:command b))))))
+
 (defn- binding-rules
   "Typing keys and unreachable as problems, shadows as warnings, for
-  binding i b in scope (its command's)."
-  [i b scope {:keys [keymap os]}]
+  binding i b in scope (its command's). For an :editor binding the window
+  shadows it when it takes the key only sometimes, and makes it
+  unreachable when it always does."
+  [i b scope {:keys [keymap os registered]}]
   (let [cells (matching-cells b)
         label (fn [[k _ st]] (chord-label k st os))
         typing (first (filter (fn [[_ kv st]] (and (typing-key? kv) (not (command-chord? st)))) cells))
         ;; typing first: its fix (hold Cmd/Ctrl) changes which chords match
-        unreachable (when (and (= :editor scope) (not typing))
-                      (some (fn [[_ kv st :as cell]]
-                              (when-let [c (shipped-command (:window keymap) kv st)] [cell c]))
-                            cells))
+        takes (when (= :editor scope)
+                (for [[_ kv st :as cell] cells
+                      :let [t (window-take (:window keymap) kv st registered)] :when t]
+                  [t cell]))
+        unreachable (when-not typing
+                      (some (fn [[[how c] cell]] (when (= :always how) [cell c])) takes))
         shadow-scopes (if (= :editor scope) [:editor] [:window :editor])
-        shadows (distinct (for [[_ kv st :as cell] cells sc shadow-scopes
-                                :let [c (shipped-command (get keymap sc) kv st)] :when c]
-                            [c cell]))]
+        shadows (distinct (concat
+                           (for [[_ kv st :as cell] cells sc shadow-scopes
+                                 :let [c (shipped-command (get keymap sc) kv st)] :when c]
+                             [c cell])
+                           (for [[[how c] cell] takes :when (= :sometimes how)] [c cell])))]
     {:problems (cond-> []
                  typing (conj (str "binding " i " (" (label typing) ") would take a key you type; "
                                    "hold Cmd/Ctrl"))
@@ -187,7 +216,9 @@
   unreachable and shadow rules for each binding km/problems passes."
   [d {:keys [registered conditions] :as request}]
   (let [bs (:bindings d)
-        own (into {} (for [c (:commands d) :when (and (map? c) (keyword? (:id c)))] [(:id c) {:scope (:scope c)}]))
+        own (into {} (for [c (when (vector? (:commands d)) (:commands d))
+                           :when (and (map? c) (keyword? (:id c)))]
+                       [(:id c) {:scope (:scope c) :own? true}]))
         known (merge registered own)
         ids (set (keys known))]
     (cond
@@ -195,19 +226,23 @@
       (not (vector? bs)) {:problems [":bindings isn't a vector"] :warnings []}
       :else
       (reduce (fn [acc [i b]]
-                (let [ps (when (map? b) (km/problems [b] ids conditions))]
+                (let [ps (when (map? b) (km/problems [b] ids (set conditions)))]
                   (cond
                     (not (map? b)) (update acc :problems conj (str "binding " i " isn't a map"))
                     (seq ps) (update acc :problems into
                                      (map #(str "bindings: " (str/replace-first % "binding 0" (str "binding " i))) ps))
                     (:outcome b) (update acc :problems conj (str "binding " i " has an :outcome; a plugin binding runs a command"))
                     :else
-                    (let [scope (:scope (get known (:command b)))]
-                      (if-not (contains? #{:window :editor} scope)
+                    (let [{:keys [scope own?]} (get known (:command b))]
+                      (cond
+                        ;; a plugin command with a bad :scope is reported once, with the command
+                        (and own? (not (contains? #{:window :editor} scope))) acc
+                        (not (contains? #{:window :editor} scope))
                         (update acc :problems conj
                                 (str "binding " i " runs " (pr-str (:command b)) ", a " (pr-str scope)
                                      " command, and the " (if (= :console scope) "console" (pr-str scope))
                                      " has no keymap"))
+                        :else
                         (let [r (binding-rules i b scope request)]
                           (-> acc
                               (update :problems into (:problems r))

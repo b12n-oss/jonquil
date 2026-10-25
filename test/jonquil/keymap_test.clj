@@ -77,7 +77,10 @@
                        [{:key "r" :exact #{} :not #{:alt} :command :x} ":exact with :not"]
                        [{:key "r" :physical? "yes" :command :x} ":physical? not boolean"]
                        [{:key "r" :exact [:shift] :command :x} ":exact a vector"]
-                       [{:key "r" :exact :shift :command :x} ":exact a keyword"]]]
+                       [{:key "r" :exact :shift :command :x} ":exact a keyword"]
+                       [{:key "r" :mods :cmd :command :x} ":mods a keyword"]
+                       [{:key "r" :not 5 :command :x} ":not a number"]
+                       [{:keys :r :command :x} ":keys a keyword"]]]
         (let [ps (km/problems [{:key "a" :command :x} b] ids #{:c})]
           (is (= 1 (count ps)) (str why ": " (pr-str ps)))
           (is (str/includes? (str (first ps)) "binding 1") (str why ": " (pr-str ps))))))))

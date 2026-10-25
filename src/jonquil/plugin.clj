@@ -15,7 +15,8 @@
   Throws when no plugin load is under way."
   [m line]
   (if-let [defs *definitions*]
-    (do (swap! defs conj (assoc m ::line line)) nil)
+    ;; a non-map is recorded as it is, for the validator to name
+    (do (swap! defs conj (if (map? m) (assoc m ::line line) m)) nil)
     (throw (ex-info "defplugin only runs while Jonquil loads a plugin file"
                     {:plugin/outside-load true}))))
 
