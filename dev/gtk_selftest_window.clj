@@ -243,6 +243,10 @@
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named
    plugin-rows/row-plugin-edit-throw-contained
+   plugin-rows/row-plugin-reload-picks-up-a-change
+   plugin-rows/row-plugin-reload-failure-keeps-old
+   plugin-rows/row-plugin-save-reloads
+   plugin-rows/row-plugin-removed-file
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

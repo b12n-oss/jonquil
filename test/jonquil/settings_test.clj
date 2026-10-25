@@ -210,3 +210,20 @@
     (let [r (settings/load-settings path)]
       (is (not (contains? r :mcp-listen?)))
       (is (str/includes? (:warning r) ":mcp-listen?")))))
+
+(deftest plugins-part-test
+  ;; plugins P4: :plugins {:disabled #{id ...}}, read; malformed is ignored
+  ;; with a warning; a save of another key keeps it
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :navy :plugins {:disabled #{:a :b}}}")
+    (is (= {:disabled #{:a :b}} (:plugins (settings/load-settings path))))
+    (is (nil? (settings/save-settings! path {:theme :dark})))
+    (is (= {:disabled #{:a :b}} (:plugins (edn/read-string (slurp path))))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :navy :plugins {:disabled [:a]}}")
+    (let [r (settings/load-settings path)]
+      (is (nil? (:plugins r)))
+      (is (str/includes? (:warning r) ":plugins :disabled"))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :navy}")
+    (is (nil? (:plugins (settings/load-settings path))))))

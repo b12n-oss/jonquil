@@ -169,10 +169,20 @@ these:
   runs the protocol on each file in id order (each load under a deadline,
   so a file that loops at top level is skipped too), and checks each one
   against the built-ins plus the plugins already loaded, so a chord an
-  earlier plugin took is warned about. The window loads plugins on a
-  future after it opens and swaps `live` on the GTK thread;
+  earlier plugin took is warned about. The window loads plugins once it
+  opens (since P4, on the load agent, which resets `live`);
   `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. `:run` commands
-  wait for effects (P5).
+  wait for effects (P5). Slice P4 (2026-10-25) made a change take effect
+  without a restart. `plugin-loader/reload` diffs the files against the
+  live registry: an unchanged file is left alone; a new or changed one goes
+  through the protocol against the plugins sorting before it; a failure
+  keeps the old entry and loads its accepted source again, so its
+  namespace is what it was; a gone file or a disabled id (`settings.edn`
+  `:plugins {:disabled #{...}}`) is removed; and every plugin after a
+  change is validated again, since its keys can depend on the earlier
+  ones. Every load (startup, Reload Plugins in the palette, a saved plugin
+  file through a hook in `save-to!`) runs on one agent that keeps going
+  after a throw, so loads never race and none is lost.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.

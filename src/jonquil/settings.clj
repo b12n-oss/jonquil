@@ -88,10 +88,24 @@
       (boolean? v) {:mcp-listen? v}
       :else {:warning (str path " has an unusable :mcp-listen?, ignoring it")})))
 
+(defn- plugins-part
+  "{:plugins {:disabled #{id ...}}} when m's :plugins holds a set of
+  keyword ids under :disabled, {} when there's none, and {:warning ..}
+  otherwise (plugins P4; the plugin list writes it, P4 only reads it)."
+  [path m]
+  (let [v (when (map? m) (:plugins m))
+        d (when (map? v) (:disabled v))]
+    (cond
+      (nil? v) {}
+      (and (map? v) (nil? d)) {}
+      (and (set? d) (every? keyword? d)) {:plugins {:disabled d}}
+      :else {:warning (str path "'s :plugins :disabled isn't a set of plugin ids, ignoring it")})))
+
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs? and :mcp-listen? when
-  they hold a boolean, and :warning when the file exists but part of it can't be used.
+  they hold a boolean, :plugins when it holds a set of disabled ids, and
+  :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."
   [path]
   (let [f (io/file path)]
@@ -103,10 +117,11 @@
             ft (file-tree-part path m)
             rt (reopen-tabs-part path m)
             ml (mcp-listen-part path m)
+            pl (plugins-part path m)
             warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt)
-                                   (:warning ml)])]
+                                   (:warning ml) (:warning pl)])]
         (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning)
-                       (dissoc rt :warning) (dissoc ml :warning))
+                       (dissoc rt :warning) (dissoc ml :warning) (dissoc pl :warning))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
 (defn- resolved-target

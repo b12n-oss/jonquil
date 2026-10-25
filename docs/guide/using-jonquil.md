@@ -1811,9 +1811,23 @@ it fires only when the first doesn't. Plugin bindings
 come ahead of the built-in ones, and their commands show in the command
 palette with the plugin's id as the source.
 
-Until Reload Plugins exists, a change to a plugin file takes effect at
-the next start. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a launch
-from the Dock or Finder, starts with none.
+Saving a plugin file in a tab reloads that plugin, and **Reload Plugins**
+in the command palette reloads every plugin whose file changed, appeared
+or went away (an edit made in another program needs this one). A reload
+that fails keeps the previous version working and leaves your file as
+you wrote it, and the console names each problem. A reload also checks
+the plugins after the one that changed again, since their keys can
+depend on it: one that now fails, say because it binds a command that's
+gone, is removed and named, and comes back once what it needs is fixed
+and saved (or at the next Reload Plugins). To keep a plugin off without deleting it,
+list its id in `settings.edn`:
+
+```clojure
+{:plugins {:disabled #{:wrap-when}}}
+```
+
+then Reload Plugins. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a
+launch from the Dock or Finder, starts with none.
 
 ## Driving Jonquil from an agent (MCP)
 
