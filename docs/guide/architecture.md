@@ -158,7 +158,21 @@ these:
   command that doesn't answer in time is reported once and its other
   fixtures are skipped, since `future-cancel` can't stop CPU-bound code in
   process (an agent's proposal is soaked in a separate process later).
-  Nothing goes live yet.
+  Nothing goes live yet. Slice P3 (2026-10-25) made plugins live.
+  `jonquil.plugin-registry` holds them in one atom, `live`, and derives the
+  plugins' `:edit` commands as registry commands and their bindings per
+  scope in id order. Each controller dispatches the plugin bindings ahead
+  of the shipped ones, so with no plugins the tables are exactly the
+  shipped ones. A plugin command checks its op against the live buffer
+  before applying it, and a throw, a bad op or a failed apply names the
+  plugin. `jonquil.plugin-loader` finds `<settings-dir>/plugins/<id>.clj`,
+  runs the protocol on each file in id order (each load under a deadline,
+  so a file that loops at top level is skipped too), and checks each one
+  against the built-ins plus the plugins already loaded, so a chord an
+  earlier plugin took is warned about. The window loads plugins on a
+  future after it opens and swaps `live` on the GTK thread;
+  `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. `:run` commands
+  wait for effects (P5).
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
