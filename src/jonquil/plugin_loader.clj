@@ -70,27 +70,33 @@
 
 (defn- recheck-later
   "After a reload changed the plugins in changed (ids, installed, replaced
-  or removed), every other live plugin sorting after the first of them is
-  validated again (no load, no soak): its standing depends on the earlier
-  ones (their chords, the commands it binds). One that now fails is removed
-  and named, as a fresh start would skip it; one that passes prints its
-  warnings, which may be new. [reg' lines]."
+  or removed), every live plugin sorting after the first of them is
+  validated again against the final state (no load, no soak), the changed
+  ones included, since one checked earlier in this pass may now depend on
+  a plugin the pass removed. In id order, so a removal cascades. One that
+  now fails is removed and named, as a fresh start would skip it; an
+  unchanged one that passes prints its warnings, which may be new.
+  [reg' lines removed-ids]."
   [reg changed os]
   (if (empty? changed)
-    [reg []]
+    [reg [] #{}]
     (let [first-changed (first (sort (map name changed)))]
-      (reduce (fn [[reg lines] [k {:keys [definition]}]]
+      (reduce (fn [[reg lines removed] [k {:keys [definition]}]]
                 (let [id (name k)]
-                  (if (or (contains? changed k) (not (pos? (compare id first-changed))))
-                    [reg lines]
+                  (if (neg? (compare id first-changed))
+                    [reg lines removed]
                     (let [r (try (plugin-check/validate (assoc (request-for reg id os)
                                                                :definitions [definition] :file-id id))
                                  (catch Throwable e {:ok? false :problems [(ex-message e)]}))]
-                      (if (:ok? r)
-                        [reg (into lines (map #(str "plugin " id ": " %) (:warnings r)))]
+                      (cond
+                        (not (:ok? r))
                         [(plugin-registry/remove-plugin reg k)
-                         (into lines (map #(str "plugin " id " removed: " %) (:problems r)))])))))
-              [reg []]
+                         (into lines (map #(str "plugin " id " removed: " %) (:problems r)))
+                         (conj removed k)]
+                        ;; a plugin this pass loaded already printed its warnings
+                        (contains? changed k) [reg lines removed]
+                        :else [reg (into lines (map #(str "plugin " id ": " %) (:warnings r))) removed])))))
+              [reg [] #{}]
               (sort-by key (:plugins reg))))))
 
 (defn- passed-lines [id d warnings]
@@ -137,6 +143,7 @@
   [{:keys [dir os registry disabled only]}]
   (let [{:keys [files skipped]} (plugin-files dir)
         disabled (set disabled)
+        all-files files
         files (if only
                 (let [c (.getCanonicalPath (io/file only))]
                   (filter (fn [[_ p]] (= c (.getCanonicalPath (io/file p)))) files))
@@ -154,10 +161,24 @@
                                                (let [[reg' more] (reload-one reg file os disabled)]
                                                  {:registry reg' :lines (into lines more)}))
                                              start files)
-        changed (set (filter #(not (identical? (get-in registry [:plugins %]) (get-in reg [:plugins %])))
-                             (into (set (keys (:plugins registry))) (keys (:plugins reg)))))
-        [reg more] (recheck-later reg changed os)]
-    {:registry reg :lines (into lines more)}))
+        changed-in (fn [r] (set (filter #(not (identical? (get-in registry [:plugins %]) (get-in r [:plugins %])))
+                                        (into (set (keys (:plugins registry))) (keys (:plugins r))))))
+        ;; a saved plugin that changed may revive the files after it that a
+        ;; recheck removed earlier (they bind its commands): try those that
+        ;; aren't live, as a fresh start would
+        [reg lines] (if (and only (seq files) (seq (changed-in reg)))
+                      (let [saved (first (first files))]
+                        (reduce (fn [[r ls] [id _ :as f]]
+                                  (if (and (pos? (compare id saved)) (not (contains? (:plugins r) (keyword id))))
+                                    (let [[r' more] (reload-one r f os disabled)] [r' (into ls more)])
+                                    [r ls]))
+                                [reg lines] all-files))
+                      [reg lines])
+        changed (changed-in reg)
+        [reg more removed] (recheck-later reg changed os)
+        ;; a plugin loaded this pass and then removed isn't reported loaded
+        lines (remove (fn [l] (some #(str/starts-with? l (str "plugin " (name %) " loaded (")) removed)) lines)]
+    {:registry reg :lines (into (vec lines) more)}))
 
 (defn load-all
   "Loads every plugin file in dir, in id order, each on its own: {:registry
@@ -178,8 +199,12 @@
   [live {:keys [settings-path] :as opts}]
   (try
     (let [settings (when settings-path (settings/load-settings settings-path))
-          warn (when (some-> (:warning settings) (str/includes? ":plugins"))
-                 [(str "settings: " (:warning settings))])
+          ;; the part of a settings warning that touches plugins: their own
+          ;; key, or a file that couldn't be read at all (its disabled ids
+          ;; are lost then, so say why)
+          warn (some->> (:warning settings) (#(str/split % #"; "))
+                        (filter #(or (str/includes? % ":plugins") (str/includes? % "couldn't read")))
+                        seq (mapv #(str "settings: " %)))
           opts (cond-> opts
                  settings-path (assoc :dir (or (:dir opts) (plugins-dir settings-path))
                                       :disabled (:disabled (:plugins settings))))

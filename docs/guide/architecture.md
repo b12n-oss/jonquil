@@ -169,8 +169,8 @@ these:
   runs the protocol on each file in id order (each load under a deadline,
   so a file that loops at top level is skipped too), and checks each one
   against the built-ins plus the plugins already loaded, so a chord an
-  earlier plugin took is warned about. The window loads plugins on a
-  future after it opens and swaps `live` on the GTK thread;
+  earlier plugin took is warned about. The window loads plugins once it
+  opens (since P4, on the load agent, which resets `live`);
   `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. `:run` commands
   wait for effects (P5). Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the

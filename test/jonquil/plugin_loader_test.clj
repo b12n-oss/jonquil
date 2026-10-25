@@ -235,3 +235,40 @@
         _ (spit sp "{:plugins {:disabled [:x]}}")
         lines (loader/load-step! (atom (reg/empty-registry)) {:settings-path sp :os "Linux"})]
     (is (some #(str/includes? % ":plugins :disabled") lines) (pr-str lines))))
+
+;; --- review of the recheck --------------------------------------------------
+
+(defn- binds [id target key]
+  (str/replace (source id :key key) (str ":command :" id "/wrap}]})") (str ":command :" target "/wrap}]})")))
+
+(deftest changed-dependent-is-rechecked-test
+  ;; I-1: q-b binds q-a's command and q-c binds q-b's; disable q-a AND edit
+  ;; q-c in one reload: q-c is removed too, and not reported loaded
+  (let [d (dir-with [["q-a.clj" (source "q-a")] ["q-b.clj" (binds "q-b" "q-a" "k")]
+                     ["q-c.clj" (binds "q-c" "q-b" "l")]])
+        {reg :registry} (load-dir d)
+        _ (write! d "q-c.clj" (str (binds "q-c" "q-b" "l") " "))
+        r (reload d reg :disabled #{:q-a})]
+    (is (= #{} (set (keys (:plugins (:registry r))))) (pr-str (:lines r)))
+    (is (not (some #(str/starts-with? % "plugin q-c loaded") (:lines r))) (pr-str (:lines r)))))
+
+(deftest a-fixed-dependency-brings-dependents-back-on-save-test
+  ;; I-2: r-b binds r-a's command; save r-a broken (r-b removed), then save
+  ;; it fixed: r-b comes back on that save, not only on Reload Plugins
+  (let [d (dir-with [["r-a.clj" (source "r-a")] ["r-b.clj" (binds "r-b" "r-a" "k")]])
+        {reg :registry} (load-dir d)
+        a (str (io/file d "r-a.clj"))
+        _ (write! d "r-a.clj" (str/replace (source "r-a") ":r-a/wrap" ":r-a/wrap2"))
+        r1 (reload d reg :only a)
+        _ (is (not (contains? (:plugins (:registry r1)) :r-b)) (pr-str (:lines r1)))
+        _ (write! d "r-a.clj" (source "r-a"))
+        r2 (reload d (:registry r1) :only a)]
+    (is (contains? (:plugins (:registry r2)) :r-b) (pr-str (:lines r2)))))
+
+(deftest unreadable-settings-are-named-test
+  ;; I-3: settings.edn that doesn't parse: the disabled ids are lost, so say why
+  (let [d (temp-dirs/temp-dir! "jonquil-settings-bad-")
+        sp (str d "/settings.edn")
+        _ (spit sp "{:plugins {:disabled #{:x}")
+        lines (loader/load-step! (atom (reg/empty-registry)) {:settings-path sp :os "Linux"})]
+    (is (some #(str/starts-with? % "settings: ") lines) (pr-str lines))))

@@ -1818,7 +1818,8 @@ that fails keeps the previous version working and leaves your file as
 you wrote it, and the console names each problem. A reload also checks
 the plugins after the one that changed again, since their keys can
 depend on it: one that now fails, say because it binds a command that's
-gone, is removed and named. To keep a plugin off without deleting it,
+gone, is removed and named, and comes back once what it needs is fixed
+and saved (or at the next Reload Plugins). To keep a plugin off without deleting it,
 list its id in `settings.edn`:
 
 ```clojure

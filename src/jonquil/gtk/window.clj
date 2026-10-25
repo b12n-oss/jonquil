@@ -2967,7 +2967,9 @@
               (let [lines (plugin-loader/load-step!
                            plugin-registry/live
                            {:settings-path settings-path :os (System/getProperty "os.name") :only only})]
-                (doseq [l lines] (@plugin-console l))
+                (try (doseq [l lines] (@plugin-console l))
+                     (catch :default e
+                       (binding [*out* *err*] (println "jonquil: plugin console:" (ex-message e)))))
                 lines))))
 
 (defn- plugin-load-now!
