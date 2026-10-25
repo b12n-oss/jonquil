@@ -3628,7 +3628,7 @@
     ;; plugins P5: the effect functions a plugin's :run command reaches,
     ;; each a turn on the GTK thread (it runs on a worker) acting on the
     ;; tab with that id, which may have closed since the command started
-    (let [turn (fn [f] (mcp-window/gui-call on-gui! f 5000))
+    (let [turn (fn [f] (plugin-registry/gui-turn on-gui! f 5000))
           tab-of (fn [id] (or (some #(when (= id (:id %)) %) @tabs)
                               (throw (ex-info "that tab was closed" {}))))]
       (reset! plugin-registry/effects

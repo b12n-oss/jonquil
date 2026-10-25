@@ -31,6 +31,29 @@
 
 (defonce ^:private running (atom #{}))
 
+(defn gui-turn
+  "Runs (f) on the GTK thread through gui, the enqueue fn, and answers its
+  value, as jonquil.mcp.window/gui-call does, except that a turn that
+  missed deadline-ms is abandoned: the thunk, if GTK runs it later, does
+  nothing. So an effect reported as \"The window did not respond.\" never
+  lands afterwards. A thunk already running at the deadline is waited
+  for. f's throw comes back as an ex-info with its message."
+  [gui f deadline-ms]
+  (let [state (atom :waiting)
+        p (promise)]
+    (gui (fn []
+           (when (compare-and-set! state :waiting :running)
+             (deliver p (try {:ok (f)}
+                             (catch Throwable e {:err (or (ex-message e) (str e))}))))))
+    (let [r (deref p deadline-ms ::timeout)
+          r (if (and (= ::timeout r) (not (compare-and-set! state :waiting :abandoned)))
+              @p
+              r)]
+      (cond
+        (= ::timeout r) (throw (ex-info "The window did not respond." {}))
+        (contains? r :err) (throw (ex-info (:err r) {}))
+        :else (:ok r)))))
+
 (def ^:private effect-impls
   ;; the implementations each effect brings into a ctx
   {:console [:print! :status!]

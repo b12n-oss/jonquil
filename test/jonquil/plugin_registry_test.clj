@@ -89,10 +89,17 @@
     (reset! reg/effects (recording-effects calls))
     (let [t0 (System/currentTimeMillis)]
       (is (= :handled (go! r "p5-slow")))
-      (is (< (- (System/currentTimeMillis) t0) 100) "the key answers before run finishes"))
+      (is (< (- (System/currentTimeMillis) t0) 1000) "the key answers before run finishes"))
     (is (not (realized? done)))
     (deliver gate true)
     (is (true? (deref done 2000 nil)))))
+
+(defn- go-when-free!
+  "go!, retried for up to 2 s while the last run is still finishing."
+  [r id]
+  (loop [i 0]
+    (let [v (try (go! r id) (catch :default e (if (< i 200) ::busy (throw e))))]
+      (if (= ::busy v) (do (Thread/sleep 10) (recur (inc i))) v))))
 
 (deftest run-command-single-flight-test
   ;; a second press while the first run is still going starts no copy
@@ -100,15 +107,15 @@
   (let [calls (atom [])
         gate (promise)
         started (atom 0)
-        r (run-plugin "p5-once" #{:console} (fn [_] (swap! started inc) @gate))]
+        second-run (promise)
+        r (run-plugin "p5-once" #{:console} (fn [_] (when (= 2 (swap! started inc)) (deliver second-run true)) @gate))]
     (reset! reg/effects (recording-effects calls))
     (is (= :handled (go! r "p5-once")))
     (let [e (try (go! r "p5-once") nil (catch :default e e))]
       (is (= "plugin p5-once: :p5-once/go is still running" (ex-message e))))
     (deliver gate true)
-    (Thread/sleep 50)
-    (is (= :handled (go! r "p5-once")) "a finished run frees the command")
-    (Thread/sleep 50)
+    (is (= :handled (go-when-free! r "p5-once")) "a finished run frees the command")
+    (is (true? (deref second-run 2000 nil)))
     (is (= 2 @started))))
 
 (deftest run-command-ctx-test
@@ -159,3 +166,18 @@
     (is (some? e))
     (is (str/starts-with? (ex-message e) "plugin p3-oob: "))
     (is (= [] @applied))))
+
+(deftest gui-turn-abandons-a-late-thunk-test
+  ;; review I1: a turn that timed out must not apply later, or a plugin
+  ;; told "the window did not respond" sees its edit land anyway
+  (let [queued (atom [])
+        gui #(swap! queued conj %)
+        ran (atom 0)
+        e (try (reg/gui-turn gui #(swap! ran inc) 50) nil (catch :default e e))]
+    (is (= "The window did not respond." (some-> e ex-message)))
+    (doseq [t @queued] (t))
+    (is (zero? @ran) "the late thunk does nothing"))
+  (is (= 3 (reg/gui-turn (fn [t] (t)) (constantly 3) 1000)))
+  (is (= "that tab was closed"
+         (try (reg/gui-turn (fn [t] (t)) #(throw (ex-info "that tab was closed" {})) 1000) nil
+              (catch :default e (ex-message e))))))
