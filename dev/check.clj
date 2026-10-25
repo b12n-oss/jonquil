@@ -55,6 +55,8 @@
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
+    jonquil.plugin
+    jonquil.plugin-check
     jonquil.gtk.palette
     jonquil.help
     jonquil.source

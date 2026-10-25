@@ -239,6 +239,14 @@
     (is (apply distinct? (map :label menu)))
     (is (apply distinct? (map :action menu)))))
 
+;; --- plugins P1: commands that can pass the key on ------------------------
+
+(deftest passes-flag-test
+  ;; the commands that can answer :next or :to-gtk, so a window binding to
+  ;; one may let the key reach the editor (the plugin validator reads it)
+  (is (= #{:popover/close-all :source/jump-back :find/bar-key}
+         (set (keep (fn [[id c]] (when (:passes? c) id)) registry/commands)))))
+
 ;; --- slice S8: the palette -------------------------------------------------
 
 (deftest palette-hidden-commands-test

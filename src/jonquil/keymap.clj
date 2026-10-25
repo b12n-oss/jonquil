@@ -122,17 +122,24 @@
   ([bindings command-ids condition-ids]
   (vec
    (for [[i b] (map-indexed vector bindings)
-         :let [names (key-names b)
-               mods (concat (:mods b) (:not b) (:exact b))]
+         :let [coll-of (fn [k] (let [v (get b k)] (when (coll? v) v)))
+               names (if (:key b) [(:key b)] (coll-of :keys))
+               exact (when (set? (:exact b)) (:exact b))
+               mods (concat (coll-of :mods) (coll-of :not) exact)]
          p (cond-> []
+             (and (contains? b :keys) (not (coll? (:keys b)))) (conj ":keys isn't a set of key names")
+             (and (contains? b :mods) (not (coll? (:mods b)))) (conj ":mods isn't a set")
+             (and (contains? b :not) (not (coll? (:not b)))) (conj ":not isn't a set")
              (and (nil? (:key b)) (nil? (:keys b))) (conj "has neither :key nor :keys")
              (and (:key b) (:keys b)) (conj "has both :key and :keys")
              (some #(nil? (key-value %)) names)
              (conj (str "names an unknown key " (pr-str (remove key-value names))))
              (some (complement modifiers) mods)
              (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
-             (and (some modifiers (:exact b)) (some (complement exact-modifiers) (:exact b)))
-             (conj (str ":exact names " (pr-str (remove exact-modifiers (:exact b)))
+             (and (contains? b :exact) (not (set? (:exact b))))
+             (conj ":exact isn't a set")
+             (and (some modifiers exact) (some (complement exact-modifiers) exact))
+             (conj (str ":exact names " (pr-str (remove exact-modifiers exact))
                         ", only :shift :alt :ctrl :meta"))
              (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
              (conj "has :exact alongside :mods or :not")

@@ -128,6 +128,24 @@ these:
   Return, Run Form's chords, F5, the Escape chain's order and conditions,
   the palette chord, and each context-menu item's command) and by the
   window self-test rows.
+- `jonquil.plugin` and `jonquil.plugin-check` (plugins Part 2, slice P1,
+  2026-10-25): the plugin API's first piece and the validator, both pure,
+  with nothing loaded from disk yet. `jonquil.plugin/defplugin` records a
+  plugin file's definition, with its line, while a load binds
+  `*definitions*`, and throws at any other time. `plugin-check/validate`
+  takes plain data (the definitions, the file's id, the registered commands
+  as `{id {:scope :passes?}}`, the condition ids, the shipped keymap and
+  the OS) and answers `{:ok? :problems :warnings}`, one sentence each, never
+  throwing, so the isolated check can send the same request to a
+  throwaway Jolt as EDN. It checks the definition, the id, the effects, the
+  commands and the hooks. It refuses a binding that would take a key you
+  type (a printable key, Return, Tab or Backspace with neither Ctrl nor
+  Meta held, in either scope, since the window sees keys first) and an
+  `:editor` binding the window always takes first. A chord a built-in
+  uses, or one the window takes only sometimes, is a warning naming that
+  command. `:passes? true` on the three window commands that can hand the
+  key on (`:popover/close-all`, `:source/jump-back`, `:find/bar-key`) is
+  how it tells the two apart.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
