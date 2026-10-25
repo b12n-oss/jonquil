@@ -24,8 +24,11 @@
     in :reset mode), and :owner: who the evaluation's new namespaces belong
     to (a tab id, or :repl). A reset-mode Run removes only its own owner's,
     the REPL's, and `user`. Defaults: :run for a Run, :repl otherwise.
-    Attach evaluators ignore it. nil when started, else the busy warning
-    string.")
+    Attach evaluators ignore it. :quiet, a token, asks an evaluator that
+    satisfies QuietEval for an eval that leaves the REPL as it was (no
+    history entry, *1 *2 *3 *e and the prompt namespace unchanged), in the
+    namespace of :ns-source's ns form when that exists. nil when started,
+    else the busy warning string.")
   (interrupt! [ev]
     "Stop: asks the running evaluation to end. nil.")
   (evaluating? [ev])
@@ -45,6 +48,11 @@
     "A doc-info map, jonquil.docs/symbol-doc's shape, or nil. Never throws.")
   (limitations [ev]
     "Sentences naming what this runtime can't do; [] when nothing."))
+
+(defprotocol QuietEval
+  "Evaluators that honour eval!'s :quiet (the two Jolt runtimes). Callers
+  check (satisfies? QuietEval ev) first."
+  (quiet-eval? [ev] "true."))
 
 (defprotocol StartNote
   "An evaluator that connects on the first Run says so once, as a plain

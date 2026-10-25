@@ -220,3 +220,29 @@
         (run session/run-definitions! s "(ns runfile.c)\n\n\n(defn from-run [] 3)\n" {:path path})
         (is (= {:file path :line 4} (var-meta 'runfile.c/from-run))))
       (finally (remove-ns 'runfile.c)))))
+
+(deftest quiet-eval-keeps-history-test
+  ;; plugins P5b: a :quiet eval leaves the REPL as it was
+  (let [s (session/make-session)
+        quiet (fn [code] (run ev/eval! s code {:quiet "T"}))]
+    (doseq [c ["1" "2" "3"]] (repl-sync s c))
+    (repl-sync s "(throw (ex-info \"e1\" {}))")
+    (let [prompt (ev/prompt-ns s)
+          items (:items @(ev/history s))
+          r (quiet "(+ 40 2)")]
+      (is (= :ok (:status r)))
+      (is (= "42" (:printed r)))
+      (is (= :error (:status (quiet "(throw (ex-info \"e2\" {}))"))))
+      (is (= :ok (:status (quiet "(in-ns 'jonquil.quiet-moved)"))))
+      (is (= items (:items @(ev/history s))) "no history entry")
+      (is (= prompt (ev/prompt-ns s)) "the prompt namespace didn't move")
+      (is (= "[3 2 1 \"e1\"]" (:printed (repl-sync s "[*1 *2 *3 (ex-message *e)]")))))))
+
+(deftest quiet-eval-runs-in-the-buffer-namespace-test
+  (let [s (session/make-session)]
+    (repl-sync s "(ns jonquil.quiet-buf) (def here :buf)")
+    (repl-sync s "(in-ns 'user)")
+    (is (= ":buf" (:printed (run ev/eval! s "here" {:quiet "T" :ns-source "(ns jonquil.quiet-buf)\n(+ 1 2)"}))))
+    (is (= :ok (:status (run ev/eval! s "(+ 1 2)" {:quiet "T" :ns-source "(ns no.such.quiet)"})))
+        "a buffer namespace that doesn't exist yet falls back to the prompt's")
+    (remove-ns 'jonquil.quiet-buf)))

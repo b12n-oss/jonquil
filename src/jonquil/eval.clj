@@ -209,6 +209,7 @@
        carries :error. format-value is unchanged; the GUI should print
        :printed rather than re-deriving it from :value.
      :ns-name symbol (default 'user)
+     :quiet any non-nil value: *1 *2 *3 and *e stay as they were
    on-output must never print: it runs on the worker thread, where *out* is
    already bound to the capture writer, so a print inside it would feed back
    into itself.
@@ -335,7 +336,8 @@
                                   ;; normal return), the user asked for a stop.
                                   @stop-requested (-> (assoc :status :interrupted)
                                                       (dissoc :value :error :printed)))]
-                          (case (:status r)
+                          ;; a :quiet eval (plugins P5b) leaves *1 *2 *3 *e alone
+                          (case (when-not (:quiet opts) (:status r))
                             :ok (swap! repl-vars (fn [{v1 :1 v2 :2 :as m}] (assoc m :1 (:value r) :2 v1 :3 v2)))
                             :error (swap! repl-vars assoc :e (:error r))
                             nil)
