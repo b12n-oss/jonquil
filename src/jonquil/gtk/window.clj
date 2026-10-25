@@ -49,7 +49,6 @@
             [jonquil.gtk.trash :as trash]
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
-            [jonquil.keymap :as km]
             [jonquil.last-session :as last-session]
             [jonquil.login-path :as login-path]
             [jonquil.nrepl.attach]
@@ -60,6 +59,8 @@
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
             [jonquil.palette :as pal-data]
+            [jonquil.plugin-loader :as plugin-loader]
+            [jonquil.plugin-registry :as plugin-registry]
             [jonquil.runtime-registry :as registry]
             [jonquil.save-path :as save-path]
             [jonquil.session]
@@ -1919,15 +1920,15 @@
   (let [f (g/gtk-root-get-focus win)]
     (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb)))))))
 
-(defn- rename-focused?
-  "True when win's focus is inside rename-pop's popover (its entry's GtkText
-  delegate, as find-bar-focused? explains). rename-pop may be nil. Asked of
-  the rename popover and of the command palette, both popovers with an
-  entry (window-key-ctx's :rename-focused?)."
-  [win rename-pop]
+(defn- focus-in-popover?
+  "True when win's focus is inside pp's popover (its entry's GtkText
+  delegate, as find-bar-focused? explains). pp may be nil. Asked of the
+  rename popover and of the command palette, both popovers with an entry
+  (window-key-ctx's :entry-focused?)."
+  [win pp]
   (let [f (g/gtk-root-get-focus win)]
-    (boolean (and rename-pop (not (ffi/null? f))
-                  (not (zero? (g/gtk-widget-is-ancestor f (:popover rename-pop))))))))
+    (boolean (and pp (not (ffi/null? f))
+                  (not (zero? (g/gtk-widget-is-ancestor f (:popover pp))))))))
 
 (defn- reload-code-css!
   "Loads theme t's CSS (jonquil.theme/code-css) at font size px into the
@@ -2111,9 +2112,9 @@
            :inspector-focused? #(inspector-pane/focused? pane win)
            ;; the rename popover's entry and the command palette's (slice S8
            ;; follow-up): either one keeps every key but Escape
-           :rename-focused? #(let [t (active-tab)]
-                               (or (rename-focused? win (:rename-pop t))
-                                   (rename-focused? win (:palette t)))))))
+           :entry-focused? #(let [t (active-tab)]
+                               (or (focus-in-popover? win (:rename-pop t))
+                                   (focus-in-popover? win (:palette t)))))))
 
 (defn- on-window-key
   "The window's capture-phase key handler. Every key goes through
@@ -2162,8 +2163,10 @@
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
             kctx (window-key-ctx ctx keyval0 state)]
+        ;; plugins P3: the live plugins' :window bindings ahead of the
+        ;; shipped ones (a plugin may bind a built-in window command)
         (cmd-registry/window-answer
-         (:window km/shipped) keyval state
+         (plugin-registry/window-bindings @plugin-registry/live) keyval state
          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
           :run! #(cmd-registry/run-command! cmd-registry/window-commands % kctx)}))
       (catch :default e
@@ -2443,7 +2446,8 @@
      palette
      {:on-run (fn [id]
                 (try
-                  (cmd-registry/run-command-in id {:window (window-key-ctx window-key-args 0 0)
+                  (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
+                                               id {:window (window-key-ctx window-key-args 0 0)
                                                    :editor (editor/key-ctx ed)
                                                    :console {:complete! repl-complete-fn}})
                   (catch :default e
@@ -2931,7 +2935,31 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
-(defn- activate! [app {:keys [file dir cwd on-ready settings-path]}]
+(defn- load-plugins!
+  "Loads the user's plugin files (jonquil.plugin-loader/load-all) on the
+  calling thread, which mustn't be the GTK thread (a soak can take
+  seconds), then swaps the live registry and prints each line on the
+  console on the GTK thread, waiting up to 5 s for that. Answers the lines.
+  A throw is one console line, and the live registry is left as it was."
+  [settings-path cv]
+  (let [lines (try
+                (let [{:keys [registry lines]} (plugin-loader/load-all
+                                                {:dir (plugin-loader/plugins-dir settings-path)
+                                                 :os (System/getProperty "os.name")})
+                      done (promise)]
+                  (on-gui! (fn []
+                             (reset! plugin-registry/live registry)
+                             (doseq [l lines] (cview/append! cv :system (str "; " l "\n")))
+                             (deliver done true)))
+                  (deref done 5000 nil)
+                  lines)
+                (catch Throwable e
+                  (let [l (str "loading plugins failed: " (ex-message e))]
+                    (on-gui! #(cview/append! cv :system (str "; " l "\n")))
+                    [l])))]
+    lines))
+
+(defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
         ;; hook only, row-theme-save-failure-reported) repoints it at an
         ;; impossible path so a save can be forced to fail without ever
@@ -3219,10 +3247,13 @@
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         ;; slice S8: the palette lists the registry's commands and opens on
         ;; the active tab, whose palette runs the picked one
-        open-palette-fn (fn [] (palette/open! (:palette (active-tab))
-                                              (pal-data/entries {:commands cmd-registry/commands
-                                                                 :keymap km/shipped
-                                                                 :os (System/getProperty "os.name")})))
+        open-palette-fn (fn [] (let [plugins @plugin-registry/live]
+                                 (palette/open! (:palette (active-tab))
+                                                (pal-data/entries
+                                                 {:commands (plugin-registry/all-commands plugins)
+                                                  :keymap {:window (plugin-registry/window-bindings plugins)
+                                                           :editor (plugin-registry/editor-bindings plugins)}
+                                                  :os (System/getProperty "os.name")}))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         window-key-args {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
@@ -3560,6 +3591,10 @@
                                (editor/focus! (:ed t)))
                              (finally (live!)))))
           (live!))))
+    ;; plugins P3: the user's plugins load off the GTK thread once the
+    ;; window is up; keys pressed before the swap see none yet
+    (when-not (false? plugins?)
+      (future (load-plugins! @settings-path* cv)))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
       ;; objects, so every existing row keeps working unchanged; rows that
@@ -3721,6 +3756,10 @@
                  ;; Cmd/Ctrl+Shift+P calls to open it
                    :palette palette
                    :open-palette!* open-palette-fn
+                 ;; plugins P3: load the plugin folder now (call it off the
+                 ;; GTK thread; it returns the console lines), and the folder
+                   :load-plugins!* (fn [] (load-plugins! @settings-path* cv))
+                   :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
@@ -3839,7 +3878,8 @@
 (defn start!
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :dir path-or-nil :cwd path-or-nil :on-ready (fn [ui])
-  :settings-path path-or-nil}, where :dir (a directory launch) and :cwd root
+  :settings-path path-or-nil :plugins? bool}, :plugins? false skipping the
+  user's plugins (plugins P3), where :dir (a directory launch) and :cwd root
   the file tree (jonquil.file-tree/root-for) and
   :settings-path defaults to (jonquil.settings/settings-path) -- every
   self-test/docs-shots/smoke harness must pass its own isolated path so it
@@ -3897,7 +3937,9 @@
   context-menu items by its unprefixed action name, exactly as
   install-context-menu!'s own docstring describes. :palette (slice S8) is
   the first tab's jonquil.gtk.palette map and :open-palette!* what
-  Cmd/Ctrl+Shift+P calls to open the active tab's. :complete!* (P4.T5) is
+  Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
+  P3) loads the plugin folder now, off the GTK thread, answering the
+  console lines, and :plugins-dir* names that folder. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
   and jonquil.gtk.completion/state read it back.

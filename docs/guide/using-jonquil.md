@@ -1746,6 +1746,75 @@ that follows a `when` in the loop body, fail with
 works, for example
 `(loop [i 0] (if (< i n) (recur (inc i)) i))`.
 
+## Plugins (early)
+
+A plugin is one Clojure file that adds editor commands and the keys that
+run them. This is the first part of plugin support: a plugin's `:edit`
+commands work now, and reloading, hooks, effects and agent proposals come
+later.
+
+Plugin files live in a `plugins` folder beside the settings file, so
+`~/.config/jonquil/plugins/` (or `$XDG_CONFIG_HOME/jonquil/plugins/`). A
+file is `<id>.clj`, where the id is lower-case letters, digits and `-`,
+starting with a letter, and its namespace is `jonquil.plugins.<id>`. It
+calls `defplugin` once:
+
+```clojure
+(ns jonquil.plugins.wrap-when
+  (:require [jonquil.plugin :as p]))
+
+(p/defplugin
+  {:id      :wrap-when
+   :doc     "Wrap the form at the caret in (when ...)."
+   :effects #{}
+   :commands
+   [{:id :wrap-when/wrap :doc "Wrap the form at the caret in (when ...)."
+     :scope :editor
+     :edit (fn [snapshot] (p/wrap-form snapshot "(when " ")"))}]
+   :bindings
+   [{:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap}]})
+```
+
+An `:edit` command gets a snapshot of the buffer, `{:text :caret
+:sel-start :sel-end}`, and returns the change to make as
+`{:edits [[start end replacement] ...] :caret n}`, with `:edits` a vector
+in ascending order, or `nil` when it doesn't apply here (the key then
+goes on as usual). `p/form-at-caret` and `p/wrap-form` are there to build
+on. `:effects #{}` says the plugin is pure. Commands that do more than
+edit the buffer (`:run`) are accepted but don't run yet, and the console
+says so.
+
+Plugins load when Jonquil starts, one file at a time, so a broken file is
+skipped while the others load, and the console names what's wrong,
+with its line when the reader or compiler gave one. A file gets 10
+seconds to load; one that loops at top level, or whose first compile of
+what it requires is very slow, is skipped with that reason (a slow
+compile usually gets through at the next start). Before anything goes
+live, each `:edit` command is tried on a few sample buffers (empty, a
+form with the caret at its start, middle and end, a selection, two
+forms), each for at most 2 seconds, and its answer's shape is checked.
+The same check runs on your real buffer each time the key runs it, so a
+wrong answer is refused with the plugin's name on the status bar instead
+of editing the wrong text.
+
+A binding must hold Cmd/Ctrl. A bare letter, Return, Tab or Backspace
+would take a key you type, so it's refused with that reason, and so is an
+editor binding the window always takes first, on every chord it matches
+(Cmd+Alt+W is the window's Cmd+W, which ignores Alt). A binding that loses
+only some of its chords loads with a warning naming them: `:mods #{:cmd}`
+on P also matches Cmd+Shift+P, which is the palette's. A chord a built-in already uses loads with a
+warning naming that command. Plugins load, and take their keys, in id
+order, so when two share a chord the one whose id sorts first gets it
+first, and the other loads with a warning: that its binding never fires,
+or, when the first one's binding is guarded or can pass the key on, that
+it fires only when the first doesn't. Plugin bindings
+come ahead of the built-in ones, and their commands show in the command
+palette with the plugin's id as the source.
+
+Until Reload Plugins exists, a change to a plugin file takes effect at
+the next start. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a launch
+from the Dock or Finder, starts with none.
+
 ## Driving Jonquil from an agent (MCP)
 
 `jonquil --mcp [DIR]` runs Jonquil with no window as an MCP server on stdio,

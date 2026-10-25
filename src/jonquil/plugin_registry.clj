@@ -1,0 +1,82 @@
+(ns jonquil.plugin-registry
+  "The live plugin registry (plugins design, Part 2): one atom, live, of
+  {:plugins {id {:definition :source :file :layer}}}, and the tables the key
+  handlers and the palette read from a registry value: the plugins' :edit
+  commands as registry commands, their bindings per scope in plugin-id
+  order, and each controller's bindings, the plugins' ahead of the shipped
+  ones. With no plugins those are exactly the shipped tables. Pure apart
+  from live. :run commands wait for effects (a later slice), so they and
+  the bindings to them aren't here."
+  (:require [jonquil.command-registry :as cmd-registry]
+            [jonquil.keymap :as km]
+            [jonquil.plugin-protocol :as protocol]))
+
+(defn empty-registry [] {:plugins {}})
+
+(defonce live (atom (empty-registry)))
+
+(defn install
+  "reg with id's entry {:definition :source :file :layer} replaced."
+  [reg id entry]
+  (assoc-in reg [:plugins id] entry))
+
+(defn remove-plugin [reg id]
+  (update reg :plugins dissoc id))
+
+(defn- in-order [reg] (sort-by key (:plugins reg)))
+
+(defn- edit-command
+  "A registry command running a plugin's :edit: the op it returns on the
+  ctx's snapshot is checked against that snapshot (the soak only saw
+  fixtures) and applied (:handled); nil leaves the key to GTK as a built-in
+  edit that changed nothing does (:to-gtk). A throw, a bad op (nothing is
+  applied) or a failed apply comes back naming the plugin, for the
+  handler's catch to report."
+  [plugin-id edit]
+  (fn [ctx _args]
+    (let [fail (fn [msg e] (throw (ex-info (str "plugin " (name plugin-id) ": " msg) {:plugin plugin-id} e)))
+          snap ((:snapshot ctx))
+          op (try (edit snap) (catch Throwable e (fail (or (ex-message e) (str e)) e)))]
+      (if (nil? op)
+        :to-gtk
+        (if-let [why (binding [*print-length* 10 *print-level* 3]
+                       (protocol/edit-result-problem snap op))]
+          (fail why nil)
+          (do (try ((:apply-op! ctx) op) (catch Throwable e (fail (or (ex-message e) (str e)) e)))
+              :handled))))))
+
+(defn commands
+  "{command-id {:doc :scope :plugin :run}} for every installed plugin's
+  :edit commands."
+  [reg]
+  (into {}
+        (for [[id {:keys [definition]}] (in-order reg)
+              {cid :id :keys [doc scope edit]} (:commands definition)
+              :when (fn? edit)]
+          [cid {:doc doc :scope scope :plugin id :run (edit-command id edit)}])))
+
+(defn all-commands
+  "The built-in commands and reg's plugin commands, for the palette."
+  [reg]
+  (merge cmd-registry/commands (commands reg)))
+
+(defn bindings-with-source
+  "bindings, each tagged :plugin/source with the plugin that made it, for
+  the validator to name it (the loader's request)."
+  [reg scope]
+  (let [known (all-commands reg)]
+    (vec (for [[id {:keys [definition]}] (in-order reg)
+               b (:bindings definition)
+               :when (= scope (:scope (get known (:command b))))]
+           (assoc b :plugin/source id)))))
+
+(defn bindings
+  "The installed plugins' bindings in scope, ordered by plugin id then file
+  order, each one whose command is a live plugin command or a built-in of
+  that scope."
+  [reg scope]
+  (mapv #(dissoc % :plugin/source) (bindings-with-source reg scope)))
+
+(defn window-bindings [reg] (into (bindings reg :window) (:window km/shipped)))
+
+(defn editor-bindings [reg] (into (bindings reg :editor) (:editor km/shipped)))

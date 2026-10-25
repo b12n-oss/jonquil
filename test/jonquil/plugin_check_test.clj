@@ -203,3 +203,119 @@
 (deftest meta-and-super-labels-test
   (is (mentions? (bind {:key "w" :mods #{:meta} :command :wrap-when/say}) :warnings "Meta+W"))
   (is (mentions? (bind {:key "a" :mods #{:super} :command :wrap-when/say}) :problems "Super+A")))
+
+(deftest conditions-per-scope-test
+  ;; with conditions given per scope, a binding's :when must name its own
+  ;; scope's (review I3: :tree-focused is a window condition)
+  (let [per-scope (assoc request :conditions {:window (set (keys registry/window-conditions))
+                                              :editor (set (keys registry/editor-conditions))})
+        run (fn [b] (pc/validate (assoc per-scope :file-id "wrap-when" :definitions [(assoc both :bindings [b])])))]
+    (is (one-problem (run {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :wrap-when/wrap})))
+    (is (:ok? (run {:key "j" :mods #{:cmd :alt} :when [:writable] :command :wrap-when/wrap})))
+    (is (:ok? (run {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :wrap-when/say})))))
+
+(deftest earlier-plugin-chord-never-fires-test
+  ;; an earlier plugin's binding (tagged :plugin/source in the request's
+  ;; keymap) on the same chord always wins, so this binding never fires: a
+  ;; warning that says so and names that plugin (review I-A)
+  (let [req (-> request
+                (assoc-in [:registered :p-a/wrap] {:scope :editor :passes? false :plugin :p-a})
+                (update-in [:keymap :editor] #(into [{:key "j" :mods #{:cmd :alt} :command :p-a/wrap
+                                                      :plugin/source :p-a}] %)))
+        r (pc/validate (assoc req :file-id "wrap-when" :definitions [good]))]
+    (is (:ok? r) (pr-str r))
+    (is (mentions? r :warnings "never fires"))
+    (is (mentions? r :warnings "plugin p-a"))))
+
+(deftest earlier-plugin-window-binding-is-a-warning-test
+  ;; an earlier plugin binding a built-in window command to a chord makes a
+  ;; later :editor binding there dead: a warning naming that plugin, not a
+  ;; problem blaming the built-in (review I-B)
+  (let [req (update-in request [:keymap :window]
+                       #(into [{:key "j" :mods #{:cmd :alt} :command :run/run :plugin/source :p-a}] %))
+        r (pc/validate (assoc req :file-id "wrap-when" :definitions [good]))]
+    (is (:ok? r) (pr-str r))
+    (is (mentions? r :warnings "plugin p-a"))
+    (is (mentions? r :warnings "never fires"))))
+
+;; --- review of 140c969: every case walked as dispatch walks it -------------
+
+(defn- with-earlier
+  "request with earlier plugin p-a's bindings bs (tagged) ahead of the
+  shipped ones in their scopes; p-a's own command :p-a/x is :editor."
+  [bs]
+  (reduce (fn [req [scope b]]
+            (update-in req [:keymap scope] #(into [(assoc b :plugin/source :p-a)] %)))
+          (assoc-in request [:registered :p-a/x] {:scope :editor :passes? false :plugin :p-a})
+          bs))
+
+(defn- check-with [req defs] (pc/validate (assoc req :file-id "wrap-when" :definitions defs)))
+
+(deftest guarded-earlier-binding-is-sometimes-test
+  ;; a guarded earlier binding takes the chord only while its guard holds
+  (doseq [[why bs defs]
+          [["editor vs guarded earlier editor"
+            [[:editor {:key "j" :mods #{:cmd :alt} :when [:writable] :command :p-a/x}]] [good]]
+           ["window vs guarded earlier window"
+            [[:window {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :run/run}]]
+            [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/say}])]]
+           ["editor vs guarded earlier window"
+            [[:window {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :run/run}]] [good]]]]
+    (let [r (check-with (with-earlier bs) defs)]
+      (is (:ok? r) (str why " " (pr-str r)))
+      (is (not (mentions? r :warnings "never fires")) (str why " " (pr-str r)))
+      (is (mentions? r :warnings "plugin p-a") (str why " " (pr-str r))))))
+
+(deftest built-in-unreachable-survives-an-earlier-plugin-test
+  ;; a guarded earlier plugin binding ahead of the built-in Cmd+R: the
+  ;; built-in still always takes it, so it's the load-blocking problem
+  (let [r (check-with (with-earlier [[:window {:key "r" :mods #{:cmd} :when [:tree-focused] :command :run/run}]])
+                      [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (false? (:ok? r)) (pr-str r))
+    (is (mentions? r :problems "can never fire"))
+    (is (mentions? r :problems ":run/run"))))
+
+(deftest unconditional-earlier-plugin-is-never-fires-test
+  (doseq [[why bs defs]
+          [["editor vs earlier editor" [[:editor {:key "j" :mods #{:cmd :alt} :command :p-a/x}]] [good]]
+           ["editor vs earlier window" [[:window {:key "j" :mods #{:cmd :alt} :command :run/run}]] [good]]
+           ["window vs earlier window" [[:window {:key "j" :mods #{:cmd :alt} :command :run/run}]]
+            [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/say}])]]]]
+    (let [r (check-with (with-earlier bs) defs)]
+      (is (:ok? r) (str why " " (pr-str r)))
+      (is (mentions? r :warnings "never fires") (str why " " (pr-str r))))))
+
+(deftest window-over-earlier-editor-takes-it-test
+  ;; the window sees keys first, so this one takes the earlier editor chord
+  (let [r (check-with (with-earlier [[:editor {:key "j" :mods #{:cmd :alt} :command :p-a/x}]])
+                      [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/say}])])]
+    (is (:ok? r))
+    (is (mentions? r :warnings "takes that chord from plugin p-a"))
+    (is (not (mentions? r :warnings "never fires")))))
+
+;; --- review of c8735f3 -----------------------------------------------------
+
+(deftest built-in-always-take-is-a-problem-behind-a-plugin-test
+  ;; p-a's Cmd+R window binding hides the built-in Run, but Run would take
+  ;; it too, so this editor binding is refused whether or not p-a is there
+  (let [r (check-with (with-earlier [[:window {:key "r" :mods #{:cmd} :command :tab/new}]])
+                      [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (false? (:ok? r)) (pr-str r))
+    (is (mentions? r :problems ":run/run"))))
+
+(deftest partly-unreachable-is-a-warning-test
+  ;; :mods #{:cmd} on P also matches Cmd+Shift+P, the palette's; the chord
+  ;; meant (Cmd+P) works, so that's a warning naming the taken chord, not a
+  ;; refusal (only a binding unreachable on every chord it matches is)
+  (let [r (bind {:key "p" :mods #{:cmd} :command :wrap-when/wrap})]
+    (is (:ok? r) (pr-str r))
+    (is (mentions? r :warnings ":palette/open"))
+    (is (mentions? r :warnings "Shift"))))
+
+(deftest no-sometimes-where-unreachable-test
+  ;; a guarded earlier plugin binding ahead of the built-in Cmd+R: only the
+  ;; problem, not also "takes that chord only when ... doesn't"
+  (let [r (check-with (with-earlier [[:window {:key "r" :mods #{:cmd} :when [:tree-focused] :command :tab/new}]])
+                      [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (false? (:ok? r)))
+    (is (not (mentions? r :warnings "only when")) (pr-str r))))

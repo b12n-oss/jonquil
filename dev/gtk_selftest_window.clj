@@ -34,6 +34,7 @@
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]
             [gtk-selftest-window.palette :as palette-rows]
+            [gtk-selftest-window.plugins :as plugin-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.prompt :as prompt]
             [gtk-selftest-window.rename-menus :as rename-menus]
@@ -238,6 +239,10 @@
    palette-rows/row-palette-arrow-keys
    palette-rows/row-palette-closes-its-own-tab
    palette-rows/row-palette-entry-keeps-window-keys
+   plugin-rows/row-plugin-key-runs-edit
+   plugin-rows/row-plugin-in-palette
+   plugin-rows/row-plugin-broken-file-named
+   plugin-rows/row-plugin-edit-throw-contained
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

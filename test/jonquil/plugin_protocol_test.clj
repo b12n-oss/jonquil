@@ -145,3 +145,31 @@
   (let [r (run (source "p2-iso") "p2-iso" :where :isolated)]
     (is (false? (:ok? r)))
     (is (= 1 (count (:problems r))))))
+
+(def stop-spin (atom false))
+
+(deftest load-deadline-test
+  ;; a file that loops at top level is a problem after :load-ms, so the
+  ;; files after it still load (review I1)
+  (reset! stop-spin false)
+  (let [t0 (System/currentTimeMillis)
+        r (try (protocol/load-candidate
+                {:source "(ns jonquil.plugins.p2-spin)\n(loop [] (when-not @jonquil.plugin-protocol-test/stop-spin (recur)))\n"
+                 :file-id "p2-spin" :load-ms 200})
+               (finally (reset! stop-spin true)))
+        ms (- (System/currentTimeMillis) t0)]
+    (is (= 1 (count (:problems r))) (pr-str r))
+    (is (str/includes? (first (:problems r)) "didn't finish"))
+    (is (< ms 2000) (str ms " ms"))))
+
+(deftest edit-result-check-is-linear-test
+  ;; the check runs on every plugin keypress, on the GTK thread: 5000 edits
+  ;; on a 20,000-line buffer must not rebuild the text per edit (review I-C)
+  (let [line "(defn f [x] (inc x)) ; a line of about forty chars\n"
+        text (apply str (repeat 20000 line))
+        edits (vec (for [i (range 5000) :let [o (* i (count line))]] [o o "  "]))
+        t0 (System/currentTimeMillis)
+        r (protocol/edit-result-problem {:text text :caret 0} {:edits edits :caret 0})
+        ms (- (System/currentTimeMillis) t0)]
+    (is (nil? r) r)
+    (is (< ms 300) (str ms " ms"))))

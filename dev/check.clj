@@ -58,6 +58,8 @@
     jonquil.plugin
     jonquil.plugin-check
     jonquil.plugin-protocol
+    jonquil.plugin-registry
+    jonquil.plugin-loader
     jonquil.gtk.palette
     jonquil.help
     jonquil.source

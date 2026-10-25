@@ -30,8 +30,12 @@
   hand the key on, answering :next or :to-gtk), with conditions, keymap and
   os as given."
   [{:keys [commands conditions keymap os]}]
-  {:registered (into {} (map (fn [[id c]] [id {:scope (:scope c) :passes? (true? (:passes? c))}])) commands)
-   :conditions (set conditions) :keymap keymap :os os})
+  {:registered (into {} (map (fn [[id c]] [id (cond-> {:scope (:scope c) :passes? (true? (:passes? c))}
+                                                 (:plugin c) (assoc :plugin (:plugin c)))]))
+                     commands)
+   ;; a set (any scope), or {:window #{...} :editor #{...}}, so a binding's
+   ;; :when is checked against its own scope's conditions
+   :conditions (if (map? conditions) conditions (set conditions)) :keymap keymap :os os})
 
 (defn- blank-string? [s] (not (and (string? s) (not (str/blank? s)))))
 
@@ -157,69 +161,118 @@
         st states :when (km/matches? b kv st (constantly true))]
     [k kv st]))
 
-(defn- shipped-command [bindings kv st]
-  (:command (km/resolve-binding bindings kv st (constantly true))))
-
-(defn- window-take
-  "How the shipped window keymap treats key kv under state st, walking its
-  matching bindings in order as jonquil.keymap/dispatch does. The key can
-  reach the editor only if the walk runs out, ends at a fixed :to-gtk, or
-  passes a command that can hand it on (registered :passes?, answering
-  :next or :to-gtk); a :when guard alone is no way out, since the walk then
-  goes on to the next match. Answers [:always cmd] when the key has no way
-  out (an unconditional take with no escape before it), [:sometimes cmd]
-  when the window takes it in some states only, cmd the first window
-  command that can; nil when no window binding ever takes it."
-  [window kv st registered]
-  (loop [[b & more] (filter #(km/matches? % kv st (constantly true)) window)
-         first-cmd nil escape? false]
+(defn- walk
+  "Who takes key kv under state st among bindings, walking the matching
+  ones in order as jonquil.keymap/dispatch does: [[how b] ...], how
+  :sometimes for a binding that takes it only in some states (a :when
+  guard, or a command registered :passes?, which can hand it on) and
+  :always for the first that takes it whenever it's reached, after which
+  nothing later is reached. A fixed :to-gtk ends the walk (the key goes on
+  to GTK); a guarded one, or a passing command before the :always one,
+  means the key can get past, so that one is only :sometimes."
+  [bindings kv st registered]
+  (loop [[b & more] (filter #(km/matches? % kv st (constantly true)) bindings)
+         out [] escape? false]
     (let [guarded? (seq (:when b))
           passes? (:passes? (get registered (:command b)))]
       (cond
-        (nil? b) (when first-cmd [:sometimes first-cmd])
-        (= :to-gtk (:outcome b))
-        (if guarded?
-          (recur more first-cmd true)
-          (when first-cmd [:sometimes first-cmd]))
-        (or guarded? passes?)
-        (recur more (or first-cmd (:command b) :outcome/handled) (or escape? (boolean passes?)))
-        :else
-        (let [cmd (or first-cmd (:command b) :outcome/handled)]
-          [(if escape? :sometimes :always) cmd])))))
+        (nil? b) out
+        (= :to-gtk (:outcome b)) (if guarded? (recur more out true) out)
+        (or guarded? passes?) (recur more (conj out [:sometimes b]) (or escape? (boolean passes?)))
+        :else (conj out [(if escape? :sometimes :always) b])))))
+
+(defn- earlier? [b] (some? (:plugin/source b)))
+
+(defn- who [b]
+  (if (earlier? b)
+    (str "plugin " (name (:plugin/source b)) "'s binding of " (pr-str (or (:command b) :outcome/handled)))
+    (str "the built-in " (pr-str (or (:command b) :outcome/handled)))))
+
+(defn- cell-findings
+  "What happens to binding b (in scope) on one key cell, as findings
+  [kind binding]: :unreachable (a built-in in the window always takes it
+  first: a problem), :dead (an earlier plugin's binding always takes it
+  first: never fires), :sometimes (another binding takes it in some
+  states), :takes (b takes it from another binding). keymap's scopes hold
+  the earlier plugins' bindings (tagged :plugin/source) ahead of the
+  shipped ones, which is where b sits too: after the earlier plugins, ahead
+  of the built-ins. The window sees every key before the editor."
+  [scope {:keys [keymap registered]} kv st]
+  (let [win (:window keymap) ed (:editor keymap)
+        walk-of (fn [bs] (walk bs kv st registered))
+        before (fn [taken] (mapv (fn [[how tb]]
+                                   [(if (= :always how) (if (earlier? tb) :dead :unreachable) :sometimes) tb])
+                                 taken))
+        always? (fn [taken] (some #(= :always (first %)) taken))
+        first-match (fn [bs] (first (filter #(and (:command %) (km/matches? % kv st (constantly true))) bs)))]
+    (if (= :editor scope)
+      ;; the window first, all of it; then the earlier plugins' editor
+      ;; bindings; then the built-in editor binding b takes over
+      (let [w (walk-of win)
+            ;; an earlier plugin's always-take can hide a built-in that would
+            ;; always take it too; that's still this binding's problem, or it
+            ;; would load or not depending on an unrelated plugin
+            hidden (when (some (fn [[how tb]] (and (= :always how) (earlier? tb))) w)
+                     (some (fn [[how tb]] (when (= :always how) [:unreachable tb]))
+                           (walk-of (remove earlier? win))))]
+        (if (always? w)
+          (cond-> (before w) hidden (conj hidden))
+          (let [e (walk-of (filter earlier? ed))]
+            (into (into (before w) (before e))
+                  (when-not (always? e)
+                    (when-let [tb (first-match (remove earlier? ed))] [[:takes tb]]))))))
+      ;; :window: the earlier plugins' window bindings first; then b takes
+      ;; the key from the built-in window binding and from any editor one
+      (let [w (walk-of (filter earlier? win))]
+        (into (before w)
+              (when-not (always? w)
+                (keep (fn [tb] (when tb [:takes tb]))
+                      [(first-match (remove earlier? win)) (first-match ed)])))))))
 
 (defn- binding-rules
-  "Typing keys and unreachable as problems, shadows as warnings, for
-  binding i b in scope (its command's). For an :editor binding the window
-  shadows it when it takes the key only sometimes, and makes it
-  unreachable when it always does."
-  [i b scope {:keys [keymap os registered]}]
+  "Typing keys and unreachable as problems, the rest as warnings, for
+  binding i b in scope (its command's), over every key cell b matches: a
+  typing key with neither Ctrl nor Meta held is a problem; then
+  cell-findings. A built-in always taking the chord first is a problem
+  only when that's so on every cell b matches; when b still fires on some
+  (:mods matches extra held modifiers, so Cmd+P also matches Cmd+Shift+P,
+  the palette's), it's a warning naming the chord b loses. On a cell b
+  loses, the :sometimes findings there are dropped. An earlier plugin's
+  binding always taking the chord is a warning that b never fires. One
+  warning per distinct [kind binding], naming the first chord it occurs on."
+  [i b scope {:keys [os] :as request}]
   (let [cells (matching-cells b)
         label (fn [[k _ st]] (chord-label k st os))
         typing (first (filter (fn [[_ kv st]] (and (typing-key? kv) (not (command-chord? st)))) cells))
-        ;; typing first: its fix (hold Cmd/Ctrl) changes which chords match
-        takes (when (= :editor scope)
-                (for [[_ kv st :as cell] cells
-                      :let [t (window-take (:window keymap) kv st registered)] :when t]
-                  [t cell]))
-        unreachable (when-not typing
-                      (some (fn [[[how c] cell]] (when (= :always how) [cell c])) takes))
-        shadow-scopes (if (= :editor scope) [:editor] [:window :editor])
-        shadows (distinct (concat
-                           (for [[_ kv st :as cell] cells sc shadow-scopes
-                                 :let [c (shipped-command (get keymap sc) kv st)] :when c]
-                             [c cell])
-                           (for [[[how c] cell] takes :when (= :sometimes how)] [c cell])))]
+        per-cell (when-not typing
+                   (for [[_ kv st :as cell] cells
+                         :let [fs (cell-findings scope request kv st)
+                               lost? (some #(= :unreachable (first %)) fs)]]
+                     [cell (if lost? (remove #(= :sometimes (first %)) fs) fs)]))
+        all-lost? (and (seq per-cell) (every? (fn [[_ fs]] (some #(= :unreachable (first %)) fs)) per-cell))
+        findings (reduce (fn [acc [cell fs]]
+                           (reduce (fn [acc [kind tb]]
+                                     (let [kind (if (and (= :unreachable kind) (not all-lost?)) :partly kind)
+                                           k [kind (:command tb) (:plugin/source tb)]]
+                                       (if (some #(= k (first %)) acc) acc (conj acc [k kind tb cell]))))
+                                   acc fs))
+                         [] per-cell)
+        msg (fn [[_ kind tb cell]]
+              (let [at (str "binding " i " (" (label cell) ") ")]
+                (case kind
+                  :unreachable (str at "can never fire: the window's " (pr-str (:command tb))
+                                    " takes it first; bind it in :window scope")
+                  :partly (str at "doesn't fire on that chord: the window's " (pr-str (:command tb))
+                               " takes it first; the binding's other chords work")
+                  :dead (str at "never fires: " (who tb) " takes that chord first, and "
+                             (name (:plugin/source tb)) " loads first")
+                  :sometimes (str at "takes that chord only when " (who tb) " doesn't")
+                  :takes (str at "takes that chord from " (who tb)))))]
     {:problems (cond-> []
                  typing (conj (str "binding " i " (" (label typing) ") would take a key you type; "
                                    "hold Cmd/Ctrl"))
-                 unreachable (conj (str "binding " i " (" (label (first unreachable)) ") can never fire: "
-                                        "the window's " (pr-str (second unreachable))
-                                        " takes it first; bind it in :window scope")))
-     ;; one warning per shadowed command, naming the first chord that takes it
-     :warnings (vec (for [[c cell] (reduce (fn [acc [c _ :as x]] (if (some #(= c (first %)) acc) acc (conj acc x)))
-                                           [] shadows)]
-                      (str "binding " i " (" (label cell) ") takes that chord from the built-in "
-                           (pr-str c))))}))
+                 true (into (map msg (filter #(= :unreachable (second %)) findings))))
+     :warnings (mapv msg (remove #(= :unreachable (second %)) findings))}))
 
 (defn- bindings-check
   "km/problems over the plugin's bindings, then the scope, typing,
@@ -236,7 +289,14 @@
       (not (vector? bs)) {:problems [":bindings isn't a vector"] :warnings []}
       :else
       (reduce (fn [acc [i b]]
-                (let [ps (when (map? b) (km/problems [b] ids (set (when (coll? conditions) conditions))))]
+                (let [scope-of (:scope (get known (when (map? b) (:command b))))
+                      conds (cond
+                              (map? conditions) (set (if (contains? conditions scope-of)
+                                                       (get conditions scope-of)
+                                                       (apply concat (vals conditions))))
+                              (coll? conditions) (set conditions)
+                              :else #{})
+                      ps (when (map? b) (km/problems [b] ids conds))]
                   (cond
                     (not (map? b)) (update acc :problems conj (str "binding " i " isn't a map"))
                     (seq ps) (update acc :problems into

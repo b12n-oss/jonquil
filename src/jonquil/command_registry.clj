@@ -93,7 +93,8 @@
    :tree-focused (fn [ctx] (some-> (:tree-keys ctx) :focused? (#(%))))
    :tree-menu-open (fn [ctx] (some-> (:tree-keys ctx) :menu-open? (#(%))))
    :evaluating (fn [ctx] ((:evaluating? ctx)))
-   :rename-focused (fn [ctx] ((:rename-focused? ctx)))})
+   ;; a text entry popover has focus: the rename box or the command palette
+   :entry-focused (fn [ctx] ((:entry-focused? ctx)))})
 
 (defn- edit [k]
   (fn [ctx _args] (if (= 1 ((get ctx k))) :handled :to-gtk)))
@@ -195,32 +196,33 @@
         menu))
 
 (defn run-command-in
-  "Runs the command id from commands with the ctx for its own :scope, out
-  of ctxs {:window c :editor c :console c}: the ctx that scope's key
-  handler builds, so the palette runs a command as its key would. Answers
-  the outcome; nil when id isn't registered."
-  [id ctxs]
-  (when-let [{:keys [scope]} (get commands id)]
-    (run-command! commands {:command id} (get ctxs scope))))
+  "Runs the command id from table (commands, or that and the live plugins'
+  commands) with the ctx for its own :scope, out of ctxs {:window c
+  :editor c :console c}: the ctx that scope's key handler builds, so the
+  palette runs a command as its key would. Answers the outcome; nil when
+  id isn't in table."
+  [table id ctxs]
+  (when-let [{:keys [scope]} (get table id)]
+    (run-command! table {:command id} (get ctxs scope))))
 
 (def ^:private KEY-ESCAPE (km/key-value "Escape"))
 
 (defn window-answer
   "on-window-key's whole answer for a lowered keyval and a modifier state,
-  1 (used up) or 0 (GTK's): first the rename stage, then the keymap.
+  1 (used up) or 0 (GTK's): first the entry stage, then the keymap.
 
-  The rename stage is the one window rule that isn't a chord. While the
+  The entry stage is the one window rule that isn't a chord. While the
   rename popover's entry or the command palette's has focus every key but
   Escape is the entry's, so Run, close and switch can't fire mid-typing;
   Escape goes on to the keymap, whose popover binding closes the entry. It covers a class of keys, so it
   stays a fixed stage ahead of the keymap, as the plugins design keeps the
-  editor's preedit yield, and asks the named condition :rename-focused.
+  editor's preedit yield, and asks the named condition :entry-focused.
 
   Then jonquil.keymap/dispatch over bindings with holds? and run!: :handled
   is 1, :to-gtk and :unmatched are 0."
   [bindings keyval state {:keys [holds?] :as opts}]
   (cond
-    (and (not= keyval KEY-ESCAPE) (holds? :rename-focused)) 0
+    (and (not= keyval KEY-ESCAPE) (holds? :entry-focused)) 0
     (= :handled (km/dispatch bindings keyval state opts)) 1
     :else 0))
 

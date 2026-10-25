@@ -33,8 +33,8 @@
             [jonquil.edit :as edit]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
-            [jonquil.keymap :as km]
             [jonquil.paint :as paint]
+            [jonquil.plugin-registry :as plugin-registry]
             [jonquil.theme :as theme]))
 
 ;; --- tags ----------------------------------------------------------------
@@ -807,7 +807,11 @@
      ;; no key reads these two (Tab is a typing stage); the context menu's
      ;; and the palette's Indent and Unindent do (S7, S8)
      :indent! #(do-indent! ed)
-     :unindent! #(do-unindent! ed)}))
+     :unindent! #(do-unindent! ed)
+     ;; a plugin's :edit command (jonquil.plugin-registry) reads the
+     ;; buffer as a snapshot and has its op applied as one user action
+     :snapshot #(snapshot ed)
+     :apply-op! #(apply-op! ed %)}))
 
 (defn handle-key!
   "The editor's key dispatch (P3.T2). Returns 1 when it handled the key,
@@ -843,13 +847,17 @@
   ([ed keyval0 keycode state]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
          cfns @(:completion-fns ed)
-         ectx (key-ctx ed)]
+         ectx (key-ctx ed)
+         ;; plugins P3: the live plugins' bindings ahead of the shipped ones,
+         ;; over the built-in commands and theirs; with none, the shipped tables
+         plugins @plugin-registry/live
+         cmds (merge cmd-registry/editor-commands (plugin-registry/commands plugins))]
      (when-not (modifier-keyval? keyval)
        (when-let [f @(:flash-cancel-fn ed)] (f)))
      (cmd-registry/editor-answer
-      (:editor km/shipped) keyval state
+      (plugin-registry/editor-bindings plugins) keyval state
       {:holds? (cmd-registry/holds-fn cmd-registry/editor-conditions ectx)
-       :run! #(cmd-registry/run-command! cmd-registry/editor-commands % ectx)
+       :run! #(cmd-registry/run-command! cmds % ectx)
        :physical (physical-key OS-NAME keyval keycode state)
        ;; P4.T5: completion's own nav/commit/escape keys (Up/Down/
        ;; PageUp/PageDown/Enter/Tab/Escape) get first look, ahead of smart
