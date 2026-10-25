@@ -1919,15 +1919,15 @@
   (let [f (g/gtk-root-get-focus win)]
     (and (not (ffi/null? f)) (not (zero? (g/gtk-widget-is-ancestor f (:box fb)))))))
 
-(defn- rename-focused?
-  "True when win's focus is inside rename-pop's popover (its entry's GtkText
-  delegate, as find-bar-focused? explains). rename-pop may be nil. Asked of
-  the rename popover and of the command palette, both popovers with an
-  entry (window-key-ctx's :rename-focused?)."
-  [win rename-pop]
+(defn- focus-in-popover?
+  "True when win's focus is inside pp's popover (its entry's GtkText
+  delegate, as find-bar-focused? explains). pp may be nil. Asked of the
+  rename popover and of the command palette, both popovers with an entry
+  (window-key-ctx's :entry-focused?)."
+  [win pp]
   (let [f (g/gtk-root-get-focus win)]
-    (boolean (and rename-pop (not (ffi/null? f))
-                  (not (zero? (g/gtk-widget-is-ancestor f (:popover rename-pop))))))))
+    (boolean (and pp (not (ffi/null? f))
+                  (not (zero? (g/gtk-widget-is-ancestor f (:popover pp))))))))
 
 (defn- reload-code-css!
   "Loads theme t's CSS (jonquil.theme/code-css) at font size px into the
@@ -2111,9 +2111,9 @@
            :inspector-focused? #(inspector-pane/focused? pane win)
            ;; the rename popover's entry and the command palette's (slice S8
            ;; follow-up): either one keeps every key but Escape
-           :rename-focused? #(let [t (active-tab)]
-                               (or (rename-focused? win (:rename-pop t))
-                                   (rename-focused? win (:palette t)))))))
+           :entry-focused? #(let [t (active-tab)]
+                               (or (focus-in-popover? win (:rename-pop t))
+                                   (focus-in-popover? win (:palette t)))))))
 
 (defn- on-window-key
   "The window's capture-phase key handler. Every key goes through

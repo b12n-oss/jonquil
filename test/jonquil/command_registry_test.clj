@@ -118,14 +118,14 @@
     (is (= [:next []] (run :source/jump-back {})) "no source-keys at all")))
 
 (deftest s4-rename-condition-test
-  (let [holds (fn [v] ((registry/holds-fn registry/window-conditions {:rename-focused? (constantly v)})
-                       :rename-focused))]
+  (let [holds (fn [v] ((registry/holds-fn registry/window-conditions {:entry-focused? (constantly v)})
+                       :entry-focused))]
     (is (true? (holds true)))
     (is (false? (holds nil)))))
 
 (deftest window-answer-test
   (let [asked (atom []) ran (atom [])
-        holds? (fn [rename?] (fn [id] (swap! asked conj id) (and rename? (= id :rename-focused))))
+        holds? (fn [rename?] (fn [id] (swap! asked conj id) (and rename? (= id :entry-focused))))
         run! (fn [answer] (fn [b] (swap! ran conj (:command b)) answer))
         bs [{:key "r" :mods #{:cmd} :command :x} {:key "Escape" :command :esc}
             {:key "Escape" :outcome :to-gtk}]
@@ -134,7 +134,7 @@
               (registry/window-answer bs kv st {:holds? (holds? rename?) :run! (run! answer)}))]
     (is (= 0 (ans 0x72 4 true :handled)) "rename focused: Cmd+R is the entry's")
     (is (= [] @ran) "and nothing ran")
-    (is (= [:rename-focused] @asked) "only the rename condition was asked")
+    (is (= [:entry-focused] @asked) "only the entry condition was asked")
     (is (= 1 (ans 0xff1b 0 true :handled)) "Escape during a rename goes on to the keymap")
     (is (= [:esc] @ran))
     (is (= [] @asked) "Escape never asks the rename condition")

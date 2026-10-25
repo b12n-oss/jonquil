@@ -93,7 +93,8 @@
    :tree-focused (fn [ctx] (some-> (:tree-keys ctx) :focused? (#(%))))
    :tree-menu-open (fn [ctx] (some-> (:tree-keys ctx) :menu-open? (#(%))))
    :evaluating (fn [ctx] ((:evaluating? ctx)))
-   :rename-focused (fn [ctx] ((:rename-focused? ctx)))})
+   ;; a text entry popover has focus: the rename box or the command palette
+   :entry-focused (fn [ctx] ((:entry-focused? ctx)))})
 
 (defn- edit [k]
   (fn [ctx _args] (if (= 1 ((get ctx k))) :handled :to-gtk)))
@@ -214,13 +215,13 @@
   Escape is the entry's, so Run, close and switch can't fire mid-typing;
   Escape goes on to the keymap, whose popover binding closes the entry. It covers a class of keys, so it
   stays a fixed stage ahead of the keymap, as the plugins design keeps the
-  editor's preedit yield, and asks the named condition :rename-focused.
+  editor's preedit yield, and asks the named condition :entry-focused.
 
   Then jonquil.keymap/dispatch over bindings with holds? and run!: :handled
   is 1, :to-gtk and :unmatched are 0."
   [bindings keyval state {:keys [holds?] :as opts}]
   (cond
-    (and (not= keyval KEY-ESCAPE) (holds? :rename-focused)) 0
+    (and (not= keyval KEY-ESCAPE) (holds? :entry-focused)) 0
     (= :handled (km/dispatch bindings keyval state opts)) 1
     :else 0))
 

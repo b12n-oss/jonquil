@@ -73,7 +73,8 @@ these:
   is the entry's; since S8's follow-up the command palette's entry too)
   covers a class of keys, so it stays a fixed stage ahead of the
   keymap, as the spec keeps the editor's preedit yield, and asks the named
-  condition `:rename-focused`. `window-answer` holds that stage and the
+  condition `:rename-focused` (since plugins P3 `:entry-focused`, as it
+  covers the command palette's entry too). `window-answer` holds that stage and the
   dispatch and answers 1 or 0. It is the whole of `on-window-key` now,
   and the oracle drove it over the full handler's transcription. Slice
   S5 (2026-10-25) started on the editor. Its eleven chords, Ctrl+Space
