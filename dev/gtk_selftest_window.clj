@@ -223,6 +223,7 @@
    rename-menus/row-menu-actions
    rename-menus/row-menu-actions-console-complete
    rename-menus/row-menu-action-throw-is-contained
+   rename-menus/row-menu-items-all-resolve
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

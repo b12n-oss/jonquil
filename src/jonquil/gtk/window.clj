@@ -2162,8 +2162,8 @@
   GSimpleActionGroup holding one no-parameter GSimpleAction per item,
   each wired to call f (its \"activate\" signal), inserted on view under
   prefix \"p4\" (gtk_widget_insert_action_group). items is [[label
-  action-name f] ...] -- f is the SAME fn its own key chord calls; every
-  editor item below names one.
+  action-name f] ...], from jonquil.command-registry/menu-items (slice
+  S7) -- f runs the item's command, the SAME one its key chord runs.
 
   Returns the GSimpleActionGroup pointer so a caller can fire an item by
   its own unprefixed action-name through g_action_group_activate_action
@@ -2361,24 +2361,19 @@
         complete-fn (fn [] (do-complete! ed completion status-label))
         run-form-fn (fn [] (do-run-form! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
                                           :flash-fns flash-fns}))
+        ;; slice S7: the editor menu's ctx (jonquil.command-registry/
+        ;; editor-menu), this tab's own fns, each the one its key calls
+        menu-ctx {:run-form! run-form-fn :jump! jump-fn :rename! rename-fn :quick-doc! quick-doc-fn
+                  :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn :complete! complete-fn
+                  :toggle-comment! (fn [] (editor/do-toggle-comment! ed))
+                  :format-all! (fn [] (editor/do-format-all! ed))
+                  :format-selection! (fn [] (editor/do-format-selection! ed))
+                  :indent! (fn [] (editor/do-indent! ed))
+                  :unindent! (fn [] (editor/do-unindent! ed))
+                  :open-find-fn open-find-fn :open-replace-fn open-replace-fn}
         menu-group
-        (install-context-menu!
-         (:view ed)
-         [["Run Form" "run-form" run-form-fn]
-          ["Jump to Definition" "jump" jump-fn]
-          ["Rename Symbol" "rename" rename-fn]
-          ["Quick Documentation" "quick-doc" quick-doc-fn]
-          ["Inspect Last Result" "inspect-last" inspect-last-fn]
-          ["Inspect Form" "inspect-form" inspect-form-fn]
-          ["Complete" "complete" complete-fn]
-          ["Toggle Comment" "toggle-comment" (fn [] (editor/do-toggle-comment! ed))]
-          ["Format All" "format-all" (fn [] (editor/do-format-all! ed))]
-          ["Format Selection" "format-selection" (fn [] (editor/do-format-selection! ed))]
-          ["Indent" "indent" (fn [] (editor/do-indent! ed))]
-          ["Unindent" "unindent" (fn [] (editor/do-unindent! ed))]
-          ["Find" "find" open-find-fn]
-          ["Replace" "replace" open-replace-fn]]
-         (fn [msg] (set-status! status-label msg)))]
+        (install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
+                               (fn [msg] (set-status! status-label msg)))]
     (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
     (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [dirty]
@@ -3159,13 +3154,15 @@
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe
-        ;; 3) -- each item calls the EXACT SAME fn its key does. install-
+        ;; 3) -- each item calls the EXACT SAME fn its key does, through
+        ;; its command in jonquil.command-registry (slice S7). install-
         ;; context-menu! returns the GSimpleActionGroup, so :activate-
         ;; menu-action!*/:repl-activate-menu-action!* (below) can fire an
         ;; item directly, by name, for rows and the smoke.
         console-menu-group
-        (install-context-menu! (:view cv) [["Complete" "complete" repl-complete-fn]
-                                           ["Clear Last Output" "clear-last-output" clear-last-fn]]
+        (install-context-menu! (:view cv)
+                               (cmd-registry/menu-items cmd-registry/console-menu
+                                                        {:complete! repl-complete-fn :clear-last-fn clear-last-fn})
                                (fn [msg] (set-status! status-label msg)))
         ;; Ruling 3: the ui's editor-menu hook fires the FIRST tab's menu
         ;; (tabs are built after this let), as the other per-tab ui keys do.
