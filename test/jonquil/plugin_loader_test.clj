@@ -83,3 +83,90 @@
 (deftest one-command-is-singular-test
   (let [{:keys [lines]} (load-dir (dir-with [["p3l-one.clj" (source "p3l-one")]]))]
     (is (some #(= "plugin p3l-one loaded (1 command)" %) lines) (pr-str lines))))
+
+;; --- plugins P4: reload ----------------------------------------------------
+
+(defn- reload [d reg & {:as more}]
+  (loader/reload (merge {:dir d :os "Linux" :registry reg :disabled #{}} more)))
+
+(defn- write! [d n text] (spit (io/file d n) text))
+
+(deftest unchanged-is-left-alone-test
+  (let [d (dir-with [["p4l-a.clj" (source "p4l-a")]])
+        {reg :registry} (load-dir d)
+        r (reload d reg)]
+    (is (= [] (:lines r)))
+    (is (identical? (get-in reg [:plugins :p4l-a]) (get-in (:registry r) [:plugins :p4l-a])))))
+
+(deftest changed-reload-swaps-test
+  (let [d (dir-with [["p4l-b.clj" (source "p4l-b")]])
+        {reg :registry} (load-dir d)
+        _ (write! d "p4l-b.clj" (source "p4l-b" :key "k"))
+        r (reload d reg)
+        keys-bound (set (map :key (reg/bindings (:registry r) :editor)))]
+    (is (= #{"k"} keys-bound) (pr-str (:lines r)))))
+
+(def ^:private v1
+  (str "(ns jonquil.plugins.p4l-m\n  (:require [jonquil.plugin :as p]))\n(def marker :v1)\n"
+       "(p/defplugin {:id :p4l-m :doc \"d\" :effects #{} :commands [] :bindings []})\n"))
+
+(def ^:private v2-broken
+  (str "(ns jonquil.plugins.p4l-m\n  (:require [jonquil.plugin :as p]))\n(def marker :v2)\n"
+       "(p/defplugin {:id :p4l-m\n"))
+
+(deftest failed-reload-restores-the-old-version-test
+  (let [d (dir-with [["p4l-m.clj" v1]])
+        {reg :registry} (load-dir d)
+        _ (write! d "p4l-m.clj" v2-broken)
+        r (reload d reg)]
+    (is (= v1 (get-in (:registry r) [:plugins :p4l-m :source])))
+    (is (= :v1 @(ns-resolve 'jonquil.plugins.p4l-m 'marker)))
+    (is (some #(str/includes? % "skipped: line") (:lines r)) (pr-str (:lines r)))
+    (is (some #(str/includes? % "the previous version stays live") (:lines r)))))
+
+(deftest reload-does-not-shadow-itself-test
+  (let [d (dir-with [["p4l-s.clj" (source "p4l-s")]])
+        {reg :registry} (load-dir d)
+        _ (write! d "p4l-s.clj" (str/replace (source "p4l-s") "Wrap it." "Wrap it, again."))
+        r (reload d reg)]
+    (is (not (some #(str/includes? % "never fires") (:lines r))) (pr-str (:lines r)))
+    (is (= "Wrap it, again." (:doc (get (reg/commands (:registry r)) :p4l-s/wrap))))))
+
+(deftest later-plugins-are-not-earlier-on-reload-test
+  ;; a reloaded p4l-a is checked against the plugins before it, not p4l-z
+  (let [d (dir-with [["p4l-a.clj" (source "p4l-a")] ["p4l-z.clj" (source "p4l-z" :key "j")]])
+        {reg :registry} (load-dir d)
+        _ (write! d "p4l-a.clj" (str/replace (source "p4l-a") "Wrap it." "Wrap it, two."))
+        r (reload d reg)]
+    (is (not (some #(and (str/starts-with? % "plugin p4l-a") (str/includes? % "never fires")) (:lines r)))
+        (pr-str (:lines r)))))
+
+(deftest removed-and-disabled-test
+  (let [d (dir-with [["p4l-r.clj" (source "p4l-r")] ["p4l-d.clj" (source "p4l-d" :key "k")]])
+        {reg :registry} (load-dir d)
+        _ (io/delete-file (io/file d "p4l-r.clj"))
+        r (reload d reg :disabled #{:p4l-d :p4l-never})]
+    (is (= #{} (set (keys (:plugins (:registry r))))))
+    (is (some #(= "plugin p4l-r removed: its file is gone" %) (:lines r)) (pr-str (:lines r)))
+    (is (some #(= "plugin p4l-d is disabled (settings.edn :plugins :disabled)" %) (:lines r)))
+    (is (not (some #(str/includes? % "p4l-never") (:lines r))))))
+
+(deftest only-reloads-one-test
+  (let [d (dir-with [["p4l-x.clj" (source "p4l-x")] ["p4l-y.clj" (source "p4l-y" :key "k")]])
+        {reg :registry} (load-dir d)
+        _ (write! d "p4l-x.clj" (source "p4l-x" :key "l"))
+        _ (write! d "p4l-y.clj" (source "p4l-y" :key "m"))
+        r (reload d reg :only (str (io/file d "p4l-x.clj")))
+        ks (set (map :key (reg/bindings (:registry r) :editor)))]
+    (is (= #{"l" "k"} ks) (pr-str (:lines r)))))
+
+(deftest plugin-file?-test
+  (let [d (temp-dirs/temp-dir! "jonquil-plugins-pf-")
+        link (str (temp-dirs/temp-dir! "jonquil-plugins-link-") "/plugins")]
+    (java.nio.file.Files/createSymbolicLink (.toPath (io/file link)) (.toPath (io/file d))
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (true? (loader/plugin-file? d (str d "/wrap.clj"))))
+    (is (false? (loader/plugin-file? d (str d "/sub/wrap.clj"))))
+    (is (false? (loader/plugin-file? d (str d "/Wrap.clj"))))
+    (is (false? (loader/plugin-file? d "/tmp/elsewhere/wrap.clj")))
+    (is (true? (loader/plugin-file? d (str link "/wrap.clj"))))))
