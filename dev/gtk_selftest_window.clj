@@ -235,6 +235,7 @@
    palette-rows/row-palette-throw-contained
    palette-rows/row-palette-arrow-keys
    palette-rows/row-palette-closes-its-own-tab
+   palette-rows/row-palette-entry-keeps-window-keys
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

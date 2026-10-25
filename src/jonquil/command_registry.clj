@@ -205,8 +205,8 @@
   1 (used up) or 0 (GTK's): first the rename stage, then the keymap.
 
   The rename stage is the one window rule that isn't a chord. While the
-  tab-rename entry has focus every key but Escape is the entry's, so Run,
-  close and switch can't fire mid-rename; Escape goes on to the keymap,
+  rename popover's entry or the command palette's has focus every key but
+  Escape is the entry's, so Run, close and switch can't fire mid-typing; Escape goes on to the keymap,
   whose popover binding closes the entry. It covers a class of keys, so it
   stays a fixed stage ahead of the keymap, as the plugins design keeps the
   editor's preedit yield, and asks the named condition :rename-focused.

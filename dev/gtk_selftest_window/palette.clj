@@ -36,6 +36,30 @@
 (defn- close! [ui]
   (let [p (:palette ui)] (when (popover/open? p) (popover/hide! p))))
 
+(defn row-palette-entry-keeps-window-keys
+  "With focus in the palette's entry, the window's capture-phase key
+  handler leaves Cmd/Ctrl+T, Cmd/Ctrl+W and F5 to the entry (0: no new or
+  closed tab, no Run), as it does for the rename popover's entry
+  (rename-menus/row-rename-entry-keeps-window-keys); Escape still reaches
+  the popover clause and closes it (1)."
+  [ui]
+  (go-row :palette-entry-keeps-window-keys support/check
+    (let [p (:palette ui)
+          tabs0 (on-gtk ((:open-palette!* ui)) (count ((:tabs* ui))))
+          focused? (await-until 2000 20 #(focus-in? ui (:popover p)))
+          [ht hw hf5 tabs1 open?] (on-gtk [((:handle-window-key! ui) ffi/null 0x074 0 g/META-MASK ffi/null)
+                                           ((:handle-window-key! ui) ffi/null 0x077 0 g/META-MASK ffi/null)
+                                           ((:handle-window-key! ui) ffi/null 0xffc2 0 0 ffi/null)
+                                           (count ((:tabs* ui)))
+                                           (popover/open? p)])
+          hesc (on-gtk ((:handle-window-key! ui) ffi/null support/KEY-ESCAPE 0 0 ffi/null))
+          closed? (await-until 1000 20 #(not (popover/open? p)))]
+      (on-gtk (close! ui)
+              (support/check :palette-entry-keeps-window-keys
+                             (and focused? (= 0 ht hw hf5) (= tabs0 tabs1) open? (= 1 hesc) closed?)
+                             {:focused focused? :cmd-t ht :cmd-w hw :f5 hf5 :tabs [tabs0 tabs1]
+                              :open open? :escape hesc :closed closed?})))))
+
 (defn row-palette-chord-opens
   "The chord opens the palette with every entry shown and the entry focused."
   [ui]
