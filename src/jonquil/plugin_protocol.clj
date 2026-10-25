@@ -86,37 +86,47 @@
 (defn- throw-message [e]
   (or (some-> e .getCause ex-message) (ex-message e) (str e)))
 
+(defn- soak-one
+  "Calls edit on snap in a future, with the shape check inside it too (a
+  lazy result is realized there, under the same timeout) and printing
+  bounded, so even an infinite seq gets a short sentence. Answers
+  [:timeout], [:threw e] or [:ok problem-or-nil] within soak-ms."
+  [edit snap soak-ms]
+  (let [f (future (binding [*print-length* 10 *print-level* 3]
+                    (try [:ok (edit-result-problem snap (edit snap))]
+                         (catch Throwable e [:threw e]))))
+        v (deref f soak-ms ::timeout)]
+    (if (= ::timeout v)
+      (do (future-cancel f) [:timeout])
+      v)))
+
 (defn soak
-  "Each :edit command of definition on each of FIXTURES, in a future, given
-  soak-ms (default 2000) to answer: {:problems [...] :timings {command-id
-  max-ms}}. A throw, a bad result shape or no answer in time is a problem
-  naming the command and the fixture. A command still running when its
-  time is up keeps running (future-cancel can't stop CPU-bound code, which
-  is why an agent's proposal is soaked in a separate process). :run
-  commands aren't invoked. Never throws."
+  "Each :edit command of definition on each of FIXTURES, given soak-ms
+  (default 2000) per fixture: {:problems [...] :timings {command-id
+  max-ms}}. A throw or a bad result shape is a problem naming the command
+  and the fixture. A command that doesn't answer in time is one problem,
+  and its other fixtures aren't tried: it may keep running (future-cancel
+  can't stop CPU-bound code, which is why an agent's proposal is soaked in
+  a separate process), so each command leaves at most one such thread and
+  the soak takes at most commands x soak-ms more. :run commands aren't
+  invoked. Never throws."
   [{:keys [definition soak-ms] :or {soak-ms 2000}}]
   (reduce
    (fn [acc {:keys [id edit]}]
      (reduce
       (fn [acc [fname snap]]
         (let [t0 (System/nanoTime)
-              f (future (edit snap))
-              v (try (deref f soak-ms ::timeout) (catch Throwable e {::threw e}))
+              [kind x] (soak-one edit snap soak-ms)
               ms (quot (- (System/nanoTime) t0) 1000000)
               acc (update-in acc [:timings id] (fnil max 0) ms)
               label (str "command " (pr-str id) " on " fname)]
-          (cond
-            (= ::timeout v)
-            (do (future-cancel f)
-                (update acc :problems conj
-                        (str label ": still running after " soak-ms
-                             " ms; it may keep running in this process until Jonquil quits")))
-            (and (map? v) (contains? v ::threw))
-            (update acc :problems conj (str label " threw: " (throw-message (::threw v))))
-            :else
-            (if-let [why (edit-result-problem snap v)]
-              (update acc :problems conj (str label ": " why))
-              acc))))
+          (case kind
+            :timeout (reduced
+                      (update acc :problems conj
+                              (str label ": still running after " soak-ms " ms; its other fixtures weren't "
+                                   "tried, and it may keep running in this process until Jonquil quits")))
+            :threw (update acc :problems conj (str label " threw: " (throw-message x)))
+            (if x (update acc :problems conj (str label ": " x)) acc))))
       acc FIXTURES))
    {:problems [] :timings {}}
    (filter #(fn? (:edit %)) (:commands definition))))

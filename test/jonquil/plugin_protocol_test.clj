@@ -100,9 +100,22 @@
                                :soak-ms 100})
                (finally (reset! stop true)))
         ms (- (System/currentTimeMillis) t0)]
-    (is (= (count protocol/FIXTURES) (count (:problems r))))
-    (is (every? #(str/includes? % "still running") (:problems r)))
-    (is (< ms 2000) (str ms " ms"))))
+    ;; one problem: after its first timeout a command's other fixtures are
+    ;; skipped, so at most one runaway thread per command
+    (is (= 1 (count (:problems r))) (pr-str r))
+    (is (str/includes? (first (:problems r)) "still running"))
+    (is (str/includes? (first (:problems r)) "weren't tried"))
+    (is (< ms 1000) (str ms " ms"))))
+
+(deftest soak-lazy-result-test
+  ;; a lazy result is checked and printed inside the timed call, with
+  ;; printing bounded, so an infinite seq can't hang the caller
+  (let [guard (future (protocol/soak {:definition (definition (fn [_] (range))) :soak-ms 200}))
+        r (deref guard 10000 ::hung)]
+    (is (not= ::hung r) "the soak returned")
+    (when (map? r)
+      (is (= (count protocol/FIXTURES) (count (:problems r))))
+      (is (every? #(< (count %) 300) (:problems r)) "each message is short"))))
 
 (deftest run-commands-not-invoked-test
   (let [ran (atom 0)
