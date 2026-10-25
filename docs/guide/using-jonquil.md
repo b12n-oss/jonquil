@@ -1750,8 +1750,8 @@ works, for example
 
 A plugin is one Clojure file that adds editor commands and the keys that
 run them. This is the first part of plugin support: a plugin's `:edit`
-commands work now, and reloading, hooks, effects and agent proposals come
-later.
+and `:run` commands work now, with the `:console` and `:buffer` effects,
+and `:eval`, hooks and agent proposals come later.
 
 Plugin files live in a `plugins` folder beside the settings file, so
 `~/.config/jonquil/plugins/` (or `$XDG_CONFIG_HOME/jonquil/plugins/`). A
@@ -1780,9 +1780,48 @@ An `:edit` command gets a snapshot of the buffer, `{:text :caret
 `{:edits [[start end replacement] ...] :caret n}`, with `:edits` a vector
 in ascending order, or `nil` when it doesn't apply here (the key then
 goes on as usual). `p/form-at-caret` and `p/wrap-form` are there to build
-on. `:effects #{}` says the plugin is pure. Commands that do more than
-edit the buffer (`:run`) are accepted but don't run yet, and the console
-says so.
+on. `:effects #{}` says the plugin is pure.
+
+A command that does more than edit the buffer is a `:run` command,
+`(fn [ctx] ...)`, and its plugin lists what it reaches in `:effects`:
+
+```clojure
+(ns jonquil.plugins.shout
+  (:require [clojure.string :as str]
+            [jonquil.plugin :as p]))
+
+(p/defplugin
+  {:id      :shout
+   :doc     "Upper-case the whole buffer."
+   :effects #{:buffer :console}
+   :commands
+   [{:id :shout/go :doc "Upper-case the whole buffer." :scope :window
+     :run (fn [ctx]
+            (p/replace-text! ctx (str/upper-case (p/buffer-text ctx)))
+            (p/status! ctx "Shouted."))}]
+   :bindings
+   [{:key "u" :mods #{:cmd :alt} :command :shout/go}]})
+```
+
+A `:run` command runs in the background, so a slow one doesn't freeze the
+window, and its key always counts as used (what the function returns is
+ignored; an `:edit` command returning `nil` is the way to let a key go
+on). It acts on the tab that was active when it started, even if you
+switch tabs while it works.
+
+| Effect | Functions |
+|---|---|
+| `:console` | `(p/print! ctx s)` prints a line on the console, `(p/status! ctx s)` shows it on the status bar |
+| `:buffer` | `(p/buffer-text ctx)`, `(p/replace-text! ctx text)` (one undo step), `(p/open! ctx path)`, which opens a file in a tab and returns its id; `(assoc ctx ::p/tab id)` acts on that tab |
+
+Calling a function whose effect the plugin didn't declare throws "this
+plugin didn't declare :buffer", and a tab that has closed throws "that tab
+was closed". `:eval` is accepted but its functions, `p/eval!` and
+`p/repl!`, aren't there yet and throw saying so. A throw from a `:run`
+command shows on the status bar and the console with the plugin's id.
+One run of a command goes at a time: pressing its key again while it's
+still working says it's still running, and nothing can stop a command
+that never finishes short of quitting Jonquil.
 
 Plugins load when Jonquil starts, one file at a time, so a broken file is
 skipped while the others load, and the console names what's wrong,

@@ -32,3 +32,42 @@
     (is (= "(when (a b))" (edit/apply-edits (:text s) (:edits op))))
     (is (= 7 (:caret op))))
   (is (nil? (p/wrap-form (snap "(a)\n\n(b)" 4) "(when " ")"))))
+
+(defn- ctx-with
+  "A plugin ctx declaring effects, its impl recording each call into calls."
+  [effects calls]
+  {::p/effects effects ::p/tab 7
+   ::p/impl {:print! #(swap! calls conj [:print! %])
+             :status! #(swap! calls conj [:status! %])
+             :buffer-text (fn [tab] (swap! calls conj [:buffer-text tab]) "text")
+             :replace-text! (fn [tab s] (swap! calls conj [:replace-text! tab s]))
+             :open! (fn [path] (swap! calls conj [:open! path]) 9)}})
+
+(defn- thrown [f] (try (f) nil (catch :default e e)))
+
+(deftest effect-gating-test
+  (let [calls (atom [])
+        c (ctx-with #{:console} calls)]
+    (is (nil? (p/print! c "hi")))
+    (p/status! c "st")
+    (is (= [[:print! "hi"] [:status! "st"]] @calls))
+    (let [e (thrown #(p/buffer-text c))]
+      (is (= "this plugin didn't declare :buffer" (ex-message e)))
+      (is (= :buffer (:plugin/effect (ex-data e)))))
+    (is (some? (thrown #(p/replace-text! c "x"))))
+    (is (some? (thrown #(p/open! c "/a.clj"))))
+    (is (= 2 (count @calls)) "a refused call reaches no impl"))
+  (let [calls (atom [])
+        c (ctx-with #{:buffer} calls)]
+    (is (= "text" (p/buffer-text c)))
+    (p/replace-text! c "new")
+    (is (= 9 (p/open! c "/a.clj")))
+    (is (= [[:buffer-text 7] [:replace-text! 7 "new"] [:open! "/a.clj"]] @calls))
+    (is (= "this plugin didn't declare :console" (ex-message (thrown #(p/print! c "x")))))))
+
+(deftest eval-not-yet-test
+  (let [c (ctx-with #{:eval} (atom []))]
+    (is (= "the :eval effect functions arrive in a later slice" (ex-message (thrown #(p/eval! c "(+ 1 2)")))))
+    (is (= "the :eval effect functions arrive in a later slice" (ex-message (thrown #(p/repl! c "(+ 1 2)"))))))
+  (let [c (ctx-with #{} (atom []))]
+    (is (= "this plugin didn't declare :eval" (ex-message (thrown #(p/eval! c "1")))))))

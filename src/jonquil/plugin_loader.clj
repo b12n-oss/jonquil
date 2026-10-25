@@ -100,11 +100,9 @@
               (sort-by key (:plugins reg))))))
 
 (defn- passed-lines [id d warnings]
-  (let [edits (count (filter #(fn? (:edit %)) (:commands d)))
-        runs (count (filter #(fn? (:run %)) (:commands d)))]
-    (cond-> [(str "plugin " id " loaded (" edits (if (= 1 edits) " command)" " commands)"))]
-      true (into (map #(str "plugin " id ": " %) warnings))
-      (pos? runs) (conj (str "plugin " id ": its :run commands wait for effects, a later slice")))))
+  (let [n (count (filter #(or (fn? (:edit %)) (fn? (:run %))) (:commands d)))]
+    (into [(str "plugin " id " loaded (" n (if (= 1 n) " command)" " commands)"))]
+          (map #(str "plugin " id ": " %) warnings))))
 
 (defn- reload-one
   "One file [id path] against reg: [reg' lines]. Disabled: removed. Text

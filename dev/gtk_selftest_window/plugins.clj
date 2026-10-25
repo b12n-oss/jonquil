@@ -3,8 +3,10 @@
   (beside its temp settings file, never the user's) loads through
   :load-plugins!*, its key runs its :edit command, the palette lists and
   runs it, a broken file is named while a good one works, and a throwing
-  :edit is contained with the plugin's id. Each row restores the live
-  registry and deletes its files."
+  :edit is contained with the plugin's id; P4's reload rows; P5's :run
+  commands printing, editing the tab they started on, and refusing it
+  once it has closed. Each row restores the live registry and deletes its
+  files."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
@@ -12,6 +14,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
+            [jonquil.plugin :as p]
             [jonquil.plugin-registry :as plugin-registry]))
 
 (def ^:private KEY-J 0x06a)
@@ -203,3 +206,73 @@
           (support/check :plugin-removed-file
                          (and j0 (not j1) (some #(= "plugin p4-gone removed: its file is gone" %) lines))
                          {:j-before j0 :j-after j1 :lines lines}))))))
+
+;; --- plugins P5: :run commands and their effects ----------------------------
+
+(defonce captured (atom nil))
+
+(defn- run-source
+  "A plugin file for id declaring effects, with one window-scope :run
+  command, (fn [ctx] run-body), bound to Cmd/Ctrl+Alt+J."
+  [id effects run-body]
+  (str "(ns jonquil.plugins." id "\n  (:require [clojure.string :as str]\n            [jonquil.plugin :as p]))\n\n"
+       "(p/defplugin\n"
+       "  {:id :" id "\n"
+       "   :doc \"A P5 row's plugin.\"\n"
+       "   :effects " effects "\n"
+       "   :commands [{:id :" id "/go :doc \"Go.\" :scope :window :run (fn [ctx] " run-body ")}]\n"
+       "   :bindings [{:key \"j\" :mods #{:cmd :alt} :command :" id "/go}]})\n"))
+
+(defn- press-j! [ui] (on-gtk ((:handle-window-key! ui) nil KEY-J 0 ctrl-alt nil)))
+
+(defn row-plugin-run-prints
+  "A :console plugin's window key runs its :run command on a worker, and
+  what it prints reaches the console."
+  [ui]
+  (go-row :plugin-run-prints support/check
+    (with-plugins ui {"p5-say.clj" (run-source "p5-say" "#{:console}" "(p/print! ctx \"p5 hello\")")}
+      (fn [lines]
+        (let [handled (press-j! ui)
+              seen? (await-until 3000 20 #(str/includes? (support/console-text ui) "p5 hello"))]
+          (support/check :plugin-run-prints (and (= 1 handled) seen?)
+                         {:handled handled :seen seen? :lines lines}))))))
+
+(defn row-plugin-run-replaces-text
+  "A :buffer plugin's :run command reads its tab's text and replaces it."
+  [ui]
+  (go-row :plugin-run-replaces-text support/check
+    (with-plugins ui {"p5-up.clj" (run-source "p5-up" "#{:buffer}" "(p/replace-text! ctx (str/upper-case (p/buffer-text ctx)))")}
+      (fn [lines]
+        (on-gtk (editor/set-text! (:editor ui) "(a b)"))
+        (press-j! ui)
+        (let [up? (await-until 3000 20 #(= "(A B)" (editor/editor-text (:editor ui))))]
+          (support/check :plugin-run-replaces-text up?
+                         {:text (on-gtk (editor/editor-text (:editor ui))) :lines lines}))))))
+
+(defn row-plugin-run-closed-tab
+  "A :run command started on a second tab keeps that tab: once it has
+  closed, the command's buffer-text throws \"that tab was closed\" and the
+  first tab is untouched."
+  [ui]
+  (go-row :plugin-run-closed-tab support/check
+    (with-plugins ui {"p5-keep.clj" (run-source "p5-keep" "#{:buffer}" "(reset! gtk-selftest-window.plugins/captured ctx)")}
+      (fn [lines]
+        (reset! captured nil)
+        (let [first-id (on-gtk (editor/set-text! (:editor ui) "(first)") (:id ((:active-tab* ui))))
+              second-id (on-gtk ((:new-tab!* ui)) (:id ((:active-tab* ui))))]
+          (try
+            (press-j! ui)
+            (let [got? (await-until 3000 20 #(some? @captured))
+                  _ (on-gtk ((:close-tab! ui) second-id))
+                  e (try (p/buffer-text @captured) nil (catch :default e e))
+                  first-text (on-gtk (editor/editor-text (:editor ui)))]
+              (support/check :plugin-run-closed-tab
+                             (and got? (not= first-id second-id)
+                                  (= second-id (::p/tab @captured))
+                                  (= "that tab was closed" (some-> e ex-message))
+                                  (= "(first)" first-text))
+                             {:got got? :tab (::p/tab @captured) :second second-id
+                              :error (some-> e ex-message) :first-text first-text :lines lines}))
+            (finally
+              (on-gtk (when (some #(= second-id (:id %)) ((:tabs* ui))) ((:close-tab! ui) second-id))
+                      ((:select-tab! ui) first-id)))))))))

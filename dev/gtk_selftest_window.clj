@@ -247,6 +247,9 @@
    plugin-rows/row-plugin-reload-failure-keeps-old
    plugin-rows/row-plugin-save-reloads
    plugin-rows/row-plugin-removed-file
+   plugin-rows/row-plugin-run-prints
+   plugin-rows/row-plugin-run-replaces-text
+   plugin-rows/row-plugin-run-closed-tab
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

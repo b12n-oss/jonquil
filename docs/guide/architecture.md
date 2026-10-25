@@ -171,8 +171,17 @@ these:
   against the built-ins plus the plugins already loaded, so a chord an
   earlier plugin took is warned about. The window loads plugins once it
   opens (since P4, on the load agent, which resets `live`);
-  `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. `:run` commands
-  wait for effects (P5). Slice P4 (2026-10-25) made a change take effect
+  `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. Slice P5 (2026-10-25)
+  made `:run` commands live: `plugin-registry/commands` wraps each one so
+  it captures the active tab id, builds a ctx holding only its plugin's
+  declared effects' functions (`jonquil.plugin` checks the declaration on
+  each call), runs on a future one run per command at a time, and reports
+  a throw with the plugin's id. The functions come from
+  `plugin-registry/effects`, which the window sets; each is a
+  `plugin-registry/gui-turn` on the GTK thread against the tab with that
+  id (like `mcp.window/gui-call`, except a turn that missed its 5 s
+  deadline is abandoned, so a call reported as timed out never lands
+  later). Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure

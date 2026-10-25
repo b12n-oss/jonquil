@@ -5,10 +5,10 @@
   commands as registry commands, their bindings per scope in plugin-id
   order, and each controller's bindings, the plugins' ahead of the shipped
   ones. With no plugins those are exactly the shipped tables. Pure apart
-  from live. :run commands wait for effects (a later slice), so they and
-  the bindings to them aren't here."
+  from live, and from effects, which a :run command reads when it starts."
   (:require [jonquil.command-registry :as cmd-registry]
             [jonquil.keymap :as km]
+            [jonquil.plugin :as p]
             [jonquil.plugin-protocol :as protocol]))
 
 (defn empty-registry [] {:plugins {}})
@@ -22,6 +22,42 @@
 
 (defn remove-plugin [reg id]
   (update reg :plugins dissoc id))
+
+;; The window's effect functions for :run commands: {:active-tab (fn [] id),
+;; called on the GTK thread; :print! :status! :buffer-text :replace-text!
+;; :open!, jonquil.plugin's implementations, called from a worker; :report!
+;; (fn [line]) for a throw}. Empty until a window sets it.
+(defonce effects (atom {}))
+
+(defonce ^:private running (atom #{}))
+
+(defn gui-turn
+  "Runs (f) on the GTK thread through gui, the enqueue fn, and answers its
+  value, as jonquil.mcp.window/gui-call does, except that a turn that
+  missed deadline-ms is abandoned: the thunk, if GTK runs it later, does
+  nothing. So an effect reported as \"The window did not respond.\" never
+  lands afterwards. A thunk already running at the deadline is waited
+  for. f's throw comes back as an ex-info with its message."
+  [gui f deadline-ms]
+  (let [state (atom :waiting)
+        p (promise)]
+    (gui (fn []
+           (when (compare-and-set! state :waiting :running)
+             (deliver p (try {:ok (f)}
+                             (catch Throwable e {:err (or (ex-message e) (str e))}))))))
+    (let [r (deref p deadline-ms ::timeout)
+          r (if (and (= ::timeout r) (not (compare-and-set! state :waiting :abandoned)))
+              @p
+              r)]
+      (cond
+        (= ::timeout r) (throw (ex-info "The window did not respond." {}))
+        (contains? r :err) (throw (ex-info (:err r) {}))
+        :else (:ok r)))))
+
+(def ^:private effect-impls
+  ;; the implementations each effect brings into a ctx
+  {:console [:print! :status!]
+   :buffer [:buffer-text :replace-text! :open!]})
 
 (defn- in-order [reg] (sort-by key (:plugins reg)))
 
@@ -45,15 +81,49 @@
           (do (try ((:apply-op! ctx) op) (catch Throwable e (fail (or (ex-message e) (str e)) e)))
               :handled))))))
 
+(defn- run-command
+  "A registry command starting a plugin's :run (fn [ctx]) on a worker and
+  answering :handled at once. The ctx holds the tab active now and only
+  the declared effects' functions from effects; a throw is reported with
+  the plugin's id. One run per command at a time: a press while the last
+  is still going throws, naming it, for the handler's catch to report
+  (nothing can stop a busy run, so a copy per press would keep a core
+  each)."
+  [plugin-id cid declared run]
+  (fn [_ctx _args]
+    (let [label (str "plugin " (name plugin-id) ": ")
+          [before _] (swap-vals! running conj cid)]
+      (when (contains? before cid)
+        (throw (ex-info (str label cid " is still running") {:plugin plugin-id})))
+      (try
+        (let [fx @effects
+              ctx {::p/effects declared
+                   ::p/impl (select-keys fx (mapcat effect-impls declared))
+                   ::p/tab (when-let [f (:active-tab fx)] (f))}]
+          (future
+            (try (run ctx)
+                 (catch Throwable e
+                   (when-let [report! (:report! fx)]
+                     (report! (str label (or (ex-message e) (str e))))))
+                 (finally (swap! running disj cid)))))
+        (catch Throwable e
+          ;; nothing started, so the command is free again
+          (swap! running disj cid)
+          (throw e)))
+      :handled)))
+
 (defn commands
   "{command-id {:doc :scope :plugin :run}} for every installed plugin's
-  :edit commands."
+  :edit and :run commands."
   [reg]
   (into {}
         (for [[id {:keys [definition]}] (in-order reg)
-              {cid :id :keys [doc scope edit]} (:commands definition)
-              :when (fn? edit)]
-          [cid {:doc doc :scope scope :plugin id :run (edit-command id edit)}])))
+              {cid :id :keys [doc scope edit run]} (:commands definition)
+              :when (or (fn? edit) (fn? run))]
+          [cid {:doc doc :scope scope :plugin id
+                :run (if (fn? edit)
+                       (edit-command id edit)
+                       (run-command id cid (set (:effects definition)) run))}])))
 
 (defn all-commands
   "The built-in commands and reg's plugin commands, for the palette."
