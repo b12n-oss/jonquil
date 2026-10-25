@@ -8,6 +8,8 @@
   a throwaway Jolt as EDN and run this same code there. Malformed input
   gets a sentence, never a throw."
   (:require [clojure.string :as str]
+            [jonquil.keymap :as km]
+            [jonquil.palette :as palette]
             [jonquil.plugin :as p]))
 
 (def EFFECTS
@@ -108,15 +110,121 @@
     [":mcp-tools isn't a vector"]
     []))
 
+(def ^:private M km/MODIFIER-MASKS)
+
+(def ^:private states
+  ;; every subset of the five modifiers, fewest held first, so the first
+  ;; match a message names is the plainest chord
+  (sort-by (fn [st] [(Long/bitCount st) (if (zero? (bit-and st (:meta M))) 0 1)])
+           (let [bits (vals M)]
+             (for [n (range 32)]
+               (reduce bit-or 0 (keep-indexed (fn [i b] (when (bit-test n i) b)) bits))))))
+
+(defn- command-chord? [st] (not (zero? (bit-and st (bit-or (:ctrl M) (:meta M))))))
+
+(def ^:private typing-keyvals
+  ;; the editor's typing stages: smart enter, Tab and Shift+Tab, Backspace
+  ;; across a pair (jonquil.gtk.editor/typing-key!); and below 0x100 every
+  ;; printable key, which GTK types
+  #{0xff0d 0xff8d 0xff09 0xfe20 0xff08})
+
+(defn- typing-key? [kv] (or (< kv 0x100) (contains? typing-keyvals kv)))
+
+(defn- key-names [b] (if (:key b) [(:key b)] (seq (:keys b))))
+
+(defn- chord-label
+  "The chord key name k makes under state st, as a person reads it."
+  [k st os]
+  (let [held (fn [m] (not (zero? (bit-and st (get M m)))))]
+    (palette/chord-label {:key k :exact (cond-> #{}
+                                          (held :meta) (conj :cmd)
+                                          (held :ctrl) (conj :ctrl)
+                                          (held :alt) (conj :alt)
+                                          (held :shift) (conj :shift))}
+                         os)))
+
+(defn- matching-cells
+  "[key-name keyval state] for every key b names and every state b matches,
+  its conditions all holding (the widest case)."
+  [b]
+  (for [k (key-names b) :let [kv (km/key-value k)] :when kv
+        st states :when (km/matches? b kv st (constantly true))]
+    [k kv st]))
+
+(defn- shipped-command [bindings kv st]
+  (:command (km/resolve-binding bindings kv st (constantly true))))
+
+(defn- binding-rules
+  "Typing keys and unreachable as problems, shadows as warnings, for
+  binding i b in scope (its command's)."
+  [i b scope {:keys [keymap os]}]
+  (let [cells (matching-cells b)
+        label (fn [[k _ st]] (chord-label k st os))
+        typing (first (filter (fn [[_ kv st]] (and (typing-key? kv) (not (command-chord? st)))) cells))
+        ;; typing first: its fix (hold Cmd/Ctrl) changes which chords match
+        unreachable (when (and (= :editor scope) (not typing))
+                      (some (fn [[_ kv st :as cell]]
+                              (when-let [c (shipped-command (:window keymap) kv st)] [cell c]))
+                            cells))
+        shadow-scopes (if (= :editor scope) [:editor] [:window :editor])
+        shadows (distinct (for [[_ kv st :as cell] cells sc shadow-scopes
+                                :let [c (shipped-command (get keymap sc) kv st)] :when c]
+                            [c cell]))]
+    {:problems (cond-> []
+                 typing (conj (str "binding " i " (" (label typing) ") would take a key you type; "
+                                   "hold Cmd/Ctrl"))
+                 unreachable (conj (str "binding " i " (" (label (first unreachable)) ") can never fire: "
+                                        "the window's " (pr-str (second unreachable))
+                                        " takes it first; bind it in :window scope")))
+     ;; one warning per shadowed command, naming the first chord that takes it
+     :warnings (vec (for [[c cell] (reduce (fn [acc [c _ :as x]] (if (some #(= c (first %)) acc) acc (conj acc x)))
+                                           [] shadows)]
+                      (str "binding " i " (" (label cell) ") takes that chord from the built-in "
+                           (pr-str c))))}))
+
+(defn- bindings-check
+  "km/problems over the plugin's bindings, then the scope, typing,
+  unreachable and shadow rules for each binding km/problems passes."
+  [d {:keys [registered conditions] :as request}]
+  (let [bs (:bindings d)
+        own (into {} (for [c (:commands d) :when (and (map? c) (keyword? (:id c)))] [(:id c) {:scope (:scope c)}]))
+        known (merge registered own)
+        ids (set (keys known))]
+    (cond
+      (nil? bs) {:problems [] :warnings []}
+      (not (vector? bs)) {:problems [":bindings isn't a vector"] :warnings []}
+      :else
+      (reduce (fn [acc [i b]]
+                (let [ps (when (map? b) (km/problems [b] ids conditions))]
+                  (cond
+                    (not (map? b)) (update acc :problems conj (str "binding " i " isn't a map"))
+                    (seq ps) (update acc :problems into
+                                     (map #(str "bindings: " (str/replace-first % "binding 0" (str "binding " i))) ps))
+                    (:outcome b) (update acc :problems conj (str "binding " i " has an :outcome; a plugin binding runs a command"))
+                    :else
+                    (let [scope (:scope (get known (:command b)))]
+                      (if-not (contains? #{:window :editor} scope)
+                        (update acc :problems conj
+                                (str "binding " i " runs " (pr-str (:command b)) ", a " (pr-str scope)
+                                     " command, and the " (if (= :console scope) "console" (pr-str scope))
+                                     " has no keymap"))
+                        (let [r (binding-rules i b scope request)]
+                          (-> acc
+                              (update :problems into (:problems r))
+                              (update :warnings into (:warnings r)))))))))
+              {:problems [] :warnings []}
+              (map-indexed vector bs)))))
+
 (defn validate
   "One plugin file's {:ok? :problems :warnings}. definitions is what the
   file's defplugin calls recorded; file-id its name without .clj;
   registered {command-id {:scope s}}; conditions the condition ids; keymap
   the shipped {:window [...] :editor [...]}; os the OS name, for chords in
   messages."
-  [{:keys [definitions file-id] :as _request}]
+  [{:keys [definitions file-id] :as request}]
   (let [n (count definitions)
         d (first definitions)
+        checked (when (and (= 1 n) (map? d)) (bindings-check d request))
         problems (cond
                    (zero? n) ["defplugin wasn't called"]
                    (> n 1) [(str "defplugin was called " n " times; a plugin file calls it once")]
@@ -125,5 +233,6 @@
                                       (effects-problems d)
                                       (commands-problems d file-id)
                                       (hooks-problems d)
-                                      (mcp-tools-problems d))))]
-    {:ok? (empty? problems) :problems problems :warnings []}))
+                                      (mcp-tools-problems d)
+                                      (:problems checked))))]
+    {:ok? (empty? problems) :problems problems :warnings (vec (:warnings checked))}))

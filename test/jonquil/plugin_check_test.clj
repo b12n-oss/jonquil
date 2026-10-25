@@ -17,7 +17,9 @@
    :effects #{}
    :commands [{:id :wrap-when/wrap :doc "Wrap the form at the caret in (when ...)."
                :scope :editor :edit (fn [s] s)}]
-   :bindings [{:key "w" :mods #{:cmd :alt} :command :wrap-when/wrap}]})
+   ;; the spec's example chord is Cmd+Alt+W, which the window's Cmd+W
+   ;; (close the tab) takes first; J is free in both scopes
+   :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap}]})
 
 (defn- check
   ([defs] (check defs "wrap-when"))
@@ -87,3 +89,67 @@
   (doseq [defs [[good] [] [(dissoc good :effects)]]]
     (let [r (check defs)]
       (is (= (:ok? r) (empty? (:problems r)))))))
+
+;; --- bindings --------------------------------------------------------------
+
+(def ^:private both
+  ;; an :editor and a :window command, so bindings can reach either scope
+  (assoc good :effects #{:console}
+         :commands [(first (:commands good))
+                    {:id :wrap-when/say :doc "Say hi." :scope :window :run (fn [_ _] nil)}]))
+
+(defn- bind [b] (check [(assoc both :bindings [b])]))
+
+(defn- mentions? [result k s]
+  (some #(str/includes? % s) (get result k)))
+
+(deftest typing-keys-test
+  (doseq [b [{:key "w" :command :wrap-when/wrap}
+             {:key "w" :mods #{:shift} :command :wrap-when/wrap}
+             {:key "w" :mods #{:alt} :command :wrap-when/wrap}
+             {:key "Return" :command :wrap-when/wrap}
+             {:key "Return" :mods #{:shift} :command :wrap-when/wrap}
+             {:key "space" :command :wrap-when/wrap}
+             {:key "w" :command :wrap-when/say}
+             {:key "w" :command :run/run}]]
+    (let [r (bind b)]
+      (is (one-problem r) (pr-str b))
+      (is (mentions? r :problems "a key you type") (pr-str b))))
+  (is (:ok? (bind {:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap})))
+  (is (:ok? (bind {:key "F2" :mods #{:shift :alt} :command :wrap-when/wrap}))))
+
+(deftest unreachable-test
+  (let [r (bind {:key "r" :mods #{:cmd} :command :wrap-when/wrap})]
+    (is (one-problem r))
+    (is (mentions? r :problems ":run/run"))
+    (is (mentions? r :problems ":window")))
+  (is (one-problem (bind {:key "r" :mods #{:cmd :alt} :command :wrap-when/wrap}))
+      "Cmd+Alt+R too: the window's Cmd+R doesn't exclude Alt")
+  (is (:ok? (bind {:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap}))))
+
+(deftest shadow-test
+  (let [r (bind {:key "w" :mods #{:cmd} :command :wrap-when/say})]
+    (is (:ok? r))
+    (is (mentions? r :warnings ":tab/close")))
+  (let [r (bind {:key "slash" :mods #{:cmd} :command :wrap-when/say})]
+    (is (:ok? r))
+    (is (mentions? r :warnings ":edit/toggle-comment")))
+  (let [r (bind {:key "b" :mods #{:ctrl} :command :wrap-when/wrap})]
+    (is (:ok? r))
+    (is (mentions? r :warnings ":help/jump")))
+  (is (= [] (:warnings (bind {:key "F2" :mods #{:shift :alt} :command :wrap-when/wrap})))))
+
+(deftest binding-scope-test
+  (let [r (bind {:key "j" :mods #{:cmd :alt} :command :console/complete})]
+    (is (one-problem r))
+    (is (mentions? r :problems "console")))
+  (is (:ok? (bind {:key "j" :mods #{:cmd :alt} :command :run/run}))
+      "a registered window command, validated as :window"))
+
+(deftest binding-parse-test
+  (doseq [b [{:key "nope" :mods #{:cmd} :command :wrap-when/wrap}
+             {:key "j" :mods #{:cmd} :command :wrap-when/missing}
+             {:key "j" :mods #{:cmd} :when [:nope] :command :wrap-when/wrap}]]
+    (let [r (bind b)]
+      (is (one-problem r) (pr-str b))
+      (is (mentions? r :problems "bindings: ") (pr-str b)))))

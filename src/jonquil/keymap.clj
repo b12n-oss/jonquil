@@ -123,7 +123,8 @@
   (vec
    (for [[i b] (map-indexed vector bindings)
          :let [names (key-names b)
-               mods (concat (:mods b) (:not b) (:exact b))]
+               exact (when (set? (:exact b)) (:exact b))
+               mods (concat (:mods b) (:not b) exact)]
          p (cond-> []
              (and (nil? (:key b)) (nil? (:keys b))) (conj "has neither :key nor :keys")
              (and (:key b) (:keys b)) (conj "has both :key and :keys")
@@ -131,8 +132,10 @@
              (conj (str "names an unknown key " (pr-str (remove key-value names))))
              (some (complement modifiers) mods)
              (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
-             (and (some modifiers (:exact b)) (some (complement exact-modifiers) (:exact b)))
-             (conj (str ":exact names " (pr-str (remove exact-modifiers (:exact b)))
+             (and (contains? b :exact) (not (set? (:exact b))))
+             (conj ":exact isn't a set")
+             (and (some modifiers exact) (some (complement exact-modifiers) exact))
+             (conj (str ":exact names " (pr-str (remove exact-modifiers exact))
                         ", only :shift :alt :ctrl :meta"))
              (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
              (conj "has :exact alongside :mods or :not")
