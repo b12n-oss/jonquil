@@ -1799,8 +1799,10 @@ of editing the wrong text.
 
 A binding must hold Cmd/Ctrl. A bare letter, Return, Tab or Backspace
 would take a key you type, so it's refused with that reason, and so is an
-editor binding the window always takes first (Cmd+Alt+W is the window's
-Cmd+W, which ignores Alt). A chord a built-in already uses loads with a
+editor binding the window always takes first, on every chord it matches
+(Cmd+Alt+W is the window's Cmd+W, which ignores Alt). A binding that loses
+only some of its chords loads with a warning naming them: `:mods #{:cmd}`
+on P also matches Cmd+Shift+P, which is the palette's. A chord a built-in already uses loads with a
 warning naming that command. Plugins load, and take their keys, in id
 order, so when two share a chord the one whose id sorts first gets it
 first, and the other loads with a warning: that its binding never fires,

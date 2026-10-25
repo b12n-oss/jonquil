@@ -208,9 +208,15 @@
     (if (= :editor scope)
       ;; the window first, all of it; then the earlier plugins' editor
       ;; bindings; then the built-in editor binding b takes over
-      (let [w (walk-of win)]
+      (let [w (walk-of win)
+            ;; an earlier plugin's always-take can hide a built-in that would
+            ;; always take it too; that's still this binding's problem, or it
+            ;; would load or not depending on an unrelated plugin
+            hidden (when (some (fn [[how tb]] (and (= :always how) (earlier? tb))) w)
+                     (some (fn [[how tb]] (when (= :always how) [:unreachable tb]))
+                           (walk-of (remove earlier? win))))]
         (if (always? w)
-          (before w)
+          (cond-> (before w) hidden (conj hidden))
           (let [e (walk-of (filter earlier? ed))]
             (into (into (before w) (before e))
                   (when-not (always? e)
@@ -226,27 +232,38 @@
 (defn- binding-rules
   "Typing keys and unreachable as problems, the rest as warnings, for
   binding i b in scope (its command's), over every key cell b matches: a
-  typing key with neither Ctrl nor Meta held; then cell-findings, one
-  warning per distinct [kind binding], naming the first chord it occurs
-  on. An earlier plugin's binding always taking the chord is a warning
-  that b never fires, since that's the user's own plugin set to sort out;
-  a built-in always taking it is a problem, since b can't work there."
+  typing key with neither Ctrl nor Meta held is a problem; then
+  cell-findings. A built-in always taking the chord first is a problem
+  only when that's so on every cell b matches; when b still fires on some
+  (:mods matches extra held modifiers, so Cmd+P also matches Cmd+Shift+P,
+  the palette's), it's a warning naming the chord b loses. On a cell b
+  loses, the :sometimes findings there are dropped. An earlier plugin's
+  binding always taking the chord is a warning that b never fires. One
+  warning per distinct [kind binding], naming the first chord it occurs on."
   [i b scope {:keys [os] :as request}]
   (let [cells (matching-cells b)
         label (fn [[k _ st]] (chord-label k st os))
         typing (first (filter (fn [[_ kv st]] (and (typing-key? kv) (not (command-chord? st)))) cells))
-        findings (when-not typing
-                   (reduce (fn [acc [_ kv st :as cell]]
-                             (reduce (fn [acc [kind tb]]
-                                       (let [k [kind (:command tb) (:plugin/source tb)]]
-                                         (if (some #(= k (first %)) acc) acc (conj acc [k kind tb cell]))))
-                                     acc (cell-findings scope request kv st)))
-                           [] cells))
+        per-cell (when-not typing
+                   (for [[_ kv st :as cell] cells
+                         :let [fs (cell-findings scope request kv st)
+                               lost? (some #(= :unreachable (first %)) fs)]]
+                     [cell (if lost? (remove #(= :sometimes (first %)) fs) fs)]))
+        all-lost? (and (seq per-cell) (every? (fn [[_ fs]] (some #(= :unreachable (first %)) fs)) per-cell))
+        findings (reduce (fn [acc [cell fs]]
+                           (reduce (fn [acc [kind tb]]
+                                     (let [kind (if (and (= :unreachable kind) (not all-lost?)) :partly kind)
+                                           k [kind (:command tb) (:plugin/source tb)]]
+                                       (if (some #(= k (first %)) acc) acc (conj acc [k kind tb cell]))))
+                                   acc fs))
+                         [] per-cell)
         msg (fn [[_ kind tb cell]]
               (let [at (str "binding " i " (" (label cell) ") ")]
                 (case kind
                   :unreachable (str at "can never fire: the window's " (pr-str (:command tb))
                                     " takes it first; bind it in :window scope")
+                  :partly (str at "doesn't fire on that chord: the window's " (pr-str (:command tb))
+                               " takes it first; the binding's other chords work")
                   :dead (str at "never fires: " (who tb) " takes that chord first, and "
                              (name (:plugin/source tb)) " loads first")
                   :sometimes (str at "takes that chord only when " (who tb) " doesn't")

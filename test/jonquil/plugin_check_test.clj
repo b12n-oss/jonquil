@@ -273,8 +273,7 @@
                       [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
     (is (false? (:ok? r)) (pr-str r))
     (is (mentions? r :problems "can never fire"))
-    (is (mentions? r :problems ":run/run"))
-    (is (mentions? r :warnings "plugin p-a"))))
+    (is (mentions? r :problems ":run/run"))))
 
 (deftest unconditional-earlier-plugin-is-never-fires-test
   (doseq [[why bs defs]
@@ -293,3 +292,30 @@
     (is (:ok? r))
     (is (mentions? r :warnings "takes that chord from plugin p-a"))
     (is (not (mentions? r :warnings "never fires")))))
+
+;; --- review of c8735f3 -----------------------------------------------------
+
+(deftest built-in-always-take-is-a-problem-behind-a-plugin-test
+  ;; p-a's Cmd+R window binding hides the built-in Run, but Run would take
+  ;; it too, so this editor binding is refused whether or not p-a is there
+  (let [r (check-with (with-earlier [[:window {:key "r" :mods #{:cmd} :command :tab/new}]])
+                      [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (false? (:ok? r)) (pr-str r))
+    (is (mentions? r :problems ":run/run"))))
+
+(deftest partly-unreachable-is-a-warning-test
+  ;; :mods #{:cmd} on P also matches Cmd+Shift+P, the palette's; the chord
+  ;; meant (Cmd+P) works, so that's a warning naming the taken chord, not a
+  ;; refusal (only a binding unreachable on every chord it matches is)
+  (let [r (bind {:key "p" :mods #{:cmd} :command :wrap-when/wrap})]
+    (is (:ok? r) (pr-str r))
+    (is (mentions? r :warnings ":palette/open"))
+    (is (mentions? r :warnings "Shift"))))
+
+(deftest no-sometimes-where-unreachable-test
+  ;; a guarded earlier plugin binding ahead of the built-in Cmd+R: only the
+  ;; problem, not also "takes that chord only when ... doesn't"
+  (let [r (check-with (with-earlier [[:window {:key "r" :mods #{:cmd} :when [:tree-focused] :command :tab/new}]])
+                      [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (false? (:ok? r)))
+    (is (not (mentions? r :warnings "only when")) (pr-str r))))
