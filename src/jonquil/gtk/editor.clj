@@ -650,12 +650,6 @@
 (def ^:private close-chars
   {KEY-PARENRIGHT \) KEY-BRACKETRIGHT \] KEY-BRACERIGHT \}})
 
-(defn- command-chord?
-  "A command chord is Control or Meta, as in Phase 2 (the keymap's :cmd
-  means the same, jonquil.keymap)."
-  [state]
-  (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
-
 (defn- shift-held? [state]
   (not (zero? (bit-and state g/SHIFT-MASK))))
 
@@ -683,7 +677,7 @@
 
 ;; P4.T7: named so the context menu's own items (window.clj) call the
 ;; EXACT same function as their key -- these five used to be inline
-;; lambdas inside handle-key!'s cond below, which a menu item could only
+;; lambdas inside handle-key!'s old cond, which a menu item could only
 ;; have duplicated, never reused. Each does exactly what its own inline
 ;; body used to.
 
@@ -755,16 +749,51 @@
   (when (and (< keyval 0x1000) (keycode-fallback? os keycode state))
     (if (= keycode MAC-KEYCODE-F) "f" "l")))
 
+(defn- typing-key!
+  "The typing stages of the plugins design, 1 when one took the key, else
+  0: smart enter on plain Return first, then auto-pairs, Backspace, and
+  Tab/Shift+Tab indent. They run only once nothing earlier in
+  jonquil.command-registry/editor-answer (the preedit yield, the
+  completion popup, the editor keymap) took the key."
+  [ed keyval state]
+  (cond
+    (plain-return? keyval state)
+    (if (handle-return! ed) 1 0)
+
+    (and (no-command-modifiers? state) (contains? open-chars keyval))
+    (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
+
+    (and (no-command-modifiers? state) (contains? close-chars keyval))
+    (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
+
+    (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
+    (apply-edit! ed (edit/backspace-pair (snapshot ed)))
+
+    ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
+    ;; spanned line has leading whitespace), the way Tab always is.
+    ;; Returning 0 handed the key to GtkTextView's own handler, which
+    ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
+    ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
+    ;; lines 5744-5764).
+    (and (no-command-modifiers? state)
+         (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
+    (do (do-unindent! ed) 1)
+
+    (and (no-command-modifiers? state) (= keyval KEY-TAB))
+    (do-indent! ed)
+
+    :else 0))
+
 (defn handle-key!
-  "The editor's key dispatch (P3.T2), first match wins. Returns
-  1 when it handled the key, 0 otherwise -- the key controller (on-key,
-  below) only calls this, so self-test rows can call the exact same
-  function with a synthetic keyval/keycode/state, never a synthesized OS
-  keystroke. Yields (0) on every key while a preedit is active (I5), not
-  just Return, since GTK/the IM context need every key while composing.
-  keyval0 is normalised with gdk_keyval_to_lower before every comparison
-  (M4: same reason window.clj's on-window-key does it -- Caps
-  Lock reports the uppercase keyval with no Shift bit set).
+  "The editor's key dispatch (P3.T2). Returns 1 when it handled the key,
+  0 otherwise -- the key controller (on-key, below) only calls this, so
+  self-test rows can call the exact same function with a synthetic
+  keyval/keycode/state, never a synthesized OS keystroke. Yields (0) on
+  every key while a preedit is active (I5), not just Return, since GTK/the
+  IM context need every key while composing. keyval0 is normalised with
+  gdk_keyval_to_lower before every comparison (M4: same reason window.clj's
+  on-window-key does it -- Caps Lock reports the uppercase keyval with no
+  Shift bit set).
 
   Two arities: the 3-arg form (no keycode) is every pre-existing caller,
   defaulting keycode to 0 -- harmless, since 0 never matches
@@ -772,20 +801,19 @@
   always uses the 4-arg form so physical-key's macOS fallback has a real
   hardware keycode to check.
 
-  I2: before any of the cond clauses below run, a pending Run Form flash
-  is cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
+  I2: before the pipeline below runs, a pending Run Form flash is
+  cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
   caret and clearing the selection) unless keyval is a bare modifier
   press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
   would act on the flash's own selection instead of the buffer's real
   one.
 
-  Plugins PL1 slice S5: the chords between plain Return and the typing
-  clauses (completion, comment, the two formats, redo, quick doc, jump,
-  rename) are the :editor keymap in jonquil/keymap.edn, run through
-  jonquil.keymap/dispatch over jonquil.command-registry/editor-commands.
-  ectx carries the editor's state as thunks. :handled is 1, :to-gtk (an
-  edit that changed nothing, or nothing to redo) is 0, and :unmatched
-  goes on to the typing clauses."
+  Plugins PL1 slices S5 and S6: the rest is
+  jonquil.command-registry/editor-answer's pipeline, preedit yield,
+  completion popup, the :editor keymap in jonquil/keymap.edn (Run Form,
+  completion, comment, the two formats, redo, quick doc, jump, rename) over
+  jonquil.command-registry/editor-commands, then typing-key!'s stages.
+  ectx carries the editor's state as thunks."
   ([ed keyval0 state] (handle-key! ed keyval0 0 state))
   ([ed keyval0 keycode state]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
@@ -802,66 +830,24 @@
                :writable? #(not @(:read-only? ed))
                :quick-doc! #(when-let [f @(:quick-doc-fn ed)] (f))
                :jump! #(when-let [f @(:jump-fn ed)] (f))
-               :rename! #(when-let [f @(:rename-fn ed)] (f))}]
+               :rename! #(when-let [f @(:rename-fn ed)] (f))
+               :preedit-active? #(deref (:preedit-active? ed))
+               :run-form! #(when-let [f @(:run-form-fn ed)] (f))}]
      (when-not (modifier-keyval? keyval)
        (when-let [f @(:flash-cancel-fn ed)] (f)))
-     (cond
-       @(:preedit-active? ed) 0
-
+     (cmd-registry/editor-answer
+      (:editor km/shipped) keyval state
+      {:holds? (cmd-registry/holds-fn cmd-registry/editor-conditions ectx)
+       :run! #(cmd-registry/run-command! cmd-registry/editor-commands % ectx)
+       :physical (physical-key OS-NAME keyval keycode state)
        ;; P4.T5: completion's own nav/commit/escape keys (Up/Down/
-       ;; PageUp/PageDown/Enter/Tab/Escape) get first look, ahead of
-       ;; plain-return?/KEY-TAB below, whenever the popup is open --
+       ;; PageUp/PageDown/Enter/Tab/Escape) get first look, ahead of smart
+       ;; enter and Tab, whenever the popup is open --
        ;; jonquil.gtk.completion/handle-key! gates on that itself and
-       ;; returns 0 otherwise, so this clause is a safe no-op the rest
-       ;; of the time. See set-completion-fns!'s docstring.
-       (when-let [f (:handle-key! cfns)] (= 1 (f keyval state)))
-       1
-
-       ;; cljd plan P3.T2: Cmd/Ctrl+Enter (Return or KP-Enter with a command
-       ;; chord) is Run Form. It sits ahead of plain-return?, so smart-Enter
-       ;; never sees it, and it's always consumed (1), so GtkTextView never
-       ;; inserts a newline for it either. Completion's own clause above
-       ;; ignores any key held with Control or Meta, so an open popup
-       ;; doesn't take it.
-       (and (command-chord? state) (contains? #{KEY-RETURN KEY-KP-ENTER} keyval))
-       (do (when-let [f @(:run-form-fn ed)] (f)) 1)
-
-       (plain-return? keyval state)
-       (if (handle-return! ed) 1 0)
-
-       ;; slice S5: the editor's chords are the :editor keymap (keymap.edn),
-       ;; between plain Return above and the typing stages below
-       :else
-       (case (km/dispatch (:editor km/shipped) keyval state
-                          {:holds? (cmd-registry/holds-fn cmd-registry/editor-conditions ectx)
-                           :run! #(cmd-registry/run-command! cmd-registry/editor-commands % ectx)
-                           :physical (physical-key OS-NAME keyval keycode state)})
-         :handled 1
-         :to-gtk 0
-         (cond
-           (and (no-command-modifiers? state) (contains? open-chars keyval))
-           (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
-
-           (and (no-command-modifiers? state) (contains? close-chars keyval))
-           (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
-
-           (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
-           (apply-edit! ed (edit/backspace-pair (snapshot ed)))
-
-           ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
-           ;; spanned line has leading whitespace), the way Tab always is.
-           ;; Returning 0 handed the key to GtkTextView's own handler, which
-           ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
-           ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
-           ;; lines 5744-5764).
-           (and (no-command-modifiers? state)
-                (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
-           (do (do-unindent! ed) 1)
-
-           (and (no-command-modifiers? state) (= keyval KEY-TAB))
-           (do-indent! ed)
-
-           :else 0))))))
+       ;; returns 0 otherwise, so this stage is a safe no-op the rest of
+       ;; the time. See set-completion-fns!'s docstring.
+       :popup-key! #(if-let [f (:handle-key! cfns)] (f keyval state) 0)
+       :typing-key! #(typing-key! ed keyval state)}))))
 
 (defn dispatch-key!
   "Wraps handle-key! so a throw from any dispatch clause is reported

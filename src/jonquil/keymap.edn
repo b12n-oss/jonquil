@@ -70,11 +70,17 @@
   ;; from answers :next, so the key passes on
   {:key "bracketleft" :mods #{:cmd} :when [:source-focused] :command :source/back}
   {:key "bracketleft" :mods #{:cmd} :command :source/jump-back}]
- ;; jonquil.gtk.editor/handle-key!'s chords (slice S5), between plain Return
- ;; and the typing stages (auto-pairs, Backspace, Tab), in the old cond's
- ;; order. An edit command's 0 makes the key GTK's.
+ ;; jonquil.gtk.editor/handle-key!'s chords (slices S5, S6), between the
+ ;; completion popup and the typing stages (smart enter, auto-pairs,
+ ;; Backspace, Tab), as jonquil.command-registry/editor-answer orders them.
+ ;; An edit command's 0 makes the key GTK's.
  :editor
- [;; Ctrl+Space, the P4 rule: Control, never Meta. Always used up, popup
+ [;; Run Form: Return or KP-Enter with Control or Meta, whatever else is
+  ;; held. Always used up, so GtkTextView never inserts a newline for it,
+  ;; and the completion popup ignores any key held with Control or Meta,
+  ;; so an open popup doesn't take it.
+  {:keys #{"Return" "KP_Enter"} :mods #{:cmd} :command :run/form}
+  ;; Ctrl+Space, the P4 rule: Control, never Meta. Always used up, popup
   ;; or not, so GTK never inserts the space.
   {:key "space" :mods #{:ctrl} :not #{:meta} :command :completion/open}
   {:keys #{"slash" "semicolon"} :mods #{:cmd} :command :edit/toggle-comment}

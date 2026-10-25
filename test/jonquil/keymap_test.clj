@@ -26,6 +26,8 @@
   (is (= 0xffbe (km/key-value "F1")))
   (is (= 0xffbf (km/key-value "F2")))
   (is (= 0xffc9 (km/key-value "F12")))
+  (is (= 0xff0d (km/key-value "Return")))
+  (is (= 0xff8d (km/key-value "KP_Enter")))
   (is (nil? (km/key-value "nope"))))
 
 (deftest matches-test

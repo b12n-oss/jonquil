@@ -478,8 +478,8 @@
   this build (not assumed) -- keyval 0x8f6 (GDK_KEY_function, the florin
   sign Option+F types on a US keyboard, gdkkeysyms.h:1143), hardware
   keycode 3 (kVK_ANSI_F, macOS SDK Events.h:200), state META-MASK|ALT-MASK
-  (Cmd reports as META on GDK's macOS backend -- command-chord?'s own
-  check; the probe showed no CONTROL bit). Calls handle-key!'s 4-arg
+  (Cmd reports as META on GDK's macOS backend -- the keymap's :cmd
+  reads it; the probe showed no CONTROL bit). Calls handle-key!'s 4-arg
   arity so physical-key's hardware-keycode fallback has a real
   keycode to match -- this row FAILS on the pre-fix code, where the
   dispatch only ever compared keyval against #{KEY-F KEY-L}."
