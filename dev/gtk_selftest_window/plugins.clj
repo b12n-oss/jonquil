@@ -5,9 +5,11 @@
   runs it, a broken file is named while a good one works, and a throwing
   :edit is contained with the plugin's id; P4's reload rows; P5's :run
   commands printing, editing the tab they started on, and refusing it
-  once it has closed. Each row restores the live registry and deletes its
+  once it has closed; P5b's quiet and visible evals and a timed-out eval
+  that's stopped. Each row restores the live registry and deletes its
   files."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -276,3 +278,64 @@
             (finally
               (on-gtk (when (some #(= second-id (:id %)) ((:tabs* ui))) ((:close-tab! ui) second-id))
                       ((:select-tab! ui) first-id)))))))))
+
+;; --- plugins P5b: the :eval effect -----------------------------------------
+
+(defn- typed!
+  "code entered the way the MCP's eval enters it (echoed, in the history,
+  shifting *1): the :done map, or ::timeout."
+  [ui code]
+  (let [done (promise)]
+    (on-gtk ((:mcp-eval!* ui) code (fn [m] (deliver done m))))
+    (deref done 5000 ::timeout)))
+
+(defn- status-text [ui] (on-gtk (g/label-text (:status-label ui))))
+
+(defn row-plugin-eval-quiet
+  "p/eval! answers the value and output without touching the console, and
+  the person's *1 is still theirs."
+  [ui]
+  (go-row :plugin-eval-quiet support/check
+    (with-plugins ui {"p5b-quiet.clj" (run-source "p5b-quiet" "#{:eval :console}"
+                                                   "(let [r (p/eval! ctx \"(println \\\"side\\\") (* 6 7)\")] (p/status! ctx (pr-str r)))")}
+      (fn [lines]
+        (typed! ui "(+ 1 2)")
+        (let [mark (on-gtk (support/out-end-offset ui))
+              _ (press-j! ui)
+              want {:value "42" :out "side\n" :err ""}
+              got? (await-until 5000 20 #(= want (try (edn/read-string (g/label-text (:status-label ui))) (catch :default _ nil))))
+              console (on-gtk (support/since ui mark))
+              star1 (get-in (typed! ui "*1") [:done :result :printed])]
+          (support/check :plugin-eval-quiet
+                         (and got? (not (str/includes? console "side")) (not (str/includes? console "42"))
+                              (= "3" star1))
+                         {:status (status-text ui) :console console :star1 star1 :lines lines}))))))
+
+(defn row-plugin-repl-visible
+  "p/repl! shows the eval at the console and answers its value."
+  [ui]
+  (go-row :plugin-repl-visible support/check
+    (with-plugins ui {"p5b-repl.clj" (run-source "p5b-repl" "#{:eval :console}"
+                                                  "(p/status! ctx (str \"v=\" (:value (p/repl! ctx \"(+ 20 22)\"))))")}
+      (fn [lines]
+        (let [mark (on-gtk (support/out-end-offset ui))
+              _ (press-j! ui)
+              got? (await-until 5000 20 #(= "v=42" (g/label-text (:status-label ui))))
+              shown? (await-until 3000 20 #(str/includes? (support/since ui mark) "=> 42"))]
+          (support/check :plugin-repl-visible (and got? shown?)
+                         {:status (status-text ui) :console (on-gtk (support/since ui mark)) :lines lines}))))))
+
+(defn row-plugin-eval-timeout
+  "An eval past its :timeout-ms throws, saying so, and is stopped: the next
+  eval answers."
+  [ui]
+  (go-row :plugin-eval-timeout support/check
+    (with-plugins ui {"p5b-slow.clj" (run-source "p5b-slow" "#{:eval :console}"
+                                                  "(p/status! ctx (try (p/eval! ctx \"(Thread/sleep 5000)\" {:timeout-ms 300}) \"no throw\" (catch :default e (ex-message e))))")}
+      (fn [lines]
+        (press-j! ui)
+        (let [said? (await-until 5000 20 #(= "the eval took longer than 300 ms and was stopped" (g/label-text (:status-label ui))))
+              next-eval (typed! ui "(+ 1 1)")]
+          (support/check :plugin-eval-timeout
+                         (and said? (= "2" (get-in next-eval [:done :result :printed])))
+                         {:status (status-text ui) :next next-eval :lines lines}))))))

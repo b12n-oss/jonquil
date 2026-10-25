@@ -250,6 +250,9 @@
    plugin-rows/row-plugin-run-prints
    plugin-rows/row-plugin-run-replaces-text
    plugin-rows/row-plugin-run-closed-tab
+   plugin-rows/row-plugin-eval-quiet
+   plugin-rows/row-plugin-repl-visible
+   plugin-rows/row-plugin-eval-timeout
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

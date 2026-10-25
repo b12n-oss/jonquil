@@ -20,7 +20,7 @@
             [jonquil.project-roots :as roots]
             [jonquil.source :as source]))
 
-(declare run-definitions! submit-repl! set-mode!)
+(declare run-definitions! submit-repl! quiet-eval! set-mode!)
 
 (defn release-owner-in!
   "Moves owner's namespaces under :repl in state's :created map (an atom
@@ -39,9 +39,10 @@
   ;; did before the Evaluator protocol existed: nothing to end.
   (stop! [_] nil)
   (eval! [this code opts]
-    (if (:run? opts)
-      (run-definitions! this code (dissoc opts :run?))
-      (submit-repl! this code (dissoc opts :run?))))
+    (cond
+      (:quiet opts) (quiet-eval! this code (dissoc opts :run?))
+      (:run? opts) (run-definitions! this code (dissoc opts :run?))
+      :else (submit-repl! this code (dissoc opts :run?))))
   (interrupt! [_] (eval/stop-eval! ctx) nil)
   (evaluating? [_] (eval/evaluating? ctx))
   (waiting-for-input? [_] (eval/waiting-for-input? ctx))
@@ -57,6 +58,8 @@
     ;; name, which resolves on the roots project-roots set
     (some-> (docs/symbol-doc (:prompt-ns @state) sym text pos) source/resolve-file))
   (limitations [_] [])
+  ev/QuietEval
+  (quiet-eval? [_] true)
   ev/Inspector
   (inspect! [_ op args on-view]
     (future
@@ -165,7 +168,13 @@
                             ;; dependencies, which mustn't freeze the window.
                             :before-eval (when dir (fn []
                                                      (roots/use-project-deps! dir)
-                                                     (auto-require! ctx state dir)))
+                                                     (if (and (:quiet opts) (:on-output opts))
+                                                       ;; a quiet eval's *out* is the plugin's:
+                                                       ;; the auto-require lines are the person's
+                                                       (let [s (with-out-str (binding [*err* *out*]
+                                                                               (auto-require! ctx state dir)))]
+                                                         (when (seq s) ((:on-output opts) :system s)))
+                                                       (auto-require! ctx state dir))))
                             :ns-name ns-sym
                             :on-complete
                             (fn [result]
@@ -174,8 +183,9 @@
                                        (cond-> (-> s
                                                    (update-in [:created (:owner opts)] (fnil into #{})
                                                               (namespaces-created before (ns-names) (loaded-libs)))
-                                                   (assoc :prompt-ns (:ns result)))
-                                         (= :ok (:status result)) (assoc :last-value (:value result)))))
+                                                   (cond-> (not (:quiet opts)) (assoc :prompt-ns (:ns result))))
+                                         (and (= :ok (:status result)) (not (:quiet opts)))
+                                         (assoc :last-value (:value result)))))
                               (when user-complete (user-complete result)))))))
 
 (defn- program-vars
@@ -247,6 +257,15 @@
                   before (assoc :before-idle
                                 (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
        (evaluate! session code 'user opts)))))
+
+(defn quiet-eval!
+  "eval!'s :quiet path (plugins P5b): code in the namespace of :ns-source's
+  ns form when that exists, else the prompt's, with no history entry and
+  the prompt namespace, *1 *2 *3 and *e left as they were."
+  [{:keys [state] :as session} code opts]
+  (let [b (some-> (:ns-source opts) clj/buffer-ns symbol)]
+    (evaluate! session code (if (and b (find-ns b)) b (:prompt-ns @state))
+               (assoc opts :owner (:owner opts :repl)))))
 
 (defn submit-repl!
   "Evaluates one REPL entry in the namespace the last evaluation left, and

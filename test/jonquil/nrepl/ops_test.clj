@@ -266,3 +266,46 @@
   (is (not (contains? (ops/doc-info "map" [{:name "map" :ns "clojure.core" :file "" :status ["done"]}]) :file))
       "babashka's empty :file is no file")
   (is (= "/x.clj" (:file (ops/doc-info "f" [{:name "f" :ns "u" :file "/x.clj" :line 3}])))))
+
+(defn- run-quiet
+  "quiet-code's output in this process, the root *1 *2 put back after (the
+  wrap moves them, as it would a server's)."
+  ([code token] (run-quiet code token nil))
+  ([code token ns-name]
+   (let [r1 *1 r2 *2]
+     (try (with-out-str (load-string (ops/quiet-code code token ns-name)))
+          (finally (alter-var-root #'*1 (constantly r1)) (alter-var-root #'*2 (constantly r2)))))))
+
+(deftest quiet-code-test
+  (is (= {:out "hi\n" :value "3"} (ops/quiet-result (run-quiet "(println \"hi\") (+ 1 2)" "TOK:") "TOK:")))
+  (is (= {:out "" :error "boom"} (ops/quiet-result (run-quiet "(throw (ex-info \"boom\" {}))" "TOK:") "TOK:"))
+      "a throw comes back as data, not out of the eval")
+  (is (= {:out "" :value "1"} (ops/quiet-result (run-quiet "1 ; a trailing comment" "TOK:") "TOK:"))
+      "a trailing comment doesn't swallow the wrap")
+  (create-ns 'jonquil.quiet-ns-probe)
+  (binding [*ns* (the-ns 'user)]
+    (is (= "\"jonquil.quiet-ns-probe\"" (:value (ops/quiet-result (run-quiet "(str (ns-name *ns*))" "TOK:" "jonquil.quiet-ns-probe") "TOK:")))
+        "it runs in the named namespace")
+    (is (= "\"user\"" (:value (ops/quiet-result (run-quiet "(str (ns-name *ns*))" "TOK:" "no.such.ns") "TOK:")))
+        "a namespace that doesn't exist falls back to the session's")
+    (is (= 'user (ns-name *ns*)) "the caller's namespace didn't move"))
+  (remove-ns 'jonquil.quiet-ns-probe))
+
+(deftest quiet-result-test
+  ;; a line that looks like the token line but isn't this call's stays :out
+  (let [out (str "OTHER:{:value \"9\"}\n" "\nTOK:{:value \"3\"}")]
+    (is (= {:out "OTHER:{:value \"9\"}\n" :value "3"} (ops/quiet-result out "TOK:"))))
+  (is (= {:out "plain"} (ops/quiet-result "plain" "TOK:"))))
+
+(deftest quiet-reply-test
+  ;; review I4: the wrap returns the person's old *1, so an :ok reply whose
+  ;; token line is missing must never hand that back as the value
+  (is (= [{:status :ok :printed "42" :ns 'user} "side\n"]
+         (ops/quiet-reply {:status :ok :printed "OLD-STAR-1" :ns 'user} "TOK:" "side\n\nTOK:{:value \"42\"}")))
+  (is (= [{:status :error :error-text "Error: boom" :ns 'user} ""]
+         (ops/quiet-reply {:status :ok :printed "OLD" :ns 'user} "TOK:" "\nTOK:{:error \"boom\"}")))
+  (is (= [{:status :error :error-text "Error: the quiet eval's answer was lost" :ns 'user} "x"]
+         (ops/quiet-reply {:status :ok :printed "OLD-STAR-1" :ns 'user} "TOK:" "x")))
+  (is (= [{:status :interrupted} "partial"]
+         (ops/quiet-reply {:status :interrupted} "TOK:" "partial"))
+      "a Stop or a lost connection stands, its output passed on"))

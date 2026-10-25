@@ -399,6 +399,14 @@
           (and (not= :ok (:status (ops/eval-result msgs false))) on-output)
           (on-output :system (str (clj/auto-require-failed auto-require-retry) "\n")))))))
 
+(defn- quiet-finish
+  "A :quiet eval's result (ops/quiet-reply), its output before the token
+  line passed on once."
+  [result token out on-output]
+  (let [[result out] (ops/quiet-reply result token out)]
+    (when (and on-output (seq out)) (on-output :out out))
+    result))
+
 (defn- run-worker!
   [ev code {:keys [run? on-output on-status-change] :as opts}]
   (try
@@ -426,12 +434,22 @@
             (if (stop-requested? ev)
               (finish! ev opts {:status :interrupted})
               (let [before (ns-snapshot conn session)
-                    msgs @(send-main! ev code opts)
+                    quiet-out (atom [])
+                    msgs (if-let [token (:quiet opts)]
+                           ;; plugins P5b: keep :out back, so the token line
+                           ;; quiet-code prints never reaches on-output
+                           @(send-main! ev (ops/quiet-code code token (some-> (:ns-source opts) clj/buffer-ns))
+                                        (assoc opts :on-output (fn [k text]
+                                                                 (if (= :out k)
+                                                                   (swap! quiet-out conj text)
+                                                                   (on-output k text)))))
+                           @(send-main! ev code opts))
                     after (ns-snapshot conn session)]
                 (when (and before after)
                   (swap! (:state ev) update-in [:created owner] (fnil into #{})
                          (session/namespaces-created (first before) (first after) (second after))))
-                (finish! ev opts (ops/eval-result msgs (stop-requested? ev)))))))))
+                (finish! ev opts (cond-> (ops/eval-result msgs (stop-requested? ev))
+                                   (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output)))))))))
     (catch Throwable e
       (finish! ev opts (if (stop-requested? ev)
                          {:status :interrupted}
@@ -470,7 +488,7 @@
     ;; A REPL entry is recorded even when refused, as jonquil.session's
     ;; submit-repl! does. Claiming is a swap, never start-lock: a Run pressed
     ;; while a child is still starting must not block the GTK thread.
-    (when-not (:run? opts) (swap! history eval/history-add code))
+    (when-not (or (:run? opts) (:quiet opts)) (swap! history eval/history-add code))
     (let [[old _] (swap-vals! state (fn [s] (if (:running s) s (assoc s :running {:opts opts}))))]
       (if (:running old)
         busy-warning
@@ -573,6 +591,8 @@
     (try (docs/candidates 'user prefix text pos extra-context)
          (catch Throwable _ [])))
 
+  ev/QuietEval
+  (quiet-eval? [_] true)
   ev/Owners
   (release-owner! [_ owner] (session/release-owner-in! state owner) nil)
   ev/Inspector

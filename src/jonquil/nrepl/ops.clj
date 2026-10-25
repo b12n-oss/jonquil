@@ -201,6 +201,56 @@
        " (clojure.core/alter-var-root (var clojure.core/*1) (clojure.core/constantly o2))"
        " o1)"))
 
+(defn quiet-code
+  "Wraps code for an eval that leaves the user's REPL alone: it runs in the
+  namespace named ns-name when that exists (else the session's), through
+  a binding, so the session's namespace doesn't move; *1, *2 and *3 come
+  out as they were (keeping-history's pre-shift, returning the old *1);
+  and a throw is caught inside, so the server never sets *e. The value, or
+  the error's message, comes back as the last thing printed: a newline,
+  token, then (pr-str {:value printed-value}) or {:error msg}, for
+  quiet-result to split off."
+  [code token ns-name]
+  (str "(clojure.core/let [o1 clojure.core/*1 o2 clojure.core/*2 o3 clojure.core/*3"
+       " n (clojure.core/or " (if ns-name (str "(clojure.core/find-ns '" ns-name ")") "nil") " clojure.core/*ns*)"
+       " r (try {:value (clojure.core/binding [clojure.core/*ns* n clojure.core/*print-length* 1000]"
+       " (clojure.core/pr-str (clojure.core/load-string " (pr-str (str code "
+")) ")))}"
+       " (catch :default e {:error (clojure.core/or (clojure.core/ex-message e) (clojure.core/str e))}))]"
+       " (clojure.core/print (clojure.core/str \"\\n\" " (pr-str token) " (clojure.core/pr-str r)))"
+       " (clojure.core/flush)"
+       " (clojure.core/alter-var-root (var clojure.core/*2) (clojure.core/constantly o3))"
+       " (clojure.core/alter-var-root (var clojure.core/*1) (clojure.core/constantly o2))"
+       " o1)"))
+
+(defn quiet-result
+  "out, the text a quiet-code eval printed, split at its last token line:
+  {:out what-came-before :value s} or {:out ... :error msg}; {:out out} when
+  token isn't there."
+  [out token]
+  (let [i (str/last-index-of out (str "\n" token))]
+    (if-let [m (when i (try (read-string (subs out (+ i 1 (count token))))
+                            (catch :default _ nil)))]
+      (merge {:out (subs out 0 i)} (select-keys m [:value :error]))
+      {:out out})))
+
+(defn quiet-reply
+  "A quiet-code eval's reply from what it printed: [result' out-before-the-
+  token-line]. On :ok, result' carries the token line's value as :printed,
+  or its error as an :error; an :ok with no token line is an error too,
+  since the reply's own :printed is the person's old *1 the wrap returned.
+  Anything else (a Stop, a lost connection) stands, out passed on as it
+  came."
+  [result token out]
+  (let [{:keys [value error] :as q} (quiet-result out token)]
+    (if (= :ok (:status result))
+      [(cond
+         value (assoc result :printed value)
+         :else (-> result (dissoc :printed)
+                   (assoc :status :error :error-text (str "Error: " (or error "the quiet eval's answer was lost")))))
+       (:out q)]
+      [result out])))
+
 (defn reset-code
   "Code for the child that removes each namespace in names that exists,
   then `user`, and recreates `user`: the in-process Reset on Run's rule

@@ -89,16 +89,19 @@
   [ctx path]
   ((effect! ctx :buffer :open!) path))
 
-(defn- eval-later [ctx]
-  (effect! ctx :eval nil)
-  (throw (ex-info "the :eval effect functions arrive in a later slice" {:plugin/effect :eval})))
-
 (defn eval!
-  "(:eval) Not yet: throws, saying so."
-  [ctx _code]
-  (eval-later ctx))
+  "(:eval) Evaluates code quietly in the command's tab's namespace: nothing
+  at the console, no history entry, *1 *2 *3 *e untouched. Blocks until it
+  answers, or opts' :timeout-ms (default 10000) passes. {:value :out :err},
+  with :error (and :value nil) when the code threw. Throws when the REPL is
+  busy, on a timeout or a read from the console (the eval is stopped), on
+  a dialect other than Jolt, and when the tab has closed."
+  ([ctx code] (eval! ctx code {}))
+  ([ctx code opts] ((effect! ctx :eval :eval!) (::tab ctx) code opts)))
 
 (defn repl!
-  "(:eval) Not yet: throws, saying so."
-  [ctx _code]
-  (eval-later ctx))
+  "(:eval) Evaluates code at the console as if typed there: echoed, shown,
+  added to the history. {:value :out}, with :error when it threw; throws as
+  eval! does, except that a read from the console waits for the person."
+  ([ctx code] (repl! ctx code {}))
+  ([ctx code opts] ((effect! ctx :eval :repl!) (::tab ctx) code opts)))

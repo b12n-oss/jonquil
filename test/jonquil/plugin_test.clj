@@ -65,9 +65,14 @@
     (is (= [[:buffer-text 7] [:replace-text! 7 "new"] [:open! "/a.clj"]] @calls))
     (is (= "this plugin didn't declare :console" (ex-message (thrown #(p/print! c "x")))))))
 
-(deftest eval-not-yet-test
-  (let [c (ctx-with #{:eval} (atom []))]
-    (is (= "the :eval effect functions arrive in a later slice" (ex-message (thrown #(p/eval! c "(+ 1 2)")))))
-    (is (= "the :eval effect functions arrive in a later slice" (ex-message (thrown #(p/repl! c "(+ 1 2)"))))))
+(deftest eval-functions-test
+  (let [calls (atom [])
+        c (assoc (ctx-with #{:eval} calls)
+                 ::p/impl {:eval! (fn [tab code opts] (swap! calls conj [:eval! tab code opts]) {:value "3"})
+                           :repl! (fn [tab code opts] (swap! calls conj [:repl! tab code opts]) {:value "4"})})]
+    (is (= {:value "3"} (p/eval! c "(+ 1 2)")))
+    (is (= {:value "4"} (p/repl! c "(+ 2 2)" {:timeout-ms 50})))
+    (is (= [[:eval! 7 "(+ 1 2)" {}] [:repl! 7 "(+ 2 2)" {:timeout-ms 50}]] @calls)))
   (let [c (ctx-with #{} (atom []))]
-    (is (= "this plugin didn't declare :eval" (ex-message (thrown #(p/eval! c "1")))))))
+    (is (= "this plugin didn't declare :eval" (ex-message (thrown #(p/eval! c "1")))))
+    (is (= "this plugin didn't declare :eval" (ex-message (thrown #(p/repl! c "1")))))))

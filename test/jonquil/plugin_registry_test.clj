@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [jonquil.command-registry :as cmd-registry]
+            [jonquil.evaluator :as ev]
             [jonquil.keymap :as km]
             [jonquil.plugin :as p]
             [jonquil.plugin-registry :as reg]))
@@ -181,3 +182,76 @@
   (is (= "that tab was closed"
          (try (reg/gui-turn (fn [t] (t)) #(throw (ex-info "that tab was closed" {})) 1000) nil
               (catch :default e (ex-message e))))))
+
+(defn- fake-fire
+  "A fire fn for await-eval! that answers with result, after printing outs
+  ([kind text] ...), or with busy when it's a string, or never when result
+  is ::never, or asks for input when it's ::input."
+  [result & {:keys [outs busy]}]
+  (fn [{:keys [on-output on-complete on-wait-input]}]
+    (or busy
+        (do (future
+              (doseq [[k t] outs] (on-output k t))
+              (case result
+                ::never nil
+                ::input (on-wait-input true)
+                (on-complete result)))
+            nil))))
+
+(defn- await-thrown [opts]
+  (try (reg/await-eval! opts) nil (catch :default e e)))
+
+(deftest eval-failures-test
+  (let [stops (atom 0)
+        stop! #(swap! stops inc)]
+    (is (= "the REPL is busy" (ex-message (await-thrown {:fire (fake-fire nil :busy "; busy") :interrupt! stop!})))))
+  (let [stops (atom 0)
+        stop! #(swap! stops inc)]
+    (is (= "the eval took longer than 50 ms and was stopped"
+           (ex-message (await-thrown {:fire (fake-fire ::never) :interrupt! stop! :timeout-ms 50}))))
+    (is (= 1 @stops)))
+  (let [stops (atom 0)
+        stop! #(swap! stops inc)]
+    (is (= "the eval asked for console input, so it was stopped"
+           (ex-message (await-thrown {:fire (fake-fire ::input) :interrupt! stop!}))))
+    (is (= 1 @stops)))
+  (is (= {:value "42" :out "side\n" :err "warn\n"}
+         (reg/await-eval! {:fire (fake-fire {:status :ok :printed "42"} :outs [[:out "side\n"] [:err "warn\n"] [:system "; note\n"]])
+                           :interrupt! (fn [])})))
+  (is (= "1" (:value (reg/await-eval! {:fire (fake-fire {:status :ok :printed "1"}) :interrupt! (fn []) :timeout-ms nil})))
+      "a nil :timeout-ms (no opts from the plugin) is the default")
+  (is (= {:value nil :out "" :err "" :error "Error: boom"}
+         (reg/await-eval! {:fire (fake-fire {:status :error :error-text "Error: boom"}) :interrupt! (fn [])})))
+  (is (= {:value nil :out "" :err "" :error "the eval was interrupted"}
+         (reg/await-eval! {:fire (fake-fire {:status :interrupted}) :interrupt! (fn [])}))))
+
+(deftest eval-other-dialect-test
+  (is (false? (reg/quiet-capable? (reify ev/Evaluator))))
+  (is (true? (reg/quiet-capable? (reify ev/Evaluator ev/QuietEval (quiet-eval? [_] true))))))
+
+(deftest run-command-ctx-eval-test
+  (let [seen (promise)
+        r (run-plugin "p5b-ctx" #{:eval} (fn [ctx] (deliver seen ctx)))]
+    (reset! reg/effects (assoc (recording-effects (atom [])) :eval! (fn [& _]) :repl! (fn [& _])))
+    (go! r "p5b-ctx")
+    (is (= #{:eval! :repl!} (set (keys (::p/impl (deref seen 2000 nil))))))))
+
+(deftest await-eval-review-fixes-test
+  ;; review I1: a dialect's :notice result (no runtime, app asleep) is its
+  ;; text, not an NPE from error-text
+  (is (= {:value nil :out "" :err "" :error "; No runtime is connected."}
+         (reg/await-eval! {:fire (fake-fire {:status :notice :text "; No runtime is connected."}) :interrupt! (fn [])})))
+  ;; review I2/I3: Jonquil's own lines (a restart, auto-require) reach
+  ;; :on-notice, the code's :out/:err don't
+  (let [notices (atom [])
+        r (reg/await-eval! {:fire (fake-fire {:status :ok :printed "1"}
+                                             :outs [[:out "o"] [:system "; Stop restarted the Jolt runtime\n"] [:error "; bad\n"]])
+                            :interrupt! (fn [])
+                            :on-notice (fn [k t] (swap! notices conj [k t]))})]
+    (is (= "o" (:out r)))
+    (is (= [[:system "; Stop restarted the Jolt runtime\n"] [:error "; bad\n"]] @notices)))
+  ;; a :timeout-ms that isn't a positive number throws before anything starts
+  (let [fired (atom 0)]
+    (is (= ":timeout-ms must be a positive number of milliseconds"
+           (ex-message (await-thrown {:fire (fn [_] (swap! fired inc) nil) :interrupt! (fn []) :timeout-ms "500"}))))
+    (is (zero? @fired))))

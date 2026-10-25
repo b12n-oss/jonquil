@@ -7,6 +7,8 @@
   ones. With no plugins those are exactly the shipped tables. Pure apart
   from live, and from effects, which a :run command reads when it starts."
   (:require [jonquil.command-registry :as cmd-registry]
+            [jonquil.console :as console]
+            [jonquil.evaluator :as ev]
             [jonquil.keymap :as km]
             [jonquil.plugin :as p]
             [jonquil.plugin-protocol :as protocol]))
@@ -25,7 +27,8 @@
 
 ;; The window's effect functions for :run commands: {:active-tab (fn [] id),
 ;; called on the GTK thread; :print! :status! :buffer-text :replace-text!
-;; :open!, jonquil.plugin's implementations, called from a worker; :report!
+;; :open! :eval! :repl!, jonquil.plugin's implementations, called from a
+;; worker; :report!
 ;; (fn [line]) for a throw}. Empty until a window sets it.
 (defonce effects (atom {}))
 
@@ -57,7 +60,56 @@
 (def ^:private effect-impls
   ;; the implementations each effect brings into a ctx
   {:console [:print! :status!]
-   :buffer [:buffer-text :replace-text! :open!]})
+   :buffer [:buffer-text :replace-text! :open!]
+   :eval [:eval! :repl!]})
+
+(defn quiet-capable?
+  "True when ev can run p/eval!'s quiet eval (jonquil.evaluator/QuietEval)."
+  [ev]
+  (satisfies? ev/QuietEval ev))
+
+(defn await-eval!
+  "Runs one plugin eval and waits for it, on the plugin's worker. (fire
+  callbacks) starts it, handing the evaluator {:on-output :on-wait-input
+  :on-complete}, and answers nil, or the evaluator's busy warning. Answers
+  {:value printed :out :err}, or with :error (the console's error text) and
+  :value nil when the code threw or the dialect answered a :notice. Output
+  that isn't the code's :out or :err (Jonquil's own lines: a Stop that
+  restarted the runtime, auto-require) goes to (on-notice kind text).
+  Throws \"the REPL is busy\"; on a
+  timeout (timeout-ms, default 10000) or with :input-stops? (the default)
+  a read from the console, it calls (interrupt!) and throws, saying which."
+  [{:keys [fire interrupt! timeout-ms input-stops? on-notice] :or {input-stops? true}}]
+  (let [timeout-ms (or timeout-ms 10000)
+        _ (when-not (and (number? timeout-ms) (pos? timeout-ms))
+            (throw (ex-info ":timeout-ms must be a positive number of milliseconds" {})))
+        p (promise)
+        out (atom [])
+        err (atom [])
+        busy (fire {:on-output (fn [k text]
+                                 (case k
+                                   :out (swap! out conj text)
+                                   :err (swap! err conj text)
+                                   ;; Jonquil's own lines (a Stop's restart,
+                                   ;; auto-require) are for the person
+                                   (when on-notice (on-notice k text))))
+                    :on-wait-input (fn [waiting?] (when (and waiting? input-stops?) (deliver p ::input)))
+                    :on-complete (fn [r] (deliver p r))})]
+    (when busy (throw (ex-info "the REPL is busy" {})))
+    (let [r (deref p timeout-ms ::timeout)]
+      (case r
+        ::timeout (do (interrupt!)
+                      (throw (ex-info (str "the eval took longer than " timeout-ms " ms and was stopped") {})))
+        ::input (do (interrupt!)
+                    (throw (ex-info "the eval asked for console input, so it was stopped" {})))
+        (let [base {:value nil :out (apply str @out) :err (apply str @err)}]
+          (case (:status r)
+            :ok (assoc base :value (:printed r))
+            :interrupted (assoc base :error "the eval was interrupted")
+            ;; a dialect saying it can't run this now (no runtime, the app
+            ;; asleep): its sentence
+            :notice (assoc base :error (:text r))
+            (assoc base :error (console/error-text r))))))))
 
 (defn- in-order [reg] (sort-by key (:plugins reg)))
 
