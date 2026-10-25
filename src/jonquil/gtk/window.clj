@@ -51,6 +51,7 @@
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.login-path :as login-path]
+            [jonquil.mcp.window :as mcp-window]
             [jonquil.nrepl.attach]
             [jonquil.nrepl.cljs-node]
             [jonquil.nrepl.connection :as connection]
@@ -2171,13 +2172,19 @@
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
-            kctx (window-key-ctx ctx keyval0 state)]
+            kctx (window-key-ctx ctx keyval0 state)
+            ;; one read per key: the bindings and commands agree
+            plugins @plugin-registry/live]
         ;; plugins P3: the live plugins' :window bindings ahead of the
         ;; shipped ones (a plugin may bind a built-in window command)
         (cmd-registry/window-answer
-         (plugin-registry/window-bindings @plugin-registry/live) keyval state
+         (plugin-registry/window-bindings plugins) keyval state
          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
-          :run! #(cmd-registry/run-command! cmd-registry/window-commands % kctx)}))
+          ;; plugins P5: and their window-scope commands, so a :run one
+          ;; bound to a key runs
+          :run! #(cmd-registry/run-command! (merge cmd-registry/window-commands
+                                                   (plugin-registry/commands plugins))
+                                            % kctx)}))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
         1))))
@@ -3618,6 +3625,28 @@
     ;; plugins P3: the user's plugins load off the GTK thread once the
     ;; window is up; keys pressed before the swap see none yet
     (reset! plugin-console (fn [line] (on-gui! #(cview/append! cv :system (str "; " line "\n")))))
+    ;; plugins P5: the effect functions a plugin's :run command reaches,
+    ;; each a turn on the GTK thread (it runs on a worker) acting on the
+    ;; tab with that id, which may have closed since the command started
+    (let [turn (fn [f] (mcp-window/gui-call on-gui! f 5000))
+          tab-of (fn [id] (or (some #(when (= id (:id %)) %) @tabs)
+                              (throw (ex-info "that tab was closed" {}))))]
+      (reset! plugin-registry/effects
+              {:active-tab (fn [] (:id (active-tab)))
+               :print! (fn [s] (turn #(cview/append! cv :system (str s "\n"))))
+               :status! (fn [s] (turn #(g/gtk-label-set-text status-label (str s))))
+               :buffer-text (fn [id] (turn #(editor/editor-text (:ed (tab-of id)))))
+               :replace-text! (fn [id text]
+                                (turn #(let [ed (:ed (tab-of id))]
+                                         (when-not (editor/apply-op! ed (mcp-window/replace-op (editor/editor-text ed) text))
+                                           (throw (ex-info "that tab is read-only" {}))))))
+               :open! (fn [path]
+                        (turn #(let [r (open-file! @*tab-ctx (str path))]
+                                 (when (and (map? r) (:error r)) (throw (ex-info (str (:error r)) {})))
+                                 (:id (active-tab)))))
+               :report! (fn [line]
+                          (on-gui! #(do (cview/append! cv :system (str "; " line "\n"))
+                                        (g/gtk-label-set-text status-label (str "; " line)))))}))
     (when-not (false? plugins?)
       (plugin-load! {:settings-path @settings-path* :cv cv})
       ;; saving a plugin file reloads that plugin
