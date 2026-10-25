@@ -202,7 +202,8 @@
 
 (defn row-palette-arrow-keys
   "Review fix I2: Up and Down, through the entry controller's own handler,
-  move the selection and are taken (1); another key isn't (0)."
+  move the selection and are taken (1); another key isn't (0), and
+  neither is an arrow while an IME preedit is active (fix-review I1)."
   [ui]
   (go-row :palette-arrow-keys support/check
     (on-gtk (let [p (:palette ui)]
@@ -211,8 +212,14 @@
                     i1 (:index @(:state p))
                     up (palette/handle-key! p 0xff52)
                     i0 (:index @(:state p))
-                    other (palette/handle-key! p 0x061)]
+                    other (palette/handle-key! p 0x061)
+                    ;; while an IME composes, the arrows are its (candidate
+                    ;; lists): 0, and the selection stays put
+                    _ (reset! (:preedit-active? p) true)
+                    composing (palette/handle-key! p 0xff54)
+                    i2 (:index @(:state p))]
+                (reset! (:preedit-active? p) false)
                 (close! ui)
                 (support/check :palette-arrow-keys
-                               (and (= 1 down up) (= 1 i1) (= 0 i0) (= 0 other))
-                               {:down down :up up :i1 i1 :i0 i0 :other other}))))))
+                               (and (= 1 down up) (= 1 i1) (= 0 i0) (= 0 other) (= 0 composing) (= 0 i2))
+                               {:down down :up up :i1 i1 :i0 i0 :other other :composing composing :i2 i2}))))))

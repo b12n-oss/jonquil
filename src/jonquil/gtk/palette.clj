@@ -68,15 +68,20 @@
       (when-let [f @(:on-run pal)] (f id)))))
 
 (defn handle-key!
-  "The entry's own keys (public for rows): Up/Down by one, PageUp/PageDown by a page. 1 when
-  taken, 0 for every other key."
+  "The entry's own keys, on its capture-phase controller (public for
+  rows): Up/Down by one, PageUp/PageDown by a page. 1 when taken, 0 for
+  every other key, and 0 for every key while an IME preedit is active, so
+  a composition's own arrows (its candidate list) reach the input method,
+  as jonquil.gtk.find-bar/handle-key! does."
   [pal keyval]
-  (condp = keyval
-    KEY-UP (do (move! pal -1) 1)
-    KEY-DOWN (do (move! pal 1) 1)
-    KEY-PAGE-UP (do (move! pal (- PAGE-STEP)) 1)
-    KEY-PAGE-DOWN (do (move! pal PAGE-STEP) 1)
-    0))
+  (if @(:preedit-active? pal)
+    0
+    (condp = keyval
+      KEY-UP (do (move! pal -1) 1)
+      KEY-DOWN (do (move! pal 1) 1)
+      KEY-PAGE-UP (do (move! pal (- PAGE-STEP)) 1)
+      KEY-PAGE-DOWN (do (move! pal PAGE-STEP) 1)
+      0)))
 
 (defn- refocus!
   "Gives view focus back, unless something other than view's own container
@@ -106,7 +111,7 @@
         pp (popover/make-popover view {:autohide? true :position :bottom})
         pal (assoc pp :entry entry :list-box list-box
                    :state (atom {:all [] :shown [] :index 0})
-                   :on-run (atom nil) :on-error (atom nil))]
+                   :on-run (atom nil) :on-error (atom nil) :preedit-active? (atom false))]
     (g/gtk-widget-set-size-request entry WIDTH -1)
     (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
     (g/gtk-scrolled-window-set-policy scroll g/POLICY-NEVER g/POLICY-AUTOMATIC)
@@ -138,6 +143,15 @@
                                          (try (handle-key! pal keyval)
                                               (catch :default e (report! pal "palette" e) 1)))
                                        [:pointer :uint :uint :uint :pointer] :int)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; the entry delegates its GtkEditable to an inner GtkText, and that
+    ;; delegate carries "preedit-changed" (as find_bar.clj's entries)
+    (g/g-signal-connect-data (g/gtk-editable-get-delegate entry) "preedit-changed"
+                             (callable (fn [_ preedit _]
+                                         (try (reset! (:preedit-active? pal) (not (empty? preedit)))
+                                              (catch :default e (report! pal "palette" e)))
+                                         nil)
+                                       [:pointer :string :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     ;; capture, as find_bar's own controller: the entry's inner GtkText (its
     ;; input method, its own bindings) sees keys first in the bubble phase
