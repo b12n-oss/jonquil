@@ -5,7 +5,8 @@
   The helpers below are pure, over a snapshot {:text :caret :sel-start
   :sel-end}, and an :edit command returns jonquil.edit's op shape
   {:edits [[start end replacement] ...] :caret n}, or nil when it doesn't
-  apply."
+  apply. A :run command (fn [ctx]) gets the effect functions at the end,
+  each refusing an effect its plugin didn't declare."
   (:require [jonquil.commands :as commands]))
 
 (def ^:dynamic *definitions*
@@ -44,3 +45,60 @@
   (when-let [{:keys [start end]} (form-at-caret snapshot)]
     {:edits [[start start open] [end end close]]
      :caret (+ (:caret snapshot) (count open))}))
+
+;; The effect functions, for :run commands. A command's ctx carries the
+;; effects its plugin declared (::effects), their implementations (::impl,
+;; only the declared ones') and the tab that was active when it started
+;; (::tab). Each function checks its effect first, so an undeclared one
+;; throws before anything is reached.
+
+(defn- effect!
+  "The ctx's implementation named k, after checking that effect is declared."
+  [ctx effect k]
+  (when-not (contains? (::effects ctx) effect)
+    (throw (ex-info (str "this plugin didn't declare " effect) {:plugin/effect effect})))
+  (get (::impl ctx) k))
+
+(defn print!
+  "(:console) Prints s on the console."
+  [ctx s]
+  ((effect! ctx :console :print!) s)
+  nil)
+
+(defn status!
+  "(:console) Shows s on the status bar."
+  [ctx s]
+  ((effect! ctx :console :status!) s)
+  nil)
+
+(defn buffer-text
+  "(:buffer) The text of the command's tab. Throws \"that tab was closed\"
+  once it has."
+  [ctx]
+  ((effect! ctx :buffer :buffer-text) (::tab ctx)))
+
+(defn replace-text!
+  "(:buffer) Replaces the whole text of the command's tab, as one undo step."
+  [ctx text]
+  ((effect! ctx :buffer :replace-text!) (::tab ctx) text)
+  nil)
+
+(defn open!
+  "(:buffer) Opens path in a tab and answers that tab's id, for a ctx
+  assoc'd ::tab to act on it."
+  [ctx path]
+  ((effect! ctx :buffer :open!) path))
+
+(defn- eval-later [ctx]
+  (effect! ctx :eval nil)
+  (throw (ex-info "the :eval effect functions arrive in a later slice" {:plugin/effect :eval})))
+
+(defn eval!
+  "(:eval) Not yet: throws, saying so."
+  [ctx _code]
+  (eval-later ctx))
+
+(defn repl!
+  "(:eval) Not yet: throws, saying so."
+  [ctx _code]
+  (eval-later ctx))
