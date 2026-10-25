@@ -1786,7 +1786,10 @@ says so.
 
 Plugins load when Jonquil starts, one file at a time, so a broken file is
 skipped while the others load, and the console names what's wrong,
-with its line when the reader or compiler gave one. Before anything goes
+with its line when the reader or compiler gave one. A file gets 10
+seconds to load; one that loops at top level, or whose first compile of
+what it requires is very slow, is skipped with that reason (a slow
+compile usually gets through at the next start). Before anything goes
 live, each `:edit` command is tried on a few sample buffers (empty, a
 form with the caret at its start, middle and end, a selection, two
 forms), each for at most 2 seconds, and its answer's shape is checked.
@@ -1797,9 +1800,10 @@ of editing the wrong text.
 A binding must hold Cmd/Ctrl. A bare letter, Return, Tab or Backspace
 would take a key you type, so it's refused with that reason, and so is an
 editor binding the window always takes first (Cmd+Alt+W is the window's
-Cmd+W, which ignores Alt). A chord a built-in already uses, or one an
-earlier plugin took, loads with a warning naming that command; when two
-plugins share a chord, the one whose id sorts first wins. Plugin bindings
+Cmd+W, which ignores Alt). A chord a built-in already uses loads with a
+warning naming that command. Plugins load, and take their keys, in id
+order, so when two share a chord the one whose id sorts first wins, and
+the other loads with a warning that its binding never fires. Plugin bindings
 come ahead of the built-in ones, and their commands show in the command
 palette with the plugin's id as the source.
 

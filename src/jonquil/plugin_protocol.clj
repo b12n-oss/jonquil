@@ -5,8 +5,7 @@
   fixture snapshots, answering {:ok? :problems :warnings :timings
   :definition}. No GTK; nothing here goes live, and a caller (the user's
   reload, Accept, a revert) swaps the registry on a pass."
-  (:require [jonquil.edit :as edit]
-            [jonquil.plugin :as p]
+  (:require [jonquil.plugin :as p]
             [jonquil.plugin-check :as plugin-check]))
 
 (defn- load-problem
@@ -24,11 +23,11 @@
   *ns* restored afterwards: {:definitions [...] :problems [...]}. Never
   throws; a load error is a problem with its line when it has one, and a
   file that doesn't end in jonquil.plugins.<file-id> is a problem too. The
-  load runs in a future given load-ms (default 5000): a file that loops at
+  load runs in a future given load-ms (default 10000): a file that loops at
   top level is a problem then, so the caller goes on (it may keep running;
   future-cancel can't stop CPU-bound code). The namespace the file made
   stays loaded."
-  [{:keys [source file-id load-ms] :or {load-ms 5000}}]
+  [{:keys [source file-id load-ms] :or {load-ms 10000}}]
   (let [wanted (str "jonquil.plugins." file-id)
         f (future
             (binding [*ns* *ns* p/*definitions* (atom [])]
@@ -45,8 +44,9 @@
     (if (= ::timeout v)
       (do (future-cancel f)
           {:definitions []
-           :problems [(str "loading the file didn't finish in " load-ms " ms; it may keep running in this "
-                           "process until Jonquil quits")]})
+           :problems [(str "loading the file didn't finish in " load-ms " ms (a loop at top level, or a "
+                           "slow first compile of what it requires, which the next start may get past); "
+                           "it may keep running in this process until Jonquil quits")]})
       v)))
 
 (def ^:private form-text "(defn f [x] (inc x))")
@@ -86,7 +86,9 @@
       (not (every? (fn [[[_ e1] [s2]]] (<= e1 s2)) (partition 2 1 edits)))
       "its edits overlap or aren't in ascending order"
       :else
-      (let [new-len (count (edit/apply-edits text edits))
+      ;; the edited length arithmetically: rebuilding the text per edit is
+      ;; O(edits x text), too slow on the GTK thread for a big buffer
+      (let [new-len (+ len (reduce + 0 (map (fn [[a b r]] (- (count r) (- b a))) edits)))
             {:keys [caret sel]} result]
         (cond
           (not (offset? caret new-len)) (str ":caret " (pr-str caret) " isn't inside the edited text (0.." new-len ")")

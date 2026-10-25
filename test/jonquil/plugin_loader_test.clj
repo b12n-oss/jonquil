@@ -76,7 +76,8 @@
   ;; review I2: a later plugin on an earlier one's chord is warned about
   (let [d (dir-with [["p3l-x.clj" (source "p3l-x")] ["p3l-y.clj" (source "p3l-y")]])
         {:keys [lines]} (load-dir d)]
-    (is (some #(and (str/starts-with? % "plugin p3l-y: ") (str/includes? % "plugin p3l-x's :p3l-x/wrap")) lines)
+    (is (some #(and (str/starts-with? % "plugin p3l-y: ") (str/includes? % "never fires")
+                    (str/includes? % "plugin p3l-x")) lines)
         (pr-str lines))))
 
 (deftest one-command-is-singular-test

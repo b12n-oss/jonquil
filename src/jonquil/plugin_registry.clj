@@ -60,16 +60,22 @@
   [reg]
   (merge cmd-registry/commands (commands reg)))
 
+(defn bindings-with-source
+  "bindings, each tagged :plugin/source with the plugin that made it, for
+  the validator to name it (the loader's request)."
+  [reg scope]
+  (let [known (all-commands reg)]
+    (vec (for [[id {:keys [definition]}] (in-order reg)
+               b (:bindings definition)
+               :when (= scope (:scope (get known (:command b))))]
+           (assoc b :plugin/source id)))))
+
 (defn bindings
   "The installed plugins' bindings in scope, ordered by plugin id then file
   order, each one whose command is a live plugin command or a built-in of
   that scope."
   [reg scope]
-  (let [known (all-commands reg)]
-    (vec (for [[_ {:keys [definition]}] (in-order reg)
-               b (:bindings definition)
-               :when (= scope (:scope (get known (:command b))))]
-           b))))
+  (mapv #(dissoc % :plugin/source) (bindings-with-source reg scope)))
 
 (defn window-bindings [reg] (into (bindings reg :window) (:window km/shipped)))
 

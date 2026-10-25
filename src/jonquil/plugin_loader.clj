@@ -7,6 +7,7 @@
   touches no GTK, and never throws."
   (:require [clojure.java.io :as io]
             [jonquil.command-registry :as cmd-registry]
+            [jonquil.keymap :as km]
             [jonquil.plugin-check :as plugin-check]
             [jonquil.plugin-protocol :as protocol]
             [jonquil.plugin-registry :as plugin-registry]))
@@ -46,8 +47,10 @@
                      {:commands (plugin-registry/all-commands reg) :conditions conditions
                       ;; the plugins already loaded count like shipped bindings, so a
                       ;; chord one takes is warned about, or unreachable, for the next
-                      :keymap {:window (plugin-registry/window-bindings reg)
-                               :editor (plugin-registry/editor-bindings reg)}
+                      :keymap {:window (into (plugin-registry/bindings-with-source reg :window)
+                                             (:window km/shipped))
+                               :editor (into (plugin-registry/bindings-with-source reg :editor)
+                                             (:editor km/shipped))}
                       :os os})
             r (try (protocol/run-protocol {:where :in-process :source text :file-id id :request request})
                    (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]}))]

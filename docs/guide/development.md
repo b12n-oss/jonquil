@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 82 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (949 tests, 5667 assertions
-on macOS, 5636 on Linux, measured with `bb linux:test` on 2026-10-25) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (951 tests, 5673 assertions
+on macOS, 5642 on Linux, measured with `bb linux:test` on 2026-10-25) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (949 tests and 5636 assertions, 31
+reports fewer assertions than macOS (951 tests and 5642 assertions, 31
 fewer, measured 2026-10-25).
 
 <details>

@@ -214,10 +214,26 @@
     (is (:ok? (run {:key "j" :mods #{:cmd :alt} :when [:writable] :command :wrap-when/wrap})))
     (is (:ok? (run {:key "j" :mods #{:cmd :alt} :when [:tree-focused] :command :wrap-when/say})))))
 
-(deftest plugin-shadow-names-the-plugin-test
+(deftest earlier-plugin-chord-never-fires-test
+  ;; an earlier plugin's binding (tagged :plugin/source in the request's
+  ;; keymap) on the same chord always wins, so this binding never fires: a
+  ;; warning that says so and names that plugin (review I-A)
   (let [req (-> request
                 (assoc-in [:registered :p-a/wrap] {:scope :editor :passes? false :plugin :p-a})
-                (update-in [:keymap :editor] #(into [{:key "j" :mods #{:cmd :alt} :command :p-a/wrap}] %)))
+                (update-in [:keymap :editor] #(into [{:key "j" :mods #{:cmd :alt} :command :p-a/wrap
+                                                      :plugin/source :p-a}] %)))
         r (pc/validate (assoc req :file-id "wrap-when" :definitions [good]))]
-    (is (:ok? r))
-    (is (mentions? r :warnings "plugin p-a's :p-a/wrap"))))
+    (is (:ok? r) (pr-str r))
+    (is (mentions? r :warnings "never fires"))
+    (is (mentions? r :warnings "plugin p-a"))))
+
+(deftest earlier-plugin-window-binding-is-a-warning-test
+  ;; an earlier plugin binding a built-in window command to a chord makes a
+  ;; later :editor binding there dead: a warning naming that plugin, not a
+  ;; problem blaming the built-in (review I-B)
+  (let [req (update-in request [:keymap :window]
+                       #(into [{:key "j" :mods #{:cmd :alt} :command :run/run :plugin/source :p-a}] %))
+        r (pc/validate (assoc req :file-id "wrap-when" :definitions [good]))]
+    (is (:ok? r) (pr-str r))
+    (is (mentions? r :warnings "plugin p-a"))
+    (is (mentions? r :warnings "never fires"))))

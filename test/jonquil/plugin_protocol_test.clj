@@ -161,3 +161,15 @@
     (is (= 1 (count (:problems r))) (pr-str r))
     (is (str/includes? (first (:problems r)) "didn't finish"))
     (is (< ms 2000) (str ms " ms"))))
+
+(deftest edit-result-check-is-linear-test
+  ;; the check runs on every plugin keypress, on the GTK thread: 5000 edits
+  ;; on a 20,000-line buffer must not rebuild the text per edit (review I-C)
+  (let [line "(defn f [x] (inc x)) ; a line of about forty chars\n"
+        text (apply str (repeat 20000 line))
+        edits (vec (for [i (range 5000) :let [o (* i (count line))]] [o o "  "]))
+        t0 (System/currentTimeMillis)
+        r (protocol/edit-result-problem {:text text :caret 0} {:edits edits :caret 0})
+        ms (- (System/currentTimeMillis) t0)]
+    (is (nil? r) r)
+    (is (< ms 300) (str ms " ms"))))
