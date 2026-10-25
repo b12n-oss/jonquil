@@ -677,7 +677,7 @@
 
 ;; P4.T7: named so the context menu's own items (window.clj) call the
 ;; EXACT same function as their key -- these five used to be inline
-;; lambdas inside handle-key!'s cond below, which a menu item could only
+;; lambdas inside handle-key!'s old cond, which a menu item could only
 ;; have duplicated, never reused. Each does exactly what its own inline
 ;; body used to.
 
