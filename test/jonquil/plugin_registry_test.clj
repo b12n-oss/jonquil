@@ -218,6 +218,8 @@
   (is (= {:value "42" :out "side\n" :err "warn\n"}
          (reg/await-eval! {:fire (fake-fire {:status :ok :printed "42"} :outs [[:out "side\n"] [:err "warn\n"] [:system "; note\n"]])
                            :interrupt! (fn [])})))
+  (is (= "1" (:value (reg/await-eval! {:fire (fake-fire {:status :ok :printed "1"}) :interrupt! (fn []) :timeout-ms nil})))
+      "a nil :timeout-ms (no opts from the plugin) is the default")
   (is (= {:value nil :out "" :err "" :error "Error: boom"}
          (reg/await-eval! {:fire (fake-fire {:status :error :error-text "Error: boom"}) :interrupt! (fn [])})))
   (is (= {:value nil :out "" :err "" :error "the eval was interrupted"}

@@ -76,8 +76,9 @@
   :value nil when the code threw. Throws \"the REPL is busy\"; on a
   timeout (timeout-ms, default 10000) or with :input-stops? (the default)
   a read from the console, it calls (interrupt!) and throws, saying which."
-  [{:keys [fire interrupt! timeout-ms input-stops?] :or {timeout-ms 10000 input-stops? true}}]
-  (let [p (promise)
+  [{:keys [fire interrupt! timeout-ms input-stops?] :or {input-stops? true}}]
+  (let [timeout-ms (or timeout-ms 10000)
+        p (promise)
         out (atom [])
         err (atom [])
         busy (fire {:on-output (fn [k text] (case k :out (swap! out conj text) :err (swap! err conj text) nil))
