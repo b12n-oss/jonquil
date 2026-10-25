@@ -700,7 +700,7 @@
   fixture whose last line is out of indent, Cmd+Option+F, Cmd+S. On
   macOS, GDK reports the Option-translated character as keyval (0x8f6,
   GDK_KEY_function, for Option+F) instead of the plain letter, so
-  editor.clj's alt-chord-f-or-l? falls back to the physical key's
+  editor.clj's physical-key falls back to the physical key's
   hardware keycode (3, matching kVK_ANSI_F) when the keyval doesn't
   match -- see that function's own docstring for the measured values.
   The file's own bytes on disk must equal

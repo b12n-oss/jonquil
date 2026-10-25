@@ -28,10 +28,12 @@
   nothing in this namespace needs jonquil.gtk.callbacks/on-gui! to get
   there."
   (:require [jolt.ffi :as ffi]
+            [jonquil.command-registry :as cmd-registry]
             [jonquil.commands :as commands]
             [jonquil.edit :as edit]
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
+            [jonquil.keymap :as km]
             [jonquil.paint :as paint]
             [jonquil.theme :as theme]))
 
@@ -626,27 +628,6 @@
 (def ^:private KEY-BACKSPACE 0xff08)
 (def ^:private KEY-TAB 0xff09)
 (def ^:private KEY-ISO-LEFT-TAB 0xfe20)
-(def ^:private KEY-SLASH 0x02f)
-(def ^:private KEY-SEMICOLON 0x03b)
-(def ^:private KEY-F 0x066)
-(def ^:private KEY-L 0x06c)
-(def ^:private KEY-Y 0x079)
-
-;; P4.T4 additions (gdkkeysyms.h): Ctrl+Q quick doc, F12/Ctrl+B jump to
-;; definition, Shift+F1 quick doc's second chord.
-(def ^:private KEY-Q 0x071)
-(def ^:private KEY-B 0x062)
-(def ^:private KEY-F1 0xffbe)
-(def ^:private KEY-F12 0xffc9)
-
-;; P4.T5 addition (gdkkeysyms.h:380, re-verified against the installed
-;; header): Ctrl+Space opens/commits completion.
-(def ^:private KEY-SPACE 0x020)
-
-;; P4.T7 additions (gdkkeysyms.h, re-verified against the installed
-;; header): Shift+F6/F2 open the rename popover.
-(def ^:private KEY-F6 0xffc3)
-(def ^:private KEY-F2 0xffbf)
 
 ;; macOS hardware keycodes for the physical F and L keys (measured live
 ;; this session, pid-driven cgevent cmd+option+f/l against this build:
@@ -655,7 +636,7 @@
 ;; 0x03 and kVK_ANSI_L = 0x25 (37) -- Events.h:200 and :232 in the macOS
 ;; SDK's HIToolbox headers -- so they're the stable, well-known scan
 ;; positions for those two physical keys, not something guessed. See
-;; handle-key!'s docstring for why keyval alone can't be used here.
+;; physical-key's docstring for why keyval alone can't be used here.
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
 
@@ -696,32 +677,6 @@
   that happens to share a keyval."
   [state]
   (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK g/ALT-MASK))))
-
-(defn- control-only?
-  "P4 keys (quick doc, jump): Control held and Meta NOT held -- the P4
-  rule (00-overview.md's global constraints) that these chords check
-  CONTROL-MASK only and reject META-MASK, unlike command-chord? above
-  which treats either as the same chord."
-  [state]
-  (and (not (zero? (bit-and state g/CONTROL-MASK)))
-       (zero? (bit-and state g/META-MASK))))
-
-(defn- shift-only?
-  "P4 keys whose own chord is Shift-based (quick doc's Shift+F1, rename's
-  Shift+F6): Shift held and NONE of Meta, Control or Alt, the same P4 rule
-  control-only? applies to the Control-based chords above --
-  Cmd/Ctrl/Alt+Shift+<key> must not also match (the parked P4 item:
-  Ctrl+Shift+F1/F6 used to trigger quick doc and rename)."
-  [state]
-  (and (not (zero? (bit-and state g/SHIFT-MASK)))
-       (zero? (bit-and state (bit-or g/META-MASK g/CONTROL-MASK g/ALT-MASK)))))
-
-(defn- no-modifiers?
-  "True when none of Shift, Control, Meta or Alt is held -- F12's own P4
-  requirement (\"no modifiers\"), stricter than no-command-modifiers?
-  above, which doesn't check Shift."
-  [state]
-  (zero? (bit-and state (bit-or g/SHIFT-MASK g/CONTROL-MASK g/META-MASK g/ALT-MASK))))
 
 (defn- apply-edit! [ed result]
   (if (apply-op! ed result) 1 0))
@@ -782,34 +737,23 @@
        (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L} keycode)
        (alt-held? state)))
 
-(defn- alt-chord-f-or-l?
-  "True for Cmd/Ctrl+Alt+F or Cmd/Ctrl+Alt+L, on either platform.
+(defn physical-key
+  "The physical key's name, \"f\" or \"l\", for the editor keymap's
+  :physical? format-selection binding (Cmd/Ctrl+Alt+F or L), or nil. Pure,
+  so a test can pass any os.
 
-  On Linux GDK, Option/Alt doesn't remap the keyval, so keyval alone
-  (already normalised to lowercase by the caller) matches KEY-F/KEY-L
-  directly -- the historical check.
+  On Linux, Alt doesn't remap the keyval, and the binding's plain f and l
+  match. On macOS GDK reports the Option-translated character instead
+  (measured live with pid-driven cgevent: Cmd+Option+F arrives as 0x8f6,
+  GDK_KEY_function, and Cmd+Option+L as 0xac, GDK_KEY_notsign), and
+  gdk_keyval_to_lower doesn't help. The hardware keycode stays
+  MAC-KEYCODE-F/MAC-KEYCODE-L, so it names the key.
 
-  On macOS, GDK reports the OPTION-TRANSLATED character as keyval, not
-  the plain letter (measured live this session, pid-driven cgevent:
-  Cmd+Option+F arrives as keyval 0x8f6 = GDK_KEY_function, the florin
-  sign; Cmd+Option+L arrives as keyval 0xac = GDK_KEY_notsign -- both
-  confirmed against gdkkeysyms.h:1143 and :490). gdk_keyval_to_lower
-  doesn't help: neither is an uppercase variant of f/l. The hardware
-  keycode is unaffected by Option's translation and stays MAC-KEYCODE-F/
-  MAC-KEYCODE-L (also measured live, matching kVK_ANSI_F/kVK_ANSI_L), so
-  it's the fallback match.
-
-  The `(< keyval 0x1000)` guard keeps that fallback from ever firing on a
-  modifier key's own key-press event (Control_L's keyval is 0xffe3, way
-  above this range) -- on standard XKB/evdev Linux keycodes, hardware
-  keycode 37 belongs to Control_L and keycode 3 is unassigned, so without
-  this guard a Ctrl+Alt press sequence could in principle mis-fire on the
-  Control_L keystroke itself; the guard makes that impossible regardless
-  of keyval-lower's actual value that day."
-  [keyval keycode state]
-  (or (contains? #{KEY-F KEY-L} keyval)
-      (and (< keyval 0x1000) (keycode-fallback? OS-NAME keycode state))))
-
+  The (< keyval 0x1000) guard keeps a modifier key's own press out:
+  Control_L is 0xffe3, and on Linux keycode 37 is Control_L."
+  [os keyval keycode state]
+  (when (and (< keyval 0x1000) (keycode-fallback? os keycode state))
+    (if (= keycode MAC-KEYCODE-F) "f" "l")))
 
 (defn handle-key!
   "The editor's key dispatch (P3.T2), first match wins. Returns
@@ -825,19 +769,40 @@
   Two arities: the 3-arg form (no keycode) is every pre-existing caller,
   defaulting keycode to 0 -- harmless, since 0 never matches
   MAC-KEYCODE-F/MAC-KEYCODE-L. on-key (below), the real GTK callback,
-  always uses the 4-arg form so alt-chord-f-or-l?'s macOS fallback has a
-  real hardware keycode to check.
+  always uses the 4-arg form so physical-key's macOS fallback has a real
+  hardware keycode to check.
 
   I2: before any of the cond clauses below run, a pending Run Form flash
   is cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
   caret and clearing the selection) unless keyval is a bare modifier
   press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
   would act on the flash's own selection instead of the buffer's real
-  one."
+  one.
+
+  Plugins PL1 slice S5: the chords between plain Return and the typing
+  clauses (completion, comment, the two formats, redo, quick doc, jump,
+  rename) are the :editor keymap in jonquil/keymap.edn, run through
+  jonquil.keymap/dispatch over jonquil.command-registry/editor-commands.
+  ectx carries the editor's state as thunks. :handled is 1, :to-gtk (an
+  edit that changed nothing, or nothing to redo) is 0, and :unmatched
+  goes on to the typing clauses."
   ([ed keyval0 state] (handle-key! ed keyval0 0 state))
   ([ed keyval0 keycode state]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
-         cfns @(:completion-fns ed)]
+         cfns @(:completion-fns ed)
+         ;; the editor keymap's ctx (jonquil.command-registry/editor-commands):
+         ;; thunks, so each reads its atom when its command runs
+         ectx {:complete! #(when-let [f (:complete! cfns)] (f))
+               :toggle-comment! #(do-toggle-comment! ed)
+               :format-all! #(do-format-all! ed)
+               :format-selection! #(do-format-selection! ed)
+               :redo! #(if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
+                         (do (g/gtk-text-buffer-redo (:buf ed)) 1)
+                         0)
+               :writable? #(not @(:read-only? ed))
+               :quick-doc! #(when-let [f @(:quick-doc-fn ed)] (f))
+               :jump! #(when-let [f @(:jump-fn ed)] (f))
+               :rename! #(when-let [f @(:rename-fn ed)] (f))}]
      (when-not (modifier-keyval? keyval)
        (when-let [f @(:flash-cancel-fn ed)] (f)))
      (cond
@@ -864,90 +829,39 @@
        (plain-return? keyval state)
        (if (handle-return! ed) 1 0)
 
-       ;; P4.T5: Ctrl+Space opens/commits completion. control-only? (not
-       ;; command-chord?), the same P4 rule as quick doc/jump below --
-       ;; CONTROL-MASK checked, META-MASK rejected. Always returns 1 once
-       ;; the chord matches, whether or not a popup actually opens
-       ;; (help/prefix-at nil, or a single candidate committed at once),
-       ;; so GTK never inserts a literal space.
-       (and (control-only? state) (= keyval KEY-SPACE))
-       (do (when-let [f (:complete! cfns)] (f)) 1)
+       ;; slice S5: the editor's chords are the :editor keymap (keymap.edn),
+       ;; between plain Return above and the typing stages below
+       :else
+       (case (km/dispatch (:editor km/shipped) keyval state
+                          {:holds? (cmd-registry/holds-fn cmd-registry/editor-conditions ectx)
+                           :run! #(cmd-registry/run-command! cmd-registry/editor-commands % ectx)
+                           :physical (physical-key OS-NAME keyval keycode state)})
+         :handled 1
+         :to-gtk 0
+         (cond
+           (and (no-command-modifiers? state) (contains? open-chars keyval))
+           (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
 
-       (and (command-chord? state) (contains? #{KEY-SLASH KEY-SEMICOLON} keyval))
-       (do-toggle-comment! ed)
+           (and (no-command-modifiers? state) (contains? close-chars keyval))
+           (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
 
-       (and (command-chord? state) (shift-held? state) (= keyval KEY-F))
-       (do-format-all! ed)
+           (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
+           (apply-edit! ed (edit/backspace-pair (snapshot ed)))
 
-       (and (command-chord? state) (alt-held? state) (alt-chord-f-or-l? keyval keycode state))
-       (do-format-selection! ed)
+           ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
+           ;; spanned line has leading whitespace), the way Tab always is.
+           ;; Returning 0 handed the key to GtkTextView's own handler, which
+           ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
+           ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
+           ;; lines 5744-5764).
+           (and (no-command-modifiers? state)
+                (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
+           (do (do-unindent! ed) 1)
 
-       (and (command-chord? state) (= keyval KEY-Y) (not @(:read-only? ed)))
-       (if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
-         (do (g/gtk-text-buffer-redo (:buf ed)) 1)
-         0)
+           (and (no-command-modifiers? state) (= keyval KEY-TAB))
+           (do-indent! ed)
 
-       ;; P4.T4: quick doc and jump. control-only? (not command-chord?)
-       ;; because the P4 global constraint is CONTROL-MASK only, rejecting
-       ;; META-MASK -- unlike every chord above, which treats Control and
-       ;; Meta as the same command chord. Shift+F1 checks shift-only? for
-       ;; the same reason, applied to its own Shift-based chord, so
-       ;; Cmd+Shift+F1 doesn't also match it. F12 additionally requires
-       ;; NO modifiers at all
-       ;; (no-modifiers?, stricter than no-command-modifiers? above, which
-       ;; doesn't check Shift). Each runs the fn jonquil.gtk.window
-       ;; registered (set-quick-doc-fn!/set-jump-fn!, below) and returns 1
-       ;; regardless of what that fn finds -- "acted" means the chord
-       ;; matched, not that a symbol/definition turned up.
-       (and (control-only? state) (= keyval KEY-Q))
-       (do (when-let [f @(:quick-doc-fn ed)] (f)) 1)
-
-       (and (shift-only? state) (= keyval KEY-F1))
-       (do (when-let [f @(:quick-doc-fn ed)] (f)) 1)
-
-       (and (no-modifiers? state) (= keyval KEY-F12))
-       (do (when-let [f @(:jump-fn ed)] (f)) 1)
-
-       (and (control-only? state) (= keyval KEY-B))
-       (do (when-let [f @(:jump-fn ed)] (f)) 1)
-
-       ;; P4.T7: rename. Shift+F6/F2. Shift+F6 checks shift-only? (fix
-       ;; round 1: it used to check shift-held? alone, so Cmd+Shift+F6
-       ;; also matched, the same gap Shift+F1 had above) rather than
-       ;; control-only?, since this is a Shift-based chord, not a
-       ;; Control-based one. The window keymap's F6 binding already lets
-       ;; Shift+F6 fall through to here (P4.T3's own key-order change);
-       ;; F2 has no other clause to collide with, and no-modifiers?
-       ;; already rejects Meta on its own.
-       (and (shift-only? state) (= keyval KEY-F6))
-       (do (when-let [f @(:rename-fn ed)] (f)) 1)
-
-       (and (no-modifiers? state) (= keyval KEY-F2))
-       (do (when-let [f @(:rename-fn ed)] (f)) 1)
-
-       (and (no-command-modifiers? state) (contains? open-chars keyval))
-       (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
-
-       (and (no-command-modifiers? state) (contains? close-chars keyval))
-       (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
-
-       (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
-       (apply-edit! ed (edit/backspace-pair (snapshot ed)))
-
-       ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
-       ;; spanned line has leading whitespace), the way Tab always is.
-       ;; Returning 0 handed the key to GtkTextView's own handler, which
-       ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
-       ;; deleting the selection (gtk/gtktextview.c at the 4.22.4 tag,
-       ;; lines 5744-5764).
-       (and (no-command-modifiers? state)
-            (or (= keyval KEY-ISO-LEFT-TAB) (and (= keyval KEY-TAB) (shift-held? state))))
-       (do (do-unindent! ed) 1)
-
-       (and (no-command-modifiers? state) (= keyval KEY-TAB))
-       (do-indent! ed)
-
-       :else 0))))
+           :else 0))))))
 
 (defn dispatch-key!
   "Wraps handle-key! so a throw from any dispatch clause is reported

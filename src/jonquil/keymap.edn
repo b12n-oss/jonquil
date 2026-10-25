@@ -69,4 +69,28 @@
   ;; else it goes back from a jump into a tab, and with none to go back
   ;; from answers :next, so the key passes on
   {:key "bracketleft" :mods #{:cmd} :when [:source-focused] :command :source/back}
-  {:key "bracketleft" :mods #{:cmd} :command :source/jump-back}]}
+  {:key "bracketleft" :mods #{:cmd} :command :source/jump-back}]
+ ;; jonquil.gtk.editor/handle-key!'s chords (slice S5), between plain Return
+ ;; and the typing stages (auto-pairs, Backspace, Tab), in the old cond's
+ ;; order. An edit command's 0 makes the key GTK's.
+ :editor
+ [;; Ctrl+Space, the P4 rule: Control, never Meta. Always used up, popup
+  ;; or not, so GTK never inserts the space.
+  {:key "space" :mods #{:ctrl} :not #{:meta} :command :completion/open}
+  {:keys #{"slash" "semicolon"} :mods #{:cmd} :command :edit/toggle-comment}
+  {:key "f" :mods #{:cmd :shift} :command :edit/format-all}
+  ;; on macOS Option turns F and L into other keyvals; :physical? matches
+  ;; them by their keycode (jonquil.gtk.editor/physical-key)
+  {:keys #{"f" "l"} :mods #{:cmd :alt} :physical? true :command :edit/format-selection}
+  ;; a read-only buffer has no redo, and the key goes on to the typing stages
+  {:key "y" :mods #{:cmd} :when [:writable] :command :edit/redo}
+  ;; quick doc and jump: Control and never Meta for the Control chords,
+  ;; exactly Shift for Shift+F1, nothing for F12 (P4)
+  {:key "q" :mods #{:ctrl} :not #{:meta} :command :help/quick-doc}
+  {:key "F1" :exact #{:shift} :command :help/quick-doc}
+  {:key "F12" :exact #{} :command :help/jump}
+  {:key "b" :mods #{:ctrl} :not #{:meta} :command :help/jump}
+  ;; rename: Shift+F6 reaches here because the window's F6 binding is
+  ;; :not #{:shift}; exactly Shift, so Cmd+Shift+F6 doesn't rename
+  {:key "F6" :exact #{:shift} :command :edit/rename}
+  {:key "F2" :exact #{} :command :edit/rename}]}

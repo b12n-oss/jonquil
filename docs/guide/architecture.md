@@ -74,7 +74,23 @@ these:
   keymap, as the spec keeps the editor's preedit yield, and asks the named
   condition `:rename-focused`. `window-answer` holds that stage and the
   dispatch and answers 1 or 0. It is the whole of `on-window-key` now,
-  and the oracle drives it over the full handler's transcription.
+  and the oracle drives it over the full handler's transcription. Slice
+  S5 (2026-10-25) started on the editor. Its eleven chords, Ctrl+Space
+  through F2 (completion, comment, the two formats, redo, quick doc, jump
+  and rename), are an `:editor` scope with its own `editor-commands` and
+  `editor-conditions`, dispatched from one slot in the editor's
+  `handle-key!` between plain Return and the typing clauses. Two matcher
+  forms came with it. `:exact #{...}` needs exactly that set among Shift,
+  Alt, Control and Meta, ignoring Super, for Shift+F1, Shift+F6, F12 and
+  F2. `:physical? true` lets a binding also match through dispatch's
+  `:physical` option, the key the hardware keycode names. That's the
+  macOS Cmd+Option+F/L case, where Option turns the keyval into another
+  character (`jonquil.gtk.editor/physical-key`). It is opt-in per binding,
+  so no other chord picks it up. The editor ctx holds thunks, so each
+  command reads the editor's state when it runs, and
+  `keymap_editor_oracle_test` crosses every key the clauses named with
+  three keycodes, both platforms, all 32 modifier sets and every command
+  answer.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
@@ -202,7 +218,7 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 
 - `jonquil.gtk.ffi`: the raw GTK4/GLib/GObject/pango bindings, plus the low-level GtkTextIter/mark helpers everything else builds on.
 - `jonquil.gtk.callbacks`: the `callable` macro that turns a Clojure function into a retained, `:collect-safe` foreign-callable (GTK invokes callbacks from inside its own blocking main loop, so a collected one would crash it). It also contains every callback: a throw never reaches GTK, where it would end the process, but is reported on stderr while the callback answers a safe value for its return type, or its own `:on-throw` (the editor's dirty-check timer answers 1 to keep running). Handlers people trigger directly also report on the window, the way the editor's and console's key handlers do. The namespace also holds `on-gui!`, the one function safe to call from any thread to hand a thunk to the GTK main thread.
-- `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its repaint after an edit keeps a baseline of what its tags show now (`:painted`). On a future, off the GTK thread, it computes the new plan and `paint/plan-diff` against that baseline, then applies only the changed range a chunk per main-loop turn, nearest the caret first. With no baseline it falls back to a full `paint-async!`. `dirty?` compares lengths before it copies the buffer, and `jonquil.syntax/tokenize` reuses its last result when it gets the identical string again, so a 20,000-line file stays responsive while typing. Its `handle-key!` dispatches the rest of the editor's key chords, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
+- `jonquil.gtk.editor`: the Definitions editor, a GtkTextView wired to `jonquil.paint` for live syntax highlighting and `jonquil.edit` for smart Enter. Its repaint after an edit keeps a baseline of what its tags show now (`:painted`). On a future, off the GTK thread, it computes the new plan and `paint/plan-diff` against that baseline, then applies only the changed range a chunk per main-loop turn, nearest the caret first. With no baseline it falls back to a full `paint-async!`. `dirty?` compares lengths before it copies the buffer, and `jonquil.syntax/tokenize` reuses its last result when it gets the identical string again, so a 20,000-line file stays responsive while typing. Its `handle-key!` dispatches the rest of the editor's keys: its chords through the `:editor` keymap (see `jonquil.keymap` above), the rest in its own cond, sending edit ops through `apply-op!` so each one lands as a single user action, and every handler yields during IME preedit.
 - `jonquil.gtk.find-bar`: the find and replace bar, with its own `handle-key!` and match highlighting through a `search-match` tag.
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
 - `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (all of them through `jonquil.command-registry/window-answer` and the keymap, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.

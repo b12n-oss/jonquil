@@ -12,7 +12,15 @@
   replaces behave.
 
   A binding may name a fixed :outcome (:handled or :to-gtk) instead of a
-  :command; dispatch answers it without running anything."
+  :command; dispatch answers it without running anything.
+
+  :exact #{...} (instead of :mods and :not) requires exactly that set among
+  :shift :alt :ctrl :meta, the other three up; :super is ignored, as the
+  editor's shift-only? and no-modifiers? ignored it. :physical? true lets
+  the binding also match when dispatch's :physical option, the key name of
+  the physical key pressed (or nil), is one of its keys: the macOS
+  Cmd+Option+F/L keycode fallback (jonquil.gtk.editor/physical-key), kept
+  per binding so no other chord picks it up."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -30,7 +38,8 @@
   ;; gdkkeysyms.h values for the names that aren't their own character
   {"equal" 0x03d "plus" 0x02b "minus" 0x02d
    "braceright" 0x07d "braceleft" 0x07b
-   "F3" 0xffc0 "F5" 0xffc2 "F6" 0xffc3 "Escape" 0xff1b "bracketleft" 0x05b})
+   "F3" 0xffc0 "F5" 0xffc2 "F6" 0xffc3 "Escape" 0xff1b "bracketleft" 0x05b
+   "space" 0x020 "slash" 0x02f "semicolon" 0x03b "F1" 0xffbe "F2" 0xffbf "F12" 0xffc9})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a
@@ -55,6 +64,14 @@
 
 (def ^:private outcomes #{:handled :to-gtk})
 
+(def ^:private exact-modifiers #{:shift :alt :ctrl :meta})
+
+(defn- modifiers-match? [binding state]
+  (if (contains? binding :exact)
+    (every? #(= (contains? (:exact binding) %) (held? state %)) exact-modifiers)
+    (and (every? #(held? state %) (:mods binding))
+         (not-any? #(held? state %) (:not binding)))))
+
 (defn matches?
   "True when keyval is the binding's key (or one of its keys), every :mods
   modifier is held, no :not modifier is, and every :when condition holds.
@@ -62,12 +79,15 @@
   once the key and modifiers have matched, stopping at the first false:
   the short-circuit order of the cond clauses the keymap replaces, so a
   focus check never runs for a key it couldn't concern. Without holds?
-  a binding with :when never matches."
+  a binding with :when never matches. physical is the physical key's name
+  for a :physical? binding (see the ns doc), nil when there's none."
   ([binding keyval state] (matches? binding keyval state (constantly false)))
-  ([binding keyval state holds?]
-   (and (contains? (set (map key-value (key-names binding))) keyval)
-        (every? #(held? state %) (:mods binding))
-        (not-any? #(held? state %) (:not binding))
+  ([binding keyval state holds?] (matches? binding keyval state holds? nil))
+  ([binding keyval state holds? physical]
+   (and (or (contains? (set (map key-value (key-names binding))) keyval)
+            (and (true? (:physical? binding)) (some? physical)
+                 (contains? (set (key-names binding)) physical)))
+        (modifiers-match? binding state)
         (every? #(boolean (holds? %)) (:when binding)))))
 
 (defn resolve-binding
@@ -82,16 +102,16 @@
   binding) returns for its command. :handled and :to-gtk (the key is
   GTK's, so stop here) are answers; :next, or nil for an unregistered
   command, moves on to the next matching binding. :unmatched when the
-  bindings run out."
-  [bindings keyval state {:keys [holds? run!]}]
+  bindings run out. The :physical option goes to matches?."
+  [bindings keyval state {:keys [holds? run! physical]}]
   (or (some (fn [b]
-              (when (matches? b keyval state holds?)
+              (when (matches? b keyval state holds? physical)
                 (let [o (if (contains? b :outcome) (:outcome b) (run! b))]
                   (when (contains? outcomes o) o))))
             bindings)
       :unmatched))
 
-(def ^:private binding-keys #{:key :keys :mods :not :when :command :args :outcome})
+(def ^:private binding-keys #{:key :keys :mods :not :exact :physical? :when :command :args :outcome})
 
 (defn problems
   "What's wrong with bindings, one sentence each naming the binding's
@@ -102,7 +122,7 @@
   (vec
    (for [[i b] (map-indexed vector bindings)
          :let [names (key-names b)
-               mods (concat (:mods b) (:not b))]
+               mods (concat (:mods b) (:not b) (:exact b))]
          p (cond-> []
              (and (nil? (:key b)) (nil? (:keys b))) (conj "has neither :key nor :keys")
              (and (:key b) (:keys b)) (conj "has both :key and :keys")
@@ -110,6 +130,13 @@
              (conj (str "names an unknown key " (pr-str (remove key-value names))))
              (some (complement modifiers) mods)
              (conj (str "names an unknown modifier " (pr-str (remove modifiers mods))))
+             (and (some modifiers (:exact b)) (some (complement exact-modifiers) (:exact b)))
+             (conj (str ":exact names " (pr-str (remove exact-modifiers (:exact b)))
+                        ", only :shift :alt :ctrl :meta"))
+             (and (contains? b :exact) (or (contains? b :mods) (contains? b :not)))
+             (conj "has :exact alongside :mods or :not")
+             (and (contains? b :physical?) (not (boolean? (:physical? b))))
+             (conj ":physical? isn't true or false")
              (and (contains? b :command) (contains? b :outcome))
              (conj "has both :command and :outcome")
              (and (not (contains? b :command)) (not (contains? b :outcome)))

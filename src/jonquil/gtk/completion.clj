@@ -113,8 +113,7 @@
 ;; other key table in this project): Up 0xff52, Down 0xff54, Page_Up
 ;; 0xff55, Page_Down 0xff56, Return 0xff0d, KP_Enter 0xff8d, Tab 0xff09.
 ;; Return/KP-Enter/Tab match editor.clj's own KEY-RETURN/KEY-KP-ENTER/
-;; KEY-TAB values; kept as private copies here the same way window.clj
-;; keeps its own KEY-Q/KEY-B/KEY-F1/KEY-F12 rather than reaching into
+;; KEY-TAB values; kept as private copies here rather than reaching into
 ;; editor.clj's private defs.
 (def ^:private KEY-UP 0xff52)
 (def ^:private KEY-DOWN 0xff54)

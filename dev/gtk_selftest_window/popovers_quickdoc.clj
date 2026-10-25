@@ -186,14 +186,14 @@
 ;; --- P4.T4: quick doc and jump to definition -------------------------------
 
 ;; The shared key table, this file's own private copies (measured
-;; against gdkkeysyms.h, same values editor.clj's own KEY-Q/KEY-B/KEY-F1/
-;; KEY-F12 use).
+;; against gdkkeysyms.h, the keys the editor keymap names "q", "b", "F1"
+;; and "F12").
 (def ^:private KEY-B 0x062)
 (def ^:private KEY-F1 0xffbe)
 (def ^:private KEY-F12 0xffc9)
 
 (defn row-quick-doc-core
-  "editor/handle-key! directly with Ctrl+Q (control-only?, no synthesized
+  "editor/handle-key! directly with Ctrl+Q (Control, not Meta; no synthesized
   keystroke): the popover opens at the caret and its label -- read back
   via help-popover/quick-doc-text -- carries clojure.core/map's own
   arglists."
@@ -300,7 +300,7 @@
                                {:opened opened? :still-open (popover/open? hp)}))))))
 
 (defn row-quick-doc-cmd-does-nothing
-  "0x71 with META-MASK only: control-only? rejects it (the P4 rule --
+  "0x71 with META-MASK only: the Ctrl+Q binding's :not #{:meta} rejects it (the P4 rule --
   CONTROL-MASK checked, META-MASK rejected), so the chord falls through
   unhandled and no popover opens."
   [ui]
@@ -314,7 +314,7 @@
                                {:handled handled :open (popover/open? hp)}))))))
 
 (defn row-quick-doc-cmd-shift-f1-does-nothing
-  "0xffbe (F1) with SHIFT and META together: shift-only? rejects it
+  "0xffbe (F1) with SHIFT and META together: :exact #{:shift} rejects it
   (checking shift-held? alone would treat this chord the same as plain
   Shift+F1), so the chord falls through unhandled and no popover opens."
   [ui]
@@ -328,7 +328,7 @@
                                {:handled handled :open (popover/open? hp)}))))))
 
 (defn row-quick-doc-ctrl-shift-f1-does-nothing
-  "0xffbe (F1) with SHIFT and CONTROL together: shift-only? must reject the
+  "0xffbe (F1) with SHIFT and CONTROL together: :exact #{:shift} must reject the
   Control side as it already rejects Meta (the parked P4 item: Ctrl+Shift+F1
   also triggered quick doc), so the chord falls through unhandled."
   [ui]
@@ -382,7 +382,7 @@
 (defn row-jump-top-level
   "\"(defn greet [n] n)\\n(greet 1)\", caret 22 (inside the SECOND greet,
   the usage) -- help/jump-target takes the symbol's START (P4.T1's
-  jump-target docstring), F12 (no-modifiers?) lands the caret on the
+  jump-target docstring), F12 (:exact #{}) lands the caret on the
   DEFN's own greet, offset 6."
   [ui]
   (go-row :jump-top-level support/check
@@ -397,7 +397,7 @@
 
 (defn row-jump-local-binding
   "\"(defn f [x] (let [y x] y))\", caret 23 (the LAST y, the usage inside
-  the body) -- Ctrl+B (control-only?) lands on the BINDING y inside
+  the body) -- Ctrl+B (Control, not Meta) lands on the BINDING y inside
   [y x], offset 18 (measured with the pure spike's help/jump-target)."
   [ui]
   (go-row :jump-local-binding support/check
