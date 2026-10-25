@@ -5,7 +5,9 @@
   fixture snapshots, answering {:ok? :problems :warnings :timings
   :definition}. No GTK; nothing here goes live, and a caller (the user's
   reload, Accept, a revert) swaps the registry on a pass."
-  (:require [jonquil.plugin :as p]))
+  (:require [jonquil.edit :as edit]
+            [jonquil.plugin :as p]
+            [jonquil.plugin-check :as plugin-check]))
 
 (defn- load-problem
   "One sentence for a throw while loading: with its line when the reader or
@@ -35,3 +37,110 @@
                    (not= wanted ns-now)
                    [(str "the file's namespace is " ns-now "; a plugin file's is " wanted)]
                    :else [])})))
+
+(def ^:private form-text "(defn f [x] (inc x))")
+
+(defn- fixture [text caret & [a b]]
+  {:text text :caret caret :sel-start (or a caret) :sel-end (or b caret)})
+
+(def FIXTURES
+  "The snapshots every :edit command is soaked on, [name snapshot]: the
+  spec's empty buffer, a small form with the caret at its start, middle and
+  end, a selection, and two forms (the likeliest bug: assuming one)."
+  [["empty" (fixture "" 0)]
+   ["form, caret at start" (fixture form-text 0)]
+   ["form, caret in the middle" (fixture form-text 12)]
+   ["form, caret at end" (fixture form-text (count form-text))]
+   ["selection" (fixture form-text 5 1 5)]
+   ["two forms" (fixture "(a)\n(b)" 4)]])
+
+(defn- offset? [n limit] (and (integer? n) (<= 0 n limit)))
+
+(defn edit-result-problem
+  "nil when result is nil (the command doesn't apply here) or a well-formed
+  jonquil.edit op for snapshot's text: {:edits [[start end string] ...]
+  :caret n}, edits in bounds, ascending and not overlapping, the caret (and
+  :sel, when given) inside the edited text. Otherwise one sentence."
+  [{:keys [text]} result]
+  (let [len (count text)
+        edits (when (map? result) (:edits result))]
+    (cond
+      (nil? result) nil
+      (not (map? result)) (str "returned " (pr-str result) ", not an edit op map")
+      (not (and (vector? edits)
+                (every? #(and (vector? %) (= 3 (count %)) (string? (nth % 2))) edits)))
+      ":edits isn't a vector of [start end string]"
+      (not (every? (fn [[a b]] (and (offset? a len) (offset? b len) (<= a b))) edits))
+      (str "an edit is outside the text (0.." len ")")
+      (not (every? (fn [[[_ e1] [s2]]] (<= e1 s2)) (partition 2 1 edits)))
+      "its edits overlap or aren't in ascending order"
+      :else
+      (let [new-len (count (edit/apply-edits text edits))
+            {:keys [caret sel]} result]
+        (cond
+          (not (offset? caret new-len)) (str ":caret " (pr-str caret) " isn't inside the edited text (0.." new-len ")")
+          (and (some? sel) (not (and (vector? sel) (= 2 (count sel)) (every? #(offset? % new-len) sel))))
+          (str ":sel " (pr-str sel) " isn't two offsets inside the edited text")
+          :else nil)))))
+
+(defn- throw-message [e]
+  (or (some-> e .getCause ex-message) (ex-message e) (str e)))
+
+(defn soak
+  "Each :edit command of definition on each of FIXTURES, in a future, given
+  soak-ms (default 2000) to answer: {:problems [...] :timings {command-id
+  max-ms}}. A throw, a bad result shape or no answer in time is a problem
+  naming the command and the fixture. A command still running when its
+  time is up keeps running (future-cancel can't stop CPU-bound code, which
+  is why an agent's proposal is soaked in a separate process). :run
+  commands aren't invoked. Never throws."
+  [{:keys [definition soak-ms] :or {soak-ms 2000}}]
+  (reduce
+   (fn [acc {:keys [id edit]}]
+     (reduce
+      (fn [acc [fname snap]]
+        (let [t0 (System/nanoTime)
+              f (future (edit snap))
+              v (try (deref f soak-ms ::timeout) (catch Throwable e {::threw e}))
+              ms (quot (- (System/nanoTime) t0) 1000000)
+              acc (update-in acc [:timings id] (fnil max 0) ms)
+              label (str "command " (pr-str id) " on " fname)]
+          (cond
+            (= ::timeout v)
+            (do (future-cancel f)
+                (update acc :problems conj
+                        (str label ": still running after " soak-ms
+                             " ms; it may keep running in this process until Jonquil quits")))
+            (and (map? v) (contains? v ::threw))
+            (update acc :problems conj (str label " threw: " (throw-message (::threw v))))
+            :else
+            (if-let [why (edit-result-problem snap v)]
+              (update acc :problems conj (str label ": " why))
+              acc))))
+      acc FIXTURES))
+   {:problems [] :timings {}}
+   (filter #(fn? (:edit %)) (:commands definition))))
+
+(defn run-protocol
+  "The one function every change to the live plugin set goes through:
+  {:ok? :problems :warnings :timings :definition}. :in-process loads
+  source (load-candidate), validates it against request
+  (jonquil.plugin-check/validate, with the definitions and file-id), and
+  soaks it only when both found nothing wrong; :definition is the plugin's
+  definition on a pass. :isolated is the agent's path, a throwaway Jolt
+  process, built in a later slice. Blocks for up to commands x fixtures x
+  soak-ms, so it's called off the GTK thread."
+  [{:keys [where source file-id request soak-ms]}]
+  (case where
+    :in-process
+    (let [{:keys [definitions problems]} (load-candidate {:source source :file-id file-id})
+          checked (when (empty? problems)
+                    (plugin-check/validate (assoc request :definitions definitions :file-id file-id)))
+          problems (into problems (:problems checked))
+          soaked (when (empty? problems)
+                   (soak (cond-> {:definition (first definitions)} soak-ms (assoc :soak-ms soak-ms))))
+          problems (into problems (:problems soaked))]
+      {:ok? (empty? problems) :problems problems :warnings (vec (:warnings checked))
+       :timings (or (:timings soaked) {})
+       :definition (when (empty? problems) (first definitions))})
+    {:ok? false :problems ["the isolated check isn't built yet"] :warnings [] :timings {} :definition nil}))
