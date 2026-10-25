@@ -33,6 +33,7 @@
             [gtk-selftest-window.find-replace :as find-replace]
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]
+            [gtk-selftest-window.palette :as palette-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.prompt :as prompt]
             [gtk-selftest-window.rename-menus :as rename-menus]
@@ -224,6 +225,14 @@
    rename-menus/row-menu-actions-console-complete
    rename-menus/row-menu-action-throw-is-contained
    rename-menus/row-menu-items-all-resolve
+   palette-rows/row-palette-chord-opens
+   palette-rows/row-palette-filters
+   palette-rows/row-palette-runs-editor-command
+   palette-rows/row-palette-runs-popover-command
+   palette-rows/row-palette-runs-window-command
+   palette-rows/row-palette-escape-closes
+   palette-rows/row-palette-no-match
+   palette-rows/row-palette-throw-contained
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

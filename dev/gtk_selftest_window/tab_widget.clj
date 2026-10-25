@@ -30,7 +30,7 @@
 
 (defn row-tab-widget-builds
   "A tab's editor holds its text, carries the jonquil-code class, takes a
-  label, and owns exactly four popovers."
+  label, and owns exactly five popovers (the palette is the fifth, slice S8)."
   [_ui]
   (go-row :tab-widget-builds support/check
     (on-gtk (let [t (make)
@@ -41,7 +41,7 @@
                      :popovers (count (tab/popovers t))
                      :id (:id t)}]
               (support/check :tab-widget-builds
-                             (= {:text "(ns x.y)\n(+ 1 2)\n" :label "x.clj" :class 1 :popovers 4 :id 99} v)
+                             (= {:text "(ns x.y)\n(+ 1 2)\n" :label "x.clj" :class 1 :popovers 5 :id 99} v)
                              v)))))
 
 (defn row-tab-widget-dispose-unparents
