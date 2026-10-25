@@ -101,7 +101,15 @@ these:
   from above the chords to the head of those stages, which is safe because
   no shipped binding can match a plain Return. A second oracle in the same test
   file proves it, comparing the whole of `handle-key!` against its old cond
-  over every stage answer.
+  over every stage answer. Slice S7 (2026-10-25) moved the context menus
+  onto the registry. `editor-menu` and `console-menu` list each item's
+  label, its action name and the command it runs, and `menu-items` turns
+  a menu and a ctx into the items `install-context-menu!` takes, so an item
+  and its chord run one command. Indent, Unindent and the console's
+  Complete became commands with no binding. A menu oracle compares both
+  menus with the literal vectors they replaced. The file tree's menu stays
+  a file-operations popover, since its items act on a path picked when it
+  opens and aren't commands anywhere else.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
@@ -306,7 +314,7 @@ The three popover namespaces share `jonquil.gtk.popover` as their base. Its most
 
 `jonquil.gtk.help-popover` builds the quick-doc popover (autohide off, so it never steals keys from the view, per `jonquil.gtk.popover`'s own autohide note) and the rename popover (autohide on, since its entry needs to receive typing; GTK itself closes it on Escape or a click outside, and a `"closed"` signal handler keeps the popover's `:open?` bit in sync when that happens with no call into this namespace at all). `jonquil.gtk.completion` is one popover per view, a candidate list over a doc preview, built once per view and reused for the rest of the session; `open!`, `refine!` and `commit!` all read `(popover/open? c)` rather than trusting the state atom directly, because a close driven from outside this namespace (the window's registry-wide `close-popovers!`) only ever calls the generic `popover/hide!` and has no idea this namespace's own state atom exists.
 
-The editor's and the console's context menus (Shift+F10, or a right click) come from `gtk_text_view_set_extra_menu`, which appends to GTK's own Cut/Copy/Paste menu rather than replacing it. `install-context-menu!` builds a `GMenu` alongside a matching `GSimpleActionGroup`, inserted on the view under the `"p4"` action-group prefix, with one action per item wired to call the exact same function its keyboard chord calls. Every action's own `"activate"` callback runs inside `try`/`catch`: an uncaught throw from a `GSimpleAction` callback kills the process outright, so this is the one place every menu item, current and future, is guarded at once.
+The editor's and the console's context menus (Shift+F10, or a right click) come from `gtk_text_view_set_extra_menu`, which appends to GTK's own Cut/Copy/Paste menu rather than replacing it. `install-context-menu!` builds a `GMenu` alongside a matching `GSimpleActionGroup`, inserted on the view under the `"p4"` action-group prefix, with one action per item. The items come from `jonquil.command-registry/menu-items`, so each one runs the same command its keyboard chord runs. Every action's own `"activate"` callback runs inside `try`/`catch`: an uncaught throw from a `GSimpleAction` callback kills the process outright, so this is the one place every menu item, current and future, is guarded at once.
 
 None of these ask a server on the GTK thread. An evaluator whose help asks one implements `ev/ServerHelp` (every attach evaluator, out-of-process Jolt and jank), and the window asks it through `ev/ask-help!`: the request runs on a worker with `ev/*help-timeout-ms*` bound to 3000 ms in place of the evaluator's own 300 ms, and the GTK thread waits only `ev/help-grace-ms` (25 ms) for it. An answer in that time is used exactly as the synchronous path always did, so a local server behaves as before, single-candidate commit included. A later one goes to a callback that hands it to `on-gui!`. For completion that's `arrived!`: the popup opened at once on `offline-candidates` (`help/waiting-state`, which stays open with no names and is never single), and the late list merges in through `help/arrive`, keeping the selected name, but only while it's still the newest request (`:gen`), from the window's current evaluator, for an open popup whose editor still exists and whose text and caret haven't moved. The doc preview does the same under its own `:doc-gen`. Quick doc, jump and the source panel's jump go through `jonquil.gtk.window/ask-lookup!`, which shows "Looking up X..." and acts on a late answer only while the caret is still on that symbol in a live, active tab (or a showing source panel), placed against the text as it is then. Jump checks the buffer first (`help/jump-target` with no doc), so a definition in the file never waits. A request that a newer one superseded before it went out is skipped, and a throw inside one comes back as `{::error message}` (`ev/help-error`) so the window can say so. In-process Jolt doesn't implement `ServerHelp` and is asked directly, as before.
 

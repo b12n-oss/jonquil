@@ -92,12 +92,14 @@
   (fn [ctx _args] ((get ctx k)) :handled))
 
 (def editor-commands
-  "The editor's chords (slice S5). ctx is the per-key map
+  "The editor's chords (slices S5, S6), plus the context menu's unbound
+  Indent and Unindent (S7). ctx is the per-key map
   jonquil.gtk.editor/handle-key! builds, each entry a thunk that reads the
   editor's state when it runs. An edit answers what the old clause did: its
   1 is :handled and its 0 (nothing changed, or nothing to redo) is GTK's.
-  The rest are :handled once the chord matches, whatever their fn finds,
-  and with no fn registered, so GTK never inserts the key."
+  The rest are :handled once the chord matches or the item is picked,
+  whatever their fn finds, and with no fn registered, so GTK never
+  inserts the key."
   {:completion/open {:doc "Open completion, or commit its only candidate." :scope :editor
                      :run (act :complete!)}
    :edit/toggle-comment {:doc "Comment or uncomment the lines." :scope :editor :run (edit :toggle-comment!)}
