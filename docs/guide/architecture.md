@@ -41,7 +41,7 @@ these:
   dispatches them through one **slot** clause in `on-window-key`'s cond,
   first placed where the plain chords used to be, so every clause above
   and below kept its precedence. Later slices grow the slot upward until the
-  cond is gone. `keymap_window_oracle_test` checks the keymap against a
+  cond is gone. A differential oracle checked the keymap against a
   transcription of the replaced clauses, for every key they named and all
   32 modifier combinations. Slice S2 (2026-10-24) added `:when`: a vector
   of named conditions, all of which must hold. `resolve-binding` asks them
@@ -53,7 +53,7 @@ these:
   the registry never touches GTK. S2 moved F3 and Cmd/Ctrl+G (while the
   find bar can navigate), plain F6 and the source panel's
   Cmd/Ctrl+Shift+O into the slot, which then sat right below the bare
-  Escape clause. The oracle crosses every key and modifier set with each
+  Escape clause. Its oracle crossed every key and modifier set with each
   combination of the three states those clauses read. Slice S3
   (2026-10-24) gave commands an outcome: `:handled` (the key is used up),
   `:to-gtk` (stop here and let GTK have it) or `:next` (not mine after
@@ -65,7 +65,7 @@ these:
   composing, is `:to-gtk` and never reaches Stop), popovers (`:next` when
   none was open), the inspector, the source panel, the tree menu, the
   tree, Stop while evaluating, and a bare `:to-gtk`. The slot then sat
-  right after F5, and its oracle crosses Escape with all eight states the
+  right after F5, and its oracle crossed Escape with all eight states the
   chain reads. Slice S4 (2026-10-24) retired the cond. F5 became the
   first binding and the two Cmd/Ctrl+[ back clauses the last, the jump
   back answering `:next` when there's nothing to go back from. The rename
@@ -75,7 +75,7 @@ these:
   keymap, as the spec keeps the editor's preedit yield, and asks the named
   condition `:rename-focused`. `window-answer` holds that stage and the
   dispatch and answers 1 or 0. It is the whole of `on-window-key` now,
-  and the oracle drives it over the full handler's transcription. Slice
+  and the oracle drove it over the full handler's transcription. Slice
   S5 (2026-10-25) started on the editor. Its eleven chords, Ctrl+Space
   through F2 (completion, comment, the two formats, redo, quick doc, jump
   and rename), are an `:editor` scope with its own `editor-commands` and
@@ -88,10 +88,9 @@ these:
   macOS Cmd+Option+F/L case, where Option turns the keyval into another
   character (`jonquil.gtk.editor/physical-key`). It is opt-in per binding,
   so no other chord picks it up. The editor ctx holds thunks, so each
-  command reads the editor's state when it runs, and
-  `keymap_editor_oracle_test` crosses every key the clauses named with
-  three keycodes, both platforms, all 32 modifier sets and every command
-  answer. Slice S6 (2026-10-25) finished the editor, and its cond is gone.
+  command reads the editor's state when it runs, and the slice's oracle
+  crossed every key the clauses named with three keycodes, both
+  platforms, all 32 modifier sets and every command answer. Slice S6 (2026-10-25) finished the editor, and its cond is gone.
   Cmd/Ctrl+Enter (Run Form) is the first `:editor` binding, Return or
   KP_Enter with `:cmd`, always used up so no newline goes in.
   `editor-answer` runs the spec's pipeline and answers 1 or 0: the preedit
@@ -100,14 +99,14 @@ these:
   unmatched key reaches the typing stages (smart enter, auto-pairs,
   Backspace, Tab), the editor's private `typing-key!`. Plain Return moved
   from above the chords to the head of those stages, which is safe because
-  no shipped binding can match a plain Return. A second oracle in the same test
-  file proves it, comparing the whole of `handle-key!` against its old cond
-  over every stage answer. Slice S7 (2026-10-25) moved the context menus
+  no shipped binding can match a plain Return. A second oracle proved it,
+  comparing the whole of `handle-key!` against its old cond over every
+  stage answer. Slice S7 (2026-10-25) moved the context menus
   onto the registry. `editor-menu` and `console-menu` list each item's
   label, its action name and the command it runs, and `menu-items` turns
   a menu and a ctx into the items `install-context-menu!` takes, so an item
   and its chord run one command. Indent, Unindent and the console's
-  Complete became commands with no binding. A menu oracle compares both
+  Complete became commands with no binding. A menu oracle compared both
   menus with the literal vectors they replaced. The file tree's menu stays
   a file-operations popover, since its items act on a path picked when it
   opens and aren't commands anywhere else. Slice S8 (2026-10-25) added
@@ -118,7 +117,13 @@ these:
   ctx of its own scope, and the two per-key ctxs are named functions now
   (`window-key-ctx`, `editor/key-ctx`), so a palette run builds the same
   ctx its key would. Commands that only work inside the key chain that
-  guards them carry `:palette? false` and stay out of the list.
+  guards them carry `:palette? false` and stay out of the list. Slice S9
+  (2026-10-25) closed Part 1 by deleting the oracles, as the spec plans,
+  once every slice had merged with its oracle green and every self-test
+  row unchanged. The shipped keymap is now pinned by `keymap_shipped_test`
+  (every binding names a registered command and condition, no editor
+  binding takes a plain Return, Run Form's chords, the Escape order and
+  the palette chord) and by the window self-test rows.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
