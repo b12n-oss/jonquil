@@ -745,6 +745,19 @@ Replace) and GTK's own Cut, Copy, and Paste. The same menu over the
 console's input line carries Complete and Clear Last Output next to
 GTK's own entries. Every item runs the exact function its key would.
 
+### The command palette
+
+Cmd/Ctrl+Shift+P opens a list of Jonquil's commands under the caret.
+Each row shows what the command does, the keys that run it when it has
+any, and where it comes from (built-in, for now). Typing narrows the
+list to the rows that contain every word you type, matched against the
+description and the command's id, so "toggle comment" finds Toggle
+Comment even though its description says "Comment or uncomment the
+lines." Up and Down move the selection, and Return or a click runs it on
+the tab you opened the palette from, exactly as its key would. Escape
+closes it. A few commands that only make sense inside their own key,
+such as the steps Escape walks through or "go to tab 3", aren't listed.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space by default, under System Settings > Keyboard >
@@ -1956,6 +1969,7 @@ The keys, grouped by what they're for. Each group opens on a click.
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
 | Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, auto) |
+| Cmd/Ctrl+Shift+P | anywhere in the window | Open the command palette |
 
 </details>
 

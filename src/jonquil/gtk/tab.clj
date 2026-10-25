@@ -14,6 +14,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
+            [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]))
 
 (defn make-tab!
@@ -49,13 +50,14 @@
      :full-doc-pop (help-popover/make-full-doc-popover view)
      :rename-pop (help-popover/make-rename-popover view)
      :completion (completion/make-completion view (assoc completion-opts :ed ed))
+     :palette (palette/make-palette view)
      :root root :label-box label-box :label label :close-btn close-btn
      :path (atom path) :project (atom nil) :discard-warned? (atom false) :last-shown (atom nil)}))
 
 (defn popovers
-  "The tab's four popovers, each a jonquil.gtk.popover map."
+  "The tab's five popovers, each a jonquil.gtk.popover map."
   [tab]
-  [(:help-pop tab) (:full-doc-pop tab) (:rename-pop tab) (:completion tab)])
+  [(:help-pop tab) (:full-doc-pop tab) (:rename-pop tab) (:completion tab) (:palette tab)])
 
 (defn dispose-popovers!
   "Hides each open popover, then unparents every one whose parent isn't

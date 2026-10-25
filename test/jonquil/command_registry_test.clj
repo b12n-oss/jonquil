@@ -5,7 +5,8 @@
 (def ^:private ctx-fns
   [:run-fn :open-fn :save-as-fn :save-fn :close-fn :toggle-tree-fn :run-selection-fn
    :clear-last-fn :clear-console-fn :open-find-fn :open-replace-fn :zoom-fn
-   :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn])
+   :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn
+   :open-palette-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -20,7 +21,8 @@
    :view/zoom-in [:zoom-fn :in] :view/zoom-out [:zoom-fn :out] :view/zoom-reset [:zoom-fn :reset]
    :tab/new [:new-tab-fn] :view/cycle-theme [:theme-cycle-fn]
    :inspect/form [:inspect-form-fn] :inspect/last [:inspect-last-fn]
-   :tab/next [:step-tab-fn 1] :tab/previous [:step-tab-fn -1]})
+   :tab/next [:step-tab-fn 1] :tab/previous [:step-tab-fn -1]
+   :palette/open [:open-palette-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)
@@ -28,7 +30,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the S1-S4 commands")
+      "exactly the S1-S4 commands and S8's palette")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))
@@ -236,3 +238,22 @@
       (is (contains? registry/commands command) (str label " names " command)))
     (is (apply distinct? (map :label menu)))
     (is (apply distinct? (map :action menu)))))
+
+;; --- slice S8: the palette -------------------------------------------------
+
+(deftest palette-hidden-commands-test
+  (is (= #{:find/bar-key :popover/close-all :source/open-here :source/close :source/back
+           :source/jump-back :tree/close-menu :tree/leave :tab/select :palette/open :console/complete}
+         (set (keep (fn [[id c]] (when (false? (:palette? c)) id)) registry/commands)))))
+
+(deftest run-command-in-test
+  (let [calls (atom [])
+        rec (fn [scope k] (fn [& _] (swap! calls conj [scope k]) nil))
+        ctxs {:window {:run-fn (rec :window :run-fn)}
+              :editor {:indent! (rec :editor :indent!)}
+              :console {:complete! (rec :console :complete!)}}
+        run (fn [id] (reset! calls []) [(registry/run-command-in id ctxs) @calls])]
+    (is (= [:handled [[:window :run-fn]]] (run :run/run)))
+    (is (= [:handled [[:editor :indent!]]] (run :edit/indent)))
+    (is (= [:handled [[:console :complete!]]] (run :console/complete)))
+    (is (= [nil []] (run :no/such)))))

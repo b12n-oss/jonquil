@@ -8,8 +8,8 @@
 
   Slices S1-S4 register the window's chords and S5-S6 the editor's; S7's
   context menus read the same table (editor-menu, console-menu,
-  menu-items); in later slices the palette does too, and Part 2's plugins
-  add their own."
+  menu-items), S8's command palette lists it (run-command-in), and Part 2's
+  plugins add their own."
   (:require [jonquil.keymap :as km]))
 
 (defn- call [k & args]
@@ -32,7 +32,7 @@
    :view/zoom-in {:doc "Make the text larger." :scope :window :run (call :zoom-fn :in)}
    :view/zoom-out {:doc "Make the text smaller." :scope :window :run (call :zoom-fn :out)}
    :view/zoom-reset {:doc "Reset the text size." :scope :window :run (call :zoom-fn :reset)}
-   :tab/select {:doc "Go to tab n (9 is the last tab)." :scope :window
+   :tab/select {:doc "Go to tab n (9 is the last tab)." :scope :window :palette? false
                 :run (fn [ctx args] ((:digit-tab-fn ctx) (:n args)) :handled)}
    :tab/new {:doc "Open a new tab." :scope :window :run (call :new-tab-fn)}
    :view/cycle-theme {:doc "Switch to the next theme." :scope :window :run (call :theme-cycle-fn)}
@@ -46,30 +46,35 @@
    :find/previous {:doc "Go to the previous find match." :scope :window :run (call :find-prev!)}
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
-   :source/open-here {:doc "Open the source panel's file in the window." :scope :window
+   :source/open-here {:doc "Open the source panel's file in the window." :scope :window :palette? false
                       :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}
    ;; slice S3: the Escape chain, each command answering an outcome. The
    ;; find bar's own answer is final: its 0 (an IME composing) is GTK's.
-   :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window
+   :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window :palette? false
                   :run (fn [ctx _args] (if (= 1 ((:find-bar-key! ctx))) :handled :to-gtk))}
-   :popover/close-all {:doc "Close any open popover." :scope :window
+   :popover/close-all {:doc "Close any open popover." :scope :window :palette? false
                        :run (fn [ctx _args] (if ((:close-popovers-fn ctx)) :handled :next))}
    :inspector/close {:doc "Close the inspector panel." :scope :window :run (call :close-inspector-fn)}
-   :source/close {:doc "Close the source panel." :scope :window
+   :source/close {:doc "Close the source panel." :scope :window :palette? false
                   :run (fn [ctx _args] ((:close! (:source-keys ctx))) :handled)}
-   :tree/close-menu {:doc "Close the file tree's menu." :scope :window
+   :tree/close-menu {:doc "Close the file tree's menu." :scope :window :palette? false
                      :run (fn [ctx _args] ((:close-menu! (:tree-keys ctx))) :handled)}
-   :tree/leave {:doc "Leave the file tree for the editor." :scope :window
+   :tree/leave {:doc "Leave the file tree for the editor." :scope :window :palette? false
                 :run (fn [ctx _args] ((:leave! (:tree-keys ctx))) :handled)}
    :run/stop {:doc "Stop the running evaluation." :scope :window :run (call :stop-fn)}
    ;; slice S4: the source panel's Cmd/Ctrl+[ back chord, and anywhere
    ;; else the jump back into the tab a jump left (open-in-tab!), passing
    ;; the key on when there's nothing to go back from
-   :source/back {:doc "Step the source panel's history back." :scope :window
+   :source/back {:doc "Step the source panel's history back." :scope :window :palette? false
                  :run (fn [ctx _args] ((:back! (:source-keys ctx))) :handled)}
-   :source/jump-back {:doc "Go back from the last jump into a tab." :scope :window
+   :source/jump-back {:doc "Go back from the last jump into a tab." :scope :window :palette? false
                       :run (fn [ctx _args]
-                             (if (some-> (:source-keys ctx) :jump-back! (#(%))) :handled :next))}})
+                             (if (some-> (:source-keys ctx) :jump-back! (#(%))) :handled :next))}
+   ;; slice S8. :palette? false marks a command that only works inside the
+   ;; key chain guarding it (a focus, an Escape step, a tab number), so the
+   ;; palette leaves it out
+   :palette/open {:doc "Show the command palette." :scope :window :palette? false
+                  :run (call :open-palette-fn)}})
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])
@@ -125,8 +130,10 @@
 (def console-commands
   "The console's context-menu commands (slice S7). The console's keys stay
   in jonquil.gtk.console-view, outside Part 1's two key chains."
+  ;; :palette? false: its popup takes keys only while the console has focus,
+  ;; and a palette run hands focus back to the editor (review fix I3)
   {:console/complete {:doc "Complete the symbol at the console's caret." :scope :console
-                      :run (act :complete!)}})
+                      :palette? false :run (act :complete!)}})
 
 (def commands
   "Every registered command, the three scopes merged; ids never collide
@@ -181,6 +188,15 @@
   (mapv (fn [{:keys [label action command]}]
           [label action #(run-command! commands {:command command} ctx)])
         menu))
+
+(defn run-command-in
+  "Runs the command id from commands with the ctx for its own :scope, out
+  of ctxs {:window c :editor c :console c}: the ctx that scope's key
+  handler builds, so the palette runs a command as its key would. Answers
+  the outcome; nil when id isn't registered."
+  [id ctxs]
+  (when-let [{:keys [scope]} (get commands id)]
+    (run-command! commands {:command id} (get ctxs scope))))
 
 (def ^:private KEY-ESCAPE (km/key-value "Escape"))
 

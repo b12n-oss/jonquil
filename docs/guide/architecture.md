@@ -109,7 +109,15 @@ these:
   Complete became commands with no binding. A menu oracle compares both
   menus with the literal vectors they replaced. The file tree's menu stays
   a file-operations popover, since its items act on a path picked when it
-  opens and aren't commands anywhere else.
+  opens and aren't commands anywhere else. Slice S8 (2026-10-25) added
+  the command palette, Part 1's one new piece of UI, on Cmd/Ctrl+Shift+P.
+  `jonquil.palette` builds its entries from the registry and the keymap
+  (doc line, chords per platform, source), filters them and moves the
+  selection, all pure. `run-command-in` runs a picked command with the
+  ctx of its own scope, and the two per-key ctxs are named functions now
+  (`window-key-ctx`, `editor/key-ctx`), so a palette run builds the same
+  ctx its key would. Commands that only work inside the key chain that
+  guards them carry `:palette? false` and stay out of the list.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
@@ -244,8 +252,9 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 
 P4 added three more, all built on a shared popover base:
 
-- `jonquil.gtk.popover`: a caret-anchored `GtkPopover`, shared by completion, quick doc, full doc and rename.
+- `jonquil.gtk.popover`: a caret-anchored `GtkPopover`, shared by completion, quick doc, full doc, rename and the command palette.
 - `jonquil.gtk.help-popover`: the quick-doc popover, the full-doc popover a second quick-doc press opens, and the rename popover, all built on `jonquil.gtk.popover`.
+- `jonquil.gtk.palette`: the command palette popover, one per tab, built on `jonquil.gtk.popover` like rename: an entry over a list of `jonquil.palette` entries. It hides before it runs the picked command, then gives the editor focus back once GTK has finished closing it, unless the command focused something of its own.
 - `jonquil.gtk.completion`: the completion popover, one instance per view (the editor and the console's input line), also built on `jonquil.gtk.popover`.
 
 This arc added one more, outside that popover base: `jonquil.gtk.inspector-pane`, the inspector panel widget, covered in its own section below.

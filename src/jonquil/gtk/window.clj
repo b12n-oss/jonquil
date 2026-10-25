@@ -42,6 +42,7 @@
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.tab :as tab]
@@ -58,6 +59,7 @@
             [jonquil.nrepl.jank]
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
+            [jonquil.palette :as pal-data]
             [jonquil.runtime-registry :as registry]
             [jonquil.save-path :as save-path]
             [jonquil.session]
@@ -2088,6 +2090,25 @@
 
 ;; --- window-level keys: jonquil/keymap.edn's :window, all of them --------
 
+(defn- window-key-ctx
+  "The window keymap's ctx for one key: on-window-key's own argument map ctx
+  plus the active tab's find-bar and focus reads and actions as fns, so
+  jonquil.command-registry never touches GTK itself. keyval0 and state are
+  the key's, for the find bar's Escape (:find-bar-key!). The command
+  palette builds the same ctx to run a window command as its key would
+  (slice S8)."
+  [{:keys [win active-tab pane] :as ctx} keyval0 state]
+  ;; Tabs plan P2.T2: the find bar is the active tab's.
+  (let [fb (:fb (active-tab))]
+    (assoc ctx
+           :find-bar-navigable? #(find-bar/nav-ready? fb)
+           :find-next! #(find-bar/find-next! fb)
+           :find-prev! #(find-bar/find-prev! fb)
+           :find-bar-focused? #(find-bar-focused? win fb)
+           :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
+           :inspector-focused? #(inspector-pane/focused? pane win)
+           :rename-focused? #(rename-focused? win (:rename-pop (active-tab))))))
+
 (defn- on-window-key
   "The window's capture-phase key handler. Every key goes through
   jonquil.command-registry/window-answer: one fixed stage (while the
@@ -2127,23 +2148,11 @@
   editor/dispatch-key! gives the editor: a throw from any condition or
   command is reported through set-status! and the key counts as used (1),
   instead of escaping into GTK's signal emission and killing the process."
-  [{:keys [win active-tab pane status-label] :as ctx}]
+  [{:keys [status-label] :as ctx}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
-            ;; Tabs plan P2.T2: the find bar is the active tab's.
-            fb (:fb (active-tab))
-            ;; the keymap's ctx for this key: the handler's own argument map
-            ;; plus the active tab's find-bar and focus reads and actions as
-            ;; fns, so jonquil.command-registry never touches GTK itself
-            kctx (assoc ctx
-                        :find-bar-navigable? #(find-bar/nav-ready? fb)
-                        :find-next! #(find-bar/find-next! fb)
-                        :find-prev! #(find-bar/find-prev! fb)
-                        :find-bar-focused? #(find-bar-focused? win fb)
-                        :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
-                        :inspector-focused? #(inspector-pane/focused? pane win)
-                        :rename-focused? #(rename-focused? win (:rename-pop (active-tab))))]
+            kctx (window-key-ctx ctx keyval0 state)]
         (cmd-registry/window-answer
          (:window km/shipped) keyval state
          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
@@ -2258,7 +2267,7 @@
 
 (defn- remove-tab!
   "Takes tab id out of the window, in the spike's order: out of tabs first
-  (so the switch-page remove_page fires never resolves to it), its four
+  (so the switch-page remove_page fires never resolves to it), its five
   popovers out of the registry and unparented (unparenting drops their
   last reference, and a page removed with a popover still parented spins
   GTK in a warning loop), then the page, then the neighbour selected."
@@ -2348,8 +2357,8 @@
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
-           open-find-fn open-replace-fn] :as ctx}
-   {:keys [ed fb help-pop full-doc-pop rename-pop completion last-shown path discard-warned?] :as t}]
+           open-find-fn open-replace-fn window-key-args repl-complete-fn] :as ctx}
+   {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
   (let [flash-fns (make-flash-fn ed)
         quick-doc-fn (fn [] (do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
                                             :full-doc-pop full-doc-pop :last-shown last-shown
@@ -2418,6 +2427,19 @@
     (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
     ;; P4.T7: rename is autohide ON, so GTK's own grab closes it.
     (register-popover-fn rename-pop)
+    ;; slice S8: the command palette runs a command as its key would, with
+    ;; its scope's ctx: the window's, this tab's editor's, the console's
+    (register-popover-fn palette)
+    (palette/set-handlers!
+     palette
+     {:on-run (fn [id]
+                (try
+                  (cmd-registry/run-command-in id {:window (window-key-ctx window-key-args 0 0)
+                                                   :editor (editor/key-ctx ed)
+                                                   :console {:complete! repl-complete-fn}})
+                  (catch :default e
+                    (set-status! status-label (str "; palette: " (ex-message e))))))
+      :on-error (fn [msg] (set-status! status-label msg))})
     (editor/set-rename-fn! ed rename-fn)
     (editor/set-run-form-fn! ed run-form-fn)
     (editor/set-flash-cancel-fn! ed (:cancel! flash-fns))
@@ -3186,7 +3208,15 @@
                                              :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        window-key-fn (on-window-key {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
+        ;; slice S8: the palette lists the registry's commands and opens on
+        ;; the active tab, whose palette runs the picked one
+        open-palette-fn (fn [] (palette/open! (:palette (active-tab))
+                                              (pal-data/entries {:commands cmd-registry/commands
+                                                                 :keymap km/shipped
+                                                                 :os (System/getProperty "os.name")})))
+        ;; named, so each tab's palette can build the same per-key ctx
+        ;; (window-key-ctx) a window chord gets
+        window-key-args {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
                                       :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn
@@ -3205,7 +3235,9 @@
                                                   :close-menu! (fn [] (g/gtk-popover-popdown (:popover tree-pane)))}
                                       :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
                                                               files-btn
-                                                              (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))})
+                                                              (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
+                                      :open-palette-fn open-palette-fn}
+        window-key-fn (on-window-key window-key-args)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
         stop-btn (g/gtk-button-new-with-label "Stop (Esc)")
@@ -3388,7 +3420,8 @@
                    :active-id active-id :active-tab active-tab :popovers popovers
                    :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
                    :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
-                   :session-restoring? (atom false)}
+                   :session-restoring? (atom false)
+                   :window-key-args window-key-args :repl-complete-fn repl-complete-fn}
           first-tab (add-tab! tab-ctx {:path file :text (or text "")})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
@@ -3524,7 +3557,7 @@
       ;; need another tab use :tabs* and :active-tab*. Actions that act on
       ;; "the window's file" (:open-path!, :save-to!, the simulated dialog
       ;; results, :close-choice!) use the active tab.
-      (let [{:keys [ed fb help-pop full-doc-pop rename-pop completion actions]} (first @tabs)]
+      (let [{:keys [ed fb help-pop full-doc-pop rename-pop completion palette actions]} (first @tabs)]
         (on-ready {:editor ed :console cv :session session :status-label status-label :window win
                  ;; Tabs plan P2.T2: the notebook, the tab list and the
                  ;; active tab, read live.
@@ -3675,6 +3708,10 @@
                  ;; install-context-menu!'s own docstring on why that's
                  ;; equivalent to activating the prefixed \"p4.<name>\".
                    :activate-menu-action!* activate-menu-action-fn
+                 ;; slice S8: the first tab's command palette, and what
+                 ;; Cmd/Ctrl+Shift+P calls to open it
+                   :palette palette
+                   :open-palette!* open-palette-fn
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
@@ -3849,7 +3886,9 @@
   text/rename-problem-text read it back. :activate-menu-action!*/:repl-
   activate-menu-action!* fire one of the editor's/the console's own P4
   context-menu items by its unprefixed action name, exactly as
-  install-context-menu!'s own docstring describes. :complete!* (P4.T5) is
+  install-context-menu!'s own docstring describes. :palette (slice S8) is
+  the first tab's jonquil.gtk.palette map and :open-palette!* what
+  Cmd/Ctrl+Shift+P calls to open the active tab's. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
   and jonquil.gtk.completion/state read it back.
