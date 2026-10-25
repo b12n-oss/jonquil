@@ -2123,10 +2123,10 @@
   mid-typing), then jonquil/keymap.edn's
   :window bindings, first match wins, run through the command registry.
   A command answers :handled (1), :to-gtk (0, the key is GTK's: stop) or
-  :next (try the next matching binding). keymap_shipped_test pins the
-  shipped bindings (the Escape chain's order among them) since S9 deleted
-  the differential oracle that checked this against the cond it replaced
-  (plugins PL1 S1-S4).
+  :next (try the next matching binding). keymap_shipped_test pins what
+  each window chord runs and the Escape chain's order and conditions,
+  since S9 deleted the differential oracle that checked this against the
+  cond it replaced (plugins PL1 S1-S4).
 
   M4: keyval is lowered with gdk_keyval_to_lower first. Caps Lock reports
   the UPPERCASE keyval with no Shift bit, so the chords match whatever Caps

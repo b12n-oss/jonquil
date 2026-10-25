@@ -5,10 +5,12 @@
   green. What they checked now lives here and in the window self-test
   rows: every binding names a registered command and condition (the spec's
   pin), the editor's format chords pass the window by, the palette chord,
-  and three properties only an oracle had checked, that no editor binding
-  takes a plain Return (what let smart enter move into the typing stages,
-  S6), that Run Form takes Cmd/Ctrl+Enter whatever else is held, and the
-  Escape chain's order (S3)."
+  and what only an oracle had checked: no editor binding takes a plain
+  Return (what let smart enter move into the typing stages, S6), Run Form
+  takes Cmd/Ctrl+Enter whatever else is held, the Escape chain's order and
+  conditions (S3), no window binding takes an editor chord, what each
+  window chord runs (Shift forms ahead of plain ones), F5 under any
+  modifier, and each context-menu item's command (S7)."
   (:require [clojure.test :refer [deftest is]]
             [jonquil.command-registry :as registry]
             [jonquil.keymap :as km]))
@@ -24,6 +26,8 @@
 (defn- keymap-answer [keyval state]
   (some-> (km/resolve-binding (:window km/shipped) keyval state)
           ((juxt :command #(or (:args %) {})))))
+
+(defn- key-names [b] (if (:key b) [(:key b)] (seq (:keys b))))
 
 (defn- command-chord? [state]
   (not (zero? (bit-and state (bit-or (:ctrl M) (:meta M))))))
@@ -62,7 +66,82 @@
         (str "keyval " (format "0x%x" kv) " state " st))))
 
 (deftest escape-chain-order-test
-  (is (= [:find/bar-key :popover/close-all :inspector/close :source/close
-          :tree/close-menu :tree/leave :run/stop [:outcome :to-gtk]]
-         (for [b (:window km/shipped) :when (= "Escape" (:key b))]
-           (or (:command b) [:outcome (:outcome b)])))))
+  ;; each step and the conditions guarding it, in order (slice S3)
+  (is (= [[:find/bar-key [:find-bar-focused]] [:popover/close-all nil]
+          [:inspector/close [:inspector-focused]] [:source/close [:source-focused]]
+          [:tree/close-menu [:tree-focused :tree-menu-open]] [:tree/leave [:tree-focused]]
+          [:run/stop [:evaluating]] [[:outcome :to-gtk] nil]]
+         (for [b (:window km/shipped) :when (contains? (set (key-names b)) "Escape")]
+           [(or (:command b) [:outcome (:outcome b)]) (:when b)]))))
+
+(deftest window-never-takes-an-editor-chord-test
+  ;; every chord an :editor binding takes reaches the editor: the window's
+  ;; capture-phase handler runs first, so a :window binding matching the
+  ;; same key and modifiers (Cmd+Shift+F, Format All, against Find's :not)
+  ;; would take it. Conditions all hold, the worst case for the window.
+  (doseq [b (:editor km/shipped) k (key-names b) st states
+          :let [kv (km/key-value k)]
+          :when (km/resolve-binding (:editor km/shipped) kv st (constantly true))]
+    (is (nil? (km/resolve-binding (:window km/shipped) kv st (constantly true)))
+        (str k " state " st))))
+
+(defn- window-command [kv st holds]
+  (some-> (km/resolve-binding (:window km/shipped) kv st holds)
+          ((juxt :command #(or (:args %) {})))))
+
+(deftest window-chords-test
+  ;; what each window chord runs, under Control and under Meta; the Shift
+  ;; forms sit ahead of their plain ones, which this pins pair by pair
+  (doseq [cmd [(:ctrl M) (:meta M)]
+          :let [sh (bit-or cmd (:shift M))]
+          [kv st holds expected]
+          [[0x72 cmd #{} [:run/run {}]]
+           [0x6f sh #{} [:file/open {}]]
+           [0x6f sh #{:source-focused} [:source/open-here {}]]
+           [0x6f cmd #{:source-focused} [:file/open {}]]
+           [0x73 sh #{} [:file/save-as {}]]
+           [0x73 cmd #{} [:file/save {}]]
+           [0x77 cmd #{} [:tab/close {}]]
+           [0x65 sh #{} [:tree/toggle {}]]
+           [0x65 cmd #{} [:run/selection {}]]
+           [0x6c sh #{} [:console/clear-last-output {}]]
+           [0x6c cmd #{} [:console/clear {}]]
+           [0x66 cmd #{} [:find/open {}]]
+           [0x68 cmd #{} [:find/open-replace {}]]
+           [0x67 sh #{:find-bar-navigable} [:find/previous {}]]
+           [0x67 cmd #{:find-bar-navigable} [:find/next {}]]
+           [0x67 cmd #{} nil]
+           [0x3d cmd #{} [:view/zoom-in {}]]
+           [0x2b cmd #{} [:view/zoom-in {}]]
+           [0x2d cmd #{} [:view/zoom-out {}]]
+           [0x30 cmd #{} [:view/zoom-reset {}]]
+           [0x33 cmd #{} [:tab/select {:n 3}]]
+           [0x39 cmd #{} [:tab/select {:n 9}]]
+           [0x74 cmd #{} [:tab/new {}]]
+           [0x6d sh #{} [:view/cycle-theme {}]]
+           [0x6d cmd #{} nil]
+           [0x69 sh #{} [:inspect/form {}]]
+           [0x69 cmd #{} [:inspect/last {}]]
+           [0x7d cmd #{} [:tab/next {}]]
+           [0x7b cmd #{} [:tab/previous {}]]
+           [0x5b cmd #{:source-focused} [:source/back {}]]
+           [0x5b cmd #{} [:source/jump-back {}]]]]
+    (is (= expected (window-command kv st holds))
+        (str (format "0x%x" kv) " state " st " " holds))))
+
+(deftest f5-runs-whatever-the-modifiers-test
+  (doseq [st states]
+    (is (= [:run/run {}] (window-command 0xffc2 st #{})) (str "state " st))))
+
+(deftest editor-menu-commands-test
+  ;; each context-menu item runs this command (slice S7's menu oracle
+  ;; pinned it through the fn each item called)
+  (is (= [["Run Form" :run/form] ["Jump to Definition" :help/jump] ["Rename Symbol" :edit/rename]
+          ["Quick Documentation" :help/quick-doc] ["Inspect Last Result" :inspect/last]
+          ["Inspect Form" :inspect/form] ["Complete" :completion/open]
+          ["Toggle Comment" :edit/toggle-comment] ["Format All" :edit/format-all]
+          ["Format Selection" :edit/format-selection] ["Indent" :edit/indent]
+          ["Unindent" :edit/unindent] ["Find" :find/open] ["Replace" :find/open-replace]]
+         (map (juxt :label :command) registry/editor-menu)))
+  (is (= [["Complete" :console/complete] ["Clear Last Output" :console/clear-last-output]]
+         (map (juxt :label :command) registry/console-menu))))

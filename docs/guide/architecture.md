@@ -37,11 +37,11 @@ these:
   a `(fn [ctx args])`, where ctx is the map the window's key handler
   already receives, so a command is a plain function a test can call. The
   shipped bindings live in `src/jonquil/keymap.edn`, read when Jonquil is
-  compiled, because the installed app has no source tree. The window
-  dispatches them through one **slot** clause in `on-window-key`'s cond,
-  first placed where the plain chords used to be, so every clause above
-  and below kept its precedence. Later slices grow the slot upward until the
-  cond is gone. A differential oracle checked the keymap against a
+  compiled, because the installed app has no source tree. S1 dispatched
+  them through one **slot** clause in `on-window-key`'s cond, first placed
+  where the plain chords used to be, so every clause above and below kept
+  its precedence. Later slices grew the slot upward until the cond was
+  gone. A differential oracle checked the keymap against a
   transcription of the replaced clauses, for every key they named and all
   32 modifier combinations. Slice S2 (2026-10-24) added `:when`: a vector
   of named conditions, all of which must hold. `resolve-binding` asks them
@@ -90,7 +90,8 @@ these:
   so no other chord picks it up. The editor ctx holds thunks, so each
   command reads the editor's state when it runs, and the slice's oracle
   crossed every key the clauses named with three keycodes, both
-  platforms, all 32 modifier sets and every command answer. Slice S6 (2026-10-25) finished the editor, and its cond is gone.
+  platforms, all 32 modifier sets and every command answer. Slice S6
+  (2026-10-25) finished the editor, and its cond is gone.
   Cmd/Ctrl+Enter (Run Form) is the first `:editor` binding, Return or
   KP_Enter with `:cmd`, always used up so no newline goes in.
   `editor-answer` runs the spec's pipeline and answers 1 or 0: the preedit
@@ -121,9 +122,12 @@ these:
   (2026-10-25) closed Part 1 by deleting the oracles, as the spec plans,
   once every slice had merged with its oracle green and every self-test
   row unchanged. The shipped keymap is now pinned by `keymap_shipped_test`
-  (every binding names a registered command and condition, no editor
-  binding takes a plain Return, Run Form's chords, the Escape order and
-  the palette chord) and by the window self-test rows.
+  (every binding names a registered command and condition, what each
+  window chord runs with its Shift forms ahead of the plain ones, that no
+  window binding takes an editor chord and no editor binding takes a plain
+  Return, Run Form's chords, F5, the Escape chain's order and conditions,
+  the palette chord, and each context-menu item's command) and by the
+  window self-test rows.
 - `jonquil.theme`: the four palettes as data, the five choices
   (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
   light or dark), `theme`, `next-theme` and `code-css`.
