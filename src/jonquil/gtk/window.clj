@@ -2088,6 +2088,25 @@
 
 ;; --- window-level keys: jonquil/keymap.edn's :window, all of them --------
 
+(defn- window-key-ctx
+  "The window keymap's ctx for one key: on-window-key's own argument map ctx
+  plus the active tab's find-bar and focus reads and actions as fns, so
+  jonquil.command-registry never touches GTK itself. keyval0 and state are
+  the key's, for the find bar's Escape (:find-bar-key!). The command
+  palette builds the same ctx to run a window command as its key would
+  (slice S8)."
+  [{:keys [win active-tab pane] :as ctx} keyval0 state]
+  ;; Tabs plan P2.T2: the find bar is the active tab's.
+  (let [fb (:fb (active-tab))]
+    (assoc ctx
+           :find-bar-navigable? #(find-bar/nav-ready? fb)
+           :find-next! #(find-bar/find-next! fb)
+           :find-prev! #(find-bar/find-prev! fb)
+           :find-bar-focused? #(find-bar-focused? win fb)
+           :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
+           :inspector-focused? #(inspector-pane/focused? pane win)
+           :rename-focused? #(rename-focused? win (:rename-pop (active-tab))))))
+
 (defn- on-window-key
   "The window's capture-phase key handler. Every key goes through
   jonquil.command-registry/window-answer: one fixed stage (while the
@@ -2127,23 +2146,11 @@
   editor/dispatch-key! gives the editor: a throw from any condition or
   command is reported through set-status! and the key counts as used (1),
   instead of escaping into GTK's signal emission and killing the process."
-  [{:keys [win active-tab pane status-label] :as ctx}]
+  [{:keys [status-label] :as ctx}]
   (fn [_ctl keyval0 _keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
-            ;; Tabs plan P2.T2: the find bar is the active tab's.
-            fb (:fb (active-tab))
-            ;; the keymap's ctx for this key: the handler's own argument map
-            ;; plus the active tab's find-bar and focus reads and actions as
-            ;; fns, so jonquil.command-registry never touches GTK itself
-            kctx (assoc ctx
-                        :find-bar-navigable? #(find-bar/nav-ready? fb)
-                        :find-next! #(find-bar/find-next! fb)
-                        :find-prev! #(find-bar/find-prev! fb)
-                        :find-bar-focused? #(find-bar-focused? win fb)
-                        :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
-                        :inspector-focused? #(inspector-pane/focused? pane win)
-                        :rename-focused? #(rename-focused? win (:rename-pop (active-tab))))]
+            kctx (window-key-ctx ctx keyval0 state)]
         (cmd-registry/window-answer
          (:window km/shipped) keyval state
          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)

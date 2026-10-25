@@ -784,6 +784,31 @@
 
     :else 0))
 
+(defn key-ctx
+  "The editor keymap's ctx (jonquil.command-registry/editor-commands) for
+  ed: thunks, so each reads its atom when its command runs. handle-key!
+  builds it per key, and the command palette builds the same one to run an
+  editor command as its key would (slice S8)."
+  [ed]
+  (let [cfns @(:completion-fns ed)]
+    {:complete! #(when-let [f (:complete! cfns)] (f))
+     :toggle-comment! #(do-toggle-comment! ed)
+     :format-all! #(do-format-all! ed)
+     :format-selection! #(do-format-selection! ed)
+     :redo! #(if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
+               (do (g/gtk-text-buffer-redo (:buf ed)) 1)
+               0)
+     :writable? #(not @(:read-only? ed))
+     :quick-doc! #(when-let [f @(:quick-doc-fn ed)] (f))
+     :jump! #(when-let [f @(:jump-fn ed)] (f))
+     :rename! #(when-let [f @(:rename-fn ed)] (f))
+     :preedit-active? #(deref (:preedit-active? ed))
+     :run-form! #(when-let [f @(:run-form-fn ed)] (f))
+     ;; no key reads these two (Tab is a typing stage); the context menu's
+     ;; and the palette's Indent and Unindent do (S7, S8)
+     :indent! #(do-indent! ed)
+     :unindent! #(do-unindent! ed)}))
+
 (defn handle-key!
   "The editor's key dispatch (P3.T2). Returns 1 when it handled the key,
   0 otherwise -- the key controller (on-key, below) only calls this, so
@@ -818,21 +843,7 @@
   ([ed keyval0 keycode state]
    (let [keyval (g/gdk-keyval-to-lower keyval0)
          cfns @(:completion-fns ed)
-         ;; the editor keymap's ctx (jonquil.command-registry/editor-commands):
-         ;; thunks, so each reads its atom when its command runs
-         ectx {:complete! #(when-let [f (:complete! cfns)] (f))
-               :toggle-comment! #(do-toggle-comment! ed)
-               :format-all! #(do-format-all! ed)
-               :format-selection! #(do-format-selection! ed)
-               :redo! #(if (not (zero? (g/gtk-text-buffer-get-can-redo (:buf ed))))
-                         (do (g/gtk-text-buffer-redo (:buf ed)) 1)
-                         0)
-               :writable? #(not @(:read-only? ed))
-               :quick-doc! #(when-let [f @(:quick-doc-fn ed)] (f))
-               :jump! #(when-let [f @(:jump-fn ed)] (f))
-               :rename! #(when-let [f @(:rename-fn ed)] (f))
-               :preedit-active? #(deref (:preedit-active? ed))
-               :run-form! #(when-let [f @(:run-form-fn ed)] (f))}]
+         ectx (key-ctx ed)]
      (when-not (modifier-keyval? keyval)
        (when-let [f @(:flash-cancel-fn ed)] (f)))
      (cmd-registry/editor-answer
