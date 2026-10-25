@@ -8,6 +8,7 @@
             [jonquil.mcp.listen :as listen]
             [jonquil.mcp.tools :as mcp-tools]
             [jonquil.mcp.window :as mcp-window]
+            [jonquil.plugin-loader :as plugin-loader]
             [jonquil.runtime-registry :as registry]
             [jonquil.settings :as settings]))
 
@@ -124,13 +125,14 @@
 ;; to stderr, and the server runs on its own thread once the window is up. The
 ;; GTK loop owns this thread; it ends when the EOF quit closes the window.
 (defn- serve-mcp-window!
-  [{:keys [dir]}]
+  [{:keys [dir plugins?]}]
   (let [real-out *out*
         cwd (System/getProperty "user.dir")]
     (alter-var-root #'*out* (constantly *err*))
     (login-path/start!)
     (start! {:cwd cwd
              :argv (gtk-argv [dir] cwd)
+             :plugins? plugins?
              :on-ready (fn [ui]
                          (future
                            (mcp-window/serve-window!
@@ -142,7 +144,7 @@
                                              (println line)
                                              (flush)))})))})))
 
-(defn -main [& args]
+(defn- run-main [args plugins?]
   (when-let [m (attach-args args)]
     (System/exit (attach-mcp! m)))
   ;; Asks the login shell for PATH in the background when launched from
@@ -163,9 +165,10 @@
   ;; files open as tabs and a folder roots the file tree. :cwd roots the
   ;; tree when there's no argument.
   (if-let [m (mcp-args args)]
-    (if (:window? m) (serve-mcp-window! m) (serve-mcp! m))
+    (if (:window? m) (serve-mcp-window! (assoc m :plugins? plugins?)) (serve-mcp! m))
     (let [cwd (System/getProperty "user.dir")]
-      (start! {:cwd cwd :argv (gtk-argv args cwd) :on-ready start-listener-when-enabled!})))
+      (start! {:cwd cwd :argv (gtk-argv args cwd) :plugins? plugins?
+               :on-ready start-listener-when-enabled!})))
   ;; The GTK loop has ended by the time g-application-run (inside start!)
   ;; returns, so blocking here is fine -- unlike ev/stop! (jonquil.nrepl.
   ;; evaluator), which never blocks the GTK thread. registry/stop-all!
@@ -179,3 +182,9 @@
          (binding [*out* *err*]
            (println "jonquil: stopping every runtime failed:" (ex-message e)))))
   (System/exit 0))
+
+(defn -main [& all-args]
+  ;; plugins P3: --no-plugins (or JONQUIL_NO_PLUGINS=1 from the Dock or
+  ;; Finder) starts the window with no plugins; nothing else sees the flag
+  (let [{:keys [args plugins?]} (plugin-loader/plugin-flags all-args #(System/getenv %))]
+    (run-main args plugins?)))
