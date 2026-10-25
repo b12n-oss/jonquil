@@ -2,15 +2,18 @@
   "Finds the user's plugin files and loads them one by one (plugins design,
   Part 2, \"Startup is per plugin\"): <settings-dir>/plugins/<id>.clj, in
   id order, each through jonquil.plugin-protocol/run-protocol, so one
-  broken file is skipped and named while the others load. Answers a
-  registry value and console lines; the window swaps it in. Reads files,
-  touches no GTK, and never throws."
+  broken file is skipped and named while the others load. reload answers
+  the next registry and console lines; load-step! applies one to the live
+  registry, on the window's load-agent. Reads files, touches no GTK, and
+  never throws."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.keymap :as km]
             [jonquil.plugin-check :as plugin-check]
             [jonquil.plugin-protocol :as protocol]
-            [jonquil.plugin-registry :as plugin-registry]))
+            [jonquil.plugin-registry :as plugin-registry]
+            [jonquil.settings :as settings]))
 
 (def ^:private id-pattern #"[a-z][a-z0-9-]*")
 
@@ -44,11 +47,12 @@
   [reg id]
   (update reg :plugins #(into {} (filter (fn [[k _]] (neg? (compare (name k) id)))) %)))
 
-(defn- check
-  "id's file text through the protocol against reg's earlier plugins."
-  [reg id text os]
-  (let [reg (before reg id)
-        request (plugin-check/request-from-registry
+(defn- request-for
+  "The validate request for id: the built-ins and reg's plugins sorting
+  before id."
+  [reg id os]
+  (let [reg (before reg id)]
+    (plugin-check/request-from-registry
                  {:commands (plugin-registry/all-commands reg) :conditions conditions
                   ;; the earlier plugins count like shipped bindings, so a
                   ;; chord one takes is warned about, or unreachable, for this one
@@ -56,9 +60,38 @@
                                          (:window km/shipped))
                            :editor (into (plugin-registry/bindings-with-source reg :editor)
                                          (:editor km/shipped))}
-                  :os os})]
-    (try (protocol/run-protocol {:where :in-process :source text :file-id id :request request})
-         (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]}))))
+                  :os os})))
+
+(defn- check
+  "id's file text through the protocol against reg's earlier plugins."
+  [reg id text os]
+  (try (protocol/run-protocol {:where :in-process :source text :file-id id :request (request-for reg id os)})
+       (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]})))
+
+(defn- recheck-later
+  "After a reload changed the plugins in changed (ids, installed, replaced
+  or removed), every other live plugin sorting after the first of them is
+  validated again (no load, no soak): its standing depends on the earlier
+  ones (their chords, the commands it binds). One that now fails is removed
+  and named, as a fresh start would skip it; one that passes prints its
+  warnings, which may be new. [reg' lines]."
+  [reg changed os]
+  (if (empty? changed)
+    [reg []]
+    (let [first-changed (first (sort (map name changed)))]
+      (reduce (fn [[reg lines] [k {:keys [definition]}]]
+                (let [id (name k)]
+                  (if (or (contains? changed k) (not (pos? (compare id first-changed))))
+                    [reg lines]
+                    (let [r (try (plugin-check/validate (assoc (request-for reg id os)
+                                                               :definitions [definition] :file-id id))
+                                 (catch Throwable e {:ok? false :problems [(ex-message e)]}))]
+                      (if (:ok? r)
+                        [reg (into lines (map #(str "plugin " id ": " %) (:warnings r)))]
+                        [(plugin-registry/remove-plugin reg k)
+                         (into lines (map #(str "plugin " id " removed: " %) (:problems r)))])))))
+              [reg []]
+              (sort-by key (:plugins reg))))))
 
 (defn- passed-lines [id d warnings]
   (let [edits (count (filter #(fn? (:edit %)) (:commands d)))
@@ -116,11 +149,15 @@
                         (-> acc
                             (update :registry plugin-registry/remove-plugin k)
                             (update :lines conj (str "plugin " (name k) " removed: its file is gone"))))
-                      start gone)]
-    (reduce (fn [{reg :registry lines :lines} file]
-              (let [[reg' more] (reload-one reg file os disabled)]
-                {:registry reg' :lines (into lines more)}))
-            start files)))
+                      start gone)
+        {reg :registry lines :lines} (reduce (fn [{reg :registry lines :lines} file]
+                                               (let [[reg' more] (reload-one reg file os disabled)]
+                                                 {:registry reg' :lines (into lines more)}))
+                                             start files)
+        changed (set (filter #(not (identical? (get-in registry [:plugins %]) (get-in reg [:plugins %])))
+                             (into (set (keys (:plugins registry))) (keys (:plugins reg)))))
+        [reg more] (recheck-later reg changed os)]
+    {:registry reg :lines (into lines more)}))
 
 (defn load-all
   "Loads every plugin file in dir, in id order, each on its own: {:registry
@@ -132,17 +169,32 @@
 
 (defn load-step!
   "One load against the live registry atom: reads it, reloads (opts are
-  reload's, less :registry), resets it, and answers the console lines.
-  Run on the window's plugin agent, one step at a time, so a step always
+  reload's, less :registry; with :settings-path, the plugins folder and the
+  disabled ids come from there, and a warning about :plugins in the
+  settings file is a line), resets it, and answers the console lines. Run
+  on the window's plugin agent, one step at a time, so a step always
   starts from what the previous one left. Never throws: a failure is one
   line, and live is left as it was."
-  [live opts]
+  [live {:keys [settings-path] :as opts}]
   (try
-    (let [{:keys [registry lines]} (reload (assoc opts :registry @live))]
+    (let [settings (when settings-path (settings/load-settings settings-path))
+          warn (when (some-> (:warning settings) (str/includes? ":plugins"))
+                 [(str "settings: " (:warning settings))])
+          opts (cond-> opts
+                 settings-path (assoc :dir (or (:dir opts) (plugins-dir settings-path))
+                                      :disabled (:disabled (:plugins settings))))
+          {:keys [registry lines]} (reload (assoc opts :registry @live))]
       (reset! live registry)
-      lines)
+      (into (vec warn) lines))
     (catch Throwable e
       [(str "loading plugins failed: " (or (ex-message e) (str e)))])))
+
+(defn load-agent
+  "The agent every plugin load runs on, one at a time. It keeps going after
+  a throw (error mode :continue), handing the throw to on-error, so one bad
+  step can't stop every later load."
+  [on-error]
+  (agent nil :error-mode :continue :error-handler (fn [_ e] (on-error e))))
 
 (defn plugin-file?
   "True when path is a plugin file directly in dir (<id>.clj), comparing

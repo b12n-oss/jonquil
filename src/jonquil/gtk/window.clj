@@ -334,7 +334,10 @@
                         java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
           (editor/mark-saved! ed)
           (reset! path-atom path)
-          (when-let [f @on-saved] (try (f path) (catch :default _ nil)))
+          (when-let [f @on-saved]
+            (try (f path)
+                 (catch :default e
+                   (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n")))))
           (catch :default e
             (let [f (java.io.File. ^String tmp)]
               (when (.exists f) (.delete f)))
@@ -2941,36 +2944,40 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
+(defonce ^:private plugin-console
+  ;; (fn [line]) printing one line on the window's console; activate! sets it
+  (atom (fn [line] (binding [*out* *err*] (println "jonquil:" line)))))
+
 (defonce ^:private plugin-loads
   ;; plugins P4: every plugin load (startup, Reload Plugins, a saved plugin
   ;; file) runs here, one at a time, so a load starts from what the last
-  ;; one left; the state is the last step's console lines
-  (agent nil))
+  ;; one left; the state is the last step's console lines. It keeps going
+  ;; after a throw, which is reported, so no later load is lost.
+  (plugin-loader/load-agent
+   (fn [e] (@plugin-console (str "loading plugins failed: " (or (ex-message e) (str e)))))))
 
 (defn- plugin-load!
   "Queues a plugin load on plugin-loads: jonquil.plugin-loader/load-step!
-  over the live registry, with the settings file's disabled ids, all files
-  or just only. The step's lines go to the console on the GTK thread.
-  Returns the agent, for a caller that wants to wait (await-for)."
-  [{:keys [settings-path cv only]}]
+  over the live registry, with the plugins folder and disabled ids from the
+  settings file, all files or just only. The step's lines go to the console
+  on the GTK thread. Returns the agent, for a caller that wants to wait."
+  [{:keys [settings-path only]}]
   (send-off plugin-loads
             (fn [_]
               (let [lines (plugin-loader/load-step!
                            plugin-registry/live
-                           {:dir (plugin-loader/plugins-dir settings-path)
-                            :os (System/getProperty "os.name")
-                            :disabled (:disabled (:plugins (settings/load-settings settings-path)))
-                            :only only})]
-                (on-gui! (fn [] (doseq [l lines] (cview/append! cv :system (str "; " l "\n")))))
+                           {:settings-path settings-path :os (System/getProperty "os.name") :only only})]
+                (doseq [l lines] (@plugin-console l))
                 lines))))
 
 (defn- plugin-load-now!
-  "plugin-load!, waited for up to 10 s: the step's lines. For the self-test
-  hooks, called off the GTK thread."
+  "plugin-load!, waited for up to 10 s: the step's lines, or a line saying
+  it didn't finish. For the self-test hooks, called off the GTK thread."
   [opts]
   (let [a (plugin-load! opts)]
-    (await-for 10000 a)
-    @a))
+    (if (await-for 10000 a)
+      @a
+      ["the plugin load didn't finish in 10 s"])))
 
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
@@ -3608,6 +3615,7 @@
           (live!))))
     ;; plugins P3: the user's plugins load off the GTK thread once the
     ;; window is up; keys pressed before the swap see none yet
+    (reset! plugin-console (fn [line] (on-gui! #(cview/append! cv :system (str "; " line "\n")))))
     (when-not (false? plugins?)
       (plugin-load! {:settings-path @settings-path* :cv cv})
       ;; saving a plugin file reloads that plugin

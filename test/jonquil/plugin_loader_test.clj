@@ -192,3 +192,46 @@
                 (loader/load-step! live {:dir "/nowhere" :os "Linux" :disabled #{}}))]
     (is (= ["loading plugins failed: kaboom"] lines))
     (is (= (reg/empty-registry) @live))))
+
+;; --- review fixes: later plugins re-checked; the agent; settings warning ---
+
+(deftest reload-rechecks-later-plugins-test
+  ;; I1: p4l-a moves onto p4l-z's chord; p4l-z is told its binding now
+  ;; never fires, as a fresh start would say
+  (let [d (dir-with [["p4l-a.clj" (source "p4l-a")] ["p4l-z.clj" (source "p4l-z" :key "k")]])
+        {reg :registry} (load-dir d)
+        _ (write! d "p4l-a.clj" (source "p4l-a" :key "k"))
+        r (reload d reg)]
+    (is (some #(and (str/starts-with? % "plugin p4l-z") (str/includes? % "never fires")) (:lines r))
+        (pr-str (:lines r)))))
+
+(deftest reload-removes-a-dependent-that-now-fails-test
+  ;; I2: p4l-c binds p4l-b's command; disabling p4l-b leaves p4l-c naming
+  ;; an unregistered command, so p4l-c is removed and named, not kept dead
+  (let [d (dir-with [["p4l-b.clj" (source "p4l-b")]
+                     ["p4l-c.clj" (str/replace (source "p4l-c" :key "k")
+                                               ":command :p4l-c/wrap}]})" ":command :p4l-b/wrap}]})")]])
+        {reg :registry lines :lines} (load-dir d)
+        _ (is (contains? (:plugins reg) :p4l-c) (pr-str lines))
+        r (reload d reg :disabled #{:p4l-b})]
+    (is (not (contains? (:plugins (:registry r)) :p4l-c)) (pr-str (:lines r)))
+    (is (some #(and (str/starts-with? % "plugin p4l-c removed") (str/includes? % ":p4l-b/wrap")) (:lines r))
+        (pr-str (:lines r)))))
+
+(deftest load-agent-keeps-going-after-a-throw-test
+  ;; I3: a throw in a step is reported, and later steps still run
+  (let [errors (atom [])
+        a (loader/load-agent #(swap! errors conj (ex-message %)))]
+    (send-off a (fn [_] (throw (ex-info "kaboom" {}))))
+    (send-off a (fn [_] [:ran]))
+    (is (true? (await-for 5000 a)))
+    (is (= [:ran] @a))
+    (is (= ["kaboom"] @errors))))
+
+(deftest load-step-prints-a-settings-warning-test
+  ;; I4: a malformed :plugins :disabled is named, not ignored silently
+  (let [d (temp-dirs/temp-dir! "jonquil-settings-pl-")
+        sp (str d "/settings.edn")
+        _ (spit sp "{:plugins {:disabled [:x]}}")
+        lines (loader/load-step! (atom (reg/empty-registry)) {:settings-path sp :os "Linux"})]
+    (is (some #(str/includes? % ":plugins :disabled") lines) (pr-str lines))))
