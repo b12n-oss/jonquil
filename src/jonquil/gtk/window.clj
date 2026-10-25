@@ -286,6 +286,11 @@
   [msg tmp target path]
   (-> msg (str/replace tmp path) (str/replace target path)))
 
+(defonce ^:private on-saved
+  ;; plugins P4: (fn [path]) run after a save succeeds; the window sets it
+  ;; to reload a saved plugin file
+  (atom nil))
+
 (defn- save-to!
   "Writes the editor text to path without ever truncating it in place
   (M12), and without breaking a symlink or dropping the target's
@@ -329,6 +334,7 @@
                         java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
           (editor/mark-saved! ed)
           (reset! path-atom path)
+          (when-let [f @on-saved] (try (f path) (catch :default _ nil)))
           (catch :default e
             (let [f (java.io.File. ^String tmp)]
               (when (.exists f) (.delete f)))
@@ -2935,29 +2941,36 @@
       (try (report-open-problem! (str "Couldn't open: " (ex-message e)))
            (catch :default _ nil)))))
 
-(defn- load-plugins!
-  "Loads the user's plugin files (jonquil.plugin-loader/load-all) on the
-  calling thread, which mustn't be the GTK thread (a soak can take
-  seconds), then swaps the live registry and prints each line on the
-  console on the GTK thread, waiting up to 5 s for that. Answers the lines.
-  A throw is one console line, and the live registry is left as it was."
-  [settings-path cv]
-  (let [lines (try
-                (let [{:keys [registry lines]} (plugin-loader/load-all
-                                                {:dir (plugin-loader/plugins-dir settings-path)
-                                                 :os (System/getProperty "os.name")})
-                      done (promise)]
-                  (on-gui! (fn []
-                             (reset! plugin-registry/live registry)
-                             (doseq [l lines] (cview/append! cv :system (str "; " l "\n")))
-                             (deliver done true)))
-                  (deref done 5000 nil)
-                  lines)
-                (catch Throwable e
-                  (let [l (str "loading plugins failed: " (ex-message e))]
-                    (on-gui! #(cview/append! cv :system (str "; " l "\n")))
-                    [l])))]
-    lines))
+(defonce ^:private plugin-loads
+  ;; plugins P4: every plugin load (startup, Reload Plugins, a saved plugin
+  ;; file) runs here, one at a time, so a load starts from what the last
+  ;; one left; the state is the last step's console lines
+  (agent nil))
+
+(defn- plugin-load!
+  "Queues a plugin load on plugin-loads: jonquil.plugin-loader/load-step!
+  over the live registry, with the settings file's disabled ids, all files
+  or just only. The step's lines go to the console on the GTK thread.
+  Returns the agent, for a caller that wants to wait (await-for)."
+  [{:keys [settings-path cv only]}]
+  (send-off plugin-loads
+            (fn [_]
+              (let [lines (plugin-loader/load-step!
+                           plugin-registry/live
+                           {:dir (plugin-loader/plugins-dir settings-path)
+                            :os (System/getProperty "os.name")
+                            :disabled (:disabled (:plugins (settings/load-settings settings-path)))
+                            :only only})]
+                (on-gui! (fn [] (doseq [l lines] (cview/append! cv :system (str "; " l "\n")))))
+                lines))))
+
+(defn- plugin-load-now!
+  "plugin-load!, waited for up to 10 s: the step's lines. For the self-test
+  hooks, called off the GTK thread."
+  [opts]
+  (let [a (plugin-load! opts)]
+    (await-for 10000 a)
+    @a))
 
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
@@ -3276,7 +3289,9 @@
                                       :toggle-tree-fn (fn [] (g/gtk-toggle-button-set-active
                                                               files-btn
                                                               (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
-                                      :open-palette-fn open-palette-fn}
+                                      :open-palette-fn open-palette-fn
+                                      :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
+                                                                               :cv cv}))}
         window-key-fn (on-window-key window-key-args)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
@@ -3594,7 +3609,11 @@
     ;; plugins P3: the user's plugins load off the GTK thread once the
     ;; window is up; keys pressed before the swap see none yet
     (when-not (false? plugins?)
-      (future (load-plugins! @settings-path* cv)))
+      (plugin-load! {:settings-path @settings-path* :cv cv})
+      ;; saving a plugin file reloads that plugin
+      (reset! on-saved (fn [path]
+                         (when (plugin-loader/plugin-file? (plugin-loader/plugins-dir @settings-path*) path)
+                           (plugin-load! {:settings-path @settings-path* :cv cv :only path})))))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
       ;; objects, so every existing row keeps working unchanged; rows that
@@ -3758,7 +3777,8 @@
                    :open-palette!* open-palette-fn
                  ;; plugins P3: load the plugin folder now (call it off the
                  ;; GTK thread; it returns the console lines), and the folder
-                   :load-plugins!* (fn [] (load-plugins! @settings-path* cv))
+                   :load-plugins!* (fn [] (plugin-load-now! {:settings-path @settings-path* :cv cv}))
+                   :reload-plugins!* (fn [] (plugin-load-now! {:settings-path @settings-path* :cv cv}))
                    :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
@@ -3939,7 +3959,8 @@
   the first tab's jonquil.gtk.palette map and :open-palette!* what
   Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
   P3) loads the plugin folder now, off the GTK thread, answering the
-  console lines, and :plugins-dir* names that folder. :complete!* (P4.T5) is
+  console lines, :reload-plugins!* (P4) does what Reload Plugins does and
+  waits for it, and :plugins-dir* names that folder. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
   and jonquil.gtk.completion/state read it back.

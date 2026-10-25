@@ -170,3 +170,25 @@
     (is (false? (loader/plugin-file? d (str d "/Wrap.clj"))))
     (is (false? (loader/plugin-file? d "/tmp/elsewhere/wrap.clj")))
     (is (true? (loader/plugin-file? d (str link "/wrap.clj"))))))
+
+(deftest loads-are-serial-test
+  ;; two load steps on one agent: the second reads the registry the first
+  ;; left, so an unchanged file gives it nothing to do (review focus 5)
+  (let [slow (str "(ns jonquil.plugins.p4l-slow\n  (:require [jonquil.plugin :as p]))\n(Thread/sleep 300)\n"
+                  "(p/defplugin {:id :p4l-slow :doc \"d\" :effects #{} :commands [] :bindings []})\n")
+        d (dir-with [["p4l-slow.clj" slow]])
+        live (atom (reg/empty-registry))
+        a (agent nil)
+        step (fn [_] (loader/load-step! live {:dir d :os "Linux" :disabled #{}}))]
+    (send-off a step)
+    (send-off a step)
+    (is (true? (await-for 10000 a)))
+    (is (= [] @a) "the second step found the file unchanged")
+    (is (contains? (:plugins @live) :p4l-slow))))
+
+(deftest load-step-never-throws-test
+  (let [live (atom (reg/empty-registry))
+        lines (with-redefs [loader/reload (fn [_] (throw (ex-info "kaboom" {})))]
+                (loader/load-step! live {:dir "/nowhere" :os "Linux" :disabled #{}}))]
+    (is (= ["loading plugins failed: kaboom"] lines))
+    (is (= (reg/empty-registry) @live))))

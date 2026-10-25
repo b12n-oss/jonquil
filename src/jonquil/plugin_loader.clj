@@ -130,6 +130,20 @@
   [{:keys [dir os disabled]}]
   (reload {:dir dir :os os :registry (plugin-registry/empty-registry) :disabled disabled}))
 
+(defn load-step!
+  "One load against the live registry atom: reads it, reloads (opts are
+  reload's, less :registry), resets it, and answers the console lines.
+  Run on the window's plugin agent, one step at a time, so a step always
+  starts from what the previous one left. Never throws: a failure is one
+  line, and live is left as it was."
+  [live opts]
+  (try
+    (let [{:keys [registry lines]} (reload (assoc opts :registry @live))]
+      (reset! live registry)
+      lines)
+    (catch Throwable e
+      [(str "loading plugins failed: " (or (ex-message e) (str e)))])))
+
 (defn plugin-file?
   "True when path is a plugin file directly in dir (<id>.clj), comparing
   canonical paths, so a symlinked folder counts."
