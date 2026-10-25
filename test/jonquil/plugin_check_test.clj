@@ -167,6 +167,13 @@
       (is (:ok? r) (pr-str b r))
       (is (mentions? r :warnings shadowed) (pr-str b r)))))
 
+(deftest guarded-then-unconditional-is-unreachable-test
+  ;; Cmd+Shift+O: Open Here while the source panel has focus, else Open
+  ;; (Shift isn't in its :not), so the window takes it whichever way
+  (let [r (bind {:key "o" :mods #{:cmd :shift} :command :wrap-when/wrap})]
+    (is (one-problem r) (pr-str r))
+    (is (mentions? r :problems "can never fire"))))
+
 (deftest malformed-bindings-never-throw-test
   (doseq [b [{:key "j" :mods :cmd :command :wrap-when/wrap}
              {:key "j" :mods 5 :command :wrap-when/wrap}
@@ -181,7 +188,7 @@
       (is (false? (:ok? r))))))
 
 (deftest request-conditions-as-any-collection-test
-  (doseq [cs [nil [] [:writable]]]
+  (doseq [cs [nil [] [:writable] :x]]
     (let [r (try (pc/validate (assoc request :conditions cs :file-id "wrap-when"
                                       :definitions [(assoc both :bindings [{:key "j" :mods #{:cmd :alt} :when [:writable]
                                                                             :command :wrap-when/wrap}])]))

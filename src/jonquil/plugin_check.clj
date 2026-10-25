@@ -3,7 +3,7 @@
   step): one plugin file's definitions against a description of Jonquil,
   answered as {:ok? :problems :warnings}, each problem or warning one
   sentence naming the item. Pure, and its request is plain data (the
-  registered commands as {id {:scope s}}, the condition ids, the shipped
+  registered commands as {id {:scope s :passes? b}}, the condition ids, the shipped
   keymap, the OS name), so the isolated check can send the same request to
   a throwaway Jolt as EDN and run this same code there. Malformed input
   gets a sentence, never a throw."
@@ -162,20 +162,30 @@
 
 (defn- window-take
   "How the shipped window keymap treats key kv under state st, walking its
-  matching bindings in order as jonquil.keymap/dispatch does:
-  [:always cmd] when an unconditional binding whose command never hands
-  the key on takes it before anything could let it through; [:sometimes
-  cmd] when the first match is guarded (:when) or can hand it on
-  (registered :passes?); nil when no binding takes it or the walk hands it
-  to GTK (a fixed :to-gtk), so the editor gets it."
+  matching bindings in order as jonquil.keymap/dispatch does. The key can
+  reach the editor only if the walk runs out, ends at a fixed :to-gtk, or
+  passes a command that can hand it on (registered :passes?, answering
+  :next or :to-gtk); a :when guard alone is no way out, since the walk then
+  goes on to the next match. Answers [:always cmd] when the key has no way
+  out (an unconditional take with no escape before it), [:sometimes cmd]
+  when the window takes it in some states only, cmd the first window
+  command that can; nil when no window binding ever takes it."
   [window kv st registered]
-  (loop [[b & more] (filter #(km/matches? % kv st (constantly true)) window) first-cmd nil]
-    (cond
-      (nil? b) (when first-cmd [:sometimes first-cmd])
-      (:outcome b) (when first-cmd [:sometimes first-cmd])
-      (and (empty? (:when b)) (not (:passes? (get registered (:command b)))))
-      [(if first-cmd :sometimes :always) (or first-cmd (:command b))]
-      :else (recur more (or first-cmd (:command b))))))
+  (loop [[b & more] (filter #(km/matches? % kv st (constantly true)) window)
+         first-cmd nil escape? false]
+    (let [guarded? (seq (:when b))
+          passes? (:passes? (get registered (:command b)))]
+      (cond
+        (nil? b) (when first-cmd [:sometimes first-cmd])
+        (= :to-gtk (:outcome b))
+        (if guarded?
+          (recur more first-cmd true)
+          (when first-cmd [:sometimes first-cmd]))
+        (or guarded? passes?)
+        (recur more (or first-cmd (:command b) :outcome/handled) (or escape? (boolean passes?)))
+        :else
+        (let [cmd (or first-cmd (:command b) :outcome/handled)]
+          [(if escape? :sometimes :always) cmd])))))
 
 (defn- binding-rules
   "Typing keys and unreachable as problems, shadows as warnings, for
@@ -226,7 +236,7 @@
       (not (vector? bs)) {:problems [":bindings isn't a vector"] :warnings []}
       :else
       (reduce (fn [acc [i b]]
-                (let [ps (when (map? b) (km/problems [b] ids (set conditions)))]
+                (let [ps (when (map? b) (km/problems [b] ids (set (when (coll? conditions) conditions))))]
                   (cond
                     (not (map? b)) (update acc :problems conj (str "binding " i " isn't a map"))
                     (seq ps) (update acc :problems into
@@ -253,7 +263,7 @@
 (defn validate
   "One plugin file's {:ok? :problems :warnings}. definitions is what the
   file's defplugin calls recorded; file-id its name without .clj;
-  registered {command-id {:scope s}}; conditions the condition ids; keymap
+  registered {command-id {:scope s :passes? b}}; conditions the condition ids; keymap
   the shipped {:window [...] :editor [...]}; os the OS name, for chords in
   messages."
   [{:keys [definitions file-id] :as request}]
