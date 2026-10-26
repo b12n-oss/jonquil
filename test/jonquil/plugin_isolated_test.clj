@@ -1,11 +1,15 @@
 (ns jonquil.plugin-isolated-test
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is use-fixtures]]
             [jonquil.plugin-checker :as checker]
             [jonquil.plugin-isolated :as isolated]
             [jonquil.plugin-loader :as loader]
-            [jonquil.plugin-registry :as reg]))
+            [jonquil.plugin-registry :as reg]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (deftest request-text-round-trips-test
   (let [req (#'loader/request-for (reg/empty-registry) "cw" "Linux")]
@@ -17,7 +21,11 @@
          (set (keys (isolated/scrub-env {"PATH" "p" "HOME" "h" "GITHUB_TOKEN" "t"
                                          "AWS_SECRET_ACCESS_KEY" "s" "OPENAI_API_KEY" "k"
                                          "my_password" "x" "SSH_AUTH_SOCK" "a"
-                                         "JAVA_HOME" "j" "KEYBOARD" "kb"}))))))
+                                         "JAVA_HOME" "j" "KEYBOARD" "kb"})))))
+  (is (= {"PATH" "/bin"}
+         (isolated/scrub-env {"PATH" "/bin" "AWS_ACCESS_KEY_ID" "a" "GITHUB_PAT" "b" "DB_PASS" "c"
+                              "OPENAI_APIKEY" "d" "GPG_PASSPHRASE" "e" "MY_PRIVATE_THING" "f"})))
+  (is (contains? (isolated/scrub-env {"PATHS" "x"}) "PATHS") "_PAT is a suffix, not a substring"))
 
 (def ^:private good {:ok? true :problems [] :warnings ["w"] :timings {:cw/wrap 3}
                      :plugin {:id :cw :doc "d" :effects #{} :commands [] :bindings [] :hooks []}})
@@ -74,3 +82,18 @@
     (is (str/starts-with? (one-problem (parse (checker/result-text v) 0))
                           "the check printed a result that isn't one: ")
         (pr-str v))))
+
+(deftest parse-overrun-names-the-deadline-test
+  (is (= ["the check didn't finish in 3 s, so it was stopped"]
+         (:problems (isolated/parse-result {:out "" :exit 143 :timed-out? true :deadline-ms 3000})))))
+
+(deftest read-output-test
+  (let [d (temp-dirs/temp-dir! "jonquil-isolated-")
+        f (io/file d "check.log")]
+    (spit f "short")
+    (is (= "short" (isolated/read-output (.getPath f))))
+    (spit f (str (apply str (repeat isolated/OUTPUT-MAX-BYTES "x")) "TAIL"))
+    (let [s (isolated/read-output (.getPath f))]
+      (is (= isolated/OUTPUT-MAX-BYTES (count s)))
+      (is (str/ends-with? s "TAIL")))
+    (is (= "" (isolated/read-output (.getPath (io/file d "missing.log")))))))

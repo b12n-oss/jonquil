@@ -22,13 +22,16 @@
   (pr-str {:request request :file-id file-id :load-ms (or load-ms 10000) :soak-ms (or soak-ms 2000)}))
 
 (def ^:private credential-words
-  ["TOKEN" "SECRET" "PASSWORD" "PASSWD" "CREDENTIAL" "AUTH" "COOKIE" "SESSION"])
+  ["TOKEN" "SECRET" "PASSWORD" "PASSWD" "PASSPHRASE" "CREDENTIAL" "AUTH" "COOKIE" "SESSION"
+   "APIKEY" "ACCESS_KEY" "PRIVATE"])
+
+(def ^:private credential-suffixes ["_KEY" "_PASS" "_PAT"])
 
 (defn- credential-name? [n]
   (let [u (str/upper-case n)]
     (boolean (or (some #(str/includes? u %) credential-words)
                  (= "KEY" u)
-                 (str/ends-with? u "_KEY")))))
+                 (some #(str/ends-with? u %) credential-suffixes)))))
 
 (defn scrub-env
   "env (name -> value) without the variables whose names look like
@@ -73,14 +76,35 @@
          (and (empty? (:problems v)) (summary? (:plugin v)))
          (nil? (:plugin v)))))
 
+(def OUTPUT-MAX-BYTES
+  ;; estimate: P8's request measured 6209 chars and a result is smaller, so
+  ;; this is room for about 150; a candidate printing in a loop until the
+  ;; deadline can write far more, and only the last marker pair matters
+  (* 1024 1024))
+
+(defn read-output
+  "The text of path's last OUTPUT-MAX-BYTES bytes (all of it when shorter),
+  or \"\" when it can't be read. A character cut at the start is before any
+  marker, so it doesn't matter. Never throws."
+  [path]
+  (try
+    (with-open [f (java.io.RandomAccessFile. (str path) "r")]
+      (let [n (.length f)
+            from (max 0 (- n OUTPUT-MAX-BYTES))
+            buf (byte-array (- n from))]
+        (.seek f from)
+        (.readFully f buf)
+        (String. buf "UTF-8")))
+    (catch Throwable _ "")))
+
 (defn- tail-lines [out n]
   (str/join "\n" (take-last n (remove str/blank? (str/split-lines (or out ""))))))
 
 (defn parse-result
   "run-protocol's result from a child that printed out (its stdout and
   stderr together, or nil) and exited with exit, or was stopped at the
-  deadline (timed-out?): {:ok? :problems :warnings :timings :plugin
-  :definition nil}. Reads the last marker pair, so a pair the candidate
+  deadline (timed-out?; deadline-ms, CHECK-DEADLINE-MS unless given):
+  {:ok? :problems :warnings :timings :plugin :definition nil}. Reads the last marker pair, so a pair the candidate
   printed before the checker's own loses. Every other outcome is a failed
   check with one sentence. Never throws.
 
@@ -90,9 +114,9 @@
   keeps agent code out of Jonquil until Accept; it can't vouch for what
   the code is. Accept runs the check again in process (P9), and that's
   the result that counts."
-  [{:keys [out exit timed-out?]}]
+  [{:keys [out exit timed-out? deadline-ms]}]
   (if timed-out?
-    (failed (str "the check didn't finish in " (quot CHECK-DEADLINE-MS 1000) " s, so it was stopped"))
+    (failed (str "the check didn't finish in " (quot (or deadline-ms CHECK-DEADLINE-MS) 1000) " s, so it was stopped"))
     (if-let [body (last-pair out)]
       (let [v (try (edn/read-string body) (catch Throwable _ ::unreadable))]
         (cond
