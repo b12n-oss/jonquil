@@ -49,10 +49,29 @@
       (when-let [j (str/index-of out (str "\n" checker/MARK-END) (dec from))]
         (subs out from (max from j))))))
 
-(defn- result? [v]
+(defn- strings? [x] (and (vector? x) (every? string? x)))
+
+(defn- summary?
+  "checker/summary's shape, every key present."
+  [p]
+  (and (map? p) (= #{:id :doc :effects :commands :bindings :hooks} (set (keys p)))
+       (keyword? (:id p)) (or (nil? (:doc p)) (string? (:doc p))) (set? (:effects p))
+       (vector? (:commands p)) (every? map? (:commands p))
+       (vector? (:bindings p)) (every? map? (:bindings p))
+       (vector? (:hooks p)) (every? keyword? (:hooks p))))
+
+(defn- result?
+  "A whole result (review I2): a pass carries no problems and a full
+  :plugin summary, a fail no :plugin, and :problems, :warnings and
+  :timings have their shapes when present."
+  [v]
   (and (map? v) (boolean? (:ok? v))
-       (or (not (contains? v :problems))
-           (and (vector? (:problems v)) (every? string? (:problems v))))))
+       (or (not (contains? v :problems)) (strings? (:problems v)))
+       (or (not (contains? v :warnings)) (strings? (:warnings v)))
+       (or (not (contains? v :timings)) (map? (:timings v)))
+       (if (:ok? v)
+         (and (empty? (:problems v)) (summary? (:plugin v)))
+         (nil? (:plugin v)))))
 
 (defn- tail-lines [out n]
   (str/join "\n" (take-last n (remove str/blank? (str/split-lines (or out ""))))))
@@ -62,8 +81,15 @@
   stderr together, or nil) and exited with exit, or was stopped at the
   deadline (timed-out?): {:ok? :problems :warnings :timings :plugin
   :definition nil}. Reads the last marker pair, so a pair the candidate
-  printed earlier loses. Every other outcome is a failed check with one
-  sentence. Never throws."
+  printed before the checker's own loses. Every other outcome is a failed
+  check with one sentence. Never throws.
+
+  The result is advisory (review I1): the candidate runs in the same
+  process as the checker, so it can print a pair of its own and exit, or
+  rebind the checker's vars, and a forged pass parses like a real one. It
+  keeps agent code out of Jonquil until Accept; it can't vouch for what
+  the code is. Accept runs the check again in process (P9), and that's
+  the result that counts."
   [{:keys [out exit timed-out?]}]
   (if timed-out?
     (failed (str "the check didn't finish in " (quot CHECK-DEADLINE-MS 1000) " s, so it was stopped"))

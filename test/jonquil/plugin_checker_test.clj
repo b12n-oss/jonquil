@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [jonquil.plugin-checker :as checker]
+            [jonquil.plugin-isolated :as isolated]
             [jonquil.plugin-loader :as loader]
             [jonquil.plugin-registry :as reg]
             [temp-dirs]))
@@ -73,3 +74,12 @@
 
 (deftest result-text-has-no-namespaced-maps-test
   (is (str/includes? (checker/result-text {:timings {:lv/w 11}}) "{:lv/w 11}")))
+
+(deftest a-real-result-parses-test
+  ;; what check-dir answers passes parse-result's shape check, pass and fail
+  (let [good (checker/check-dir (check-folder "cwp" (source "cwp")))
+        bad (checker/check-dir (check-folder "cwpbad" (source "cwpbad" :command ":nope/x")))]
+    (is (= (assoc good :definition nil)
+           (isolated/parse-result {:out (checker/result-text good) :exit 0})))
+    (is (= (:problems bad)
+           (:problems (isolated/parse-result {:out (checker/result-text bad) :exit 0}))))))

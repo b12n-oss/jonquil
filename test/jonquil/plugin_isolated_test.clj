@@ -59,3 +59,18 @@
 (deftest parse-nonzero-after-result-test
   (is (= "the check exited with 3 after printing its result"
          (one-problem (parse (checker/result-text good) 3)))))
+
+(deftest parse-rejects-a-half-shaped-result-test
+  ;; review I2: a pass must carry no problems and a whole :plugin summary;
+  ;; a fail carries no :plugin; :warnings and :timings have their shapes
+  (doseq [v [{:ok? true :problems ["x"] :warnings [] :timings {} :plugin (:plugin good)}
+             {:ok? true :problems [] :warnings [] :timings {} :plugin {:id :cw :effects #{}}}
+             {:ok? true :problems [] :warnings [] :timings {}}
+             (assoc good :warnings "w")
+             (assoc good :warnings [1])
+             (assoc good :timings [1])
+             (assoc-in good [:plugin :effects] [:console])
+             {:ok? false :problems ["p"] :warnings [] :timings {} :plugin (:plugin good)}]]
+    (is (str/starts-with? (one-problem (parse (checker/result-text v) 0))
+                          "the check printed a result that isn't one: ")
+        (pr-str v))))
