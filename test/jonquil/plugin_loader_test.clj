@@ -172,6 +172,16 @@
     (is (false? (loader/plugin-file? d "/tmp/elsewhere/wrap.clj")))
     (is (true? (loader/plugin-file? d (str link "/wrap.clj"))))))
 
+(deftest history-folder-is-not-a-plugin-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])]
+    (io/make-parents (io/file d ".history" "wrap" "1.clj"))
+    (spit (io/file d ".history" "wrap" "1.clj") (source "wrap"))
+    (is (= {:files [["wrap" (str (io/file d "wrap.clj"))]] :skipped []} (loader/plugin-files d)))))
+
+(deftest history-file-is-not-a-plugin-file-test
+  (let [d (temp-dirs/temp-dir! "jonquil-plugins-pf-")]
+    (is (false? (loader/plugin-file? d (str d "/.history/wrap/1.clj"))))))
+
 (deftest loads-are-serial-test
   ;; two load steps on one agent: the second reads the registry the first
   ;; left, so an unchanged file gives it nothing to do (review focus 5)
