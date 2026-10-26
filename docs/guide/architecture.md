@@ -215,7 +215,23 @@ these:
   old version through `reload` with `:text` (the same protocol and
   re-check of later plugins), and only on a pass writes `<id>.clj`,
   resets the registry and records a `:revert` version; nothing calls it
-  until the plugin list. Slice P4 (2026-10-25) made a change take effect
+  until the plugin list. Slice P8 (2026-10-26) built the checker an
+  agent's proposal will be checked with, short of starting it:
+  `jonquil.plugin-checker` reads `request.edn` and `candidate.clj` from its
+  working folder, runs `run-protocol :in-process` in that (child) process,
+  prints one EDN result between `__JONQUIL_CHECK__` and `__END_CHECK__`
+  lines, and calls `System/exit`, since a soak thread it gave up on would
+  otherwise keep `jolt -e` alive. `jonquil.plugin-checker-files` embeds it
+  and the eleven namespaces it loads (plus `keymap.edn`) at compile time
+  and writes them under `~/.cache/jonquil/plugin-checker/<hash>` through
+  `middleware-files/ensure-root!`, which now takes a file set.
+  `jonquil.plugin-isolated` builds the request text, scrubs
+  credential-named variables from the child's environment, and
+  `parse-result` reads the last marker pair, turning no output, garbage, a
+  half-shaped result, an overrun or a non-zero exit into a failed check.
+  The result is advisory: the candidate shares the checker's process and
+  can forge it, so Accept (P9) checks again in process and compares. Slice
+  P8b starts the child. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
