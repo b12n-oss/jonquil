@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.plugin-history :as history]
             [jonquil.plugin-loader :as loader]
             [jonquil.plugin-registry :as reg]
             [temp-dirs]))
@@ -283,3 +284,150 @@
         _ (spit sp "{:plugins {:disabled #{:x}")
         lines (loader/load-step! (atom (reg/empty-registry)) {:settings-path sp :os "Linux"})]
     (is (some #(str/starts-with? % "settings: ") lines) (pr-str lines))))
+
+;; --- plugins P7: history and revert -----------------------------------------
+
+(def ^:private now (constantly "2026-10-26T00:00:00Z"))
+
+(defn- step! [live d & {:as more}]
+  (loader/load-step! live (merge {:dir d :os "Linux" :disabled #{} :now now} more)))
+
+(defn- revert! [live d id n & {:as more}]
+  (loader/revert-step! live (merge {:dir d :os "Linux" :disabled #{} :now now :id id :n n} more)))
+
+(defn- entries [d id] (:entries (history/read-entries (history/history-dir d id))))
+
+(defn- v2-of [id] (str/replace (source id) "Wrap it." "Wrap it, v2."))
+
+(deftest load-step-records-v1-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])]
+    (step! (atom (reg/empty-registry)) d)
+    (is (= [{:n 1 :at "2026-10-26T00:00:00Z" :source :user :reason "edited by hand" :status :accepted}]
+           (entries d "wrap")))
+    (is (= (source "wrap") (history/version-source (history/history-dir d "wrap") 1)))))
+
+(deftest load-step-records-once-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])]
+    (step! (atom (reg/empty-registry)) d)
+    (step! (atom (reg/empty-registry)) d)
+    (is (= 1 (count (entries d "wrap"))))))
+
+(deftest load-step-records-a-changed-file-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (write! d "wrap.clj" (v2-of "wrap"))
+    (step! live d :only (str (io/file d "wrap.clj")))
+    (is (= [1 2] (map :n (entries d "wrap"))))
+    (is (= (v2-of "wrap") (history/version-source (history/history-dir d "wrap") 2)))))
+
+(deftest load-step-failed-edit-records-nothing-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (write! d "wrap.clj" "(ns broken")
+    (step! live d)
+    (is (= 1 (count (entries d "wrap"))))))
+
+(deftest load-step-disabled-records-nothing-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])]
+    (step! (atom (reg/empty-registry)) d :disabled #{:wrap})
+    (is (not (.exists (io/file (history/history-dir d "wrap")))))))
+
+(deftest load-step-history-failure-is-a-line-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])
+        f (io/file (history/history-dir d "wrap") "history.edn")
+        live (atom (reg/empty-registry))]
+    (io/make-parents f)
+    (spit f "{:not")
+    (let [lines (step! live d)]
+      (is (some #(str/starts-with? % "plugin wrap: its history wasn't recorded: ") lines) (pr-str lines)))
+    (is (contains? (:plugins @live) :wrap))
+    (is (= "{:not" (slurp f)))))
+
+(defn- with-v1-and-v2 [id]
+  (let [d (dir-with [[(str id ".clj") (source id)]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (write! d (str id ".clj") (v2-of id))
+    (step! live d)
+    [d live]))
+
+(deftest revert-test
+  (let [[d live] (with-v1-and-v2 "wrap")
+        lines (revert! live d "wrap" 1 :reason "too eager")]
+    (is (= (source "wrap") (slurp (io/file d "wrap.clj"))))
+    (is (= (source "wrap") (get-in @live [:plugins :wrap :source])))
+    (is (= {:n 3 :at "2026-10-26T00:00:00Z" :source :revert :reason "revert to v1: too eager" :status :accepted}
+           (nth (entries d "wrap") 2)))
+    (is (= "plugin wrap reverted to v1 (now v3)" (last lines)) (pr-str lines))
+    (step! live d)
+    (is (= 3 (count (entries d "wrap"))))))
+
+(deftest revert-without-reason-test
+  (let [[d live] (with-v1-and-v2 "wrap")]
+    (revert! live d "wrap" 1)
+    (is (= "revert to v1" (:reason (last (entries d "wrap")))))))
+
+(deftest revert-missing-version-test
+  (let [[d live] (with-v1-and-v2 "wrap")
+        before @live]
+    (is (= ["plugin wrap has no v9 to revert to"] (revert! live d "wrap" 9)))
+    (is (identical? before @live))
+    (is (= 2 (count (entries d "wrap"))))))
+
+(deftest revert-that-fails-changes-nothing-test
+  ;; v1 of wrap binds aaa's command; once aaa is gone, v1 no longer checks
+  (let [d (dir-with [["aaa.clj" (source "aaa")] ["wrap.clj" (binds "wrap" "aaa" "k")]])
+        live (atom (reg/empty-registry))
+        _ (step! live d)
+        _ (write! d "wrap.clj" (source "wrap" :key "k"))
+        _ (step! live d)
+        _ (io/delete-file (io/file d "aaa.clj"))
+        _ (step! live d)
+        before @live
+        lines (revert! live d "wrap" 1)]
+    (is (= "plugin wrap wasn't reverted to v1" (last lines)) (pr-str lines))
+    (is (= (source "wrap" :key "k") (slurp (io/file d "wrap.clj"))))
+    (is (= before @live))
+    (is (= 2 (count (entries d "wrap"))))))
+
+(deftest revert-restores-a-deleted-file-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (io/delete-file (io/file d "wrap.clj"))
+    (step! live d)
+    (is (not (contains? (:plugins @live) :wrap)))
+    (let [lines (revert! live d "wrap" 1)]
+      (is (= (source "wrap") (slurp (io/file d "wrap.clj"))) (pr-str lines))
+      (is (contains? (:plugins @live) :wrap)))))
+
+(deftest revert-rechecks-later-plugins-test
+  ;; zzz binds aaa's command; v2 of aaa renames it (zzz removed), and
+  ;; reverting aaa to v1 brings zzz back, as a save of a fixed aaa would
+  (let [d (dir-with [["aaa.clj" (source "aaa")] ["zzz.clj" (binds "zzz" "aaa" "k")]])
+        live (atom (reg/empty-registry))
+        _ (step! live d)
+        _ (write! d "aaa.clj" (str/replace (source "aaa") ":aaa/wrap" ":aaa/wrap2"))
+        _ (step! live d :only (str (io/file d "aaa.clj")))
+        _ (is (not (contains? (:plugins @live) :zzz)))
+        lines (revert! live d "aaa" 1)]
+    (is (contains? (:plugins @live) :zzz) (pr-str lines))
+    (is (= 1 (count (entries d "zzz"))) "zzz's text didn't change, so no new version")))
+
+(deftest revert-disabled-test
+  (let [[d live] (with-v1-and-v2 "wrap")
+        before @live]
+    (is (= ["plugin wrap is disabled, so it wasn't reverted"] (revert! live d "wrap" 1 :disabled #{:wrap})))
+    (is (identical? before @live))
+    (is (= (v2-of "wrap") (slurp (io/file d "wrap.clj"))))))
+
+(deftest revert-step-never-throws-test
+  (let [live (atom (reg/empty-registry))
+        d (dir-with [])
+        _ (history/record! {:plugins-dir d :id "wrap" :text "(a)" :source :user :reason "r" :now now})
+        lines (with-redefs [loader/reload (fn [_] (throw (ex-info "kaboom" {})))]
+                (revert! live d "wrap" 1))]
+    (is (= ["reverting plugin wrap failed: kaboom"] lines))
+    (is (= (reg/empty-registry) @live))))

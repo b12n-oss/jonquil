@@ -82,16 +82,16 @@
 
 (defn record!
   "Records text as id's next version, from source with reason: {:n n}, or
-  {:same n} when it equals the latest accepted version n's text, or
-  {:error sentence}. <n>.clj is written before its entry, so an entry
+  {:same n} when it equals the latest accepted version n's text (unless
+  always?, a revert, which is a version even then), or {:error sentence}. <n>.clj is written before its entry, so an entry
   never names a missing file. now gives :at (an ISO instant by default)."
-  [{:keys [plugins-dir id text source reason now]}]
+  [{:keys [plugins-dir id text source reason now always?]}]
   (let [dir (history-dir plugins-dir id)
         {:keys [entries error]} (read-entries dir)]
     (if error
       {:error error}
       (let [latest (latest-accepted entries)]
-        (if (and latest (= text (version-source dir (:n latest))))
+        (if (and latest (not always?) (= text (version-source dir (:n latest))))
           {:same (:n latest)}
           (let [n (next-n entries (file-ns dir))
                 at ((or now #(str (java.time.Instant/now))))]
