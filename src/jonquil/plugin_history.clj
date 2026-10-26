@@ -4,9 +4,13 @@
   <n>.clj, and history.edn holds one vector of {:n :at :source :reason
   :status}. No entry is ever changed or removed: a new one goes at the end
   and the file is replaced whole through a temp file and an atomic move. A
-  history.edn that can't be read is never overwritten. Pure apart from
-  read-entries, version-source, record! and write-atomic!, none of which
-  throws."
+  history.edn that can't be read is never overwritten. An agent's proposal
+  (slice P9) is a version too, :source :agent, :pending or
+  :rejected-by-checks; a later change of a version's status (:superseded,
+  :accepted, :rejected) is a short {:n :at :status} entry appended after
+  it, so a version's status is its last entry's. Pure apart from
+  read-entries, version-source, write-atomic! and the record and
+  all-pending fns, none of which throws."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [jonquil.save-path :as save-path]))
@@ -93,6 +97,28 @@
   (keep #(some-> (re-matches #"(\d+)\.clj" (.getName ^java.io.File %)) second parse-long)
         (some-> (.listFiles (io/file dir)) seq)))
 
+(defn version-status
+  "The :status of the last entry for version n, or nil."
+  [entries n]
+  (:status (last (filter #(= n (:n %)) entries))))
+
+(defn pending
+  "The proposal entry (the version's first entry) of the version whose
+  status is :pending, or nil."
+  [entries]
+  (some (fn [e] (when (and (= :pending (:status e)) (= :pending (version-status entries (:n e))))
+                  e))
+        (reverse entries)))
+
+(defn- append!
+  "Writes text (when given) as dir's <n>.clj, then history.edn with more
+  appended to entries, printed without namespaced maps: nil, or the
+  sentence saying why it couldn't."
+  [dir n text entries more]
+  (or (when text (write-atomic! (str dir "/" n ".clj") text))
+      (write-atomic! (str dir "/history.edn")
+                     (binding [*print-namespace-maps* false] (pr-str (into entries more))))))
+
 (defn record!
   "Records text as id's next version, from source with reason: {:n n}, or
   {:same n} when it equals the latest accepted version n's text (unless
@@ -111,10 +137,59 @@
             {:same (:n latest)}
             (let [n (next-n entries (file-ns dir))
                   at ((or now #(str (java.time.Instant/now))))]
-              (if-let [why (or (write-atomic! (str dir "/" n ".clj") text)
-                               (write-atomic! (str dir "/history.edn")
-                                              (pr-str (conj entries (entry {:n n :at at :source source :reason reason})))))]
+              (if-let [why (append! dir n text entries [(entry {:n n :at at :source source :reason reason})])]
                 {:error why}
                 {:n n}))))))
     (catch Throwable e
       {:error (str "recording it threw: " (or (ex-message e) (str e)))})))
+
+(defn record-proposal!
+  "Records an agent's proposal of text for id as its next version, with
+  status :pending (keeping check, what its check reported) or
+  :rejected-by-checks (keeping problems), and based-on, the live version
+  it was made against: {:n n}, {:n n :superseded m} when a pending one
+  replaced pending version m (in the same history.edn write), or {:error
+  sentence}. Never throws."
+  [{:keys [plugins-dir id text reason status based-on check problems now]}]
+  (try
+    (let [dir (history-dir plugins-dir id)
+          {:keys [entries error]} (read-entries dir)]
+      (if error
+        {:error error}
+        (let [n (next-n entries (file-ns dir))
+              at ((or now #(str (java.time.Instant/now))))
+              old (when (= :pending status) (:n (pending entries)))
+              e (cond-> {:n n :at at :source :agent :reason reason :status status :based-on based-on}
+                  (= :pending status) (assoc :check check)
+                  (= :rejected-by-checks status) (assoc :problems problems))]
+          (if-let [why (append! dir n text entries (cond-> [e] old (conj {:n old :at at :status :superseded})))]
+            {:error why}
+            (cond-> {:n n} old (assoc :superseded old))))))
+    (catch Throwable e
+      {:error (str "recording it threw: " (or (ex-message e) (str e)))})))
+
+(defn record-status!
+  "Appends {:n :at :status} (and :note, when given) to id's history: nil,
+  or the sentence saying why it wasn't recorded. Never throws."
+  [{:keys [plugins-dir id n status note now]}]
+  (try
+    (let [dir (history-dir plugins-dir id)
+          {:keys [entries error]} (read-entries dir)]
+      (or error
+          (append! dir n nil entries [(cond-> {:n n :at ((or now #(str (java.time.Instant/now)))) :status status}
+                                        note (assoc :note note))])))
+    (catch Throwable e
+      (str "recording it threw: " (or (ex-message e) (str e))))))
+
+(defn all-pending
+  "Every plugin's pending proposal under plugins-dir, as its proposal entry
+  with :id, sorted by id. A history that can't be read is skipped. Never
+  throws."
+  [plugins-dir]
+  (try
+    (vec (for [f (sort-by #(.getName ^java.io.File %) (or (.listFiles (io/file plugins-dir ".history")) []))
+               :when (.isDirectory ^java.io.File f)
+               :let [p (pending (:entries (read-entries f)))]
+               :when p]
+           (assoc p :id (.getName ^java.io.File f))))
+    (catch Throwable _ [])))
