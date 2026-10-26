@@ -257,6 +257,9 @@
    plugin-rows/row-plugin-hook-after-run
    plugin-rows/row-plugin-hook-on-error
    plugin-rows/row-plugin-hook-repl-no-loop
+   plugin-rows/row-plugin-before-run-abort
+   plugin-rows/row-plugin-before-run-form
+   plugin-rows/row-plugin-before-run-overrun
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

@@ -424,3 +424,57 @@
           (reset! captured nil)
           (support/check :plugin-hook-repl-no-loop (and two? (= 1 n))
                          {:two two? :captured n :console (on-gtk (support/since ui mark)) :lines lines}))))))
+
+(defn row-plugin-before-run-abort
+  "A :before-run hook's {:abort ...} stops the Run: its line shows and the
+  code is never sent."
+  [ui]
+  (go-row :plugin-before-run-abort support/check
+    (with-plugins ui {"p6b-stop.clj" (hook-source "p6b-stop" "#{}"
+                                                  "{:before-run (fn [_ e] (if (.contains ^String (:text e) \"p6b-stop\") {:abort \"p6b said no\"} e))}")}
+      (fn [lines]
+        (let [mark (on-gtk (support/out-end-offset ui))
+              _ (run-text! ui "(println \"p6b-printed\") ; p6b-stop")
+              seen? (await-until 5000 20 #(str/includes? (support/since ui mark)
+                                                         "; plugin p6b-stop stopped this Run: p6b said no"))
+              _ (Thread/sleep 500)
+              out (support/since ui mark)]
+          (support/check :plugin-before-run-abort (and seen? (not (str/includes? out "p6b-printed")))
+                         {:seen seen? :console out :lines lines}))))))
+
+(defn row-plugin-before-run-form
+  "Run Form asks :before-run with :kind :form and the form's text, then runs."
+  [ui]
+  (go-row :plugin-before-run-form support/check
+    (with-plugins ui {"p6b-form.clj" (hook-source "p6b-form" "#{}"
+                                                  "{:before-run (fn [_ e] (reset! gtk-selftest-window.plugins/captured [(:kind e) (:text e)]) e)}")}
+      (fn [lines]
+        (reset! captured nil)
+        (let [mark (on-gtk (support/out-end-offset ui))
+              _ (on-gtk (let [ed (:editor ui)]
+                          (editor/set-text! ed "(+ 40 2)")
+                          (support/place-cursor! (:buf ed) 1)
+                          ((:run-form!* ui))))
+              ran? (await-until 5000 20 #(str/includes? (support/since ui mark) "42"))
+              got @captured]
+          (reset! captured nil)
+          (support/check :plugin-before-run-form (and ran? (= [:form "(+ 40 2)"] got))
+                         {:ran ran? :captured got :console (support/since ui mark) :lines lines}))))))
+
+(defn row-plugin-before-run-overrun
+  "A :before-run hook past the budget is reported and the Run goes ahead."
+  [ui]
+  (go-row :plugin-before-run-overrun support/check
+    (with-plugins ui {"p6b-slow.clj" (hook-source "p6b-slow" "#{}"
+                                                  "{:before-run (fn [_ e] (Thread/sleep 400) e)}")}
+      (fn [lines]
+        (let [mark (on-gtk (support/out-end-offset ui))
+              _ (run-text! ui "(+ 1 2)")
+              both? (await-until 5000 20 #(let [t (support/since ui mark)]
+                                            (and (str/includes? t "the :before-run hooks took longer than 100 ms")
+                                                 (str/includes? t "so the Run went ahead")
+                                                 (str/includes? t "3"))))
+              out (support/since ui mark)]
+          ;; let the hook return before the next row
+          (Thread/sleep 500)
+          (support/check :plugin-before-run-overrun both? {:console out :lines lines}))))))
