@@ -6,14 +6,18 @@
   the next registry and console lines; load-step! applies one to the live
   registry, on the window's load-agent, and records each plugin it made
   live in jonquil.plugin-history; revert-step! checks an old version the
-  same way and, on a pass, writes it back as a new version. reload only
-  reads files; nothing here touches GTK or throws."
+  same way and, on a pass, writes it back as a new version. An agent's
+  proposal (slice P9) is checked in isolation by propose-check, off the
+  agent, and recorded by propose-step!; accept-step! and reject-step! end
+  it. reload only reads files; nothing here touches GTK or throws."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.keymap :as km]
             [jonquil.plugin-check :as plugin-check]
+            [jonquil.plugin-checker :as checker]
             [jonquil.plugin-history :as history]
+            [jonquil.plugin-isolated :as isolated]
             [jonquil.plugin-protocol :as protocol]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]))
@@ -256,6 +260,22 @@
     (catch Throwable e
       [(str "loading plugins failed: " (or (ex-message e) (str e)))])))
 
+(defn- disk-changed
+  "The line saying id's file changed since it was loaded, when id is live
+  in reg and <dir>/<id>.clj holds other text: writing over it would lose
+  an edit no Reload has seen (P9 review I4). nil otherwise."
+  [dir reg id]
+  (let [live-src (get-in reg [:plugins (keyword id) :source])
+        f (io/file dir (str id ".clj"))]
+    (when (and live-src (.isFile f) (not= live-src (try (slurp f) (catch Throwable _ live-src))))
+      (str id ".clj changed since it was loaded (Reload Plugins first)"))))
+
+(defn- was-live?
+  "Whether version n was ever accepted: a proposal that never went live
+  isn't a revert target (P9 review I3)."
+  [hdir n]
+  (boolean (some #(and (= n (:n %)) (= :accepted (:status %))) (:entries (history/read-entries hdir)))))
+
 (defn revert-step!
   "Reverts plugin id to its version n, on the plugin agent like load-step!
   (opts as load-step!'s, plus :id, :n and an optional :reason): the old
@@ -272,6 +292,8 @@
       (cond
         (nil? src) (conj warn (str "plugin " id " has no v" n " to revert to"))
         (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
+        (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
+        (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
         :else
         (let [old @live
               path (str dir "/" id ".clj")
@@ -297,6 +319,144 @@
                             (str "plugin " id " reverted to v" n ", but its history wasn't recorded: " (:error r)))))))))))
     (catch Throwable e
       [(str "reverting plugin " id " failed: " (or (ex-message e) (str e)))])))
+
+(defn propose-check
+  "The isolated check of an agent's source for id against registry's
+  earlier plugins: check (plugin-isolated/check! unless given) called with
+  {:source :file-id :request}. Blocks for up to the isolated deadline, so
+  it's called off the plugin agent, and its result goes to propose-step!.
+  Never throws."
+  [{:keys [registry id source os check]}]
+  (try ((or check isolated/check!) {:source source :file-id id :request (request-for registry id os)})
+       (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]})))
+
+(def ^:private review-hint "(Review Plugin Proposals in the palette)")
+
+(defn propose-step!
+  "Records an agent's proposal of source for id, with reason, given its
+  check's result (propose-check's), on the plugin agent: {:status :n
+  :problems :lines}. A pass, or an unchecked result when there's no jolt,
+  is :pending, keeping what the check reported, superseding an older
+  pending one, and announced in the lines; a fail is :rejected-by-checks
+  with no line. Both record the live version as :based-on. A bad id, a
+  blank reason or a history that can't be written is :refused, recording
+  nothing. opts are load-step!'s folder options. Never throws."
+  [{:keys [id source reason result now] :as opts}]
+  (let [refused (fn [why] {:status :refused :n nil :problems [why] :lines []})]
+    (try
+      (let [[_ opts] (step-opts opts)
+            dir (:dir opts)]
+        (cond
+          (not (and (string? id) (re-matches id-pattern id)))
+          (refused (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
+          (str/blank? reason) (refused "a proposal needs a reason")
+          (not (string? source)) (refused "a proposal needs its source as text")
+          :else
+          (let [pass? (boolean (or (:ok? result) (:unchecked? result)))
+                based-on (:n (history/latest-accepted (:entries (history/read-entries (history/history-dir dir id)))))
+                r (history/record-proposal!
+                   (cond-> {:plugins-dir dir :id id :text source :reason reason :based-on based-on :now now
+                            :status (if pass? :pending :rejected-by-checks)}
+                     pass? (assoc :check {:warnings (vec (:warnings result)) :timings (or (:timings result) {})
+                                          :plugin (when-not (:unchecked? result) (:plugin result))
+                                          :unchecked? (boolean (:unchecked? result))})
+                     (not pass?) (assoc :problems (vec (:problems result)))))]
+            (cond
+              (:error r) (refused (str "the proposal wasn't recorded: " (:error r)))
+              pass? {:status :pending :n (:n r) :problems []
+                     :lines (cond-> [(str "plugin " id ": an agent proposes v" (:n r)
+                                          (when (:unchecked? result) ", unchecked since there's no jolt to check it in")
+                                          ": " reason " " review-hint)]
+                              (:superseded r) (conj (str "plugin " id ": v" (:superseded r) " is superseded by v" (:n r))))}
+              :else {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}))))
+      (catch Throwable e
+        (refused (str "the proposal wasn't recorded: " (or (ex-message e) (str e))))))))
+
+(defn- pending-n?
+  "Whether version n of id under dir is the pending proposal."
+  [dir id n]
+  (= n (:n (history/pending (:entries (history/read-entries (history/history-dir dir id)))))))
+
+(defn- restore-ns!
+  "Loads id's live source from reg again, putting its namespace back after
+  a check loaded other code into it: the lines for any problems doing so."
+  [reg id]
+  (when-let [src (get-in reg [:plugins (keyword id) :source])]
+    (map #(str "plugin " id ": putting the live version back: " %)
+         (:problems (protocol/load-candidate {:source src :file-id id})))))
+
+(def ^:private summary-keys [:id :doc :effects :commands :bindings :hooks])
+
+(defn accept-step!
+  "Accepts id's pending version n, on the plugin agent like revert-step!
+  (opts as load-step!'s, plus :id and :n): its source goes through reload,
+  so the protocol runs again in this process with the same re-check of
+  later plugins. It goes live only when that passes and, for a checked
+  proposal, the summary of what loaded equals what the proposal's check
+  reported (the isolated result is advisory: a candidate can forge it).
+  Then <id>.clj is written, live reset and v<n> recorded :accepted. A
+  refusal leaves the file, live and the status as they were, putting the
+  namespace back. The console lines. Never throws."
+  [live {:keys [id n now] :as opts}]
+  (try
+    (let [[warn opts] (step-opts opts)
+          dir (:dir opts)
+          k (keyword id)
+          hdir (history/history-dir dir id)
+          proposal (history/pending (:entries (history/read-entries hdir)))]
+      (cond
+        (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
+        (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
+        ;; review I1: with no source, reload would check the file on disk
+        (nil? (history/version-source hdir n))
+        (conj warn (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history"))
+        (disk-changed dir @live id) (conj warn (str "plugin " id ": v" n " wasn't accepted: " (disk-changed dir @live id)))
+        :else
+        (let [src (history/version-source hdir n)
+              old @live
+              path (str dir "/" id ".clj")
+              {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))
+              installed (get-in registry [:plugins k])
+              reported (get-in proposal [:check :plugin])
+              loaded (some-> installed :definition checker/summary)
+              differ (when (and installed (not (get-in proposal [:check :unchecked?])))
+                       (filterv #(not= (get loaded %) (get reported %)) summary-keys))]
+          (cond
+            (or (nil? src) (not= src (:source installed)))
+            (-> warn (into lines) (conj (str "plugin " id ": v" n " wasn't accepted and stays pending")))
+            (seq differ)
+            (-> warn (into (restore-ns! old id))
+                (conj (str "plugin " id ": v" n " wasn't accepted: what loaded here isn't what its check reported ("
+                           (str/join ", " differ) ")")))
+            :else
+            (if-let [why (history/write-atomic! path src)]
+              (-> warn (into (restore-ns! old id)) (conj (str "plugin " id ": v" n " wasn't accepted: " why)))
+              (let [_ (reset! live registry)
+                    why (history/record-status! {:plugins-dir dir :id id :n n :status :accepted :now now})
+                    others (record-changed! dir old (update registry :plugins dissoc k) now)]
+                (-> warn (into lines) (into others)
+                    (conj (str "plugin " id ": v" n " accepted"
+                               (when why (str ", but its status wasn't recorded: " why)))))))))))
+    (catch Throwable e
+      [(str "accepting plugin " id " failed: " (or (ex-message e) (str e)))])))
+
+(defn reject-step!
+  "Rejects id's pending version n with the user's optional note, on the
+  plugin agent (opts as load-step!'s, plus :id, :n and :note): the console
+  lines. Nothing else changes. Never throws."
+  [{:keys [id n note now] :as opts}]
+  (try
+    (let [[warn opts] (step-opts opts)
+          dir (:dir opts)]
+      (if-not (pending-n? dir id n)
+        (conj warn (str "plugin " id " has no pending v" n))
+        (let [why (history/record-status! {:plugins-dir dir :id id :n n :status :rejected :now now
+                                           :note (when-not (str/blank? note) note)})]
+          (conj warn (if why
+                       (str "plugin " id ": v" n " wasn't rejected: " why)
+                       (str "plugin " id ": v" n " rejected"))))))
+    (catch Throwable e
+      [(str "rejecting plugin " id " failed: " (or (ex-message e) (str e)))])))
 
 (defn load-agent
   "The agent every plugin load runs on, one at a time. It keeps going after

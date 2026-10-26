@@ -253,7 +253,35 @@ these:
   the kept variables are briefly in that command line. A process the
   candidate starts and leaves running when its check ends on its own
   keeps running. A candidate can require only the embedded namespaces and
-  `clojure.*`. Slice P4 (2026-10-25) made a change take effect
+  `clojure.*`. Slice P9 (2026-10-27) gave a proposal its lifecycle,
+  still with nothing in the window. A proposal is a version in the
+  history, `:source :agent`, either `:pending` (keeping what its check
+  reported: warnings, timings, the summary, and whether it was unchecked)
+  or `:rejected-by-checks` (keeping the problems), and it records the live
+  version it was `:based-on`. The history stays append-only: a later
+  change of status (`:superseded`, `:accepted`, `:rejected` with the
+  user's note) is a short entry with the same `:n` appended after it, so
+  a version's status is its last entry's. A pending proposal supersedes an
+  older pending one in the same write; a failing one supersedes nothing.
+  `plugin-loader/propose-check` runs the isolated check against the live
+  registry off the plugin agent (it can take 30 s), and `propose-step!`
+  records its result on the agent and gives the console line.
+  `accept-step!` runs the protocol again in process through `reload`, and
+  goes live only when that passes and, for a checked proposal, the
+  summary of what loaded equals the reported one; the compare sees the
+  id, doc, effects, commands, bindings and hook points, not what a
+  function does. The compare runs after the proposal's top-level code
+  has already run in Jonquil (the in-process check loads it), so it
+  keeps a misreported plugin from going live, not from running: pressing
+  Accept is the trust decision, as the spec's trust boundary says, and a
+  refused brand-new plugin's namespace keeps the code it loaded,
+  registered nowhere. It refuses a version whose source is missing, a
+  disabled plugin, and a live plugin whose file changed since it was
+  loaded (Reload Plugins first), and every refusal leaves the file, live,
+  the status and a live plugin's namespace as they were.
+  `reject-step!` records the note. `revert-step!` now refuses a version
+  that was never live, so a proposal can't skip Accept that way. Slice
+  P9b adds the review panel that calls these. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure

@@ -2,8 +2,10 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.plugin-checker :as checker]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-loader :as loader]
+            [jonquil.plugin-protocol :as protocol]
             [jonquil.plugin-registry :as reg]
             [temp-dirs]))
 
@@ -477,3 +479,262 @@
     (revert! live d "wrap" 1)
     (is (java.nio.file.Files/isSymbolicLink (.toPath link)))
     (is (= (source "wrap") (slurp target)))))
+
+;; --- plugins P9: proposals --------------------------------------------------
+
+(defn- propose! [d id text result & {:as more}]
+  (loader/propose-step! (merge {:dir d :os "Linux" :disabled #{} :now now :id id :source text
+                                :reason "tidy" :result result}
+                               more)))
+
+(def ^:private summ {:id :pw :doc "A test plugin." :effects #{:console}
+                     :commands [{:id :pw/wrap :doc "Wrap it." :scope :editor}]
+                     :bindings [{:key "j" :mods #{:cmd :alt} :command :pw/wrap}] :hooks []})
+
+(def ^:private passed {:ok? true :problems [] :warnings ["w"] :timings {:pw/wrap 2} :plugin summ})
+
+(deftest propose-check-passes-the-request-test
+  (let [r (reg/empty-registry)
+        seen (atom nil)
+        answer (loader/propose-check {:registry r :id "pw" :source "s" :os "Linux"
+                                      :check (fn [m] (reset! seen m) {:ok? true :mark 1})})]
+    (is (= {:source "s" :file-id "pw" :request (#'loader/request-for r "pw" "Linux")} @seen))
+    (is (= {:ok? true :mark 1} answer)))
+  (let [answer (loader/propose-check {:registry (reg/empty-registry) :id "pw" :source "s" :os "Linux"
+                                      :check (fn [_] (throw (ex-info "boom" {})))})]
+    (is (false? (:ok? answer)))
+    (is (= ["checking it threw: boom"] (:problems answer)))))
+
+(deftest propose-pending-test
+  (let [d (dir-with [])
+        r (propose! d "pw" (source "pw") passed)]
+    (is (= {:status :pending :n 1 :problems []
+            :lines ["plugin pw: an agent proposes v1: tidy (Review Plugin Proposals in the palette)"]}
+           r))
+    (is (= {:warnings ["w"] :timings {:pw/wrap 2} :plugin summ :unchecked? false}
+           (:check (first (entries d "pw")))))
+    (is (not (.exists (io/file d "pw.clj"))) "nothing goes live")))
+
+(deftest propose-unchecked-test
+  (let [d (dir-with [])
+        r (propose! d "pw" (source "pw") {:ok? false :unchecked? true :problems ["there's no jolt to check it in, so it wasn't checked"]
+                                          :warnings [] :timings {} :plugin nil})]
+    (is (= :pending (:status r)))
+    (is (= ["plugin pw: an agent proposes v1, unchecked since there's no jolt to check it in: tidy (Review Plugin Proposals in the palette)"]
+           (:lines r)))
+    (is (nil? (get-in (first (entries d "pw")) [:check :plugin])))
+    (is (true? (get-in (first (entries d "pw")) [:check :unchecked?])))))
+
+(deftest propose-rejected-by-checks-test
+  (let [d (dir-with [])]
+    (is (= {:status :rejected-by-checks :n 1 :problems ["p"] :lines []}
+           (propose! d "pw" (source "pw") {:ok? false :problems ["p"]})))))
+
+(deftest propose-supersedes-test
+  (let [d (dir-with [])]
+    (propose! d "pw" (source "pw") passed)
+    (is (= ["plugin pw: an agent proposes v2: tidy (Review Plugin Proposals in the palette)"
+            "plugin pw: v1 is superseded by v2"]
+           (:lines (propose! d "pw" (v2-of "pw") passed))))))
+
+(deftest propose-records-based-on-test
+  (let [d (dir-with [["pw.clj" (source "pw")]])]
+    (step! (atom (reg/empty-registry)) d)
+    (propose! d "pw" (v2-of "pw") passed)
+    (is (= 1 (:based-on (history/pending (entries d "pw"))))))
+  (let [d (dir-with [])]
+    (propose! d "pw" (source "pw") passed)
+    (is (nil? (:based-on (first (entries d "pw")))))))
+
+(deftest propose-refuses-test
+  (let [d (dir-with [])]
+    (is (= {:status :refused :n nil :lines []
+            :problems ["Bad_Id isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"]}
+           (propose! d "Bad_Id" (source "pw") passed)))
+    (is (= ["a proposal needs a reason"] (:problems (propose! d "pw" (source "pw") passed :reason " "))))
+    (is (not (.exists (io/file d ".history"))))))
+
+(defn- summary-of
+  "What a real check would report for id's text: its summary, from the
+  in-process protocol."
+  [id text]
+  (checker/summary (:definition (protocol/run-protocol {:where :in-process :source text :file-id id
+                                                         :request (#'loader/request-for (reg/empty-registry) id "Linux")}))))
+
+(defn- reported [id text & {:as more}]
+  (merge {:ok? true :problems [] :warnings [] :timings {} :plugin (summary-of id text)} more))
+
+(defn- accept! [live d id n & {:as more}]
+  (loader/accept-step! live (merge {:dir d :os "Linux" :disabled #{} :now now :id id :n n} more)))
+
+(defn- reject! [d id n & {:as more}]
+  (loader/reject-step! (merge {:dir d :os "Linux" :disabled #{} :now now :id id :n n} more)))
+
+(deftest accept-new-plugin-test
+  (let [d (dir-with [])
+        live (atom (reg/empty-registry))
+        text (source "pw")]
+    (propose! d "pw" text (reported "pw" text))
+    (let [lines (accept! live d "pw" 1)]
+      (is (= "plugin pw: v1 accepted" (last lines)) (pr-str lines))
+      (is (contains? (:plugins @live) :pw))
+      (is (= text (slurp (io/file d "pw.clj"))))
+      (is (= :accepted (history/version-status (entries d "pw") 1)))
+      (let [before (entries d "pw")]
+        (step! live d)
+        (is (= before (entries d "pw")) "a load after the Accept records nothing more")))))
+
+(deftest accept-replaces-the-live-version-test
+  (let [d (dir-with [["pw.clj" (source "pw")]])
+        live (atom (reg/empty-registry))
+        v2 (v2-of "pw")]
+    (step! live d)
+    (propose! d "pw" v2 (reported "pw" v2))
+    (write! d "pw.clj" (str/replace (source "pw") "Wrap it." "Wrap it by hand."))
+    (step! live d)
+    (is (= :pending (history/version-status (entries d "pw") 2)))
+    (is (= 1 (:based-on (history/pending (entries d "pw")))))
+    (let [lines (accept! live d "pw" 2)]
+      (is (= "plugin pw: v2 accepted" (last lines)) (pr-str lines))
+      (is (= "Wrap it, v2." (:doc (first (get-in @live [:plugins :pw :definition :commands])))))
+      (is (= v2 (slurp (io/file d "pw.clj"))))
+      (is (= 2 (:n (history/latest-accepted (entries d "pw"))))))))
+
+(deftest accept-that-fails-stays-pending-test
+  (let [d (dir-with [["pw.clj" (source "pw")]])
+        live (atom (reg/empty-registry))
+        bad (str/replace (source "pw") ":command :pw/wrap" ":command :nope/x")]
+    (step! live d)
+    (propose! d "pw" bad (reported "pw" (source "pw")))
+    (let [before @live
+          lines (accept! live d "pw" 2)]
+      (is (= "plugin pw: v2 wasn't accepted and stays pending" (last lines)) (pr-str lines))
+      (is (some #(str/includes? % ":nope/x") lines) (pr-str lines))
+      (is (= before @live))
+      (is (= (source "pw") (slurp (io/file d "pw.clj"))))
+      (is (= :pending (history/version-status (entries d "pw") 2))))))
+
+(deftest accept-refuses-a-misreported-summary-test
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)]
+    (step! live d)
+    (propose! d "pw" v2 (reported "pw" v2 :plugin (assoc (summary-of "pw" v2) :effects #{})))
+    (let [before @live
+          lines (accept! live d "pw" 2)]
+      (is (= "plugin pw: v2 wasn't accepted: what loaded here isn't what its check reported (:effects)" (last lines))
+          (pr-str lines))
+      (is (= before @live))
+      (is (= (marked "pw" 1) (slurp (io/file d "pw.clj"))))
+      (is (= :pending (history/version-status (entries d "pw") 2)))
+      (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker))))))
+
+(deftest accept-unchecked-skips-the-compare-test
+  (let [d (dir-with [])
+        live (atom (reg/empty-registry))]
+    (propose! d "pw" (source "pw") {:ok? false :unchecked? true :problems ["no jolt"] :warnings [] :timings {} :plugin nil})
+    (is (= "plugin pw: v1 accepted" (last (accept! live d "pw" 1))))
+    (is (contains? (:plugins @live) :pw))))
+
+(deftest accept-not-pending-test
+  (let [d (dir-with [["pw.clj" (source "pw")]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (is (= ["plugin pw has no pending v1"] (accept! live d "pw" 1)))
+    (propose! d "pw" (v2-of "pw") (reported "pw" (v2-of "pw")))
+    (reject! d "pw" 2)
+    (is (= ["plugin pw has no pending v2"] (accept! live d "pw" 2)))
+    (is (= ["plugin pw has no pending v9"] (accept! live d "pw" 9)))))
+
+(deftest accept-disabled-test
+  (let [d (dir-with [])
+        live (atom (reg/empty-registry))]
+    (propose! d "pw" (source "pw") (reported "pw" (source "pw")))
+    (is (= ["plugin pw is disabled, so v1 wasn't accepted"] (accept! live d "pw" 1 :disabled #{:pw})))
+    (is (= :pending (history/version-status (entries d "pw") 1)))))
+
+(deftest accept-step-never-throws-test
+  (let [d (dir-with [])
+        live (atom (reg/empty-registry))]
+    (propose! d "pw" (source "pw") (reported "pw" (source "pw")))
+    (let [lines (with-redefs [loader/reload (fn [_] (throw (ex-info "kaboom" {})))]
+                  (accept! live d "pw" 1))]
+      (is (= ["accepting plugin pw failed: kaboom"] lines))
+      (is (= (reg/empty-registry) @live)))))
+
+(deftest reject-test
+  (let [d (dir-with [])
+        live (atom (reg/empty-registry))]
+    (propose! d "pw" (source "pw") (reported "pw" (source "pw")))
+    (is (= ["plugin pw: v1 rejected"] (reject! d "pw" 1 :note "too broad")))
+    (is (= {:n 1 :at "2026-10-26T00:00:00Z" :status :rejected :note "too broad"} (last (entries d "pw"))))
+    (is (= (reg/empty-registry) @live))
+    (is (empty? (history/all-pending d)))))
+
+(deftest reject-not-pending-test
+  (is (= ["plugin pw has no pending v3"] (reject! (dir-with []) "pw" 3))))
+
+;; --- plugins P9: the final review's fixes ------------------------------------
+
+(deftest accept-with-a-missing-version-file-loads-nothing-test
+  ;; review I1: with <n>.clj gone, Accept checked the file on disk instead
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)
+        ;; the real check loads v2 here, so it runs before v1 goes live
+        rep (reported "pw" v2)]
+    (step! live d)
+    (propose! d "pw" v2 rep)
+    (io/delete-file (io/file (history/history-dir d "pw") "2.clj"))
+    (is (= ["plugin pw: v2 wasn't accepted: its source is missing from its history"] (accept! live d "pw" 2)))
+    (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
+
+(deftest propose-needs-source-text-test
+  ;; review I2: a nil source made an entry naming a file that was never written
+  (let [d (dir-with [])]
+    (is (= {:status :refused :n nil :lines [] :problems ["a proposal needs its source as text"]}
+           (propose! d "pw" nil {:ok? false :unchecked? true :problems [] :warnings [] :timings {} :plugin nil})))
+    (is (not (.exists (io/file d ".history"))))))
+
+(deftest revert-refuses-a-version-that-was-never-live-test
+  ;; review I3: a proposal's <n>.clj made it a revert target, skipping Accept
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)
+        ;; the real check loads v2 here, so it runs before v1 goes live
+        rep (reported "pw" v2)]
+    (step! live d)
+    (propose! d "pw" v2 rep)
+    (is (= ["plugin pw: v2 was never live, so it wasn't reverted"] (revert! live d "pw" 2)))
+    (propose! d "pw" (marked "pw" 3) {:ok? false :problems ["p"]})
+    (is (= ["plugin pw: v3 was never live, so it wasn't reverted"] (revert! live d "pw" 3)))
+    (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))
+    (is (= (marked "pw" 1) (slurp (io/file d "pw.clj"))))))
+
+(deftest accept-keeps-an-edit-that-wasnt-reloaded-test
+  ;; review I4: Accept wrote over a change to pw.clj that no Reload had seen
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)
+        ;; the real check loads v2 here, so it runs before v1 goes live
+        rep (reported "pw" v2)]
+    (step! live d)
+    (propose! d "pw" v2 rep)
+    (write! d "pw.clj" (marked "pw" 3))
+    (is (= ["plugin pw: v2 wasn't accepted: pw.clj changed since it was loaded (Reload Plugins first)"]
+           (accept! live d "pw" 2)))
+    (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
+    (is (= :pending (history/version-status (entries d "pw") 2)))
+    (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
+
+(deftest revert-keeps-an-edit-that-wasnt-reloaded-test
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (write! d "pw.clj" (marked "pw" 2))
+    (step! live d)
+    (write! d "pw.clj" (marked "pw" 3))
+    (is (= ["plugin pw wasn't reverted: pw.clj changed since it was loaded (Reload Plugins first)"]
+           (revert! live d "pw" 1)))
+    (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
+    (is (= 2 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
