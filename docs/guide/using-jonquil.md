@@ -1751,8 +1751,7 @@ works, for example
 A plugin is one Clojure file that adds editor commands and the keys that
 run them. This is the first part of plugin support: a plugin's `:edit`
 and `:run` commands work now, with the `:console`, `:buffer` and `:eval`
-effects, and so do three of the four hooks. `:before-run` and agent
-proposals come later.
+effects, and so do the four hooks. Agent proposals come later.
 
 Plugin files live in a `plugins` folder beside the settings file, so
 `~/.config/jonquil/plugins/` (or `$XDG_CONFIG_HOME/jonquil/plugins/`). A
@@ -1863,6 +1862,7 @@ effects:
 
 | Hook | Event |
 |---|---|
+| `:before-run` | `{:kind :text :path}`, just before a Run sends `:text` (the code), with `:path` nil for an unsaved tab. Returning `{:abort "sentence"}` stops the Run |
 | `:after-save` | `{:path p}`, the path as you named it, after the save succeeded |
 | `:after-run` | `{:kind :status :value :error}`. `:kind` is `:run`, `:selection` or `:form`; `:status` is `:ok`, `:error`, `:interrupted` (you pressed Stop) or `:notice` (the dialect couldn't run it, with its sentence as `:error`); `:value` is the printed value |
 | `:on-error` | `{:source :text :line :column}`. `:source` is `:run`, `:selection`, `:form` or `:repl` (an entry at the console); `:text` is the error as the console shows it |
@@ -1888,7 +1888,49 @@ Events that arrive while the hooks at a point are still busy (Save All
 saves every tab at once) wait their turn, up to 16 of them, and past that
 one is skipped with a line on the console. So a hook that never returns
 holds up its own point, and the plugins after it there, but nothing else.
-`:before-run` is accepted in a plugin file but isn't called yet.
+
+`:before-run` works differently, because the Run waits for it. Here's a
+plugin that won't let a Run go ahead while the code still has a `TODO`
+in it:
+
+```clojure
+(ns jonquil.plugins.no-todo
+  (:require [jonquil.plugin :as p]))
+
+(p/defplugin
+  {:id      :no-todo
+   :doc     "Refuse to Run code that still says TODO."
+   :effects #{}
+   :hooks   {:before-run (fn [_ e]
+                           (if (.contains ^String (:text e) "TODO")
+                             {:abort "the code still has a TODO"}
+                             e))}})
+```
+
+A Run it stops shows `; plugin no-todo stopped this Run: the code still
+has a TODO` on the console and the status bar, and sends nothing: no
+banner, no echo, no `:after-run`. An agent's `jonquil_run` gets the same
+line back as its error. The hooks run in plugin-id order and the first
+abort wins, so the hooks after it aren't asked. Changing `:text` in the
+event doesn't change what's sent, and an `:abort` that isn't a sentence
+(a keyword, an empty string) is reported and the Run goes ahead.
+
+Jonquil waits at most 100 ms for all the `:before-run` hooks together.
+Past that, the Run goes ahead with a line saying the hooks took too long,
+naming the plugin whose hook was running when it can. A hook that throws
+is reported the same way, and the Run goes ahead. Since nothing can stop
+a hook that never returns, it keeps running in the background, and until
+it does, each Run skips the `:before-run` hooks with a line saying so.
+
+A `:before-run` hook can't use effects, even when its plugin declares
+them, because the window is waiting for it and every effect needs the
+window. `p/print!` and the rest throw there, which is reported, and the
+Run goes ahead. The event carries the code and the path, which is what
+a check before a Run needs. The hooks are asked only when a Run would
+really start, so not when the REPL is busy, the tab belongs to another
+project or a bracket is unclosed. Inspect Form, the console and an
+agent's `jonquil_eval` don't ask them either, so a guard plugin doesn't
+cover those.
 
 ### Loading and reloading
 

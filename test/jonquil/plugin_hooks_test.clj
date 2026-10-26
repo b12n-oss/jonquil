@@ -176,3 +176,140 @@
         (is (= 2 (count @reports)))
         (is (re-find #"^the :on-error hooks didn't start: " (first @reports)))
         (is (re-find #"^the :after-run hooks didn't start: " (second @reports)))))))
+
+;; --- :before-run (P6b) -------------------------------------------------------
+
+(deftest refused-ctx-test
+  (let [ctx {::p/effects #{:console} ::p/impl {:print! identity} ::p/refused "no effects here"}]
+    (is (thrown-with-msg? Exception #"^no effects here$" (p/print! ctx "x")))))
+
+(defn- await-before-free
+  "Waits (up to 2 s) until no :before-run chain is running, so a stuck one
+  a test released doesn't leak into the next test."
+  []
+  (loop [i 0]
+    (when (and @@#'hooks/before-busy (< i 200)) (Thread/sleep 10) (recur (inc i)))))
+
+(defn- before [kind text path]
+  (hooks/before-run! {:kind kind :text text :path path :tab 1}))
+
+(deftest before-run-none-installed-test
+  (with-live (reg/empty-registry) {}
+    #(is (nil? (before :run "(+ 1 2)" nil)))))
+
+(deftest before-run-goes-ahead-test
+  (let [seen (atom nil)
+        r (with (hooked "a" #{} {:before-run (fn [_ e] (assoc e :seen true))})
+                (hooked "b" #{} {:before-run (fn [_ e] (reset! seen e) e)}))]
+    (with-live r {}
+      (fn []
+        (is (nil? (before :run "(+ 1 2)" "/f.clj")))
+        (is (= {:kind :run :text "(+ 1 2)" :path "/f.clj" :seen true} @seen))))))
+
+(deftest before-run-abort-first-wins-test
+  (let [called (atom false)
+        r (with (hooked "a" #{} {:before-run (fn [_ _] {:abort "not today"})})
+                (hooked "b" #{} {:before-run (fn [_ e] (reset! called true) e)}))]
+    (with-live r {}
+      (fn []
+        (is (= "plugin a stopped this Run: not today" (before :form "(x)" nil)))
+        (is (false? @called))))))
+
+(deftest before-run-bad-abort-test
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ _] {:abort :nope})})
+                (hooked "b" #{} {:before-run (fn [_ _] {:abort ""})}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (is (nil? (before :run "(x)" nil)))
+        (is (= ["plugin a: :before-run's :abort must be a sentence, so the Run went ahead"
+                "plugin b: :before-run's :abort must be a sentence, so the Run went ahead"]
+               @reports))))))
+
+(deftest before-run-throw-reported-test
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ _] (throw (ex-info "boom" {})))})
+                (hooked "b" #{} {:before-run (fn [_ _] {:abort "stop"})}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (is (= "plugin b stopped this Run: stop" (before :run "(x)" nil)))
+        (is (= ["plugin a: :before-run hook: boom"] @reports))))))
+
+(deftest before-run-effects-refused-test
+  (let [reports (atom [])
+        printed (atom [])
+        r (with (hooked "a" #{:console} {:before-run (fn [ctx e] (p/print! ctx "hi") e)}))]
+    (with-live r {:print! #(swap! printed conj %) :report! #(swap! reports conj %)}
+      (fn []
+        (is (nil? (before :run "(x)" nil)))
+        (is (= [] @printed))
+        (is (= ["plugin a: :before-run hook: :before-run hooks can't use effects, since the Run waits for them"]
+               @reports))))))
+
+(deftest before-run-overrun-test
+  (let [gate (promise)
+        reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ e] @gate e)}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (try
+          (let [t0 (System/currentTimeMillis)]
+            (is (nil? (before :run "(x)" nil)))
+            (is (< (- (System/currentTimeMillis) t0) 1000)))
+          ;; the plugin is named once its hook has started, which under
+          ;; load may be after the budget ran out
+          (is (= 1 (count @reports)))
+          (is (re-matches #"the :before-run hooks took longer than 100 ms( \(plugin a was running\))?, so the Run went ahead"
+                          (first @reports)))
+          (finally (deliver gate true) (await-before-free)))))))
+
+(deftest before-run-skips-while-overrun-test
+  (let [gate (promise)
+        reports (atom [])
+        calls (atom 0)
+        r (with (hooked "a" #{} {:before-run (fn [_ e] (when (= 1 (swap! calls inc)) @gate) e)}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (await-before-free)
+        (try
+          (is (nil? (before :run "(x)" nil)))
+          ;; under load the chain's future may start after the budget ran out
+          (loop [i 0] (when (and (zero? @calls) (< i 200)) (Thread/sleep 10) (recur (inc i))))
+          (is (nil? (before :run "(x)" nil)))
+          (is (= 1 @calls))
+          (is (= "the :before-run hooks are still running from an earlier Run, so this Run went ahead without them"
+                 (second @reports)))
+          (deliver gate true)
+          ;; the stuck chain returns and frees the hooks: a later Run
+          ;; (each one skipped until then) runs the hook again
+          (loop [i 0]
+            (before :run "(x)" nil)
+            (when (and (< @calls 2) (< i 200)) (Thread/sleep 10) (recur (inc i))))
+          (is (= 2 @calls) "a later Run runs the hook again")
+          (finally (deliver gate true) (await-before-free)))))))
+
+(deftest before-run-odd-return-reported-test
+  ;; a sorted map with string keys throws on (contains? m :abort): that's
+  ;; reported as the plugin's, never thrown onto the GTK thread (review I1)
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ _] (sorted-map "x" 1))})
+                (hooked "b" #{} {:before-run (fn [_ _] {:abort "stop"})}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (is (= "plugin b stopped this Run: stop" (before :run "(x)" nil)))
+        (is (= 1 (count @reports)))
+        (is (re-find #"^plugin a: :before-run hook: " (str (first @reports))))))))
+
+(deftest before-run-chain-failure-reported-test
+  ;; anything that fails the chain itself (here report! throwing the
+  ;; first time) is reported and the Run goes ahead (review I1)
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ _] (throw (ex-info "boom" {})))}))]
+    (with-live r {:report! (fn [line]
+                             (swap! reports conj line)
+                             (when (= 1 (count @reports)) (throw (ex-info "report failed" {}))))}
+      (fn []
+        (is (nil? (before :run "(x)" nil)))
+        (is (= 2 (count @reports)))
+        (is (re-find #"^the :before-run hooks failed: .*report failed.*, so the Run went ahead$"
+                     (str (second @reports))))))))

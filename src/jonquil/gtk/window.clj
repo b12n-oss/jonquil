@@ -1009,6 +1009,19 @@
                (when on-complete (on-complete result))
                (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
+(defn- before-run-stopped
+  "Plugins P6b: asks the :before-run hooks about a Run of kind sending text
+  from tab. nil to go ahead; when a plugin stops it, the line saying so,
+  after putting it on the console and the status bar. Call only when the
+  Run would otherwise start (the tab is ours, the evaluator idle, the
+  bracket check clean, the text there), since a Run that wouldn't start
+  asks nothing. GTK thread; waits for the hooks up to their budget."
+  [{:keys [cv status-label]} kind tab text]
+  (when-let [line (plugin-hooks/before-run! {:kind kind :text text :path @(:path tab) :tab (:id tab)})]
+    (cview/append! cv :system (str "; " line "\n"))
+    (set-status! status-label (str "; " line))
+    line))
+
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).
   ev/evaluating? is checked BEFORE ev/eval! and the banner (when printed)
@@ -1063,19 +1076,25 @@
            (when notify (notify {:busy warning}))))
        :else
        (let [text (editor/editor-text ed)
-             problem (commands/pre-run-problem text)]
-         (cview/mark-entry-start! cv)
-         ;; Tabs plan ruling 5: a saved tab's banner names its file.
-         (cview/append! cv :system (tabs/run-banner @path-atom))
-         (if problem
-           (do (cview/append! cv :error (str problem "\n"))
-               (set-status! status-label "Ready")
-               (when notify (notify {:problem problem})))
-           (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                 warning (ev/eval! @ev* text (opts))]
-             (when warning
-               (cview/append! cv :system warning)
-               (when notify (notify {:busy warning})))))))
+             problem (commands/pre-run-problem text)
+             ;; P6b: a plugin may stop a Run that would start; nothing
+             ;; then shows but its line, not even the banner
+             stopped (when-not problem (before-run-stopped ctx :run tab text))]
+         (if stopped
+           (when notify (notify {:refused stopped}))
+           (do
+             (cview/mark-entry-start! cv)
+             ;; Tabs plan ruling 5: a saved tab's banner names its file.
+             (cview/append! cv :system (tabs/run-banner @path-atom))
+             (if problem
+               (do (cview/append! cv :error (str problem "\n"))
+                   (set-status! status-label "Ready")
+                   (when notify (notify {:problem problem})))
+               (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                     warning (ev/eval! @ev* text (opts))]
+                 (when warning
+                   (cview/append! cv :system warning)
+                   (when notify (notify {:busy warning})))))))))
      (when notify (fn [] (apply str @out))))))
 
 (defn- do-stop!
@@ -1137,7 +1156,9 @@
   (let [ed (:ed tab)
         snap (editor/snapshot ed)]
     (when-let [text (commands/run-selection-text snap)]
-      (when-not (refuse-foreign! ctx)
+      (when-not (or (refuse-foreign! ctx)
+                    ;; P6b: asked only when the Run would start
+                    (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab text)))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
                                                     :hook-source :selection :hook-tab (:id tab)})))))
@@ -1180,7 +1201,8 @@
         _ (g/with-iters* buf a b (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
         snap (editor/snapshot ed)]
     (if-let [text (commands/run-selection-text snap)]
-      (if-let [msg (refuse-foreign! ctx)]
+      (if-let [msg (or (refuse-foreign! ctx)
+                       (and (not (ev/evaluating? @(:ev* ctx))) (before-run-stopped ctx :selection tab text)))]
         (do (notify {:refused msg}) (fn [] ""))
         (mcp-eval! ctx text {:ns-source (:text snap) :owner (:id tab)
                              :hook-source :selection :hook-tab (:id tab)}
@@ -1257,7 +1279,8 @@
   (let [ed (:ed tab)
         snap (editor/snapshot ed)]
     (if-let [{:keys [text start end]} (commands/run-form snap)]
-      (when-not (refuse-foreign! ctx)
+      (when-not (or (refuse-foreign! ctx)
+                    (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :form tab text)))
         ((:flash! flash-fns) start end (:caret snap))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)

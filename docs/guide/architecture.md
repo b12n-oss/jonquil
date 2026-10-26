@@ -199,7 +199,13 @@ these:
   through each plugin's hook in id order on one future per point, with a
   ctx built by `plugin-registry/effect-ctx` as a `:run` command's is.
   Events that come while a point is busy queue on that future, up to 16,
-  and past that are skipped with a line. `:before-run` is slice P6b. Slice P4 (2026-10-25) made a change take effect
+  and past that are skipped with a line. Slice P6b (2026-10-26) added
+  `:before-run`: `do-run!`, `do-run-selection!`, `mcp-run-selection!` and
+  `do-run-form!` call `before-run-stopped` when the Run would start, which
+  asks `plugin-hooks/before-run!` on the GTK thread. That runs the chain
+  on a future and waits up to 100 ms; the ctx carries `::p/refused`, so
+  every effect throws there (no GTK turn can happen while the GTK thread
+  waits), and a busy flag keeps an overrun chain to one. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
