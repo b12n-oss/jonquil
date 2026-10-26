@@ -63,6 +63,15 @@
    :buffer [:buffer-text :replace-text! :open!]
    :eval [:eval! :repl!]})
 
+(defn effect-ctx
+  "The ctx plugin code gets: the declared effects, only their
+  implementations from fx (an effects value), and tab-id as the tab it
+  acts on."
+  [fx declared tab-id]
+  {::p/effects declared
+   ::p/impl (select-keys fx (mapcat effect-impls declared))
+   ::p/tab tab-id})
+
 (defn quiet-capable?
   "True when ev can run p/eval!'s quiet eval (jonquil.evaluator/QuietEval)."
   [ev]
@@ -149,9 +158,7 @@
         (throw (ex-info (str label cid " is still running") {:plugin plugin-id})))
       (try
         (let [fx @effects
-              ctx {::p/effects declared
-                   ::p/impl (select-keys fx (mapcat effect-impls declared))
-                   ::p/tab (when-let [f (:active-tab fx)] (f))}]
+              ctx (effect-ctx fx declared (when-let [f (:active-tab fx)] (f)))]
           (future
             (try (run ctx)
                  (catch Throwable e
