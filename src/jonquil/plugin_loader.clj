@@ -6,14 +6,17 @@
   the next registry and console lines; load-step! applies one to the live
   registry, on the window's load-agent, and records each plugin it made
   live in jonquil.plugin-history; revert-step! checks an old version the
-  same way and, on a pass, writes it back as a new version. reload only
-  reads files; nothing here touches GTK or throws."
+  same way and, on a pass, writes it back as a new version. An agent's
+  proposal (slice P9) is checked in isolation by propose-check, off the
+  agent, and recorded by propose-step!; accept-step! and reject-step! end
+  it. reload only reads files; nothing here touches GTK or throws."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.keymap :as km]
             [jonquil.plugin-check :as plugin-check]
             [jonquil.plugin-history :as history]
+            [jonquil.plugin-isolated :as isolated]
             [jonquil.plugin-protocol :as protocol]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.settings :as settings]))
@@ -297,6 +300,57 @@
                             (str "plugin " id " reverted to v" n ", but its history wasn't recorded: " (:error r)))))))))))
     (catch Throwable e
       [(str "reverting plugin " id " failed: " (or (ex-message e) (str e)))])))
+
+(defn propose-check
+  "The isolated check of an agent's source for id against registry's
+  earlier plugins: check (plugin-isolated/check! unless given) called with
+  {:source :file-id :request}. Blocks for up to the isolated deadline, so
+  it's called off the plugin agent, and its result goes to propose-step!.
+  Never throws."
+  [{:keys [registry id source os check]}]
+  (try ((or check isolated/check!) {:source source :file-id id :request (request-for registry id os)})
+       (catch Throwable e {:ok? false :problems [(str "checking it threw: " (ex-message e))]})))
+
+(def ^:private review-hint "(Review Plugin Proposals in the palette)")
+
+(defn propose-step!
+  "Records an agent's proposal of source for id, with reason, given its
+  check's result (propose-check's), on the plugin agent: {:status :n
+  :problems :lines}. A pass, or an unchecked result when there's no jolt,
+  is :pending, keeping what the check reported, superseding an older
+  pending one, and announced in the lines; a fail is :rejected-by-checks
+  with no line. Both record the live version as :based-on. A bad id, a
+  blank reason or a history that can't be written is :refused, recording
+  nothing. opts are load-step!'s folder options. Never throws."
+  [{:keys [id source reason result now] :as opts}]
+  (let [refused (fn [why] {:status :refused :n nil :problems [why] :lines []})]
+    (try
+      (let [[_ opts] (step-opts opts)
+            dir (:dir opts)]
+        (cond
+          (not (and (string? id) (re-matches id-pattern id)))
+          (refused (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
+          (str/blank? reason) (refused "a proposal needs a reason")
+          :else
+          (let [pass? (boolean (or (:ok? result) (:unchecked? result)))
+                based-on (:n (history/latest-accepted (:entries (history/read-entries (history/history-dir dir id)))))
+                r (history/record-proposal!
+                   (cond-> {:plugins-dir dir :id id :text source :reason reason :based-on based-on :now now
+                            :status (if pass? :pending :rejected-by-checks)}
+                     pass? (assoc :check {:warnings (vec (:warnings result)) :timings (or (:timings result) {})
+                                          :plugin (when-not (:unchecked? result) (:plugin result))
+                                          :unchecked? (boolean (:unchecked? result))})
+                     (not pass?) (assoc :problems (vec (:problems result)))))]
+            (cond
+              (:error r) (refused (str "the proposal wasn't recorded: " (:error r)))
+              pass? {:status :pending :n (:n r) :problems []
+                     :lines (cond-> [(str "plugin " id ": an agent proposes v" (:n r)
+                                          (when (:unchecked? result) ", unchecked since there's no jolt to check it in")
+                                          ": " reason " " review-hint)]
+                              (:superseded r) (conj (str "plugin " id ": v" (:superseded r) " is superseded by v" (:n r))))}
+              :else {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}))))
+      (catch Throwable e
+        (refused (str "the proposal wasn't recorded: " (or (ex-message e) (str e))))))))
 
 (defn load-agent
   "The agent every plugin load runs on, one at a time. It keeps going after

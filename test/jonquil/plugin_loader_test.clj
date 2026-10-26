@@ -477,3 +477,77 @@
     (revert! live d "wrap" 1)
     (is (java.nio.file.Files/isSymbolicLink (.toPath link)))
     (is (= (source "wrap") (slurp target)))))
+
+;; --- plugins P9: proposals --------------------------------------------------
+
+(defn- propose! [d id text result & {:as more}]
+  (loader/propose-step! (merge {:dir d :os "Linux" :disabled #{} :now now :id id :source text
+                                :reason "tidy" :result result}
+                               more)))
+
+(def ^:private summ {:id :pw :doc "A test plugin." :effects #{:console}
+                     :commands [{:id :pw/wrap :doc "Wrap it." :scope :editor}]
+                     :bindings [{:key "j" :mods #{:cmd :alt} :command :pw/wrap}] :hooks []})
+
+(def ^:private passed {:ok? true :problems [] :warnings ["w"] :timings {:pw/wrap 2} :plugin summ})
+
+(deftest propose-check-passes-the-request-test
+  (let [r (reg/empty-registry)
+        seen (atom nil)
+        answer (loader/propose-check {:registry r :id "pw" :source "s" :os "Linux"
+                                      :check (fn [m] (reset! seen m) {:ok? true :mark 1})})]
+    (is (= {:source "s" :file-id "pw" :request (#'loader/request-for r "pw" "Linux")} @seen))
+    (is (= {:ok? true :mark 1} answer)))
+  (let [answer (loader/propose-check {:registry (reg/empty-registry) :id "pw" :source "s" :os "Linux"
+                                      :check (fn [_] (throw (ex-info "boom" {})))})]
+    (is (false? (:ok? answer)))
+    (is (= ["checking it threw: boom"] (:problems answer)))))
+
+(deftest propose-pending-test
+  (let [d (dir-with [])
+        r (propose! d "pw" (source "pw") passed)]
+    (is (= {:status :pending :n 1 :problems []
+            :lines ["plugin pw: an agent proposes v1: tidy (Review Plugin Proposals in the palette)"]}
+           r))
+    (is (= {:warnings ["w"] :timings {:pw/wrap 2} :plugin summ :unchecked? false}
+           (:check (first (entries d "pw")))))
+    (is (not (.exists (io/file d "pw.clj"))) "nothing goes live")))
+
+(deftest propose-unchecked-test
+  (let [d (dir-with [])
+        r (propose! d "pw" (source "pw") {:ok? false :unchecked? true :problems ["there's no jolt to check it in, so it wasn't checked"]
+                                          :warnings [] :timings {} :plugin nil})]
+    (is (= :pending (:status r)))
+    (is (= ["plugin pw: an agent proposes v1, unchecked since there's no jolt to check it in: tidy (Review Plugin Proposals in the palette)"]
+           (:lines r)))
+    (is (nil? (get-in (first (entries d "pw")) [:check :plugin])))
+    (is (true? (get-in (first (entries d "pw")) [:check :unchecked?])))))
+
+(deftest propose-rejected-by-checks-test
+  (let [d (dir-with [])]
+    (is (= {:status :rejected-by-checks :n 1 :problems ["p"] :lines []}
+           (propose! d "pw" (source "pw") {:ok? false :problems ["p"]})))))
+
+(deftest propose-supersedes-test
+  (let [d (dir-with [])]
+    (propose! d "pw" (source "pw") passed)
+    (is (= ["plugin pw: an agent proposes v2: tidy (Review Plugin Proposals in the palette)"
+            "plugin pw: v1 is superseded by v2"]
+           (:lines (propose! d "pw" (v2-of "pw") passed))))))
+
+(deftest propose-records-based-on-test
+  (let [d (dir-with [["pw.clj" (source "pw")]])]
+    (step! (atom (reg/empty-registry)) d)
+    (propose! d "pw" (v2-of "pw") passed)
+    (is (= 1 (:based-on (history/pending (entries d "pw"))))))
+  (let [d (dir-with [])]
+    (propose! d "pw" (source "pw") passed)
+    (is (nil? (:based-on (first (entries d "pw")))))))
+
+(deftest propose-refuses-test
+  (let [d (dir-with [])]
+    (is (= {:status :refused :n nil :lines []
+            :problems ["Bad_Id isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"]}
+           (propose! d "Bad_Id" (source "pw") passed)))
+    (is (= ["a proposal needs a reason"] (:problems (propose! d "pw" (source "pw") passed :reason " "))))
+    (is (not (.exists (io/file d ".history"))))))
