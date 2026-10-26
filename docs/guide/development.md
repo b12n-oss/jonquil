@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 87 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (1072 tests, 6093 assertions
-on macOS, 6062 on Linux, measured with `bb linux:test` on 2026-10-26) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (1078 tests, 6110 assertions
+on macOS, 6079 on Linux, measured with `bb linux:test` on 2026-10-26) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,11 +20,11 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (1072 tests and 6062 assertions, 31
+reports fewer assertions than macOS (1078 tests and 6079 assertions, 31
 fewer, measured 2026-10-26).
 
 <details>
-<summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code> and <code>test:basilisp</code></strong></summary>
+<summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code>, <code>test:basilisp</code> and <code>test:plugins</code></strong></summary>
 
 `bb test:nrepl` runs a second, separate suite (63 tests, 235 assertions,
 about 50 s): every test in it spawns a real Jolt child over
@@ -64,7 +64,14 @@ error lines for a runtime error, a compile error and `ex-info`, quick docs
 through `info` (also from a buffer namespace the server hasn't loaded),
 completion, the limitations, a read with the server's stdin closed, and
 Stop by disconnecting. It uses `JONQUIL_BASILISP` when that's set, else a
-`basilisp` on `PATH`, and skips, exiting 0, with neither. `bb test` never touches a child process or a real server and stays
+`basilisp` on `PATH`, and skips, exiting 0, with neither. `bb test:plugins`
+runs a seventh (7 tests, 20 assertions, about 12 s, measured 2026-10-26):
+real isolated plugin checks in throwaway `jolt` children, covering a good
+plugin, a bad one, a top-level loop killed at a 3 s deadline along with
+the `sleep` it started, a shutdown hook that can't start a process at
+the kill, a kept log cut to its tail, junk output, and code that runs in
+the child but leaves no namespace behind in the test's process. It skips,
+exiting 0, when no `jolt` is on the login `PATH`. `bb test` never touches a child process or a real server and stays
 that self-contained on purpose, which is why the live suites are separate
 tasks rather than tags inside the same one.
 

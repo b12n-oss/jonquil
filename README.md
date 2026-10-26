@@ -134,6 +134,7 @@ bb test:clj               # live JVM tests: start a real clojure -M:serve (need 
 bb test:jank              # live jank tests: launch a real jank repl (JONQUIL_JANK or jank on PATH; skips without one)
 bb test:bb                # live nREPL-dialect tests: start a real bb nrepl-server (bb on PATH; skips without one)
 bb test:basilisp          # the same against a real basilisp nrepl-server (JONQUIL_BASILISP or basilisp on PATH)
+bb test:plugins           # live isolated plugin checks: run real jolt checker children (skips without jolt)
 bb test:cljs-node         # live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)
 bb test jonquil.edit-test # one namespace (the TDD loop)
 bb linux:test             # bb test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)

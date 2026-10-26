@@ -231,7 +231,29 @@ these:
   half-shaped result, an overrun or a non-zero exit into a failed check.
   The result is advisory: the candidate shares the checker's process and
   can forge it, so Accept (P9) checks again in process and compares. Slice
-  P8b starts the child. Slice P4 (2026-10-25) made a change take effect
+  P8b (2026-10-26) runs it: `plugin-isolated/check!` writes the request
+  and the candidate to a fresh owner-only `jonquil-plugin-check-` folder,
+  starts the `jolt` the out-of-process runtime finds, in that folder with
+  the scrubbed environment, and waits up to 30 s. A child that overruns is
+  killed with SIGKILL, along with every process it had started (taken just
+  before, since they outlive it otherwise). It gets no SIGTERM first,
+  because that would run a candidate's shutdown hooks, and one of those
+  can start a process after the list was taken. Only the log's last MiB
+  is read. When the checker printed its result the folder goes; when the
+  child misbehaved (overran, printed no result or garbage, exited
+  non-zero) it's kept with its log cut to that tail, the result names the
+  log, and `leftovers/prune!` removes it a day later. With no `jolt` the
+  answer is `:unchecked? true` and nothing is written. `check!` is the
+  protocol's isolated seam (`run-protocol` itself is embedded in the
+  child, so it can't start one), and nothing calls it until P9. The child
+  is isolation from Jonquil, not a sandbox: it runs as you, with your
+  files and network. The environment scrub is by name, so a credential in
+  a variable called something else (a proxy URL with a password in it)
+  reaches the child, and Jolt starts it through `sh -c "env -i ..."`, so
+  the kept variables are briefly in that command line. A process the
+  candidate starts and leaves running when its check ends on its own
+  keeps running. A candidate can require only the embedded namespaces and
+  `clojure.*`. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
