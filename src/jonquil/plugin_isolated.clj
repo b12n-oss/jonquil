@@ -143,28 +143,25 @@
   []
   (tool-path/resolve-program "jolt" (login-path/path) login-path/executable-file?))
 
-(def TERM-GRACE-MS
-  ;; estimate: as nrepl.child/term-grace-ms, SIGTERM ended a looping child
-  ;; and one with a hung shutdown hook within it (probed, P8b)
+(def KILL-WAIT-MS
+  ;; estimate: how long to wait for a SIGKILLed child to be reaped, as
+  ;; nrepl.child/term-grace-ms
   1000)
 
 (defn- stop!
-  "Ends proc and what it started: the descendants are taken first, since
-  after the child dies they're reparented and a candidate's own process
-  (probed: a sleep it started) would outlive it. SIGTERM, then SIGKILL
-  after TERM-GRACE-MS. Returns the exit code, or nil."
+  "Ends proc and what it started, with SIGKILL and no SIGTERM first: a
+  throwaway checker has nothing to shut down, and SIGTERM would run a
+  candidate's shutdown hooks, which can start a process after the
+  descendants were taken (review I2, probed). The descendants are taken
+  first, since after the child dies they're reparented (probed: a sleep it
+  started outlived it). Returns the exit code, or nil."
   [proc]
   (let [kids (try (vec (iterator-seq (.iterator (.descendants (.toHandle ^java.lang.Process (:proc proc))))))
                   (catch Throwable _ []))]
-    (p/destroy proc)
-    (let [r (deref proc TERM-GRACE-MS ::alive)
-          exit (if (= ::alive r)
-                 (do (.destroyForcibly ^java.lang.Process (:proc proc))
-                     (:exit (deref proc TERM-GRACE-MS nil)))
-                 (:exit r))]
-      (doseq [^java.lang.ProcessHandle k kids]
-        (try (when (.isAlive k) (.destroyForcibly k)) (catch Throwable _ nil)))
-      exit)))
+    (.destroyForcibly ^java.lang.Process (:proc proc))
+    (doseq [^java.lang.ProcessHandle k kids]
+      (try (when (.isAlive k) (.destroyForcibly k)) (catch Throwable _ nil)))
+    (:exit (deref proc KILL-WAIT-MS nil))))
 
 (defn- delete-tree! [f]
   (doseq [x (reverse (file-seq (io/file f)))] (.delete ^java.io.File x)))
@@ -182,6 +179,43 @@
   (let [path (login-path/path)]
     (cond-> (scrub-env (into {} (System/getenv)))
       path (assoc "PATH" path))))
+
+(defn- check-in!
+  "check!'s run once dir exists: writes the request and candidate, runs the
+  child, and keeps dir or deletes it."
+  [{:keys [dir root source file-id request program deadline-ms]}]
+  (let [log (str dir "/check.log")
+        proc (atom nil)
+        keep? (atom false)]
+    (try
+      (spit (io/file dir "request.edn") (request-text {:request request :file-id file-id}))
+      (spit (io/file dir "candidate.clj") source)
+      (let [spawned (try (p/process {:dir dir :env (env-for-child) :out (io/file log) :err :out}
+                                    program "-Sdeps"
+                                    (str "{:deps {" checker-files/lib " {:local/root " (pr-str root) "}}}")
+                                    "-e" "(require 'jonquil.plugin-checker) (jonquil.plugin-checker/-main)")
+                         (catch Throwable t {:spawn-error (str "couldn't start jolt: " (ex-message t))}))]
+        (if-let [e (:spawn-error spawned)]
+          (failed e)
+          (do
+            (reset! proc spawned)
+            (leftovers/write-pid! dir (.pid ^java.lang.Process (:proc spawned)))
+            (let [r (deref spawned deadline-ms ::overrun)
+                  timed-out? (= ::overrun r)
+                  exit (if timed-out? (stop! spawned) (:exit r))
+                  _ (reset! proc nil)
+                  out (read-output log)
+                  result (parse-result {:out out :exit exit :timed-out? timed-out? :deadline-ms deadline-ms})]
+              (if (or timed-out? (not (reported? out exit)))
+                ;; review I3: the kept log is cut to the tail that was
+                ;; read, all a post-mortem shows anyway
+                (do (reset! keep? true) (spit log out) (assoc result :log log))
+                result)))))
+      (catch Throwable t
+        (failed (str "the isolated check couldn't run: " (ex-message t))))
+      (finally
+        (when-let [pr @proc] (try (stop! pr) (catch Throwable _ nil)))
+        (when-not @keep? (delete-tree! dir))))))
 
 (defn check!
   "Runs the isolated check of source (file-id's plugin) against request in
@@ -203,40 +237,15 @@
       (if-let [e (:error root)]
         (failed e)
         (let [_ (leftovers/prune!)
-              dir (.getCanonicalPath
-                   (.toFile (java.nio.file.Files/createTempDirectory
-                             (.toPath (io/file (or temp-base (System/getProperty "java.io.tmpdir"))))
-                             "jonquil-plugin-check-"
-                             (make-array java.nio.file.attribute.FileAttribute 0))))
-              log (str dir "/check.log")
-              proc (atom nil)
-              keep? (atom false)]
-          (try
-            (spit (io/file dir "request.edn") (request-text {:request request :file-id file-id}))
-            (spit (io/file dir "candidate.clj") source)
-            (let [spawned (try (p/process {:dir dir :env (env-for-child) :out (io/file log) :err :out}
-                                          program "-Sdeps"
-                                          (str "{:deps {" checker-files/lib " {:local/root " (pr-str root) "}}}")
-                                          "-e" "(require 'jonquil.plugin-checker) (jonquil.plugin-checker/-main)")
-                               (catch Throwable t {:spawn-error (str "couldn't start jolt: " (ex-message t))}))]
-              (if-let [e (:spawn-error spawned)]
-                (failed e)
-                (do
-                  (reset! proc spawned)
-                  (leftovers/write-pid! dir (.pid ^java.lang.Process (:proc spawned)))
-                  (let [r (deref spawned deadline-ms ::overrun)
-                        timed-out? (= ::overrun r)
-                        exit (if timed-out? (stop! spawned) (:exit r))
-                        _ (reset! proc nil)
-                        out (read-output log)
-                        result (parse-result {:out out :exit exit :timed-out? timed-out? :deadline-ms deadline-ms})]
-                    (if (or timed-out? (not (reported? out exit)))
-                      (do (reset! keep? true) (assoc result :log log))
-                      result)))))
-            (catch Throwable t
-              (failed (str "the isolated check couldn't run: " (ex-message t))))
-            (finally
-              (when-let [pr @proc] (try (stop! pr) (catch Throwable _ nil)))
-              (when-not @keep? (delete-tree! dir)))))))
+              dir (try (.getCanonicalPath
+                        (.toFile (java.nio.file.Files/createTempDirectory
+                                  (.toPath (io/file (or temp-base (System/getProperty "java.io.tmpdir"))))
+                                  "jonquil-plugin-check-"
+                                  (make-array java.nio.file.attribute.FileAttribute 0))))
+                       (catch Throwable t {:error (str "the check's folder couldn't be made: " (ex-message t))}))]
+          (if-let [e (:error dir)]
+            (failed e)
+            (check-in! {:dir dir :root root :source source :file-id file-id :request request
+                        :program program :deadline-ms deadline-ms})))))
     {:ok? false :unchecked? true :problems ["there's no jolt to check it in, so it wasn't checked"]
      :warnings [] :timings {} :plugin nil :definition nil}))

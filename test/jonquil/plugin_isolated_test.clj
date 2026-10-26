@@ -128,3 +128,13 @@
                             :cache-base (.getPath (io/file blocker "under")) :temp-base tmp})]
     (is (str/starts-with? (first (:problems r)) "the checker's files couldn't be written: ") (pr-str r))
     (is (empty? (check-folders tmp)))))
+
+(deftest check-with-an-unusable-temp-base-fails-test
+  (let [tmp (temp-dirs/temp-dir! "jonquil-isolated-")
+        blocker (io/file tmp "a-file")
+        _ (spit blocker "")
+        r (isolated/check! {:source "(ns x)" :file-id "x" :request {} :program "/bin/sh"
+                            :cache-base (temp-dirs/temp-dir! "jonquil-isolated-cache-")
+                            :temp-base (.getPath blocker)})]
+    (is (false? (:ok? r)))
+    (is (str/starts-with? (first (:problems r)) "the check's folder couldn't be made: ") (pr-str r))))

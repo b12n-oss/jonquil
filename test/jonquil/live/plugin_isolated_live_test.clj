@@ -82,3 +82,22 @@
     (is (true? (:ok? r)) (pr-str r))
     (is (= "ran" (slurp marker)))
     (is (nil? (find-ns 'jonquil.plugins.lmark)))))
+
+(deftest a-hook-cant-start-a-process-at-the-kill-test
+  ;; review I2: a shutdown hook SIGTERM would run starts a process after
+  ;; the descendants were taken; the overrun kill gives it no chance
+  (let [[r _] (check "lhook" (source "lhook" :extra (str "(.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (spit \"late.pid\" (str (.pid (.start (ProcessBuilder. [\"sleep\" \"300\"]))))))))\n"
+                                                        "(loop [] (recur))"))
+                     :deadline-ms 3000)
+        late (some-> (:log r) io/file .getParentFile (io/file "late.pid"))]
+    (is (:log r) (pr-str r))
+    (is (or (nil? late) (not (.exists late)) (gone? (parse-long (str/trim (slurp late)))))
+        "the hook's process isn't left running")))
+
+(deftest a-kept-log-is-cut-to-its-tail-test
+  ;; review I3: a candidate printing until the deadline doesn't leave a log
+  ;; of hundreds of MB behind for a day
+  (let [[r _] (check "lspam" (source "lspam" :extra "(let [l (apply str (repeat 1000 \"x\"))] (loop [] (println l) (recur)))")
+                     :deadline-ms 3000)]
+    (is (:log r) (pr-str r))
+    (is (<= (.length (io/file (:log r))) isolated/OUTPUT-MAX-BYTES))))
