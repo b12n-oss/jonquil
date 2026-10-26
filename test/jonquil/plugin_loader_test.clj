@@ -673,3 +673,68 @@
 
 (deftest reject-not-pending-test
   (is (= ["plugin pw has no pending v3"] (reject! (dir-with []) "pw" 3))))
+
+;; --- plugins P9: the final review's fixes ------------------------------------
+
+(deftest accept-with-a-missing-version-file-loads-nothing-test
+  ;; review I1: with <n>.clj gone, Accept checked the file on disk instead
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)
+        ;; the real check loads v2 here, so it runs before v1 goes live
+        rep (reported "pw" v2)]
+    (step! live d)
+    (propose! d "pw" v2 rep)
+    (io/delete-file (io/file (history/history-dir d "pw") "2.clj"))
+    (is (= ["plugin pw: v2 wasn't accepted: its source is missing from its history"] (accept! live d "pw" 2)))
+    (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
+
+(deftest propose-needs-source-text-test
+  ;; review I2: a nil source made an entry naming a file that was never written
+  (let [d (dir-with [])]
+    (is (= {:status :refused :n nil :lines [] :problems ["a proposal needs its source as text"]}
+           (propose! d "pw" nil {:ok? false :unchecked? true :problems [] :warnings [] :timings {} :plugin nil})))
+    (is (not (.exists (io/file d ".history"))))))
+
+(deftest revert-refuses-a-version-that-was-never-live-test
+  ;; review I3: a proposal's <n>.clj made it a revert target, skipping Accept
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)
+        ;; the real check loads v2 here, so it runs before v1 goes live
+        rep (reported "pw" v2)]
+    (step! live d)
+    (propose! d "pw" v2 rep)
+    (is (= ["plugin pw: v2 was never live, so it wasn't reverted"] (revert! live d "pw" 2)))
+    (propose! d "pw" (marked "pw" 3) {:ok? false :problems ["p"]})
+    (is (= ["plugin pw: v3 was never live, so it wasn't reverted"] (revert! live d "pw" 3)))
+    (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))
+    (is (= (marked "pw" 1) (slurp (io/file d "pw.clj"))))))
+
+(deftest accept-keeps-an-edit-that-wasnt-reloaded-test
+  ;; review I4: Accept wrote over a change to pw.clj that no Reload had seen
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (marked "pw" 2)
+        ;; the real check loads v2 here, so it runs before v1 goes live
+        rep (reported "pw" v2)]
+    (step! live d)
+    (propose! d "pw" v2 rep)
+    (write! d "pw.clj" (marked "pw" 3))
+    (is (= ["plugin pw: v2 wasn't accepted: pw.clj changed since it was loaded (Reload Plugins first)"]
+           (accept! live d "pw" 2)))
+    (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
+    (is (= :pending (history/version-status (entries d "pw") 2)))
+    (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
+
+(deftest revert-keeps-an-edit-that-wasnt-reloaded-test
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))]
+    (step! live d)
+    (write! d "pw.clj" (marked "pw" 2))
+    (step! live d)
+    (write! d "pw.clj" (marked "pw" 3))
+    (is (= ["plugin pw wasn't reverted: pw.clj changed since it was loaded (Reload Plugins first)"]
+           (revert! live d "pw" 1)))
+    (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
+    (is (= 2 @(ns-resolve 'jonquil.plugins.pw 'marker)))))

@@ -260,6 +260,22 @@
     (catch Throwable e
       [(str "loading plugins failed: " (or (ex-message e) (str e)))])))
 
+(defn- disk-changed
+  "The line saying id's file changed since it was loaded, when id is live
+  in reg and <dir>/<id>.clj holds other text: writing over it would lose
+  an edit no Reload has seen (P9 review I4). nil otherwise."
+  [dir reg id]
+  (let [live-src (get-in reg [:plugins (keyword id) :source])
+        f (io/file dir (str id ".clj"))]
+    (when (and live-src (.isFile f) (not= live-src (try (slurp f) (catch Throwable _ live-src))))
+      (str id ".clj changed since it was loaded (Reload Plugins first)"))))
+
+(defn- was-live?
+  "Whether version n was ever accepted: a proposal that never went live
+  isn't a revert target (P9 review I3)."
+  [hdir n]
+  (boolean (some #(and (= n (:n %)) (= :accepted (:status %))) (:entries (history/read-entries hdir)))))
+
 (defn revert-step!
   "Reverts plugin id to its version n, on the plugin agent like load-step!
   (opts as load-step!'s, plus :id, :n and an optional :reason): the old
@@ -276,6 +292,8 @@
       (cond
         (nil? src) (conj warn (str "plugin " id " has no v" n " to revert to"))
         (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
+        (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
+        (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
         :else
         (let [old @live
               path (str dir "/" id ".clj")
@@ -332,6 +350,7 @@
           (not (and (string? id) (re-matches id-pattern id)))
           (refused (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
           (str/blank? reason) (refused "a proposal needs a reason")
+          (not (string? source)) (refused "a proposal needs its source as text")
           :else
           (let [pass? (boolean (or (:ok? result) (:unchecked? result)))
                 based-on (:n (history/latest-accepted (:entries (history/read-entries (history/history-dir dir id)))))
@@ -388,6 +407,10 @@
       (cond
         (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
         (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
+        ;; review I1: with no source, reload would check the file on disk
+        (nil? (history/version-source hdir n))
+        (conj warn (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history"))
+        (disk-changed dir @live id) (conj warn (str "plugin " id ": v" n " wasn't accepted: " (disk-changed dir @live id)))
         :else
         (let [src (history/version-source hdir n)
               old @live

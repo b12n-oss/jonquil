@@ -154,8 +154,11 @@
   (try
     (let [dir (history-dir plugins-dir id)
           {:keys [entries error]} (read-entries dir)]
-      (if error
-        {:error error}
+      (cond
+        error {:error error}
+        ;; review I2: an entry never names a file that wasn't written
+        (not (string? text)) {:error "a proposal needs its text"}
+        :else
         (let [n (next-n entries (file-ns dir))
               at ((or now #(str (java.time.Instant/now))))
               old (when (= :pending status) (:n (pending entries)))
