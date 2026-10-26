@@ -61,6 +61,7 @@
     jonquil.plugin-registry
     jonquil.plugin-hooks
     jonquil.plugin-history
+    jonquil.plugin-checker
     jonquil.plugin-loader
     jonquil.gtk.palette
     jonquil.help

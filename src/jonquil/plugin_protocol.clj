@@ -149,14 +149,16 @@
   {:ok? :problems :warnings :timings :definition}. :in-process loads
   source (load-candidate), validates it against request
   (jonquil.plugin-check/validate, with the definitions and file-id), and
-  soaks it only when both found nothing wrong; :definition is the plugin's
+  soaks it only when both found nothing wrong (load-ms and soak-ms, when
+  given, are load-candidate's and soak's budgets); :definition is the plugin's
   definition on a pass. :isolated is the agent's path, a throwaway Jolt
   process, built in a later slice. Blocks for up to commands x fixtures x
   soak-ms, so it's called off the GTK thread."
-  [{:keys [where source file-id request soak-ms]}]
+  [{:keys [where source file-id request soak-ms load-ms]}]
   (case where
     :in-process
-    (let [{:keys [definitions problems]} (load-candidate {:source source :file-id file-id})
+    (let [{:keys [definitions problems]} (load-candidate (cond-> {:source source :file-id file-id}
+                                                           load-ms (assoc :load-ms load-ms)))
           checked (when (empty? problems)
                     (plugin-check/validate (assoc request :definitions definitions :file-id file-id)))
           problems (into problems (:problems checked))

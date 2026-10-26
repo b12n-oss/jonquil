@@ -44,6 +44,7 @@
     jonquil.plugin-registry-test
     jonquil.plugin-hooks-test
     jonquil.plugin-history-test
+    jonquil.plugin-checker-test
     jonquil.plugin-loader-test
     jonquil.help-test
     jonquil.source-test
