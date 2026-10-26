@@ -6,9 +6,13 @@
   save or Run it watches. One chain per point at a time: an event arriving
   while the last chain at its point is still running waits its turn on
   that chain's worker, up to a bound past which it's skipped, with a line
-  saying so. :before-run is slice P6b; nothing here calls it. Pure
-  apart from run-hooks!, which reads the live registry and its effects."
-  (:require [jonquil.console :as console]
+  saying so. :before-run (slice P6b) is different: the window waits for
+  it before a Run, up to a budget, and it may stop the Run, so its ctx has
+  no effects. Pure apart from run-hooks! and before-run!, which read the
+  live registry and its effects."
+  (:require [clojure.string :as str]
+            [jonquil.console :as console]
+            [jonquil.plugin :as p]
             [jonquil.plugin-registry :as plugin-registry]))
 
 (defn hooks
@@ -138,3 +142,74 @@
     (when (#{:run :selection :form} source)
       (try-point :after-run #(run-event source result)))
     nil))
+
+;; --- :before-run (P6b) -------------------------------------------------------
+
+(def ^:private BEFORE-RUN-MS
+  ;; estimate: about where a delay after a key press starts to show;
+  ;; ROADMAP D2 measured a REPL line at 8 ms out of process, 0.3 ms in
+  100)
+
+(def ^:private NO-EFFECTS
+  ":before-run hooks can't use effects, since the Run waits for them")
+
+(defn run-before-chain
+  "Threads event through hooks, each called with ctx, until one answers
+  {:abort sentence}: {:plugin id :abort sentence}, or nil when none did.
+  Each hook's plugin id goes into the current atom before it's called. A
+  throw, or an :abort that isn't a non-blank string, is reported and the
+  chain goes on with the event as it was."
+  [{:keys [hooks ctx event report! current]}]
+  (reduce (fn [e {:keys [plugin f]}]
+            (reset! current plugin)
+            (let [e' (try (f ctx e)
+                          (catch Throwable ex
+                            (report! (str "plugin " (name plugin) ": :before-run hook: "
+                                          (or (ex-message ex) (str ex))))
+                            e))]
+              (cond
+                (not (and (map? e') (contains? e' :abort))) (if (map? e') e' e)
+                (and (string? (:abort e')) (not (str/blank? (:abort e'))))
+                (reduced {:plugin plugin :abort (:abort e')})
+                :else (do (report! (str "plugin " (name plugin)
+                                        ": :before-run's :abort must be a sentence, so the Run went ahead"))
+                          e))))
+          event hooks))
+
+;; true while a :before-run chain is running, overrun or not
+(defonce ^:private before-busy (atom false))
+
+(defn before-run!
+  "Asks the :before-run hooks about a Run of kind about to send text from
+  path, on tab. nil to let it go ahead, or the line saying which plugin
+  stopped it and why. The chain runs on a future this waits for, up to
+  BEFORE-RUN-MS; past that, or while an earlier chain that overran is
+  still running, the Run goes ahead with a line saying so. GTK thread:
+  the ctx has no effects, so nothing in the chain needs a GTK turn."
+  [{:keys [kind text path tab]}]
+  (let [hs (hooks @plugin-registry/live :before-run)]
+    (when (seq hs)
+      (let [report! (or (:report! @plugin-registry/effects) (fn [_]))
+            [was _] (swap-vals! before-busy (constantly true))]
+        (if was
+          (do (report! "the :before-run hooks are still running from an earlier Run, so this Run went ahead without them")
+              nil)
+          (let [current (atom nil)
+                ctx {::p/effects #{} ::p/impl {} ::p/tab tab ::p/refused NO-EFFECTS}
+                f (try
+                    (future
+                      (try (run-before-chain {:hooks hs :ctx ctx :report! report! :current current
+                                              :event {:kind kind :text text :path path}})
+                           (finally (reset! before-busy false))))
+                    (catch Throwable e
+                      ;; nothing started, so the hooks are free again
+                      (reset! before-busy false)
+                      (throw e)))
+                r (deref f BEFORE-RUN-MS ::timeout)]
+            (cond
+              (= ::timeout r)
+              (do (report! (str "the :before-run hooks took longer than " BEFORE-RUN-MS " ms (plugin "
+                                (some-> @current name) " was running), so the Run went ahead"))
+                  nil)
+              (:abort r) (str "plugin " (name (:plugin r)) " stopped this Run: " (:abort r))
+              :else nil)))))))

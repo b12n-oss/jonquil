@@ -50,11 +50,14 @@
 ;; effects its plugin declared (::effects), their implementations (::impl,
 ;; only the declared ones') and the tab that was active when it started
 ;; (::tab). Each function checks its effect first, so an undeclared one
-;; throws before anything is reached.
+;; throws before anything is reached. A ctx with ::refused (a :before-run
+;; hook's, P6b) refuses every effect with that sentence.
 
 (defn- effect!
   "The ctx's implementation named k, after checking that effect is declared."
   [ctx effect k]
+  (when-let [why (::refused ctx)]
+    (throw (ex-info why {:plugin/effect effect})))
   (when-not (contains? (::effects ctx) effect)
     (throw (ex-info (str "this plugin didn't declare " effect) {:plugin/effect effect})))
   (get (::impl ctx) k))
