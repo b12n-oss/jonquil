@@ -141,10 +141,7 @@
     (is (nil? (:definition r))))
   (let [r (run "(ns jonquil.plugins.p2-bad\n" "p2-bad")]
     (is (false? (:ok? r)))
-    (is (str/starts-with? (first (:problems r)) "line ")))
-  (let [r (run (source "p2-iso") "p2-iso" :where :isolated)]
-    (is (false? (:ok? r)))
-    (is (= 1 (count (:problems r))))))
+    (is (str/starts-with? (first (:problems r)) "line "))))
 
 (def stop-spin (atom false))
 

@@ -4,7 +4,9 @@
   its jonquil-cljs-run- folder so the error can name the log. A Jolt start
   that never ran keeps its jonquil-nrepl-<n>.log. A Jonquil, launcher or
   jank that is SIGKILLed leaves whatever it held (jonquil-cljs-run-,
-  jonquil-cljs-, jonquil-jank-run-). prune! deletes those once untouched for
+  jonquil-cljs-, jonquil-jank-run-). An isolated plugin check whose child
+  misbehaved keeps its jonquil-plugin-check- folder for a post-mortem
+  (jonquil.plugin-isolated/check!). prune! deletes those once untouched for
   a day, the same age middleware-files/prune-old! uses.
 
   A child with no project runs inside its run folder, so a live one must
@@ -28,7 +30,7 @@
 (def ^:private folder-name
   ;; createTempDirectory's suffix: <millis>-<n> on Jolt (the run dirs),
   ;; a random unsigned long on the JVM (the launcher's own folder)
-  #"jonquil-(cljs-run|cljs|jank-run)-\d+(-\d+)?")
+  #"jonquil-(cljs-run|cljs|jank-run|plugin-check)-\d+(-\d+)?")
 
 (def ^:private log-name #"jonquil-nrepl-\d+\.log")
 

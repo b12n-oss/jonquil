@@ -151,9 +151,10 @@
   (jonquil.plugin-check/validate, with the definitions and file-id), and
   soaks it only when both found nothing wrong (load-ms and soak-ms, when
   given, are load-candidate's and soak's budgets); :definition is the plugin's
-  definition on a pass. :isolated is the agent's path, a throwaway Jolt
-  process, built in a later slice. Blocks for up to commands x fixtures x
-  soak-ms, so it's called off the GTK thread."
+  definition on a pass. The agent's path, a throwaway Jolt process that
+  runs this function :in-process, is jonquil.plugin-isolated/check!.
+  Blocks for up to commands x fixtures x soak-ms, so it's called off the
+  GTK thread."
   [{:keys [where source file-id request soak-ms load-ms]}]
   (case where
     :in-process
@@ -167,5 +168,4 @@
           problems (into problems (:problems soaked))]
       {:ok? (empty? problems) :problems problems :warnings (vec (:warnings checked))
        :timings (or (:timings soaked) {})
-       :definition (when (empty? problems) (first definitions))})
-    {:ok? false :problems ["the isolated check isn't built yet"] :warnings [] :timings {} :definition nil}))
+       :definition (when (empty? problems) (first definitions))})))

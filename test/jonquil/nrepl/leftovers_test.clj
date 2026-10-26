@@ -40,8 +40,8 @@
 (deftest the-names-the-children-make-match
   (let [base (temp-dirs/temp-dir! "jonquil-leftovers-")
         made (mapv #(.getName ^java.io.File (run-dir! base % old dead-pid))
-                   ["jonquil-cljs-run-" "jonquil-jank-run-" "jonquil-cljs-"])]
-    (is (= 3 (leftovers/prune! base now)) (str "pruned " made))
+                   ["jonquil-cljs-run-" "jonquil-jank-run-" "jonquil-cljs-" "jonquil-plugin-check-"])]
+    (is (= 4 (leftovers/prune! base now)) (str "pruned " made))
     (is (empty? (names base)))))
 
 (deftest old-leftovers-go-and-fresh-ones-stay
