@@ -41,9 +41,10 @@
        :warnings [] :timings {}})))
 
 (defn result-text
-  "result between the two marker lines."
+  "result between the two marker lines, with no #:ns{} map syntax (the
+  :timings map's keys share a namespace), as child.clj prints its coord."
   [result]
-  (str "\n" MARK-START "\n" (pr-str result) "\n" MARK-END "\n"))
+  (str "\n" MARK-START "\n" (binding [*print-namespace-maps* false] (pr-str result)) "\n" MARK-END "\n"))
 
 (defn -main
   "Checks the working folder, prints the result and exits: a soak thread

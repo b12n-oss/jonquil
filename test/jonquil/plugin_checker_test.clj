@@ -70,3 +70,6 @@
     (is (= [:after-save] (:hooks s)))
     (is (= [{:key "j" :mods #{:cmd} :command :sm/x}] (:bindings s))))
   (is (nil? (checker/summary nil))))
+
+(deftest result-text-has-no-namespaced-maps-test
+  (is (str/includes? (checker/result-text {:timings {:lv/w 11}}) "{:lv/w 11}")))
