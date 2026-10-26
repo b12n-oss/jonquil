@@ -183,6 +183,13 @@
   (let [ctx {::p/effects #{:console} ::p/impl {:print! identity} ::p/refused "no effects here"}]
     (is (thrown-with-msg? Exception #"^no effects here$" (p/print! ctx "x")))))
 
+(defn- await-before-free
+  "Waits (up to 2 s) until no :before-run chain is running, so a stuck one
+  a test released doesn't leak into the next test."
+  []
+  (loop [i 0]
+    (when (and @@#'hooks/before-busy (< i 200)) (Thread/sleep 10) (recur (inc i)))))
+
 (defn- before [kind text path]
   (hooks/before-run! {:kind kind :text text :path path :tab 1}))
 
@@ -254,7 +261,7 @@
           (is (= 1 (count @reports)))
           (is (re-matches #"the :before-run hooks took longer than 100 ms( \(plugin a was running\))?, so the Run went ahead"
                           (first @reports)))
-          (finally (deliver gate true)))))))
+          (finally (deliver gate true) (await-before-free)))))))
 
 (deftest before-run-skips-while-overrun-test
   (let [gate (promise)
@@ -263,6 +270,7 @@
         r (with (hooked "a" #{} {:before-run (fn [_ e] (when (= 1 (swap! calls inc)) @gate) e)}))]
     (with-live r {:report! #(swap! reports conj %)}
       (fn []
+        (await-before-free)
         (try
           (is (nil? (before :run "(x)" nil)))
           ;; under load the chain's future may start after the budget ran out
@@ -278,4 +286,4 @@
             (before :run "(x)" nil)
             (when (and (< @calls 2) (< i 200)) (Thread/sleep 10) (recur (inc i))))
           (is (= 2 @calls) "a later Run runs the hook again")
-          (finally (deliver gate true)))))))
+          (finally (deliver gate true) (await-before-free)))))))
