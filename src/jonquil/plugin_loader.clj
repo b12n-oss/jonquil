@@ -15,6 +15,7 @@
             [jonquil.command-registry :as cmd-registry]
             [jonquil.keymap :as km]
             [jonquil.plugin-check :as plugin-check]
+            [jonquil.plugin-checker :as checker]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-isolated :as isolated]
             [jonquil.plugin-protocol :as protocol]
@@ -351,6 +352,88 @@
               :else {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}))))
       (catch Throwable e
         (refused (str "the proposal wasn't recorded: " (or (ex-message e) (str e))))))))
+
+(defn- pending-n?
+  "Whether version n of id under dir is the pending proposal."
+  [dir id n]
+  (= n (:n (history/pending (:entries (history/read-entries (history/history-dir dir id)))))))
+
+(defn- restore-ns!
+  "Loads id's live source from reg again, putting its namespace back after
+  a check loaded other code into it: the lines for any problems doing so."
+  [reg id]
+  (when-let [src (get-in reg [:plugins (keyword id) :source])]
+    (map #(str "plugin " id ": putting the live version back: " %)
+         (:problems (protocol/load-candidate {:source src :file-id id})))))
+
+(def ^:private summary-keys [:id :doc :effects :commands :bindings :hooks])
+
+(defn accept-step!
+  "Accepts id's pending version n, on the plugin agent like revert-step!
+  (opts as load-step!'s, plus :id and :n): its source goes through reload,
+  so the protocol runs again in this process with the same re-check of
+  later plugins. It goes live only when that passes and, for a checked
+  proposal, the summary of what loaded equals what the proposal's check
+  reported (the isolated result is advisory: a candidate can forge it).
+  Then <id>.clj is written, live reset and v<n> recorded :accepted. A
+  refusal leaves the file, live and the status as they were, putting the
+  namespace back. The console lines. Never throws."
+  [live {:keys [id n now] :as opts}]
+  (try
+    (let [[warn opts] (step-opts opts)
+          dir (:dir opts)
+          k (keyword id)
+          hdir (history/history-dir dir id)
+          proposal (history/pending (:entries (history/read-entries hdir)))]
+      (cond
+        (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
+        (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
+        :else
+        (let [src (history/version-source hdir n)
+              old @live
+              path (str dir "/" id ".clj")
+              {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))
+              installed (get-in registry [:plugins k])
+              reported (get-in proposal [:check :plugin])
+              loaded (some-> installed :definition checker/summary)
+              differ (when (and installed (not (get-in proposal [:check :unchecked?])))
+                       (filterv #(not= (get loaded %) (get reported %)) summary-keys))]
+          (cond
+            (or (nil? src) (not= src (:source installed)))
+            (-> warn (into lines) (conj (str "plugin " id ": v" n " wasn't accepted and stays pending")))
+            (seq differ)
+            (-> warn (into (restore-ns! old id))
+                (conj (str "plugin " id ": v" n " wasn't accepted: what loaded here isn't what its check reported ("
+                           (str/join ", " differ) ")")))
+            :else
+            (if-let [why (history/write-atomic! path src)]
+              (-> warn (into (restore-ns! old id)) (conj (str "plugin " id ": v" n " wasn't accepted: " why)))
+              (let [_ (reset! live registry)
+                    why (history/record-status! {:plugins-dir dir :id id :n n :status :accepted :now now})
+                    others (record-changed! dir old (update registry :plugins dissoc k) now)]
+                (-> warn (into lines) (into others)
+                    (conj (str "plugin " id ": v" n " accepted"
+                               (when why (str ", but its status wasn't recorded: " why)))))))))))
+    (catch Throwable e
+      [(str "accepting plugin " id " failed: " (or (ex-message e) (str e)))])))
+
+(defn reject-step!
+  "Rejects id's pending version n with the user's optional note, on the
+  plugin agent (opts as load-step!'s, plus :id, :n and :note): the console
+  lines. Nothing else changes. Never throws."
+  [{:keys [id n note now] :as opts}]
+  (try
+    (let [[warn opts] (step-opts opts)
+          dir (:dir opts)]
+      (if-not (pending-n? dir id n)
+        (conj warn (str "plugin " id " has no pending v" n))
+        (let [why (history/record-status! {:plugins-dir dir :id id :n n :status :rejected :now now
+                                           :note (when-not (str/blank? note) note)})]
+          (conj warn (if why
+                       (str "plugin " id ": v" n " wasn't rejected: " why)
+                       (str "plugin " id ": v" n " rejected"))))))
+    (catch Throwable e
+      [(str "rejecting plugin " id " failed: " (or (ex-message e) (str e)))])))
 
 (defn load-agent
   "The agent every plugin load runs on, one at a time. It keeps going after
