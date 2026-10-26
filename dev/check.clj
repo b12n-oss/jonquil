@@ -63,6 +63,7 @@
     jonquil.plugin-history
     jonquil.plugin-checker
     jonquil.plugin-checker-files
+    jonquil.plugin-isolated
     jonquil.plugin-loader
     jonquil.gtk.palette
     jonquil.help
