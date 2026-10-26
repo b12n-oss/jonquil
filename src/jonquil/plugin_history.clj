@@ -8,7 +8,8 @@
   read-entries, version-source, record! and write-atomic!, none of which
   throws."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [jonquil.save-path :as save-path]))
 
 (defn history-dir
   "The folder holding id's versions, in the plugins folder plugins-dir."
@@ -33,34 +34,46 @@
   {:n n :at at :source source :reason reason :status :accepted})
 
 (defn write-atomic!
-  "Writes text to path through a temp file beside it and an atomic move,
-  making its folder: nil, or the sentence saying why it couldn't."
+  "Writes text to path through a temp file and an atomic move, making its
+  folder: nil, or the sentence saying why it couldn't. A symlinked path
+  is followed (save-path/resolve-target), so the link survives and its
+  target is the file rewritten, keeping its POSIX mode, as the window's
+  Save does (review I2: a revert used to replace a dotfiles link)."
   [path text]
-  (let [tmp (str path ".tmp-" (System/nanoTime))]
+  (let [tmp (atom nil)]
     (try
-      (io/make-parents path)
-      (spit tmp text)
-      (java.nio.file.Files/move
-       (.toPath (java.io.File. ^String tmp))
-       (.toPath (java.io.File. ^String path))
-       (into-array java.nio.file.CopyOption
-                   [java.nio.file.StandardCopyOption/REPLACE_EXISTING
-                    java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-      nil
+      (let [target (save-path/resolve-target path)]
+        (reset! tmp (str target ".tmp-" (System/nanoTime)))
+        (io/make-parents target)
+        (save-path/create-temp! @tmp target)
+        (spit @tmp text)
+        (when (.exists (io/file target))
+          (java.nio.file.Files/setPosixFilePermissions
+           (.toPath (io/file @tmp))
+           (java.nio.file.Files/getPosixFilePermissions
+            (.toPath (io/file target)) (make-array java.nio.file.LinkOption 0))))
+        (java.nio.file.Files/move
+         (.toPath (java.io.File. ^String @tmp))
+         (.toPath (java.io.File. ^String target))
+         (into-array java.nio.file.CopyOption
+                     [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                      java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+        nil)
       (catch Throwable e
-        (try (io/delete-file tmp true) (catch Throwable _ nil))
+        (when @tmp (try (io/delete-file @tmp true) (catch Throwable _ nil)))
         (str "couldn't write " path ": " (or (ex-message e) (str e)))))))
 
 (defn read-entries
   "{:entries [...]} from dir's history.edn ([] when it's missing), or
-  {:error sentence} when it can't be read or isn't a vector of maps."
+  {:error sentence} when it can't be read or isn't a vector of maps, each
+  with a whole-number :n (review I1: a bad :n threw in next-n)."
   [dir]
   (let [f (io/file dir "history.edn")]
     (if-not (.exists f)
       {:entries []}
       (try
         (let [v (edn/read-string (slurp f))]
-          (if (and (vector? v) (every? map? v))
+          (if (and (vector? v) (every? #(and (map? %) (nat-int? (:n %))) v))
             {:entries v}
             {:error (str (.getPath f) " isn't a vector of entries, so it was left as it is")}))
         (catch Throwable e
@@ -83,20 +96,25 @@
 (defn record!
   "Records text as id's next version, from source with reason: {:n n}, or
   {:same n} when it equals the latest accepted version n's text (unless
-  always?, a revert, which is a version even then), or {:error sentence}. <n>.clj is written before its entry, so an entry
-  never names a missing file. now gives :at (an ISO instant by default)."
+  always?, a revert, which is a version even then), or {:error sentence}.
+  <n>.clj is written before its entry, so an entry never names a missing
+  file. now gives :at (an ISO instant by default). Never throws: anything
+  unexpected is an :error too."
   [{:keys [plugins-dir id text source reason now always?]}]
-  (let [dir (history-dir plugins-dir id)
-        {:keys [entries error]} (read-entries dir)]
-    (if error
-      {:error error}
-      (let [latest (latest-accepted entries)]
-        (if (and latest (not always?) (= text (version-source dir (:n latest))))
-          {:same (:n latest)}
-          (let [n (next-n entries (file-ns dir))
-                at ((or now #(str (java.time.Instant/now))))]
-            (if-let [why (or (write-atomic! (str dir "/" n ".clj") text)
-                             (write-atomic! (str dir "/history.edn")
-                                            (pr-str (conj entries (entry {:n n :at at :source source :reason reason})))))]
-              {:error why}
-              {:n n})))))))
+  (try
+    (let [dir (history-dir plugins-dir id)
+          {:keys [entries error]} (read-entries dir)]
+      (if error
+        {:error error}
+        (let [latest (latest-accepted entries)]
+          (if (and latest (not always?) (= text (version-source dir (:n latest))))
+            {:same (:n latest)}
+            (let [n (next-n entries (file-ns dir))
+                  at ((or now #(str (java.time.Instant/now))))]
+              (if-let [why (or (write-atomic! (str dir "/" n ".clj") text)
+                               (write-atomic! (str dir "/history.edn")
+                                              (pr-str (conj entries (entry {:n n :at at :source source :reason reason})))))]
+                {:error why}
+                {:n n}))))))
+    (catch Throwable e
+      {:error (str "recording it threw: " (or (ex-message e) (str e)))})))

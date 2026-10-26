@@ -431,3 +431,49 @@
                 (revert! live d "wrap" 1))]
     (is (= ["reverting plugin wrap failed: kaboom"] lines))
     (is (= (reg/empty-registry) @live))))
+
+(deftest load-step-bad-history-n-is-a-line-test
+  ;; review I1: a history.edn with a non-numeric :n is a line, not a failed load
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])
+        f (io/file (history/history-dir d "wrap") "history.edn")
+        live (atom (reg/empty-registry))]
+    (io/make-parents f)
+    (spit f "[{:n \"x\" :status :accepted}]")
+    (let [lines (step! live d)]
+      (is (some #(= "plugin wrap loaded (1 command)" %) lines) (pr-str lines))
+      (is (some #(str/starts-with? % "plugin wrap: its history wasn't recorded: ") lines) (pr-str lines)))))
+
+(defn- marked [id n] (str (str/replace (source id) "Wrap it." (str "Wrap it v" n ".")) "(def marker " n ")\n"))
+
+(deftest revert-whose-write-fails-restores-the-namespace-test
+  ;; review I3: the check loaded v1 into the namespace; a failed write puts v2 back
+  (let [d (dir-with [["pc.clj" (marked "pc" 1)]])
+        live (atom (reg/empty-registry))
+        _ (step! live d)
+        _ (write! d "pc.clj" (marked "pc" 2))
+        _ (step! live d)
+        before @live
+        write history/write-atomic!
+        lines (with-redefs [history/write-atomic! (fn [path text]
+                                                    (if (str/ends-with? path "/pc.clj") "disk full" (write path text)))]
+                (revert! live d "pc" 1))]
+    (is (some #(= "plugin pc wasn't reverted: disk full" %) lines) (pr-str lines))
+    (is (= before @live))
+    (is (= 2 @(ns-resolve 'jonquil.plugins.pc 'marker)))))
+
+(deftest revert-keeps-a-symlinked-plugin-file-test
+  ;; review I2: reverting through a symlinked <id>.clj updates its target
+  (let [real-dir (temp-dirs/temp-dir! "jonquil-plugins-real-")
+        d (dir-with [])
+        target (io/file real-dir "wrap.clj")
+        link (io/file d "wrap.clj")
+        live (atom (reg/empty-registry))]
+    (spit target (source "wrap"))
+    (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath target)
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (step! live d)
+    (spit target (v2-of "wrap"))
+    (step! live d)
+    (revert! live d "wrap" 1)
+    (is (java.nio.file.Files/isSymbolicLink (.toPath link)))
+    (is (= (source "wrap") (slurp target)))))

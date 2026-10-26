@@ -279,7 +279,13 @@
           (if (not= src (get-in registry [:plugins k :source]))
             (-> warn (into lines) (conj (str "plugin " id " wasn't reverted to v" n)))
             (if-let [why (history/write-atomic! path src)]
-              (conj warn (str "plugin " id " wasn't reverted: " why))
+              ;; the check loaded src into the plugin's namespace: put the
+              ;; live version back, as reload-one does on a fail (review I3)
+              (let [restored (when-let [live-src (get-in old [:plugins k :source])]
+                               (:problems (protocol/load-candidate {:source live-src :file-id id})))]
+                (-> warn
+                    (conj (str "plugin " id " wasn't reverted: " why))
+                    (into (map #(str "plugin " id ": putting the live version back: " %) restored))))
               (let [_ (reset! live registry)
                     r (history/record! {:plugins-dir dir :id id :text src :source :revert :always? true :now now
                                         :reason (str "revert to v" n
