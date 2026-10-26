@@ -205,7 +205,17 @@ these:
   asks `plugin-hooks/before-run!` on the GTK thread. That runs the chain
   on a future and waits up to 100 ms; the ctx carries `::p/refused`, so
   every effect throws there (no GTK turn can happen while the GTK thread
-  waits), and a busy flag keeps an overrun chain to one. Slice P4 (2026-10-25) made a change take effect
+  waits), and a busy flag keeps an overrun chain to one. Slice P7 (2026-10-26)
+  added history: `jonquil.plugin-history` keeps each live version under
+  `plugins/.history/<id>/` (`<n>.clj` and a `history.edn` vector,
+  rewritten whole through an atomic move, never overwritten when it
+  can't be read). `plugin-loader/load-step!` records every plugin whose
+  source changed after its `reset!`, unless the text is already the
+  latest version, so a relaunch adds nothing. `revert-step!` sends an
+  old version through `reload` with `:text` (the same protocol and
+  re-check of later plugins), and only on a pass writes `<id>.clj`,
+  resets the registry and records a `:revert` version; nothing calls it
+  until the plugin list. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure

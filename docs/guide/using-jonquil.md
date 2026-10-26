@@ -1981,6 +1981,21 @@ launch from the Dock or Finder, starts with none. Reload Plugins still
 loads them in a window started that way, and then their hooks fire,
 though saving a plugin file there doesn't reload it.
 
+Every version of a plugin that goes live is kept, so you can see what
+changed and go back. They live in `plugins/.history/<id>/`: each version's
+source as `1.clj`, `2.clj` and so on, and `history.edn`, a list saying
+when each one went live, where it came from and why. Jonquil adds a
+version whenever a plugin loads with text different from its latest one,
+at startup, on Reload Plugins or when you save its file, with the reason
+"edited by hand". An edit that fails its checks isn't a version. The
+entries are never changed or removed, and if `history.edn` can't be read
+Jonquil leaves it alone: the plugin still loads, and the console says its
+history wasn't recorded. Going back to an older version runs it through
+the same checks as a reload and, when it passes, writes it to the plugin
+file (through a symlink, if the file is one) and keeps it as a new
+version, "revert to v2", so going back never erases anything. The button
+for it arrives with the plugin list.
+
 ## Driving Jonquil from an agent (MCP)
 
 `jonquil --mcp [DIR]` runs Jonquil with no window as an MCP server on stdio,
