@@ -255,6 +255,7 @@
      (row "test:cljs-node" "live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)")
      (row "test:bb" "live nREPL-dialect tests: start a real bb nrepl-server (need bb on PATH; skips without one)")
      (row "test:basilisp" "the same against a real basilisp nrepl-server (JONQUIL_BASILISP or basilisp on PATH; skips without one)")
+     (row "test:plugins" "live isolated plugin checks: run real jolt checker children (skips without jolt)")
      (row "verify" "lint (report) + test + test:nrepl (must pass) — pre-commit gate")
      (hdr "Run and build")
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
@@ -314,6 +315,8 @@
                  :task (shell "jolt" "-M:test" "--live-basilisp")}
   test:cljs-node {:doc "Live ClojureScript-on-node tests: launch a real clojure + node prepl (need the clojure CLI and node; skips without them)"
                   :task (shell "jolt" "-M:test" "--live-cljs-node")}
+  test:plugins {:doc "Live isolated plugin checks: run real jolt checker children (skips without jolt on the login PATH)"
+                :task (shell "jolt" "-M:test" "--live-plugins")}
   test:jank {:doc "Live jank tests: launch a real jank repl (JONQUIL_JANK or any jank on PATH; skips without one)"
              :task (shell "jolt" "-M:test" "--live-jank")}
   bench:edit {:doc "Benchmark editing stalls on large files; opens a real window per size (default sizes 200 2000 8000 20000)"

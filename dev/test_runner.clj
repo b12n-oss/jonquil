@@ -9,6 +9,7 @@
             [jonquil.login-path :as login-path]
             [jonquil.nrepl.cljs-child :as cljs-child]
             [jonquil.nrepl.jank-child :as jank-child]
+            [jonquil.plugin-isolated :as isolated]
             [jonquil.tool-path :as tool-path]))
 
 (def test-namespaces
@@ -126,6 +127,11 @@
   ;; test. Run with `bb test:bb`, not `bb test`. Skips without bb on PATH.
   '[jonquil.live.bb-nrepl-test])
 
+(def live-plugins-namespaces
+  ;; The isolated plugin check against real jolt checker children. Run with
+  ;; `bb test:plugins`, not `bb test`. Skips without jolt on the login PATH.
+  '[jonquil.live.plugin-isolated-live-test])
+
 (def live-basilisp-namespaces
   ;; The :nrepl dialect against Basilisp: starts a real `basilisp
   ;; nrepl-server` per test. Run with `bb test:basilisp`. Skips without
@@ -147,6 +153,9 @@
   (when (and (= ["--live-jank"] args) (nil? (jank-child/find-binary)))
     (println "test:jank: no jank found (set JONQUIL_JANK or install jank); skipping")
     (System/exit 0))
+  (when (and (= ["--live-plugins"] args) (nil? (isolated/jolt-program)))
+    (println "test:plugins: no jolt on the login PATH; skipping")
+    (System/exit 0))
   (when (= ["--live-cljs-node"] args)
     (when (nil? (cljs-child/find-clojure))
       (println "test:cljs-node: no clojure CLI found (set JONQUIL_CLOJURE or install clojure); skipping")
@@ -160,6 +169,7 @@
                   (= ["--live-cljs-node"] args) live-cljs-node-namespaces
                   (= ["--live-bb"] args) live-bb-namespaces
                   (= ["--live-basilisp"] args) live-basilisp-namespaces
+                  (= ["--live-plugins"] args) live-plugins-namespaces
                   (seq args) (mapv symbol args)
                   :else test-namespaces)]
     (apply require nss)
