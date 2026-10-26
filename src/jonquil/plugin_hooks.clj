@@ -162,18 +162,23 @@
   [{:keys [hooks ctx event report! current]}]
   (reduce (fn [e {:keys [plugin f]}]
             (reset! current plugin)
-            (let [e' (try (f ctx e)
-                          (catch Throwable ex
-                            (report! (str "plugin " (name plugin) ": :before-run hook: "
-                                          (or (ex-message ex) (str ex))))
-                            e))]
-              (cond
-                (not (and (map? e') (contains? e' :abort))) (if (map? e') e' e)
-                (and (string? (:abort e')) (not (str/blank? (:abort e'))))
-                (reduced {:plugin plugin :abort (:abort e')})
-                :else (do (report! (str "plugin " (name plugin)
-                                        ": :before-run's :abort must be a sentence, so the Run went ahead"))
-                          e))))
+            ;; the answer's shape is checked inside the try too: an odd map
+            ;; (a sorted one with string keys) throws on contains? (review I1)
+            (let [answer (try (let [e' (f ctx e)]
+                                (cond
+                                  (not (and (map? e') (contains? e' :abort))) [:next (if (map? e') e' e)]
+                                  (and (string? (:abort e')) (not (str/blank? (:abort e')))) [:abort (:abort e')]
+                                  :else [:bad-abort]))
+                              (catch Throwable ex
+                                (report! (str "plugin " (name plugin) ": :before-run hook: "
+                                              (or (ex-message ex) (str ex))))
+                                [:next e]))]
+              (case (first answer)
+                :next (second answer)
+                :abort (reduced {:plugin plugin :abort (second answer)})
+                :bad-abort (do (report! (str "plugin " (name plugin)
+                                             ": :before-run's :abort must be a sentence, so the Run went ahead"))
+                               e))))
           event hooks))
 
 ;; true while a :before-run chain is running, overrun or not
@@ -205,7 +210,14 @@
                       ;; nothing started, so the hooks are free again
                       (reset! before-busy false)
                       (throw e)))
-                r (deref f BEFORE-RUN-MS ::timeout)]
+                ;; a chain that failed outright is reported, never thrown
+                ;; onto the GTK thread (review I1)
+                r (try (deref f BEFORE-RUN-MS ::timeout)
+                       (catch Throwable e
+                         (let [c (or (ex-cause e) e)]
+                           (report! (str "the :before-run hooks failed: " (or (ex-message c) (str c))
+                                         ", so the Run went ahead")))
+                         nil))]
             (cond
               (= ::timeout r)
               (do (report! (str "the :before-run hooks took longer than " BEFORE-RUN-MS " ms"

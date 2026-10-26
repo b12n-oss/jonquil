@@ -287,3 +287,29 @@
             (when (and (< @calls 2) (< i 200)) (Thread/sleep 10) (recur (inc i))))
           (is (= 2 @calls) "a later Run runs the hook again")
           (finally (deliver gate true) (await-before-free)))))))
+
+(deftest before-run-odd-return-reported-test
+  ;; a sorted map with string keys throws on (contains? m :abort): that's
+  ;; reported as the plugin's, never thrown onto the GTK thread (review I1)
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ _] (sorted-map "x" 1))})
+                (hooked "b" #{} {:before-run (fn [_ _] {:abort "stop"})}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (is (= "plugin b stopped this Run: stop" (before :run "(x)" nil)))
+        (is (= 1 (count @reports)))
+        (is (re-find #"^plugin a: :before-run hook: " (str (first @reports))))))))
+
+(deftest before-run-chain-failure-reported-test
+  ;; anything that fails the chain itself (here report! throwing the
+  ;; first time) is reported and the Run goes ahead (review I1)
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:before-run (fn [_ _] (throw (ex-info "boom" {})))}))]
+    (with-live r {:report! (fn [line]
+                             (swap! reports conj line)
+                             (when (= 1 (count @reports)) (throw (ex-info "report failed" {}))))}
+      (fn []
+        (is (nil? (before :run "(x)" nil)))
+        (is (= 2 (count @reports)))
+        (is (re-find #"^the :before-run hooks failed: .*report failed.*, so the Run went ahead$"
+                     (str (second @reports))))))))
