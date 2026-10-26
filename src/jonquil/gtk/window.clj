@@ -998,8 +998,8 @@
   :hook-tab, and, when it had a source, its :on-complete chained so the
   plugins' :after-run and :on-error hooks hear how the eval ended. Only
   opts handed to ev/eval! come here, so an eval that never started fires
-  nothing. Starting the hooks only starts futures; a throw there is
-  dropped so the eval's own completion is never lost to it."
+  nothing. after-eval! only starts futures and reports its own throws, so
+  the eval's own completion is never lost to it."
   [{:keys [hook-source hook-tab on-complete] :as opts}]
   (let [opts (dissoc opts :hook-source :hook-tab)]
     (if-not hook-source
@@ -1007,8 +1007,7 @@
       (assoc opts :on-complete
              (fn [result]
                (when on-complete (on-complete result))
-               (try (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result})
-                    (catch :default _ nil)))))))
+               (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).

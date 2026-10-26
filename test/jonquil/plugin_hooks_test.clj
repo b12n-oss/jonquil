@@ -99,24 +99,43 @@
   (with-live (reg/empty-registry) {}
     #(is (nil? (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/f"}})))))
 
-(deftest run-hooks-single-flight-test
+(deftest run-hooks-queues-while-busy-test
+  ;; Save All saves each tab in one GTK callback, so a second event comes
+  ;; while the first chain still waits on the GTK thread: it runs after,
+  ;; on the same worker, and nothing is reported (review I1)
+  (let [gate (promise)
+        reports (atom [])
+        seen (atom [])
+        r (with (hooked "a" #{} {:after-save (fn [_ e] (when (empty? @seen) @gate) (swap! seen conj (:path e)) e)}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (let [first-run (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/f"}})]
+          (is (future? first-run))
+          (is (nil? (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/g"}})))
+          (deliver gate true)
+          (deref first-run 2000 nil)
+          (is (= ["/f" "/g"] @seen))
+          (is (= [] @reports))
+          (let [later (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/h"}})]
+            (is (future? later) "a drained point starts afresh")
+            (deref later 2000 nil))
+          (is (= ["/f" "/g" "/h"] @seen)))))))
+
+(deftest run-hooks-skips-past-the-queue-bound-test
+  ;; a hook that never returns holds at most the bound's worth of events
   (let [gate (promise)
         reports (atom [])
         runs (atom 0)
         r (with (hooked "a" #{} {:after-save (fn [_ e] (when (= 1 (swap! runs inc)) @gate) e)}))]
     (with-live r {:report! #(swap! reports conj %)}
       (fn []
-        (let [first-run (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/f"}})]
-          (is (future? first-run))
-          (is (nil? (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/g"}})))
-          (is (= ["the :after-save hooks are still running from the last time, so they were skipped this time"]
+        (let [first-run (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/0"}})]
+          (dotimes [i 17] (hooks/run-hooks! {:point :after-save :tab 1 :event {:path (str "/" (inc i))}}))
+          (is (= ["the :after-save hooks are still busy with 16 earlier events, so this one was skipped"]
                  @reports))
           (deliver gate true)
           (deref first-run 2000 nil)
-          (let [third (hooks/run-hooks! {:point :after-save :tab 1 :event {:path "/h"}})]
-            (is (future? third))
-            (deref third 2000 nil))
-          (is (= 2 @runs)))))))
+          (is (= 17 @runs)))))))
 
 (deftest run-hooks-ctx-test
   (let [printed (atom [])
@@ -144,3 +163,16 @@
         (go :repl :ok)
         (Thread/sleep 100)
         (is (= [] @calls))))))
+
+(deftest after-eval-reports-a-throw-test
+  ;; an :error result with neither :error nor :error-text: building the
+  ;; :on-error event throws; that's reported, never thrown at the eval's
+  ;; completion; each point is tried on its own (review I2)
+  (let [reports (atom [])
+        r (with (hooked "a" #{} {:on-error (fn [_ e] e) :after-run (fn [_ e] e)}))]
+    (with-live r {:report! #(swap! reports conj %)}
+      (fn []
+        (is (nil? (hooks/after-eval! {:source :run :tab 1 :result {:status :error}})))
+        (is (= 2 (count @reports)))
+        (is (re-find #"^the :on-error hooks didn't start: " (first @reports)))
+        (is (re-find #"^the :after-run hooks didn't start: " (second @reports)))))))
