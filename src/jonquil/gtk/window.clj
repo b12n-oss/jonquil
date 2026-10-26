@@ -60,6 +60,7 @@
             [jonquil.nrepl.jvm]
             [jonquil.nrepl.shadow]
             [jonquil.palette :as pal-data]
+            [jonquil.plugin-hooks :as plugin-hooks]
             [jonquil.plugin-loader :as plugin-loader]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.runtime-registry :as registry]
@@ -288,8 +289,8 @@
   (-> msg (str/replace tmp path) (str/replace target path)))
 
 (defonce ^:private on-saved
-  ;; plugins P4: (fn [path]) run after a save succeeds; the window sets it
-  ;; to reload a saved plugin file
+  ;; plugins P4: (fn [path ed]) run after a save succeeds; the window sets
+  ;; it to reload a saved plugin file and, P6, to fire :after-save hooks
   (atom nil))
 
 (defn- save-to!
@@ -336,7 +337,7 @@
           (editor/mark-saved! ed)
           (reset! path-atom path)
           (when-let [f @on-saved]
-            (try (f path)
+            (try (f path ed)
                  (catch :default e
                    (cview/append! cv :error (str "; reloading the saved plugin failed: " (ex-message e) "\n")))))
           (catch :default e
@@ -992,6 +993,23 @@
                              (finally
                                (notify {:done {:result result :output (apply str @out)}}))))))
 
+(defn- hooked-opts
+  "Plugins P6: opts without :hook-source (:run :selection :form :repl) and
+  :hook-tab, and, when it had a source, its :on-complete chained so the
+  plugins' :after-run and :on-error hooks hear how the eval ended. Only
+  opts handed to ev/eval! come here, so an eval that never started fires
+  nothing. Starting the hooks only starts futures; a throw there is
+  dropped so the eval's own completion is never lost to it."
+  [{:keys [hook-source hook-tab on-complete] :as opts}]
+  (let [opts (dissoc opts :hook-source :hook-tab)]
+    (if-not hook-source
+      opts
+      (assoc opts :on-complete
+             (fn [result]
+               (when on-complete (on-complete result))
+               (try (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result})
+                    (catch :default _ nil)))))))
+
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts (M1).
   ev/evaluating? is checked BEFORE ev/eval! and the banner (when printed)
@@ -1035,7 +1053,8 @@
          refused (refuse-foreign! ctx)
          opts (fn [] (let [base (assoc (make-eval-opts ed cv ev* status-label true)
                                        :run? true :path @path-atom :owner id)]
-                       (if notify (notifying-opts base out notify) base)))]
+                       (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
+                                           :hook-source :run :hook-tab id))))]
      (cond
        refused (when notify (notify {:refused refused}))
        (ev/evaluating? @ev*)
@@ -1097,8 +1116,8 @@
   ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
   ([ed cv ev* status-label text extra-opts]
    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-         warning (ev/eval! @ev* text (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
-                                            extra-opts))]
+         warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+                                                         extra-opts)))]
      (when warning (cview/append! cv :system warning)))))
 
 (defn- do-run-selection!
@@ -1121,7 +1140,8 @@
     (when-let [text (commands/run-selection-text snap)]
       (when-not (refuse-foreign! ctx)
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)})))))
+        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
+                                                    :hook-source :selection :hook-tab (:id tab)})))))
 
 ;; --- MCP hooks (mcp2): run/eval/run-selection that report back ---------------
 
@@ -1135,9 +1155,9 @@
   [{:keys [tab cv ev* status-label]} text extra-opts notify]
   (let [ed (:ed tab)
         out (atom [])
-        opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
-                                    out notify)
-                    extra-opts)]
+        opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+                                                 out notify)
+                                 extra-opts))]
     (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
     (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
           warning (ev/eval! @ev* text opts)]
@@ -1163,7 +1183,9 @@
     (if-let [text (commands/run-selection-text snap)]
       (if-let [msg (refuse-foreign! ctx)]
         (do (notify {:refused msg}) (fn [] ""))
-        (mcp-eval! ctx text {:ns-source (:text snap) :owner (:id tab)} notify))
+        (mcp-eval! ctx text {:ns-source (:text snap) :owner (:id tab)
+                             :hook-source :selection :hook-tab (:id tab)}
+                   notify))
       (do (notify {:none (str "Nothing to run: the range " a ".." b " is blank.")})
           (fn [] "")))))
 
@@ -1239,7 +1261,8 @@
       (when-not (refuse-foreign! ctx)
         ((:flash! flash-fns) start end (:caret snap))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
-        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)}))
+        (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
+                                                    :hook-source :form :hook-tab (:id tab)}))
       (set-status! status-label "No form at the caret."))))
 
 ;; --- inspector panel (P2.T2) -------------------------------------------
@@ -2067,10 +2090,11 @@
   call time -- by then activate! has reset! it to the real cv (P2.T7's only
   forward reference; every other closure below is built after its pieces
   already exist)."
-  [ed-fn *cv ev* status-label]
+  [tab-fn *cv ev* status-label]
   (fn [{:keys [action text]}]
     (case action
-      :eval (do-repl-eval! (ed-fn) @*cv ev* status-label text)
+      :eval (let [tab (tab-fn)]
+              (do-repl-eval! (:ed tab) @*cv ev* status-label text {:hook-source :repl :hook-tab (:id tab)}))
       :send-stdin (ev/send-input! @ev* text)
       :eof (ev/send-eof! @ev*))))
 
@@ -3043,7 +3067,7 @@
         suppress-close? (atom false)
         closing? (atom false)
         *cv (atom nil)
-        cv (cview/make-console-view {:on-submit (make-on-submit (fn [] (:ed (active-tab))) *cv ev* status-label)
+        cv (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label)
                                      :history-prev (history-prev-fn ev*)
                                      :history-next (history-next-fn ev*)
                                      ;; I2: the console reads busy/waiting state
@@ -3690,11 +3714,17 @@
                           (on-gui! #(do (cview/append! cv :system (str "; " line "\n"))
                                         (g/gtk-label-set-text status-label (str "; " line)))))}))
     (when-not (false? plugins?)
-      (plugin-load! {:settings-path @settings-path* :cv cv})
-      ;; saving a plugin file reloads that plugin
-      (reset! on-saved (fn [path]
-                         (when (plugin-loader/plugin-file? (plugin-loader/plugins-dir @settings-path*) path)
-                           (plugin-load! {:settings-path @settings-path* :cv cv :only path})))))
+      (plugin-load! {:settings-path @settings-path* :cv cv}))
+    ;; saving a plugin file reloads that plugin, and any save fires the
+    ;; :after-save hooks (P6) on the saved tab; save-to! runs on the GTK
+    ;; thread, so the tab lookup is safe here
+    (reset! on-saved (fn [path ed]
+                       (when (and (not (false? plugins?))
+                                  (plugin-loader/plugin-file? (plugin-loader/plugins-dir @settings-path*) path))
+                         (plugin-load! {:settings-path @settings-path* :cv cv :only path}))
+                       (plugin-hooks/run-hooks! {:point :after-save
+                                                 :tab (some #(when (identical? ed (:ed %)) (:id %)) @tabs)
+                                                 :event {:path path}})))
     (when on-ready
       ;; Ruling 3 (tabs plan): the per-tab keys below are the FIRST tab's
       ;; objects, so every existing row keeps working unchanged; rows that
@@ -3754,8 +3784,9 @@
                                           :status-label status-label}
                                          notify))
                    :mcp-eval!* (fn [text notify]
-                                 (mcp-eval! {:tab (active-tab) :cv cv :ev* ev* :status-label status-label}
-                                            text nil notify))
+                                 (let [t (active-tab)]
+                                   (mcp-eval! {:tab t :cv cv :ev* ev* :status-label status-label}
+                                              text {:hook-source :repl :hook-tab (:id t)} notify)))
                    :mcp-run-selection!* (fn [start end notify]
                                           (mcp-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
                                                                :status-label status-label}
