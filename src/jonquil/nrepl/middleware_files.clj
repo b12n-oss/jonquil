@@ -22,6 +22,11 @@
    "jonquil/nrepl/info_middleware.clj" (embedded-text "jonquil/nrepl/info_middleware.clj")
    "jonquil/nrepl/stdin_middleware.clj" (embedded-text "jonquil/nrepl/stdin_middleware.clj")})
 
+(def ^:private ^:dynamic *files*
+  ;; the file set the folder helpers write and check: sources, or another
+  ;; set ensure-root!'s two-argument form binds (the plugin checker's, P8)
+  sources)
+
 (def inspect-middleware
   "The inspector's :nrepl/middleware symbol: last, after jolt-lang/nrepl's."
   'jonquil.nrepl.inspect-middleware/inspect)
@@ -49,13 +54,13 @@
          "/jonquil/nrepl-middleware")))
 
 (defn- folder-name []
-  (format "%08x" (bit-and (hash (apply str (sort sources))) 0xffffffff)))
+  (format "%08x" (bit-and (hash (apply str (sort *files*))) 0xffffffff)))
 
 (defn- complete? [dir]
   (and (.exists (io/file dir "deps.edn"))
        (every? (fn [[rel text]] (let [f (io/file dir "src" rel)]
                                   (and (.exists f) (= text (slurp f)))))
-               sources)))
+               *files*)))
 
 (defn- delete-tree! [f]
   (doseq [x (reverse (file-seq (io/file f)))] (.delete x)))
@@ -64,7 +69,7 @@
   "A fresh sibling of dir holding every file, ready to rename into place."
   [dir]
   (let [tmp (io/file (.getParentFile (io/file dir)) (str (.getName (io/file dir)) ".tmp-" (System/nanoTime)))]
-    (doseq [[rel text] sources]
+    (doseq [[rel text] *files*]
       (let [f (io/file tmp "src" rel)]
         (io/make-parents f)
         (spit f text)))
@@ -117,23 +122,26 @@
   text, so a newer Jonquil writes its own, and other versions' folders
   unused for a day are pruned (prune-old!). Throws when it can't be
   written; the evaluator then starts the child without Jonquil's
-  middleware and says why."
+  middleware and says why. With files (classpath path -> text), that file
+  set is written instead, under its own hash (the plugin checker's, P8)."
   ([] (ensure-root! (cache-base (System/getenv) (System/getProperty "user.home"))))
-  ([base]
-   (let [dir (io/file base (folder-name))]
-     ;; marked used before it's checked, so another version's prune can't
-     ;; take it between the check and the child loading it
-     (when (.exists dir) (.setLastModified dir (System/currentTimeMillis)))
-     (if (complete? dir)
-       (in-use! base dir)
-       (let [tmp (write-tmp! dir)]
-         (try
-           (when-not (.renameTo tmp dir)
-             (when (and (.exists dir) (not (complete? dir)))
-               (let [aside (io/file base (str (.getName dir) ".stale-" (System/nanoTime)))]
-                 (when (.renameTo dir aside) (delete-tree! aside))))
-             (.renameTo tmp dir))
-           (if (complete? dir)
-             (in-use! base dir)
-             (throw (ex-info (str "couldn't write " (.getPath dir)) {:dir (.getPath dir)})))
-           (finally (when (.exists tmp) (delete-tree! tmp)))))))))
+  ([base] (ensure-root! base sources))
+  ([base files]
+   (binding [*files* files]
+     (let [dir (io/file base (folder-name))]
+       ;; marked used before it's checked, so another version's prune can't
+       ;; take it between the check and the child loading it
+       (when (.exists dir) (.setLastModified dir (System/currentTimeMillis)))
+       (if (complete? dir)
+         (in-use! base dir)
+         (let [tmp (write-tmp! dir)]
+           (try
+             (when-not (.renameTo tmp dir)
+               (when (and (.exists dir) (not (complete? dir)))
+                 (let [aside (io/file base (str (.getName dir) ".stale-" (System/nanoTime)))]
+                   (when (.renameTo dir aside) (delete-tree! aside))))
+               (.renameTo tmp dir))
+             (if (complete? dir)
+               (in-use! base dir)
+               (throw (ex-info (str "couldn't write " (.getPath dir)) {:dir (.getPath dir)})))
+             (finally (when (.exists tmp) (delete-tree! tmp))))))))))
