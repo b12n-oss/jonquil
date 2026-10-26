@@ -208,8 +208,10 @@
                 r (deref f BEFORE-RUN-MS ::timeout)]
             (cond
               (= ::timeout r)
-              (do (report! (str "the :before-run hooks took longer than " BEFORE-RUN-MS " ms (plugin "
-                                (some-> @current name) " was running), so the Run went ahead"))
+              (do (report! (str "the :before-run hooks took longer than " BEFORE-RUN-MS " ms"
+                                ;; under load the worker may not have reached a hook yet
+                                (when-let [id @current] (str " (plugin " (name id) " was running)"))
+                                ", so the Run went ahead"))
                   nil)
               (:abort r) (str "plugin " (name (:plugin r)) " stopped this Run: " (:abort r))
               :else nil)))))))

@@ -249,8 +249,11 @@
           (let [t0 (System/currentTimeMillis)]
             (is (nil? (before :run "(x)" nil)))
             (is (< (- (System/currentTimeMillis) t0) 1000)))
-          (is (= ["the :before-run hooks took longer than 100 ms (plugin a was running), so the Run went ahead"]
-                 @reports))
+          ;; the plugin is named once its hook has started, which under
+          ;; load may be after the budget ran out
+          (is (= 1 (count @reports)))
+          (is (re-matches #"the :before-run hooks took longer than 100 ms( \(plugin a was running\))?, so the Run went ahead"
+                          (first @reports)))
           (finally (deliver gate true)))))))
 
 (deftest before-run-skips-while-overrun-test
