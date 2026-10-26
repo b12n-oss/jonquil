@@ -97,3 +97,34 @@
       (is (= isolated/OUTPUT-MAX-BYTES (count s)))
       (is (str/ends-with? s "TAIL")))
     (is (= "" (isolated/read-output (.getPath (io/file d "missing.log")))))))
+
+(defn- check-folders [base]
+  (filter #(str/starts-with? % "jonquil-plugin-check-") (.list (io/file base))))
+
+(deftest check-without-jolt-is-unchecked-test
+  (let [tmp (temp-dirs/temp-dir! "jonquil-isolated-")]
+    (with-redefs [isolated/jolt-program (constantly nil)]
+      (let [r (isolated/check! {:source "(ns x)" :file-id "x" :request {} :temp-base tmp})]
+        (is (false? (:ok? r)))
+        (is (true? (:unchecked? r)))
+        (is (= ["there's no jolt to check it in, so it wasn't checked"] (:problems r)))
+        (is (empty? (check-folders tmp)) "nothing was written")))))
+
+(deftest check-with-a-missing-program-fails-test
+  (let [tmp (temp-dirs/temp-dir! "jonquil-isolated-")
+        r (isolated/check! {:source "(ns x)" :file-id "x" :request {} :program "/nonexistent/jolt"
+                            :cache-base (temp-dirs/temp-dir! "jonquil-isolated-cache-")
+                            :temp-base tmp})]
+    (is (false? (:ok? r)))
+    (is (nil? (:unchecked? r)))
+    (is (str/starts-with? (first (:problems r)) "couldn't start jolt: ") (pr-str r))
+    (is (empty? (check-folders tmp)) "the folder was deleted")))
+
+(deftest check-with-an-unwritable-cache-fails-test
+  (let [tmp (temp-dirs/temp-dir! "jonquil-isolated-")
+        blocker (io/file tmp "a-file")
+        _ (spit blocker "")
+        r (isolated/check! {:source "(ns x)" :file-id "x" :request {} :program "/bin/sh"
+                            :cache-base (.getPath (io/file blocker "under")) :temp-base tmp})]
+    (is (str/starts-with? (first (:problems r)) "the checker's files couldn't be written: ") (pr-str r))
+    (is (empty? (check-folders tmp)))))

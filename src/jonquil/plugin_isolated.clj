@@ -1,12 +1,19 @@
 (ns jonquil.plugin-isolated
   "The parent's half of an isolated check (plugins design, Part 2, \"The
-  isolated check\"; slice P8), pure: the request.edn text the child reads,
-  the environment it gets, and parse-result, which turns what the child
-  printed into run-protocol's result. Starting and stopping the child is
-  slice P8b."
+  isolated check\"; slices P8 and P8b): the request.edn text the child
+  reads, the environment it gets, parse-result, which turns what the child
+  printed into run-protocol's result, and check!, which runs the child.
+  check! is the protocol's :isolated seam: the child runs run-protocol
+  :in-process itself, so the two can't drift in what they check."
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
-            [jonquil.plugin-checker :as checker]))
+            [jolt.process :as p]
+            [jonquil.login-path :as login-path]
+            [jonquil.nrepl.leftovers :as leftovers]
+            [jonquil.plugin-checker :as checker]
+            [jonquil.plugin-checker-files :as checker-files]
+            [jonquil.tool-path :as tool-path]))
 
 (def CHECK-DEADLINE-MS
   ;; estimate: a cold jolt start with the checker's namespaces measured
@@ -129,3 +136,107 @@
                  (select-keys v [:ok? :problems :warnings :timings :plugin])
                  {:definition nil})))
       (failed (str "the check printed no result (exit " exit "): " (tail-lines out 3))))))
+
+(defn jolt-program
+  "jolt's absolute path on the login PATH (the lookup the out-of-process
+  Jolt runtime uses), or nil."
+  []
+  (tool-path/resolve-program "jolt" (login-path/path) login-path/executable-file?))
+
+(def TERM-GRACE-MS
+  ;; estimate: as nrepl.child/term-grace-ms, SIGTERM ended a looping child
+  ;; and one with a hung shutdown hook within it (probed, P8b)
+  1000)
+
+(defn- stop!
+  "Ends proc and what it started: the descendants are taken first, since
+  after the child dies they're reparented and a candidate's own process
+  (probed: a sleep it started) would outlive it. SIGTERM, then SIGKILL
+  after TERM-GRACE-MS. Returns the exit code, or nil."
+  [proc]
+  (let [kids (try (vec (iterator-seq (.iterator (.descendants (.toHandle ^java.lang.Process (:proc proc))))))
+                  (catch Throwable _ []))]
+    (p/destroy proc)
+    (let [r (deref proc TERM-GRACE-MS ::alive)
+          exit (if (= ::alive r)
+                 (do (.destroyForcibly ^java.lang.Process (:proc proc))
+                     (:exit (deref proc TERM-GRACE-MS nil)))
+                 (:exit r))]
+      (doseq [^java.lang.ProcessHandle k kids]
+        (try (when (.isAlive k) (.destroyForcibly k)) (catch Throwable _ nil)))
+      exit)))
+
+(defn- delete-tree! [f]
+  (doseq [x (reverse (file-seq (io/file f)))] (.delete ^java.io.File x)))
+
+(defn- reported?
+  "Whether out holds a marker pair that is a result and the child exited
+  0: the checker reported, so its problems say everything and the folder
+  isn't worth keeping."
+  [out exit]
+  (boolean (and (= 0 exit)
+                (when-let [body (last-pair out)]
+                  (result? (try (edn/read-string body) (catch Throwable _ nil)))))))
+
+(defn- env-for-child []
+  (let [path (login-path/path)]
+    (cond-> (scrub-env (into {} (System/getenv)))
+      path (assoc "PATH" path))))
+
+(defn check!
+  "Runs the isolated check of source (file-id's plugin) against request in
+  a throwaway jolt: {:ok? :problems :warnings :timings :plugin :definition
+  nil}, plus :log when the child misbehaved (overran, printed no result or
+  garbage, exited non-zero) and its folder was kept for a post-mortem.
+  With no jolt (program nil and none on the login PATH) nothing is written
+  and the result is {:ok? false :unchecked? true ...}. The folder is a
+  fresh owner-only one under temp-base (java.io.tmpdir unless given), the
+  child's environment is scrub-env's, and it's stopped with what it
+  started at deadline-ms (CHECK-DEADLINE-MS unless given). The result is
+  advisory (see parse-result). Never throws."
+  [{:keys [source file-id request program cache-base temp-base deadline-ms]}]
+  (if-let [program (or program (jolt-program))]
+    (let [deadline-ms (or deadline-ms CHECK-DEADLINE-MS)
+          root (try (checker-files/ensure-root!
+                     (or cache-base (checker-files/cache-base (System/getenv) (System/getProperty "user.home"))))
+                    (catch Throwable t {:error (str "the checker's files couldn't be written: " (ex-message t))}))]
+      (if-let [e (:error root)]
+        (failed e)
+        (let [_ (leftovers/prune!)
+              dir (.getCanonicalPath
+                   (.toFile (java.nio.file.Files/createTempDirectory
+                             (.toPath (io/file (or temp-base (System/getProperty "java.io.tmpdir"))))
+                             "jonquil-plugin-check-"
+                             (make-array java.nio.file.attribute.FileAttribute 0))))
+              log (str dir "/check.log")
+              proc (atom nil)
+              keep? (atom false)]
+          (try
+            (spit (io/file dir "request.edn") (request-text {:request request :file-id file-id}))
+            (spit (io/file dir "candidate.clj") source)
+            (let [spawned (try (p/process {:dir dir :env (env-for-child) :out (io/file log) :err :out}
+                                          program "-Sdeps"
+                                          (str "{:deps {" checker-files/lib " {:local/root " (pr-str root) "}}}")
+                                          "-e" "(require 'jonquil.plugin-checker) (jonquil.plugin-checker/-main)")
+                               (catch Throwable t {:spawn-error (str "couldn't start jolt: " (ex-message t))}))]
+              (if-let [e (:spawn-error spawned)]
+                (failed e)
+                (do
+                  (reset! proc spawned)
+                  (leftovers/write-pid! dir (.pid ^java.lang.Process (:proc spawned)))
+                  (let [r (deref spawned deadline-ms ::overrun)
+                        timed-out? (= ::overrun r)
+                        exit (if timed-out? (stop! spawned) (:exit r))
+                        _ (reset! proc nil)
+                        out (read-output log)
+                        result (parse-result {:out out :exit exit :timed-out? timed-out? :deadline-ms deadline-ms})]
+                    (if (or timed-out? (not (reported? out exit)))
+                      (do (reset! keep? true) (assoc result :log log))
+                      result)))))
+            (catch Throwable t
+              (failed (str "the isolated check couldn't run: " (ex-message t))))
+            (finally
+              (when-let [pr @proc] (try (stop! pr) (catch Throwable _ nil)))
+              (when-not @keep? (delete-tree! dir)))))))
+    {:ok? false :unchecked? true :problems ["there's no jolt to check it in, so it wasn't checked"]
+     :warnings [] :timings {} :plugin nil :definition nil}))
