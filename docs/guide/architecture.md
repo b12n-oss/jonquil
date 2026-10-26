@@ -190,7 +190,16 @@ these:
   `keeping-history` does, and prints the value after a random token, which
   the evaluator splits off before anything reaches `on-output`.
   `plugin-registry/await-eval!` waits on the plugin's worker and stops an
-  eval that times out. Slice P4 (2026-10-25) made a change take effect
+  eval that times out. Slice P6 (2026-10-26) added the hooks that watch:
+  `:after-save`, `:after-run` and `:on-error`, in `jonquil.plugin-hooks`.
+  The window tags the opts of the evals that count with `:hook-source`
+  (`:run :selection :form :repl`) and the tab, and `hooked-opts` chains
+  their `:on-complete` into `plugin-hooks/after-eval!`; `save-to!`'s
+  `on-saved` callback fires `:after-save`. `run-hooks!` threads the event
+  through each plugin's hook in id order on one future per point, with a
+  ctx built by `plugin-registry/effect-ctx` as a `:run` command's is.
+  Events that come while a point is busy queue on that future, up to 16,
+  and past that are skipped with a line. `:before-run` is slice P6b. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
