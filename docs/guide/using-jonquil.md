@@ -1751,7 +1751,8 @@ works, for example
 A plugin is one Clojure file that adds editor commands and the keys that
 run them. This is the first part of plugin support: a plugin's `:edit`
 and `:run` commands work now, with the `:console`, `:buffer` and `:eval`
-effects, and hooks and agent proposals come later.
+effects, and so do three of the four hooks. `:before-run` and agent
+proposals come later.
 
 Plugin files live in a `plugins` folder beside the settings file, so
 `~/.config/jonquil/plugins/` (or `$XDG_CONFIG_HOME/jonquil/plugins/`). A
@@ -1842,6 +1843,55 @@ One run of a command goes at a time: pressing its key again while it's
 still working says it's still running, and nothing can stop a command
 that never finishes short of quitting Jonquil.
 
+### Hooks
+
+A plugin can also watch what happens in the window through `:hooks`, a
+map from a hook point to `(fn [ctx event] ...)`. The ctx is the same one
+a `:run` command gets, so a hook reaches only its plugin's declared
+effects:
+
+```clojure
+(ns jonquil.plugins.ran
+  (:require [jonquil.plugin :as p]))
+
+(p/defplugin
+  {:id      :ran
+   :doc     "Print each Run's kind and value."
+   :effects #{:console}
+   :hooks   {:after-run (fn [ctx e] (p/print! ctx (str "ran " (:kind e) " " (:value e))))}})
+```
+
+| Hook | Event |
+|---|---|
+| `:after-save` | `{:path p}`, the path as you named it, after the save succeeded |
+| `:after-run` | `{:kind :status :value :error}`. `:kind` is `:run`, `:selection` or `:form`; `:status` is `:ok`, `:error`, `:interrupted` (you pressed Stop) or `:notice` (the dialect couldn't run it, with its sentence as `:error`); `:value` is the printed value |
+| `:on-error` | `{:source :text :line :column}`. `:source` is `:run`, `:selection`, `:form` or `:repl` (an entry at the console); `:text` is the error as the console shows it |
+
+A Run here is Run, Run Selection or Run Form, from a key, a menu, the
+palette or an agent's `jonquil_run` and `jonquil_run_selection`. A Run that
+never started, because the REPL was busy, the tab belongs to another
+project or a bracket is unclosed, fires nothing. `:on-error` hears an
+error from any of those and from what you, or an agent's `jonquil_eval`,
+type at the console. It never hears from a plugin's own `p/eval!` or
+`p/repl!`, so a hook that evaluates code can't set itself off. `:line`
+and `:column` are there only when the error text names them, which
+in-process Jolt does for an error the compiler places (an unresolved
+symbol, say) but not for a runtime throw like `(/ 1 0)`, and Jolt running
+as a child never does.
+
+Hooks run in the background, after the save or Run is done, so none of
+them can change it. The hooks at one point run one after another, in
+plugin-id order, and each gets the event the one before returned (a hook
+that returns something other than a map leaves it as it was). A hook's
+throw shows with the plugin's id, and the next plugin's hook still runs.
+Events that arrive while the hooks at a point are still busy (Save All
+saves every tab at once) wait their turn, up to 16 of them, and past that
+one is skipped with a line on the console. So a hook that never returns
+holds up its own point, and the plugins after it there, but nothing else.
+`:before-run` is accepted in a plugin file but isn't called yet.
+
+### Loading and reloading
+
 Plugins load when Jonquil starts, one file at a time, so a broken file is
 skipped while the others load, and the console names what's wrong,
 with its line when the reader or compiler gave one. A file gets 10
@@ -1885,7 +1935,9 @@ list its id in `settings.edn`:
 ```
 
 then Reload Plugins. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a
-launch from the Dock or Finder, starts with none.
+launch from the Dock or Finder, starts with none. Reload Plugins still
+loads them in a window started that way, and then their hooks fire,
+though saving a plugin file there doesn't reload it.
 
 ## Driving Jonquil from an agent (MCP)
 

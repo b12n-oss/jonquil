@@ -253,6 +253,10 @@
    plugin-rows/row-plugin-eval-quiet
    plugin-rows/row-plugin-repl-visible
    plugin-rows/row-plugin-eval-timeout
+   plugin-rows/row-plugin-hook-after-save
+   plugin-rows/row-plugin-hook-after-run
+   plugin-rows/row-plugin-hook-on-error
+   plugin-rows/row-plugin-hook-repl-no-loop
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

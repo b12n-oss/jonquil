@@ -339,3 +339,88 @@
           (support/check :plugin-eval-timeout
                          (and said? (= "2" (get-in next-eval [:done :result :printed])))
                          {:status (status-text ui) :next next-eval :lines lines}))))))
+
+;; --- plugins P6: the after-hooks ---------------------------------------------
+
+(defn- hook-source
+  "A plugin file for id declaring effects whose :hooks are hooks-text, a
+  map literal of point to (fn [ctx event] ...)."
+  [id effects hooks-text]
+  (str "(ns jonquil.plugins." id "\n  (:require [jonquil.plugin :as p]))\n\n"
+       "(p/defplugin\n"
+       "  {:id :" id "\n"
+       "   :doc \"A P6 row's plugin.\"\n"
+       "   :effects " effects "\n"
+       "   :hooks " hooks-text "})\n"))
+
+(defn- run-text!
+  "Sets the active tab's text and presses Run."
+  [ui text]
+  (on-gtk (editor/set-text! (:editor ui) text)
+          ((:run!* ui))))
+
+(defn row-plugin-hook-after-save
+  "A saved tab's :after-save hook gets the path it was saved to."
+  [ui]
+  (go-row :plugin-hook-after-save support/check
+    (with-plugins ui {"p6-saved.clj" (hook-source "p6-saved" "#{:console}"
+                                                  "{:after-save (fn [ctx e] (p/print! ctx (str \"p6 saved \" (.getName (java.io.File. (:path e))))))}")}
+      (fn [lines]
+        (let [f (java.io.File/createTempFile "p6-save" ".clj")
+              first-id (on-gtk (:id ((:active-tab* ui))))
+              second-id (on-gtk ((:new-tab!* ui)) (:id ((:active-tab* ui))))]
+          (try
+            (on-gtk ((:save-to! ui) (.getPath f)))
+            (let [seen? (await-until 3000 20 #(str/includes? (support/console-text ui) (str "p6 saved " (.getName f))))]
+              (support/check :plugin-hook-after-save seen? {:seen seen? :lines lines}))
+            (finally
+              (on-gtk (when (some #(= second-id (:id %)) ((:tabs* ui))) ((:close-tab! ui) second-id))
+                      ((:select-tab! ui) first-id))
+              (.delete f))))))))
+
+(defn row-plugin-hook-after-run
+  "A Run's :after-run hook gets its kind and value."
+  [ui]
+  (go-row :plugin-hook-after-run support/check
+    (with-plugins ui {"p6-ran.clj" (hook-source "p6-ran" "#{:console}"
+                                                "{:after-run (fn [ctx e] (p/print! ctx (str \"p6 ran \" (:kind e) \" \" (:value e))))}")}
+      (fn [lines]
+        (run-text! ui "(+ 1 2)")
+        (let [seen? (await-until 5000 20 #(str/includes? (support/console-text ui) "p6 ran :run 3"))]
+          (support/check :plugin-hook-after-run seen? {:seen seen? :lines lines}))))))
+
+(defn row-plugin-hook-on-error
+  "A Run's error reaches :on-error with its source and line."
+  [ui]
+  (go-row :plugin-hook-on-error support/check
+    (with-plugins ui {"p6-err.clj" (hook-source "p6-err" "#{:console}"
+                                                "{:on-error (fn [ctx e] (p/print! ctx (str \"p6 error \" (:source e) \" line \" (:line e))))}")}
+      (fn [lines]
+        (run-text! ui "(def a 1)\n(def b 2)\n(foo-undefined 3)")
+        (let [seen? (await-until 5000 20 #(str/includes? (support/console-text ui) "p6 error :run line 3"))]
+          (support/check :plugin-hook-on-error seen?
+                         {:seen seen? :tail (let [t (support/console-text ui)] (subs t (max 0 (- (count t) 400))))
+                          :lines lines}))))))
+
+(defn- occurrences [s sub]
+  (loop [i 0 n 0]
+    (let [j (str/index-of s sub i)]
+      (if j (recur (inc j) (inc n)) n))))
+
+(defn row-plugin-hook-repl-no-loop
+  "An :on-error hook whose own p/repl! throws doesn't fire itself again."
+  [ui]
+  (go-row :plugin-hook-repl-no-loop support/check
+    (with-plugins ui {"p6-loop.clj" (hook-source "p6-loop" "#{:console :eval}"
+                                                 "{:on-error (fn [ctx e] (swap! gtk-selftest-window.plugins/captured (fnil inc 0)) (p/repl! ctx \"(/ 1 0)\"))}")}
+      (fn [lines]
+        (reset! captured nil)
+        (let [mark (on-gtk (support/out-end-offset ui))
+              _ (run-text! ui "(/ 1 0)")
+              two? (await-until 5000 20 #(and (= 1 @captured)
+                                              (= 2 (occurrences (support/since ui mark) "Divide by zero"))))
+              _ (Thread/sleep 1000)
+              n @captured]
+          (reset! captured nil)
+          (support/check :plugin-hook-repl-no-loop (and two? (= 1 n))
+                         {:two two? :captured n :console (on-gtk (support/since ui mark)) :lines lines}))))))
