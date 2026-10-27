@@ -1,0 +1,188 @@
+(ns jonquil.plugin-mcp
+  "The text of the plugin MCP tools (plugins P10): jonquil_plugins_list,
+  jonquil_plugin_read, jonquil_plugin_status and jonquil_plugin_propose's
+  answer, over a plugin state {:plugins? :plugins-dir :registry :disabled}.
+  Each answers a tool result {:text :error?} and never throws. Pure apart
+  from reading the plugins folder and its histories. An id is checked
+  before it becomes a path, so nothing outside the plugins folder is read."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [jonquil.plugin-history :as history]
+            [jonquil.plugin-loader :as loader]))
+
+(def MAX-SOURCE-CHARS
+  ;; estimate, not measured: bigger than any plugin file seen so far, and
+  ;; small enough to keep a pasted megabyte out of the history and the
+  ;; review panel's text view
+  262144)
+
+(defn- ok [text] {:text text :error? false})
+(defn- err [text] {:text text :error? true})
+
+(defn- guarded
+  "(f)'s result, or an error result naming what failed."
+  [what f]
+  (try (f)
+       (catch Throwable e (err (str what " failed: " (or (ex-message e) (str e)))))))
+
+(defn- bad-id [id]
+  (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
+
+(defn propose-refusal
+  "Why a proposal is refused before any check runs, or nil: plugins off in
+  the window, a bad id, a source that isn't text, a blank reason, or a
+  source longer than MAX-SOURCE-CHARS."
+  [{:keys [id source reason plugins?]}]
+  (cond
+    (false? plugins?) "plugins are off in this window (--no-plugins), so it takes no proposals"
+    (not (loader/plugin-id? id)) (bad-id id)
+    (not (string? source)) "a proposal needs its source as text"
+    (or (not (string? reason)) (str/blank? reason)) "a proposal needs a reason"
+    (> (count source) MAX-SOURCE-CHARS)
+    (str "the source is " (count source) " characters, more than the " MAX-SOURCE-CHARS " a proposal may have")))
+
+;; --- list --------------------------------------------------------------------
+
+(defn- ids
+  "Every plugin id: loaded, a file in the plugins folder, or a history."
+  [{:keys [plugins-dir registry]}]
+  (sort (distinct (concat (map name (keys (:plugins registry)))
+                          (map first (:files (loader/plugin-files plugins-dir)))
+                          (for [f (or (.listFiles (io/file plugins-dir ".history")) [])
+                                :when (.isDirectory ^java.io.File f)
+                                :let [n (.getName ^java.io.File f)]
+                                :when (loader/plugin-id? n)]
+                            n)))))
+
+(defn- list-line [{:keys [plugins-dir registry disabled]} id]
+  (let [{:keys [entries error]} (history/read-entries (history/history-dir plugins-dir id))
+        loaded (get-in registry [:plugins (keyword id)])
+        {:keys [doc effects]} (:definition loaded)
+        live (cond error "history unreadable"
+                   (history/latest-accepted entries) (str "live v" (:n (history/latest-accepted entries)))
+                   :else "no live version")
+        pending (cond error "history unreadable"
+                      (history/pending entries) (str "pending v" (:n (history/pending entries)))
+                      :else "no pending proposal")
+        state (cond (contains? (set disabled) (keyword id)) "disabled"
+                    loaded "loaded"
+                    :else "not loaded")
+        effects (cond (not loaded) "unknown"
+                      (empty? effects) "none"
+                      :else (str/join " " (map str (sort-by str effects))))]
+    (str id ": " live ", " state ", effects " effects ", " pending "."
+         (when doc (str " " doc)))))
+
+(defn list-text
+  "jonquil_plugins_list: one line per plugin, sorted by id."
+  [state]
+  (guarded "listing the plugins"
+           (fn []
+             (let [ids (ids state)]
+               (ok (if (empty? ids)
+                     "No plugins. Call jonquil_plugin_propose to propose one."
+                     (str/join "\n" (map #(list-line state %) ids))))))))
+
+;; --- read and status ---------------------------------------------------------
+
+(defn- version-entries
+  "id's entries for version n: the first is the version's own, the last
+  holds its status."
+  [entries n]
+  (filter #(= n (:n %)) entries))
+
+(defn- history-line [entries n]
+  (let [es (version-entries entries n)
+        e0 (first es)
+        e1 (last es)]
+    (str "v" n " " (some-> (:status e1) name) " (" (some-> (:source e0) name) ", " (:at e0) "): " (:reason e0)
+         (when (:note e1) (str "; note: " (:note e1)))
+         (when (= :rejected-by-checks (:status e1)) (str "; problems: " (str/join "; " (:problems e0)))))))
+
+(defn- with-history
+  "(f hdir entries) for a good id whose history reads, else the error."
+  [{:keys [plugins-dir id]} f]
+  (if-not (loader/plugin-id? id)
+    (err (bad-id id))
+    (let [hdir (history/history-dir plugins-dir id)
+          {:keys [entries error]} (history/read-entries hdir)]
+      (if error
+        (err (str id "'s history can't be read: " error))
+        (f hdir entries)))))
+
+(defn read-text
+  "jonquil_plugin_read: id's live source and history, or with :version
+  that version's status and source."
+  [{:keys [plugins-dir registry id version] :as state}]
+  (guarded
+   "reading the plugin"
+   (fn []
+     (with-history
+       state
+       (fn [hdir entries]
+         (if version
+           (if-let [src (history/version-source hdir version)]
+             (ok (str id " v" version ": "
+                      (if-let [s (history/version-status entries version)] (name s) "not in its history")
+                      "\n\n" src))
+             (err (str id " has no v" version ". Call jonquil_plugin_read with just the id to see its history.")))
+           (let [loaded (get-in registry [:plugins (keyword id)])
+                 live-n (:n (history/latest-accepted entries))
+                 src (or (:source loaded) (when live-n (history/version-source hdir live-n)))]
+             (if (and (empty? entries) (not loaded) (not (.isFile (io/file plugins-dir (str id ".clj")))))
+               (err (str "There's no plugin " id ". Call jonquil_plugins_list to see them."))
+               (ok (str/join "\n" (concat [(str id ": " (if live-n (str "live v" live-n) "no live version"))]
+                                          (when src ["" src])
+                                          (when (seq entries)
+                                            (into ["" "History:"]
+                                                  (map #(history-line entries %) (distinct (map :n entries))))))))))))))))
+
+(defn status-text
+  "jonquil_plugin_status: version n's status (default: id's latest agent
+  proposal), with the user's note or the check's problems, and the call
+  that continues it."
+  [{:keys [id n] :as state}]
+  (guarded
+   "reading the proposal's status"
+   (fn []
+     (with-history
+       state
+       (fn [_ entries]
+         (let [n (or n (:n (last (filter #(= :agent (:source %)) entries))))
+               es (version-entries entries n)]
+           (cond
+             (nil? n) (err (str id " has no proposals. Call jonquil_plugin_propose to make one."))
+             (empty? es) (err (str id " has no v" n "."))
+             :else
+             (let [e1 (last es)
+                   st (:status e1)]
+               (ok (str id " v" n ": " (some-> st name) "."
+                        (case st
+                          :pending " The user decides in the window. Call jonquil_plugin_status again later."
+                          :rejected (str (if (:note e1) (str " The user's note: " (:note e1)) " The user left no note.")
+                                         " Call jonquil_plugin_propose with a new version to try again.")
+                          :rejected-by-checks (str " Problems: " (str/join "; " (:problems (first es)))
+                                                   ". Fix them and call jonquil_plugin_propose again.")
+                          :superseded " A newer proposal replaced it."
+                          "")))))))))))
+
+;; --- propose -----------------------------------------------------------------
+
+(defn propose-text
+  "jonquil_plugin_propose's answer for id from a propose result {:status
+  :n :problems}: its status, version and problems, then the call that
+  continues it. Only pending isn't an error."
+  [id {:keys [status n problems]}]
+  (guarded
+   "answering the proposal"
+   (fn []
+     {:text (str/join "\n" (concat [(str "status: " (name status))]
+                                   (when n [(str "proposal: v" n)])
+                                   (when (seq problems) (cons "problems:" (map #(str "- " %) problems)))
+                                   [(case status
+                                      :pending (str "The user reviews it in the window. Call jonquil_plugin_status with id "
+                                                    id " and n " n " to see what they decide.")
+                                      :rejected-by-checks (str "Fix the problems and call jonquil_plugin_propose again with id " id ".")
+                                      :refused "Fix that and call jonquil_plugin_propose again."
+                                      (str "Call jonquil_plugin_status with id " id " to see whether it was recorded."))]))
+      :error? (not= :pending status)})))
