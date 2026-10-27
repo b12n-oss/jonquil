@@ -265,6 +265,10 @@
    review-rows/row-review-next-cycles
    review-rows/row-review-based-on-live-moved
    review-rows/row-review-none-to-review
+   review-rows/row-review-accept-goes-live
+   review-rows/row-review-reject-keeps-note
+   review-rows/row-review-refused-stays-pending
+   review-rows/row-review-superseded-while-shown
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

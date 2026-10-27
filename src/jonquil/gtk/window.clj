@@ -3297,6 +3297,31 @@
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :source-pane sp}
         _ (reset! *right right)
+        ;; plugins P9b: the plugin-step! opts for Accept or Reject of the
+        ;; proposal the panel shows (nil when none is), its last line put
+        ;; on the panel's footer and the status bar once the window has
+        ;; changed. GTK-thread only: it reads the note.
+        review-step (fn [kind]
+                      (let [{:keys [reviews index]} @review-state]
+                        (when-let [{:keys [id n]} (get reviews index)]
+                          (let [path @settings-path*
+                                note (review-pane/note-text rp)]
+                            {:settings-path path
+                             :step (case kind
+                                     :accept #(plugin-loader/accept-step!
+                                               plugin-registry/live
+                                               {:settings-path path :os (System/getProperty "os.name") :id id :n n})
+                                     :reject #(plugin-loader/reject-step! {:settings-path path :id id :n n :note note}))
+                             :after (fn [lines]
+                                      (when-let [l (last lines)]
+                                        (when (pos? (g/gtk-widget-get-visible (:root rp)))
+                                          (review-pane/report! rp l))
+                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
+        ;; the same, waited for, for the self-test hooks (off the GTK thread)
+        review-step-now (fn [kind]
+                          (let [p (promise)]
+                            (on-gui! #(deliver p (review-step kind)))
+                            (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
@@ -3560,7 +3585,9 @@
     (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
     (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
     (review-pane/set-handlers!
-     rp {:on-next (fn [] (let [{:keys [reviews index]} @review-state
+     rp {:on-accept (fn [] (some-> (review-step :accept) plugin-step!))
+         :on-reject (fn [] (some-> (review-step :reject) plugin-step!))
+         :on-next (fn [] (let [{:keys [reviews index]} @review-state
                                n (count reviews)]
                            (when (pos? n)
                              (let [i (mod (inc index) n)]
@@ -4046,6 +4073,12 @@
                    :review-proposals!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                                  :step (fn [] []) :open? true})
                                          nil)
+                   :review-accept!* (fn [] (review-step-now :accept))
+                   :review-reject!* (fn [] (review-step-now :reject))
+                   :review-next!* (fn [] (let [p (promise)]
+                                           (on-gui! #(do ((:on-next @(:handlers rp))) (deliver p true)))
+                                           (deref p 10000 nil)
+                                           []))
                    :review-shown* (fn [] (let [{:keys [reviews index]} @review-state]
                                            (when-let [r (get reviews index)]
                                              {:id (:id r) :n (:n r) :index index :count (count reviews)})))
@@ -4196,7 +4229,10 @@
   waits for it, and :plugins-dir* names that folder. :review-pane (plugins
   P9b) is the jonquil.gtk.review-pane map, :pending-label the status bar's
   pending count, :review-proposals!* does what Review Plugin Proposals
-  does and waits for the window to change, and :review-shown* answers
+  does and waits for the window to change, :review-accept!*,
+  :review-reject!* and :review-next!* do what the panel's buttons do and
+  wait the same way (answering the step's lines, [] for Next), and
+  :review-shown* answers
   {:id :n :index :count} for the proposal the panel shows, or nil. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?

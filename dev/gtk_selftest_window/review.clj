@@ -10,10 +10,14 @@
             [clojure.string :as str]
             [gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-registry :as plugin-registry]))
+
+(def ^:private KEY-J 0x06a)
+(def ^:private ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK))
 
 (defn- source
   "A plugin file for id with one :edit command bound to Cmd/Ctrl+Alt+J, its
@@ -45,7 +49,8 @@
 
 (defn with-proposals
   "Writes files ({name text}) into the plugins folder and loads them when
-  there are any, runs (f), then deletes the files and the histories of ids,
+  there are any, runs (f), then deletes the files, each id's <id>.clj (an
+  Accept writes it) and the histories of ids,
   restores the live registry, closes the panel and reloads, so the pending
   count is back to what it was."
   [ui {:keys [files ids]} f]
@@ -58,7 +63,9 @@
       (f)
       (finally
         (doseq [[n _] files] (io/delete-file (io/file dir n) true))
-        (doseq [id ids] (delete-tree! (history/history-dir (str dir) id)))
+        (doseq [id ids]
+          (io/delete-file (io/file dir (str id ".clj")) true)
+          (delete-tree! (history/history-dir (str dir) id)))
         (reset! plugin-registry/live before)
         (close-panel! ui)
         ((:reload-plugins!* ui))))))
@@ -144,3 +151,90 @@
           (support/check :review-none-to-review
                          (and (not visible) (not count-visible) (= "No plugin proposals to review." status))
                          (assoc p :status status)))))))
+
+(defn- entries [ui id]
+  (:entries (history/read-entries (history/history-dir ((:plugins-dir* ui)) id))))
+
+(defn row-review-accept-goes-live
+  "Accept on an unchecked proposal for a new plugin: it's checked in
+  process, written, recorded as accepted and live, so its key wraps; the
+  panel and the count go away."
+  [ui]
+  (go-row :review-accept-goes-live support/check
+    (with-proposals ui {:ids ["p9b-acc"]}
+      (fn []
+        (propose! ui "p9b-acc" (source "p9b-acc"))
+        ((:review-proposals!* ui))
+        (let [lines ((:review-accept!* ui))
+              live? (some? (get-in @plugin-registry/live [:plugins :p9b-acc]))
+              text (on-gtk (let [ed (:editor ui)]
+                             (editor/set-text! ed "(a b)")
+                             (support/place-cursor! (:buf ed) 1)
+                             (editor/handle-key! ed KEY-J ctrl-alt)
+                             (editor/editor-text ed)))
+              file? (.exists (io/file ((:plugins-dir* ui)) "p9b-acc.clj"))
+              status (history/version-status (entries ui "p9b-acc") 1)
+              {:keys [visible count-visible]} (panel ui)]
+          (support/check :review-accept-goes-live
+                         (and (= "plugin p9b-acc: v1 accepted" (last lines)) live? (= "(when (a b))" text)
+                              file? (= :accepted status) (not visible) (not count-visible))
+                         {:lines lines :live? live? :text text :file? file? :status status
+                          :visible visible :count-visible count-visible}))))))
+
+(defn row-review-reject-keeps-note
+  "Reject with a note: the status is :rejected with the note, and nothing
+  goes live."
+  [ui]
+  (go-row :review-reject-keeps-note support/check
+    (with-proposals ui {:ids ["p9b-rej"]}
+      (fn []
+        (propose! ui "p9b-rej" (source "p9b-rej"))
+        ((:review-proposals!* ui))
+        (on-gtk (review-pane/set-note! (:review-pane ui) "not now"))
+        (let [lines ((:review-reject!* ui))
+              e (dissoc (last (entries ui "p9b-rej")) :at)
+              live? (some? (get-in @plugin-registry/live [:plugins :p9b-rej]))]
+          (support/check :review-reject-keeps-note
+                         (and (= "plugin p9b-rej: v1 rejected" (last lines))
+                              (= {:n 1 :status :rejected :note "not now"} e) (not live?))
+                         {:lines lines :entry e :live? live?}))))))
+
+(defn row-review-refused-stays-pending
+  "A checked proposal whose check reported something other than what loads:
+  Accept refuses, the panel stays on it and says why, and it stays
+  pending."
+  [ui]
+  (go-row :review-refused-stays-pending support/check
+    (with-proposals ui {:ids ["p9b-ref"]}
+      (fn []
+        (propose! ui "p9b-ref" (source "p9b-ref")
+                  :check {:plugin {:id :p9b-ref} :warnings [] :timings {} :unchecked? false})
+        ((:review-proposals!* ui))
+        (let [lines ((:review-accept!* ui))
+              shown ((:review-shown* ui))
+              status (history/version-status (entries ui "p9b-ref") 1)
+              live? (some? (get-in @plugin-registry/live [:plugins :p9b-ref]))
+              {:keys [visible footer count] :as p} (panel ui)]
+          (support/check :review-refused-stays-pending
+                         (and visible (= {:id "p9b-ref" :n 1} (select-keys shown [:id :n]))
+                              (str/includes? footer "isn't what its check reported")
+                              (= :pending status) (not live?) (= "1 plugin proposal" count))
+                         (assoc p :lines lines :shown shown :status status :live? live?)))))))
+
+(defn row-review-superseded-while-shown
+  "v1 is shown when v2 supersedes it behind the panel's back: Accept
+  refuses v1, the panel moves to v2, and nothing goes live."
+  [ui]
+  (go-row :review-superseded-while-shown support/check
+    (with-proposals ui {:ids ["p9b-sup"]}
+      (fn []
+        (propose! ui "p9b-sup" (source "p9b-sup"))
+        ((:review-proposals!* ui))
+        (propose! ui "p9b-sup" (source "p9b-sup" "The second."))
+        (let [lines ((:review-accept!* ui))
+              shown ((:review-shown* ui))
+              live? (some? (get-in @plugin-registry/live [:plugins :p9b-sup]))]
+          (support/check :review-superseded-while-shown
+                         (and (some #{"plugin p9b-sup has no pending v1"} lines)
+                              (= {:id "p9b-sup" :n 2} (select-keys shown [:id :n])) (not live?))
+                         {:lines lines :shown shown :live? live?}))))))
