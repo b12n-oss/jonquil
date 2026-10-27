@@ -93,7 +93,7 @@
                         (str "Effects, as its check reported: "
                              (if (empty? (:effects plugin))
                                "none"
-                               (str/join ", " (for [e (sort (:effects plugin))]
+                               (str/join ", " (for [e (sort-by str (:effects plugin))]
                                                 (str e (when-not (contains? live-effects e) " (new)"))))))))
                 (cond-> (and (not unchecked?) (seq warnings))
                   (conj (str "Warnings, as its check reported: " (str/join "; " warnings))))
@@ -113,8 +113,9 @@
   "The review of every pending proposal under plugins-dir, sorted by id.
   Live is registry's source and declared effects when the plugin is
   loaded, else the latest accepted version's source (and no effects, so
-  every one is marked new). A proposal whose review can't be built is
-  skipped. Never throws."
+  every one is marked new). A proposal whose review can't be built (a
+  forged check result, say) is a short review saying why, so it's still
+  counted and can be rejected. Never throws."
   [{:keys [plugins-dir registry]}]
   (try
     (vec (keep (fn [{:keys [id] :as proposal}]
@@ -129,6 +130,9 @@
                                 :live-n live-n
                                 :live-source (or (:source loaded) (when live-n (history/version-source hdir live-n)))
                                 :live-effects (get-in loaded [:definition :effects])})))
-                   (catch Throwable _ nil)))
+                   (catch Throwable e
+                     {:id id :n (:n proposal) :diff ""
+                      :lines [(str id " v" (:n proposal) ": its review couldn't be built: " (or (ex-message e) (str e)))
+                              "Pressing Accept runs this code in Jonquil."]})))
                (history/all-pending plugins-dir)))
     (catch Throwable _ [])))

@@ -3298,9 +3298,9 @@
                :review-root (:root rp) :source-pane sp}
         _ (reset! *right right)
         ;; plugins P9b: the plugin-step! opts for Accept or Reject of the
-        ;; proposal the panel shows (nil when none is), its last line put
-        ;; on the panel's footer and the status bar once the window has
-        ;; changed. GTK-thread only: it reads the note.
+        ;; proposal the panel shows (nil when none is), its lines put on
+        ;; the panel's footer and its last on the status bar once the
+        ;; window has changed. GTK-thread only: it reads the note.
         review-step (fn [kind]
                       (let [{:keys [reviews index]} @review-state]
                         (when-let [{:keys [id n]} (get reviews index)]
@@ -3313,9 +3313,11 @@
                                                {:settings-path path :os (System/getProperty "os.name") :id id :n n})
                                      :reject #(plugin-loader/reject-step! {:settings-path path :id id :n n :note note}))
                              :after (fn [lines]
+                                      ;; review I1: every line, since a refused
+                                      ;; Accept's reasons come before its last
                                       (when-let [l (last lines)]
                                         (when (pos? (g/gtk-widget-get-visible (:root rp)))
-                                          (review-pane/report! rp l))
+                                          (review-pane/report! rp (str/join "\n" lines)))
                                         (g/gtk-label-set-text status-label (str "; " l))))}))))
         ;; the same, waited for, for the self-test hooks (off the GTK thread)
         review-step-now (fn [kind]
@@ -3779,10 +3781,17 @@
                              (hide-right-panel! right :review)
                              (when open? (g/gtk-label-set-text status-label "No plugin proposals to review.")))
                          (let [{old :reviews index :index} @review-state
-                               shown (:id (get old index))
-                               i (or (first (keep-indexed (fn [i r] (when (= shown (:id r)) i)) reviews)) 0)]
+                               shown (get old index)
+                               i (or (first (keep-indexed (fn [i r] (when (= (:id shown) (:id r)) i)) reviews)) 0)
+                               r (nth reviews i)
+                               showing? (pos? (g/gtk-widget-get-visible (:root rp)))]
                            (reset! review-state {:reviews reviews :index i})
-                           (review-pane/show! rp (nth reviews i) i n)
+                           ;; review I2: the same proposal still shown keeps
+                           ;; the note being typed, the diff's place and the
+                           ;; footer
+                           (if (and showing? (= [(:id shown) (:n shown)] [(:id r) (:n r)]))
+                             (review-pane/update-summary! rp r i n)
+                             (review-pane/show! rp r i n))
                            (show-right-panel! right :review))))
                      (when after (after lines)))
                    (finally (when done (deliver done true))))))))

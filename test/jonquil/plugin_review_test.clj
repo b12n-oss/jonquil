@@ -148,3 +148,20 @@
     (propose! d "b" "(b1)")
     (spit (io/file (history/history-dir d "a") "history.edn") "{:not")
     (is (= ["b"] (mapv :id (review/pending-reviews {:plugins-dir d :registry {:plugins {}}}))))))
+
+(deftest review-mixed-effects-test
+  ;; review I4: a forged check result can report effects that don't sort
+  ;; together; the review still builds
+  (is (some #(str/starts-with? % "Effects, as its check reported: ")
+            (lines (assoc-in in [:proposal :check :plugin :effects] #{:console "x"})))))
+
+(deftest a-review-that-cant-be-built-is-a-stub-test
+  ;; review I4: it still counts and can be rejected, and says why
+  (let [d (two-plugins)
+        real review/review
+        r (with-redefs [review/review (fn [m] (if (= "a" (:id m)) (throw (ex-info "boom" {})) (real m)))]
+            (review/pending-reviews {:plugins-dir d :registry (loaded "(a1)")}))]
+    (is (= ["a" "b"] (mapv :id r)))
+    (is (= {:id "a" :n 2 :diff ""} (select-keys (first r) [:id :n :diff])))
+    (is (= ["a v2: its review couldn't be built: boom" "Pressing Accept runs this code in Jonquil."]
+           (:lines (first r))))))

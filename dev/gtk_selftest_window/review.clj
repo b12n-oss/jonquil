@@ -21,14 +21,15 @@
 
 (defn- source
   "A plugin file for id with one :edit command bound to Cmd/Ctrl+Alt+J, its
-  doc being doc."
+  doc being doc and its effects the text effects."
   ([id] (source id "Wrap the form at the caret in (when ...)."))
-  ([id doc]
+  ([id doc] (source id doc "#{}"))
+  ([id doc effects]
    (str "(ns jonquil.plugins." id "\n  (:require [jonquil.plugin :as p]))\n\n"
         "(p/defplugin\n"
         "  {:id :" id "\n"
         "   :doc \"" doc "\"\n"
-        "   :effects #{}\n"
+        "   :effects " effects "\n"
         "   :commands [{:id :" id "/wrap :doc \"Wrap it.\"\n"
         "               :scope :editor :edit (fn [s] (p/wrap-form s \"(when \" \")\"))}]\n"
         "   :bindings [{:key \"j\" :mods #{:cmd :alt} :command :" id "/wrap}]})\n")))
@@ -238,3 +239,37 @@
                          (and (some #{"plugin p9b-sup has no pending v1"} lines)
                               (= {:id "p9b-sup" :n 2} (select-keys shown [:id :n])) (not live?))
                          {:lines lines :shown shown :live? live?}))))))
+
+(defn row-review-failed-accept-says-why
+  "review I1: an unchecked proposal whose checks fail at Accept stays shown,
+  and the footer names the problem, not only that it stays pending."
+  [ui]
+  (go-row :review-failed-accept-says-why support/check
+    (with-proposals ui {:ids ["p9b-bad"]}
+      (fn []
+        (propose! ui "p9b-bad" (source "p9b-bad" "Bad." "#{:nope}"))
+        ((:review-proposals!* ui))
+        (let [lines ((:review-accept!* ui))
+              {:keys [visible footer] :as p} (panel ui)]
+          (support/check :review-failed-accept-says-why
+                         (and visible (str/includes? footer ":nope") (str/includes? footer "stays pending"))
+                         (assoc p :lines lines)))))))
+
+(defn row-review-step-keeps-shown-and-note
+  "review I2 and I3: a plugin step while the second of two proposals is
+  shown keeps it shown, and keeps the note being typed for Reject."
+  [ui]
+  (go-row :review-step-keeps-shown-and-note support/check
+    (with-proposals ui {:ids ["p9b-k1" "p9b-k2"]}
+      (fn []
+        (propose! ui "p9b-k1" (source "p9b-k1"))
+        (propose! ui "p9b-k2" (source "p9b-k2"))
+        ((:review-proposals!* ui))
+        ((:review-next!* ui))
+        (on-gtk (review-pane/set-note! (:review-pane ui) "too broad"))
+        ((:reload-plugins!* ui))
+        (let [shown ((:review-shown* ui))
+              note (on-gtk (review-pane/note-text (:review-pane ui)))]
+          (support/check :review-step-keeps-shown-and-note
+                         (and (= {:id "p9b-k2" :index 1} (select-keys shown [:id :index])) (= "too broad" note))
+                         {:shown shown :note note}))))))

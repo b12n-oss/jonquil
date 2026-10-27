@@ -48,6 +48,15 @@
   (g/gtk-widget-set-sensitive (:next-btn pane) (if (> count 1) 1 0))
   nil)
 
+(defn update-summary!
+  "Shows review's summary as the index-th of count, keeping the diff's
+  caret, the note and the footer: for a refresh that leaves the same
+  proposal shown (review I2)."
+  [pane review index count]
+  (g/gtk-label-set-text (:summary pane) (plugin-review/summary-text review index count))
+  (g/gtk-widget-set-sensitive (:next-btn pane) (if (> count 1) 1 0))
+  nil)
+
 (defn note-text [pane] (or (g/editable-text (:note pane)) ""))
 (defn set-note! [pane s] (g/gtk-editable-set-text (:note pane) s) nil)
 (defn summary-text [pane] (g/label-text (:summary pane)))
