@@ -81,6 +81,15 @@
     (is (= "Its source is missing from its history, so it can't be accepted." (second (:lines r))))
     (is (= "" (:diff r)))))
 
+(deftest review-mcp-tools-test
+  (let [tools [{:name "echo"} {:name "wc"}]
+        ls (lines (-> in (assoc-in [:proposal :check :plugin :mcp-tools] tools) (assoc :live-tools ["echo"])))
+        i (.indexOf ^java.util.List ls "Effects, as its check reported: :console, :eval (new)")]
+    (is (= "MCP tools, as its check reported: plugin_fmt_echo, plugin_fmt_wc (new)" (nth ls (inc i))))
+    (is (not-any? #(str/starts-with? % "MCP tools") (lines in)))
+    (is (not-any? #(str/starts-with? % "MCP tools")
+                  (lines (assoc-in in [:proposal :check] {:unchecked? true :plugin {:mcp-tools tools}}))))))
+
 (deftest summary-text-test
   (let [r (review/review in)]
     (is (= (str/join "\n" (:lines r)) (review/summary-text r 0 1)))

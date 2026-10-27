@@ -428,6 +428,22 @@
 
 ;; --- serving -----------------------------------------------------------------
 
+(defn with-plugin-tools
+  "base (make-window-tools' table) with the window's live plugin tools
+  after the built-ins (plugins P10b): a fn answering a table, for
+  jonquil.mcp/serve! to read on every message. (:plugin-tools* ui) answers
+  jonquil.plugin-registry/mcp-tools' rows; it's read once per table, so one
+  message's list and call agree. A ui without it serves base unchanged."
+  [base ui]
+  (fn []
+    (let [plugins (if-let [f (:plugin-tools* ui)] (f) [])
+          by-name (into {} (map (juxt :name :call)) plugins)]
+      {:defs (into (:defs base) (map :def) plugins)
+       :call (fn [tname args]
+               (if-let [call (get by-name tname)]
+                 (call (or args {}))
+                 ((:call base) tname args)))})))
+
 (defn serve-window!
   "Serves the window table over :read-line / :write-line until EOF, then quits
   the window, discarding unsaved edits: one gui turn that, when any tab is
@@ -441,7 +457,7 @@
     (binding [*out* *err*]
       (println "jonquil: MCP server driving the window on stdio, default directory" dir))
     (try
-      (mcp/serve! {:tools (make-window-tools {:ui ui :dir dir :gui gui})
+      (mcp/serve! {:tools (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui)
                    :read-line read-line
                    :write-line write-line})
       (catch Throwable e

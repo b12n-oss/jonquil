@@ -61,10 +61,21 @@
 
 (defn- strings? [x] (and (vector? x) (every? string? x)))
 
+(defn- tool-summary?
+  "One :mcp-tools row of checker/summary: a string :name and :doc, and
+  :args, when present, a map keyed by strings (plugins P10b)."
+  [t]
+  (and (map? t) (string? (:name t)) (string? (:doc t))
+       (or (nil? (:args t)) (and (map? (:args t)) (every? string? (keys (:args t)))))))
+
 (defn- summary?
-  "checker/summary's shape, every key present."
+  "checker/summary's shape, every key present, and :mcp-tools when the
+  plugin has them (P10b review C1: a fixed key set refused every proposal
+  with tools)."
   [p]
-  (and (map? p) (= #{:id :doc :effects :commands :bindings :hooks} (set (keys p)))
+  (and (map? p)
+       (= #{:id :doc :effects :commands :bindings :hooks} (disj (set (keys p)) :mcp-tools))
+       (or (not (contains? p :mcp-tools)) (and (vector? (:mcp-tools p)) (every? tool-summary? (:mcp-tools p))))
        (keyword? (:id p)) (or (nil? (:doc p)) (string? (:doc p))) (set? (:effects p))
        (vector? (:commands p)) (every? map? (:commands p))
        (vector? (:bindings p)) (every? map? (:bindings p))

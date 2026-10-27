@@ -224,15 +224,34 @@
     ;; In process, as this window block was written against.
     (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit a "(ns demo.a) (def y 7) y")
+    ;; plugins P10b: a pure plugin with one MCP tool, loaded at startup
+    (fs/create-dirs (str xdg "/jonquil/plugins"))
+    (spit (str xdg "/jonquil/plugins/smoke-t.clj")
+          (str "(ns jonquil.plugins.smoke-t\n  (:require [jonquil.plugin :as p]))\n\n"
+               "(p/defplugin\n  {:id :smoke-t :doc \"A smoke tool.\" :effects #{}\n"
+               "   :mcp-tools [{:name \"twice\" :doc \"The text twice.\"\n"
+               "                :args {\"text\" {:type \"string\" :doc \"The text.\" :required? true}}\n"
+               "                :run (fn [_ a] (str (get a \"text\") (get a \"text\")))}]})\n"))
     (let [srv (launch! proj xdg)
           pid (.pid ^java.lang.Process (:proc (:proc srv)))]
       (try
         (handshake! srv "window")
-        (let [r (request! srv "tools/list" {} 60000)
+        ;; the startup plugin load runs on the plugin agent, so the first
+        ;; tools/list can come before it; until P10c's list_changed, a
+        ;; client sees the tool on a later list
+        (let [want (conj window-tool-names "plugin_smoke-t_twice")
+              r (loop [i 0]
+                  (let [r (request! srv "tools/list" {} 60000)
+                        names (set (map #(get % "name") (get-in r ["result" "tools"])))]
+                    (if (or (= want names) (>= i 60) (:fail r)) r (do (Thread/sleep 500) (recur (inc i))))))
               names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-          (check! "tools/list has exactly the nineteen window tools"
-                  (and (= 19 (count (get-in r ["result" "tools"]))) (= window-tool-names names))
+          (check! "tools/list has the nineteen window tools and plugin_smoke-t_twice within 30 s"
+                  (and (= 20 (count (get-in r ["result" "tools"])))
+                       (= want names))
                   r))
+        (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
+          (check! "a plugin's tool answers over real stdio"
+                  (and (= "abab" (:text r)) (not (:error? r))) r))
         (let [r (tool! srv "jonquil_open" {"path" a} 60000)]
           (check! "open a.clj" (and (string? (:text r)) (not (:error? r))) r))
         (let [r (tool! srv "jonquil_run" {} 60000)]

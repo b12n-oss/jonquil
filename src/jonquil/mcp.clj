@@ -3,7 +3,9 @@
 
   Transport-free: `serve!` takes its line reader and writer as functions, so
   this namespace never touches stdin or stdout itself. The tool table is
-  `{:defs [tool-def ...] :call (fn [name args] {:text s :error? b})}`."
+  `{:defs [tool-def ...] :call (fn [name args] {:text s :error? b})}`, or
+  (plugins P10b) a no-argument fn answering one, read once per message, so
+  the tools a window serves can change between calls."
   (:require [clojure.string :as str]
             [jonquil.mcp.json :as json]))
 
@@ -53,6 +55,8 @@
    "tools/list" (fn [tools msg] (rpc-result (get msg "id") {"tools" (:defs tools)}))
    "tools/call" tools-call})
 
+(defn- table-of [tools] (if (fn? tools) (tools) tools))
+
 (defn handle-message
   "Decoded request -> response map, or nil when there is nothing to answer:
   a message without an \"id\" is a notification and never gets a reply. A
@@ -63,7 +67,7 @@
     (not (map? msg)) (rpc-error nil -32600 "Invalid Request")
     (not (contains? msg "id")) nil
     :else (if-let [h (get handlers (get msg "method"))]
-            (h tools msg)
+            (h (table-of tools) msg)
             (rpc-error (get msg "id") -32601 "Method not found"))))
 
 (defn- respond

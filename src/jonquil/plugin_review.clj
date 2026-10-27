@@ -5,6 +5,7 @@
   reported them) and a line diff against live. Pure except
   pending-reviews, which reads the history; no GTK."
   (:require [clojure.string :as str]
+            [jonquil.plugin-check :as plugin-check]
             [jonquil.plugin-history :as history]))
 
 (def DIFF-MAX-CELLS
@@ -75,9 +76,9 @@
 (defn review
   "The review of a pending proposal entry for plugin id (a string), given
   its source (nil when missing from the history), the live version's
-  number, source and declared effects (each nil when there's none):
-  {:id :n :lines [...] :diff text}."
-  [{:keys [id proposal source live-n live-source live-effects]}]
+  number, source and declared effects, and the live definition's MCP tool
+  names (each nil when there's none): {:id :n :lines [...] :diff text}."
+  [{:keys [id proposal source live-n live-source live-effects live-tools]}]
   (let [{:keys [n reason based-on check]} proposal
         {:keys [unchecked? plugin warnings timings]} check
         live-effects (set live-effects)]
@@ -95,6 +96,12 @@
                                "none"
                                (str/join ", " (for [e (sort-by str (:effects plugin))]
                                                 (str e (when-not (contains? live-effects e) " (new)"))))))))
+                ;; plugins P10b: the tools an agent could call once it's live
+                (cond-> (and (not unchecked?) (seq (:mcp-tools plugin)))
+                  (conj (str "MCP tools, as its check reported: "
+                             (str/join ", " (for [{:keys [name]} (:mcp-tools plugin)]
+                                              (str (plugin-check/served-tool-name id name)
+                                                   (when-not (contains? (set live-tools) name) " (new)")))))))
                 (cond-> (and (not unchecked?) (seq warnings))
                   (conj (str "Warnings, as its check reported: " (str/join "; " warnings))))
                 (cond-> (and (not unchecked?) (seq timings))
@@ -129,7 +136,8 @@
                                 :source (history/version-source hdir (:n proposal))
                                 :live-n live-n
                                 :live-source (or (:source loaded) (when live-n (history/version-source hdir live-n)))
-                                :live-effects (get-in loaded [:definition :effects])})))
+                                :live-effects (get-in loaded [:definition :effects])
+                                :live-tools (map :name (get-in loaded [:definition :mcp-tools]))})))
                    (catch Throwable e
                      {:id id :n (:n proposal) :diff ""
                       :lines [(str id " v" (:n proposal) ": its review couldn't be built: " (or (ex-message e) (str e)))

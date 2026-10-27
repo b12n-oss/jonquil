@@ -255,3 +255,104 @@
     (is (= ":timeout-ms must be a positive number of milliseconds"
            (ex-message (await-thrown {:fire (fn [_] (swap! fired inc) nil) :interrupt! (fn []) :timeout-ms "500"}))))
     (is (zero? @fired))))
+
+;; --- a plugin's MCP tools (plugins P10b) -------------------------------------
+
+(defn- tool-plugin
+  "A registry holding plugin :fmt declaring effects, with tool rows."
+  [effects & rows]
+  (with {:id :fmt :doc "d" :effects effects :mcp-tools (vec rows)}))
+
+(def ^:private echo-row
+  {:name "echo" :doc "Echo it." :args {"text" {:type "string" :doc "What to echo." :required? true}}
+   :run (fn [_ args] (get args "text"))})
+
+(defn- call-tool [r served args & [opts]]
+  ((:call (some #(when (= served (:name %)) %) (reg/mcp-tools r (or opts {})))) args))
+
+(deftest mcp-tools-defs-test
+  (let [ts (reg/mcp-tools (tool-plugin #{} echo-row {:name "now" :doc "The time." :run (fn [_ _] "t")}))]
+    (is (= ["plugin_fmt_echo" "plugin_fmt_now"] (mapv :name ts)))
+    (is (= [:fmt :fmt] (mapv :plugin ts)))
+    (is (= {"name" "plugin_fmt_echo" "description" "Echo it."
+            "inputSchema" {"type" "object"
+                           "properties" {"text" {"type" "string" "description" "What to echo."}}
+                           "required" ["text"]}}
+           (:def (first ts))))
+    (is (= {"type" "object" "properties" {} "required" []} (get-in (second ts) [:def "inputSchema"])))
+    (is (= [] (reg/mcp-tools (reg/empty-registry))))))
+
+(deftest mcp-tools-call-test
+  (let [r (tool-plugin #{} echo-row)]
+    (is (= {:text "hi" :error? false} (call-tool r "plugin_fmt_echo" {"text" "hi"})))
+    (is (= {:text "hi" :error? false} (call-tool r "plugin_fmt_echo" {"text" "hi" "extra" 1}))
+        "an argument not in :args is passed through untouched")
+    (is (= {:text "Missing required argument: text" :error? true} (call-tool r "plugin_fmt_echo" {})))
+    (is (= {:text "Argument text must be a string." :error? true} (call-tool r "plugin_fmt_echo" {"text" 3}))))
+  (let [r (tool-plugin #{} (assoc echo-row :run (fn [_ _] {:text "x" :error? true})))]
+    (is (= {:text "x" :error? true} (call-tool r "plugin_fmt_echo" {"text" "a"}))))
+  (let [r (tool-plugin #{} (assoc echo-row :args {"n" {:type "integer" :doc "n"} "b" {:type "boolean" :doc "b"}}
+                                  :run (fn [_ a] (pr-str [(get a "n") (get a "b")]))))]
+    (is (= "[2 true]" (:text (call-tool r "plugin_fmt_echo" {"n" 2 "b" true}))))
+    (is (= {:text "Argument n must be an integer." :error? true} (call-tool r "plugin_fmt_echo" {"n" 2.5})))
+    (is (= {:text "Argument b must be a boolean." :error? true} (call-tool r "plugin_fmt_echo" {"b" "yes"})))))
+
+(deftest mcp-tools-bad-answers-test
+  (is (= {:text "plugin fmt: plugin_fmt_echo answered 42, not text" :error? true}
+         (call-tool (tool-plugin #{} (assoc echo-row :run (fn [_ _] 42))) "plugin_fmt_echo" {"text" "a"})))
+  (is (= {:text "plugin fmt: boom" :error? true}
+         (call-tool (tool-plugin #{} (assoc echo-row :run (fn [_ _] (throw (ex-info "boom" {})))))
+                    "plugin_fmt_echo" {"text" "a"}))))
+
+(deftest mcp-tools-deadline-test
+  (let [gate (promise)
+        r (tool-plugin #{} (assoc echo-row :run (fn [_ _] @gate "late")))
+        opts {:deadline-ms 100}]
+    (is (= {:text "plugin fmt: plugin_fmt_echo didn't answer in 0 s; it may still be running" :error? true}
+           (call-tool r "plugin_fmt_echo" {"text" "a"} opts)))
+    (is (= {:text "plugin fmt: plugin_fmt_echo is still running" :error? true}
+           (call-tool r "plugin_fmt_echo" {"text" "a"} opts)))
+    (deliver gate true)
+    (let [answer (loop [i 0]
+                   (let [a (call-tool r "plugin_fmt_echo" {"text" "a"} opts)]
+                     (if (and (str/ends-with? (:text a) "is still running") (< i 100))
+                       (do (Thread/sleep 20) (recur (inc i)))
+                       a)))]
+      (is (= {:text "late" :error? false} answer)))))
+
+(deftest mcp-tools-effects-test
+  (let [calls (atom [])
+        before @reg/effects]
+    (try
+      (reset! reg/effects (assoc (recording-effects calls) :active-tab-turn (constantly 9)))
+      (let [r (tool-plugin #{:console :buffer}
+                           (assoc echo-row :run (fn [ctx a] (p/print! ctx (get a "text")) (str (p/buffer-text ctx)))))]
+        (is (= {:text "t" :error? false} (call-tool r "plugin_fmt_echo" {"text" "hi"})))
+        (is (= [[:print! "hi"] [:buffer-text 9]] @calls) "the tab is what :active-tab-turn answers"))
+      (let [r (tool-plugin #{} (assoc echo-row :run (fn [ctx _] (p/replace-text! ctx "gone") "done")))
+            res (call-tool r "plugin_fmt_echo" {"text" "a"})]
+        (is (:error? res))
+        (is (str/starts-with? (:text res) "plugin fmt: this plugin didn't declare :buffer"))
+        (is (not-any? #(= :replace-text! (first %)) @calls)))
+      (finally (reset! reg/effects before)))))
+
+(deftest mcp-tools-lazy-answer-is-under-the-deadline-test
+  ;; P10b review I1: realizing a lazy answer runs plugin code too, so it
+  ;; happens under the deadline, never on the serve thread
+  (let [r (tool-plugin #{} (assoc echo-row :name "lazy" :run (fn [_ _] (lazy-seq (Thread/sleep 3000) [1]))))
+        t0 (System/currentTimeMillis)
+        a (call-tool r "plugin_fmt_lazy" {"text" "a"} {:deadline-ms 200})
+        ms (- (System/currentTimeMillis) t0)]
+    (is (< ms 1500) (str ms " ms"))
+    (is (= {:text "plugin fmt: plugin_fmt_lazy didn't answer in 0 s; it may still be running" :error? true} a))))
+
+(deftest mcp-tools-without-buffer-dont-wait-on-the-window-test
+  ;; P10b review I3: a tool that doesn't declare :buffer never takes a GTK
+  ;; turn, so a busy window can't fail it
+  (let [before @reg/effects
+        turns (atom 0)]
+    (try
+      (reset! reg/effects {:active-tab-turn (fn [] (swap! turns inc) (throw (ex-info "The window did not respond." {})))})
+      (is (= {:text "hi" :error? false} (call-tool (tool-plugin #{} echo-row) "plugin_fmt_echo" {"text" "hi"})))
+      (is (zero? @turns))
+      (finally (reset! reg/effects before)))))

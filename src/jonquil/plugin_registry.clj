@@ -11,6 +11,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.keymap :as km]
             [jonquil.plugin :as p]
+            [jonquil.plugin-check :as plugin-check]
             [jonquil.plugin-protocol :as protocol]))
 
 (defn empty-registry [] {:plugins {}})
@@ -183,6 +184,100 @@
                 :run (if (fn? edit)
                        (edit-command id edit)
                        (run-command id cid (set (:effects definition)) run))}])))
+
+(def PLUGIN-TOOL-DEADLINE-MS
+  ;; estimate: the built-in window tools' default timeout_ms
+  30000)
+
+;; the served names of plugin MCP tools with a call still running
+(defonce ^:private tools-running (atom #{}))
+
+(def ^:private arg-type-ok
+  {"string" string? "integer" integer? "number" number? "boolean" boolean?})
+
+(defn- arg-problem
+  "The error for args against a row's :args (a missing required one, or a
+  value of the wrong type), the built-in tools' wording, or nil. Extra
+  arguments pass through."
+  [args spec]
+  (some (fn [[k {:keys [type required?]}]]
+          (let [v (get args k)
+                ok? (arg-type-ok type)]
+            (cond
+              (and required? (nil? v)) (str "Missing required argument: " k)
+              (and (some? v) ok? (not (ok? v)))
+              (str "Argument " k " must be " (if (= "integer" type) "an " "a ") type "."))))
+        (sort-by key spec)))
+
+(defn- tool-def [served {:keys [doc args]}]
+  {"name" served "description" doc
+   "inputSchema" {"type" "object"
+                  "properties" (into {} (for [[k {:keys [type doc]}] args] [k {"type" type "description" doc}]))
+                  "required" (vec (sort (for [[k a] args :when (:required? a)] k)))}})
+
+(defn- tool-answer
+  "A :run's answer as a tool result: a string, or a map whose :text is one."
+  [label served r]
+  (cond
+    (string? r) {:text r :error? false}
+    (and (map? r) (string? (:text r))) {:text (:text r) :error? (boolean (:error? r))}
+    :else {:text (str label served " answered " (binding [*print-length* 10 *print-level* 3] (pr-str r)) ", not text")
+           :error? true}))
+
+(defn- tool-call
+  "The call fn of plugin-id's tool row, served as served: its args checked,
+  then :run on a future with a ctx of the declared effects and, for a
+  :buffer tool, the active tab (read through :active-tab-turn, safe off
+  the GTK thread), its answer made a result there too, answered within
+  deadline-ms. One call per tool at a time, as run-command's one
+  run per command, since nothing can stop one that overran. Never throws."
+  [plugin-id served row declared deadline-ms]
+  (fn [args]
+    (let [label (str "plugin " (name plugin-id) ": ")]
+      (try
+        (if-let [why (arg-problem args (:args row))]
+          {:text why :error? true}
+          (let [[before _] (swap-vals! tools-running conj served)]
+            (if (contains? before served)
+              {:text (str label served " is still running") :error? true}
+              (let [f (try
+                        (let [fx @effects
+                              ;; review I3: only a :buffer tool needs the
+                              ;; tab, so only it waits on the GTK thread
+                              tab (when (contains? declared :buffer)
+                                    (when-let [t (:active-tab-turn fx)] (t)))
+                              ctx (effect-ctx fx declared tab)]
+                          ;; review I1: the answer is turned into a result
+                          ;; here too, since realizing a lazy one runs
+                          ;; plugin code, so it's under the deadline
+                          (future (try (tool-answer label served ((:run row) ctx args))
+                                       (catch Throwable e {:text (str label (or (ex-message e) (str e))) :error? true})
+                                       (finally (swap! tools-running disj served)))))
+                        (catch Throwable e
+                          ;; nothing started, so the tool is free again
+                          (swap! tools-running disj served)
+                          (throw e)))
+                    v (deref f deadline-ms ::timeout)]
+                (if (= ::timeout v)
+                  {:text (str label served " didn't answer in " (quot deadline-ms 1000) " s; it may still be running")
+                   :error? true}
+                  v)))))
+        (catch Throwable e
+          {:text (str label (or (ex-message e) (str e))) :error? true})))))
+
+(defn mcp-tools
+  "Every installed plugin's MCP tools (plugins P10b), in plugin-id then row
+  order: {:name served :plugin id :def mcp-tool-def :call (fn [args]
+  {:text :error?})}, served as plugin_<id>_<name>. opts :deadline-ms
+  (default PLUGIN-TOOL-DEADLINE-MS) is a test knob."
+  ([reg] (mcp-tools reg {}))
+  ([reg {:keys [deadline-ms]}]
+   (vec (for [[id {:keys [definition]}] (in-order reg)
+              row (:mcp-tools definition)
+              :when (and (map? row) (string? (:name row)) (fn? (:run row)))
+              :let [served (plugin-check/served-tool-name (name id) (:name row))]]
+          {:name served :plugin id :def (tool-def served row)
+           :call (tool-call id served row (set (:effects definition)) (or deadline-ms PLUGIN-TOOL-DEADLINE-MS))}))))
 
 (defn all-commands
   "The built-in commands and reg's plugin commands, for the palette."

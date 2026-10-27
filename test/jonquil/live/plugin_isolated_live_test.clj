@@ -54,6 +54,14 @@
     (is (nil? (:log r)))
     (is (empty? (check-folders tmp)))))
 
+(deftest a-plugin-with-mcp-tools-passes-test
+  ;; P10b review C1: the real child's summary carries :mcp-tools, and it's a result
+  (let [text (str/replace (source "ltools") "   :commands"
+                          "   :mcp-tools [{:name \"echo\" :doc \"Echo it.\" :run (fn [_ a] \"x\")}]\n   :commands")
+        [r _] (check "ltools" text)]
+    (is (:ok? r) (pr-str (:problems r)))
+    (is (= [{:name "echo" :doc "Echo it."}] (get-in r [:plugin :mcp-tools])))))
+
 (deftest bad-plugin-fails-with-its-problem-test
   (let [[r tmp] (check "lbad" (source "lbad" :command ":nope/x"))]
     (is (false? (:ok? r)))

@@ -316,7 +316,22 @@ these:
   finished by then the answer is `status: unknown`. A refresh that
   replaces the shown proposal with a newer version of the same plugin arms
   a one-time refusal of Accept, so a click aimed at the version the user
-  read never accepts one an agent swapped in. Slice P4 (2026-10-25) made a change take effect
+  read never accepts one an agent swapped in. Slice P10b (2026-10-27)
+  serves a plugin's own `:mcp-tools`. `plugin-check` validates each row
+  (a short `:name`, a `:doc`, typed `:args` and a `:run`), and the served
+  name `plugin_<id>_<name>` is capped at 50 characters.
+  `plugin-checker/summary` carries the rows' name, doc and args when a
+  plugin has them, `plugin-isolated` accepts that shape, Accept compares
+  them (P9's I5), and the review names them with new ones marked.
+  `plugin-registry/mcp-tools` turns the live registry into served rows. A
+  call checks its arguments, then runs `:run` on a future with the
+  declared effects (and the active tab, through a GTK turn, only for a
+  `:buffer` tool), turns the answer into a result inside that future, and
+  answers within 30 s, one call per tool at a time. `jonquil.mcp/serve!`
+  takes a table or a fn that answers one, read once per message, and
+  `mcp-window/with-plugin-tools` builds that fn from the built-in table and
+  the ui's `:plugin-tools*`, for `--mcp --window` and the listener alike.
+  Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure

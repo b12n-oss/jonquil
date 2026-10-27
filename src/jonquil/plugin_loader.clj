@@ -391,7 +391,7 @@
     (map #(str "plugin " id ": putting the live version back: " %)
          (:problems (protocol/load-candidate {:source src :file-id id})))))
 
-(def ^:private summary-keys [:id :doc :effects :commands :bindings :hooks])
+(def ^:private summary-keys [:id :doc :effects :commands :bindings :hooks :mcp-tools])
 
 (defn accept-step!
   "Accepts id's pending version n, on the plugin agent like revert-step!

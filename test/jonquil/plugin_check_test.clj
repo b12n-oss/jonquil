@@ -319,3 +319,55 @@
                       [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])]
     (is (false? (:ok? r)))
     (is (not (mentions? r :warnings "only when")) (pr-str r))))
+
+;; --- :mcp-tools rows (plugins P10b) ------------------------------------------
+
+(def ^:private tool-row
+  {:name "echo" :doc "Echo the text back."
+   :args {"text" {:type "string" :doc "What to echo." :required? true}}
+   :run (fn [_ctx args] (get args "text"))})
+
+(defn- with-tools [rows] {:id :mt :doc "Tools." :effects #{} :mcp-tools rows})
+
+(deftest mcp-tools-valid-test
+  (is (:ok? (check [(with-tools [tool-row])] "mt")))
+  (is (:ok? (check [(with-tools [(dissoc tool-row :args)])] "mt")))
+  (is (:ok? (check [(dissoc (with-tools []) :mcp-tools)] "mt")))
+  (is (= "plugin_mt_echo" (pc/served-tool-name "mt" "echo"))))
+
+(deftest mcp-tools-problems-test
+  (let [has (fn [rows sentence]
+              (let [r (check [(with-tools rows)] "mt")]
+                (is (some #{sentence} (:problems r)) (pr-str (:problems r)))))
+        l "mcp tool 0 (\"echo\")"]
+    (has [:x] "mcp tool 0 isn't a map")
+    (has [(assoc tool-row :name "Echo")]
+         "mcp tool 0 (\"Echo\"): :name isn't lower-case letters, digits and _, starting with a letter")
+    (has [tool-row tool-row] "mcp tool 1 (\"echo\"): its name is used twice")
+    (let [n (apply str (repeat 60 "a"))]
+      (has [(assoc tool-row :name n)]
+           (str "mcp tool 0 (\"" n "\"): its served name plugin_mt_" n " is longer than 50 characters")))
+    ;; review I2: plugin_mt_ is 10, so a 40-character name is the longest
+    (is (:ok? (check [(with-tools [(assoc tool-row :name (apply str (repeat 40 "a")))])] "mt")))
+    (has [(assoc tool-row :name (apply str (repeat 41 "a")))]
+         (str "mcp tool 0 (\"" (apply str (repeat 41 "a")) "\"): its served name plugin_mt_" (apply str (repeat 41 "a"))
+              " is longer than 50 characters"))
+    (has [(assoc tool-row :x 1)] (str l ": has unknown keys [:x]"))
+    (has [(assoc tool-row :doc " ")] (str l ": :doc isn't a sentence"))
+    (has [(assoc tool-row :args [])] (str l ": :args isn't a map of argument name to {:type :doc :required?}"))
+    (has [(assoc tool-row :args {:text {:type "string" :doc "t"}})]
+         (str l ": argument :text isn't a string of letters, digits, _, . or -, 1 to 64 long"))
+    (doseq [k ["a b" "$x" "" (apply str (repeat 65 "k"))]]
+      (has [(assoc tool-row :args {k {:type "string" :doc "t"}})]
+           (str l ": argument " (pr-str k) " isn't a string of letters, digits, _, . or -, 1 to 64 long")))
+    (is (:ok? (check [(with-tools [(assoc tool-row :args {"a.b-C_9" {:type "string" :doc "t"}})])] "mt")))
+    (has [(assoc tool-row :args {"text" {:type "object" :doc "t"}})]
+         (str l ": argument text's :type \"object\" isn't one of [\"boolean\" \"integer\" \"number\" \"string\"]"))
+    (has [(assoc tool-row :args {"text" {:type "string" :doc "t" :default 1}})]
+         (str l ": argument text has unknown keys [:default]"))
+    (has [(assoc tool-row :args {"text" {:type "string" :doc ""}})]
+         (str l ": argument text's :doc isn't a sentence"))
+    (has [(assoc tool-row :args {"text" {:type "string" :doc "t" :required? "yes"}})]
+         (str l ": argument text's :required? isn't true or false"))
+    (has [(assoc tool-row :run "nope")] (str l ": :run isn't a function")))
+  (is (some #{":mcp-tools isn't a vector"} (:problems (check [(with-tools {})] "mt")))))

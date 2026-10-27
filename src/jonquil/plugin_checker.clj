@@ -16,13 +16,17 @@
 (defn summary
   "A plugin definition as plain data, nothing that can't print and read
   back: its id, doc and effects, each command's id, doc and scope, its
-  bindings, and its hook points. nil for nil."
+  bindings, its hook points, and (plugins P10b, only when it has the key,
+  so a summary from before then still compares equal) its MCP tools'
+  name, doc and args. nil for nil."
   [definition]
   (when definition
-    {:id (:id definition) :doc (:doc definition) :effects (:effects definition)
-     :commands (mapv #(select-keys % [:id :doc :scope]) (:commands definition))
-     :bindings (vec (:bindings definition))
-     :hooks (vec (sort (keys (:hooks definition))))}))
+    (cond-> {:id (:id definition) :doc (:doc definition) :effects (:effects definition)
+             :commands (mapv #(select-keys % [:id :doc :scope]) (:commands definition))
+             :bindings (vec (:bindings definition))
+             :hooks (vec (sort (keys (:hooks definition))))}
+      (contains? definition :mcp-tools)
+      (assoc :mcp-tools (mapv #(if (map? %) (select-keys % [:name :doc :args]) %) (:mcp-tools definition))))))
 
 (defn check-dir
   "The check of dir's candidate.clj against dir's request.edn ({:request

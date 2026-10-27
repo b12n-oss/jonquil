@@ -2146,6 +2146,41 @@ you didn't see. Press Accept again once you've read the new one.
 
 </details>
 
+<details>
+<summary><strong>A plugin's own tools</strong></summary>
+
+A plugin can give agents tools of its own in `:mcp-tools`, one map per tool:
+
+```clojure
+:mcp-tools [{:name "twice" :doc "The text twice."
+             :args {"text" {:type "string" :doc "The text." :required? true}}
+             :run (fn [ctx args] (str (get args "text") (get args "text")))}]
+```
+
+A window serving MCP (`--mcp --window`, or one you attach to) serves each live
+plugin's tools as `plugin_<id>_<name>` after its nineteen, so the one above is
+`plugin_smoke-t_twice` in a plugin `smoke-t`. Argument types are `string`,
+`integer`, `number` and `boolean`, and a required argument that's missing or
+of the wrong type is refused before `:run` sees it. `:run` answers a string,
+or `{:text "..." :error? true}`. It runs with only the effects the plugin
+declares, gets 30 s to answer, and runs one call at a time per tool. A call
+still going at 30 s keeps the tool busy until it ends, since nothing can stop
+it.
+
+The served name can be at most 50 characters and an argument name at most 64,
+from letters, digits, `_`, `.` and `-`. Both limits are what the Anthropic API
+is remembered to accept, less Claude Code's own `mcp__jonquil__` prefix, and
+haven't been measured yet.
+
+The tool list is read on every call, so a reload, an Accept or a disable shows
+up on the client's next `tools/list`. Jonquil doesn't announce the change yet,
+so a client that lists its tools once when it connects sees a plugin's tools
+only after it reconnects, even the tools of plugins loaded at startup. When an
+agent proposes a plugin, the review names its tools and marks new ones, and
+Accept refuses a plugin whose tools aren't the ones its check reported.
+
+</details>
+
 ### Attaching to a window that is already open
 
 `--window` starts a new window for each agent session. To hand an agent the

@@ -111,10 +111,78 @@
                   (for [[k f] h :when (and (contains? HOOKS k) (not (fn? f)))]
                     (str "hook " (pr-str k) " isn't a function")))))))
 
-(defn- mcp-tools-problems [d]
-  (if (and (contains? d :mcp-tools) (not (vector? (:mcp-tools d))))
-    [":mcp-tools isn't a vector"]
-    []))
+(def MCP-ARG-TYPES
+  "The JSON types a plugin tool's argument may name in :type."
+  #{"string" "integer" "number" "boolean"})
+
+(def MCP-NAME-MAX
+  ;; estimate, not measured (P10b review I2): the Anthropic API's tool-name
+  ;; limit as remembered, 64 (^[a-zA-Z0-9_-]{1,64}$), less Claude Code's
+  ;; own mcp__jonquil__ prefix, 14; P10c's probe measures it
+  50)
+
+(def ^:private arg-name-pattern
+  ;; review I2: what the API accepts as a schema property key, as
+  ;; remembered (not measured), so one plugin row can't break a client's
+  ;; whole tool list
+  #"[a-zA-Z0-9_.-]{1,64}")
+
+(def ^:private tool-name-pattern #"[a-z][a-z0-9_]*")
+(def ^:private tool-keys #{:name :doc :args :run})
+(def ^:private arg-keys #{:type :doc :required?})
+
+(defn served-tool-name
+  "The name plugin file-id's tool row name is served under over MCP."
+  [file-id name]
+  (str "plugin_" file-id "_" name))
+
+(defn- arg-problems [label k a]
+  (if-not (and (string? k) (re-matches arg-name-pattern k))
+    [(str label ": argument " (pr-str k) " isn't a string of letters, digits, _, . or -, 1 to 64 long")]
+    (let [al (str label ": argument " k)]
+      (if-not (map? a)
+        [(str al " isn't a map of :type :doc :required?")]
+        (cond-> []
+          (not (contains? MCP-ARG-TYPES (:type a)))
+          (conj (str al "'s :type " (pr-str (:type a)) " isn't one of " (pr-str (vec (sort MCP-ARG-TYPES)))))
+          (seq (remove arg-keys (keys a))) (conj (str al " has unknown keys " (pr-str (vec (remove arg-keys (keys a))))))
+          (blank-string? (:doc a)) (conj (str al "'s :doc isn't a sentence"))
+          (and (contains? a :required?) (not (boolean? (:required? a))))
+          (conj (str al "'s :required? isn't true or false")))))))
+
+(defn- tool-problems [i t file-id seen]
+  (if-not (map? t)
+    [(str "mcp tool " i " isn't a map")]
+    (let [{:keys [name doc args run]} t
+          label (str "mcp tool " i " (" (pr-str name) ")")
+          good-name? (and (string? name) (re-matches tool-name-pattern name))
+          served (when (and good-name? (string? file-id)) (served-tool-name file-id name))]
+      (cond-> []
+        (not good-name?) (conj (str label ": :name isn't lower-case letters, digits and _, starting with a letter"))
+        (contains? seen name) (conj (str label ": its name is used twice"))
+        (and served (> (count served) MCP-NAME-MAX))
+        (conj (str label ": its served name " served " is longer than " MCP-NAME-MAX " characters"))
+        (seq (remove tool-keys (keys t))) (conj (str label ": has unknown keys " (pr-str (vec (remove tool-keys (keys t))))))
+        (blank-string? doc) (conj (str label ": :doc isn't a sentence"))
+        (and (some? args) (not (map? args)))
+        (conj (str label ": :args isn't a map of argument name to {:type :doc :required?}"))
+        (map? args) (into (mapcat (fn [[k a]] (arg-problems label k a)) args))
+        (not (fn? run)) (conj (str label ": :run isn't a function"))))))
+
+(defn- mcp-tools-problems
+  "Each :mcp-tools row's problems (plugins P10b). file-id names the served
+  tools, so their length is checked against it."
+  [d file-id]
+  (let [ts (:mcp-tools d)]
+    (cond
+      (not (contains? d :mcp-tools)) []
+      (not (vector? ts)) [":mcp-tools isn't a vector"]
+      :else (loop [i 0 seen #{} out []]
+              (if (< i (count ts))
+                (let [t (nth ts i)]
+                  (recur (inc i) (if (map? t) (conj seen (:name t)) seen)
+                         (into out (tool-problems i t file-id seen))))
+                out)))))
 
 (def ^:private M km/MODIFIER-MASKS)
 
@@ -338,6 +406,6 @@
                                       (effects-problems d)
                                       (commands-problems d file-id)
                                       (hooks-problems d)
-                                      (mcp-tools-problems d)
+                                      (mcp-tools-problems d file-id)
                                       (:problems checked))))]
     {:ok? (empty? problems) :problems problems :warnings (vec (:warnings checked))}))
