@@ -42,7 +42,7 @@ window on the first Run (`brew install jank-lang/jank/jank`, or set
 `JONQUIL_JANK`). A short list of limits for each runtime
 is in [Using Jonquil](docs/guide/using-jonquil.md).
 
-An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate, run a file, check brackets, doc, completion, project info) over MCP on stdio, with no window. Add `--window` (`jonquil --mcp --window [DIR]`) and the agent drives a live window instead: nineteen tools that open, edit, save and run tabs while you watch, and that let it propose plugins you then accept or reject in the window. To drive a window you already have open, turn on `:mcp-listen? true` in the settings file and point the agent at `jonquil --mcp-attach [DIR]`, which bridges stdio to that window. See [Driving Jonquil from an agent (MCP)](docs/guide/using-jonquil.md#driving-jonquil-from-an-agent-mcp).
+An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate, run a file, check brackets, doc, completion, project info) over MCP on stdio, with no window. Add `--window` (`jonquil --mcp --window [DIR]`) and the agent drives a live window instead: nineteen tools that open, edit, save and run tabs while you watch, and that let it propose plugins you then accept or reject in the window. A plugin can add tools of its own beside them. To drive a window you already have open, turn on `:mcp-listen? true` in the settings file and point the agent at `jonquil --mcp-attach [DIR]`, which bridges stdio to that window. See [Driving Jonquil from an agent (MCP)](docs/guide/using-jonquil.md#driving-jonquil-from-an-agent-mcp).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
