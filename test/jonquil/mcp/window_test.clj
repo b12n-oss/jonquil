@@ -30,12 +30,46 @@
 
 (defn- millis-since [t0] (/ (- (System/nanoTime) t0) 1000000.0))
 
-(deftest defs-are-the-fifteen
+(deftest defs-are-the-nineteen
   (is (= ["jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop"
           "jonquil_open" "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab"
           "jonquil_replace_text" "jonquil_save" "jonquil_console" "jonquil_doc"
-          "jonquil_complete" "jonquil_check_brackets" "jonquil_project"]
+          "jonquil_complete" "jonquil_check_brackets" "jonquil_project"
+          "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"]
          (map #(get % "name") (:defs (tools-for {}))))))
+
+(defn- plugin-ui
+  "A fake ui over a plugins folder that doesn't exist, its propose hook
+  recording each call and answering pending v1."
+  [calls & {:keys [plugins?] :or {plugins? true}}]
+  {:plugin-state* (fn [] {:plugins? plugins? :plugins-dir "/nonexistent/jonquil-pmcp" :registry {:plugins {}} :disabled #{}})
+   :plugin-propose!* (fn [m] (swap! calls conj m) {:status :pending :n 1 :problems [] :lines []})})
+
+(deftest plugin-tools-over-a-fake-ui
+  (let [calls (atom [])
+        t (tools-for (plugin-ui calls))]
+    (is (= {:error? false
+            :text "status: pending\nproposal: v1\nThe user reviews it in the window. Call jonquil_plugin_status with id fmt and n 1 to see what they decide."}
+           (call t "jonquil_plugin_propose" {"id" "fmt" "source" "(ns x)" "reason" "faster"})))
+    (is (= [{:id "fmt" :source "(ns x)" :reason "faster"}] @calls))
+    (let [r (call t "jonquil_plugin_propose" {"id" "fmt" "source" "(ns x)" "reason" " "})]
+      (is (:error? r))
+      (is (str/starts-with? (:text r) "status: refused\nproblems:\n- a proposal needs a reason")))
+    (is (:error? (call t "jonquil_plugin_propose" {"id" "fmt" "source" "(ns x)"})))
+    (is (= 1 (count @calls)) "a refusal never reaches the hook")
+    (is (= {:text "No plugins. Call jonquil_plugin_propose to propose one." :error? false}
+           (call t "jonquil_plugins_list" {})))
+    (is (= {:text "fmt has no proposals. Call jonquil_plugin_propose to make one." :error? true}
+           (call t "jonquil_plugin_status" {"id" "fmt"})))
+    (is (= {:text "There's no plugin fmt. Call jonquil_plugins_list to see them." :error? true}
+           (call t "jonquil_plugin_read" {"id" "fmt"})))
+    (is (thrown-with-msg? Throwable #"must be a number" (call t "jonquil_plugin_read" {"id" "fmt" "version" "2"})))
+    (is (thrown-with-msg? Throwable #"must be a number" (call t "jonquil_plugin_status" {"id" "fmt" "n" "2"}))))
+  (let [calls (atom [])
+        r (call (tools-for (plugin-ui calls :plugins? false)) "jonquil_plugin_propose"
+                {"id" "fmt" "source" "(ns x)" "reason" "faster"})]
+    (is (str/includes? (:text r) "plugins are off in this window"))
+    (is (= [] @calls))))
 
 (deftest tab-line-format
   (is (= "3 * dirty /x/y.clj" (w/tab-line {:id 3 :active? true :dirty? true :path "/x/y.clj"})))
