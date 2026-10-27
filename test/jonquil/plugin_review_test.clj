@@ -1,7 +1,12 @@
 (ns jonquil.plugin-review-test
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
-            [jonquil.plugin-review :as review]))
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.plugin-history :as history]
+            [jonquil.plugin-review :as review]
+            [temp-dirs]))
+
+(use-fixtures :once temp-dirs/fixture)
 
 (deftest line-diff-test
   (is (= [[:same "a"] [:del "b"] [:add "x"] [:same "c"]] (review/line-diff "a\nb\nc" "a\nx\nc")))
@@ -80,3 +85,66 @@
   (let [r (review/review in)]
     (is (= (str/join "\n" (:lines r)) (review/summary-text r 0 1)))
     (is (str/ends-with? (review/summary-text r 0 2) "\nProposal 1 of 2."))))
+
+;; --- pending-reviews ---------------------------------------------------
+
+(def ^:private now (constantly "2026-10-27T00:00:00Z"))
+
+(defn- accepted! [d id text]
+  (history/record! {:plugins-dir d :id id :text text :source :user :reason "edited by hand" :now now}))
+
+(defn- propose! [d id text & {:as more}]
+  (history/record-proposal! (merge {:plugins-dir d :id id :text text :reason "r" :status :pending
+                                    :check {:unchecked? true} :now now}
+                                   more)))
+
+(def ^:private checked {:plugin {:effects #{:console}} :warnings [] :timings {} :unchecked? false})
+
+(defn- two-plugins
+  "Plugin a: accepted v1 \"(a1)\" and a pending v2 \"(a2)\" based on 1,
+  unchecked; plugin b: only a pending v1, checked."
+  []
+  (let [d (temp-dirs/temp-dir! "jonquil-review-")]
+    (accepted! d "a" "(a1)")
+    (propose! d "a" "(a2)" :based-on 1)
+    (propose! d "b" "(b1)" :check checked)
+    d))
+
+(defn- loaded [source] {:plugins {:a {:source source :definition {:effects #{}}}}})
+
+(deftest pending-reviews-test
+  (let [r (review/pending-reviews {:plugins-dir (two-plugins) :registry (loaded "(a1)")})]
+    (is (= ["a" "b"] (mapv :id r)))
+    (is (= 2 (:n (first r))))
+    (is (= "- (a1)\n+ (a2)" (:diff (first r))))
+    (is (= "A new plugin, so the whole file is shown." (second (:lines (second r)))))))
+
+(deftest live-is-the-registry-source-test
+  (let [r (review/pending-reviews {:plugins-dir (two-plugins) :registry (loaded "(hand)")})]
+    (is (= "- (hand)\n+ (a2)" (:diff (first r))))))
+
+(deftest not-loaded-uses-the-accepted-source-test
+  (let [d (temp-dirs/temp-dir! "jonquil-review-")
+        _ (accepted! d "a" "(a1)")
+        _ (propose! d "a" "(a2)" :based-on 1 :check checked)
+        [r] (review/pending-reviews {:plugins-dir d :registry {:plugins {}}})]
+    (is (= "- (a1)\n+ (a2)" (:diff r)))
+    (is (some #{"Effects, as its check reported: :console (new)"} (:lines r)))))
+
+(deftest rejected-and-superseded-are-not-shown-test
+  (let [d (temp-dirs/temp-dir! "jonquil-review-")]
+    (propose! d "a" "(a1)")
+    (propose! d "a" "(a2)")
+    (history/record-status! {:plugins-dir d :id "a" :n 2 :status :rejected :now now})
+    (propose! d "b" "(b1)" :status :rejected-by-checks :problems ["no"])
+    (is (= [] (review/pending-reviews {:plugins-dir d :registry {:plugins {}}})))))
+
+(deftest no-plugins-folder-test
+  (is (= [] (review/pending-reviews {:plugins-dir "/nonexistent/jonquil-review" :registry {:plugins {}}}))))
+
+(deftest an-unreadable-history-is-skipped-test
+  (let [d (temp-dirs/temp-dir! "jonquil-review-")]
+    (propose! d "a" "(a1)")
+    (propose! d "b" "(b1)")
+    (spit (io/file (history/history-dir d "a") "history.edn") "{:not")
+    (is (= ["b"] (mapv :id (review/pending-reviews {:plugins-dir d :registry {:plugins {}}}))))))

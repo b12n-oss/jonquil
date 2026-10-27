@@ -2,8 +2,10 @@
   "What the review panel shows for an agent's pending proposal (plugins
   P9b): summary lines (where it stands against live, the effects with new
   ones marked, the check's warnings and soak timings, all as the check
-  reported them) and a line diff against live. Pure; no GTK."
-  (:require [clojure.string :as str]))
+  reported them) and a line diff against live. Pure except
+  pending-reviews, which reads the history; no GTK."
+  (:require [clojure.string :as str]
+            [jonquil.plugin-history :as history]))
 
 (def DIFF-MAX-CELLS
   ;; MEASURED (jolt v0.8.23-47): the LCS table takes 39 ms at 300 x 300
@@ -106,3 +108,27 @@
   [review index count]
   (str/join "\n" (cond-> (:lines review)
                    (> count 1) (conj (str "Proposal " (inc index) " of " count ".")))))
+
+(defn pending-reviews
+  "The review of every pending proposal under plugins-dir, sorted by id.
+  Live is registry's source and declared effects when the plugin is
+  loaded, else the latest accepted version's source (and no effects, so
+  every one is marked new). A proposal whose review can't be built is
+  skipped. Never throws."
+  [{:keys [plugins-dir registry]}]
+  (try
+    (vec (keep (fn [{:keys [id] :as proposal}]
+                 (try
+                   (let [hdir (history/history-dir plugins-dir id)
+                         {:keys [entries error]} (history/read-entries hdir)
+                         live-n (:n (history/latest-accepted entries))
+                         loaded (get-in registry [:plugins (keyword id)])]
+                     (when-not error
+                       (review {:id id :proposal (dissoc proposal :id)
+                                :source (history/version-source hdir (:n proposal))
+                                :live-n live-n
+                                :live-source (or (:source loaded) (when live-n (history/version-source hdir live-n)))
+                                :live-effects (get-in loaded [:definition :effects])})))
+                   (catch Throwable _ nil)))
+               (history/all-pending plugins-dir)))
+    (catch Throwable _ [])))
