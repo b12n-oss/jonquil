@@ -83,7 +83,10 @@
    ;; plugins P4: reload the plugin files that changed, appeared or went
    ;; away; no chord, the palette reaches it
    :plugins/reload {:doc "Reload the plugin files that changed." :scope :window
-                    :run (call :reload-plugins-fn)}})
+                    :run (call :reload-plugins-fn)}
+   ;; plugins P9b: open the review of the agents' pending proposals
+   :plugins/review {:doc "Review the plugin proposals agents made." :scope :window
+                    :run (call :review-proposals-fn)}})
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])

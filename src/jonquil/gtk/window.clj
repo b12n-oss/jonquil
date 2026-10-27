@@ -43,6 +43,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.tab :as tab]
@@ -63,6 +64,7 @@
             [jonquil.plugin-hooks :as plugin-hooks]
             [jonquil.plugin-loader :as plugin-loader]
             [jonquil.plugin-registry :as plugin-registry]
+            [jonquil.plugin-review :as plugin-review]
             [jonquil.runtime-registry :as registry]
             [jonquil.save-path :as save-path]
             [jonquil.session]
@@ -790,17 +792,25 @@
   ;; status box's own child spacing (6) plus a little.
   8)
 
+(defn- right-roots
+  "{which root} for the panels right's slot holds; a right without
+  :review-root (a test's) has two."
+  [{:keys [inspector-root source-root review-root]}]
+  (cond-> {:inspector inspector-root :source source-root}
+    review-root (assoc :review review-root)))
+
 (defn- show-right-panel!
-  "Shows which (:inspector or :source) in the slot and hides the other.
-  When the slot was hidden, also sizes h-paned so the panel claims about
-  PANEL-WIDTH, as the inspector always did; while it's showing, the split
-  stays where the person put it. right is {:win :h-paned :slot
-  :inspector-root :source-root}. GTK-thread only."
-  [{:keys [win h-paned slot inspector-root source-root]} which]
+  "Shows which (:inspector, :source or, plugins P9b, :review) in the slot
+  and hides the others. When the slot was hidden, also sizes h-paned so
+  the panel claims about PANEL-WIDTH, as the inspector always did; while
+  it's showing, the split stays where the person put it. right is {:win
+  :h-paned :slot :inspector-root :source-root :review-root}. GTK-thread
+  only."
+  [{:keys [win h-paned slot] :as right} which]
   (let [was-hidden? (zero? (g/gtk-widget-get-visible slot))
-        [show hide] (if (= which :inspector) [inspector-root source-root] [source-root inspector-root])]
-    (g/gtk-widget-set-visible hide 0)
-    (g/gtk-widget-set-visible show 1)
+        roots (right-roots right)]
+    (doseq [[k root] roots :when (not= k which)] (g/gtk-widget-set-visible root 0))
+    (g/gtk-widget-set-visible (get roots which) 1)
     (g/gtk-widget-set-visible slot 1)
     (when was-hidden?
       (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
@@ -815,19 +825,19 @@
              (or (= f widget) (pos? (g/gtk-widget-is-ancestor f widget))))))))
 
 (defn- hide-right-panel!
-  "Hides which's root, and the slot once neither root is showing. Hiding
+  "Hides which's root, and the slot once no root is showing. Hiding
   :source also cancels any re-scroll settling still in flight for it
   (source-pane/cancel-scroll-settle!, final review finding #1), so the
   shared settle timeout stops touching the view behind a hidden panel
   instead of only finding out once the view is actually destroyed.
   close-source-panel! reaches this same cancellation by calling through
   here, not by calling cancel-scroll-settle! a second time."
-  [{:keys [slot inspector-root source-root source-pane]} which]
-  (let [[root other] (if (= which :inspector) [inspector-root source-root] [source-root inspector-root])]
-    (g/gtk-widget-set-visible root 0)
+  [{:keys [slot source-pane] :as right} which]
+  (let [roots (right-roots right)]
+    (g/gtk-widget-set-visible (get roots which) 0)
     (when (= which :source)
       (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))
-    (when (zero? (g/gtk-widget-get-visible other))
+    (when (every? #(zero? (g/gtk-widget-get-visible %)) (vals roots))
       (g/gtk-widget-set-visible slot 0))))
 
 ;; apply-selection! sits here, after start-and-report! (above), which it
@@ -3009,30 +3019,62 @@
   (plugin-loader/load-agent
    (fn [e] (@plugin-console (str "loading plugins failed: " (or (ex-message e) (str e)))))))
 
-(defn- plugin-load!
-  "Queues a plugin load on plugin-loads: jonquil.plugin-loader/load-step!
-  over the live registry, with the plugins folder and disabled ids from the
-  settings file, all files or just only. The step's lines go to the console
-  on the GTK thread. Returns the agent, for a caller that wants to wait."
-  [{:keys [settings-path only]}]
+(defonce ^:private plugin-reviews-changed
+  ;; plugins P9b: (fn [{:keys [reviews open? lines after done]}]) taking the
+  ;; pending proposals' reviews after every plugin step; activate! sets it
+  ;; to update the pending count and the review panel. done, when given, is
+  ;; a promise it delivers once the window has changed.
+  (atom (fn [{:keys [done]}] (when done (deliver done true)))))
+
+(defn- plugin-step!
+  "Queues step (a no-arg fn answering console lines) on plugin-loads. Its
+  lines go to the console; then, still off the GTK thread, the pending
+  proposals' reviews are built (jonquil.plugin-review/pending-reviews over
+  the settings file's plugins folder and the live registry) and handed to
+  plugin-reviews-changed with open? (open the review panel), after (fn
+  [lines] run once the window has changed) and done. Returns the agent,
+  whose state is the step's lines."
+  [{:keys [settings-path step open? after done]}]
   (send-off plugin-loads
             (fn [_]
-              (let [lines (plugin-loader/load-step!
-                           plugin-registry/live
-                           {:settings-path settings-path :os (System/getProperty "os.name") :only only})]
+              (let [lines (step)]
                 (try (doseq [l lines] (@plugin-console l))
                      (catch :default e
                        (binding [*out* *err*] (println "jonquil: plugin console:" (ex-message e)))))
+                (try
+                  (@plugin-reviews-changed
+                   {:reviews (plugin-review/pending-reviews {:plugins-dir (plugin-loader/plugins-dir settings-path)
+                                                             :registry @plugin-registry/live})
+                    :open? open? :lines lines :after after :done done})
+                  (catch :default e
+                    (when done (deliver done true))
+                    (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e))))))
                 lines))))
 
-(defn- plugin-load-now!
-  "plugin-load!, waited for up to 10 s: the step's lines, or a line saying
-  it didn't finish. For the self-test hooks, called off the GTK thread."
+(defn- load-step
+  "The step of a plugin load: jonquil.plugin-loader/load-step! over the
+  live registry, with the plugins folder and disabled ids from the settings
+  file, all files or just only."
+  [settings-path only]
+  (fn [] (plugin-loader/load-step! plugin-registry/live
+                                   {:settings-path settings-path :os (System/getProperty "os.name") :only only})))
+
+(defn- plugin-load!
+  "Queues a plugin load (load-step) through plugin-step!. Returns the
+  agent, for a caller that wants to wait."
+  [{:keys [settings-path only]}]
+  (plugin-step! {:settings-path settings-path :step (load-step settings-path only)}))
+
+(defn- plugin-step-now!
+  "plugin-step!, waited for up to 10 s, and for the window to change after
+  it: the step's lines, or a line saying it didn't finish. For the
+  self-test hooks, called off the GTK thread."
   [opts]
-  (let [a (plugin-load! opts)]
-    (if (await-for 10000 a)
+  (let [done (promise)
+        a (plugin-step! (assoc opts :done done))]
+    (if (and (await-for 10000 a) (deref done 10000 false))
       @a
-      ["the plugin load didn't finish in 10 s"])))
+      ["the plugin step didn't finish in 10 s"])))
 
 (defn- activate! [app {:keys [file dir cwd on-ready settings-path plugins?]}]
   (let [;; TH.T5: an atom, not a plain value -- :settings-path!* (self-test
@@ -3081,6 +3123,8 @@
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
+        ;; plugins P9b: how many agent proposals are pending, hidden at zero
+        pending-label (g/gtk-label-new "")
         ;; D1.T4: the window's dialect (and runtime, when it isn't the
         ;; dialect's default), between the status text and Ln/Col.
         dialect-label (g/gtk-label-new (dialect/label @sel*))
@@ -3124,6 +3168,11 @@
         ;; jump opens it; its root joins the right-hand slot once the
         ;; inspector exists (*right, reset below).
         sp (source-pane/make-pane)
+        ;; plugins P9b: the review panel shares the slot, and review-state is
+        ;; what it shows, {:reviews [review ...] :index i}, rebuilt from the
+        ;; history after every plugin step
+        rp (review-pane/make-pane)
+        review-state (atom {:reviews [] :index 0})
         *right (atom nil)
         ;; Where each jump into a tab started, newest last, for Cmd/Ctrl+[
         ;; (open-in-tab!, jump-back!).
@@ -3246,7 +3295,7 @@
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :source-pane sp}
+               :review-root (:root rp) :source-pane sp}
         _ (reset! *right right)
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
@@ -3352,6 +3401,8 @@
                                                               files-btn
                                                               (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                                       :open-palette-fn open-palette-fn
+                                      :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
+                                                                                 :step (fn [] []) :open? true}))
                                       :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
                                                                                :cv cv}))}
         window-key-fn (on-window-key window-key-args)
@@ -3400,11 +3451,14 @@
     (g/gtk-widget-set-vexpand (:root sp) 1)
     (g/gtk-box-append slot (:root pane))
     (g/gtk-box-append slot (:root sp))
+    (g/gtk-widget-set-vexpand (:root rp) 1)
+    (g/gtk-box-append slot (:root rp))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
     (g/gtk-widget-set-visible (:root pane) 0)
     (g/gtk-widget-set-visible (:root sp) 0)
+    (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
     (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
@@ -3415,6 +3469,8 @@
     (g/gtk-box-append vbox tree-paned)
     (g/gtk-widget-set-hexpand status-label 1)
     (g/gtk-box-append status-box status-label)
+    (g/gtk-box-append status-box pending-label)
+    (g/gtk-widget-set-visible pending-label 0)
     (g/gtk-box-append status-box dialect-label)
     (g/gtk-box-append status-box line-col-label)
     ;; Room at both ends, so "Ln N, Col N" doesn't touch the window's right
@@ -3503,6 +3559,14 @@
     (editor/set-jump-fn! (:editor sp) source-jump-fn)
     (editor/set-error-fn! (:editor sp) (fn [msg] (source-pane/report! sp msg)))
     (source-pane/set-handlers! sp {:on-open source-open-fn :on-close source-close-fn})
+    (review-pane/set-handlers!
+     rp {:on-next (fn [] (let [{:keys [reviews index]} @review-state
+                               n (count reviews)]
+                           (when (pos? n)
+                             (let [i (mod (inc index) n)]
+                               (swap! review-state assoc :index i)
+                               (review-pane/show! rp (nth reviews i) i n)))))
+         :on-close (fn [] (hide-right-panel! right :review) (editor/focus! (:ed (active-tab))))})
     ;; I5: joins the SAME registry, so Escape closes the def prompt
     ;; before it can fall through to Stop (ruling 8).
     (register-popover-fn (:def-popover pane))
@@ -3671,6 +3735,30 @@
     ;; plugins P3: the user's plugins load off the GTK thread once the
     ;; window is up; keys pressed before the swap see none yet
     (reset! plugin-console (fn [line] (on-gui! #(cview/append! cv :system (str "; " line "\n")))))
+    ;; plugins P9b: after every plugin step, the pending count and, when
+    ;; it's showing or being opened, the review panel: the same plugin's
+    ;; proposal again if it's still pending, else the first
+    (reset! plugin-reviews-changed
+            (fn [{:keys [reviews open? lines after done]}]
+              (on-gui!
+               (fn []
+                 (try
+                   (let [n (count reviews)]
+                     (g/gtk-label-set-text pending-label (str n " plugin proposal" (when (not= 1 n) "s")))
+                     (g/gtk-widget-set-visible pending-label (if (pos? n) 1 0))
+                     (when (or open? (pos? (g/gtk-widget-get-visible (:root rp))))
+                       (if (zero? n)
+                         (do (reset! review-state {:reviews [] :index 0})
+                             (hide-right-panel! right :review)
+                             (when open? (g/gtk-label-set-text status-label "No plugin proposals to review.")))
+                         (let [{old :reviews index :index} @review-state
+                               shown (:id (get old index))
+                               i (or (first (keep-indexed (fn [i r] (when (= shown (:id r)) i)) reviews)) 0)]
+                           (reset! review-state {:reviews reviews :index i})
+                           (review-pane/show! rp (nth reviews i) i n)
+                           (show-right-panel! right :review))))
+                     (when after (after lines)))
+                   (finally (when done (deliver done true))))))))
     ;; plugins P5: the effect functions a plugin's :run command reaches,
     ;; each a turn on the GTK thread (it runs on a worker) acting on the
     ;; tab with that id, which may have closed since the command started
@@ -3911,8 +3999,8 @@
                    :open-palette!* open-palette-fn
                  ;; plugins P3: load the plugin folder now (call it off the
                  ;; GTK thread; it returns the console lines), and the folder
-                   :load-plugins!* (fn [] (plugin-load-now! {:settings-path @settings-path* :cv cv}))
-                   :reload-plugins!* (fn [] (plugin-load-now! {:settings-path @settings-path* :cv cv}))
+                   :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
+                   :reload-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
                    :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
@@ -3950,6 +4038,17 @@
                  ;; and buttons call.
                    :source-pane sp
                    :right-slot slot
+                 ;; plugins P9b: the review panel, the status bar's pending
+                 ;; count, what Review Plugin Proposals does (waited for),
+                 ;; and what the panel shows now
+                   :review-pane rp
+                   :pending-label pending-label
+                   :review-proposals!* (fn [] (plugin-step-now! {:settings-path @settings-path*
+                                                                 :step (fn [] []) :open? true})
+                                         nil)
+                   :review-shown* (fn [] (let [{:keys [reviews index]} @review-state]
+                                           (when-let [r (get reviews index)]
+                                             {:id (:id r) :n (:n r) :index index :count (count reviews)})))
                    :source-jump!* source-jump-fn
                    :source-open!* source-open-fn
                    :source-back!* source-back-fn
@@ -4094,7 +4193,11 @@
   Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
   P3) loads the plugin folder now, off the GTK thread, answering the
   console lines, :reload-plugins!* (P4) does what Reload Plugins does and
-  waits for it, and :plugins-dir* names that folder. :complete!* (P4.T5) is
+  waits for it, and :plugins-dir* names that folder. :review-pane (plugins
+  P9b) is the jonquil.gtk.review-pane map, :pending-label the status bar's
+  pending count, :review-proposals!* does what Review Plugin Proposals
+  does and waits for the window to change, and :review-shown* answers
+  {:id :n :index :count} for the proposal the panel shows, or nil. :complete!* (P4.T5) is
   exactly what the editor's own Ctrl+Space clause calls; :completion is
   the jonquil.gtk.completion map it acts on -- jonquil.gtk.popover/open?
   and jonquil.gtk.completion/state read it back.

@@ -38,6 +38,7 @@
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.prompt :as prompt]
             [gtk-selftest-window.rename-menus :as rename-menus]
+            [gtk-selftest-window.review :as review-rows]
             [gtk-selftest-window.run-form :as run-form]
             [gtk-selftest-window.run-repl :as run-repl]
             [gtk-selftest-window.session-tabs :as session-tabs]
@@ -260,6 +261,10 @@
    plugin-rows/row-plugin-before-run-abort
    plugin-rows/row-plugin-before-run-form
    plugin-rows/row-plugin-before-run-overrun
+   review-rows/row-review-opens-pending
+   review-rows/row-review-next-cycles
+   review-rows/row-review-based-on-live-moved
+   review-rows/row-review-none-to-review
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns
