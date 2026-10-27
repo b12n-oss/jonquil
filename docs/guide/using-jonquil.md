@@ -2068,11 +2068,11 @@ claude mcp add jonquil -- jolt -M -m jonquil.main --mcp --window /path/to/projec
 ```
 
 Headless `jonquil --mcp` keeps its six tools unchanged. With `--window` the
-server offers fifteen, and they act on the live window rather than on private
+server offers nineteen, and they act on the live window rather than on private
 evaluators:
 
 <details>
-<summary><strong>The fifteen window tools</strong></summary>
+<summary><strong>The nineteen window tools</strong></summary>
 
 | Tool | What it does |
 |---|---|
@@ -2091,6 +2091,10 @@ evaluators:
 | `jonquil_complete` | Completion candidates for a prefix, one per line, at most 50 |
 | `jonquil_check_brackets` | "ok", or the sentence naming the first problem, for `text` or a file `path` |
 | `jonquil_project` | The window's live dialect selection: label, runtime, project directory, source, warnings |
+| `jonquil_plugins_list` | One line per plugin: its live version, whether it's loaded or disabled, its effects, any pending proposal, and its doc |
+| `jonquil_plugin_read` | A plugin's live source and its history (each version's status, source and reason), or one `version`'s source |
+| `jonquil_plugin_propose` | Proposes a plugin's whole new `source` for `id`, with a `reason`, and answers its status: pending, rejected-by-checks or refused |
+| `jonquil_plugin_status` | A proposal's status (the latest one when you leave `n` out), and your note when you rejected it |
 
 </details>
 
@@ -2118,6 +2122,30 @@ reach: the agent can open, edit and save any file you can.
 
 </details>
 
+<details>
+<summary><strong>An agent proposing a plugin</strong></summary>
+
+`jonquil_plugin_propose` never runs the agent's code in Jonquil. The proposal
+is checked in a separate jolt process first. When it passes, it waits as a
+pending proposal, the status bar counts it, and you decide it in Review Plugin
+Proposals. No tool can accept or reject one, so the agent learns your decision
+by calling `jonquil_plugin_status`, which also passes on your note when you
+reject it.
+
+A proposal is refused before any check when its id isn't a plugin id, when its
+reason is blank or longer than 4000 characters, when its source is longer than
+262144, or when the window was started with `--no-plugins`. The reading tools
+still answer with plugins off. A check can take up to 30 s and the window may be
+busy with another plugin step, so a propose can take most of a minute. If the
+step doesn't finish in time, the answer is `status: unknown`, and
+`jonquil_plugin_status` tells the agent whether the proposal was recorded.
+
+If an agent's newer proposal replaces the one you're reading while the panel
+shows it, the next Accept is refused and says so, so you never accept a version
+you didn't see. Press Accept again once you've read the new one.
+
+</details>
+
 ### Attaching to a window that is already open
 
 `--window` starts a new window for each agent session. To hand an agent the
@@ -2128,7 +2156,7 @@ window you already have, with its tabs and its console, turn listening on in
 {:mcp-listen? true}
 ```
 
-A window started with that setting serves the same fifteen tools on a socket
+A window started with that setting serves the same nineteen tools on a socket
 bound to 127.0.0.1, on a port the operating system picks, to one client at a
 time. It publishes the port in `mcp/<pid>.edn` inside the settings directory
 (next to `settings.edn`), one file per window. Then register the bridge:

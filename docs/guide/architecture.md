@@ -299,7 +299,24 @@ these:
   proposal again, or the first. The same proposal still shown keeps the
   note being typed for Reject, and an Accept's lines all go on the
   panel's footer, so a refusal says why. Nothing in the panel is an MCP
-  tool. Slice P4 (2026-10-25) made a change take effect
+  tool. Slice P10 (2026-10-27) gives agents four of them over the window
+  (`jonquil_plugins_list`, `jonquil_plugin_read`, `jonquil_plugin_propose`
+  and `jonquil_plugin_status`). Their text comes from `jonquil.plugin-mcp`,
+  pure apart from reading the plugins folder and its histories, which
+  checks every id against `plugin-loader/plugin-id?` before it becomes a
+  path and refuses a proposal before any check when its id or reason is
+  bad, its reason passes 4000 characters or its source 262144, or plugins
+  are off. The window gives the tool table two ui keys: `:plugin-state*`
+  (the plugins folder, the live registry and the disabled ids, read on
+  every call) and `:plugin-propose!*`, which runs the isolated check on
+  the MCP serve thread, then `propose-step!` through `plugin-step!`, so
+  the count and an open panel refresh as after any step. The serve loop
+  takes one request at a time, so a propose holds it for up to the check's
+  30 s plus up to 20 s for the agent and the window; when the step hasn't
+  finished by then the answer is `status: unknown`. A refresh that
+  replaces the shown proposal with a newer version of the same plugin arms
+  a one-time refusal of Accept, so a click aimed at the version the user
+  read never accepts one an agent swapped in. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
@@ -393,7 +410,7 @@ entry never opens a window:
   `registry/stop-all!` stops them. An evaluation that passes its deadline is
   interrupted, and a dead one can't wedge its project.
 
-**Window mode.** `jonquil.mcp.window` sits beside these and builds the fifteen
+**Window mode.** `jonquil.mcp.window` sits beside these and builds the nineteen
 tools for `jonquil --mcp --window`. It never requires `jonquil.gtk.window`:
 it receives the window's `ui` map (the `:on-ready` map) and touches it only
 through `gui-call`, a thunk handed to the GTK thread with a bounded deref, so
@@ -408,7 +425,7 @@ evaluator; the tools never stop or swap it. The stdout rule below holds in
 window mode unchanged.
 
 **Listener and bridge.** `jonquil.mcp.listen` lets a window that has
-`:mcp-listen? true` serve those same fifteen tools to a socket client. It binds
+`:mcp-listen? true` serve those same nineteen tools to a socket client. It binds
 127.0.0.1 on an OS-picked port, accepts one connection at a time and runs
 `serve!` over it, and it records the port in a per-window registry file
 (`<settings-dir>/mcp/<pid>.edn`) that `stop!` removes and that startup
