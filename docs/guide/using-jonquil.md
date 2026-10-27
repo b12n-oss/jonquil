@@ -1996,6 +1996,20 @@ file (through a symlink, if the file is one) and keeps it as a new
 version, "revert to v2", so going back never erases anything. The button
 for it arrives with the plugin list.
 
+An agent's proposed change to a plugin waits for you. It's a version too,
+pending, and the status bar counts how many are waiting. **Review Plugin
+Proposals** in the command palette opens the review on the right, where
+the source panel shows: the agent's reason, whether the proposal is based
+on the live version or an older one, a diff against what's live now, the
+effects it declares with any new ones marked, and its checks' warnings and
+timings. Next steps through them when there's more than one. **Accept**
+runs it through the same checks again, in Jonquil this time, and only
+then writes the file and makes it live, so pressing Accept is the moment
+you trust that code. When it doesn't pass, it stays pending and the
+footer says why. **Reject** takes an optional note. The agent can read
+what happened to its proposal but can never press Accept. (Agents propose
+through the MCP tools, which come in the next slice.)
+
 ## Driving Jonquil from an agent (MCP)
 
 `jonquil --mcp [DIR]` runs Jonquil with no window as an MCP server on stdio,
