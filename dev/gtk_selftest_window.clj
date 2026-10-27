@@ -34,6 +34,7 @@
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]
             [gtk-selftest-window.palette :as palette-rows]
+            [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
             [gtk-selftest-window.plugins :as plugin-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
             [gtk-selftest-window.prompt :as prompt]
@@ -271,6 +272,10 @@
    review-rows/row-review-superseded-while-shown
    review-rows/row-review-failed-accept-says-why
    review-rows/row-review-step-keeps-shown-and-note
+   plugin-mcp-rows/row-plugin-mcp-propose-pending
+   plugin-mcp-rows/row-plugin-mcp-propose-rejected-by-checks
+   plugin-mcp-rows/row-plugin-mcp-propose-refused-without-check
+   plugin-mcp-rows/row-plugin-mcp-status-after-reject
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

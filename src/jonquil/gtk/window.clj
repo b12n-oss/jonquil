@@ -3068,7 +3068,7 @@
 (defn- plugin-step-now!
   "plugin-step!, waited for up to 10 s, and for the window to change after
   it: the step's lines, or a line saying it didn't finish. For the
-  self-test hooks, called off the GTK thread."
+  self-test hooks and an MCP propose (P10), called off the GTK thread."
   [opts]
   (let [done (promise)
         a (plugin-step! (assoc opts :done done))]
@@ -4038,6 +4038,30 @@
                    :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
                    :reload-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
                    :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
+                 ;; plugins P10: what the plugin MCP tools read, and an
+                 ;; agent's propose: the isolated check on the caller's
+                 ;; thread (never the GTK one), then propose-step! on the
+                 ;; plugin agent, which refreshes the count and the panel
+                   :plugin-state* (fn [] (let [path @settings-path*]
+                                           {:plugins? (not (false? plugins?))
+                                            :plugins-dir (plugin-loader/plugins-dir path)
+                                            :registry @plugin-registry/live
+                                            :disabled (:disabled (:plugins (settings/load-settings path)))}))
+                   :plugin-propose!* (fn [{:keys [id source reason]}]
+                                       (let [path @settings-path*
+                                             result (plugin-loader/propose-check
+                                                     {:registry @plugin-registry/live :id id :source source
+                                                      :os (System/getProperty "os.name")})
+                                             out (promise)
+                                             lines (plugin-step-now!
+                                                    {:settings-path path
+                                                     :step (fn []
+                                                             (let [r (plugin-loader/propose-step!
+                                                                      {:settings-path path :id id :source source
+                                                                       :reason reason :result result})]
+                                                               (deliver out r)
+                                                               (:lines r)))})]
+                                         (deref out 0 {:status :unknown :n nil :problems [] :lines lines})))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
@@ -4235,7 +4259,12 @@
   Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
   P3) loads the plugin folder now, off the GTK thread, answering the
   console lines, :reload-plugins!* (P4) does what Reload Plugins does and
-  waits for it, and :plugins-dir* names that folder. :review-pane (plugins
+  waits for it, and :plugins-dir* names that folder. :plugin-state*
+  (plugins P10) answers {:plugins? :plugins-dir :registry :disabled} for
+  the plugin MCP tools' reads, and :plugin-propose!* takes {:id :source
+  :reason}, runs the isolated check on the calling thread and records the
+  proposal through the plugin agent, answering propose-step!'s map, or
+  :status :unknown when the step didn't finish in time. :review-pane (plugins
   P9b) is the jonquil.gtk.review-pane map, :pending-label the status bar's
   pending count, :review-proposals!* does what Review Plugin Proposals
   does and waits for the window to change, :review-accept!*,
