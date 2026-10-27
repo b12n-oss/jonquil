@@ -16,6 +16,13 @@
   ;; review panel's text view
   262144)
 
+(def MAX-REASON-CHARS
+  ;; estimate, as MAX-SOURCE-CHARS: a few paragraphs; review I1, since the
+  ;; reason reaches the history, the console and the review panel too
+  4000)
+
+(def ^:private ECHOED-ID-CHARS 40)
+
 (defn- ok [text] {:text text :error? false})
 (defn- err [text] {:text text :error? true})
 
@@ -25,13 +32,16 @@
   (try (f)
        (catch Throwable e (err (str what " failed: " (or (ex-message e) (str e)))))))
 
-(defn- bad-id [id]
-  (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
+(defn- bad-id
+  "The sentence refusing id, echoing at most ECHOED-ID-CHARS of it."
+  [id]
+  (str (let [s (str id)] (if (> (count s) ECHOED-ID-CHARS) (str (subs s 0 ECHOED-ID-CHARS) "…") s))
+       " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
 
 (defn propose-refusal
   "Why a proposal is refused before any check runs, or nil: plugins off in
   the window, a bad id, a source that isn't text, a blank reason, or a
-  source longer than MAX-SOURCE-CHARS."
+  source or reason longer than MAX-SOURCE-CHARS or MAX-REASON-CHARS."
   [{:keys [id source reason plugins?]}]
   (cond
     (false? plugins?) "plugins are off in this window (--no-plugins), so it takes no proposals"
@@ -39,7 +49,9 @@
     (not (string? source)) "a proposal needs its source as text"
     (or (not (string? reason)) (str/blank? reason)) "a proposal needs a reason"
     (> (count source) MAX-SOURCE-CHARS)
-    (str "the source is " (count source) " characters, more than the " MAX-SOURCE-CHARS " a proposal may have")))
+    (str "the source is " (count source) " characters, more than the " MAX-SOURCE-CHARS " a proposal may have")
+    (> (count reason) MAX-REASON-CHARS)
+    (str "the reason is " (count reason) " characters, more than the " MAX-REASON-CHARS " a proposal may have")))
 
 ;; --- list --------------------------------------------------------------------
 

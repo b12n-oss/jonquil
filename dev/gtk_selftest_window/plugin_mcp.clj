@@ -13,7 +13,8 @@
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.mcp.window :as mcp-window]
             [jonquil.plugin-history :as history]
-            [jonquil.plugin-loader :as plugin-loader]))
+            [jonquil.plugin-loader :as plugin-loader]
+            [jonquil.plugin-registry :as plugin-registry]))
 
 (defn- call [ui tname args]
   ((:call (mcp-window/make-window-tools {:ui ui :dir (System/getProperty "java.io.tmpdir")})) tname args))
@@ -83,3 +84,27 @@
           (support/check :plugin-mcp-status-after-reject
                          (str/ends-with? st "The user's note: not now Call jonquil_plugin_propose with a new version to try again.")
                          st))))))
+
+(defn row-plugin-mcp-supersede-while-shown-needs-a-second-accept
+  "Review I2: an agent's newer proposal replacing the one the user is
+  reading makes the next Accept refuse and say so, so a click aimed at v1
+  never accepts v2 unseen; the Accept after that takes v2."
+  [ui]
+  (go-row :plugin-mcp-supersede-while-shown-needs-a-second-accept support/check
+    (review/with-proposals ui {:ids ["mcps"]}
+      (fn []
+        (propose ui "mcps" (review/source "mcps"))
+        ((:review-proposals!* ui))
+        (propose ui "mcps" (review/source "mcps" "Wrap it, v2."))
+        (let [shown ((:review-shown* ui))
+              first-lines ((:review-accept!* ui))
+              {:keys [footer]} (review/panel ui)
+              live-after-first? (some? (get-in @plugin-registry/live [:plugins :mcps]))
+              second-lines ((:review-accept!* ui))
+              live? (some? (get-in @plugin-registry/live [:plugins :mcps]))]
+          (support/check :plugin-mcp-supersede-while-shown-needs-a-second-accept
+                         (and (= 2 (:n shown)) (empty? first-lines) (not live-after-first?)
+                              (= "plugin mcps: v2 replaced v1 while it was shown, so it wasn't accepted. Read v2, then press Accept again."
+                                 footer)
+                              (= "plugin mcps: v2 accepted" (last second-lines)) live?)
+                         {:shown shown :first first-lines :footer footer :second second-lines}))))))

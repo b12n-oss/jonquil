@@ -3302,7 +3302,17 @@
         ;; the panel's footer and its last on the status bar once the
         ;; window has changed. GTK-thread only: it reads the note.
         review-step (fn [kind]
-                      (let [{:keys [reviews index]} @review-state]
+                      (let [{:keys [reviews index swapped]} @review-state]
+                        (if (and (= :accept kind) swapped)
+                          ;; P10 review I2: the shown proposal was replaced
+                          ;; while shown, so this click was aimed at the
+                          ;; old one; refuse it once and say so
+                          (let [[id from to] swapped]
+                            (swap! review-state dissoc :swapped)
+                            (review-pane/report! rp (str "plugin " id ": v" to " replaced v" from
+                                                         " while it was shown, so it wasn't accepted. Read v" to
+                                                         ", then press Accept again."))
+                            nil)
                         (when-let [{:keys [id n]} (get reviews index)]
                           (let [path @settings-path*
                                 note (review-pane/note-text rp)]
@@ -3318,7 +3328,7 @@
                                       (when-let [l (last lines)]
                                         (when (pos? (g/gtk-widget-get-visible (:root rp)))
                                           (review-pane/report! rp (str/join "\n" lines)))
-                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
+                                        (g/gtk-label-set-text status-label (str "; " l))))})))))
         ;; the same, waited for, for the self-test hooks (off the GTK thread)
         review-step-now (fn [kind]
                           (let [p (promise)]
@@ -3593,7 +3603,7 @@
                                n (count reviews)]
                            (when (pos? n)
                              (let [i (mod (inc index) n)]
-                               (swap! review-state assoc :index i)
+                               (swap! review-state #(-> % (assoc :index i) (dissoc :swapped)))
                                (review-pane/show! rp (nth reviews i) i n)))))
          :on-close (fn [] (hide-right-panel! right :review) (editor/focus! (:ed (active-tab))))})
     ;; I5: joins the SAME registry, so Escape closes the def prompt
@@ -3785,7 +3795,15 @@
                                i (or (first (keep-indexed (fn [i r] (when (= (:id shown) (:id r)) i)) reviews)) 0)
                                r (nth reviews i)
                                showing? (pos? (g/gtk-widget-get-visible (:root rp)))]
-                           (reset! review-state {:reviews reviews :index i})
+                           ;; P10 review I2: a newer version of the shown
+                           ;; plugin replacing it arms a one-time refusal of
+                           ;; Accept, kept while that version stays shown
+                           (reset! review-state (cond-> {:reviews reviews :index i}
+                                                  (and showing? (= (:id shown) (:id r)) (not= (:n shown) (:n r)))
+                                                  (assoc :swapped [(:id r) (:n shown) (:n r)])
+                                                  (and showing? (= [(:id shown) (:n shown)] [(:id r) (:n r)])
+                                                       (= (:n r) (get (:swapped @review-state) 2)))
+                                                  (assoc :swapped (:swapped @review-state))))
                            ;; review I2: the same proposal still shown keeps
                            ;; the note being typed, the diff's place and the
                            ;; footer

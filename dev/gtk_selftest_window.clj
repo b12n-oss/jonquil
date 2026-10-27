@@ -276,6 +276,7 @@
    plugin-mcp-rows/row-plugin-mcp-propose-rejected-by-checks
    plugin-mcp-rows/row-plugin-mcp-propose-refused-without-check
    plugin-mcp-rows/row-plugin-mcp-status-after-reject
+   plugin-mcp-rows/row-plugin-mcp-supersede-while-shown-needs-a-second-accept
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

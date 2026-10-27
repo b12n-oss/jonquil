@@ -43,7 +43,14 @@
     (is (= "a proposal needs a reason" (pm/propose-refusal (assoc ok :reason "  "))))
     (is (= "the source is 262145 characters, more than the 262144 a proposal may have"
            (pm/propose-refusal (assoc ok :source (apply str (repeat 262145 "x"))))))
-    (is (nil? (pm/propose-refusal (assoc ok :source (apply str (repeat 262144 "x"))))))))
+    (is (nil? (pm/propose-refusal (assoc ok :source (apply str (repeat 262144 "x"))))))
+    ;; review I1: the reason reaches the history, the console and the panel
+    ;; too, and a refused id is echoed back
+    (is (= "the reason is 4001 characters, more than the 4000 a proposal may have"
+           (pm/propose-refusal (assoc ok :reason (apply str (repeat 4001 "r"))))))
+    (is (nil? (pm/propose-refusal (assoc ok :reason (apply str (repeat 4000 "r"))))))
+    (is (= (str (apply str (repeat 40 "X")) "… isn't a plugin id: lowercase letters, digits and dashes, starting with a letter")
+           (pm/propose-refusal (assoc ok :id (apply str (repeat 100000 "X"))))))))
 
 (defn- three-plugins []
   (let [d (dir)]
