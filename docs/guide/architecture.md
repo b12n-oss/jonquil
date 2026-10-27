@@ -254,7 +254,7 @@ these:
   candidate starts and leaves running when its check ends on its own
   keeps running. A candidate can require only the embedded namespaces and
   `clojure.*`. Slice P9 (2026-10-27) gave a proposal its lifecycle,
-  still with nothing in the window. A proposal is a version in the
+  headless, and P9b put it in the window. A proposal is a version in the
   history, `:source :agent`, either `:pending` (keeping what its check
   reported: warnings, timings, the summary, and whether it was unchecked)
   or `:rejected-by-checks` (keeping the problems), and it records the live
@@ -281,7 +281,25 @@ these:
   the status and a live plugin's namespace as they were.
   `reject-step!` records the note. `revert-step!` now refuses a version
   that was never live, so a proposal can't skip Accept that way. Slice
-  P9b adds the review panel that calls these. Slice P4 (2026-10-25) made a change take effect
+  P9b (2026-10-27) is the window side. `jonquil.plugin-review` is pure
+  apart from `pending-reviews`, which reads the history: it turns each
+  pending proposal into summary lines (unchecked first when it is, where
+  it stands against live, the effects with new ones marked, the warnings
+  and soak timings, each labelled as what the check reported, and a last
+  line saying Accept runs the code in Jonquil) and a line diff against
+  live, its own LCS capped at a million cells (about half a second on
+  Jolt), past which it's the whole old file removed and the new one added.
+  Live is the registry's source, or the latest accepted version's when the
+  plugin isn't loaded. `jonquil.gtk.review-pane` shows one review at a
+  time in the right-hand slot the inspector and the source panel use. The
+  window runs every plugin step (a load, Accept, Reject, opening the
+  review) through `plugin-step!` on the plugin agent, which builds every
+  pending review there, off the GTK thread, then sets the status bar's
+  pending count and, when the panel shows, shows the same plugin's
+  proposal again, or the first. The same proposal still shown keeps the
+  note being typed for Reject, and an Accept's lines all go on the
+  panel's footer, so a refusal says why. Nothing in the panel is an MCP
+  tool. Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure

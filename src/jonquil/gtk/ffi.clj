@@ -533,6 +533,9 @@
 ;; entry is a GtkSearchEntry, the replacement entry a plain GtkEntry.
 (ffi/defcfn gtk-search-entry-new "gtk_search_entry_new" [] :pointer)
 (ffi/defcfn gtk-entry-new "gtk_entry_new" [] :pointer)
+;; gtk_entry_set_placeholder_text: gtkentry.h; the review panel's note
+;; (plugins P9b).
+(ffi/defcfn gtk-entry-set-placeholder-text "gtk_entry_set_placeholder_text" [:pointer :string] :void)
 ;; gtk_editable_get_text / gtk_editable_set_text: gtkeditable.h:82, 84-85.
 ;; get_text returns a borrowed const char* (no transfer-full annotation) --
 ;; no g_free, unlike gtk_text_buffer_get_text's caller-owned copy
