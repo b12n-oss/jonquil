@@ -629,6 +629,21 @@
       (is (= :pending (history/version-status (entries d "pw") 2)))
       (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker))))))
 
+(deftest accept-refuses-unreported-mcp-tools-test
+  ;; P9 review I5: a check that reported no tools can't bring some in at Accept
+  (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
+        live (atom (reg/empty-registry))
+        v2 (str/replace (marked "pw" 2) "   :effects #{:console}\n"
+                        "   :effects #{:console}\n   :mcp-tools [{:name \"echo\" :doc \"Echo it.\" :run (fn [_ a] \"x\")}]\n")]
+    (step! live d)
+    (propose! d "pw" v2 (reported "pw" v2 :plugin (dissoc (summary-of "pw" v2) :mcp-tools)))
+    (let [before @live
+          lines (accept! live d "pw" 2)]
+      (is (= "plugin pw: v2 wasn't accepted: what loaded here isn't what its check reported (:mcp-tools)" (last lines))
+          (pr-str lines))
+      (is (= before @live))
+      (is (= :pending (history/version-status (entries d "pw") 2))))))
+
 (deftest accept-unchecked-skips-the-compare-test
   (let [d (dir-with [])
         live (atom (reg/empty-registry))]
