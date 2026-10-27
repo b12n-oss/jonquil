@@ -160,3 +160,19 @@
     (is (nil? (get (rs 0) "id")))
     (is (= 9 (get (rs 1) "id")))
     (is (= {} (get-in rs [1 "result"])))))
+
+(deftest table-fn-is-read-per-message
+  ;; plugins P10b: a fn table is read on every message
+  (let [t (atom tools)
+        f (fn [] @t)
+        names (fn [] (map #(get % "name") (get-in (mcp/handle-message f (req 1 "tools/list" {})) ["result" "tools"])))]
+    (is (= ["echo" "boom" "nope"] (names)))
+    (swap! t (fn [m] (-> m
+                         (update :defs conj {"name" "late" "description" "added" "inputSchema" {"type" "object"}})
+                         (assoc :call (fn [n a] (if (= "late" n) {:text "here" :error? false} ((:call tools) n a)))))))
+    (is (= ["echo" "boom" "nope" "late"] (names)))
+    (is (= "here" (get-in (mcp/handle-message f (req 2 "tools/call" {"name" "late" "arguments" {}}))
+                          ["result" "content" 0 "text"])))
+    (reset! t tools)
+    (is (= -32602 (get-in (mcp/handle-message f (req 3 "tools/call" {"name" "late" "arguments" {}}))
+                          ["error" "code"])))))

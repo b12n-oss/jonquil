@@ -3826,6 +3826,9 @@
                               (throw (ex-info "that tab was closed" {}))))]
       (reset! plugin-registry/effects
               {:active-tab (fn [] (:id (active-tab)))
+               ;; plugins P10b: the same, for a plugin MCP tool's ctx,
+               ;; whose call arrives on the MCP serve thread
+               :active-tab-turn (fn [] (turn #(:id (active-tab))))
                :print! (fn [s] (turn #(cview/append! cv :system (str s "\n"))))
                :status! (fn [s] (turn #(g/gtk-label-set-text status-label (str s))))
                :buffer-text (fn [id] (turn #(editor/editor-text (:ed (tab-of id)))))
@@ -4065,6 +4068,9 @@
                                             :plugins-dir (plugin-loader/plugins-dir path)
                                             :registry @plugin-registry/live
                                             :disabled (:disabled (:plugins (settings/load-settings path)))}))
+                 ;; plugins P10b: the live plugins' MCP tools, read on
+                 ;; every message the MCP server handles
+                   :plugin-tools* (fn [] (plugin-registry/mcp-tools @plugin-registry/live))
                    :plugin-propose!* (fn [{:keys [id source reason]}]
                                        (let [path @settings-path*
                                              result (plugin-loader/propose-check
@@ -4282,7 +4288,10 @@
   the plugin MCP tools' reads, and :plugin-propose!* takes {:id :source
   :reason}, runs the isolated check on the calling thread and records the
   proposal through the plugin agent, answering propose-step!'s map, or
-  :status :unknown when the step didn't finish in time. :review-pane (plugins
+  :status :unknown when the step didn't finish in time. :plugin-tools*
+  (P10b) answers the live plugins' MCP tools
+  (jonquil.plugin-registry/mcp-tools), which the MCP server serves beside
+  the built-ins. :review-pane (plugins
   P9b) is the jonquil.gtk.review-pane map, :pending-label the status bar's
   pending count, :review-proposals!* does what Review Plugin Proposals
   does and waits for the window to change, :review-accept!*,

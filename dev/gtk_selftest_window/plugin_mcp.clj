@@ -10,7 +10,10 @@
             [gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.review :as review]
             [gtk-selftest-window.support :as support]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.review-pane :as review-pane]
+            [jonquil.mcp :as mcp]
             [jonquil.mcp.window :as mcp-window]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-loader :as plugin-loader]
@@ -108,3 +111,69 @@
                                  footer)
                               (= "plugin mcps: v2 accepted" (last second-lines)) live?)
                          {:shown shown :first first-lines :footer footer :second second-lines}))))))
+
+;; --- a plugin's own MCP tools (plugins P10b) ---------------------------------
+
+(def ^:private tools-source
+  (str "(ns jonquil.plugins.mcpt\n  (:require [jonquil.plugin :as p]))\n\n"
+       "(p/defplugin\n  {:id :mcpt :doc \"MCP tools.\" :effects #{:console :buffer}\n"
+       "   :mcp-tools [{:name \"echo\" :doc \"Echo it.\"\n"
+       "                :args {\"text\" {:type \"string\" :doc \"What to echo.\" :required? true}}\n"
+       "                :run (fn [ctx a] (p/print! ctx (str \"mcpt says \" (get a \"text\"))) (get a \"text\"))}\n"
+       "               {:name \"buf\" :doc \"The active tab's text.\" :run (fn [ctx _] (p/buffer-text ctx))}]})\n"))
+
+(def ^:private no-tools-source
+  (str "(ns jonquil.plugins.mcpt\n  (:require [jonquil.plugin :as p]))\n\n"
+       "(p/defplugin\n  {:id :mcpt :doc \"MCP tools.\" :effects #{}})\n"))
+
+(defn- table [ui]
+  ((mcp-window/with-plugin-tools (mcp-window/make-window-tools {:ui ui :dir (System/getProperty "java.io.tmpdir")}) ui)))
+
+(defn row-plugin-mcp-tool-listed-and-called
+  "A loaded plugin's tool is served beside the built-ins and runs with its
+  declared :console effect."
+  [ui]
+  (go-row :plugin-mcp-tool-listed-and-called support/check
+    (review/with-proposals ui {:files {"mcpt.clj" tools-source} :ids ["mcpt"]}
+      (fn []
+        (let [t (table ui)
+              names (mapv #(get % "name") (:defs t))
+              r ((:call t) "plugin_mcpt_echo" {"text" "hi"})
+              console (on-gtk (g/buffer-text (:buf (:console ui))))]
+          (support/check :plugin-mcp-tool-listed-and-called
+                         (and (= ["plugin_mcpt_echo" "plugin_mcpt_buf"] (subvec names 19))
+                              (= {:text "hi" :error? false} r)
+                              (str/includes? console "mcpt says hi"))
+                         {:names (subvec names (min 19 (count names))) :r r}))))))
+
+(defn row-plugin-mcp-tool-gone-after-reload
+  "A reload that drops the tools drops them from the next table, and a
+  call to one is the server's Unknown tool error."
+  [ui]
+  (go-row :plugin-mcp-tool-gone-after-reload support/check
+    (review/with-proposals ui {:files {"mcpt.clj" tools-source} :ids ["mcpt"]}
+      (fn []
+        (let [before (count (:defs (table ui)))
+              _ (spit (io/file ((:plugins-dir* ui)) "mcpt.clj") no-tools-source)
+              _ ((:reload-plugins!* ui))
+              tf (mcp-window/with-plugin-tools (mcp-window/make-window-tools {:ui ui :dir "/tmp"}) ui)
+              after (count (:defs (tf)))
+              resp (mcp/handle-message tf {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
+                                           "params" {"name" "plugin_mcpt_echo" "arguments" {"text" "x"}}})]
+          (support/check :plugin-mcp-tool-gone-after-reload
+                         (and (= 21 before) (= 19 after)
+                              (= "Unknown tool: plugin_mcpt_echo" (get-in resp ["error" "message"])))
+                         {:before before :after after :resp resp}))))))
+
+(defn row-plugin-mcp-tool-reads-the-buffer
+  "A :buffer tool called from the MCP thread reads the active tab, taken
+  through a GTK turn."
+  [ui]
+  (go-row :plugin-mcp-tool-reads-the-buffer support/check
+    (review/with-proposals ui {:files {"mcpt.clj" tools-source} :ids ["mcpt"]}
+      (fn []
+        (let [want (on-gtk (editor/editor-text (:ed ((:active-tab* ui)))))
+              r ((:call (table ui)) "plugin_mcpt_buf" {})]
+          (support/check :plugin-mcp-tool-reads-the-buffer
+                         (= {:text want :error? false} r)
+                         {:want want :r r}))))))

@@ -278,3 +278,20 @@
     ((:on-output opts) :out "hi")
     (is (thrown? Throwable ((:on-complete opts) {:status :weird})))
     (is (= {:done {:result {:status :weird} :output "hi"}} @got))))
+
+(deftest plugin-tools-join-the-table
+  (let [served (atom [{:name "plugin_fmt_echo" :plugin :fmt
+                       :def {"name" "plugin_fmt_echo" "description" "Echo it." "inputSchema" {"type" "object"}}
+                       :call (fn [args] {:text (str "echo " (get args "text")) :error? false})}])
+        f (w/with-plugin-tools (tools-for {}) {:plugin-tools* (fn [] @served)})
+        names (fn [] (map #(get % "name") (:defs (f))))]
+    (is (= 20 (count (names))))
+    (is (= "plugin_fmt_echo" (last (names))))
+    (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
+    (is (= {:text "Selected tab 1." :error? false}
+           ((:call ((w/with-plugin-tools (tools-for {:tabs* (fn [] [{:id 1}]) :select-tab! (fn [_] nil)})
+                                         {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
+        "a built-in still reaches its own handler")
+    (reset! served [])
+    (is (= 19 (count (names))))
+    (is (= 19 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
