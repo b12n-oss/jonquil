@@ -1,5 +1,6 @@
 (ns jonquil.mcp.window
-  "The fifteen MCP tools over a live Jonquil window.
+  "The nineteen MCP tools over a live Jonquil window, four of them over its
+  plugins folder (plugins P10, through jonquil.plugin-mcp).
 
   `make-window-tools` returns the same table shape as jonquil.mcp.tools:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`,
@@ -18,7 +19,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
-            [jonquil.mcp.tools :as tools]))
+            [jonquil.mcp.tools :as tools]
+            [jonquil.plugin-mcp :as plugin-mcp]))
 
 (def ^:private gui-deadline-ms 5000)
 (def ^:private default-grace-ms 5000)
@@ -26,6 +28,8 @@
 (def ^:private max-completions 50)
 
 (defn- prop [type description] {"type" type "description" description})
+
+(def ^:private plugin-id-doc "The plugin id: lowercase letters, digits and dashes, starting with a letter.")
 
 (def window-tool-defs
   [{"name" "jonquil_eval"
@@ -101,7 +105,29 @@
                    "required" []}}
    {"name" "jonquil_project"
     "description" "The window's dialect, runtime and project directory."
-    "inputSchema" {"type" "object" "properties" {} "required" []}}])
+    "inputSchema" {"type" "object" "properties" {} "required" []}}
+   {"name" "jonquil_plugins_list"
+    "description" "Every plugin: its live version, whether it's loaded or disabled, its effects, any pending proposal, and its doc."
+    "inputSchema" {"type" "object" "properties" {} "required" []}}
+   {"name" "jonquil_plugin_read"
+    "description" "A plugin's live source, or one version's, and its history: each version's status, source and reason."
+    "inputSchema" {"type" "object"
+                   "properties" {"id" (prop "string" plugin-id-doc)
+                                 "version" (prop "integer" "A version number from its history. Default: the live version.")}
+                   "required" ["id"]}}
+   {"name" "jonquil_plugin_propose"
+    "description" "Propose a plugin's whole new source with a reason. It's checked in a separate jolt process, never in Jonquil, and goes live only if the user accepts it in the window. Answers its status: pending, rejected-by-checks or refused."
+    "inputSchema" {"type" "object"
+                   "properties" {"id" (prop "string" plugin-id-doc)
+                                 "source" (prop "string" "The whole plugin file.")
+                                 "reason" (prop "string" "Why this version exists. It's kept in the plugin's history.")}
+                   "required" ["id" "source" "reason"]}}
+   {"name" "jonquil_plugin_status"
+    "description" "A proposal's status, and the user's note when they rejected it. Default: the plugin's latest proposal."
+    "inputSchema" {"type" "object"
+                   "properties" {"id" (prop "string" plugin-id-doc)
+                                 "n" (prop "integer" "The proposal's version number.")}
+                   "required" ["id"]}}])
 
 ;; --- pure helpers ------------------------------------------------------------
 
@@ -357,6 +383,24 @@
                            :error? false}))
         tool-brackets (fn [args] (tools/brackets-result dir args))
         tool-project (fn [_] {:text (tools/selection-text ((:selection* ui))) :error? false})
+        ;; plugins P10: reads go straight to the plugins folder; a propose
+        ;; is refused here before the window's hook runs any check
+        tool-plugins-list (fn [_] (plugin-mcp/list-text ((:plugin-state* ui))))
+        tool-plugin-read (fn [args]
+                           (let [id (tools/required-string args "id")
+                                 version (number-arg args "version")]
+                             (plugin-mcp/read-text (assoc ((:plugin-state* ui)) :id id :version version))))
+        tool-plugin-status (fn [args]
+                             (let [id (tools/required-string args "id")
+                                   n (number-arg args "n")]
+                               (plugin-mcp/status-text (assoc ((:plugin-state* ui)) :id id :n n))))
+        tool-plugin-propose (fn [args]
+                              (let [p {:id (get args "id") :source (get args "source") :reason (get args "reason")}
+                                    why (plugin-mcp/propose-refusal (assoc p :plugins? (:plugins? ((:plugin-state* ui)))))]
+                                (plugin-mcp/propose-text (:id p)
+                                                         (if why
+                                                           {:status :refused :n nil :problems [why]}
+                                                           ((:plugin-propose!* ui) p)))))
         handlers {"jonquil_eval" tool-eval
                   "jonquil_run" tool-run
                   "jonquil_run_selection" tool-run-selection
@@ -371,7 +415,11 @@
                   "jonquil_doc" tool-doc
                   "jonquil_complete" tool-complete
                   "jonquil_check_brackets" tool-brackets
-                  "jonquil_project" tool-project}]
+                  "jonquil_project" tool-project
+                  "jonquil_plugins_list" tool-plugins-list
+                  "jonquil_plugin_read" tool-plugin-read
+                  "jonquil_plugin_propose" tool-plugin-propose
+                  "jonquil_plugin_status" tool-plugin-status}]
     {:defs window-tool-defs
      :call (fn [tname args]
              (if-let [h (get handlers tname)]

@@ -19,7 +19,7 @@
 (def ^:private KEY-J 0x06a)
 (def ^:private ctrl-alt (bit-or g/CONTROL-MASK g/ALT-MASK))
 
-(defn- source
+(defn source
   "A plugin file for id with one :edit command bound to Cmd/Ctrl+Alt+J, its
   doc being doc and its effects the text effects."
   ([id] (source id "Wrap the form at the caret in (when ...)."))
@@ -71,7 +71,7 @@
         (close-panel! ui)
         ((:reload-plugins!* ui))))))
 
-(defn- panel [ui]
+(defn panel [ui]
   (let [pane (:review-pane ui)]
     (on-gtk {:visible (pos? (g/gtk-widget-get-visible (:root pane)))
              :summary (review-pane/summary-text pane)

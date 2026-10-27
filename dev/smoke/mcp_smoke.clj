@@ -14,6 +14,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import (java.util.concurrent LinkedBlockingQueue TimeUnit)))
@@ -164,10 +165,54 @@
   #{"jonquil_eval" "jonquil_run" "jonquil_run_selection" "jonquil_stop" "jonquil_open"
     "jonquil_tabs" "jonquil_select_tab" "jonquil_read_tab" "jonquil_replace_text"
     "jonquil_save" "jonquil_console" "jonquil_doc" "jonquil_complete"
-    "jonquil_check_brackets" "jonquil_project"})
+    "jonquil_check_brackets" "jonquil_project"
+    "jonquil_plugins_list" "jonquil_plugin_read" "jonquil_plugin_propose" "jonquil_plugin_status"})
 
 (defn- ends-with? [r suffix]
   (and (string? (:text r)) (str/ends-with? (str/trim (:text r)) suffix)))
+
+(defn- plugin-source
+  "A plugin file whose defplugin id is id, with one :edit command."
+  [id]
+  (str "(ns jonquil.plugins." id "\n  (:require [jonquil.plugin :as p]))\n\n"
+       "(p/defplugin\n  {:id :" id "\n   :doc \"A smoke plugin.\"\n   :effects #{}\n"
+       "   :commands [{:id :" id "/wrap :doc \"Wrap it.\" :scope :editor\n"
+       "               :edit (fn [s] (p/wrap-form s \"(when \" \")\"))}]})\n"))
+
+(defn- plugin-checks!
+  "Plugins P10 over real stdio: a propose that's pending, one its check
+  refuses, the status, the user's note after a rejection (written into
+  the temp history here, since no tool can reject), list and read."
+  [srv xdg]
+  (let [r (tool! srv "jonquil_plugin_propose" {"id" "smoke-p" "source" (plugin-source "smoke-p")
+                                               "reason" "the smoke's plugin"} 90000)]
+    (check! "propose smoke-p is pending"
+            (and (string? (:text r)) (str/starts-with? (:text r) "status: pending") (not (:error? r))) r))
+  (let [r (tool! srv "jonquil_plugin_propose" {"id" "smoke-q" "source" (plugin-source "smoke-other")
+                                               "reason" "a mismatched id"} 90000)]
+    (check! "propose with a mismatched id is rejected-by-checks with its problems"
+            (and (string? (:text r)) (str/starts-with? (:text r) "status: rejected-by-checks")
+                 (str/includes? (:text r) "\nproblems:\n- ") (:error? r))
+            r))
+  (let [r (tool! srv "jonquil_plugin_status" {"id" "smoke-p"} 30000)]
+    (check! "status of smoke-p is pending" (and (string? (:text r)) (str/starts-with? (:text r) "smoke-p v1: pending.")) r))
+  (let [f (io/file xdg "jonquil" "plugins" ".history" "smoke-p" "history.edn")
+        found? (.isFile f)]
+    (check! "the proposal is in the temp settings' plugins folder" found? (str f))
+    (when found?
+      (spit f (pr-str (conj (edn/read-string (slurp f))
+                            {:n 1 :at (str (java.time.Instant/now)) :status :rejected :note "smoke note"}))))
+    (let [r (tool! srv "jonquil_plugin_status" {"id" "smoke-p"} 30000)]
+      (check! "status after a rejection carries the note and the call that continues it"
+              (and (string? (:text r))
+                   (str/ends-with? (:text r) "The user's note: smoke note Call jonquil_plugin_propose with a new version to try again."))
+              r)))
+  (let [r (tool! srv "jonquil_plugins_list" {} 30000)]
+    (check! "list has a smoke-p line"
+            (and (string? (:text r)) (some #(str/starts-with? % "smoke-p: ") (str/split-lines (:text r)))) r))
+  (let [r (tool! srv "jonquil_plugin_read" {"id" "smoke-p"} 30000)]
+    (check! "read smoke-p shows its history"
+            (and (string? (:text r)) (str/includes? (:text r) "History:\nv1 rejected (agent, ")) r)))
 
 (defn- window-main []
   (let [tmp (str (fs/create-temp-dir {:prefix "jonquil-mcp-smoke-"}))
@@ -185,8 +230,8 @@
         (handshake! srv "window")
         (let [r (request! srv "tools/list" {} 60000)
               names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-          (check! "tools/list has exactly the fifteen window tools"
-                  (and (= 15 (count (get-in r ["result" "tools"]))) (= window-tool-names names))
+          (check! "tools/list has exactly the nineteen window tools"
+                  (and (= 19 (count (get-in r ["result" "tools"]))) (= window-tool-names names))
                   r))
         (let [r (tool! srv "jonquil_open" {"path" a} 60000)]
           (check! "open a.clj" (and (string? (:text r)) (not (:error? r))) r))
@@ -221,6 +266,7 @@
                   {:r r :ms dt}))
         (let [r (tool! srv "jonquil_eval" {"code" "(+ 2 2)"} 60000)]
           (check! "eval after the timeout => 4" (ends-with? r "=> 4") r))
+        (plugin-checks! srv xdg)
         ;; dirty EOF: an unsaved edit, then stdin closes; the quit discards it
         (let [r (tool! srv "jonquil_replace_text" {"text" "(def w 1) w"} 30000)
               before (slurp a)
@@ -298,8 +344,8 @@
             (handshake! b1 "bridge 1")
             (let [r (request! b1 "tools/list" {} 60000)
                   names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-              (check! "tools/list has exactly the fifteen window tools"
-                      (and (= 15 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
+              (check! "tools/list has exactly the nineteen window tools"
+                      (and (= 19 (count (get-in r ["result" "tools"]))) (= window-tool-names names)) r))
             (let [r (tool! b1 "jonquil_eval" {"code" "(+ 1 2)"} 60000)]
               (check! "eval (+ 1 2) => 3" (ends-with? r "=> 3") r))
             (let [r (tool! b1 "jonquil_console" {"since" 0} 30000)]

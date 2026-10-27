@@ -3068,7 +3068,7 @@
 (defn- plugin-step-now!
   "plugin-step!, waited for up to 10 s, and for the window to change after
   it: the step's lines, or a line saying it didn't finish. For the
-  self-test hooks, called off the GTK thread."
+  self-test hooks and an MCP propose (P10), called off the GTK thread."
   [opts]
   (let [done (promise)
         a (plugin-step! (assoc opts :done done))]
@@ -3302,7 +3302,17 @@
         ;; the panel's footer and its last on the status bar once the
         ;; window has changed. GTK-thread only: it reads the note.
         review-step (fn [kind]
-                      (let [{:keys [reviews index]} @review-state]
+                      (let [{:keys [reviews index swapped]} @review-state]
+                        (if (and (= :accept kind) swapped)
+                          ;; P10 review I2: the shown proposal was replaced
+                          ;; while shown, so this click was aimed at the
+                          ;; old one; refuse it once and say so
+                          (let [[id from to] swapped]
+                            (swap! review-state dissoc :swapped)
+                            (review-pane/report! rp (str "plugin " id ": v" to " replaced v" from
+                                                         " while it was shown, so it wasn't accepted. Read v" to
+                                                         ", then press Accept again."))
+                            nil)
                         (when-let [{:keys [id n]} (get reviews index)]
                           (let [path @settings-path*
                                 note (review-pane/note-text rp)]
@@ -3318,7 +3328,7 @@
                                       (when-let [l (last lines)]
                                         (when (pos? (g/gtk-widget-get-visible (:root rp)))
                                           (review-pane/report! rp (str/join "\n" lines)))
-                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
+                                        (g/gtk-label-set-text status-label (str "; " l))))})))))
         ;; the same, waited for, for the self-test hooks (off the GTK thread)
         review-step-now (fn [kind]
                           (let [p (promise)]
@@ -3593,7 +3603,7 @@
                                n (count reviews)]
                            (when (pos? n)
                              (let [i (mod (inc index) n)]
-                               (swap! review-state assoc :index i)
+                               (swap! review-state #(-> % (assoc :index i) (dissoc :swapped)))
                                (review-pane/show! rp (nth reviews i) i n)))))
          :on-close (fn [] (hide-right-panel! right :review) (editor/focus! (:ed (active-tab))))})
     ;; I5: joins the SAME registry, so Escape closes the def prompt
@@ -3785,7 +3795,15 @@
                                i (or (first (keep-indexed (fn [i r] (when (= (:id shown) (:id r)) i)) reviews)) 0)
                                r (nth reviews i)
                                showing? (pos? (g/gtk-widget-get-visible (:root rp)))]
-                           (reset! review-state {:reviews reviews :index i})
+                           ;; P10 review I2: a newer version of the shown
+                           ;; plugin replacing it arms a one-time refusal of
+                           ;; Accept, kept while that version stays shown
+                           (reset! review-state (cond-> {:reviews reviews :index i}
+                                                  (and showing? (= (:id shown) (:id r)) (not= (:n shown) (:n r)))
+                                                  (assoc :swapped [(:id r) (:n shown) (:n r)])
+                                                  (and showing? (= [(:id shown) (:n shown)] [(:id r) (:n r)])
+                                                       (= (:n r) (get (:swapped @review-state) 2)))
+                                                  (assoc :swapped (:swapped @review-state))))
                            ;; review I2: the same proposal still shown keeps
                            ;; the note being typed, the diff's place and the
                            ;; footer
@@ -4038,6 +4056,30 @@
                    :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
                    :reload-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
                    :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
+                 ;; plugins P10: what the plugin MCP tools read, and an
+                 ;; agent's propose: the isolated check on the caller's
+                 ;; thread (never the GTK one), then propose-step! on the
+                 ;; plugin agent, which refreshes the count and the panel
+                   :plugin-state* (fn [] (let [path @settings-path*]
+                                           {:plugins? (not (false? plugins?))
+                                            :plugins-dir (plugin-loader/plugins-dir path)
+                                            :registry @plugin-registry/live
+                                            :disabled (:disabled (:plugins (settings/load-settings path)))}))
+                   :plugin-propose!* (fn [{:keys [id source reason]}]
+                                       (let [path @settings-path*
+                                             result (plugin-loader/propose-check
+                                                     {:registry @plugin-registry/live :id id :source source
+                                                      :os (System/getProperty "os.name")})
+                                             out (promise)
+                                             lines (plugin-step-now!
+                                                    {:settings-path path
+                                                     :step (fn []
+                                                             (let [r (plugin-loader/propose-step!
+                                                                      {:settings-path path :id id :source source
+                                                                       :reason reason :result result})]
+                                                               (deliver out r)
+                                                               (:lines r)))})]
+                                         (deref out 0 {:status :unknown :n nil :problems [] :lines lines})))
                    :repl-activate-menu-action!* repl-activate-menu-action-fn
                  ;; P4.T5: the ui's own completion action -- the exact fn
                  ;; editor.clj's own Ctrl+Space clause calls -- and the
@@ -4235,7 +4277,12 @@
   Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
   P3) loads the plugin folder now, off the GTK thread, answering the
   console lines, :reload-plugins!* (P4) does what Reload Plugins does and
-  waits for it, and :plugins-dir* names that folder. :review-pane (plugins
+  waits for it, and :plugins-dir* names that folder. :plugin-state*
+  (plugins P10) answers {:plugins? :plugins-dir :registry :disabled} for
+  the plugin MCP tools' reads, and :plugin-propose!* takes {:id :source
+  :reason}, runs the isolated check on the calling thread and records the
+  proposal through the plugin agent, answering propose-step!'s map, or
+  :status :unknown when the step didn't finish in time. :review-pane (plugins
   P9b) is the jonquil.gtk.review-pane map, :pending-label the status bar's
   pending count, :review-proposals!* does what Review Plugin Proposals
   does and waits for the window to change, :review-accept!*,

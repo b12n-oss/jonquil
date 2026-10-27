@@ -24,6 +24,12 @@
 
 (def ^:private id-pattern #"[a-z][a-z0-9-]*")
 
+(defn plugin-id?
+  "True when x is a string that is a plugin id: lowercase letters, digits
+  and dashes, starting with a letter."
+  [x]
+  (boolean (and (string? x) (re-matches id-pattern x))))
+
 (defn plugins-dir
   "The plugins folder beside the settings file at settings-path."
   [settings-path]
@@ -347,7 +353,7 @@
       (let [[_ opts] (step-opts opts)
             dir (:dir opts)]
         (cond
-          (not (and (string? id) (re-matches id-pattern id)))
+          (not (plugin-id? id))
           (refused (str id " isn't a plugin id: lowercase letters, digits and dashes, starting with a letter"))
           (str/blank? reason) (refused "a proposal needs a reason")
           (not (string? source)) (refused "a proposal needs its source as text")
