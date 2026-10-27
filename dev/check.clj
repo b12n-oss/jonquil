@@ -65,6 +65,7 @@
     jonquil.plugin-checker-files
     jonquil.plugin-isolated
     jonquil.plugin-loader
+    jonquil.plugin-review
     jonquil.gtk.palette
     jonquil.help
     jonquil.source

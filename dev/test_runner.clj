@@ -49,6 +49,7 @@
     jonquil.plugin-checker-files-test
     jonquil.plugin-isolated-test
     jonquil.plugin-loader-test
+    jonquil.plugin-review-test
     jonquil.help-test
     jonquil.source-test
     jonquil.tabs-test
