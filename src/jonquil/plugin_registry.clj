@@ -226,9 +226,10 @@
 
 (defn- tool-call
   "The call fn of plugin-id's tool row, served as served: its args checked,
-  then :run on a future with a ctx of the declared effects and the active
-  tab (read through :active-tab-turn, safe off the GTK thread), answered
-  within deadline-ms. One call per tool at a time, as run-command's one
+  then :run on a future with a ctx of the declared effects and, for a
+  :buffer tool, the active tab (read through :active-tab-turn, safe off
+  the GTK thread), its answer made a result there too, answered within
+  deadline-ms. One call per tool at a time, as run-command's one
   run per command, since nothing can stop one that overran. Never throws."
   [plugin-id served row declared deadline-ms]
   (fn [args]
@@ -241,21 +242,26 @@
               {:text (str label served " is still running") :error? true}
               (let [f (try
                         (let [fx @effects
-                              ctx (effect-ctx fx declared (when-let [t (:active-tab-turn fx)] (t)))]
-                          (future (try {:ok ((:run row) ctx args)}
-                                       (catch Throwable e {:err (or (ex-message e) (str e))})
+                              ;; review I3: only a :buffer tool needs the
+                              ;; tab, so only it waits on the GTK thread
+                              tab (when (contains? declared :buffer)
+                                    (when-let [t (:active-tab-turn fx)] (t)))
+                              ctx (effect-ctx fx declared tab)]
+                          ;; review I1: the answer is turned into a result
+                          ;; here too, since realizing a lazy one runs
+                          ;; plugin code, so it's under the deadline
+                          (future (try (tool-answer label served ((:run row) ctx args))
+                                       (catch Throwable e {:text (str label (or (ex-message e) (str e))) :error? true})
                                        (finally (swap! tools-running disj served)))))
                         (catch Throwable e
                           ;; nothing started, so the tool is free again
                           (swap! tools-running disj served)
                           (throw e)))
                     v (deref f deadline-ms ::timeout)]
-                (cond
-                  (= ::timeout v)
+                (if (= ::timeout v)
                   {:text (str label served " didn't answer in " (quot deadline-ms 1000) " s; it may still be running")
                    :error? true}
-                  (contains? v :err) {:text (str label (:err v)) :error? true}
-                  :else (tool-answer label served (:ok v)))))))
+                  v)))))
         (catch Throwable e
           {:text (str label (or (ex-message e) (str e))) :error? true})))))
 

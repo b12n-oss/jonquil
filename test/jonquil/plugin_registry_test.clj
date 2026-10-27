@@ -335,3 +335,24 @@
         (is (str/starts-with? (:text res) "plugin fmt: this plugin didn't declare :buffer"))
         (is (not-any? #(= :replace-text! (first %)) @calls)))
       (finally (reset! reg/effects before)))))
+
+(deftest mcp-tools-lazy-answer-is-under-the-deadline-test
+  ;; P10b review I1: realizing a lazy answer runs plugin code too, so it
+  ;; happens under the deadline, never on the serve thread
+  (let [r (tool-plugin #{} (assoc echo-row :name "lazy" :run (fn [_ _] (lazy-seq (Thread/sleep 3000) [1]))))
+        t0 (System/currentTimeMillis)
+        a (call-tool r "plugin_fmt_lazy" {"text" "a"} {:deadline-ms 200})
+        ms (- (System/currentTimeMillis) t0)]
+    (is (< ms 1500) (str ms " ms"))
+    (is (= {:text "plugin fmt: plugin_fmt_lazy didn't answer in 0 s; it may still be running" :error? true} a))))
+
+(deftest mcp-tools-without-buffer-dont-wait-on-the-window-test
+  ;; P10b review I3: a tool that doesn't declare :buffer never takes a GTK
+  ;; turn, so a busy window can't fail it
+  (let [before @reg/effects
+        turns (atom 0)]
+    (try
+      (reset! reg/effects {:active-tab-turn (fn [] (swap! turns inc) (throw (ex-info "The window did not respond." {})))})
+      (is (= {:text "hi" :error? false} (call-tool (tool-plugin #{} echo-row) "plugin_fmt_echo" {"text" "hi"})))
+      (is (zero? @turns))
+      (finally (reset! reg/effects before)))))

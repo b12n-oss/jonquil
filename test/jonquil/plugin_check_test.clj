@@ -346,12 +346,21 @@
     (has [tool-row tool-row] "mcp tool 1 (\"echo\"): its name is used twice")
     (let [n (apply str (repeat 60 "a"))]
       (has [(assoc tool-row :name n)]
-           (str "mcp tool 0 (\"" n "\"): its served name plugin_mt_" n " is longer than 64 characters")))
+           (str "mcp tool 0 (\"" n "\"): its served name plugin_mt_" n " is longer than 50 characters")))
+    ;; review I2: plugin_mt_ is 10, so a 40-character name is the longest
+    (is (:ok? (check [(with-tools [(assoc tool-row :name (apply str (repeat 40 "a")))])] "mt")))
+    (has [(assoc tool-row :name (apply str (repeat 41 "a")))]
+         (str "mcp tool 0 (\"" (apply str (repeat 41 "a")) "\"): its served name plugin_mt_" (apply str (repeat 41 "a"))
+              " is longer than 50 characters"))
     (has [(assoc tool-row :x 1)] (str l ": has unknown keys [:x]"))
     (has [(assoc tool-row :doc " ")] (str l ": :doc isn't a sentence"))
     (has [(assoc tool-row :args [])] (str l ": :args isn't a map of argument name to {:type :doc :required?}"))
     (has [(assoc tool-row :args {:text {:type "string" :doc "t"}})]
-         (str l ": argument :text isn't a non-blank string name"))
+         (str l ": argument :text isn't a string of letters, digits, _, . or -, 1 to 64 long"))
+    (doseq [k ["a b" "$x" "" (apply str (repeat 65 "k"))]]
+      (has [(assoc tool-row :args {k {:type "string" :doc "t"}})]
+           (str l ": argument " (pr-str k) " isn't a string of letters, digits, _, . or -, 1 to 64 long")))
+    (is (:ok? (check [(with-tools [(assoc tool-row :args {"a.b-C_9" {:type "string" :doc "t"}})])] "mt")))
     (has [(assoc tool-row :args {"text" {:type "object" :doc "t"}})]
          (str l ": argument text's :type \"object\" isn't one of [\"boolean\" \"integer\" \"number\" \"string\"]"))
     (has [(assoc tool-row :args {"text" {:type "string" :doc "t" :default 1}})]

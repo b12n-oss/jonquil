@@ -116,9 +116,16 @@
   #{"string" "integer" "number" "boolean"})
 
 (def MCP-NAME-MAX
-  ;; estimate, not measured: the Anthropic API's tool-name limit as
-  ;; remembered (^[a-zA-Z0-9_-]{1,64}$); a client's own prefix may lower it
-  64)
+  ;; estimate, not measured (P10b review I2): the Anthropic API's tool-name
+  ;; limit as remembered, 64 (^[a-zA-Z0-9_-]{1,64}$), less Claude Code's
+  ;; own mcp__jonquil__ prefix, 14; P10c's probe measures it
+  50)
+
+(def ^:private arg-name-pattern
+  ;; review I2: what the API accepts as a schema property key, as
+  ;; remembered (not measured), so one plugin row can't break a client's
+  ;; whole tool list
+  #"[a-zA-Z0-9_.-]{1,64}")
 
 (def ^:private tool-name-pattern #"[a-z][a-z0-9_]*")
 (def ^:private tool-keys #{:name :doc :args :run})
@@ -130,8 +137,8 @@
   (str "plugin_" file-id "_" name))
 
 (defn- arg-problems [label k a]
-  (if-not (and (string? k) (not (str/blank? k)))
-    [(str label ": argument " (pr-str k) " isn't a non-blank string name")]
+  (if-not (and (string? k) (re-matches arg-name-pattern k))
+    [(str label ": argument " (pr-str k) " isn't a string of letters, digits, _, . or -, 1 to 64 long")]
     (let [al (str label ": argument " k)]
       (if-not (map? a)
         [(str al " isn't a map of :type :doc :required?")]

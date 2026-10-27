@@ -49,6 +49,20 @@
 
 (defn- one-problem [r] (is (false? (:ok? r))) (is (= 1 (count (:problems r))) (pr-str r)) (first (:problems r)))
 
+(deftest parse-tools-summary-test
+  ;; P10b review C1: a summary with :mcp-tools is a result, so an agent can
+  ;; propose a plugin with tools; forged tool shapes still aren't
+  (let [tools {:mcp-tools [{:name "echo" :doc "Echo it." :args {"text" {:type "string" :doc "t" :required? true}}}]}
+        ok (update good :plugin merge tools)]
+    (is (= (assoc ok :definition nil) (parse (checker/result-text ok) 0)))
+    (is (:ok? (parse (checker/result-text (assoc-in good [:plugin :mcp-tools] [])) 0)))
+    (doseq [bad [{:mcp-tools {}} {:mcp-tools ["echo"]} {:mcp-tools [{:name :echo :doc "d"}]}
+                 {:mcp-tools [{:name "echo" :doc 3}]} {:mcp-tools [{:name "echo" :doc "d" :args [1]}]}
+                 {:mcp-tools [{:name "echo" :doc "d" :args {:text {}}}]}]]
+      (is (str/starts-with? (one-problem (parse (checker/result-text (update good :plugin merge bad)) 0))
+                            "the check printed a result that isn't one: ")
+          (pr-str bad)))))
+
 (deftest parse-garbage-test
   (doseq [body ["{:ok?" "[1 2]" "{:ok? \"yes\"}" "{:ok? false :problems [1]}"]]
     (is (str/starts-with? (one-problem (parse (str "\n__JONQUIL_CHECK__\n" body "\n__END_CHECK__\n") 0))
