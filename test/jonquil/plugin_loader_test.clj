@@ -875,7 +875,9 @@
         text (slurp sp)
         off! (fn [id enabled?] (loader/set-enabled-step! live {:settings-path sp :id id :enabled? enabled?
                                                                :os "Linux" :now now :plugins? false}))]
-    (is (= [(str off "plugin t-a wasn't disabled")] (off! "t-a" false)))
+    (is (= [(str off "plugin t-a wasn't disabled. To keep it off, add :t-a to :plugins :disabled in "
+                sp ", then start without --no-plugins.")]
+           (off! "t-a" false)))
     (is (= [(str off "plugin t-b wasn't enabled")] (off! "t-b" true)))
     (is (identical? before @live))
     (is (= text (slurp sp)))))

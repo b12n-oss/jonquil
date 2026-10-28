@@ -290,7 +290,13 @@
   (let [what (if enabled? "enabled" "disabled")]
     (try
       (cond
-        (false? (:plugins? opts)) (plugins-off (str "plugin " id " wasn't " what))
+        ;; final review: Disable's refusal names the way to turn it off
+        ;; by hand, since the button can't here
+        (false? (:plugins? opts))
+        (plugins-off (str "plugin " id " wasn't " what
+                          (when-not enabled?
+                            (str ". To keep it off, add :" id " to :plugins :disabled in "
+                                 settings-path ", then start without --no-plugins."))))
         (= enabled? (not (contains? (set (:disabled (:plugins (settings/load-settings settings-path))))
                                       (keyword id))))
         [(str "plugin " id " is already " what ".")]

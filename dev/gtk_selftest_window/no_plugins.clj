@@ -59,7 +59,9 @@
                   lines ((:plugin-disable!* ui) "np-c")
                   after (when (.isFile (io/file sp)) (slurp sp))]
               (support/check :no-plugins-disable-refuses
-                             (and (= [(str off "plugin np-c wasn't disabled")] lines) (= before after) (live? "np-c")
+                             (and (= [(str off "plugin np-c wasn't disabled. To keep it off, add :np-c to :plugins :disabled in "
+                                         sp ", then start without --no-plugins.")]
+                                    lines) (= before after) (live? "np-c")
                                   (not (contains? (get-in (settings/load-settings sp) [:plugins :disabled]) :np-c)))
                              {:lines lines}))))))))
 
