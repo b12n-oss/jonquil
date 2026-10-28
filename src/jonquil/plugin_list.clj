@@ -57,3 +57,32 @@
   "Every plugin's row, sorted by id."
   [state]
   (mapv #(row state %) (ids state)))
+
+(defn version-entries
+  "id's entries for version n: the first is the version's own, the last
+  holds its status."
+  [entries n]
+  (filter #(= n (:n %)) entries))
+
+(defn history-line
+  "One version's line: v<n>, its status, source, time and reason, with
+  the user's note or the check's problems."
+  [entries n]
+  (let [es (version-entries entries n)
+        e0 (first es)
+        e1 (last es)]
+    (str "v" n " " (some-> (:status e1) name) " (" (some-> (:source e0) name) ", " (:at e0) "): " (:reason e0)
+         (when (:note e1) (str "; note: " (:note e1)))
+         (when (= :rejected-by-checks (:status e1)) (str "; problems: " (str/join "; " (:problems e0)))))))
+
+(defn version-rows
+  "id's versions, newest first, {:live-n :rows [{:n :line}]}, where :live-n
+  is the last accepted version (nil when none); or {:error sentence} when
+  its history can't be read."
+  [plugins-dir id]
+  (let [{:keys [entries error]} (history/read-entries (history/history-dir plugins-dir id))]
+    (if error
+      {:error (str id "'s history can't be read: " error)}
+      {:live-n (:n (history/latest-accepted entries))
+       :rows (mapv (fn [n] {:n n :line (history-line entries n)})
+                   (reverse (distinct (map :n entries))))})))
