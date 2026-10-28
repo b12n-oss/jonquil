@@ -42,7 +42,7 @@ test counts, self-test rows, and any timing that matters.
 
 ## Where things are
 
-The [Architecture](architecture.md) page maps the namespaces. The
+The [Architecture](architecture/index.md) page maps the namespaces. The
 [Development](development.md) page describes every harness in detail,
 including how the self-test rows are written and what the binary smoke
 checks. `ROADMAP.md` in the repository root tracks phase status and the

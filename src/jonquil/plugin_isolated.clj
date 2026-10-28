@@ -1,6 +1,6 @@
 (ns jonquil.plugin-isolated
   "The parent's half of an isolated check (plugins design, Part 2, \"The
-  isolated check\"; slices P8 and P8b): the request.edn text the child
+  isolated check\"; steps P8 and P8b): the request.edn text the child
   reads, the environment it gets, parse-result, which turns what the child
   printed into run-protocol's result, and check!, which runs the child.
   check! is the protocol's :isolated seam: the child runs run-protocol

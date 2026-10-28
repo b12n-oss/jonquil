@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.palette
-  "Slice S8's command palette rows: Cmd/Ctrl+Shift+P opens it through the
+  "Step S8's command palette rows: Cmd/Ctrl+Shift+P opens it through the
   window's key handler, the query filters it, run-selected! runs the
   picked command with its scope's ctx, Escape closes it, and a throw from
   a run is contained. Driven through ui fns and the palette's own fns,

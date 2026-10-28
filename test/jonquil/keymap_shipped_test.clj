@@ -1,7 +1,7 @@
 (ns jonquil.keymap-shipped-test
-  "The shipped keymap's own pins (plugins design, Part 1). Slices S1 to S8
+  "The shipped keymap's own pins (plugins design, Part 1). Steps S1 to S8
   were each gated by a differential oracle, a transcription of the key
-  clauses they replaced; S9 deleted those once every slice was merged
+  clauses they replaced; S9 deleted those once every step was merged
   green. What they checked now lives here and in the window self-test
   rows: every binding names a registered command and condition (the spec's
   pin), the editor's format chords pass the window by, the palette chord,
@@ -47,7 +47,7 @@
     (is (nil? (keymap-answer 0x066 ctrl-alt)))))
 
 (deftest palette-chord-test
-  ;; slice S8: Cmd/Ctrl+Shift+P opens the palette; P was bound nowhere before
+  ;; step S8: Cmd/Ctrl+Shift+P opens the palette; P was bound nowhere before
   (is (= [:palette/open {}] (keymap-answer 0x70 (bit-or (:ctrl M) (:shift M)))))
   (is (= [:palette/open {}] (keymap-answer 0x70 (bit-or (:meta M) (:shift M)))))
   (doseq [st [(:ctrl M) (:shift M) 0]]
@@ -66,7 +66,7 @@
         (str "keyval " (format "0x%x" kv) " state " st))))
 
 (deftest escape-chain-order-test
-  ;; each step and the conditions guarding it, in order (slice S3)
+  ;; each step and the conditions guarding it, in order (step S3)
   (is (= [[:find/bar-key [:find-bar-focused]] [:popover/close-all nil]
           [:inspector/close [:inspector-focused]] [:source/close [:source-focused]]
           [:tree/close-menu [:tree-focused :tree-menu-open]] [:tree/leave [:tree-focused]]
@@ -134,7 +134,7 @@
     (is (= [:run/run {}] (window-command 0xffc2 st #{})) (str "state " st))))
 
 (deftest editor-menu-commands-test
-  ;; each context-menu item runs this command (slice S7's menu oracle
+  ;; each context-menu item runs this command (step S7's menu oracle
   ;; pinned it through the fn each item called)
   (is (= [["Run Form" :run/form] ["Jump to Definition" :help/jump] ["Rename Symbol" :edit/rename]
           ["Quick Documentation" :help/quick-doc] ["Inspect Last Result" :inspect/last]

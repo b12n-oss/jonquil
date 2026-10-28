@@ -1,11 +1,11 @@
 (ns jonquil.plugin-history
-  "Plugin history (plugins design, Part 2, \"History and revert\"; slice
+  "Plugin history (plugins design, Part 2, \"History and revert\"; step
   P7): <plugins-dir>/.history/<id>/ keeps each version that went live as
   <n>.clj, and history.edn holds one vector of {:n :at :source :reason
   :status}. No entry is ever changed or removed: a new one goes at the end
   and the file is replaced whole through a temp file and an atomic move. A
   history.edn that can't be read is never overwritten. An agent's proposal
-  (slice P9) is a version too, :source :agent, :pending or
+  (step P9) is a version too, :source :agent, :pending or
   :rejected-by-checks; a later change of a version's status (:superseded,
   :accepted, :rejected) is a short {:n :at :status} entry appended after
   it, so a version's status is its last entry's. Pure apart from

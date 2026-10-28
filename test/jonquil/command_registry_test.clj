@@ -146,7 +146,7 @@
     (is (= 0 (ans 0xff1b 0 false :next)) "the fixed :to-gtk is 0")
     (is (= 0 (ans 0x61 0 false :handled)) ":unmatched is 0")))
 
-;; --- slice S5: the editor's commands ---------------------------------------
+;; --- step S5: the editor's commands ---------------------------------------
 
 (deftest editor-commands-answer-outcomes-test
   (let [calls (atom [])
@@ -183,7 +183,7 @@
     (is (true? (holds true)))
     (is (false? (holds false)))))
 
-;; --- slice S6: Run Form and the editor's fixed stages ----------------------
+;; --- step S6: Run Form and the editor's fixed stages ----------------------
 
 (deftest editor-preedit-condition-test
   (let [holds (fn [v] ((registry/holds-fn registry/editor-conditions {:preedit-active? (constantly v)})
@@ -219,7 +219,7 @@
       (is (= [:popup :typing] @ran))
       (is (= 0 (ans 0x61 {:popup 0 :typing 0}))))))
 
-;; --- slice S7: the context menus -------------------------------------------
+;; --- step S7: the context menus -------------------------------------------
 
 (deftest console-commands-test
   (let [calls (atom [])
@@ -250,7 +250,7 @@
   (is (= #{:popover/close-all :source/jump-back :find/bar-key}
          (set (keep (fn [[id c]] (when (:passes? c) id)) registry/commands)))))
 
-;; --- slice S8: the palette -------------------------------------------------
+;; --- step S8: the palette -------------------------------------------------
 
 (deftest palette-hidden-commands-test
   (is (= #{:find/bar-key :popover/close-all :source/open-here :source/close :source/back

@@ -30,7 +30,7 @@
 
 (defn row-tab-widget-builds
   "A tab's editor holds its text, carries the jonquil-code class, takes a
-  label, and owns exactly five popovers (the palette is the fifth, slice S8)."
+  label, and owns exactly five popovers (the palette is the fifth, step S8)."
   [_ui]
   (go-row :tab-widget-builds support/check
     (on-gtk (let [t (make)

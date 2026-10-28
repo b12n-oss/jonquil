@@ -6,7 +6,7 @@
   rest; the editor's thunks), so a command is a plain function a test can
   call with a fake ctx. No GTK here.
 
-  Slices S1-S4 register the window's chords and S5-S6 the editor's; S7's
+  Steps S1-S4 register the window's chords and S5-S6 the editor's; S7's
   context menus read the same table (editor-menu, console-menu,
   menu-items), S8's command palette lists it (run-command-in), and Part 2's
   plugins add their own."
@@ -41,14 +41,14 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
    :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
-   ;; slice S2: the clauses that sat above S1's block
+   ;; step S2: the clauses that sat above S1's block
    :find/next {:doc "Go to the next find match." :scope :window :run (call :find-next!)}
    :find/previous {:doc "Go to the previous find match." :scope :window :run (call :find-prev!)}
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
    :source/open-here {:doc "Open the source panel's file in the window." :scope :window :palette? false
                       :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}
-   ;; slice S3: the Escape chain, each command answering an outcome. The
+   ;; step S3: the Escape chain, each command answering an outcome. The
    ;; find bar's own answer is final: its 0 (an IME composing) is GTK's.
    :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window :palette? false :passes? true
                   :run (fn [ctx _args] (if (= 1 ((:find-bar-key! ctx))) :handled :to-gtk))}
@@ -62,7 +62,7 @@
    :tree/leave {:doc "Leave the file tree for the editor." :scope :window :palette? false
                 :run (fn [ctx _args] ((:leave! (:tree-keys ctx))) :handled)}
    :run/stop {:doc "Stop the running evaluation." :scope :window :run (call :stop-fn)}
-   ;; slice S4: the source panel's Cmd/Ctrl+[ back chord, and anywhere
+   ;; step S4: the source panel's Cmd/Ctrl+[ back chord, and anywhere
    ;; else the jump back into the tab a jump left (open-in-tab!), passing
    ;; the key on when there's nothing to go back from
    :source/back {:doc "Step the source panel's history back." :scope :window :palette? false
@@ -75,7 +75,7 @@
    ;; :to-gtk, so the key may reach the editor after it; the plugin
    ;; validator reads it to tell an unreachable plugin binding from one the
    ;; window only sometimes takes.
-   ;; slice S8. :palette? false marks a command that only works inside the
+   ;; step S8. :palette? false marks a command that only works inside the
    ;; key chain guarding it (a focus, an Escape step, a tab number), so the
    ;; palette leaves it out
    :palette/open {:doc "Show the command palette." :scope :window :palette? false
@@ -113,7 +113,7 @@
   (fn [ctx _args] ((get ctx k)) :handled))
 
 (def editor-commands
-  "The editor's chords (slices S5, S6), plus the context menu's unbound
+  "The editor's chords (steps S5, S6), plus the context menu's unbound
   Indent and Unindent (S7). ctx is the per-key map
   jonquil.gtk.editor/handle-key! builds, each entry a thunk that reads the
   editor's state when it runs. An edit answers what the old clause did: its
@@ -130,9 +130,9 @@
    :help/quick-doc {:doc "Show the docs for the symbol at the caret." :scope :editor :run (act :quick-doc!)}
    :help/jump {:doc "Jump to the definition of the symbol at the caret." :scope :editor :run (act :jump!)}
    :edit/rename {:doc "Rename the symbol at the caret." :scope :editor :run (act :rename!)}
-   ;; slice S6
+   ;; step S6
    :run/form {:doc "Run the form at the caret." :scope :editor :run (act :run-form!)}
-   ;; slice S7: the context menu's, with no binding, since Tab is a typing
+   ;; step S7: the context menu's, with no binding, since Tab is a typing
    ;; stage
    :edit/indent {:doc "Indent the lines." :scope :editor :run (act :indent!)}
    :edit/unindent {:doc "Unindent the lines." :scope :editor :run (act :unindent!)}})
@@ -144,7 +144,7 @@
    :preedit-active (fn [ctx] ((:preedit-active? ctx)))})
 
 (def console-commands
-  "The console's context-menu commands (slice S7). The console's keys stay
+  "The console's context-menu commands (step S7). The console's keys stay
   in jonquil.gtk.console-view, outside Part 1's two key chains."
   ;; :palette? false: its popup takes keys only while the console has focus,
   ;; and a palette run hands focus back to the editor (review fix I3)
@@ -157,7 +157,7 @@
   (merge window-commands editor-commands console-commands))
 
 (def editor-menu
-  "The editor's context menu (slice S7), in its order: each item's label,
+  "The editor's context menu (step S7), in its order: each item's label,
   the action name it's installed under (\"p4.<action>\") and the command
   it runs."
   [{:label "Run Form" :action "run-form" :command :run/form}
@@ -176,7 +176,7 @@
    {:label "Replace" :action "replace" :command :find/open-replace}])
 
 (def console-menu
-  "The console's context menu (slice S7)."
+  "The console's context menu (step S7)."
   [{:label "Complete" :action "complete" :command :console/complete}
    {:label "Clear Last Output" :action "clear-last-output" :command :console/clear-last-output}])
 

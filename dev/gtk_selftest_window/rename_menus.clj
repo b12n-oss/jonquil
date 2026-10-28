@@ -201,7 +201,7 @@
   "Escape closes the rename popover and the editor has focus again, not
   the editor's scrolled window: GTK moves focus to the popover's parent
   once it unmaps, after its \"closed\" handler has run, so the handler's
-  own grab used to be undone (found with the command palette, slice S8)."
+  own grab used to be undone (found with the command palette, step S8)."
   [ui]
   (go-row :rename-escape-refocuses-editor support/check
     (let [ed (:editor ui) rp (:rename-popover ui)
@@ -324,7 +324,7 @@
                              {:status (g/label-text status) :text text})))))
 
 (defn row-menu-items-all-resolve
-  "Slice S7, Review Focus 1: the editor menu's items now run commands over
+  "Step S7, Review Focus 1: the editor menu's items now run commands over
   a menu ctx wire-tab! builds, and an item whose ctx entry is missing
   throws only when picked, which install-context-menu!'s try/catch turns
   into \"; <action>: ...\" in the status bar. So this fires, through

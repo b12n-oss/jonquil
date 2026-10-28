@@ -1,5 +1,5 @@
 (ns jonquil.palette
-  "The command palette's data (plugins design, Part 1, slice S8): the
+  "The command palette's data (plugins design, Part 1, step S8): the
   registered commands as entries a person can filter, each with its doc
   line, the chords that run it and its source. No GTK here;
   jonquil.gtk.palette shows the entries and runs the one picked."

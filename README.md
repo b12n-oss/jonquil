@@ -8,7 +8,7 @@ Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, a
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
-See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
+See the [guide](docs/guide/index.md), starting with [Using Jonquil](docs/guide/using-jonquil.md), for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
 
 Jonquil picks a dialect for whatever file is open:
 
@@ -19,9 +19,9 @@ Jonquil picks a dialect for whatever file is open:
 - **Any other nREPL server** attaches the same way once a project's `.jonquil.edn` says `{:dialect :nrepl}`: babashka (`bb nrepl-server 1667`, then `:nrepl {:port 1667}`), Basilisp, whose `basilisp nrepl-server` writes `.nrepl-port` itself, or a server on another host through `:host`. Features follow what that server offers, and the console says what it can't do.
 - **jank (experimental).** Open a `.jank` file and Jonquil starts its own `jank repl` for the window on the first Run (`brew install jank-lang/jank/jank`, or set `JONQUIL_JANK`).
 
-A short list of limits for each runtime is in [Using Jonquil](docs/guide/using-jonquil.md#known-limits).
+A short list of limits for each runtime is in [Known limits](docs/guide/known-limits.md).
 
-An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate, run a file, check brackets, doc, completion, project info) over MCP on stdio, with no window. Add `--window` (`jonquil --mcp --window [DIR]`) and the agent drives a live window instead: nineteen tools that open, edit, save and run tabs while you watch, and that let it propose plugins you then accept or reject in the window. A plugin can add tools of its own beside them. To drive a window you already have open, turn on `:mcp-listen? true` in the settings file and point the agent at `jonquil --mcp-attach [DIR]`, which bridges stdio to that window. See [Driving Jonquil from an agent (MCP)](docs/guide/using-jonquil.md#driving-jonquil-from-an-agent-mcp).
+An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate, run a file, check brackets, doc, completion, project info) over MCP on stdio, with no window. Add `--window` (`jonquil --mcp --window [DIR]`) and the agent drives a live window instead: nineteen tools that open, edit, save and run tabs while you watch, and that let it propose plugins you then accept or reject in the window. A plugin can add tools of its own beside them. To drive a window you already have open, turn on `:mcp-listen? true` in the settings file and point the agent at `jonquil --mcp-attach [DIR]`, which bridges stdio to that window. See [Driving Jonquil from an agent (MCP)](docs/guide/mcp.md).
 
 ![Jonquil's window in the dark theme](docs/images/theme-dark.png)
 
