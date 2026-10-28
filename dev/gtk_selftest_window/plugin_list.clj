@@ -30,7 +30,7 @@
     ((:close-tab! ui) (:id t)))
   ((:select-tab! ui) (:id (first ((:tabs* ui))))))
 
-(defn- with-list
+(defn with-list
   "Writes settings-text into the settings file (when given) and files
   ({name text}) into the plugins folder, loads them, runs (f), then puts
   everything back: the files, each id's history, the settings file's old

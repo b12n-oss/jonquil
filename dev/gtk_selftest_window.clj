@@ -34,6 +34,7 @@
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]
             [gtk-selftest-window.palette :as palette-rows]
+            [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
             [gtk-selftest-window.plugins :as plugin-rows]
@@ -291,6 +292,15 @@
    plugin-list-rows/row-plugin-list-review-opens-the-review
    plugin-list-rows/row-plugin-list-empty
    plugin-list-rows/row-plugin-list-refreshes-after-a-step
+   plugin-history-rows/row-plugin-history-shows-each-version
+   plugin-history-rows/row-plugin-history-revert-brings-back-v1
+   plugin-history-rows/row-plugin-history-revert-of-live-says-already
+   plugin-history-rows/row-plugin-history-revert-over-a-broken-edit
+   plugin-history-rows/row-plugin-history-revert-restores-a-deleted-file
+   plugin-history-rows/row-plugin-history-pending-isnt-reverted
+   plugin-history-rows/row-plugin-history-unreadable
+   plugin-history-rows/row-plugin-history-back-shows-the-list
+   plugin-history-rows/row-plugin-history-refreshes-after-a-step
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

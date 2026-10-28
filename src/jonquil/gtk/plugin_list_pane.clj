@@ -3,7 +3,7 @@
   in the right-hand slot the source panel uses, one wrapped label per row
   in a list, a disabled plugin's dimmed, then the Enable, Disable, Open,
   Review Proposals and Close buttons and a footer for what the last step
-  said. jonquil.gtk.window decides where it shows and what the buttons do;
+  said, and (P11b) a History button. jonquil.gtk.window decides where it shows and what the buttons do;
   this namespace owns what it shows."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable]]
@@ -27,7 +27,7 @@
 
 (defn set-handlers!
   "Registers the buttons' handlers, {:on-enable :on-disable :on-open
-  :on-review :on-close}, each a no-arg fn."
+  :on-history :on-review :on-close}, each a no-arg fn."
   [pane m]
   (reset! (:handlers pane) m)
   nil)
@@ -82,7 +82,7 @@
 
 (defn make-pane
   "Builds the panel: {:root :list :scroll :empty :enable-btn :disable-btn
-  :open-btn :review-btn :close-btn :footer :rows (atom []) :handlers (atom
+  :open-btn :history-btn :review-btn :close-btn :footer :rows (atom []) :handlers (atom
   {})}. :root starts visible; the window hides it."
   []
   (let [root (g/gtk-box-new g/ORIENTATION-VERTICAL 4)
@@ -94,11 +94,12 @@
         enable-btn (g/gtk-button-new-with-label "Enable")
         disable-btn (g/gtk-button-new-with-label "Disable")
         open-btn (g/gtk-button-new-with-label "Open")
+        history-btn (g/gtk-button-new-with-label "History")
         review-btn (g/gtk-button-new-with-label "Review Proposals")
         close-btn (g/gtk-button-new-with-label "Close")
         footer (g/gtk-label-new "")
         pane {:root root :list lb :scroll scroll :empty empty :enable-btn enable-btn
-              :disable-btn disable-btn :open-btn open-btn :review-btn review-btn
+              :disable-btn disable-btn :open-btn open-btn :history-btn history-btn :review-btn review-btn
               :close-btn close-btn :footer footer :rows (atom []) :handlers (atom {})}]
     (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
     (g/gtk-scrolled-window-set-child scroll lb)
@@ -107,11 +108,11 @@
       (g/gtk-label-set-xalign l 0.0)
       (g/gtk-label-set-wrap l 1))
     (g/gtk-widget-set-visible empty 0)
-    (doseq [b [enable-btn disable-btn open-btn review-btn close-btn]] (g/gtk-box-append bar b))
+    (doseq [b [enable-btn disable-btn open-btn history-btn review-btn close-btn]] (g/gtk-box-append bar b))
     (doseq [w [title scroll empty bar footer]] (g/gtk-box-append root w))
     (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
     (doseq [[b k] [[enable-btn :on-enable] [disable-btn :on-disable] [open-btn :on-open]
-                   [review-btn :on-review] [close-btn :on-close]]]
+                   [history-btn :on-history] [review-btn :on-review] [close-btn :on-close]]]
       (g/g-signal-connect-data b "clicked" (callable (handler-click pane k) [:pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT))
     pane))
