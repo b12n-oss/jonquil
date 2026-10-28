@@ -27,6 +27,83 @@ these:
 - `jonquil.commands`: the run-selection text, the form Run Form sends,
   the pre-Run bracket check, next/prev match, replace-current and
   replace-all, the format operations, and the zoom sizes.
+- `jonquil.keymap`, `jonquil.command-registry` and the `jonquil.plugin*`
+  namespaces: see [Commands, keys and plugins](#commands-keys-and-plugins),
+  below.
+- `jonquil.theme`: the four palettes as data, the five choices
+  (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
+  light or dark), `theme`, `next-theme` and `code-css`.
+- `jonquil.settings`: `settings-path`, `load-settings` (never throws) and
+  `save-settings!` (atomic, never throws).
+- `jonquil.last-session`: the tabs to reopen, kept per tree root in
+  `sessions.edn` beside the settings file. It's a separate file because
+  `settings.edn` is hand-edited and may be a dotfiles symlink, while this one
+  changes whenever the tabs do. `load-sessions` and `save-sessions!` never
+  throw, and `remember` and `entry-for` are pure. When no file was named,
+  startup picks the entry (and re-roots the tree) before the window is
+  shown. `reopen-later!` then waits for the window's first painted frame
+  (the frame clock's `after-paint`, or one second if no frame comes) and
+  opens them all in one main-loop turn, so the window appears without
+  waiting for them and nothing the user does can land between two of
+  them. A quit before then cancels it and saves nothing, since the tabs
+  open are only part of the list. After the reopen the window saves as the tabs
+  change:
+  `refresh-labels!` (every open, close and path change) and `on-switch!` call
+  `session-changed!`, which writes only when the `{:root :tabs :active}`
+  snapshot differs from the last one written. It does nothing until
+  startup's own reopen is done, since the first Untitled tab would otherwise
+  overwrite the list it's about to reopen, and the state startup ends in is
+  only recorded, not written, so a launch on one file leaves the folder's
+  list alone until a tab changes. The real-quit
+  branch of the close-request handler turns that off, then saves once more,
+  next to the tree's width. Each saved path goes through the same
+  `open-file!` as Open, and a path that fails, or throws, is named on the
+  console instead of stopping the rest.
+
+P4 added `jonquil.help`, the decisions behind completion, quick
+doc, jump to definition and rename, covered in its own section below.
+
+- `jonquil.file-tree`: the file tree's model as plain data: `{:root :expanded :ignore}`, listing one folder (ignore rules, folders first), flattening the expanded tree into rows (a symlink back to an ancestor shows collapsed instead of recursing), `expand-to` for a saved file, the launch root (`root-for`), and a directory's own project selection (`project-selection`, since `dialect/find-project` starts at a path's parent).
+- `jonquil.save-path`: where a save really writes and the temp file it writes through, as plain `java.nio.file` calls. `resolve-target` follows symlinks by hand, each relative link against its parent's real location, because `.getCanonicalPath` on this Jolt returns a dangling link's own path and a rename onto that path would replace the link; it gives up after 40 hops, so a link loop fails. `create-temp!` creates the temp file owner-only when the target exists, so new content never sits in a file wider than the owner's. `jonquil.gtk.window`'s `save-to!` writes the editor text into a temp file in the resolved target's directory, copies the target's permissions onto it, then renames it over the target with `ATOMIC_MOVE`, so a failed write never leaves a half-written file and a symlink is updated rather than replaced. The tab counts as saved only once the rename succeeds; any failure deletes the temp file and prints an error naming the user's own path.
+- `jonquil.tabs`: the window's tabs as plain data: the strip's labels, finding a file that's already open (compared canonically), whether a tab may run in the window's evaluator (`runnable-here?`: the same `dialect/selection-key`, or a Jolt file outside any project in any Jolt window), whether a lone tab keeps the window's Jolt instead of switching it (`keeps-window-jolt?`), and the text of the refusal, the unsaved-changes alert and the Run banner.
+- `jonquil.source`: where a definition outside the buffer lives and its text, from a lookup's `:file` (an absolute path or a `jar:file:…!/entry` URL, read locally with `java.util.zip.ZipFile`), whether it can be edited (a plain file under the project), line arithmetic, and the source panel's bounded history.
+
+The inspector arc added two more: `jonquil.inspect.view`, the inspector's view
+code lifted from clojure-cli.repl (`UPSTREAM.md` carries the provenance
+row), and `jonquil.inspect`, the panel's own pane state and its key-to-op
+decisions. Both are covered in their own section below, alongside the
+`Inspector` protocol.
+
+`jonquil.console` is the console's own pure half: what Return does with
+the text at the prompt, how much old output to trim, how a result is
+shown, where the last entry starts for Clear Last Output, and a friendlier
+message for an unclosed bracket. `jonquil.core` holds only the app's name.
+
+The front-end and the core use plain data to communicate. When the user edits, the GTK TextBuffer sends a snapshot to the core:
+
+```clojure
+{:text "..." :caret 42 :sel-start 40 :sel-end 45}
+```
+
+An edit operation returns data for the front-end to apply:
+
+```clojure
+{:edits [[start end "replacement"] ...]
+ :caret 44
+ :sel   [44 44]}
+```
+
+The front-end applies each edit in reverse order within one `gtk_text_buffer_begin/end_user_action` call, so undo sees one step.
+
+## Commands, keys and plugins
+
+Keys and commands are data, and plugins add to that data while Jonquil runs.
+Part 1 built the keymap and the command registry, and Part 2 built plugins on
+top of them. Both are kept here slice by slice, as the record of why each piece
+is the way it is.
+
+### Part 1: the keymap and the command registry
+
 - `jonquil.keymap` and `jonquil.command-registry` (plugins Part 1, slice
   S1, 2026-10-24): key bindings and commands as data. `jonquil.keymap`
   matches a lowered keyval and a GDK modifier state against an ordered
@@ -129,6 +206,9 @@ these:
   Return, Run Form's chords, F5, the Escape chain's order and conditions,
   the palette chord, and each context-menu item's command) and by the
   window self-test rows.
+
+### Part 2: plugins
+
 - Plugins at a glance (Part 2, slices P1 to P11c, 2026-10-25 to
   2026-10-28). The half with no GTK and no live state is data and checks: `jonquil.plugin` (the
   `defplugin` API), `plugin-check` (the validator), `plugin-protocol` (load,
@@ -395,70 +475,6 @@ these:
   ones. Every load (startup, Reload Plugins in the palette, a saved plugin
   file through a hook in `save-to!`) runs on one agent that keeps going
   after a throw, so loads never race and none is lost.
-- `jonquil.theme`: the four palettes as data, the five choices
-  (`choice-names`, `choice?`), `resolve-choice` (which turns `auto` into
-  light or dark), `theme`, `next-theme` and `code-css`.
-- `jonquil.settings`: `settings-path`, `load-settings` (never throws) and
-  `save-settings!` (atomic, never throws).
-- `jonquil.last-session`: the tabs to reopen, kept per tree root in
-  `sessions.edn` beside the settings file. It's a separate file because
-  `settings.edn` is hand-edited and may be a dotfiles symlink, while this one
-  changes whenever the tabs do. `load-sessions` and `save-sessions!` never
-  throw, and `remember` and `entry-for` are pure. When no file was named,
-  startup picks the entry (and re-roots the tree) before the window is
-  shown. `reopen-later!` then waits for the window's first painted frame
-  (the frame clock's `after-paint`, or one second if no frame comes) and
-  opens them all in one main-loop turn, so the window appears without
-  waiting for them and nothing the user does can land between two of
-  them. A quit before then cancels it and saves nothing, since the tabs
-  open are only part of the list. After the reopen the window saves as the tabs
-  change:
-  `refresh-labels!` (every open, close and path change) and `on-switch!` call
-  `session-changed!`, which writes only when the `{:root :tabs :active}`
-  snapshot differs from the last one written. It does nothing until
-  startup's own reopen is done, since the first Untitled tab would otherwise
-  overwrite the list it's about to reopen, and the state startup ends in is
-  only recorded, not written, so a launch on one file leaves the folder's
-  list alone until a tab changes. The real-quit
-  branch of the close-request handler turns that off, then saves once more,
-  next to the tree's width. Each saved path goes through the same
-  `open-file!` as Open, and a path that fails, or throws, is named on the
-  console instead of stopping the rest.
-
-P4 added `jonquil.help`, the decisions behind completion, quick
-doc, jump to definition and rename, covered in its own section below.
-
-- `jonquil.file-tree`: the file tree's model as plain data: `{:root :expanded :ignore}`, listing one folder (ignore rules, folders first), flattening the expanded tree into rows (a symlink back to an ancestor shows collapsed instead of recursing), `expand-to` for a saved file, the launch root (`root-for`), and a directory's own project selection (`project-selection`, since `dialect/find-project` starts at a path's parent).
-- `jonquil.save-path`: where a save really writes and the temp file it writes through, as plain `java.nio.file` calls. `resolve-target` follows symlinks by hand, each relative link against its parent's real location, because `.getCanonicalPath` on this Jolt returns a dangling link's own path and a rename onto that path would replace the link; it gives up after 40 hops, so a link loop fails. `create-temp!` creates the temp file owner-only when the target exists, so new content never sits in a file wider than the owner's. `jonquil.gtk.window`'s `save-to!` writes the editor text into a temp file in the resolved target's directory, copies the target's permissions onto it, then renames it over the target with `ATOMIC_MOVE`, so a failed write never leaves a half-written file and a symlink is updated rather than replaced. The tab counts as saved only once the rename succeeds; any failure deletes the temp file and prints an error naming the user's own path.
-- `jonquil.tabs`: the window's tabs as plain data: the strip's labels, finding a file that's already open (compared canonically), whether a tab may run in the window's evaluator (`runnable-here?`: the same `dialect/selection-key`, or a Jolt file outside any project in any Jolt window), whether a lone tab keeps the window's Jolt instead of switching it (`keeps-window-jolt?`), and the text of the refusal, the unsaved-changes alert and the Run banner.
-- `jonquil.source`: where a definition outside the buffer lives and its text, from a lookup's `:file` (an absolute path or a `jar:file:…!/entry` URL, read locally with `java.util.zip.ZipFile`), whether it can be edited (a plain file under the project), line arithmetic, and the source panel's bounded history.
-
-The inspector arc added two more: `jonquil.inspect.view`, the inspector's view
-code lifted from clojure-cli.repl (`UPSTREAM.md` carries the provenance
-row), and `jonquil.inspect`, the panel's own pane state and its key-to-op
-decisions. Both are covered in their own section below, alongside the
-`Inspector` protocol.
-
-`jonquil.console` is the console's own pure half: what Return does with
-the text at the prompt, how much old output to trim, how a result is
-shown, where the last entry starts for Clear Last Output, and a friendlier
-message for an unclosed bracket. `jonquil.core` holds only the app's name.
-
-The front-end and the core use plain data to communicate. When the user edits, the GTK TextBuffer sends a snapshot to the core:
-
-```clojure
-{:text "..." :caret 42 :sel-start 40 :sel-end 45}
-```
-
-An edit operation returns data for the front-end to apply:
-
-```clojure
-{:edits [[start end "replacement"] ...]
- :caret 44
- :sel   [44 44]}
-```
-
-The front-end applies each edit in reverse order within one `gtk_text_buffer_begin/end_user_action` call, so undo sees one step.
 
 ## MCP: `jonquil --mcp`
 
