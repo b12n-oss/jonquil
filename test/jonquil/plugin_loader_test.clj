@@ -854,3 +854,50 @@
     (is (identical? before @live))
     (is (= text (slurp sp)))
     (is (= ["plugin t-x is already enabled."] (toggle! live sp "t-x" true)))))
+
+;; --- plugins F1: refusing under --no-plugins ---------------------------------
+
+(def ^:private off "plugins are off in this window (--no-plugins), so ")
+
+(deftest load-step-refuses-without-plugins-test
+  (let [d (dir-with [["wrap.clj" (source "wrap")]])
+        live (atom (reg/empty-registry))
+        before @live]
+    (is (= [(str off "nothing was reloaded")] (step! live d :plugins? false)))
+    (is (identical? before @live))
+    (is (empty? (entries d "wrap")))))
+
+(deftest set-enabled-step-refuses-without-plugins-test
+  (let [sp (settings-with "{:plugins {:disabled #{:t-b}}}" [["t-a.clj" (source "t-a")] ["t-b.clj" (source "t-b")]])
+        live (atom (reg/empty-registry))
+        _ (loader/load-step! live {:settings-path sp :os "Linux" :now now})
+        before @live
+        text (slurp sp)
+        off! (fn [id enabled?] (loader/set-enabled-step! live {:settings-path sp :id id :enabled? enabled?
+                                                               :os "Linux" :now now :plugins? false}))]
+    (is (= [(str off "plugin t-a wasn't disabled. To keep it off, add :t-a to :plugins :disabled in "
+                sp ", then start without --no-plugins.")]
+           (off! "t-a" false)))
+    (is (= [(str off "plugin t-b wasn't enabled")] (off! "t-b" true)))
+    (is (identical? before @live))
+    (is (= text (slurp sp)))))
+
+(deftest revert-step-refuses-without-plugins-test
+  (let [[d live] (with-v1-and-v2 "wrap")
+        before @live
+        text (slurp (io/file d "wrap.clj"))]
+    (is (= [(str off "plugin wrap wasn't reverted")] (revert! live d "wrap" 1 :plugins? false)))
+    (is (identical? before @live))
+    (is (= text (slurp (io/file d "wrap.clj"))))
+    (is (= 2 (count (entries d "wrap"))))))
+
+(deftest accept-step-refuses-without-plugins-test
+  (let [d (dir-with [])
+        live (atom (reg/empty-registry))
+        text (source "pw")]
+    (propose! d "pw" text (reported "pw" text))
+    (let [before @live]
+      (is (= [(str off "plugin pw: v1 wasn't accepted")] (accept! live d "pw" 1 :plugins? false)))
+      (is (identical? before @live))
+      (is (not (.exists (io/file d "pw.clj"))))
+      (is (= :pending (history/version-status (entries d "pw") 1))))))

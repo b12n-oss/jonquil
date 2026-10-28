@@ -78,3 +78,14 @@
     (propose! d "a" "(a1)")
     (spit (io/file (history/history-dir d "a") "history.edn") "{:not")
     (is (str/starts-with? (:error (plugin-list/version-rows d "a")) "a's history can't be read: "))))
+
+(deftest a-deleted-plugin-says-file-deleted-test
+  (let [d (dir)]
+    (accepted! d "h" "(h1)")
+    (is (= "h: live v1, not loaded, file deleted, effects unknown, no pending proposal."
+           (:line (first (plugin-list/rows (state d))))))))
+
+(deftest a-new-proposal-isnt-file-deleted-test
+  (let [d (dir)]
+    (propose! d "h" "(h1)")
+    (is (not (str/includes? (:line (first (plugin-list/rows (state d)))) "file deleted")))))

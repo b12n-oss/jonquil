@@ -3079,16 +3079,19 @@
 (defn- load-step
   "The step of a plugin load: jonquil.plugin-loader/load-step! over the
   live registry, with the plugins folder and disabled ids from the settings
-  file, all files or just only."
-  [settings-path only]
-  (fn [] (plugin-loader/load-step! plugin-registry/live
-                                   {:settings-path settings-path :os (System/getProperty "os.name") :only only})))
+  file, all files or just only. plugins? false (--no-plugins) makes it
+  refuse (plugins F1); nil runs it."
+  ([settings-path only] (load-step settings-path only nil))
+  ([settings-path only plugins?]
+   (fn [] (plugin-loader/load-step! plugin-registry/live
+                                    {:settings-path settings-path :os (System/getProperty "os.name") :only only
+                                     :plugins? plugins?}))))
 
 (defn- plugin-load!
   "Queues a plugin load (load-step) through plugin-step!. Returns the
   agent, for a caller that wants to wait."
-  [{:keys [settings-path only]}]
-  (plugin-step! {:settings-path settings-path :step (load-step settings-path only)}))
+  [{:keys [settings-path only plugins?]}]
+  (plugin-step! {:settings-path settings-path :step (load-step settings-path only plugins?)}))
 
 (defn- plugin-step-now!
   "plugin-step!, waited for up to 10 s, and for the window to change after
@@ -3117,6 +3120,10 @@
         ;; expression sees the OUTER scope, never itself), but the shadow
         ;; made that non-obvious to a reader.
         settings-path* (atom (or settings-path (settings/settings-path)))
+        ;; plugins F1: whether this window runs plugins (false under
+        ;; --no-plugins); an atom only so :plugins-on!* (self-test hook) can
+        ;; turn it off in a window that started with them
+        plugins-on* (atom (not (false? plugins?)))
         ;; D1.T4: the window's dialect and runtime (jonquil.dialect/select),
         ;; and its one evaluator. ev* is an atom because D2.T5 swaps it when
         ;; a file from another runtime opens; every reader derefs it at
@@ -3351,7 +3358,8 @@
                              :step (case kind
                                      :accept #(plugin-loader/accept-step!
                                                plugin-registry/live
-                                               {:settings-path path :os (System/getProperty "os.name") :id id :n n})
+                                               {:settings-path path :os (System/getProperty "os.name") :id id :n n
+                                                :plugins? @plugins-on*})
                                      :reject #(plugin-loader/reject-step! {:settings-path path :id id :n n :note note}))
                              :after (fn [lines]
                                       ;; review I1: every line, since a refused
@@ -3383,7 +3391,7 @@
                              :step #(plugin-loader/set-enabled-step!
                                      plugin-registry/live
                                      {:settings-path path :os (System/getProperty "os.name")
-                                      :id (:id row) :enabled? enabled?})
+                                      :id (:id row) :enabled? enabled? :plugins? @plugins-on*})
                              :after (fn [lines]
                                       (when-let [l (first lines)]
                                         (plugin-list-pane/report! lp l)
@@ -3419,7 +3427,7 @@
                              :step #(plugin-loader/revert-step!
                                      plugin-registry/live
                                      {:settings-path path :os (System/getProperty "os.name")
-                                      :id id :n (:n row) :reason reason})
+                                      :id id :n (:n row) :reason reason :plugins? @plugins-on*})
                              :after (fn [lines]
                                       (when-let [l (last lines)]
                                         (plugin-history-pane/report! hp (str/join "\n" lines))
@@ -3544,7 +3552,7 @@
                                       :plugins-list-fn (fn [] (plugin-step! {:settings-path @settings-path*
                                                                              :step (fn [] []) :open-list? true}))
                                       :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
-                                                                               :cv cv}))}
+                                                                               :cv cv :plugins? @plugins-on*}))}
         window-key-fn (on-window-key window-key-args)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
@@ -4017,13 +4025,13 @@
                :report! (fn [line]
                           (on-gui! #(do (cview/append! cv :system (str "; " line "\n"))
                                         (g/gtk-label-set-text status-label (str "; " line)))))}))
-    (when-not (false? plugins?)
+    (when @plugins-on*
       (plugin-load! {:settings-path @settings-path* :cv cv}))
     ;; saving a plugin file reloads that plugin, and any save fires the
     ;; :after-save hooks (P6) on the saved tab; save-to! runs on the GTK
     ;; thread, so the tab lookup is safe here
     (reset! on-saved (fn [path ed]
-                       (when (and (not (false? plugins?))
+                       (when (and @plugins-on*
                                   (plugin-loader/plugin-file? (plugin-loader/plugins-dir @settings-path*) path))
                          (plugin-load! {:settings-path @settings-path* :cv cv :only path}))
                        (plugin-hooks/run-hooks! {:point :after-save
@@ -4194,14 +4202,15 @@
                  ;; plugins P3: load the plugin folder now (call it off the
                  ;; GTK thread; it returns the console lines), and the folder
                    :load-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
-                   :reload-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil)}))
+                   :reload-plugins!* (fn [] (plugin-step-now! {:settings-path @settings-path* :step (load-step @settings-path* nil @plugins-on*)}))
+                   :plugins-on!* (fn [b] (reset! plugins-on* (boolean b)) nil)
                    :plugins-dir* (fn [] (plugin-loader/plugins-dir @settings-path*))
                  ;; plugins P10: what the plugin MCP tools read, and an
                  ;; agent's propose: the isolated check on the caller's
                  ;; thread (never the GTK one), then propose-step! on the
                  ;; plugin agent, which refreshes the count and the panel
                    :plugin-state* (fn [] (let [path @settings-path*]
-                                           {:plugins? (not (false? plugins?))
+                                           {:plugins? @plugins-on*
                                             :plugins-dir (plugin-loader/plugins-dir path)
                                             :registry @plugin-registry/live
                                             :disabled (:disabled (:plugins (settings/load-settings path)))}))
@@ -4475,7 +4484,9 @@
   Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
   P3) loads the plugin folder now, off the GTK thread, answering the
   console lines, :reload-plugins!* (P4) does what Reload Plugins does and
-  waits for it, and :plugins-dir* names that folder. :plugin-state*
+  waits for it, and :plugins-dir* names that folder. :plugins-on!*
+  (plugins F1) sets whether the window runs plugins, as --no-plugins
+  would have. :plugin-state*
   (plugins P10) answers {:plugins? :plugins-dir :registry :disabled} for
   the plugin MCP tools' reads, and :plugin-propose!* takes {:id :source
   :reason}, runs the isolated check on the calling thread and records the

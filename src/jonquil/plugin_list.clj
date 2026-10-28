@@ -33,10 +33,14 @@
         state (cond (contains? (set disabled) (keyword id)) "disabled"
                     loaded "loaded"
                     :else "not loaded")
+        ;; plugins F1: went live once, and its file is gone now
+        deleted (when (and (not error) (history/latest-accepted entries)
+                           (not (.isFile (io/file plugins-dir (str id ".clj")))))
+                  ", file deleted")
         effects (cond (not loaded) "unknown"
                       (empty? effects) "none"
                       :else (str/join " " (map str (sort-by str effects))))]
-    (str id ": " live ", " state ", effects " effects ", " pending "."
+    (str id ": " live ", " state deleted ", effects " effects ", " pending "."
          (when doc (str " " doc)))))
 
 (defn row

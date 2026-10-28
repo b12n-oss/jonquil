@@ -464,6 +464,12 @@ is the way it is.
   on the plugin agent. `revert-step!` now also refuses a version whose
   text is already live while the file is there (a deleted file is still
   written back).
+  Follow-up F1 (2026-10-28): `plugin-list`'s line says "file deleted"
+  when a plugin has an accepted version but no file, and `load-step!`,
+  `set-enabled-step!`, `revert-step!` and `accept-step!` refuse with one
+  line (`plugins-off`) when their opts carry `:plugins? false`. The window
+  keeps that flag in a `plugins-on*` atom, seeded from `--no-plugins`, and
+  passes it to every step.
   Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes

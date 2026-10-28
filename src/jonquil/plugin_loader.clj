@@ -247,6 +247,12 @@
              :when (:error r)]
          (str "plugin " (name k) ": its history wasn't recorded: " (:error r)))))
 
+(defn- plugins-off
+  "The one line a step answers in a window started with --no-plugins
+  (plugins F1): it loads nothing and writes nothing."
+  [what]
+  [(str "plugins are off in this window (--no-plugins), so " what)])
+
 (defn load-step!
   "One load against the live registry atom: reads it, reloads (opts are
   reload's, less :registry, plus :now for the history's clock; with
@@ -255,16 +261,19 @@
   resets it, records each plugin it made live in the history, and answers
   the console lines. Run on the window's plugin agent, one step at a time,
   so a step always starts from what the previous one left. Never throws:
-  a failure is one line, and live is left as it was."
+  a failure is one line, and live is left as it was. With :plugins?
+  false (--no-plugins), it refuses (plugins F1), as the other steps do."
   [live opts]
-  (try
-    (let [[warn opts] (step-opts opts)
-          old @live
-          {:keys [registry lines]} (reload (assoc opts :registry old))]
-      (reset! live registry)
-      (-> warn (into lines) (into (record-changed! (:dir opts) old registry (:now opts)))))
-    (catch Throwable e
-      [(str "loading plugins failed: " (or (ex-message e) (str e)))])))
+  (if (false? (:plugins? opts))
+    (plugins-off "nothing was reloaded")
+    (try
+      (let [[warn opts] (step-opts opts)
+            old @live
+            {:keys [registry lines]} (reload (assoc opts :registry old))]
+        (reset! live registry)
+        (-> warn (into lines) (into (record-changed! (:dir opts) old registry (:now opts)))))
+      (catch Throwable e
+        [(str "loading plugins failed: " (or (ex-message e) (str e)))]))))
 
 (defn set-enabled-step!
   "Enables or disables plugin id (a string) for the plugin list (plugins
@@ -280,9 +289,18 @@
   [live {:keys [settings-path id enabled?] :as opts}]
   (let [what (if enabled? "enabled" "disabled")]
     (try
-      (if (= enabled? (not (contains? (set (:disabled (:plugins (settings/load-settings settings-path))))
+      (cond
+        ;; final review: Disable's refusal names the way to turn it off
+        ;; by hand, since the button can't here
+        (false? (:plugins? opts))
+        (plugins-off (str "plugin " id " wasn't " what
+                          (when-not enabled?
+                            (str ". To keep it off, add :" id " to :plugins :disabled in "
+                                 settings-path ", then start without --no-plugins."))))
+        (= enabled? (not (contains? (set (:disabled (:plugins (settings/load-settings settings-path))))
                                       (keyword id))))
         [(str "plugin " id " is already " what ".")]
+        :else
         (if-let [why (settings/save-plugin-disabled! settings-path (keyword id) (not enabled?))]
           [(str "plugin " id " wasn't " what ": " why)]
           (into [(str "plugin " id " " what ".")] (load-step! live (dissoc opts :id :enabled?)))))
@@ -314,46 +332,48 @@
   reset, and a :revert version recorded, \"revert to vN\" plus the reason.
   The console lines. Never throws."
   [live {:keys [id n reason now] :as opts}]
-  (try
-    (let [[warn opts] (step-opts opts)
-          dir (:dir opts)
-          k (keyword id)
-          src (history/version-source (history/history-dir dir id) n)]
-      (cond
-        (nil? src) (conj warn (str "plugin " id " has no v" n " to revert to"))
-        (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
-        (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
-        (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
-        ;; the file's there (disk-changed says it holds the live text), so
-        ;; there's nothing to put back; a deleted one is written back
-        ;; (final review I2)
-        (and (= src (get-in @live [:plugins k :source])) (.isFile (io/file dir (str id ".clj"))))
-        (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
-        :else
-        (let [old @live
-              path (str dir "/" id ".clj")
-              {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))]
-          (if (not= src (get-in registry [:plugins k :source]))
-            (-> warn (into lines) (conj (str "plugin " id " wasn't reverted to v" n)))
-            (if-let [why (history/write-atomic! path src)]
-              ;; the check loaded src into the plugin's namespace: put the
-              ;; live version back, as reload-one does on a fail (review I3)
-              (let [restored (when-let [live-src (get-in old [:plugins k :source])]
-                               (:problems (protocol/load-candidate {:source live-src :file-id id})))]
-                (-> warn
-                    (conj (str "plugin " id " wasn't reverted: " why))
-                    (into (map #(str "plugin " id ": putting the live version back: " %) restored))))
-              (let [_ (reset! live registry)
-                    r (history/record! {:plugins-dir dir :id id :text src :source :revert :always? true :now now
-                                        :reason (str "revert to v" n
-                                                     (when-not (str/blank? reason) (str ": " reason)))})
-                    others (record-changed! dir old (update registry :plugins dissoc k) now)]
-                (-> warn (into lines) (into others)
-                    (conj (if (:n r)
-                            (str "plugin " id " reverted to v" n " (now v" (:n r) ")")
-                            (str "plugin " id " reverted to v" n ", but its history wasn't recorded: " (:error r)))))))))))
-    (catch Throwable e
-      [(str "reverting plugin " id " failed: " (or (ex-message e) (str e)))])))
+  (if (false? (:plugins? opts))
+    (plugins-off (str "plugin " id " wasn't reverted"))
+    (try
+      (let [[warn opts] (step-opts opts)
+            dir (:dir opts)
+            k (keyword id)
+            src (history/version-source (history/history-dir dir id) n)]
+        (cond
+          (nil? src) (conj warn (str "plugin " id " has no v" n " to revert to"))
+          (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
+          (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
+          (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
+          ;; the file's there (disk-changed says it holds the live text), so
+          ;; there's nothing to put back; a deleted one is written back
+          ;; (final review I2)
+          (and (= src (get-in @live [:plugins k :source])) (.isFile (io/file dir (str id ".clj"))))
+          (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
+          :else
+          (let [old @live
+                path (str dir "/" id ".clj")
+                {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))]
+            (if (not= src (get-in registry [:plugins k :source]))
+              (-> warn (into lines) (conj (str "plugin " id " wasn't reverted to v" n)))
+              (if-let [why (history/write-atomic! path src)]
+                ;; the check loaded src into the plugin's namespace: put the
+                ;; live version back, as reload-one does on a fail (review I3)
+                (let [restored (when-let [live-src (get-in old [:plugins k :source])]
+                                 (:problems (protocol/load-candidate {:source live-src :file-id id})))]
+                  (-> warn
+                      (conj (str "plugin " id " wasn't reverted: " why))
+                      (into (map #(str "plugin " id ": putting the live version back: " %) restored))))
+                (let [_ (reset! live registry)
+                      r (history/record! {:plugins-dir dir :id id :text src :source :revert :always? true :now now
+                                          :reason (str "revert to v" n
+                                                       (when-not (str/blank? reason) (str ": " reason)))})
+                      others (record-changed! dir old (update registry :plugins dissoc k) now)]
+                  (-> warn (into lines) (into others)
+                      (conj (if (:n r)
+                              (str "plugin " id " reverted to v" n " (now v" (:n r) ")")
+                              (str "plugin " id " reverted to v" n ", but its history wasn't recorded: " (:error r)))))))))))
+      (catch Throwable e
+        [(str "reverting plugin " id " failed: " (or (ex-message e) (str e)))]))))
 
 (defn propose-check
   "The isolated check of an agent's source for id against registry's
@@ -433,47 +453,49 @@
   refusal leaves the file, live and the status as they were, putting the
   namespace back. The console lines. Never throws."
   [live {:keys [id n now] :as opts}]
-  (try
-    (let [[warn opts] (step-opts opts)
-          dir (:dir opts)
-          k (keyword id)
-          hdir (history/history-dir dir id)
-          proposal (history/pending (:entries (history/read-entries hdir)))]
-      (cond
-        (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
-        (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
-        ;; review I1: with no source, reload would check the file on disk
-        (nil? (history/version-source hdir n))
-        (conj warn (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history"))
-        (disk-changed dir @live id) (conj warn (str "plugin " id ": v" n " wasn't accepted: " (disk-changed dir @live id)))
-        :else
-        (let [src (history/version-source hdir n)
-              old @live
-              path (str dir "/" id ".clj")
-              {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))
-              installed (get-in registry [:plugins k])
-              reported (get-in proposal [:check :plugin])
-              loaded (some-> installed :definition checker/summary)
-              differ (when (and installed (not (get-in proposal [:check :unchecked?])))
-                       (filterv #(not= (get loaded %) (get reported %)) summary-keys))]
-          (cond
-            (or (nil? src) (not= src (:source installed)))
-            (-> warn (into lines) (conj (str "plugin " id ": v" n " wasn't accepted and stays pending")))
-            (seq differ)
-            (-> warn (into (restore-ns! old id))
-                (conj (str "plugin " id ": v" n " wasn't accepted: what loaded here isn't what its check reported ("
-                           (str/join ", " differ) ")")))
-            :else
-            (if-let [why (history/write-atomic! path src)]
-              (-> warn (into (restore-ns! old id)) (conj (str "plugin " id ": v" n " wasn't accepted: " why)))
-              (let [_ (reset! live registry)
-                    why (history/record-status! {:plugins-dir dir :id id :n n :status :accepted :now now})
-                    others (record-changed! dir old (update registry :plugins dissoc k) now)]
-                (-> warn (into lines) (into others)
-                    (conj (str "plugin " id ": v" n " accepted"
-                               (when why (str ", but its status wasn't recorded: " why)))))))))))
-    (catch Throwable e
-      [(str "accepting plugin " id " failed: " (or (ex-message e) (str e)))])))
+  (if (false? (:plugins? opts))
+    (plugins-off (str "plugin " id ": v" n " wasn't accepted"))
+    (try
+      (let [[warn opts] (step-opts opts)
+            dir (:dir opts)
+            k (keyword id)
+            hdir (history/history-dir dir id)
+            proposal (history/pending (:entries (history/read-entries hdir)))]
+        (cond
+          (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
+          (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
+          ;; review I1: with no source, reload would check the file on disk
+          (nil? (history/version-source hdir n))
+          (conj warn (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history"))
+          (disk-changed dir @live id) (conj warn (str "plugin " id ": v" n " wasn't accepted: " (disk-changed dir @live id)))
+          :else
+          (let [src (history/version-source hdir n)
+                old @live
+                path (str dir "/" id ".clj")
+                {:keys [registry lines]} (reload (assoc opts :registry old :only path :text src))
+                installed (get-in registry [:plugins k])
+                reported (get-in proposal [:check :plugin])
+                loaded (some-> installed :definition checker/summary)
+                differ (when (and installed (not (get-in proposal [:check :unchecked?])))
+                         (filterv #(not= (get loaded %) (get reported %)) summary-keys))]
+            (cond
+              (or (nil? src) (not= src (:source installed)))
+              (-> warn (into lines) (conj (str "plugin " id ": v" n " wasn't accepted and stays pending")))
+              (seq differ)
+              (-> warn (into (restore-ns! old id))
+                  (conj (str "plugin " id ": v" n " wasn't accepted: what loaded here isn't what its check reported ("
+                             (str/join ", " differ) ")")))
+              :else
+              (if-let [why (history/write-atomic! path src)]
+                (-> warn (into (restore-ns! old id)) (conj (str "plugin " id ": v" n " wasn't accepted: " why)))
+                (let [_ (reset! live registry)
+                      why (history/record-status! {:plugins-dir dir :id id :n n :status :accepted :now now})
+                      others (record-changed! dir old (update registry :plugins dissoc k) now)]
+                  (-> warn (into lines) (into others)
+                      (conj (str "plugin " id ": v" n " accepted"
+                                 (when why (str ", but its status wasn't recorded: " why)))))))))))
+      (catch Throwable e
+        [(str "accepting plugin " id " failed: " (or (ex-message e) (str e)))]))))
 
 (defn reject-step!
   "Rejects id's pending version n with the user's optional note, on the
