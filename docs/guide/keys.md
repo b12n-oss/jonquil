@@ -1,6 +1,6 @@
 # Keys
 
-The keys, grouped by what they're for. Each group opens on a click.
+Keys by purpose; click a group to open it.
 
 <details>
 <summary><strong>Run, files and tabs</strong></summary>

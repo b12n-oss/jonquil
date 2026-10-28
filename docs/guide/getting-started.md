@@ -2,58 +2,36 @@
 
 ## Requirements
 
-- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.23 or later. It
-  carries the reader fixes from jolt-lang/jolt#1134 and #1138 that
-  `(read)` from the console needs, the closed-socket fix from
-  jolt-lang/jolt#1183 that the ClojureDart attach connection relies on,
-  the fix from jolt-lang/jolt#1355 that sends `pprint` output to the
-  console, and the fix from jolt-lang/jolt#1389 that makes `pp` print
-  `*1`. Building Jolt from source needs a
-  threaded Chez Scheme 10.x on `PATH`; if you don't already have one,
-  Jolt's own `make` provisions Chez 10.4.1 for you, so there's usually
-  nothing to install separately.
-- **GTK4 and pango**. On macOS, install them with Homebrew: `brew install
-  gtk4`, which pulls in `pango` and `glib` as dependencies. Jonquil loads GTK4
-  and pango at startup rather than linking against them. On Linux they come
-  from your distribution; see [Linux](#linux).
+- **[Jolt](https://github.com/jolt-lang/jolt)**, v0.8.23 or later (the
+  version last tested). Building Jolt from source needs a threaded Chez
+  Scheme 10.x on `PATH`; Jolt's own `make` provisions one if missing.
+- **GTK4 and pango**. On macOS, `brew install gtk4` pulls in `pango` and
+  `glib`. Jonquil loads them at startup rather than linking against them.
+  On Linux they come from your distribution; see [Linux](#linux).
 - **[babashka](https://babashka.org)** (`bb`), to run the tasks below
   (`bb app:run`, `bb app:build`, the tests). The built binary doesn't
   need it.
 
-Jonquil was most recently tested on Jolt v0.8.23.
+Each other dialect needs one more thing, only when you use it:
 
-Each dialect other than in-process Jolt needs one more thing, and only when
-you use it:
-
-- **jank** (experimental): a `jank` binary. `brew install
-  jank-lang/jank/jank` is the simplest; Jonquil also looks on `PATH`, in
-  `~/.local/bin`, and at whatever `JONQUIL_JANK` names. See
-  [jank](dialects/jank.md).
-- **JVM Clojure**: Java 17 or later and the `clojure` CLI, plus an nREPL
-  server you start yourself in the project. See
-  [JVM Clojure](dialects/jvm-clojure.md).
+- **jank** (experimental): a `jank` binary; `brew install
+  jank-lang/jank/jank` is simplest. See [jank](dialects/jank.md).
+- **JVM Clojure**: Java 17+, the `clojure` CLI, and an nREPL server you
+  start. See [JVM Clojure](dialects/jvm-clojure.md).
 - **ClojureDart** (experimental): a running app built with the ClojureDart
-  fork that serves nREPL. See
-  [ClojureDart](dialects/clojuredart.md).
-- **ClojureScript** (experimental): in a shadow-cljs project
-  (`shadow-cljs.edn`), `npx shadow-cljs watch <build>` running and a
-  JS runtime that has the build loaded. See
-  [ClojureScript](dialects/clojurescript.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
-  A `.cljs` file outside a shadow-cljs project needs only the Clojure CLI
-  and `node`, and Jonquil starts ClojureScript itself. See
-  [ClojureScript on node](dialects/clojurescript.md#clojurescript-experimental-running-on-node).
-  A project can run it in a browser tab instead, with
-  `{:cljs {:target :browser}}` in `.jonquil.edn`; see
-  [running in the browser](dialects/clojurescript.md#clojurescript-experimental-running-in-the-browser).
-- **Any nREPL server** (the nREPL dialect): the server itself, which you
-  start, and `.jonquil.edn {:dialect :nrepl :nrepl {:port N}}` naming it.
-  Basilisp's `basilisp nrepl-server` writes `.nrepl-port`, so
-  `{:dialect :nrepl}` alone is enough there.
-  See [Any nREPL server](dialects/other-nrepl.md).
-- **Jolt out of process**, the default in a project with a `deps.edn`:
-  `git` on `PATH` and a network connection the first time, when Jonquil
-  fetches jolt-lang/nrepl's middleware, or a checkout of jolt-lang/nrepl.
-  See [Running Jolt out of process](dialects/index.md#running-jolt-out-of-process).
+  fork that serves nREPL. See [ClojureDart](dialects/clojuredart.md).
+- **ClojureScript** (experimental): `npx shadow-cljs watch <build>` in a
+  shadow-cljs project, or just the Clojure CLI and `node` for a loose
+  `.cljs` file. See
+  [attaching](dialects/clojurescript.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build),
+  [node](dialects/clojurescript.md#clojurescript-experimental-running-on-node)
+  and [browser](dialects/clojurescript.md#clojurescript-experimental-running-in-the-browser).
+- **Any nREPL server**: the server, plus `.jonquil.edn {:dialect :nrepl
+  :nrepl {:port N}}`. See [Any nREPL server](dialects/other-nrepl.md).
+- **Jolt out of process**, the default with a `deps.edn`: `git` on `PATH`
+  and a network connection the first time, or a checkout of
+  jolt-lang/nrepl. See
+  [Running Jolt out of process](dialects/index.md#running-jolt-out-of-process).
 
 ## Running
 
@@ -69,24 +47,23 @@ bb app:run ~/dev/project  # opens a folder: the file tree shows it, ready to pic
 bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from the system at startup
 ```
 
-Once it's built, `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` (one tab each) and `./jonquil <folder>` work the same way as
-`bb app:run` does, without needing babashka at all. Jolt is needed only
-for a project that runs Jolt as a child (one with a `deps.edn`), and Jonquil
-looks for it on your login shell's `PATH`; a loose file runs inside the
-binary itself.
+Then `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` (one tab
+each) and `./jonquil <folder>` work like `bb app:run`, without babashka.
+Jolt is needed only for a project that runs Jolt as a child (one with a
+`deps.edn`), and Jonquil looks for it on your login shell's `PATH`; a
+loose file runs inside the binary itself.
 
 ### The macOS quarantine note
 
-The binary is unsigned on macOS. `bb app:build` prints the fix if you need
-to hand it to someone else:
+The binary is unsigned on macOS. `bb app:build` prints the fix if you
+need to hand it to someone else:
 
 ```
 jolt build: note — on macOS this binary is unsigned; to share it,
   `xattr -d com.apple.quarantine ./jonquil` on the target, or sign it.
 ```
 
-Building and running it yourself on the same machine needs neither step;
-Gatekeeper only objects to a binary that arrived from somewhere else.
+Building and running it on the same machine needs neither step.
 
 ## The macOS app
 
@@ -95,40 +72,30 @@ bb app:bundle    # builds ./jonquil, then ./Jonquil.app from it
 bb app:install   # the same, then moves it to ~/Applications/Jonquil.app and registers it
 ```
 
-`bb app:bundle` writes `./Jonquil.app` (gitignored) with the icon, an
-`Info.plist` whose identifier is `net.b12n.jonquil`, and the binary inside.
-The short version string comes from `git describe --tags --always` and the
-build number from `git rev-list --count HEAD`. The bundle declares two
-document types, Clojure source (`clj`, `cljc`, `cljd`, `cljs`, `jank`, `edn`
-and `bb`) and Folder, both as Alternate. That means they show up under Open
-With and as Dock drop targets, but Jonquil never becomes the default app for
-anything. `bb app:install` replaces an existing `~/Applications/Jonquil.app`
-only when it is a Jonquil bundle, and refuses otherwise.
+`bb app:bundle` writes `./Jonquil.app` (gitignored) with the icon and
+identifier `net.b12n.jonquil`. It declares Clojure source and Folder
+document types as Alternate, so Jonquil shows under Open With and as a Dock
+drop target but is never the default app. `bb app:install` replaces an
+existing `~/Applications/Jonquil.app` only if it is a Jonquil bundle.
 
 The app still loads GTK4 and pango from Homebrew, so `brew install gtk4`
-stays a requirement. It isn't notarized either: the quarantine note above
+stays a requirement. It isn't notarized either, so the quarantine note
 applies when you copy `Jonquil.app` to another Mac.
 
-macOS registers any new `.app` it finds on disk, so after `bb app:bundle` the
-checkout's `./Jonquil.app` may also appear in Open With next to the installed
-one. `bb app:install` moves the bundle into `~/Applications`, so no second
-copy is left. After a plain `bb app:bundle`, delete `./Jonquil.app` or run
+After a plain `bb app:bundle`, the checkout's `./Jonquil.app` may show in
+Open With next to the installed one. Delete it or run
 `lsregister -u ./Jonquil.app` (it lives under
 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`).
 
 ### Where tools come from in a Finder launch
 
-A Finder or Dock launch inherits a bare `PATH`, without Homebrew, so `jolt`,
-`jank`, `clojure` and `node` wouldn't be found. When Jonquil's `PATH` has none of
-`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`, it asks
-your login shell once, in the background (`$SHELL -il -c`, zsh when `SHELL`
-is unset), and hands the answer to the Jolt child, to jank and to the
-ClojureScript launcher. If the shell
-takes more than 5 seconds but had already printed its `PATH`, Jonquil uses
-that. If the shell fails, or times out with nothing usable printed, or prints
-no `PATH`, Jonquil keeps the `PATH` it has and adds whichever of those four
-folders exist and aren't already in it. It then says where
-the `PATH` came from in the console, with one of these lines:
+A Finder or Dock launch inherits a bare `PATH`, so `jolt`, `jank`,
+`clojure` and `node` wouldn't be found. When `PATH` has none of
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`, Jonquil
+asks your login shell once (`$SHELL -il -c`, zsh if unset) and passes the
+result to the Jolt child, jank and ClojureScript. If the shell fails or
+prints nothing usable, Jonquil adds whichever of those folders exist. The
+console says which happened:
 
 ```
 ; PATH from your login shell (zsh).
@@ -137,28 +104,24 @@ the `PATH` came from in the console, with one of these lines:
 ; PATH from well-known folders (your login shell printed no PATH).
 ```
 
-A launch from a terminal (`./jonquil`, `bb app:run`) is unchanged. It
-inherits your shell's `PATH`, which usually has one of those folders, so no
-lookup runs and no line appears. A terminal `PATH` with none of them triggers
-the lookup too.
+A terminal launch usually has one of those folders already, so no lookup
+runs and no line appears.
 
 ## Linux
 
-Jonquil builds and runs on Linux. It was tested on Ubuntu 26.04 with GTK 4.22,
-in Docker on both arm64 and amd64 (see [Development](development.md#linux-checks-in-docker)),
-and checked by hand in a noVNC desktop.
+Jonquil builds and runs on Linux (tested on Ubuntu 26.04 with GTK 4.22, in
+Docker on arm64 and amd64, see
+[Development](development.md#linux-checks-in-docker)).
 
 ### Requirements
 
-- **GTK 4 and pango from your distribution.** On Ubuntu that is `libgtk-4-1`
-  and `libpango-1.0-0`, plus `adwaita-icon-theme` for the icon theme. Jonquil loads the shared libraries by
-  name at startup (`libgtk-4.so.1`, `libpango-1.0.so.0`, and so on), so
-  nothing is linked at build time.
-- **Jolt** v0.8.23 or later, as above. On x86_64 take the binary from Jolt's
-  release page. Jolt publishes no Linux arm64 binary, so there you build it
-  from source (`make` provisions its own Chez Scheme).
-- A desktop session. The checks so far ran under X11 (Xvfb, openbox and
-  pcmanfm in Docker); a Wayland desktop on real hardware is untested.
+- **GTK 4 and pango from your distribution.** On Ubuntu that is
+  `libgtk-4-1` and `libpango-1.0-0`, plus
+  `adwaita-icon-theme`. Nothing is linked at build time.
+- **Jolt** v0.8.23 or later. On x86_64 take the binary from Jolt's release
+  page. There is no Linux arm64 binary, so build it from source (`make`
+  provisions its own Chez Scheme).
+- A desktop session. Checks ran under X11; Wayland is untested.
 
 ### Build and install
 
@@ -180,52 +143,38 @@ bb app:uninstall   # takes it out again
 | `~/.local/share/icons/hicolor/256x256/apps/net.b12n.jonquil.png` | the icon |
 | `~/.local/share/mime/packages/net.b12n.jonquil.xml` | the MIME types |
 
-The MIME package defines `text/x-clojure` (`*.clj`, `*.cljc`, `*.cljd`,
-`*.cljs`, `*.bb`), `application/edn` (`*.edn`) and `text/x-jank` (`*.jank`), each a
-kind of `text/plain`. The launcher lists those three types, so Jonquil
-appears in a file manager's Open With list. Nothing outside `~/.local/share`
-is touched, and Jonquil is never made the default app for anything. Afterwards
-the installer runs `update-mime-database` and `update-desktop-database` on
-your `~/.local/share` folders when they are on `PATH`, and prints a note for
-each that isn't.
-
-Running it again replaces the earlier install. The launcher carries an
-`X-Jonquil-Install=1` line, and `app:install` and `app:uninstall` refuse to
-touch a launcher at that path without it, since that file isn't theirs. To
-start Jonquil from a terminal after installing, run
-`~/.local/share/jonquil/jonquil [file or folder...]`, or go through the
-launcher with `gtk4-launch net.b12n.jonquil [file or folder...]`. That
-command comes in Ubuntu's `libgtk-4-bin` package, which a GTK 4 install
-doesn't pull in; GTK 3's `gtk-launch` (in `libgtk-3-bin`) works the same.
+The MIME package defines `text/x-clojure`, `application/edn` and
+`text/x-jank`, so Jonquil appears in Open With but is never the default.
+Nothing outside `~/.local/share` is touched, and the installer runs
+`update-mime-database` and `update-desktop-database` when they are on
+`PATH`. Running it again replaces the earlier install; `app:install` and
+`app:uninstall` refuse a launcher without its `X-Jonquil-Install=1` line.
+To start from a terminal afterwards, run
+`~/.local/share/jonquil/jonquil [file or folder...]`, or
+`gtk4-launch net.b12n.jonquil [file or folder...]` (Ubuntu's
+`libgtk-4-bin`; GTK 3's `gtk-launch` works too).
 
 ### Where tools come from in a launcher start
 
-A start from the desktop launcher can inherit a short `PATH`, and the
-lookup described in [the macOS section](#where-tools-come-from-in-a-finder-launch)
-runs here too. When `SHELL` is unset, the shell it asks is the one in your
-`/etc/passwd` entry (matched by user id), or `/bin/sh` when there is no entry
-or its shell field is empty. Users whose account lives in LDAP or another
-network source have no line in that file, so they get `/bin/sh`.
-
-One gap remains. The lookup only runs when none of `/opt/homebrew/bin`,
-`/usr/local/bin`, `~/.local/bin` and `~/bin` is on the `PATH`. A desktop
-session that has `/usr/local/bin` on its `PATH` skips the lookup, so a tool
-that lives only in `~/.local/bin` isn't found from a launcher start. Start
-Jonquil from a terminal, or put the tool in `/usr/local/bin`.
+The [lookup above](#where-tools-come-from-in-a-finder-launch) runs here
+too. When `SHELL` is unset, it uses the shell in your `/etc/passwd` entry,
+or `/bin/sh` (always, for LDAP accounts). It is skipped when any of the
+four folders is already on `PATH`, so a tool living only in `~/.local/bin`
+isn't found if `/usr/local/bin` is on it. Start from a terminal, or put the
+tool in `/usr/local/bin`.
 
 ### Keys
 
-Ctrl is the command key, so the shortcuts the guide writes as Cmd/Ctrl work
-as Ctrl chords. Ctrl+Q is quick doc, as it is on macOS, and it does not quit.
+Ctrl is the command key, so the shortcuts the guide writes as Cmd/Ctrl
+work as Ctrl chords. Ctrl+Q is quick doc, as on macOS, and does not quit.
 Ctrl+W closes the tab, and on the last tab it closes the window, which
-quits. Closing the window quits too. There's no separate quit chord.
+quits. There's no separate quit chord.
 
 ## Settings
 
 Jonquil keeps a few choices between runs in
 `$XDG_CONFIG_HOME/jonquil/settings.edn`, or `~/.config/jonquil/settings.edn`
-when that variable is unset, blank, or not an absolute path. It's a small
-EDN map:
+when that variable is unset, blank, or not an absolute path:
 
 ```clojure
 {:theme :navy
@@ -234,38 +183,30 @@ EDN map:
  :reopen-tabs? true}
 ```
 
-- `:theme` is the theme you last picked with Cmd/Ctrl+Shift+M, one of
+- `:theme`: the theme you last picked with Cmd/Ctrl+Shift+M, one of
   `:light`, `:dark`, `:solarized`, `:navy` or `:auto` (follow macOS's
   light or dark setting).
-- `:file-tree` is whether the file tree was showing and how wide it was,
-  saved when you toggle it and when you quit.
-- `:dialect` is optional and only written by hand: the dialect an untitled
-  buffer or a file outside any project starts in (see
+- `:file-tree`: whether the tree was showing and how wide, saved when you
+  toggle it and when you quit.
+- `:dialect` (hand-written, optional): the dialect an untitled buffer or a
+  file outside any project starts in (see
   [Choosing a dialect](dialects/index.md#choosing-a-dialect)).
-- `:reopen-tabs?` is also only written by hand. Set it to `false` and
-  Jonquil stops saving and reopening the last session's tabs. Leaving it
-  out, or `true`, keeps that on.
-- `:mcp-listen?` is only written by hand too. Set it to `true` and each
-  window serves Jonquil's MCP tools on a loopback socket, so an agent can
-  attach to a window that's already open with `jonquil --mcp-attach` (see
-  [Driving Jonquil from an agent](mcp.md)).
+- `:reopen-tabs?` (hand-written): `false` stops Jonquil saving and
+  reopening the last session's tabs. Omitted or `true` keeps it on.
+- `:mcp-listen?` (hand-written): `true` makes each window serve Jonquil's
+  MCP tools on a loopback socket, so an agent can attach to an open window
+  with `jonquil --mcp-attach` (see [Driving Jonquil from an agent](mcp.md)).
 
-The tabs themselves live next door in `sessions.edn`, one entry per
-project folder, newest first, at most 20 (see
-[Tabs from last time](files-and-tabs.md#tabs-from-last-time)). It changes as you open and close tabs, which is why
-it's a separate file from the one you edit by hand.
+The tabs live next door in `sessions.edn`, one entry per project folder,
+newest first, at most 20 (see
+[Tabs from last time](files-and-tabs.md#tabs-from-last-time)). It changes
+as you open and close tabs, which is why it's separate from the file you
+edit by hand.
 
-Loading the file never throws. A missing file starts Jonquil with the
-defaults (the light theme, and the tree hidden unless you opened a folder) and says nothing. A file that
-can't be read, or a value Jonquil can't use, falls back to the default for
-that key and says so once in the console. Saving changes only
-the key it's saving and keeps everything else in the file, and it refuses
-to overwrite a file it couldn't read, telling you in the console instead,
-so a hand edit with a typo is never thrown away. Saving is atomic: Jonquil
-writes a temp file beside the target and renames it into place, and if the
-settings file is a symlink, the save follows it and the link itself
-survives. To go back to every default, delete the file. Deleting
-`sessions.edn` as well forgets the remembered tabs.
+A missing file means the defaults; an unreadable file or unusable value
+falls back per key with one console note. Saving changes only its own key,
+refuses to overwrite a file it couldn't read, and is atomic. Delete the
+file to reset everything, and `sessions.edn` to forget remembered tabs.
 
 See [Using Jonquil](using-jonquil.md) for the rest of the window, and
 [Development](development.md) for the test suite, the self-test harnesses,
