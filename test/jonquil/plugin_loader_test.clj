@@ -737,7 +737,7 @@
     (step! live d)
     (propose! d "pw" v2 rep)
     (write! d "pw.clj" (marked "pw" 3))
-    (is (= ["plugin pw: v2 wasn't accepted: pw.clj changed since it was loaded (Reload Plugins first)"]
+    (is (= ["plugin pw: v2 wasn't accepted: pw.clj differs from the live version (an edit not yet reloaded, or one that failed its checks); reload or fix it first"]
            (accept! live d "pw" 2)))
     (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
     (is (= :pending (history/version-status (entries d "pw") 2)))
@@ -750,10 +750,27 @@
     (write! d "pw.clj" (marked "pw" 2))
     (step! live d)
     (write! d "pw.clj" (marked "pw" 3))
-    (is (= ["plugin pw wasn't reverted: pw.clj changed since it was loaded (Reload Plugins first)"]
+    (is (= ["plugin pw wasn't reverted: pw.clj differs from the live version (an edit not yet reloaded, or one that failed its checks); reload or fix it first"]
            (revert! live d "pw" 1)))
     (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
     (is (= 2 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
+
+(deftest revert-to-the-live-text-says-already-test
+  (let [[d live] (with-v1-and-v2 "wrap")
+        before @live]
+    (is (= ["plugin wrap: v2 is already live, so it wasn't reverted"] (revert! live d "wrap" 2)))
+    (is (identical? before @live))
+    (is (= 2 (count (entries d "wrap"))))))
+
+(deftest revert-over-a-broken-edit-says-so-test
+  (let [[d live] (with-v1-and-v2 "wrap")]
+    (write! d "wrap.clj" "(ns broken")
+    (step! live d)
+    (is (= (v2-of "wrap") (get-in @live [:plugins :wrap :source])) "the previous version stays live")
+    (is (= ["plugin wrap wasn't reverted: wrap.clj differs from the live version (an edit not yet reloaded, or one that failed its checks); reload or fix it first"]
+           (revert! live d "wrap" 1)))
+    (is (= "(ns broken" (slurp (io/file d "wrap.clj"))))
+    (is (= 2 (count (entries d "wrap"))))))
 
 ;; --- plugins P11: Enable and Disable -----------------------------------------
 
