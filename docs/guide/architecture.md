@@ -129,6 +129,22 @@ these:
   Return, Run Form's chords, F5, the Escape chain's order and conditions,
   the palette chord, and each context-menu item's command) and by the
   window self-test rows.
+- Plugins at a glance (Part 2, slices P1 to P11c, 2026-10-25 to
+  2026-10-28). The half with no GTK and no live state is data and checks: `jonquil.plugin` (the
+  `defplugin` API), `plugin-check` (the validator), `plugin-protocol` (load,
+  soak and validate one candidate), `plugin-history` (the version files),
+  `plugin-list` (the list's rows and a plugin's version lines) and
+  `plugin-review` (a proposal's review). The live side is
+  `plugin-registry` (the registry atom, the effect functions and the
+  bindings that reach the keymap), `plugin-loader` (every step: load,
+  reload, revert, propose, Accept, Reject, Enable and Disable) and
+  `plugin-hooks`. An agent's proposal is checked by `plugin-isolated`, which
+  starts a throwaway `jolt` running `plugin-checker` from the files
+  `plugin-checker-files` writes. `plugin-mcp` is the four plugin MCP tools.
+  In the window, `jonquil.gtk.review-pane`, `plugin-list-pane` and
+  `plugin-history-pane` share the right-hand slot, and every step runs on
+  one plugin agent (`plugin-step!`), so no two ever interleave. The bullets
+  below are the slice-by-slice record.
 - `jonquil.plugin` and `jonquil.plugin-check` (plugins Part 2, slice P1,
   2026-10-25): the plugin API's first piece and the validator, both pure,
   with nothing loaded from disk yet. `jonquil.plugin/defplugin` records a

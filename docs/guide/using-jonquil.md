@@ -1746,12 +1746,14 @@ that follows a `when` in the loop body, fail with
 works, for example
 `(loop [i 0] (if (< i n) (recur (inc i)) i))`.
 
-## Plugins (early)
+## Plugins
 
-A plugin is one Clojure file that adds editor commands and the keys that
-run them. This is the first part of plugin support: a plugin's `:edit`
-and `:run` commands work now, with the `:console`, `:buffer` and `:eval`
-effects, and so do the four hooks. Agent proposals come later.
+A plugin is one Clojure file that adds to Jonquil while it runs: editor
+commands and the keys that run them, hooks that hear about saves, Runs and
+errors, and tools an agent can call. You can write one yourself, or an
+agent can propose one, which then waits until you accept it (see Proposals
+from an agent, below). Either way it runs with Jonquil's own rights, so a
+plugin file deserves the same trust as any other code you run.
 
 Plugin files live in a `plugins` folder beside the settings file, so
 `~/.config/jonquil/plugins/` (or `$XDG_CONFIG_HOME/jonquil/plugins/`). A
@@ -1781,6 +1783,8 @@ An `:edit` command gets a snapshot of the buffer, `{:text :caret
 in ascending order, or `nil` when it doesn't apply here (the key then
 goes on as usual). `p/form-at-caret` and `p/wrap-form` are there to build
 on. `:effects #{}` says the plugin is pure.
+
+### Commands and effects
 
 A command that does more than edit the buffer is a `:run` command,
 `(fn [ctx] ...)`, and its plugin lists what it reaches in `:effects`:
@@ -1818,6 +1822,15 @@ switch tabs while it works.
 Calling a function whose effect the plugin didn't declare throws "this
 plugin didn't declare :buffer", and a tab that has closed throws "that tab
 was closed".
+
+Three more effects, `:fs`, `:proc` and `:net`, can be declared but come
+with no functions in this release. They say what a plugin means to reach,
+so the review of an agent's proposal can show it to you. None of the
+effects is a sandbox, though. A plugin's code can still call Java, read a
+file or start a process directly, and nothing in Jonquil stops it: a
+declaration decides which of Jonquil's own functions the plugin's ctx
+holds, and what the review shows you before you accept an agent's
+proposal. A plugin file you put in the folder yourself gets no review.
 
 `p/eval!` runs the code in the tab's namespace (the one its `ns` form
 names, once that exists), and the console never hears of it. It adds
@@ -1971,6 +1984,13 @@ depend on it: one that now fails, say because it binds a command that's
 gone, is removed and named, and comes back once what it needs is fixed
 and saved (or at the next Reload Plugins).
 
+`--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a
+launch from the Dock or Finder, starts with none. Reload Plugins, Enable
+and Disable still load them in a window started that way, and then their hooks fire,
+though saving a plugin file there doesn't reload it.
+
+### The plugin list
+
 **Plugins…** in the command palette lists every plugin on the right,
 where the source panel shows. A row says what `jonquil_plugins_list` says
 to an agent: the plugin's id, its live version, whether it's loaded,
@@ -1998,10 +2018,9 @@ every other setting, the rest of `:plugins` included:
 
 You can also write it by hand and then Reload Plugins. When that key holds
 something Jonquil can't use, Enable and Disable refuse and say so rather
-than overwrite it. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a
-launch from the Dock or Finder, starts with none. Reload Plugins, Enable
-and Disable still load them in a window started that way, and then their hooks fire,
-though saving a plugin file there doesn't reload it.
+than overwrite it.
+
+### History and revert
 
 Every version of a plugin that goes live is kept, so you can see what
 changed and go back. They live in `plugins/.history/<id>/`: each version's
@@ -2032,6 +2051,8 @@ back. A tab already open on the plugin's file keeps its old text after a
 Revert, so close it, or don't save it, if you want to keep the revert.
 **Back** returns to the list.
 
+### Proposals from an agent
+
 An agent's proposed change to a plugin waits for you. It's a version too,
 pending, and the status bar counts how many are waiting. **Review Plugin
 Proposals** in the command palette opens the review on the right, where
@@ -2043,8 +2064,26 @@ runs it through the same checks again, in Jonquil this time, and only
 then writes the file and makes it live, so pressing Accept is the moment
 you trust that code. When it doesn't pass, it stays pending and the
 footer says why. **Reject** takes an optional note. The agent can read
-what happened to its proposal but can never press Accept. (Agents propose
-through the MCP tools, which come in the next slice.)
+what happened to its proposal but can never press Accept. An agent proposes
+with `jonquil_plugin_propose`, one of the window's MCP tools, described
+with a plugin's own tools under Driving Jonquil from an agent (MCP).
+
+Before a proposal reaches the review, Jonquil checks it in a separate Jolt
+started for that one check, in a new temporary folder only you can open,
+with the environment variables whose names look like credentials taken
+out. That child is not a sandbox. It runs as you, with your files and
+your network, so a proposal whose top-level code deletes a file deletes
+it during the check, and the scrub only catches the obvious names. That
+reach on your machine is no more than an agent already has through
+`jonquil_eval`. The code could even rewrite a file on disk that Jonquil
+reads later, such as another plugin's file or `settings.edn`. What the
+check keeps out of reach is the running Jonquil: until you press Accept,
+the agent's code can't touch your open tabs, the REPL, the plugins that
+are loaded or the settings Jonquil has already read, and it can't crash
+or hang the window. A check that runs past 30
+seconds is stopped, and the agent gets that reason back. When there's no
+`jolt` to check in, the proposal waits unchecked, the review says so, and
+its checks run when you press Accept.
 
 ## Driving Jonquil from an agent (MCP)
 
