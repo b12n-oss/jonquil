@@ -58,7 +58,7 @@ sequenceDiagram
 `Jvm` serves `{:dialect :clj}`. A JVM server honours `:ns`, so Run Selection and Run Form send it explicitly and Jonquil never sends the buffer's `ns` form; an unloaded namespace gets the not-loaded sentence. Run is a plain `load-file`, then the prompt moves to the buffer's namespace.
 
 - **Auto-require:** on each fresh connection, `auto-require!` sends one `(require ...)` for the `:auto-require` list from `.jonquil.edn` (kept for `:clj` and `:jolt`). A failure is reported and the user's request still goes out. Jolt does the same, out of process and in process.
-- **Stop:** sends `interrupt` if the server advertises it, waits `:interrupt-timeout-ms`, then detaches.
+- **Stop:** sends `interrupt` if the server advertises it and waits up to `:interrupt-timeout-ms` (1 s); it detaches only if the evaluation hasn't ended by then, or the server lacks the op.
 - **stdin:** `send-eof!` sends an empty `stdin` op only on nREPL 1.8.0 or later with a read waiting. Older servers get nothing, and the console says so once.
 - **Help:** `complete` merges server and offline candidates. `lookup` uses the server's op and adds a `Defined in <file>:<line>` line. `lookup` and `full-doc` resolve `:ns` through `resolve-lookup!` (buffer namespace, then prompt namespace). `full-doc` runs off the GTK thread with a longer `:full-doc-timeout-ms`, because the first call downloads the ClojureDocs export.
 

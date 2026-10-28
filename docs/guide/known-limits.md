@@ -21,8 +21,8 @@ Known rough edges, parked for later:
   error.
 - Exiting while an out-of-process child is still starting can take up to
   about 16 s per start.
-- A wedged child delays completion and quick doc by 3 s at most; Jonquil's
-  offline answer shows first.
+- A wedged child doesn't block completion or quick doc: the offline answer
+  shows after about 25 ms, and Jonquil gives up on the child's after 3 s.
 - Stop on an unresponsive child takes about 2 s.
 - A project kept in process shares Jonquil's libraries, so a library Jonquil
   already loaded stays at its version. Run out of process when the version
@@ -34,7 +34,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>ClojureDart</strong> (9)</summary>
+<summary><strong>ClojureDart</strong> (7)</summary>
 
 - Stop detaches instead of interrupting, and there is no stdin.
 - It needs the fork that adds an nREPL server.
@@ -60,7 +60,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>ClojureScript on node</strong> (5)</summary>
+<summary><strong>ClojureScript on node</strong> (4)</summary>
 
 - Needs the Clojure CLI and `node` on the login shell's `PATH`. Its
   listeners are unauthenticated loopback sockets.
@@ -91,7 +91,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>ClojureScript with shadow-cljs</strong> (7)</summary>
+<summary><strong>ClojureScript with shadow-cljs</strong> (5)</summary>
 
 - It attaches to a shadow-cljs server you started.
 - Stop detaches, since the work runs in the JS runtime. No stdin and no
@@ -128,7 +128,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>The inspector</strong> (5)</summary>
+<summary><strong>The inspector</strong> (6)</summary>
 
 - The panel never refreshes itself; reopen it after a later evaluation.
 - A collection shows at most 1000 entries.
@@ -136,6 +136,8 @@ Known rough edges, parked for later:
   Jonquil's view.
 - Resizing the panel doesn't reflow rows already shown.
 - No inspector for ClojureDart or ClojureScript.
+- JVM Clojure's inspector needs your server to offer clojure-cli.repl's
+  inspector; without it, Cmd/Ctrl+I is refused.
 
 </details>
 

@@ -87,6 +87,8 @@ marker; `{:dialect :cljs}` in `.jonquil.edn` forces it. The build is
 ```
 
 With several builds and none named, Run ends with a notice listing them.
+Reopen the file after editing `.jonquil.edn`, since the edit takes effect
+then.
 
 <details>
 <summary><strong>What the console says when it can't connect</strong></summary>
@@ -112,6 +114,6 @@ With several builds and none named, Run ends with a notice listing them.
   Jonquil's offline tables otherwise. Jump to definition stays in the
   buffer.
 - **Differences from a JVM habit**: `js/console.log` goes to the JS
-  runtime's console, not Jonquil's (`println` reaches both). Requiring a
+  runtime's console, not Jonquil's (`println` does reach Jonquil). Requiring a
   namespace the build doesn't include compiles but throws a ReferenceError
   on first use, so keep a Run file's requires within the build.

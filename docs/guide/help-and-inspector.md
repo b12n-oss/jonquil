@@ -102,7 +102,8 @@ become a table.
 - `d` prompts for a name and defines that var from the current value.
 - Escape closes the panel (inside the `d` prompt, only the prompt).
 
-Stepping through a value never changes `*1`, `*2` or `*3`. Collections cap
+Out of process, Jonquil loads the inspector into its Jolt child as nREPL
+middleware, so stepping through a value never changes `*1`, `*2` or `*3`. Collections cap
 at 1000 entries (`1000+ items`). Runtime support is in
 [Known limits](known-limits.md).
 

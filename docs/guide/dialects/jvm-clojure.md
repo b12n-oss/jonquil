@@ -54,7 +54,7 @@ or it's ignored with a console note. Edits take effect in a new window.
 - **Run** sends the whole pane as a `load-file`; the file's `ns` decides
   where it evaluates, and the prompt moves there.
 - **REPL entries** run in the prompt's namespace, which follows `in-ns`.
-- **Run Form** (Cmd/Ctrl+E, Cmd/Ctrl+Enter) runs in the buffer's namespace.
+- **Run Selection and Run Form** (Cmd/Ctrl+E, Cmd/Ctrl+Enter) run in the buffer's namespace.
   If the server hasn't loaded it: "Run the file first."
 - **Stop** sends `interrupt` and waits up to a second. If the evaluation
   doesn't end, Jonquil detaches and the next evaluation uses a fresh

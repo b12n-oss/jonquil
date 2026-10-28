@@ -57,7 +57,7 @@ A plugin is `<settings-dir>/plugins/<id>.clj`. The data-and-checks half has no G
 - A gone file, or an id in `:plugins {:disabled #{...}}` in `settings.edn`, is removed.
 - Later plugins are validated again, since their keys can depend on earlier ones.
 
-Loads happen at window open, from Reload Plugins in the palette, and from a saved plugin file (a hook in `save-to!`). `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip them and every step refuses with `plugins-off`. After each step `sync-plugin-tabs!` refreshes tabs on plugin files through `tabs/disk-sync`: a clean tab reloads, a dirty one is warned once and rebased to the disk text.
+Loads happen at window open, from Reload Plugins in the palette, and from a saved plugin file (a hook in `save-to!`). `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip them and every step refuses with `plugins-off`. After each step `sync-plugin-tabs!` refreshes tabs on plugin files through `tabs/disk-sync`: a clean tab reloads, a dirty one keeps its edits, is warned once, and takes the disk text as its saved baseline (`editor/rebase-saved!`).
 
 ### Effects
 

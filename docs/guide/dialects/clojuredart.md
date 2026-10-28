@@ -23,7 +23,7 @@ to a live process. It never starts, stops or signals the app.
   session in the file's namespace. It prints "; Loaded <ns> (<n> forms)",
   or "Load stopped at form <n>" with the app's error. An untitled buffer
   is refused: save it first.
-- **Run Form** runs in the buffer's namespace, evaluating its `ns` form
+- **Run Selection and Run Form** (Cmd/Ctrl+E, Cmd/Ctrl+Enter) run in the buffer's namespace, evaluating its `ns` form
   first if the session is elsewhere. REPL entries run wherever the session
   is.
 - **Stop** detaches, leaving the app untouched; a change already sent may

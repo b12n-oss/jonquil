@@ -133,8 +133,9 @@ TODO` on the console and status bar, sends nothing, and gives an agent's
 `:text` changes nothing, and a non-sentence `:abort` is reported and ignored.
 
 - All `:before-run` hooks together get 100 ms. If they time out or throw, the
-  Run goes ahead with a line saying so. A hook that never returns is skipped
-  by later Runs, with a line.
+  Run goes ahead with a line saying so. While a hook from an earlier Run
+  hasn't returned, every later Run skips all `:before-run` hooks, with a
+  line saying so.
 - `:before-run` hooks can't use effects, even declared ones (`p/print!` etc.
   throw and the Run goes ahead).
 - Inspect Form, the console and `jonquil_eval` don't ask these hooks.
@@ -177,7 +178,7 @@ Select a row, then:
 
 - **Disable**: writes the id into `settings.edn` and reloads; commands and
   keys go at once. The file stays.
-- **Enable**: removes it and reloads through the usual checks.
+- **Enable**: removes its id from `:disabled` and reloads through the usual checks.
 - **Open**: the file in a tab.
 - **History**: its versions.
 - **Review Proposals**: pending agent proposals.

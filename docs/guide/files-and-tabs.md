@@ -113,8 +113,8 @@ your choice and the tree's width (drag its edge).
 <summary><strong>What the tree hides, and refreshing it</strong></summary>
 
 - Hidden: dotfiles, `target`, `node_modules`, and plain-name, `*` and
-  `folder/` lines from the root's `.gitignore` (lines with `!`, `**` or `/`
-  and nested `.gitignore` files are ignored).
+  `folder/` lines from the root's `.gitignore` (lines with `!`, `**` or a `/`
+  before the end, and nested `.gitignore` files, aren't applied).
 - Non-Clojure files are dimmed but still open.
 - The tree doesn't watch the disk: ⟳ re-reads every open folder.
 

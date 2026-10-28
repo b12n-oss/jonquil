@@ -20,8 +20,9 @@ and the traps that catch first-time runners.
 <summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code>, <code>test:basilisp</code>, <code>test:plugins</code> and <code>test:cljs-node</code></strong></summary>
 
 `bb test` never touches a child process or a real server, on purpose, so
-the live suites are separate tasks. Those that need a missing tool print a
-message and skip, exiting 0.
+the live suites are separate tasks. `test:jank`, `test:bb`, `test:basilisp`,
+`test:plugins` and `test:cljs-node` print a message and skip, exiting 0,
+when their tool is missing.
 
 | Task | Runs against | Needs |
 |---|---|---|
@@ -86,8 +87,9 @@ The full application window alone has 399 rows.
 <details>
 <summary><strong>The ten groups, and what each one covers</strong></summary>
 
-Fakes run in the same process, so none of these need a real runtime except
-the nREPL group.
+Fakes stand in for real toolchains (in process, or as a small script
+started as a child for jank and node), so only the nREPL group needs a
+real runtime.
 
 | # | File (`dev/`) | Covers | Needs |
 |---|---|---|---|
@@ -96,7 +98,7 @@ the nREPL group.
 | 3 | `gtk_selftest_nrepl.clj` | a `{:runtime :nrepl}` project with a real Jolt child | the jolt-lang/nrepl checkout (one failing row without it) |
 | 4 | `gtk_selftest_cljd.clj` | ClojureDart attach | fake server `fake_cljd_nrepl.clj` named by `NREPL.lock` |
 | 5 | `gtk_selftest_clj.clj` | JVM Clojure attach, including slow-answer rows (its `:delays` atom) | fake server `fake_jvm_nrepl.clj` named by `.nrepl-port` |
-| 6 | `gtk_selftest_tree.clj` | session restore from `sessions.edn` (two files, one gone) | |
+| 6 | `gtk_selftest_tree.clj` | session restore from `sessions.edn` (two files plus one that's gone) | |
 | 7 | `gtk_selftest_jank.clj` | a `.jank` project | `JONQUIL_JANK` set to `dev/fake-jank` (done by the task) |
 | 8 | `gtk_selftest_args.clj` | launching like a terminal, via `jonquil.main/gtk-argv` | |
 | 9 | `gtk_selftest_cljs.clj` | shadow-cljs attach | fake server `fake_shadow_nrepl.clj` named by `.shadow-cljs/nrepl.port` |
@@ -259,7 +261,8 @@ manual. Docker is the only requirement beyond the usual tools.
 Tasks take `--arch arm64|amd64` (default: the host's), except
 `linux:clean`. The arm64 image compiles Jolt and Chez Scheme from source
 because Jolt publishes no Linux arm64 binary, so it's slow to build (about
-11 minutes); amd64 uses the pinned release tarball. Pulling the base image
+11 minutes); amd64 uses the pinned release tarball but still takes
+about 6.5 minutes, its `apt` step emulated. Pulling the base image
 needs Docker Hub, so run the first `bb linux:image` from a normal terminal.
 
 The checkout is mounted read-only and copied to `~/jonquil` in the
