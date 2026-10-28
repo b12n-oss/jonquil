@@ -68,20 +68,6 @@
 
 ;; --- read and status ---------------------------------------------------------
 
-(defn- version-entries
-  "id's entries for version n: the first is the version's own, the last
-  holds its status."
-  [entries n]
-  (filter #(= n (:n %)) entries))
-
-(defn- history-line [entries n]
-  (let [es (version-entries entries n)
-        e0 (first es)
-        e1 (last es)]
-    (str "v" n " " (some-> (:status e1) name) " (" (some-> (:source e0) name) ", " (:at e0) "): " (:reason e0)
-         (when (:note e1) (str "; note: " (:note e1)))
-         (when (= :rejected-by-checks (:status e1)) (str "; problems: " (str/join "; " (:problems e0)))))))
-
 (defn- with-history
   "(f hdir entries) for a good id whose history reads, else the error."
   [{:keys [plugins-dir id]} f]
@@ -118,7 +104,7 @@
                                           (when src ["" src])
                                           (when (seq entries)
                                             (into ["" "History:"]
-                                                  (map #(history-line entries %) (distinct (map :n entries))))))))))))))))
+                                                  (map #(plugin-list/history-line entries %) (distinct (map :n entries))))))))))))))))
 
 (defn status-text
   "jonquil_plugin_status: version n's status (default: id's latest agent
@@ -132,7 +118,7 @@
        state
        (fn [_ entries]
          (let [n (or n (:n (last (filter #(= :agent (:source %)) entries))))
-               es (version-entries entries n)]
+               es (plugin-list/version-entries entries n)]
            (cond
              (nil? n) (err (str id " has no proposals. Call jonquil_plugin_propose to make one."))
              (empty? es) (err (str id " has no v" n "."))

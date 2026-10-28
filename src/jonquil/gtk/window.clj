@@ -43,6 +43,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.popover :as popover]
@@ -794,18 +795,26 @@
   ;; status box's own child spacing (6) plus a little.
   8)
 
+(defonce ^:private plugin-history-shown
+  ;; plugins P11b: the id whose history panel is open, or nil. Set when
+  ;; History is pressed, cleared by show-right-panel! for any other panel
+  ;; and by hide-right-panel! :history, so it follows the panel; plugin-step!
+  ;; reads it to rebuild that history off the GTK thread.
+  (atom nil))
+
 (defn- right-roots
   "{which root} for the panels right's slot holds; a right without
-  :review-root or :plugins-root (a test's) has fewer."
-  [{:keys [inspector-root source-root review-root plugins-root]}]
+  :review-root, :plugins-root or :history-root (a test's) has fewer."
+  [{:keys [inspector-root source-root review-root plugins-root history-root]}]
   (cond-> {:inspector inspector-root :source source-root}
     review-root (assoc :review review-root)
-    plugins-root (assoc :plugins plugins-root)))
+    plugins-root (assoc :plugins plugins-root)
+    history-root (assoc :history history-root)))
 
 (defn- show-right-panel!
-  "Shows which (:inspector, :source or, plugins P9b, :review, or P11,
-  :plugins) in the slot
-  and hides the others. When the slot was hidden, also sizes h-paned so
+  "Shows which (:inspector, :source or, plugins P9b, :review, P11,
+  :plugins, or P11b, :history) in the slot and hides the others; any but
+  :history clears plugin-history-shown. When the slot was hidden, also sizes h-paned so
   the panel claims about PANEL-WIDTH, as the inspector always did; while
   it's showing, the split stays where the person put it. right is {:win
   :h-paned :slot :inspector-root :source-root :review-root}. GTK-thread
@@ -813,6 +822,7 @@
   [{:keys [win h-paned slot] :as right} which]
   (let [was-hidden? (zero? (g/gtk-widget-get-visible slot))
         roots (right-roots right)]
+    (when (not= which :history) (reset! plugin-history-shown nil))
     (doseq [[k root] roots :when (not= k which)] (g/gtk-widget-set-visible root 0))
     (g/gtk-widget-set-visible (get roots which) 1)
     (g/gtk-widget-set-visible slot 1)
@@ -839,6 +849,7 @@
   [{:keys [slot source-pane] :as right} which]
   (let [roots (right-roots right)]
     (g/gtk-widget-set-visible (get roots which) 0)
+    (when (= which :history) (reset! plugin-history-shown nil))
     (when (= which :source)
       (source-pane/cancel-scroll-settle! (:scroll-cancelled? source-pane)))
     (when (every? #(zero? (g/gtk-widget-get-visible %)) (vals roots))
@@ -3038,9 +3049,11 @@
   plugin-reviews-changed with open? (open the review panel), after (fn
   [lines] run once the window has changed) and done. Plugins P11: so are
   the plugin list's rows (jonquil.plugin-list/rows, with the disabled ids
-  from the settings file) and open-list? (open the list). Returns the
+  from the settings file) and open-list? (open the list), and P11b, the
+  open history's version rows (jonquil.plugin-list/version-rows for
+  plugin-history-shown, with its :id) and open-history?. Returns the
   agent, whose state is the step's lines."
-  [{:keys [settings-path step open? open-list? after done]}]
+  [{:keys [settings-path step open? open-list? open-history? after done]}]
   (send-off plugin-loads
             (fn [_]
               (let [lines (step)]
@@ -3054,7 +3067,10 @@
                      {:reviews (plugin-review/pending-reviews {:plugins-dir dir :registry reg})
                       :rows (plugin-list/rows {:plugins-dir dir :registry reg
                                                :disabled (:disabled (:plugins (settings/load-settings settings-path)))})
-                      :open? open? :open-list? open-list? :lines lines :after after :done done}))
+                      :history (when-let [id @plugin-history-shown]
+                                 (assoc (plugin-list/version-rows dir id) :id id))
+                      :open? open? :open-list? open-list? :open-history? open-history?
+                      :lines lines :after after :done done}))
                   (catch :default e
                     (when done (deliver done true))
                     (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e))))))
@@ -3185,6 +3201,8 @@
         ;; plugins P11: the plugin list shares the slot too; its rows are
         ;; rebuilt after every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
+        ;; plugins P11b: and the history of the plugin selected in it
+        hp (plugin-history-pane/make-pane)
         *right (atom nil)
         ;; Where each jump into a tab started, newest last, for Cmd/Ctrl+[
         ;; (open-in-tab!, jump-back!).
@@ -3307,7 +3325,8 @@
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :review-root (:root rp) :plugins-root (:root lp) :source-pane sp}
+               :review-root (:root rp) :plugins-root (:root lp)
+               :history-root (:root hp) :source-pane sp}
         _ (reset! *right right)
         ;; plugins P9b: the plugin-step! opts for Accept or Reject of the
         ;; proposal the panel shows (nil when none is), its lines put on
@@ -3373,6 +3392,38 @@
                           (let [p (promise)]
                             (on-gui! #(deliver p (when (plugin-list-pane/select-id! lp id) (toggle-step enabled?))))
                             (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
+        ;; plugins P11b: History on the list's selected plugin, Back and
+        ;; Revert on the history's selected version: plugin-step! opts, or
+        ;; nil with the footer saying why. Revert's lines go to the
+        ;; history's footer and its last to the status bar once the window
+        ;; has changed. GTK-thread only: they read the selection and reason.
+        history-step (fn []
+                       (if-let [{:keys [id]} (plugin-list-pane/selected-row lp)]
+                         (do (reset! plugin-history-shown id)
+                             (plugin-history-pane/set-reason! hp "")
+                             {:settings-path @settings-path* :step (fn [] []) :open-history? true})
+                         (do (plugin-list-pane/report! lp "No plugin is selected.") nil)))
+        history-back-step (fn []
+                            (reset! plugin-history-shown nil)
+                            {:settings-path @settings-path* :step (fn [] []) :open-list? true})
+        revert-step (fn []
+                      (let [id @plugin-history-shown
+                            row (plugin-history-pane/selected-row hp)]
+                        (if (or (nil? id) (nil? row))
+                          (do (plugin-history-pane/report! hp "No version is selected.") nil)
+                          ;; final review I1: the reason is read here, at the
+                          ;; click, never on the agent
+                          (let [path @settings-path*
+                                reason (plugin-history-pane/reason-text hp)]
+                            {:settings-path path
+                             :step #(plugin-loader/revert-step!
+                                     plugin-registry/live
+                                     {:settings-path path :os (System/getProperty "os.name")
+                                      :id id :n (:n row) :reason reason})
+                             :after (fn [lines]
+                                      (when-let [l (last lines)]
+                                        (plugin-history-pane/report! hp (str/join "\n" lines))
+                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
         ;; plugins P11: Open shows the selected plugin's file in a tab, or
         ;; says why it can't (no row, or no file now). GTK-thread only.
         plugin-open-fn (fn []
@@ -3544,6 +3595,8 @@
     (g/gtk-box-append slot (:root rp))
     (g/gtk-widget-set-vexpand (:root lp) 1)
     (g/gtk-box-append slot (:root lp))
+    (g/gtk-widget-set-vexpand (:root hp) 1)
+    (g/gtk-box-append slot (:root hp))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -3551,6 +3604,7 @@
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible (:root lp) 0)
+    (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
     (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
@@ -3665,8 +3719,13 @@
      lp {:on-enable (fn [] (some-> (toggle-step true) plugin-step!))
          :on-disable (fn [] (some-> (toggle-step false) plugin-step!))
          :on-open plugin-open-fn
+         :on-history (fn [] (some-> (history-step) plugin-step!))
          :on-review (fn [] (plugin-step! {:settings-path @settings-path* :step (fn [] []) :open? true}))
          :on-close (fn [] (hide-right-panel! right :plugins) (editor/focus! (:ed (active-tab))))})
+    (plugin-history-pane/set-handlers!
+     hp {:on-revert (fn [] (some-> (revert-step) plugin-step!))
+         :on-back (fn [] (plugin-step! (history-back-step)))
+         :on-close (fn [] (hide-right-panel! right :history) (editor/focus! (:ed (active-tab))))})
     ;; I5: joins the SAME registry, so Escape closes the def prompt
     ;; before it can fall through to Stop (ruling 8).
     (register-popover-fn (:def-popover pane))
@@ -3839,7 +3898,7 @@
     ;; it's showing or being opened, the review panel: the same plugin's
     ;; proposal again if it's still pending, else the first
     (reset! plugin-reviews-changed
-            (fn [{:keys [reviews rows open? open-list? lines after done]}]
+            (fn [{:keys [reviews rows history open? open-list? open-history? lines after done]}]
               (on-gui!
                (fn []
                  (try
@@ -3852,6 +3911,14 @@
                      (when open-list?
                        (plugin-list-pane/report! lp "")
                        (show-right-panel! right :plugins)))
+                   ;; plugins P11b: the history, kept on the same version
+                   ;; while it stays open
+                   (when (and history (or open-history? (pos? (g/gtk-widget-get-visible (:root hp)))))
+                     (plugin-history-pane/show! hp history
+                                                (when-not open-history? (:n (plugin-history-pane/selected-row hp))))
+                     (when open-history?
+                       (plugin-history-pane/report! hp "")
+                       (show-right-panel! right :history)))
                    (let [n (count reviews)]
                      (g/gtk-label-set-text pending-label (str n " plugin proposal" (when (not= 1 n) "s")))
                      (g/gtk-widget-set-visible pending-label (if (pos? n) 1 0))
@@ -4220,6 +4287,40 @@
                                              (on-gui! #(deliver p (do (when (plugin-list-pane/select-id! lp id) (plugin-open-fn))
                                                                       (plugin-list-pane/footer-text lp))))
                                              (deref p 10000 nil)))
+                 ;; plugins P11b: History on an id's list row, Revert on
+                 ;; version n (nil: whatever's selected) with a reason, Back,
+                 ;; each as the button does and waited for, and what the
+                 ;; history shows now
+                   :plugin-history-pane hp
+                   :plugin-history!* (fn [id] (let [p (promise)]
+                                                (on-gui! #(deliver p (when (plugin-list-pane/select-id! lp id) (history-step))))
+                                                (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
+                   :plugin-revert!* (fn [n reason & [then]]
+                                      ;; then: run on the GTK thread after the
+                                      ;; click, before the step runs (final
+                                      ;; review I1's row edits the reason there)
+                                      (let [p (promise)]
+                                        (on-gui! #(deliver p (do (plugin-history-pane/set-reason! hp reason)
+                                                                 (let [o (if (or (nil? n) (plugin-history-pane/select-n! hp n))
+                                                                           (revert-step)
+                                                                           (do (plugin-history-pane/report! hp (str "no v" n " row")) nil))]
+                                                                   (when then (then))
+                                                                   o))))
+                                        (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
+                   :plugin-history-back!* (fn [] (plugin-step-now! (history-back-step)))
+                   :plugin-history-close!* (fn [] (let [p (promise)]
+                                                    (on-gui! #(deliver p (hide-right-panel! right :history)))
+                                                    (deref p 10000 nil)))
+                   :plugin-history-shown* (fn [] (let [p (promise)]
+                                                   (on-gui! #(deliver p {:visible (pos? (g/gtk-widget-get-visible (:root hp)))
+                                                                         :id @plugin-history-shown
+                                                                         :title (plugin-history-pane/title-text hp)
+                                                                         :rows (plugin-history-pane/row-texts hp)
+                                                                         :selected (:n (plugin-history-pane/selected-row hp))
+                                                                         :empty (plugin-history-pane/empty-text hp)
+                                                                         :reason (plugin-history-pane/reason-text hp)
+                                                                         :footer (plugin-history-pane/footer-text hp)}))
+                                                   (deref p 10000 nil)))
                    :plugin-list-shown* (fn [] (let [p (promise)]
                                                 (on-gui! #(deliver p {:visible (pos? (g/gtk-widget-get-visible (:root lp)))
                                                                       :rows (plugin-list-pane/row-texts lp)

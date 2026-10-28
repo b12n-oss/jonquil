@@ -59,3 +59,22 @@
 
 (deftest no-plugins-is-no-rows-test
   (is (= [] (plugin-list/rows (state (dir))))))
+
+(deftest version-rows-test
+  (let [d (dir)]
+    (accepted! d "a" "(a1)")
+    (propose! d "a" "(a2)" :based-on 1)
+    (let [{:keys [live-n rows]} (plugin-list/version-rows d "a")]
+      (is (= 1 live-n))
+      (is (= [2 1] (map :n rows)))
+      (is (= "v1 accepted (user, T): edited by hand" (:line (last rows))))
+      (is (str/starts-with? (:line (first rows)) "v2 pending (agent, T): r")))))
+
+(deftest version-rows-of-no-history-test
+  (is (= {:live-n nil :rows []} (plugin-list/version-rows (dir) "a"))))
+
+(deftest version-rows-of-an-unreadable-history-test
+  (let [d (dir)]
+    (propose! d "a" "(a1)")
+    (spit (io/file (history/history-dir d "a") "history.edn") "{:not")
+    (is (str/starts-with? (:error (plugin-list/version-rows d "a")) "a's history can't be read: "))))

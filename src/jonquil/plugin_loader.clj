@@ -290,14 +290,15 @@
         [(str (if enabled? "enabling" "disabling") " plugin " id " failed: " (or (ex-message e) (str e)))]))))
 
 (defn- disk-changed
-  "The line saying id's file changed since it was loaded, when id is live
-  in reg and <dir>/<id>.clj holds other text: writing over it would lose
-  an edit no Reload has seen (P9 review I4). nil otherwise."
+  "The line saying id's file differs from its live version, when id is
+  live in reg and <dir>/<id>.clj holds other text: writing over it would
+  lose an edit no Reload has seen (P9 review I4), or one a Reload refused,
+  which leaves the previous version live (P11b). nil otherwise."
   [dir reg id]
   (let [live-src (get-in reg [:plugins (keyword id) :source])
         f (io/file dir (str id ".clj"))]
     (when (and live-src (.isFile f) (not= live-src (try (slurp f) (catch Throwable _ live-src))))
-      (str id ".clj changed since it was loaded (Reload Plugins first)"))))
+      (str id ".clj differs from the live version (an edit not yet reloaded, or one that failed its checks); reload or fix it first"))))
 
 (defn- was-live?
   "Whether version n was ever accepted: a proposal that never went live
@@ -323,6 +324,11 @@
         (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
         (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
         (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
+        ;; the file's there (disk-changed says it holds the live text), so
+        ;; there's nothing to put back; a deleted one is written back
+        ;; (final review I2)
+        (and (= src (get-in @live [:plugins k :source])) (.isFile (io/file dir (str id ".clj"))))
+        (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
         :else
         (let [old @live
               path (str dir "/" id ".clj")
