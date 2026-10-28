@@ -477,6 +477,11 @@ is the way it is.
   reloads with `set-text!`, a dirty one is warned once and takes the disk
   text as its saved baseline (`editor/rebase-saved!`), and one whose edits
   already equal the disk text just takes the baseline.
+  Follow-up F3 (2026-10-28): when `plugin-isolated/check!` keeps its
+  folder it returns the log as `:log`, and `propose-step!` records it on
+  the `:rejected-by-checks` entry as `:check-log`. `propose-text` names it,
+  and `status-text` and `plugin-list/history-line` name it while the file
+  exists.
   Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes

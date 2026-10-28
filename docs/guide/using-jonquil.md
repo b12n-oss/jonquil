@@ -2090,7 +2090,11 @@ check keeps out of reach is the running Jonquil: until you press Accept,
 the agent's code can't touch your open tabs, the REPL, the plugins that
 are loaded or the settings Jonquil has already read, and it can't crash
 or hang the window. A check that runs past 30
-seconds is stopped, and the agent gets that reason back. When there's no
+seconds is stopped, and the agent gets that reason back. When a check
+fails that way, or the child prints no result or exits with an error, its
+folder is kept so you can see what happened: the agent's answer, the
+agent's status and the version's line in History all give the path of
+its `check.log`, until the folder is cleaned up a day later. When there's no
 `jolt` to check in, the proposal waits unchecked, the review says so, and
 its checks run when you press Accept.
 

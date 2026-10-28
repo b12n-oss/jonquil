@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 93 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (1197 tests, 6524 assertions
-on macOS, 6493 on Linux, measured with `bb linux:test` on 2026-10-28) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (1202 tests, 6535 assertions
+on macOS, 6504 on Linux, measured with `bb linux:test` on 2026-10-28) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (1197 tests and 6493 assertions, 31
+reports fewer assertions than macOS (1202 tests and 6504 assertions, 31
 fewer, measured 2026-10-28).
 
 <details>
@@ -65,11 +65,12 @@ through `info` (also from a buffer namespace the server hasn't loaded),
 completion, the limitations, a read with the server's stdin closed, and
 Stop by disconnecting. It uses `JONQUIL_BASILISP` when that's set, else a
 `basilisp` on `PATH`, and skips, exiting 0, with neither. `bb test:plugins`
-runs a seventh (8 tests, 22 assertions, measured 2026-10-27):
+runs a seventh (9 tests, 26 assertions, measured 2026-10-28):
 real isolated plugin checks in throwaway `jolt` children, covering a good
 plugin, one with MCP tools, a bad one, a top-level loop killed at a 3 s deadline along with
 the `sleep` it started, a shutdown hook that can't start a process at
-the kill, a kept log cut to its tail, junk output, and code that runs in
+the kill, a kept log cut to its tail, an overrun proposal whose history
+names its kept log, junk output, and code that runs in
 the child but leaves no namespace behind in the test's process. It skips,
 exiting 0, when no `jolt` is on the login `PATH`. `bb test` never touches a child process or a real server and stays
 that self-contained on purpose, which is why the live suites are separate
