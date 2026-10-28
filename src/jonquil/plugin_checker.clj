@@ -1,6 +1,6 @@
 (ns jonquil.plugin-checker
   "The program an isolated check runs in a throwaway jolt child (plugins
-  design, Part 2, \"The isolated check\"; slice P8). It reads request.edn
+  design, Part 2, \"The isolated check\"; step P8). It reads request.edn
   and candidate.clj from its working folder, puts the candidate through
   jonquil.plugin-protocol/run-protocol :in-process (the child's own
   process), prints one EDN result between MARK-START and MARK-END, and

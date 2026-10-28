@@ -797,7 +797,7 @@
   "The editor keymap's ctx (jonquil.command-registry/editor-commands) for
   ed: thunks, so each reads its atom when its command runs. handle-key!
   builds it per key, and the command palette builds the same one to run an
-  editor command as its key would (slice S8)."
+  editor command as its key would (step S8)."
   [ed]
   (let [cfns @(:completion-fns ed)]
     {:complete! #(when-let [f (:complete! cfns)] (f))
@@ -846,7 +846,7 @@
   would act on the flash's own selection instead of the buffer's real
   one.
 
-  Plugins PL1 slices S5 and S6: the rest is
+  Plugins PL1 steps S5 and S6: the rest is
   jonquil.command-registry/editor-answer's pipeline, preedit yield,
   completion popup, the :editor keymap in jonquil/keymap.edn (Run Form,
   completion, comment, the two formats, redo, quick doc, jump, rename) over

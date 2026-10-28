@@ -2180,7 +2180,7 @@
   jonquil.command-registry never touches GTK itself. keyval0 and state are
   the key's, for the find bar's Escape (:find-bar-key!). The command
   palette builds the same ctx to run a window command as its key would
-  (slice S8)."
+  (step S8)."
   [{:keys [win active-tab pane] :as ctx} keyval0 state]
   ;; Tabs plan P2.T2: the find bar is the active tab's.
   (let [fb (:fb (active-tab))]
@@ -2191,7 +2191,7 @@
            :find-bar-focused? #(find-bar-focused? win fb)
            :find-bar-key! #(find-bar/handle-key! fb keyval0 state)
            :inspector-focused? #(inspector-pane/focused? pane win)
-           ;; the rename popover's entry and the command palette's (slice S8
+           ;; the rename popover's entry and the command palette's (step S8
            ;; follow-up): either one keeps every key but Escape
            :entry-focused? #(let [t (active-tab)]
                                (or (focus-in-popover? win (:rename-pop t))
@@ -2270,7 +2270,7 @@
   GSimpleActionGroup holding one no-parameter GSimpleAction per item,
   each wired to call f (its \"activate\" signal), inserted on view under
   prefix \"p4\" (gtk_widget_insert_action_group). items is [[label
-  action-name f] ...], from jonquil.command-registry/menu-items (slice
+  action-name f] ...], from jonquil.command-registry/menu-items (step
   S7) -- f runs the item's command, the SAME one its key chord runs.
 
   Returns the GSimpleActionGroup pointer so a caller can fire an item by
@@ -2469,7 +2469,7 @@
         complete-fn (fn [] (do-complete! ed completion status-label))
         run-form-fn (fn [] (do-run-form! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
                                           :flash-fns flash-fns}))
-        ;; slice S7: the editor menu's ctx (jonquil.command-registry/
+        ;; step S7: the editor menu's ctx (jonquil.command-registry/
         ;; editor-menu), this tab's own fns, each the one its key calls
         menu-ctx {:run-form! run-form-fn :jump! jump-fn :rename! rename-fn :quick-doc! quick-doc-fn
                   :inspect-last-fn inspect-last-fn :inspect-form-fn inspect-form-fn :complete! complete-fn
@@ -2526,7 +2526,7 @@
     (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
     ;; P4.T7: rename is autohide ON, so GTK's own grab closes it.
     (register-popover-fn rename-pop)
-    ;; slice S8: the command palette runs a command as its key would, with
+    ;; step S8: the command palette runs a command as its key would, with
     ;; its scope's ctx: the window's, this tab's editor's, the console's
     (register-popover-fn palette)
     (palette/set-handlers!
@@ -3515,7 +3515,7 @@
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe
         ;; 3) -- each item calls the EXACT SAME fn its key does, through
-        ;; its command in jonquil.command-registry (slice S7). install-
+        ;; its command in jonquil.command-registry (step S7). install-
         ;; context-menu! returns the GSimpleActionGroup, so :activate-
         ;; menu-action!*/:repl-activate-menu-action!* (below) can fire an
         ;; item directly, by name, for rows and the smoke.
@@ -3546,7 +3546,7 @@
                                              :on-trash (fn [p] (tree-trash! @*tab-ctx p))})
         files-btn (g/gtk-toggle-button-new-with-label "☰ Files")
         tree-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
-        ;; slice S8: the palette lists the registry's commands and opens on
+        ;; step S8: the palette lists the registry's commands and opens on
         ;; the active tab, whose palette runs the picked one
         open-palette-fn (fn [] (let [plugins @plugin-registry/live]
                                  (palette/open! (:palette (active-tab))
@@ -4228,7 +4228,7 @@
                  ;; install-context-menu!'s own docstring on why that's
                  ;; equivalent to activating the prefixed \"p4.<name>\".
                    :activate-menu-action!* activate-menu-action-fn
-                 ;; slice S8: the first tab's command palette, and what
+                 ;; step S8: the first tab's command palette, and what
                  ;; Cmd/Ctrl+Shift+P calls to open it
                    :palette palette
                    :open-palette!* open-palette-fn
@@ -4512,7 +4512,7 @@
   text/rename-problem-text read it back. :activate-menu-action!*/:repl-
   activate-menu-action!* fire one of the editor's/the console's own P4
   context-menu items by its unprefixed action name, exactly as
-  install-context-menu!'s own docstring describes. :palette (slice S8) is
+  install-context-menu!'s own docstring describes. :palette (step S8) is
   the first tab's jonquil.gtk.palette map and :open-palette!* what
   Cmd/Ctrl+Shift+P calls to open the active tab's. :load-plugins!* (plugins
   P3) loads the plugin folder now, off the GTK thread, answering the

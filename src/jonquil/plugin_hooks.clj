@@ -1,12 +1,12 @@
 (ns jonquil.plugin-hooks
-  "Plugin hooks (plugins design, Part 2, slice P6): :after-save, :after-run
+  "Plugin hooks (plugins design, Part 2, step P6): :after-save, :after-run
   and :on-error. A hook is (fn [ctx event] -> event'); the hooks at a point
   run in plugin-id order on one worker, each getting the event the last
   returned (a non-map return leaves it as it was), so none can change the
   save or Run it watches. One chain per point at a time: an event arriving
   while the last chain at its point is still running waits its turn on
   that chain's worker, up to a bound past which it's skipped, with a line
-  saying so. :before-run (slice P6b) is different: the window waits for
+  saying so. :before-run (step P6b) is different: the window waits for
   it before a Run, up to a budget, and it may stop the Run, so its ctx has
   no effects. Pure apart from run-hooks! and before-run!, which read the
   live registry and its effects."

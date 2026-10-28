@@ -5,13 +5,13 @@
 ;; :window is the whole of jonquil.gtk.window/on-window-key, after one fixed
 ;; stage (jonquil.command-registry/window-answer: while the rename popover's
 ;; or the command palette's entry has focus, every key but Escape is the
-;; entry's). Slices S4's F5, S3, S2,
+;; entry's). Steps S4's F5, S3, S2,
 ;; S1, then S4's Cmd/Ctrl+[, each in the old cond's order. Shift-qualified
 ;; bindings sit ahead of their plain forms, so the plain one never sees them.
 {:window
- [;; slice S4: F5 runs the buffer, whatever the modifiers
+ [;; step S4: F5 runs the buffer, whatever the modifiers
   {:key "F5" :command :run/run}
-  ;; slice S3: the Escape chain, in the old cond's order. No modifier
+  ;; step S3: the Escape chain, in the old cond's order. No modifier
   ;; checks, as the old clauses had none. A command answers an outcome:
   ;; the popover close answers :next when nothing was open, so the chain
   ;; goes on; bare Escape with nothing to close or Stop is GTK's (M5).
@@ -23,7 +23,7 @@
   {:key "Escape" :when [:tree-focused] :command :tree/leave}
   {:key "Escape" :when [:evaluating] :command :run/stop}
   {:key "Escape" :outcome :to-gtk}
-  ;; slice S2: the clauses that sat directly above S1's block, in their
+  ;; step S2: the clauses that sat directly above S1's block, in their
   ;; order. F3 and Cmd+G are find-bar/handle-nav-key!'s own four branches,
   ;; guarded by its two checks (the bar is open, no IME composition).
   {:key "F3" :mods #{:shift} :when [:find-bar-navigable] :command :find/previous}
@@ -33,7 +33,7 @@
   ;; plain F6; Shift+F6 is rename, which the editor gets
   {:key "F6" :not #{:shift} :command :focus/toggle}
   {:key "o" :mods #{:cmd :shift} :when [:source-focused] :command :source/open-here}
-  ;; slice S1: the plain command chords
+  ;; step S1: the plain command chords
   {:key "r" :mods #{:cmd} :command :run/run}
   {:key "o" :mods #{:cmd} :command :file/open}
   {:key "s" :mods #{:cmd :shift} :command :file/save-as}
@@ -64,16 +64,16 @@
   {:key "m" :mods #{:cmd :shift} :command :view/cycle-theme}
   {:key "i" :mods #{:cmd :shift} :command :inspect/form}
   {:key "i" :mods #{:cmd} :command :inspect/last}
-  ;; slice S8: the command palette
+  ;; step S8: the command palette
   {:key "p" :mods #{:cmd :shift} :command :palette/open}
   {:key "braceright" :mods #{:cmd} :command :tab/next}
   {:key "braceleft" :mods #{:cmd} :command :tab/previous}
-  ;; slice S4: Cmd/Ctrl+[ steps the focused source panel back; anywhere
+  ;; step S4: Cmd/Ctrl+[ steps the focused source panel back; anywhere
   ;; else it goes back from a jump into a tab, and with none to go back
   ;; from answers :next, so the key passes on
   {:key "bracketleft" :mods #{:cmd} :when [:source-focused] :command :source/back}
   {:key "bracketleft" :mods #{:cmd} :command :source/jump-back}]
- ;; jonquil.gtk.editor/handle-key!'s chords (slices S5, S6), between the
+ ;; jonquil.gtk.editor/handle-key!'s chords (steps S5, S6), between the
  ;; completion popup and the typing stages (smart enter, auto-pairs,
  ;; Backspace, Tab), as jonquil.command-registry/editor-answer orders them.
  ;; An edit command's 0 makes the key GTK's.

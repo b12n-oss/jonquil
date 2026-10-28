@@ -7,7 +7,7 @@
   registry, on the window's load-agent, and records each plugin it made
   live in jonquil.plugin-history; revert-step! checks an old version the
   same way and, on a pass, writes it back as a new version. An agent's
-  proposal (slice P9) is checked in isolation by propose-check, off the
+  proposal (step P9) is checked in isolation by propose-check, off the
   agent, and recorded by propose-step!; accept-step! and reject-step! end
   it. reload only reads files; nothing here touches GTK or throws."
   (:require [clojure.java.io :as io]

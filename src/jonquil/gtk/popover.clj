@@ -244,7 +244,7 @@
   Posted (on-gui!), not done in the handler: GTK moves focus to the
   popover's parent (the view's scrolled window) once the popover unmaps,
   after \"closed\" has run, so a grab in the handler is undone (measured
-  with the command palette in slice S8, and then on the rename popover:
+  with the command palette in step S8, and then on the rename popover:
   the root's focus was the scrolled window, not the view). And only while
   focus is still there or nowhere, so a popover a command just opened
   keeps the focus it took. The posted thunk holds its own ref on the view,

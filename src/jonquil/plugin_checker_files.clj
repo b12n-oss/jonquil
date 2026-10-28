@@ -2,7 +2,7 @@
   "The plugin checker (jonquil.plugin-checker) and every namespace it
   loads, as source files carried inside Jonquil and written where an
   isolated check's jolt child loads them as a :local/root dep (plugins
-  design, Part 2, \"The isolated check\"; slice P8). The same files Jonquil
+  design, Part 2, \"The isolated check\"; step P8). The same files Jonquil
   runs in process, so the child checks with the same validator. Read when
   this namespace is compiled, as jonquil.nrepl.middleware-files does, and
   written through its ensure-root!."
