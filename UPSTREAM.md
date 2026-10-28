@@ -1,7 +1,7 @@
 # Upstream: DrClojure-Neo
 
 **Repository:** https://github.com/kimtg/DrClojure-Neo  
-**Pinned commit:** [`41c56b8`](https://github.com/kimtg/DrClojure-Neo/commit/41c56b8563bb319bb940547c8982406eff1a6db0) (2026-09-22), also in `UPSTREAM_PIN`  
+**Pinned commit:** [`7056c61`](https://github.com/kimtg/DrClojure-Neo/commit/7056c61e09f8e9ad3c63fc4b1bd9ac35d15ad3ed) (2026-09-28), also in `UPSTREAM_PIN`  
 **Checking for new commits:** `bb upstream:diff` (see [Porting and attribution](docs/guide/porting-and-attribution.md#staying-in-sync))
 
 ## Lifted code
@@ -22,8 +22,20 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 
 ## Code deltas from upstream
 
-- `src/jonquil/syntax.clj`: `Character/toLowerCase` is not shimmed in Jolt. Two call sites (lines 590 and 798 at 2026-10-28) replaced with `(first (str/lower-case (subs ... 0 1)))`. This change was verified in a trial lift on 2026-09-23; upstream's 13 pure deftests pass on Jolt after the change.
+- `src/jonquil/syntax.clj`: `Character/toLowerCase` is not shimmed in Jolt. Two call sites (lines 607 and 815 at 2026-10-29) replaced with `(first (str/lower-case (subs ... 0 1)))`. This change was verified in a trial lift on 2026-09-23; upstream's 13 pure deftests pass on Jolt after the change.
+- `src/jonquil/syntax.clj`: `compute-smart-indent` takes upstream `7056c61`'s rule (no dedent before a closer while a bracket before the caret is open) but not its method. Upstream scans the text before the caret on every Enter, which measured 82 ms at the end of a 4574-line file. Jonquil's private `prefix-unclosed?` answers the same question from the whole-buffer `compute-brackets` result: the painter's cached one when the cached text is equal (about 0.2 ms), else one uncached scan. It runs only when Enter is right before a closer. A test checks it against upstream's prefix scan at every caret position.
 - `src/jonquil/syntax.clj`: `special-forms` and `core-builtins` read the Jolt dialect profile (`(:special-forms dialect/jolt)`, `(:builtins dialect/jolt)` in `src/jonquil/dialect.clj`), which holds upstream's two sets verbatim, so the file also requires `jonquil.dialect`. A re-sync that changes either set edits `src/jonquil/dialect.clj`.
+
+## Not ported
+
+From `7056c61` (Parinfer Smart Mode), only the `compute-smart-indent` fix was
+ported. These parts weren't, because Parinfer is a feature decision that
+hasn't been taken yet:
+
+- `src/DrClojure/parinfer.clj` (Parinfer v3.13.1: Smart, Indent and Paren modes)
+- the Parinfer menu, status-bar indicator and Ctrl+Alt+P wiring in `src/DrClojure/ui.clj`
+- the Parinfer-aware branch of `handle-smart-enter!`, and `update-document-diff!`
+- `test-resources/parinfer/*.json`, `test/DrClojure/json_helper.clj` and `test/DrClojure/parinfer_test.clj`
 
 ## Syncing with upstream
 
