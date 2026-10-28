@@ -1977,14 +1977,15 @@ to an agent: the plugin's id, its live version, whether it's loaded,
 disabled or not loaded, its effects, any pending proposal and its doc. A
 plugin whose file fails its checks is listed too, as not loaded, so you
 can always turn it off from here. A plugin that once went live keeps its
-row after its file is deleted, because its history stays. Select a row,
-then:
+row after its file is deleted, because its history stays, and its History
+can bring the file back. Select a row, then:
 
 - **Disable** keeps the plugin off without deleting its file. It writes the
   id into `settings.edn` and reloads, so its commands and keys go at once.
 - **Enable** takes it out again and reloads, so the plugin goes through
   its checks and the console says how that went.
 - **Open** shows the plugin's file in a tab.
+- **History** shows the plugin's versions, described below.
 - **Review Proposals** opens the review of any pending agent proposals,
   described below.
 
@@ -2014,8 +2015,22 @@ Jonquil leaves it alone: the plugin still loads, and the console says its
 history wasn't recorded. Going back to an older version runs it through
 the same checks as a reload and, when it passes, writes it to the plugin
 file (through a symlink, if the file is one) and keeps it as a new
-version, "revert to v2", so going back never erases anything. The button
-for it arrives with the plugin list.
+version, "revert to v2", so going back never erases anything.
+
+**History** in the plugin list shows the selected plugin's versions in
+the same place, newest first, one line each: the version, its status, where
+it came from (you, an agent or a revert), when, and why. The title says
+which version is live. Select an older version, type a reason if you want
+one, and press **Revert**. The reason goes after "revert to v2: " in the
+new version's line. Revert refuses, and says why on the footer, when the
+version was never live (a proposal goes through Accept instead), when the
+plugin is disabled, when its text is already the live one, and when the
+plugin's file differs from the live version, because writing over it would
+lose an edit: one you haven't reloaded yet, or one that failed its checks.
+Fix that file or reload it first. A plugin whose file was deleted gets it
+back. A tab already open on the plugin's file keeps its old text after a
+Revert, so close it, or don't save it, if you want to keep the revert.
+**Back** returns to the list.
 
 An agent's proposed change to a plugin waits for you. It's a version too,
 pending, and the status bar counts how many are waiting. **Review Plugin

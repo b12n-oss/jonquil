@@ -214,8 +214,8 @@ these:
   latest version, so a relaunch adds nothing. `revert-step!` sends an
   old version through `reload` with `:text` (the same protocol and
   re-check of later plugins), and only on a pass writes `<id>.clj`,
-  resets the registry and records a `:revert` version; nothing calls it
-  until the plugin list. Slice P8 (2026-10-26) built the checker an
+  resets the registry and records a `:revert` version; the plugin list's
+  History calls it (P11b). Slice P8 (2026-10-26) built the checker an
   agent's proposal will be checked with, short of starting it:
   `jonquil.plugin-checker` reads `request.edn` and `candidate.clj` from its
   working folder, runs `run-protocol :in-process` in that (child) process,
@@ -277,7 +277,7 @@ these:
   refused brand-new plugin's namespace keeps the code it loaded,
   registered nowhere. It refuses a version whose source is missing, a
   disabled plugin, and a live plugin whose file changed since it was
-  loaded (Reload Plugins first), and every refusal leaves the file, live,
+  loaded, or whose edit failed its checks (reload or fix it first), and every refusal leaves the file, live,
   the status and a live plugin's namespace as they were.
   `reject-step!` records the note. `revert-step!` now refuses a version
   that was never live, so a proposal can't skip Accept that way. Slice
@@ -356,6 +356,18 @@ these:
   quick clicks queue two steps), else writes and reloads. `plugin-step!`
   builds the rows after every step, beside the reviews, and
   `jonquil.gtk.plugin-list-pane` shows them in the right-hand slot.
+  Slice P11b (2026-10-28) adds History and Revert to it. `history-line`
+  moved from `jonquil.plugin-mcp` to `jonquil.plugin-list`, so
+  `jonquil_plugin_read` and the panel print the same lines, and
+  `plugin-list/version-rows` gives them newest first. A top-level
+  `plugin-history-shown` atom holds the id whose history is open:
+  `show-right-panel!` clears it for any other panel and
+  `hide-right-panel! :history` clears it, so it follows the panel, and
+  `plugin-step!` reads it to rebuild that history off the GTK thread after
+  every step. Revert reads its reason at the click and runs `revert-step!`
+  on the plugin agent. `revert-step!` now also refuses a version whose
+  text is already live while the file is there (a deleted file is still
+  written back).
   Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
