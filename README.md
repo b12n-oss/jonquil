@@ -10,37 +10,16 @@ Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, a
 
 See [Using Jonquil](docs/guide/using-jonquil.md) for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
 
-Jonquil picks a dialect for whatever file is open. For Jolt, a program
-in a project (a folder with a `deps.edn`) runs out of process over nREPL,
-so one that calls `System/exit`, crashes or wedges Jolt takes down a
-separate child, not Jonquil. A loose file runs inline, in Jonquil's own
-process, and a project's `.jonquil.edn` `{:runtime :in-process}` keeps it
-there too. Stop, Reset on Run, help, `read-line` and the inspector work
-the same way across either choice. ClojureDart is
-experimental: rather than starting anything, Jonquil attaches to a
-ClojureDart app you already have running, over its own nREPL server.
-JVM Clojure attaches the same way, to a project's own nREPL server, once
-its `.jonquil.edn` says `{:dialect :clj}`: start a server with
-`clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil
-connects the first time you Run, requiring any namespaces the project
-lists under `:auto-require` as it does (a Jolt project can list them
-too). ClojureScript is also experimental, and it has two
-runtimes. In a project with a `shadow-cljs.edn`, start your build with
-`npx shadow-cljs watch <build>` and Jonquil connects to its nREPL server the
-first time you Run, evaluating in whatever JS runtime has the build loaded.
-A `.cljs` file anywhere else, a loose file included, runs on node: Jonquil
-starts ClojureScript for the window on the first Run, which needs the Clojure
-CLI and `node` (and the launcher's local sockets listen on loopback only).
-Any other nREPL server attaches the same way once a
-project's `.jonquil.edn` says `{:dialect :nrepl}`: babashka
-(`bb nrepl-server 1667`, then `:nrepl {:port 1667}`), Basilisp, whose
-`basilisp nrepl-server` writes `.nrepl-port` itself, or a server on
-another host through `:host`. Features follow what that server offers, and
-the console says what it can't do. jank is the other experimental
-dialect: open a `.jank` file and Jonquil starts its own `jank repl` for the
-window on the first Run (`brew install jank-lang/jank/jank`, or set
-`JONQUIL_JANK`). A short list of limits for each runtime
-is in [Using Jonquil](docs/guide/using-jonquil.md).
+Jonquil picks a dialect for whatever file is open:
+
+- **Jolt.** A program in a project (a folder with a `deps.edn`) runs out of process over nREPL, so one that calls `System/exit`, crashes or wedges Jolt takes down a separate child, not Jonquil. A loose file runs inline, in Jonquil's own process, and a project's `.jonquil.edn` `{:runtime :in-process}` keeps it there too. Stop, Reset on Run, help, `read-line` and the inspector work the same way across either choice.
+- **ClojureDart (experimental).** Rather than starting anything, Jonquil attaches to a ClojureDart app you already have running, over its own nREPL server.
+- **JVM Clojure.** It attaches the same way, to a project's own nREPL server, once its `.jonquil.edn` says `{:dialect :clj}`: start a server with `clojure -M:serve` or any server that writes `.nrepl-port`, and Jonquil connects the first time you Run, requiring any namespaces the project lists under `:auto-require` as it does (a Jolt project can list them too).
+- **ClojureScript (experimental)** has two runtimes. In a project with a `shadow-cljs.edn`, start your build with `npx shadow-cljs watch <build>` and Jonquil connects to its nREPL server the first time you Run, evaluating in whatever JS runtime has the build loaded. A `.cljs` file anywhere else, a loose file included, runs on node: Jonquil starts ClojureScript for the window on the first Run, which needs the Clojure CLI and `node` (and the launcher's local sockets listen on loopback only).
+- **Any other nREPL server** attaches the same way once a project's `.jonquil.edn` says `{:dialect :nrepl}`: babashka (`bb nrepl-server 1667`, then `:nrepl {:port 1667}`), Basilisp, whose `basilisp nrepl-server` writes `.nrepl-port` itself, or a server on another host through `:host`. Features follow what that server offers, and the console says what it can't do.
+- **jank (experimental).** Open a `.jank` file and Jonquil starts its own `jank repl` for the window on the first Run (`brew install jank-lang/jank/jank`, or set `JONQUIL_JANK`).
+
+A short list of limits for each runtime is in [Using Jonquil](docs/guide/using-jonquil.md#known-limits).
 
 An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate, run a file, check brackets, doc, completion, project info) over MCP on stdio, with no window. Add `--window` (`jonquil --mcp --window [DIR]`) and the agent drives a live window instead: nineteen tools that open, edit, save and run tabs while you watch, and that let it propose plugins you then accept or reject in the window. A plugin can add tools of its own beside them. To drive a window you already have open, turn on `:mcp-listen? true` in the settings file and point the agent at `jonquil --mcp-attach [DIR]`, which bridges stdio to that window. See [Driving Jonquil from an agent (MCP)](docs/guide/using-jonquil.md#driving-jonquil-from-an-agent-mcp).
 
