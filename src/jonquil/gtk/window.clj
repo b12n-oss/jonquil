@@ -3439,22 +3439,30 @@
         ;; text as its saved baseline. GTK-thread only.
         sync-plugin-tabs! (fn []
                             (let [dir (plugin-loader/plugins-dir @settings-path*)]
-                              (doseq [t @tabs
-                                      :let [path @(:path t)
-                                            ed (:ed t)]
-                                      :when (and path (plugin-loader/plugin-file? dir path))
-                                      :let [disk (try (slurp path) (catch :default _ nil))]]
-                                (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)})
-                                  :reload (let [caret (g/cursor-offset (:buf ed))
-                                                at (min caret (count disk))]
-                                            (editor/set-text! ed disk)
-                                            (g/with-iters* (:buf ed) at at (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
-                                            (cview/append! cv :system (str "; " path " now holds the version the plugin step wrote, so this tab was reloaded.\n"))
-                                            (refresh-labels! @*tab-ctx))
-                                  :warn (do (editor/rebase-saved! ed disk)
-                                            (cview/append! cv :system (str "; " path " was changed by a plugin step (Revert or Accept). This tab keeps your unsaved edits, and saving it will write over that version.\n"))
-                                            (refresh-labels! @*tab-ctx))
-                                  nil))))
+                              ;; final review I3: a throw here is one console
+                              ;; line and never skips the rest of the step's
+                              ;; window update
+                              (try
+                                (doseq [t @tabs
+                                        :let [path @(:path t)
+                                              ed (:ed t)]
+                                        :when (and path (plugin-loader/plugin-file-or-target? dir path))
+                                        :let [disk (try (slurp path) (catch :default _ nil))]]
+                                  (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
+                                                    :buffer (editor/editor-text ed)})
+                                    :reload (let [caret (g/cursor-offset (:buf ed))
+                                                  at (min caret (count disk))]
+                                              (editor/set-text! ed disk)
+                                              (g/with-iters* (:buf ed) at at (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+                                              (cview/append! cv :system (str "; " path " changed on disk, so this tab was reloaded.\n"))
+                                              (refresh-labels! @*tab-ctx))
+                                    :warn (do (editor/rebase-saved! ed disk)
+                                              (cview/append! cv :system (str "; " path " changed on disk. This tab keeps your unsaved edits, and saving it will write over the version on disk.\n"))
+                                              (refresh-labels! @*tab-ctx))
+                                    :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
+                                    nil))
+                              (catch :default e
+                                (cview/append! cv :error (str "; keeping plugin tabs in step failed: " (or (ex-message e) (str e)) "\n"))))))
         ;; plugins P11: Open shows the selected plugin's file in a tab, or
         ;; says why it can't (no row, or no file now). GTK-thread only.
         plugin-open-fn (fn []

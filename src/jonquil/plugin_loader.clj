@@ -58,6 +58,17 @@
                   (re-matches id-pattern (subs n 0 (- (count n) 4)))
                   (= (.getCanonicalPath (io/file dir)) (.getCanonicalPath parent))))))
 
+(defn plugin-file-or-target?
+  "plugin-file?, or path is what a plugin file in dir links to (plugins F2
+  final review I1: a dotfiles setup links <dir>/<id>.clj to a file kept
+  elsewhere, and a tab may be open at that target)."
+  [dir path]
+  (or (plugin-file? dir path)
+      (boolean (try (let [c (.getCanonicalPath (io/file path))]
+                      (some (fn [^java.io.File f] (and (plugin-file? dir (.getPath f)) (= c (.getCanonicalPath f))))
+                            (or (.listFiles (io/file dir)) [])))
+                    (catch Throwable _ false)))))
+
 (def ^:private conditions
   ;; per scope, so a binding's :when is checked against its own scope's
   {:window (set (keys cmd-registry/window-conditions))

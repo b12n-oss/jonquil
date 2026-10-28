@@ -176,6 +176,21 @@
     (is (false? (loader/plugin-file? d "/tmp/elsewhere/wrap.clj")))
     (is (true? (loader/plugin-file? d (str link "/wrap.clj"))))))
 
+(deftest plugin-file-or-target?-test
+  ;; plugins F2 final review I1: a tab opened at a symlinked plugin file's
+  ;; target is that plugin's file too
+  (let [d (temp-dirs/temp-dir! "jonquil-plugins-pt-")
+        elsewhere (temp-dirs/temp-dir! "jonquil-plugins-dots-")
+        target (str elsewhere "/wrap.clj")]
+    (spit target "(wrap)")
+    (spit (str elsewhere "/other.clj") "(other)")
+    (java.nio.file.Files/createSymbolicLink (.toPath (io/file d "wrap.clj")) (.toPath (io/file target))
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (true? (loader/plugin-file-or-target? d (str d "/wrap.clj"))))
+    (is (true? (loader/plugin-file-or-target? d target)))
+    (is (false? (loader/plugin-file-or-target? d (str elsewhere "/other.clj"))))
+    (is (false? (loader/plugin-file-or-target? d "/tmp/elsewhere/nope.clj")))))
+
 (deftest history-folder-is-not-a-plugin-test
   (let [d (dir-with [["wrap.clj" (source "wrap")]])]
     (io/make-parents (io/file d ".history" "wrap" "1.clj"))

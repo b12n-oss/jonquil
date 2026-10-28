@@ -307,6 +307,7 @@
    plugin-history-rows/row-plugin-tab-keeps-edits-on-a-revert
    plugin-history-rows/row-plugin-tab-follows-an-accept
    plugin-history-rows/row-plugin-tab-untouched-by-a-refused-revert
+   plugin-history-rows/row-plugin-tab-at-a-link-target-follows-a-revert
    no-plugins-rows/row-no-plugins-reload-refuses
    no-plugins-rows/row-no-plugins-disable-refuses
    no-plugins-rows/row-no-plugins-revert-refuses

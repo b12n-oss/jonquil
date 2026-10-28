@@ -229,8 +229,8 @@
 
 (defn- count-of [ui s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) (support/console-text ui))))
 
-(def ^:private reloaded "now holds the version the plugin step wrote, so this tab was reloaded.")
-(def ^:private warned "was changed by a plugin step (Revert or Accept). This tab keeps your unsaved edits")
+(def ^:private reloaded "changed on disk, so this tab was reloaded.")
+(def ^:private warned "changed on disk. This tab keeps your unsaved edits")
 
 (defn row-plugin-tab-follows-a-revert
   "A clean tab on v2's file: Revert to v1 reloads it, clean."
@@ -307,3 +307,31 @@
                          (and t (= st0 st) (= before [(count-of ui reloaded) (count-of ui warned)])
                               (str/includes? (str (last lines)) "already live"))
                          {:lines lines :st st}))))))
+
+(defn row-plugin-tab-at-a-link-target-follows-a-revert
+  "<plugins>/pt-e.clj links to a file kept elsewhere (a dotfiles setup), and
+  the tab is open at that target: Revert to v1 still reloads it (final
+  review I1)."
+  [ui]
+  (go-row :plugin-tab-at-a-link-target-follows-a-revert support/check
+    (let [elsewhere (str (java.nio.file.Files/createTempDirectory "jonquil-dots-" (make-array java.nio.file.attribute.FileAttribute 0)))
+          target (str elsewhere "/pt-e.clj")
+          link (io/file ((:plugins-dir* ui)) "pt-e.clj")]
+      (spit target (review/source "pt-e"))
+      (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath (io/file target))
+                                              (make-array java.nio.file.attribute.FileAttribute 0))
+      (try
+        (with-history ui {:files [] :ids ["pt-e"]}
+          (fn []
+            (spit target (v2 "pt-e"))
+            ((:reload-plugins!* ui))
+            (on-gtk ((:open-paths! ui) [target]))
+            (let [t (on-gtk (first (filter #(= target @(:path %)) ((:tabs* ui)))))
+                  _ ((:plugins-list!* ui))
+                  _ ((:plugin-history!* ui) "pt-e")
+                  lines ((:plugin-revert!* ui) 1 "")
+                  st (when t (tab-state t))]
+              (support/check :plugin-tab-at-a-link-target-follows-a-revert
+                             (and t (= (review/source "pt-e") (:text st)) (not (:dirty? st)))
+                             {:lines lines :st st}))))
+        (finally (io/delete-file link true) (io/delete-file target true) (io/delete-file elsewhere true))))))
