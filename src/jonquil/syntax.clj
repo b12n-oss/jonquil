@@ -287,17 +287,19 @@
 
 (defn- prefix-unclosed?
   "Whether text before pos holds an unmatched bracket, as upstream 7056c61
-  checks by scanning (subs text 0 pos). Answered from text's whole bracket
-  result instead: the compute-brackets cache when it holds an equal string
-  (the painter's; an editor snapshot is a fresh string, so identical? would
-  miss), else compute-brackets* on text, uncached. A bracket before pos is
-  open in the prefix when it's unmatched, or an opener whose closer is at or
-  after pos."
+  checks by scanning (subs text 0 pos). When the compute-brackets cache holds
+  an equal string (the painter's; an editor snapshot is a fresh string, so
+  identical? would miss), it answers from that whole-buffer result: a bracket
+  before pos is open in the prefix when it's unmatched, or an opener whose
+  closer is at or after pos. Otherwise it scans the prefix as upstream does,
+  uncached, so the cost stops at pos."
   [^String text pos]
-  (let [[last-text last-result] @compute-brackets-last
-        {:keys [matches unmatched]} (if (= last-text text) last-result (compute-brackets* text))]
-    (boolean (or (some #(< % pos) unmatched)
-                 (some (fn [[a b]] (and (< a pos) (>= b pos))) matches)))))
+  (let [[last-text last-result] @compute-brackets-last]
+    (if (= last-text text)
+      (let [{:keys [matches unmatched]} last-result]
+        (boolean (or (some #(< % pos) unmatched)
+                     (some (fn [[a b]] (and (< a pos) (>= b pos))) matches))))
+      (boolean (seq (:unmatched (compute-brackets* (subs text 0 pos))))))))
 
 (defn compute-smart-indent
   "Calculates the appropriate indentation spaces string for a new line created at `pos` in `text`.

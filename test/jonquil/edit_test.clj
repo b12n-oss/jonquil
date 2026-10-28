@@ -326,3 +326,14 @@
       (is (= (boolean (seq (:unmatched (#'syntax/compute-brackets* (subs t 0 pos)))))
              (#'syntax/prefix-unclosed? t pos))
           (pr-str t pos warm?)))))
+
+(deftest prefix-unclosed-cold-path-scans-only-the-prefix-test
+  ;; review I1: on a cache miss the scan stops at the caret, as upstream's
+  ;; does, rather than reading the whole buffer
+  (let [orig @#'syntax/compute-brackets*
+        seen (atom [])
+        t "(defn foo\n  [x])\n(def a 1)\n(def b 2)\n"]
+    (syntax/compute-brackets "x")
+    (with-redefs-fn {#'syntax/compute-brackets* (fn [s] (swap! seen conj (count s)) (orig s))}
+      #(syntax/compute-smart-indent t 15))
+    (is (= [15] @seen))))
