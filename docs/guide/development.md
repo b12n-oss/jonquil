@@ -334,9 +334,9 @@ of the buffer text on the GTK thread, about 50 ms.
 
 ## Upstream
 
-`bb upstream:diff` lists upstream DrClojure commits since `UPSTREAM_PIN`
-that touch `src` or `test`, against a checkout at `$DRCLOJURE_DIR` (default
-`~/dev/b12n-oss/kimtg--DrClojure-Neo`). See
+`bb upstream:diff` lists upstream DrClojure-Neo commits since
+`UPSTREAM_PIN` that touch `src` or `test`, using the clone at
+`$DRCLOJURE_DIR` and its `upstream` remote. See
 [Porting and attribution](porting-and-attribution.md).
 
 ## Docs
