@@ -6,12 +6,12 @@ Part of the [architecture notes](index.md).
 
 Keys and commands are data, and plugins add to that data while Jonquil runs.
 Part 1 built the keymap and the command registry, and Part 2 built plugins on
-top of them. Both are kept here slice by slice, as the record of why each piece
+top of them. Both are kept here step by step, as the record of why each piece
 is the way it is.
 
 ## Part 1: the keymap and the command registry
 
-- `jonquil.keymap` and `jonquil.command-registry` (plugins Part 1, slice
+- `jonquil.keymap` and `jonquil.command-registry` (plugins Part 1, step
   S1, 2026-10-24): key bindings and commands as data. `jonquil.keymap`
   matches a lowered keyval and a GDK modifier state against an ordered
   binding vector, first match wins. A binding names `:key` (or `:keys`),
@@ -24,10 +24,10 @@ is the way it is.
   compiled, because the installed app has no source tree. S1 dispatched
   them through one **slot** clause in `on-window-key`'s cond, first placed
   where the plain chords used to be, so every clause above and below kept
-  its precedence. Later slices grew the slot upward until the cond was
+  its precedence. Later steps grew the slot upward until the cond was
   gone. A differential oracle checked the keymap against a
   transcription of the replaced clauses, for every key they named and all
-  32 modifier combinations. Slice S2 (2026-10-24) added `:when`: a vector
+  32 modifier combinations. Step S2 (2026-10-24) added `:when`: a vector
   of named conditions, all of which must hold. `resolve-binding` asks them
   through a `holds?` fn only once a binding's key and modifiers match, in
   order, stopping at the first false, the short-circuit order of the `and`s
@@ -38,7 +38,7 @@ is the way it is.
   find bar can navigate), plain F6 and the source panel's
   Cmd/Ctrl+Shift+O into the slot, which then sat right below the bare
   Escape clause. Its oracle crossed every key and modifier set with each
-  combination of the three states those clauses read. Slice S3
+  combination of the three states those clauses read. Step S3
   (2026-10-24) gave commands an outcome: `:handled` (the key is used up),
   `:to-gtk` (stop here and let GTK have it) or `:next` (not mine after
   all, try the next matching binding). A binding can name a fixed
@@ -50,7 +50,7 @@ is the way it is.
   none was open), the inspector, the source panel, the tree menu, the
   tree, Stop while evaluating, and a bare `:to-gtk`. The slot then sat
   right after F5, and its oracle crossed Escape with all eight states the
-  chain reads. Slice S4 (2026-10-24) retired the cond. F5 became the
+  chain reads. Step S4 (2026-10-24) retired the cond. F5 became the
   first binding and the two Cmd/Ctrl+[ back clauses the last, the jump
   back answering `:next` when there's nothing to go back from. The rename
   guard (while the rename popover's entry has focus, every key but Escape
@@ -60,7 +60,7 @@ is the way it is.
   condition `:rename-focused` (since plugins P3 `:entry-focused`, as it
   covers the command palette's entry too). `window-answer` holds that stage and the
   dispatch and answers 1 or 0. It is the whole of `on-window-key` now,
-  and the oracle drove it over the full handler's transcription. Slice
+  and the oracle drove it over the full handler's transcription. Step
   S5 (2026-10-25) started on the editor. Its eleven chords, Ctrl+Space
   through F2 (completion, comment, the two formats, redo, quick doc, jump
   and rename), are an `:editor` scope with its own `editor-commands` and
@@ -73,9 +73,9 @@ is the way it is.
   macOS Cmd+Option+F/L case, where Option turns the keyval into another
   character (`jonquil.gtk.editor/physical-key`). It is opt-in per binding,
   so no other chord picks it up. The editor ctx holds thunks, so each
-  command reads the editor's state when it runs, and the slice's oracle
+  command reads the editor's state when it runs, and the step's oracle
   crossed every key the clauses named with three keycodes, both
-  platforms, all 32 modifier sets and every command answer. Slice S6
+  platforms, all 32 modifier sets and every command answer. Step S6
   (2026-10-25) finished the editor, and its cond is gone.
   Cmd/Ctrl+Enter (Run Form) is the first `:editor` binding, Return or
   KP_Enter with `:cmd`, always used up so no newline goes in.
@@ -87,7 +87,7 @@ is the way it is.
   from above the chords to the head of those stages, which is safe because
   no shipped binding can match a plain Return. A second oracle proved it,
   comparing the whole of `handle-key!` against its old cond over every
-  stage answer. Slice S7 (2026-10-25) moved the context menus
+  stage answer. Step S7 (2026-10-25) moved the context menus
   onto the registry. `editor-menu` and `console-menu` list each item's
   label, its action name and the command it runs, and `menu-items` turns
   a menu and a ctx into the items `install-context-menu!` takes, so an item
@@ -95,7 +95,7 @@ is the way it is.
   Complete became commands with no binding. A menu oracle compared both
   menus with the literal vectors they replaced. The file tree's menu stays
   a file-operations popover, since its items act on a path picked when it
-  opens and aren't commands anywhere else. Slice S8 (2026-10-25) added
+  opens and aren't commands anywhere else. Step S8 (2026-10-25) added
   the command palette, Part 1's one new piece of UI, on Cmd/Ctrl+Shift+P.
   `jonquil.palette` builds its entries from the registry and the keymap
   (doc line, chords per platform, source), filters them and moves the
@@ -103,9 +103,9 @@ is the way it is.
   ctx of its own scope, and the two per-key ctxs are named functions now
   (`window-key-ctx`, `editor/key-ctx`), so a palette run builds the same
   ctx its key would. Commands that only work inside the key chain that
-  guards them carry `:palette? false` and stay out of the list. Slice S9
+  guards them carry `:palette? false` and stay out of the list. Step S9
   (2026-10-25) closed Part 1 by deleting the oracles, as the spec plans,
-  once every slice had merged with its oracle green and every self-test
+  once every step had merged with its oracle green and every self-test
   row unchanged. The shipped keymap is now pinned by `keymap_shipped_test`
   (every binding names a registered command and condition, what each
   window chord runs with its Shift forms ahead of the plain ones, that no
@@ -116,7 +116,7 @@ is the way it is.
 
 ## Part 2: plugins
 
-- Plugins at a glance (Part 2, slices P1 to P11c, 2026-10-25 to
+- Plugins at a glance (Part 2, steps P1 to P11c, 2026-10-25 to
   2026-10-28). The half with no GTK and no live state is data and checks: `jonquil.plugin` (the
   `defplugin` API), `plugin-check` (the validator), `plugin-protocol` (load,
   soak and validate one candidate), `plugin-history` (the version files),
@@ -131,8 +131,8 @@ is the way it is.
   In the window, `jonquil.gtk.review-pane`, `plugin-list-pane` and
   `plugin-history-pane` share the right-hand slot, and every step runs on
   one plugin agent (`plugin-step!`), so no two ever interleave. The bullets
-  below are the slice-by-slice record.
-- `jonquil.plugin` and `jonquil.plugin-check` (plugins Part 2, slice P1,
+  below are the step-by-step record.
+- `jonquil.plugin` and `jonquil.plugin-check` (plugins Part 2, step P1,
   2026-10-25): the plugin API's first piece and the validator, both pure,
   with nothing loaded from disk yet. `jonquil.plugin/defplugin` records a
   plugin file's definition, with its line, while a load binds
@@ -149,7 +149,7 @@ is the way it is.
   uses, or one the window takes only sometimes, is a warning naming that
   command. `:passes? true` on the three window commands that can hand the
   key on (`:popover/close-all`, `:source/jump-back`, `:find/bar-key`) is
-  how it tells the two apart. Slice P2 (2026-10-25) added the API's first
+  how it tells the two apart. Step P2 (2026-10-25) added the API's first
   helpers, `form-at-caret` (the form Run Form would send) and `wrap-form`,
   and `jonquil.plugin-protocol`, the one function every change to the live
   plugin set will go through. `run-protocol` loads a candidate file
@@ -161,7 +161,7 @@ is the way it is.
   command that doesn't answer in time is reported once and its other
   fixtures are skipped, since `future-cancel` can't stop CPU-bound code in
   process (an agent's proposal is soaked in a separate process later).
-  Nothing goes live yet. Slice P3 (2026-10-25) made plugins live.
+  Nothing goes live yet. Step P3 (2026-10-25) made plugins live.
   `jonquil.plugin-registry` holds them in one atom, `live`, and derives the
   plugins' `:edit` commands as registry commands and their bindings per
   scope in id order. Each controller dispatches the plugin bindings ahead
@@ -174,7 +174,7 @@ is the way it is.
   against the built-ins plus the plugins already loaded, so a chord an
   earlier plugin took is warned about. The window loads plugins once it
   opens (since P4, on the load agent, which resets `live`);
-  `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. Slice P5 (2026-10-25)
+  `--no-plugins` and `JONQUIL_NO_PLUGINS=1` skip that. Step P5 (2026-10-25)
   made `:run` commands live: `plugin-registry/commands` wraps each one so
   it captures the active tab id, builds a ctx holding only its plugin's
   declared effects' functions (`jonquil.plugin` checks the declaration on
@@ -184,7 +184,7 @@ is the way it is.
   `plugin-registry/gui-turn` on the GTK thread against the tab with that
   id (like `mcp.window/gui-call`, except a turn that missed its 5 s
   deadline is abandoned, so a call reported as timed out never lands
-  later). Slice P5b (2026-10-26) added the `:eval` effect. `ev/eval!`
+  later). Step P5b (2026-10-26) added the `:eval` effect. `ev/eval!`
   takes `:quiet`, which the two Jolt runtimes honour (`ev/QuietEval`): no
   history entry, the prompt namespace and `*1` `*2` `*3` `*e` unchanged.
   In process that's a skipped `repl-vars` shift; a Jolt child gets the
@@ -193,7 +193,7 @@ is the way it is.
   `keeping-history` does, and prints the value after a random token, which
   the evaluator splits off before anything reaches `on-output`.
   `plugin-registry/await-eval!` waits on the plugin's worker and stops an
-  eval that times out. Slice P6 (2026-10-26) added the hooks that watch:
+  eval that times out. Step P6 (2026-10-26) added the hooks that watch:
   `:after-save`, `:after-run` and `:on-error`, in `jonquil.plugin-hooks`.
   The window tags the opts of the evals that count with `:hook-source`
   (`:run :selection :form :repl`) and the tab, and `hooked-opts` chains
@@ -202,13 +202,13 @@ is the way it is.
   through each plugin's hook in id order on one future per point, with a
   ctx built by `plugin-registry/effect-ctx` as a `:run` command's is.
   Events that come while a point is busy queue on that future, up to 16,
-  and past that are skipped with a line. Slice P6b (2026-10-26) added
+  and past that are skipped with a line. Step P6b (2026-10-26) added
   `:before-run`: `do-run!`, `do-run-selection!`, `mcp-run-selection!` and
   `do-run-form!` call `before-run-stopped` when the Run would start, which
   asks `plugin-hooks/before-run!` on the GTK thread. That runs the chain
   on a future and waits up to 100 ms; the ctx carries `::p/refused`, so
   every effect throws there (no GTK turn can happen while the GTK thread
-  waits), and a busy flag keeps an overrun chain to one. Slice P7 (2026-10-26)
+  waits), and a busy flag keeps an overrun chain to one. Step P7 (2026-10-26)
   added history: `jonquil.plugin-history` keeps each live version under
   `plugins/.history/<id>/` (`<n>.clj` and a `history.edn` vector,
   rewritten whole through an atomic move, never overwritten when it
@@ -218,7 +218,7 @@ is the way it is.
   old version through `reload` with `:text` (the same protocol and
   re-check of later plugins), and only on a pass writes `<id>.clj`,
   resets the registry and records a `:revert` version; the plugin list's
-  History calls it (P11b). Slice P8 (2026-10-26) built the checker an
+  History calls it (P11b). Step P8 (2026-10-26) built the checker an
   agent's proposal will be checked with, short of starting it:
   `jonquil.plugin-checker` reads `request.edn` and `candidate.clj` from its
   working folder, runs `run-protocol :in-process` in that (child) process,
@@ -233,7 +233,7 @@ is the way it is.
   `parse-result` reads the last marker pair, turning no output, garbage, a
   half-shaped result, an overrun or a non-zero exit into a failed check.
   The result is advisory: the candidate shares the checker's process and
-  can forge it, so Accept (P9) checks again in process and compares. Slice
+  can forge it, so Accept (P9) checks again in process and compares. Step
   P8b (2026-10-26) runs it: `plugin-isolated/check!` writes the request
   and the candidate to a fresh owner-only `jonquil-plugin-check-` folder,
   starts the `jolt` the out-of-process runtime finds, in that folder with
@@ -256,7 +256,7 @@ is the way it is.
   the kept variables are briefly in that command line. A process the
   candidate starts and leaves running when its check ends on its own
   keeps running. A candidate can require only the embedded namespaces and
-  `clojure.*`. Slice P9 (2026-10-27) gave a proposal its lifecycle,
+  `clojure.*`. Step P9 (2026-10-27) gave a proposal its lifecycle,
   headless, and P9b put it in the window. A proposal is a version in the
   history, `:source :agent`, either `:pending` (keeping what its check
   reported: warnings, timings, the summary, and whether it was unchecked)
@@ -283,7 +283,7 @@ is the way it is.
   loaded, or whose edit failed its checks (reload or fix it first), and every refusal leaves the file, live,
   the status and a live plugin's namespace as they were.
   `reject-step!` records the note. `revert-step!` now refuses a version
-  that was never live, so a proposal can't skip Accept that way. Slice
+  that was never live, so a proposal can't skip Accept that way. Step
   P9b (2026-10-27) is the window side. `jonquil.plugin-review` is pure
   apart from `pending-reviews`, which reads the history: it turns each
   pending proposal into summary lines (unchecked first when it is, where
@@ -302,7 +302,7 @@ is the way it is.
   proposal again, or the first. The same proposal still shown keeps the
   note being typed for Reject, and an Accept's lines all go on the
   panel's footer, so a refusal says why. Nothing in the panel is an MCP
-  tool. Slice P10 (2026-10-27) gives agents four of them over the window
+  tool. Step P10 (2026-10-27) gives agents four of them over the window
   (`jonquil_plugins_list`, `jonquil_plugin_read`, `jonquil_plugin_propose`
   and `jonquil_plugin_status`). Their text comes from `jonquil.plugin-mcp`,
   pure apart from reading the plugins folder and its histories, which
@@ -319,7 +319,7 @@ is the way it is.
   finished by then the answer is `status: unknown`. A refresh that
   replaces the shown proposal with a newer version of the same plugin arms
   a one-time refusal of Accept, so a click aimed at the version the user
-  read never accepts one an agent swapped in. Slice P10b (2026-10-27)
+  read never accepts one an agent swapped in. Step P10b (2026-10-27)
   serves a plugin's own `:mcp-tools`. `plugin-check` validates each row
   (a short `:name`, a `:doc`, typed `:args` and a `:run`), and the served
   name `plugin_<id>_<name>` is capped at 50 characters.
@@ -334,7 +334,7 @@ is the way it is.
   takes a table or a fn that answers one, read once per message, and
   `mcp-window/with-plugin-tools` builds that fn from the built-in table and
   the ui's `:plugin-tools*`, for `--mcp --window` and the listener alike.
-  Slice P10c (2026-10-28) tells the client when those tools change.
+  Step P10c (2026-10-28) tells the client when those tools change.
   `serve!` takes `:subscribe`, a fn that gets a `notify!` and answers its
   unsubscribe, which runs however the session ends. Every write in a session
   holds one lock, so a notification never splits an answer. `notify!` sends
@@ -348,7 +348,7 @@ is the way it is.
   `:list-changed?`, so `initialize` declares `"listChanged" true`, and stdio
   and each listener connection subscribe on their own. Headless `--mcp`
   passes no `:subscribe` and declares nothing.
-  Slice P11 (2026-10-28) adds the plugin list. `jonquil.plugin-list` builds
+  Step P11 (2026-10-28) adds the plugin list. `jonquil.plugin-list` builds
   one row per plugin, from the registry, the plugin files and the histories,
   and `jonquil_plugins_list` prints those rows' lines, so the panel and the
   MCP tool never disagree. `settings/save-plugin-disabled!` merges inside
@@ -359,7 +359,7 @@ is the way it is.
   quick clicks queue two steps), else writes and reloads. `plugin-step!`
   builds the rows after every step, beside the reviews, and
   `jonquil.gtk.plugin-list-pane` shows them in the right-hand slot.
-  Slice P11b (2026-10-28) adds History and Revert to it. `history-line`
+  Step P11b (2026-10-28) adds History and Revert to it. `history-line`
   moved from `jonquil.plugin-mcp` to `jonquil.plugin-list`, so
   `jonquil_plugin_read` and the panel print the same lines, and
   `plugin-list/version-rows` gives them newest first. A top-level
@@ -389,7 +389,7 @@ is the way it is.
   the `:rejected-by-checks` entry as `:check-log`. `propose-text` names it,
   and `status-text` and `plugin-list/history-line` name it while the file
   exists.
-  Slice P4 (2026-10-25) made a change take effect
+  Step P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes
   through the protocol against the plugins sorting before it; a failure
