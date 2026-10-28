@@ -29,7 +29,7 @@ fewer, measured 2026-10-28).
 `bb test:nrepl` runs a second, separate suite (63 tests, 235 assertions,
 about 50 s): every test in it spawns a real Jolt child over
 `jonquil.nrepl.child` and talks to it over a socket, so it needs the
-jolt-lang/nrepl checkout described in [Using Jonquil](using-jonquil.md).
+jolt-lang/nrepl checkout described in [Where the nREPL middleware comes from](dialects/index.md#where-the-nrepl-middleware-comes-from).
 `bb test:nightly` runs that same suite on Jolt's nightly build (the
 `vnightly` pre-release, built daily from Jolt's main), so a change on Jolt
 main that breaks Jonquil shows up before it reaches a release. It downloads

@@ -28,32 +28,32 @@ you use it:
 - **jank** (experimental): a `jank` binary. `brew install
   jank-lang/jank/jank` is the simplest; Jonquil also looks on `PATH`, in
   `~/.local/bin`, and at whatever `JONQUIL_JANK` names. See
-  [jank](using-jonquil.md#jank-experimental).
+  [jank](dialects/jank.md).
 - **JVM Clojure**: Java 17 or later and the `clojure` CLI, plus an nREPL
   server you start yourself in the project. See
-  [JVM Clojure](using-jonquil.md#jvm-clojure-attaching-to-your-own-nrepl-server).
+  [JVM Clojure](dialects/jvm-clojure.md).
 - **ClojureDart** (experimental): a running app built with the ClojureDart
   fork that serves nREPL. See
-  [ClojureDart](using-jonquil.md#clojuredart-experimental-attaching-to-a-running-app).
+  [ClojureDart](dialects/clojuredart.md).
 - **ClojureScript** (experimental): in a shadow-cljs project
   (`shadow-cljs.edn`), `npx shadow-cljs watch <build>` running and a
   JS runtime that has the build loaded. See
-  [ClojureScript](using-jonquil.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
+  [ClojureScript](dialects/clojurescript.md#clojurescript-experimental-attaching-to-a-shadow-cljs-build).
   A `.cljs` file outside a shadow-cljs project needs only the Clojure CLI
   and `node`, and Jonquil starts ClojureScript itself. See
-  [ClojureScript on node](using-jonquil.md#clojurescript-experimental-running-on-node).
+  [ClojureScript on node](dialects/clojurescript.md#clojurescript-experimental-running-on-node).
   A project can run it in a browser tab instead, with
   `{:cljs {:target :browser}}` in `.jonquil.edn`; see
-  [running in the browser](using-jonquil.md#clojurescript-experimental-running-in-the-browser).
+  [running in the browser](dialects/clojurescript.md#clojurescript-experimental-running-in-the-browser).
 - **Any nREPL server** (the nREPL dialect): the server itself, which you
   start, and `.jonquil.edn {:dialect :nrepl :nrepl {:port N}}` naming it.
   Basilisp's `basilisp nrepl-server` writes `.nrepl-port`, so
   `{:dialect :nrepl}` alone is enough there.
-  See [Any nREPL server](using-jonquil.md#any-nrepl-server-babashka-other-clojures-other-hosts).
+  See [Any nREPL server](dialects/other-nrepl.md).
 - **Jolt out of process**, the default in a project with a `deps.edn`:
   `git` on `PATH` and a network connection the first time, when Jonquil
   fetches jolt-lang/nrepl's middleware, or a checkout of jolt-lang/nrepl.
-  See [Running Jolt out of process](using-jonquil.md#running-jolt-out-of-process).
+  See [Running Jolt out of process](dialects/index.md#running-jolt-out-of-process).
 
 ## Running
 
@@ -241,18 +241,18 @@ EDN map:
   saved when you toggle it and when you quit.
 - `:dialect` is optional and only written by hand: the dialect an untitled
   buffer or a file outside any project starts in (see
-  [Choosing a dialect](using-jonquil.md#choosing-a-dialect)).
+  [Choosing a dialect](dialects/index.md#choosing-a-dialect)).
 - `:reopen-tabs?` is also only written by hand. Set it to `false` and
   Jonquil stops saving and reopening the last session's tabs. Leaving it
   out, or `true`, keeps that on.
 - `:mcp-listen?` is only written by hand too. Set it to `true` and each
   window serves Jonquil's MCP tools on a loopback socket, so an agent can
   attach to a window that's already open with `jonquil --mcp-attach` (see
-  [Driving Jonquil from an agent](using-jonquil.md#driving-jonquil-from-an-agent-mcp)).
+  [Driving Jonquil from an agent](mcp.md)).
 
 The tabs themselves live next door in `sessions.edn`, one entry per
 project folder, newest first, at most 20 (see
-[Using Jonquil](using-jonquil.md)). It changes as you open and close tabs, which is why
+[Tabs from last time](files-and-tabs.md#tabs-from-last-time)). It changes as you open and close tabs, which is why
 it's a separate file from the one you edit by hand.
 
 Loading the file never throws. A missing file starts Jonquil with the
