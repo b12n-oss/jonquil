@@ -70,7 +70,10 @@ bb app:build   # writes ./jonquil (gitignored); it loads GTK4 and pango from the
 ```
 
 Once it's built, `./jonquil`, `./jonquil file.clj`, `./jonquil a.clj b.clj` (one tab each) and `./jonquil <folder>` work the same way as
-`bb app:run` does, without needing Jolt or babashka on `PATH` at all.
+`bb app:run` does, without needing babashka at all. Jolt is needed only
+for a project that runs Jolt as a child (one with a `deps.edn`), and Jonquil
+looks for it on your login shell's `PATH`; a loose file runs inside the
+binary itself.
 
 ### The macOS quarantine note
 

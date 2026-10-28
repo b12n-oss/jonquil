@@ -2,7 +2,8 @@
 ;; (https://github.com/jlt-commons/docs-engine).
 ;;
 ;; Build it locally with `bb site:serve` (or `jolt site:serve`). There is
-;; deliberately NO CI workflow and NO GitHub Pages site: this repo is private
+;; deliberately NO GitHub Pages site (`.github/workflows/site.yml` only builds
+;; it, run by hand): this repo is private
 ;; and staying that way for now. Publishing is two separate decisions, taken
 ;; explicitly, and neither is implied by this file existing. Until the
 ;; project is open-sourced, the only way to see this site is to build it on
