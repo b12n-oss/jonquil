@@ -69,6 +69,7 @@
     jonquil.plugin-list
     jonquil.plugin-mcp
     jonquil.gtk.review-pane
+    jonquil.gtk.plugin-list-pane
     jonquil.gtk.palette
     jonquil.help
     jonquil.source

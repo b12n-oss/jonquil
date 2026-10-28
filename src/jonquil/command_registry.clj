@@ -86,7 +86,10 @@
                     :run (call :reload-plugins-fn)}
    ;; plugins P9b: open the review of the agents' pending proposals
    :plugins/review {:doc "Review the plugin proposals agents made." :scope :window
-                    :run (call :review-proposals-fn)}})
+                    :run (call :review-proposals-fn)}
+   ;; plugins P11: the plugin list, to enable, disable or open one
+   :plugins/list {:doc "Show the plugins: enable, disable or open one." :scope :window
+                  :run (call :plugins-list-fn)}})
 
 (def window-conditions
   "Named conditions a window binding's :when can ask for, each (fn [ctx])

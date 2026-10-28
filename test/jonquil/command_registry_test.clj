@@ -6,7 +6,7 @@
   [:run-fn :open-fn :save-as-fn :save-fn :close-fn :toggle-tree-fn :run-selection-fn
    :clear-last-fn :clear-console-fn :open-find-fn :open-replace-fn :zoom-fn
    :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn
-   :open-palette-fn :reload-plugins-fn :review-proposals-fn])
+   :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -24,7 +24,8 @@
    :tab/next [:step-tab-fn 1] :tab/previous [:step-tab-fn -1]
    :palette/open [:open-palette-fn]
    :plugins/reload [:reload-plugins-fn]
-   :plugins/review [:review-proposals-fn]})
+   :plugins/review [:review-proposals-fn]
+   :plugins/list [:plugins-list-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)
@@ -32,7 +33,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the S1-S4 commands, S8's palette, P4's reload and P9b's review")
+      "exactly the S1-S4 commands, S8's palette, P4's reload, P9b's review and P11's list")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))

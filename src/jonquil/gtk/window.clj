@@ -43,6 +43,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
             [jonquil.gtk.review-pane :as review-pane]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
@@ -62,6 +63,7 @@
             [jonquil.nrepl.shadow]
             [jonquil.palette :as pal-data]
             [jonquil.plugin-hooks :as plugin-hooks]
+            [jonquil.plugin-list :as plugin-list]
             [jonquil.plugin-loader :as plugin-loader]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.plugin-review :as plugin-review]
@@ -794,13 +796,15 @@
 
 (defn- right-roots
   "{which root} for the panels right's slot holds; a right without
-  :review-root (a test's) has two."
-  [{:keys [inspector-root source-root review-root]}]
+  :review-root or :plugins-root (a test's) has fewer."
+  [{:keys [inspector-root source-root review-root plugins-root]}]
   (cond-> {:inspector inspector-root :source source-root}
-    review-root (assoc :review review-root)))
+    review-root (assoc :review review-root)
+    plugins-root (assoc :plugins plugins-root)))
 
 (defn- show-right-panel!
-  "Shows which (:inspector, :source or, plugins P9b, :review) in the slot
+  "Shows which (:inspector, :source or, plugins P9b, :review, or P11,
+  :plugins) in the slot
   and hides the others. When the slot was hidden, also sizes h-paned so
   the panel claims about PANEL-WIDTH, as the inspector always did; while
   it's showing, the split stays where the person put it. right is {:win
@@ -3032,9 +3036,11 @@
   proposals' reviews are built (jonquil.plugin-review/pending-reviews over
   the settings file's plugins folder and the live registry) and handed to
   plugin-reviews-changed with open? (open the review panel), after (fn
-  [lines] run once the window has changed) and done. Returns the agent,
-  whose state is the step's lines."
-  [{:keys [settings-path step open? after done]}]
+  [lines] run once the window has changed) and done. Plugins P11: so are
+  the plugin list's rows (jonquil.plugin-list/rows, with the disabled ids
+  from the settings file) and open-list? (open the list). Returns the
+  agent, whose state is the step's lines."
+  [{:keys [settings-path step open? open-list? after done]}]
   (send-off plugin-loads
             (fn [_]
               (let [lines (step)]
@@ -3042,10 +3048,13 @@
                      (catch :default e
                        (binding [*out* *err*] (println "jonquil: plugin console:" (ex-message e)))))
                 (try
-                  (@plugin-reviews-changed
-                   {:reviews (plugin-review/pending-reviews {:plugins-dir (plugin-loader/plugins-dir settings-path)
-                                                             :registry @plugin-registry/live})
-                    :open? open? :lines lines :after after :done done})
+                  (let [dir (plugin-loader/plugins-dir settings-path)
+                        reg @plugin-registry/live]
+                    (@plugin-reviews-changed
+                     {:reviews (plugin-review/pending-reviews {:plugins-dir dir :registry reg})
+                      :rows (plugin-list/rows {:plugins-dir dir :registry reg
+                                               :disabled (:disabled (:plugins (settings/load-settings settings-path)))})
+                      :open? open? :open-list? open-list? :lines lines :after after :done done}))
                   (catch :default e
                     (when done (deliver done true))
                     (@plugin-console (str "reading the plugin proposals failed: " (or (ex-message e) (str e))))))
@@ -3173,6 +3182,9 @@
         ;; history after every plugin step
         rp (review-pane/make-pane)
         review-state (atom {:reviews [] :index 0})
+        ;; plugins P11: the plugin list shares the slot too; its rows are
+        ;; rebuilt after every plugin step, like the reviews
+        lp (plugin-list-pane/make-pane)
         *right (atom nil)
         ;; Where each jump into a tab started, newest last, for Cmd/Ctrl+[
         ;; (open-in-tab!, jump-back!).
@@ -3295,7 +3307,7 @@
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :review-root (:root rp) :source-pane sp}
+               :review-root (:root rp) :plugins-root (:root lp) :source-pane sp}
         _ (reset! *right right)
         ;; plugins P9b: the plugin-step! opts for Accept or Reject of the
         ;; proposal the panel shows (nil when none is), its lines put on
@@ -3334,6 +3346,44 @@
                           (let [p (promise)]
                             (on-gui! #(deliver p (review-step kind)))
                             (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
+        ;; plugins P11: the plugin-step! opts for Enable (enabled? true) or
+        ;; Disable of the list's selected plugin, its first line put on the
+        ;; list's footer and the status bar once the window has changed;
+        ;; nil, with the footer saying why, when there's nothing to do.
+        ;; GTK-thread only.
+        toggle-step (fn [enabled?]
+                      (let [row (plugin-list-pane/selected-row lp)
+                            what (if enabled? "enabled" "disabled")]
+                        (cond
+                          (nil? row) (do (plugin-list-pane/report! lp "No plugin is selected.") nil)
+                          (= enabled? (not (:disabled? row)))
+                          (do (plugin-list-pane/report! lp (str "plugin " (:id row) " is already " what ".")) nil)
+                          :else
+                          (let [path @settings-path*]
+                            {:settings-path path
+                             :step #(plugin-loader/set-enabled-step!
+                                     plugin-registry/live
+                                     {:settings-path path :os (System/getProperty "os.name")
+                                      :id (:id row) :enabled? enabled?})
+                             :after (fn [lines]
+                                      (when-let [l (first lines)]
+                                        (plugin-list-pane/report! lp l)
+                                        (g/gtk-label-set-text status-label (str "; " l))))}))))
+        toggle-step-now (fn [id enabled?]
+                          (let [p (promise)]
+                            (on-gui! #(deliver p (when (plugin-list-pane/select-id! lp id) (toggle-step enabled?))))
+                            (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
+        ;; plugins P11: Open shows the selected plugin's file in a tab, or
+        ;; says why it can't (no row, or no file now). GTK-thread only.
+        plugin-open-fn (fn []
+                         (if-let [{:keys [id]} (plugin-list-pane/selected-row lp)]
+                           (let [dir (plugin-loader/plugins-dir @settings-path*)
+                                 f (java.io.File. ^String dir (str id ".clj"))]
+                             (if (.isFile f)
+                               (when-let [err (:error (open-file! @*tab-ctx (str f)))]
+                                 (plugin-list-pane/report! lp (str "plugin " id ": " err)))
+                               (plugin-list-pane/report! lp (str "plugin " id " has no file in " dir "."))))
+                           (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
@@ -3440,6 +3490,8 @@
                                       :open-palette-fn open-palette-fn
                                       :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
                                                                                  :step (fn [] []) :open? true}))
+                                      :plugins-list-fn (fn [] (plugin-step! {:settings-path @settings-path*
+                                                                             :step (fn [] []) :open-list? true}))
                                       :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
                                                                                :cv cv}))}
         window-key-fn (on-window-key window-key-args)
@@ -3490,12 +3542,15 @@
     (g/gtk-box-append slot (:root sp))
     (g/gtk-widget-set-vexpand (:root rp) 1)
     (g/gtk-box-append slot (:root rp))
+    (g/gtk-widget-set-vexpand (:root lp) 1)
+    (g/gtk-box-append slot (:root lp))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
     (g/gtk-widget-set-visible (:root pane) 0)
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible (:root rp) 0)
+    (g/gtk-widget-set-visible (:root lp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
     (g/gtk-paned-set-start-child tree-paned (:root tree-pane))
@@ -3606,6 +3661,12 @@
                                (swap! review-state #(-> % (assoc :index i) (dissoc :swapped)))
                                (review-pane/show! rp (nth reviews i) i n)))))
          :on-close (fn [] (hide-right-panel! right :review) (editor/focus! (:ed (active-tab))))})
+    (plugin-list-pane/set-handlers!
+     lp {:on-enable (fn [] (some-> (toggle-step true) plugin-step!))
+         :on-disable (fn [] (some-> (toggle-step false) plugin-step!))
+         :on-open plugin-open-fn
+         :on-review (fn [] (plugin-step! {:settings-path @settings-path* :step (fn [] []) :open? true}))
+         :on-close (fn [] (hide-right-panel! right :plugins) (editor/focus! (:ed (active-tab))))})
     ;; I5: joins the SAME registry, so Escape closes the def prompt
     ;; before it can fall through to Stop (ruling 8).
     (register-popover-fn (:def-popover pane))
@@ -3778,10 +3839,19 @@
     ;; it's showing or being opened, the review panel: the same plugin's
     ;; proposal again if it's still pending, else the first
     (reset! plugin-reviews-changed
-            (fn [{:keys [reviews open? lines after done]}]
+            (fn [{:keys [reviews rows open? open-list? lines after done]}]
               (on-gui!
                (fn []
                  (try
+                   ;; plugins P11: the list, before the review, which hides
+                   ;; it when it opens
+                   (when (or open-list? (pos? (g/gtk-widget-get-visible (:root lp))))
+                     (plugin-list-pane/show! lp rows (:id (plugin-list-pane/selected-row lp))
+                                             (str "No plugins yet. A plugin is a file in "
+                                                  (plugin-loader/plugins-dir @settings-path*) "."))
+                     (when open-list?
+                       (plugin-list-pane/report! lp "")
+                       (show-right-panel! right :plugins)))
                    (let [n (count reviews)]
                      (g/gtk-label-set-text pending-label (str n " plugin proposal" (when (not= 1 n) "s")))
                      (g/gtk-widget-set-visible pending-label (if (pos? n) 1 0))
@@ -4137,6 +4207,26 @@
                                            (on-gui! #(do ((:on-next @(:handlers rp))) (deliver p true)))
                                            (deref p 10000 nil)
                                            []))
+                 ;; plugins P11: the plugin list, what Plugins… does (waited
+                 ;; for), Enable, Disable and Open on an id's row as the
+                 ;; buttons do, and what the list shows now
+                   :plugin-list-pane lp
+                   :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
+                                                             :step (fn [] []) :open-list? true})
+                                     nil)
+                   :plugin-enable!* (fn [id] (toggle-step-now id true))
+                   :plugin-disable!* (fn [id] (toggle-step-now id false))
+                   :plugin-open!* (fn [id] (let [p (promise)]
+                                             (on-gui! #(deliver p (do (when (plugin-list-pane/select-id! lp id) (plugin-open-fn))
+                                                                      (plugin-list-pane/footer-text lp))))
+                                             (deref p 10000 nil)))
+                   :plugin-list-shown* (fn [] (let [p (promise)]
+                                                (on-gui! #(deliver p {:visible (pos? (g/gtk-widget-get-visible (:root lp)))
+                                                                      :rows (plugin-list-pane/row-texts lp)
+                                                                      :selected (:id (plugin-list-pane/selected-row lp))
+                                                                      :empty (plugin-list-pane/empty-text lp)
+                                                                      :footer (plugin-list-pane/footer-text lp)}))
+                                                (deref p 10000 nil)))
                    :review-shown* (fn [] (let [{:keys [reviews index]} @review-state]
                                            (when-let [r (get reviews index)]
                                              {:id (:id r) :n (:n r) :index index :count (count reviews)})))
