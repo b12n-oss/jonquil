@@ -65,7 +65,7 @@
 (deftest list-text-test
   (let [r (pm/list-text (state (three-plugins) :registry reg-a :disabled #{:c}))]
     (is (= {:error? false
-            :text (str/join "\n" ["a: live v1, loaded, effects :console :eval, pending v2. Wraps."
+            :text (str/join "\n" ["a: live v1, loaded, file deleted, effects :console :eval, pending v2. Wraps."
                                   "b: no live version, not loaded, effects unknown, no pending proposal."
                                   "c: no live version, disabled, effects unknown, no pending proposal."])}
            r))))
