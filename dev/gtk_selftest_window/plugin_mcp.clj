@@ -6,6 +6,7 @@
   temp settings file). Cleanup is gtk-selftest-window.review's
   with-proposals."
   (:require [clojure.java.io :as io]
+            [jonquil.mcp.json :as json]
             [clojure.string :as str]
             [gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.review :as review]
@@ -177,3 +178,54 @@
           (support/check :plugin-mcp-tool-reads-the-buffer
                          (= {:text want :error? false} r)
                          {:want want :r r}))))))
+
+(defn- serve-queues
+  "mcp/serve! on a future over a queue, as the stdio session is served:
+  the window table with plugin tools and :subscribe from the ui."
+  [ui]
+  (let [q (java.util.concurrent.LinkedBlockingQueue.)
+        out (atom [])
+        done (future
+               (mcp/serve! {:tools (mcp-window/with-plugin-tools
+                                    (mcp-window/make-window-tools {:ui ui :dir (System/getProperty "java.io.tmpdir")}) ui)
+                            :subscribe (:watch-plugin-tools* ui)
+                            :read-line (fn [] (let [l (.take q)] (when-not (= l ::eof) l)))
+                            :write-line (fn [s] (swap! out conj (json/decode s)))}))]
+    {:send! (fn [m] (.put q (json/encode m))) :eof! (fn [] (.put q ::eof)) :out out :done done}))
+
+(defn- wait-for [f ms]
+  (let [t0 (System/currentTimeMillis)]
+    (loop [] (or (f) (when (< (- (System/currentTimeMillis) t0) ms) (Thread/sleep 20) (recur))))))
+
+(def ^:private list-changed {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"})
+
+(defn row-plugin-mcp-list-changed-after-reload
+  "Plugins P10c: a reload that adds a plugin's tools sends list_changed to
+  a session that's initialized, and the next tools/list has them; a reload
+  that changes nothing sends none; the session ends on EOF."
+  [ui]
+  (go-row :plugin-mcp-list-changed-after-reload support/check
+    (review/with-proposals ui {:files {"mcpt.clj" no-tools-source} :ids ["mcpt"]}
+      (fn []
+        (let [{:keys [send! eof! out done]} (serve-queues ui)
+              notes #(count (filter #{list-changed} @out))
+              _ (send! {"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {"protocolVersion" "2025-06-18"}})
+              _ (send! {"jsonrpc" "2.0" "method" "notifications/initialized"})
+              _ (send! {"jsonrpc" "2.0" "id" 2 "method" "ping"})
+              _ (wait-for #(= 2 (count @out)) 5000)
+              cap (get-in (first @out) ["result" "capabilities" "tools"])
+              _ (spit (io/file ((:plugins-dir* ui)) "mcpt.clj") tools-source)
+              _ ((:reload-plugins!* ui))
+              first-note? (wait-for #(= 1 (notes)) 5000)
+              _ (send! {"jsonrpc" "2.0" "id" 3 "method" "tools/list"})
+              listed (wait-for #(some (fn [m] (when (= 3 (get m "id")) m)) @out) 5000)
+              names (set (map #(get % "name") (get-in listed ["result" "tools"])))
+              _ ((:reload-plugins!* ui))
+              _ (Thread/sleep 1000)
+              after (notes)
+              _ (eof!)
+              ended (deref done 5000 ::timeout)]
+          (support/check :plugin-mcp-list-changed-after-reload
+                         (and (= {"listChanged" true} cap) first-note?
+                              (contains? names "plugin_mcpt_echo") (= 1 after) (not= ::timeout ended))
+                         {:cap cap :first first-note? :names (count names) :after after :ended ended}))))))

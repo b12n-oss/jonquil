@@ -4071,6 +4071,7 @@
                  ;; plugins P10b: the live plugins' MCP tools, read on
                  ;; every message the MCP server handles
                    :plugin-tools* (fn [] (plugin-registry/mcp-tools @plugin-registry/live))
+                   :watch-plugin-tools* (fn [notify!] (plugin-registry/watch-tools! plugin-registry/live notify!))
                    :plugin-propose!* (fn [{:keys [id source reason]}]
                                        (let [path @settings-path*
                                              result (plugin-loader/propose-check
@@ -4291,7 +4292,9 @@
   :status :unknown when the step didn't finish in time. :plugin-tools*
   (P10b) answers the live plugins' MCP tools
   (jonquil.plugin-registry/mcp-tools), which the MCP server serves beside
-  the built-ins. :review-pane (plugins
+  the built-ins. :watch-plugin-tools* (P10c) takes a notify! fn and calls
+  it when a swap of the live registry changes those tools, answering a fn
+  that stops it (jonquil.plugin-registry/watch-tools!). :review-pane (plugins
   P9b) is the jonquil.gtk.review-pane map, :pending-label the status bar's
   pending count, :review-proposals!* does what Review Plugin Proposals
   does and waits for the window to change, :review-accept!*,

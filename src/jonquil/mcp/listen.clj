@@ -96,6 +96,7 @@
                            (mcp-window/make-window-tools
                             {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
                            ui)
+                   :subscribe (:watch-plugin-tools* ui)
                    :read-line (fn [] (.readLine ^java.io.BufferedReader in))
                    :write-line (fn [s]
                                  (.write ^java.io.Writer out (str s "\n"))
