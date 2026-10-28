@@ -7,6 +7,7 @@
             [jonquil.plugin-loader :as loader]
             [jonquil.plugin-protocol :as protocol]
             [jonquil.plugin-registry :as reg]
+            [jonquil.settings :as settings]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)
@@ -753,3 +754,63 @@
            (revert! live d "pw" 1)))
     (is (= (marked "pw" 3) (slurp (io/file d "pw.clj"))))
     (is (= 2 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
+
+;; --- plugins P11: Enable and Disable -----------------------------------------
+
+(defn- settings-with
+  "A temp settings file holding settings-text, with files in its plugins
+  folder: its path."
+  [settings-text files]
+  (let [d (temp-dirs/temp-dir! "jonquil-toggle-")
+        sp (str d "/settings.edn")
+        pd (io/file (loader/plugins-dir sp))]
+    (.mkdirs pd)
+    (spit sp settings-text)
+    (doseq [[n text] files] (spit (io/file pd n) text))
+    sp))
+
+(defn- toggle! [live sp id enabled?]
+  (loader/set-enabled-step! live {:settings-path sp :id id :enabled? enabled? :os "Linux" :now now}))
+
+(defn- disabled-ids [sp] (get-in (settings/load-settings sp) [:plugins :disabled]))
+
+(deftest disable-step-removes-and-saves-test
+  (let [sp (settings-with "{}" [["t-a.clj" (source "t-a")]])
+        live (atom (reg/empty-registry))
+        _ (loader/load-step! live {:settings-path sp :os "Linux" :now now})
+        _ (is (some? (get-in @live [:plugins :t-a])))
+        lines (toggle! live sp "t-a" false)]
+    (is (= "plugin t-a disabled." (first lines)) (pr-str lines))
+    (is (nil? (get-in @live [:plugins :t-a])))
+    (is (= #{:t-a} (disabled-ids sp)))))
+
+(deftest enable-step-loads-it-again-test
+  (let [sp (settings-with "{:plugins {:disabled #{:t-b}}}" [["t-b.clj" (source "t-b")]])
+        live (atom (reg/empty-registry))
+        _ (loader/load-step! live {:settings-path sp :os "Linux" :now now})
+        _ (is (nil? (get-in @live [:plugins :t-b])))
+        lines (toggle! live sp "t-b" true)]
+    (is (= "plugin t-b enabled." (first lines)) (pr-str lines))
+    (is (some? (get-in @live [:plugins :t-b])))
+    (is (= #{} (disabled-ids sp)))))
+
+(deftest a-refused-save-changes-nothing-test
+  (let [sp (settings-with "{}" [["t-c.clj" (source "t-c")]])
+        live (atom (reg/empty-registry))
+        _ (loader/load-step! live {:settings-path sp :os "Linux" :now now})
+        _ (spit sp "{:plugins {:disabled [:t-c]}}")
+        before @live
+        lines (toggle! live sp "t-c" false)]
+    (is (= 1 (count lines)) (pr-str lines))
+    (is (str/starts-with? (first lines) "plugin t-c wasn't disabled: ") (pr-str lines))
+    (is (identical? before @live))
+    (is (= "{:plugins {:disabled [:t-c]}}" (slurp sp)))))
+
+(deftest a-broken-plugin-can-be-disabled-test
+  (let [sp (settings-with "{}" [["t-d.clj" "(ns jonquil.plugins.t-d) (this does not compile"]])
+        live (atom (reg/empty-registry))
+        _ (loader/load-step! live {:settings-path sp :os "Linux" :now now})
+        _ (is (nil? (get-in @live [:plugins :t-d])))
+        lines (toggle! live sp "t-d" false)]
+    (is (= "plugin t-d disabled." (first lines)) (pr-str lines))
+    (is (= #{:t-d} (disabled-ids sp)))))
