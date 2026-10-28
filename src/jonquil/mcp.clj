@@ -5,7 +5,10 @@
   this namespace never touches stdin or stdout itself. The tool table is
   `{:defs [tool-def ...] :call (fn [name args] {:text s :error? b})}`, or
   (plugins P10b) a no-argument fn answering one, read once per message, so
-  the tools a window serves can change between calls."
+  the tools a window serves can change between calls. A table with
+  :list-changed? true declares the capability, and serve!'s :subscribe
+  (plugins P10c) is how the server learns when to send
+  notifications/tools/list_changed."
   (:require [clojure.string :as str]
             [jonquil.mcp.json :as json]))
 
@@ -19,14 +22,14 @@
 (defn- rpc-error [id code message]
   {"jsonrpc" "2.0" "id" id "error" {"code" code "message" message}})
 
-(defn- initialize [_ msg]
+(defn- initialize [tools msg]
   (let [client-v (get-in msg ["params" "protocolVersion"])
         v (if (some #{client-v} supported-versions)
             client-v
             (last supported-versions))]
     (rpc-result (get msg "id")
                 {"protocolVersion" v
-                 "capabilities" {"tools" {}}
+                 "capabilities" {"tools" (if (:list-changed? tools) {"listChanged" true} {})}
                  "serverInfo" server-info})))
 
 (defn- text-result [text error?]
@@ -71,19 +74,20 @@
             (rpc-error (get msg "id") -32601 "Method not found"))))
 
 (defn- respond
-  "Response map for one input line, or nil. Decode failure is -32700 with a
-  null id; a throw inside dispatch is -32603 with the request's id, and no
-  reply when the message had none."
+  "{:msg decoded :resp response-or-nil} for one input line. Decode failure
+  is -32700 with a null id; a throw inside dispatch is -32603 with the
+  request's id, and no reply when the message had none."
   [tools line]
   (let [decoded (try {:msg (json/decode line)}
                      (catch Throwable _ nil))]
     (if-not decoded
-      (rpc-error nil -32700 "Parse error")
+      {:resp (rpc-error nil -32700 "Parse error")}
       (let [msg (:msg decoded)]
-        (try (handle-message tools msg)
-             (catch Throwable _
-               (when (and (map? msg) (contains? msg "id"))
-                 (rpc-error (get msg "id") -32603 "Internal error"))))))))
+        {:msg msg
+         :resp (try (handle-message tools msg)
+                    (catch Throwable _
+                      (when (and (map? msg) (contains? msg "id"))
+                        (rpc-error (get msg "id") -32603 "Internal error"))))}))))
 
 (defn- encode-response [resp]
   (try (json/encode resp)
@@ -94,15 +98,53 @@
               (catch Throwable _
                 (json/encode (rpc-error nil -32603 "Internal error")))))))
 
+(def ^:private list-changed-line
+  (json/encode {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"}))
+
+(defn- notifier
+  "notify! for one session (plugins P10c): safe from any thread, and returns
+  at once. Nothing is sent until ready? holds (the client's
+  notifications/initialized). The send runs on a future, so a swap on the
+  GTK thread never waits on a slow client, and a burst makes one send in
+  flight plus one queued: pending is cleared before the write, so a change
+  during it sends again. A failed write says one line on err; the serve
+  loop finds the dead client on its own read."
+  [write! ready? err]
+  (let [pending (atom false)]
+    (fn []
+      (when (and @ready? (compare-and-set! pending false true))
+        (future
+          (reset! pending false)
+          (try (write! list-changed-line)
+               (catch Throwable e
+                 (binding [*out* err]
+                   (println (str "jonquil: couldn't send tools/list_changed: " (or (ex-message e) (str e))))))))
+        nil))))
+
 (defn serve!
   "Reads one JSON-RPC message per line via :read-line until it returns nil,
   writing each response with :write-line. Blank lines are skipped. A bad
   request never ends the loop. A :write-line failure (a broken pipe) is not
-  caught: nobody is listening, so the loop ends with it."
-  [{:keys [tools read-line write-line]}]
-  (loop []
-    (when-let [line (read-line)]
-      (when-not (str/blank? line)
-        (when-let [resp (respond tools line)]
-          (write-line (encode-response resp))))
-      (recur))))
+  caught: nobody is listening, so the loop ends with it.
+
+  :subscribe (plugins P10c, optional) is (fn [notify!] -> unsubscribe fn),
+  called once before the loop; its unsubscribe runs when the loop ends,
+  however it ends. notify! sends notifications/tools/list_changed (see
+  notifier). Every write, response or notification, holds one lock, so
+  lines never interleave."
+  [{:keys [tools read-line write-line subscribe]}]
+  (let [lock (Object.)
+        write! (fn [s] (locking lock (write-line s)))
+        ready? (atom false)
+        unsubscribe (when subscribe (subscribe (notifier write! ready? *err*)))]
+    (try
+      (loop []
+        (when-let [line (read-line)]
+          (when-not (str/blank? line)
+            (let [{:keys [msg resp]} (respond tools line)]
+              (when resp (write! (encode-response resp)))
+              (when (and (map? msg) (= "notifications/initialized" (get msg "method")))
+                (reset! ready? true))))
+          (recur)))
+      (finally
+        (when (fn? unsubscribe) (unsubscribe))))))

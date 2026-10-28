@@ -1,7 +1,8 @@
 (ns jonquil.mcp-test
   (:require [clojure.test :refer [deftest is]]
             [jonquil.mcp :as mcp]
-            [jonquil.mcp.json :as json]))
+            [jonquil.mcp.json :as json])
+  (:import (java.util.concurrent LinkedBlockingQueue)))
 
 (def ^:private stub-defs
   [{"name" "echo" "description" "echo s" "inputSchema" {"type" "object"}}
@@ -176,3 +177,159 @@
     (reset! t tools)
     (is (= -32602 (get-in (mcp/handle-message f (req 3 "tools/call" {"name" "late" "arguments" {}}))
                           ["error" "code"])))))
+
+;; --- tools/list_changed (plugins P10c) ---------------------------------------
+
+(deftest initialize-declares-list-changed
+  (is (= {"tools" {"listChanged" true}}
+         (get-in (mcp/handle-message (assoc tools :list-changed? true)
+                                     (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+                 ["result" "capabilities"]))))
+
+(defn- wait-until
+  "Polls (f) every 10 ms until it's truthy or ms pass; its last value."
+  [f ms]
+  (let [t0 (System/currentTimeMillis)]
+    (loop []
+      (let [v (f)]
+        (if (or v (> (- (System/currentTimeMillis) t0) ms))
+          v
+          (do (Thread/sleep 10) (recur)))))))
+
+(defn- live-serve
+  "serve! on a future over a queue. :write-line defaults to conj onto :out.
+  The fake :subscribe delivers notify! to :notify and counts unsubscribes."
+  [& {:keys [write-line err]}]
+  (let [q (LinkedBlockingQueue.)
+        out (atom [])
+        notify (promise)
+        unsub (atom 0)
+        done (future
+               (binding [*err* (or err *err*)]
+                 (mcp/serve! {:tools (assoc tools :list-changed? true)
+                              :read-line (fn [] (let [l (.take q)] (when-not (= l ::eof) l)))
+                              :write-line (or write-line (fn [s] (swap! out conj s)))
+                              :subscribe (fn [n] (deliver notify n) (fn [] (swap! unsub inc)))})))]
+    {:q q :out out :notify notify :unsub unsub :done done}))
+
+(defn- send! [{:keys [q]} m] (.put ^LinkedBlockingQueue q (json/encode m)))
+(defn- eof! [{:keys [q]}] (.put ^LinkedBlockingQueue q ::eof))
+(def ^:private initialized {"jsonrpc" "2.0" "method" "notifications/initialized"})
+(def ^:private list-changed {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"})
+
+(defn- ready! [s]
+  (send! s (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+  (send! s initialized)
+  (send! s (req 2 "ping" nil))
+  (wait-until #(= 2 (count @(:out s))) 2000))
+
+(defn- notes [s] (filter #(= list-changed %) (map json/decode @(:out s))))
+
+(deftest serve-sends-list-changed-after-initialized
+  (let [s (live-serve)]
+    (ready! s)
+    ((deref (:notify s) 2000 nil))
+    (is (wait-until #(= 1 (count (notes s))) 2000))
+    (is (= [list-changed] (notes s)))
+    (eof! s)
+    (deref (:done s) 2000 nil)))
+
+(deftest no-list-changed-before-initialized
+  (let [s (live-serve)]
+    (send! s (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+    (wait-until #(= 1 (count @(:out s))) 2000)
+    ((deref (:notify s) 2000 nil))
+    (Thread/sleep 200)
+    (send! s (req 2 "ping" nil))
+    (wait-until #(= 2 (count @(:out s))) 2000)
+    (is (= [1 2] (map #(get (json/decode %) "id") @(:out s))))
+    (eof! s)
+    (deref (:done s) 2000 nil)))
+
+(deftest notify-does-not-block-the-caller
+  (let [gate (promise)
+        out (atom [])
+        s (live-serve :write-line (fn [l] (when (= list-changed (json/decode l)) @gate) (swap! out conj l)))]
+    (send! s (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+    (send! s initialized)
+    (send! s (req 2 "ping" nil))
+    (wait-until #(= 2 (count @out)) 2000)
+    (let [t0 (System/currentTimeMillis)]
+      ((deref (:notify s) 2000 nil))
+      (is (< (- (System/currentTimeMillis) t0) 500)))
+    (deliver gate true)
+    (eof! s)
+    (deref (:done s) 2000 nil)))
+
+(deftest notifications-coalesce
+  (let [gate (promise)
+        out (atom [])
+        s (live-serve :write-line (fn [l] (when (= list-changed (json/decode l)) @gate) (swap! out conj l)))]
+    (send! s (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+    (send! s initialized)
+    (send! s (req 2 "ping" nil))
+    (wait-until #(= 2 (count @out)) 2000)
+    (let [n (deref (:notify s) 2000 nil)]
+      (n)
+      (Thread/sleep 100)
+      (dotimes [_ 5] (n)))
+    (deliver gate true)
+    (Thread/sleep 500)
+    (let [k (count (filter #(= list-changed (json/decode %)) @out))]
+      (is (<= 1 k 2) k))
+    (eof! s)
+    (deref (:done s) 2000 nil)))
+
+(deftest writes-never-overlap
+  (let [in-flight (atom 0)
+        most (atom 0)
+        out (atom [])
+        s (live-serve :write-line (fn [l]
+                                    (swap! most max (swap! in-flight inc))
+                                    (Thread/sleep 1)
+                                    (swap! out conj l)
+                                    (swap! in-flight dec)))]
+    (send! s (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+    (send! s initialized)
+    (send! s (req 2 "ping" nil))
+    (wait-until #(= 2 (count @out)) 2000)
+    (let [n (deref (:notify s) 2000 nil)
+          f (future (dotimes [_ 50] (n) (Thread/sleep 1)))]
+      (dotimes [i 50] (send! s (req (+ 10 i) "ping" nil)))
+      @f)
+    (wait-until #(<= 52 (count @out)) 5000)
+    (Thread/sleep 200)
+    (is (pos? (count (filter #(= list-changed (json/decode %)) @out))))
+    (is (= 1 @most))
+    (is (every? #(map? (json/decode %)) @out))
+    (eof! s)
+    (deref (:done s) 2000 nil)))
+
+(deftest unsubscribes-at-eof
+  (let [s (live-serve)]
+    (ready! s)
+    (eof! s)
+    (deref (:done s) 2000 nil)
+    (is (= 1 @(:unsub s))))
+  (let [s (live-serve :write-line (fn [_] (throw (ex-info "pipe gone" {}))))]
+    (send! s (req 1 "ping" nil))
+    (is (thrown? Throwable (deref (:done s) 2000 nil)))
+    (is (= 1 @(:unsub s)))))
+
+(deftest failed-notification-is-logged
+  (let [err (java.io.StringWriter.)
+        out (atom [])
+        s (live-serve :err err
+                      :write-line (fn [l]
+                                    (when (= list-changed (json/decode l)) (throw (ex-info "pipe gone" {})))
+                                    (swap! out conj l)))]
+    (send! s (req 1 "initialize" {"protocolVersion" "2025-06-18"}))
+    (send! s initialized)
+    (send! s (req 2 "ping" nil))
+    (wait-until #(= 2 (count @out)) 2000)
+    ((deref (:notify s) 2000 nil))
+    (is (wait-until #(.contains (str err) "jonquil: couldn't send tools/list_changed: pipe gone") 2000) (str err))
+    (send! s (req 3 "ping" nil))
+    (is (wait-until #(= 3 (count @out)) 2000))
+    (eof! s)
+    (deref (:done s) 2000 nil)))
