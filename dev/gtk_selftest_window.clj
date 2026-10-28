@@ -294,6 +294,7 @@
    plugin-list-rows/row-plugin-list-refreshes-after-a-step
    plugin-history-rows/row-plugin-history-shows-each-version
    plugin-history-rows/row-plugin-history-revert-brings-back-v1
+   plugin-history-rows/row-plugin-history-revert-keeps-the-reason-at-the-click
    plugin-history-rows/row-plugin-history-revert-of-live-says-already
    plugin-history-rows/row-plugin-history-revert-over-a-broken-edit
    plugin-history-rows/row-plugin-history-revert-restores-a-deleted-file

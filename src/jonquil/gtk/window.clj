@@ -3411,12 +3411,15 @@
                             row (plugin-history-pane/selected-row hp)]
                         (if (or (nil? id) (nil? row))
                           (do (plugin-history-pane/report! hp "No version is selected.") nil)
-                          (let [path @settings-path*]
+                          ;; final review I1: the reason is read here, at the
+                          ;; click, never on the agent
+                          (let [path @settings-path*
+                                reason (plugin-history-pane/reason-text hp)]
                             {:settings-path path
                              :step #(plugin-loader/revert-step!
                                      plugin-registry/live
                                      {:settings-path path :os (System/getProperty "os.name")
-                                      :id id :n (:n row) :reason (plugin-history-pane/reason-text hp)})
+                                      :id id :n (:n row) :reason reason})
                              :after (fn [lines]
                                       (when-let [l (last lines)]
                                         (plugin-history-pane/report! hp (str/join "\n" lines))
@@ -4292,12 +4295,17 @@
                    :plugin-history!* (fn [id] (let [p (promise)]
                                                 (on-gui! #(deliver p (when (plugin-list-pane/select-id! lp id) (history-step))))
                                                 (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
-                   :plugin-revert!* (fn [n reason]
+                   :plugin-revert!* (fn [n reason & [then]]
+                                      ;; then: run on the GTK thread after the
+                                      ;; click, before the step runs (final
+                                      ;; review I1's row edits the reason there)
                                       (let [p (promise)]
                                         (on-gui! #(deliver p (do (plugin-history-pane/set-reason! hp reason)
-                                                                 (if (or (nil? n) (plugin-history-pane/select-n! hp n))
-                                                                   (revert-step)
-                                                                   (do (plugin-history-pane/report! hp (str "no v" n " row")) nil)))))
+                                                                 (let [o (if (or (nil? n) (plugin-history-pane/select-n! hp n))
+                                                                           (revert-step)
+                                                                           (do (plugin-history-pane/report! hp (str "no v" n " row")) nil))]
+                                                                   (when then (then))
+                                                                   o))))
                                         (if-let [o (deref p 10000 nil)] (plugin-step-now! o) [])))
                    :plugin-history-back!* (fn [] (plugin-step-now! (history-back-step)))
                    :plugin-history-close!* (fn [] (let [p (promise)]

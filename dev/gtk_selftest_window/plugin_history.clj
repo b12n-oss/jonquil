@@ -10,6 +10,7 @@
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.review :as review]
             [gtk-selftest-window.support :as support]
+            [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-registry :as plugin-registry]))
 
@@ -82,6 +83,22 @@
                               (= "plugin ph-b: v1 is already live, so it wasn't reverted" (last again))
                               (= 3 (count (:rows s2))))
                          {:lines lines :again again :s s :s2 s2}))))))
+
+(defn row-plugin-history-revert-keeps-the-reason-at-the-click
+  "The reason recorded is the one in the entry when Revert was pressed,
+  even if the entry changes before the step runs (final review I1)."
+  [ui]
+  (go-row :plugin-history-revert-keeps-the-reason-at-the-click support/check
+    (with-history ui (files "ph-j")
+      (fn []
+        (v1-then-v2! ui "ph-j")
+        (open! ui "ph-j")
+        (let [lines ((:plugin-revert!* ui) 1 "kept"
+                     #(plugin-history-pane/set-reason! (:plugin-history-pane ui) "changed"))
+              row (first (:rows (shown ui)))]
+          (support/check :plugin-history-revert-keeps-the-reason-at-the-click
+                         (str/ends-with? (str row) "): revert to v1: kept")
+                         {:lines lines :row row}))))))
 
 (defn row-plugin-history-revert-of-live-says-already
   "Revert on the live v2 says it's already live and adds no row."

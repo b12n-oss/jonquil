@@ -324,7 +324,11 @@
         (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so it wasn't reverted"))
         (not (was-live? (history/history-dir dir id) n)) (conj warn (str "plugin " id ": v" n " was never live, so it wasn't reverted"))
         (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
-        (= src (get-in @live [:plugins k :source])) (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
+        ;; the file's there (disk-changed says it holds the live text), so
+        ;; there's nothing to put back; a deleted one is written back
+        ;; (final review I2)
+        (and (= src (get-in @live [:plugins k :source])) (.isFile (io/file dir (str id ".clj"))))
+        (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
         :else
         (let [old @live
               path (str dir "/" id ".clj")

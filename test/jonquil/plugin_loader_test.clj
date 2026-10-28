@@ -762,6 +762,14 @@
     (is (identical? before @live))
     (is (= 2 (count (entries d "wrap"))))))
 
+(deftest revert-to-the-live-version-restores-a-deleted-file-test
+  ;; final review I2: deleted with no reload since, so v2 is still live
+  (let [[d live] (with-v1-and-v2 "wrap")]
+    (io/delete-file (io/file d "wrap.clj"))
+    (let [lines (revert! live d "wrap" 2)]
+      (is (= (v2-of "wrap") (slurp (io/file d "wrap.clj"))) (pr-str lines))
+      (is (= "plugin wrap reverted to v2 (now v3)" (last lines))))))
+
 (deftest revert-over-a-broken-edit-says-so-test
   (let [[d live] (with-v1-and-v2 "wrap")]
     (write! d "wrap.clj" "(ns broken")
