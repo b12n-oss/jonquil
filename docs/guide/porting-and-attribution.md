@@ -7,8 +7,8 @@ completion lookup. `UPSTREAM.md` carries the file-by-file provenance table.
 This page carries the reasoning behind it, plus the Jolt fixes the port
 needed along the way.
 
-The pin is DrClojure-Neo at `41c56b8` (2026-09-22), checked out locally at
-`~/dev/b12n-oss/kimtg--DrClojure-Neo`.
+The pin is [DrClojure-Neo](https://github.com/kimtg/DrClojure-Neo) at commit
+[`41c56b8`](https://github.com/kimtg/DrClojure-Neo/commit/41c56b8563bb319bb940547c8982406eff1a6db0) (2026-09-22), recorded in `UPSTREAM_PIN`.
 
 ## What was lifted, and what was rebuilt
 
@@ -38,12 +38,22 @@ not a behaviour change.
 
 ## Staying in sync
 
-`bb upstream:diff` lists upstream commits since `UPSTREAM_PIN` that touch
-`src` or `test`, against the checkout at `$DRCLOJURE_DIR` (default
-`~/dev/b12n-oss/kimtg--DrClojure-Neo`). Review each one, port what
-matters, and bump `UPSTREAM_PIN` to the new commit SHA in the same commit
-as the port. Then `UPSTREAM.md` keeps matching the code Jonquil took from
-upstream.
+`bb upstream:diff` lists the upstream commits since `UPSTREAM_PIN` that
+touch `src` or `test`. It needs a clone of DrClojure-Neo with a remote
+named `upstream` pointing at the original repository, and `DRCLOJURE_DIR`
+set to that clone's folder:
+
+```sh
+git clone https://github.com/kimtg/DrClojure-Neo
+git -C DrClojure-Neo remote add upstream https://github.com/kimtg/DrClojure-Neo
+export DRCLOJURE_DIR=$PWD/DrClojure-Neo
+bb upstream:diff
+```
+
+The task fetches `upstream` and compares the pin with `upstream/main`.
+Review each commit, port what matters, and bump `UPSTREAM_PIN` to the new
+commit SHA in the same commit as the port, so `UPSTREAM.md` keeps
+matching the code Jonquil took from upstream.
 
 ## The Jolt fixes this project needed along the way
 

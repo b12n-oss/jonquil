@@ -1,8 +1,8 @@
 # Upstream: DrClojure-Neo
 
 **Repository:** https://github.com/kimtg/DrClojure-Neo  
-**Pinned commit:** `41c56b8` (2026-09-22)  
-**Local checkout:** `~/dev/b12n-oss/kimtg--DrClojure-Neo`
+**Pinned commit:** [`41c56b8`](https://github.com/kimtg/DrClojure-Neo/commit/41c56b8563bb319bb940547c8982406eff1a6db0) (2026-09-22), also in `UPSTREAM_PIN`  
+**Checking for new commits:** `bb upstream:diff` (see [Porting and attribution](docs/guide/porting-and-attribution.md#staying-in-sync))
 
 ## Lifted code
 
@@ -38,8 +38,7 @@ This keeps Jonquil's provenance transparent and drift visible.
 # Upstream: clojure-cli.repl
 
 **Repository:** https://github.com/clojure/clojure-cli.repl  
-**Pinned commit:** `775e858`  
-**Local checkout:** `~/dev/b12n-oss/clojure--clojure-cli.repl`  
+**Pinned commit:** [`775e858`](https://github.com/clojure/clojure-cli.repl/commit/775e8587abd65d9f202b15865eae21e834b57903) (2026-09-28)  
 **Licence:** EPL-1.0
 
 ## Lifted code
