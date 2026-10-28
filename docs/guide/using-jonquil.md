@@ -108,8 +108,8 @@ though, so it requires them the way it would under `clj`.
 
 `*1`, `*2` and `*3` hold the last three values, and `*e` the last
 error, so `(ex-data *e)` right after a failure shows what it carried. A
-Run counts as well as a prompt entry, the way an nREPL editor's load-file
-does, for Jolt in process and out of process. In process, a Stop leaves
+Run's result sets `*1` too, as load-file does in an nREPL editor, for Jolt in
+process and out of process. In process, a Stop leaves
 them as they were. Out of process, a Stop that has to restart Jolt clears
 them along with every definition.
 
@@ -134,8 +134,9 @@ question, waits, and prints the answer back once you press Return.
 Cmd/Ctrl+D sends end-of-input while a program is waiting this way, the
 same signal `read-line` would see from a closed pipe on the command line.
 
-This works with Jolt in process and out of process, and with launched
-ClojureScript on node. Out of process,
+This works with Jolt in process and out of process, with JVM Clojure (see
+[JVM Clojure](#jvm-clojure-attaching-to-your-own-nrepl-server)), and with
+launched ClojureScript on node. ClojureDart has no stdin. Out of process,
 Jonquil's own nREPL middleware in the Jolt child asks for each line, a
 `print`ed prompt shows before the wait, and Stop frees a read that's
 waiting (see [Running Jolt out of process](#running-jolt-out-of-process)).
@@ -223,8 +224,8 @@ an empty pair in a single press instead of leaving a stray opener behind.
 Tab indents the current line, or every line in a selection, one level;
 Shift+Tab unindents the same way. Cmd/Ctrl+/ or Cmd/Ctrl+; toggles line
 comments on the line or selection. Cmd/Ctrl+Shift+F formats the whole
-file, and Cmd/Ctrl+Option+F (Alt+F on Linux and Windows keyboards) or the
-+L equivalent formats just the selection or the current line. A format is
+file, and Cmd+Option+F on macOS (Ctrl+Alt+F on Linux), or the same chord
+with L, formats just the selection or the current line. A format is
 one undo step, so a single Cmd/Ctrl+Z puts the file back the way it was.
 The caret stays on the same code it was on, wherever the new indentation
 moves it, and the view scrolls to it.
@@ -607,13 +608,14 @@ light, delete the file.
 
 ## Help
 
-P4 adds four features on top of everything above: completion with a doc
-preview, quick documentation, jump to definition, and rename, plus a
-right-click menu that reaches all of them. Each one resolves in the
+Help covers four things: completion with a doc preview, quick
+documentation, jump to definition, and rename. A right-click menu and the
+command palette reach all of them. Each one resolves in the
 namespace your program actually runs in, so a function Run just defined
 shows up the same way a core one does.
 
-Every key below checks the Control key specifically, not Command: Cmd+Q
+The Ctrl keys below (Ctrl+Space, Ctrl+Q and Ctrl+B) mean Control
+specifically, even on a Mac, and the F-keys take no Control or Command: Cmd+Q
 still means Quit, and Cmd+Space still does whatever Spotlight or your
 input source switcher already has it bound to. Cmd+B, Cmd+F1, and
 Command's usual companions to these keys do nothing here, on purpose.
@@ -749,7 +751,7 @@ GTK's own entries. Every item runs the exact function its key would.
 
 Cmd/Ctrl+Shift+P opens a list of Jonquil's commands under the caret.
 Each row shows what the command does, the keys that run it when it has
-any, and where it comes from (built-in, for now). Typing narrows the
+any, and where it comes from (built-in, or the plugin that added it). Typing narrows the
 list to the rows that contain every word you type, matched against the
 description and the command's id, so "toggle comment" finds Toggle
 Comment even though its description says "Comment or uncomment the
@@ -923,9 +925,7 @@ dialect by its extension as well. Which runtime it gets depends on the
 project. A project with a `shadow-cljs.edn` attaches to your shadow-cljs
 server, as it always did. A `.cljs` file in any other project, or a loose
 `.cljs` file with no project at all, runs "ClojureScript (node)": Jonquil
-starts ClojureScript on node itself. (Before this runtime existed, such a
-file fell back to in-process Jolt, and later got a Run notice saying there
-was no shadow-cljs project to attach to.) `{:dialect :cljs}` in a
+starts ClojureScript on node itself. `{:dialect :cljs}` in a
 project's `.jonquil.edn` forces the dialect for files with other
 extensions, and `{:runtime :launch}` or `{:runtime :attach}` there forces
 the runtime, say to launch node inside a shadow-cljs project. A project
@@ -1049,7 +1049,7 @@ starts the child. A checkout comes first, found at
 set; keep it at v0.4.0 or later so output streams as it prints. With no
 checkout, Jonquil asks Jolt for jolt-lang/nrepl v0.4.0 as a git
 dependency. The first start clones it into `~/.gitlibs`, which took about
-3 seconds here, and needs `git` on `PATH` and a network connection; later
+3 seconds when we measured it, and needs `git` on `PATH` and a network connection; later
 starts take about a third of a second, the same as a checkout. If that
 fetch fails, Jonquil starts a plain nREPL server instead and says so in
 the console. A plain server has no `interrupt`, so Stop falls back to
@@ -1299,9 +1299,10 @@ Completion and quick documentation both ask the server, not just this
 buffer. Ctrl+Space merges the server's own candidates in with the
 offline ones, and Ctrl+Q or Shift+F1 shows a symbol's real docstring and
 arglists, wherever it's defined. A definition outside the
-buffer ends with a `Defined in` line naming the file and line number
-and F12 opens it in the source panel (see Jump to definition), `Defined in clojure-1.12.5.jar!/clojure/core.clj:2748`
-for something inside a jar, or a plain path and line for project code.
+buffer ends with a `Defined in` line naming the file and line number,
+and F12 opens it in the source panel (see Jump to definition). The line
+reads `Defined in clojure-1.12.5.jar!/clojure/core.clj:2748` for something
+inside a jar, and a plain path and line for project code.
 Before the buffer's own namespace has been loaded, quick doc and
 completion still answer for names the prompt's own namespace already
 knows, `clojure.core` functions before the file's first Run, say;
@@ -1837,7 +1838,7 @@ names, once that exists), and the console never hears of it. It adds
 nothing to the REPL history, and `*1`, `*2`, `*3` and `*e` are what they
 were before it. `:value` is the printed value, the text the console would
 show after `=> `, and a throw from the code comes back as `:error` with
-`:value` nil. It works with the Jolt dialect for now, in process or in a
+`:value` nil. It works with the Jolt dialect, in process or in a
 child, and on any other dialect it says to use `p/repl!`, which works
 everywhere. `p/repl!` evaluates at the console the way Run Selection
 does: the code is echoed, its output and result show, it goes into the
@@ -2125,7 +2126,8 @@ evaluates in a Jolt child, one with `{:runtime :in-process}` inside the
 server's own process, and one with `{:dialect :clj}` attaches to its nREPL
 server. `jonquil_eval` and `jonquil_run_file` take a `timeout_ms`; the default
 deadline is 30 s, after which the evaluation is interrupted and the tool
-answers with an error. Closing stdin ends the server and stops every runtime
+answers with an error. If it still hasn't stopped 5 s after the interrupt,
+Jonquil stops that runtime, and the next call starts a fresh one. Closing stdin ends the server and stops every runtime
 it started. On a project with an out-of-process runtime, `jonquil_doc` and
 `jonquil_complete` answer from the editor's offline tables until the first
 evaluation has started the runtime, so evaluate once first to get
@@ -2242,8 +2244,9 @@ declares, gets 30 s to answer, and runs one call at a time per tool. A call
 still going at 30 s keeps the tool busy until it ends, since nothing can stop
 it.
 
-The served name can be at most 50 characters and an argument name at most 64,
-from letters, digits, `_`, `.` and `-`. Claude Code 2.1.311 called tools whose
+A tool's `:name` is lower-case letters, digits and `_`, starting with a letter,
+and the served name can be at most 50 characters. An argument name is 1 to 64
+characters from letters, digits, `_`, `.` and `-`. Claude Code 2.1.311 called tools whose
 full `mcp__jonquil__` names ran to 70 characters, so 50 is headroom for other
 clients rather than Claude Code's own limit, which wasn't found.
 
@@ -2279,7 +2282,7 @@ claude mcp add jonquil -- jonquil --mcp-attach /path/to/project
 ```
 
 `jonquil --mcp-attach [DIR]` finds the live window whose registered folder
-matches `DIR` and relays JSON-RPC lines between its own stdio and that window.
+matches `DIR` (the newest, if several do) and relays JSON-RPC lines between its own stdio and that window.
 Left bare, `jonquil --mcp-attach` attaches when exactly one window is
 listening. With none, or with several and no `DIR` to choose between them, it
 refuses and says why, listing the live windows when there is more than one.
@@ -2312,7 +2315,7 @@ on.
 Whoever can start `jonquil --mcp` can run code as you. Evaluating is the point
 of the tools, and nothing authenticates the caller. That is the model of MCP
 over stdio: the client controls what it spawns, so you already decide who gets
-to launch the server. It is also the same reach `bb nrepl-server` gives today. Don't
+to launch the server. It is also the same reach `bb nrepl-server` gives. Don't
 put it behind anything that lets someone else choose its command line or feed
 its stdin.
 
@@ -2370,7 +2373,7 @@ The keys, grouped by what they're for. Each group opens on a click.
 | Cmd/Ctrl+Option(Alt)+L | Definitions editor | Format the selection or current line |
 | Cmd/Ctrl+Z | anywhere in the window | Undo |
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
-| Cmd/Ctrl+Y | anywhere in the window | Redo |
+| Cmd/Ctrl+Y | Definitions editor | Redo |
 | F6 | anywhere in the window | Move focus between the editor and the console |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
@@ -2614,6 +2617,21 @@ than being surprises you'd otherwise have to rediscover:
   no `stdin` op, a read waits until Stop on babashka, and reads the server's
   own terminal on Basilisp. Reset on Run isn't available, and
   jump to definition follows only a file that exists on this machine.
+
+</details>
+
+<details>
+<summary><strong>jank</strong> (4)</summary>
+
+- Stop restarts jank, so earlier definitions are gone afterwards.
+- Programs can't read input, jump to definition works only inside the
+  buffer, and the inspector isn't available.
+- Output is held until the evaluation ends, so a `println` in a long loop
+  shows nothing while it runs, and a Stopped evaluation never shows its
+  output.
+- Jonquil can't attach to a jank you started yourself, and some loops
+  don't compile yet (a bare `recur`, or one after a `when`); see jank (experimental),
+  above.
 
 </details>
 

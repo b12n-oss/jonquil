@@ -24,7 +24,7 @@ reports fewer assertions than macOS (1189 tests and 6467 assertions, 31
 fewer, measured 2026-10-28).
 
 <details>
-<summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code>, <code>test:basilisp</code> and <code>test:plugins</code></strong></summary>
+<summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code>, <code>test:basilisp</code>, <code>test:plugins</code> and <code>test:cljs-node</code></strong></summary>
 
 `bb test:nrepl` runs a second, separate suite (63 tests, 235 assertions,
 about 50 s): every test in it spawns a real Jolt child over
@@ -129,7 +129,7 @@ bridge stdout line must parse as JSON. It prints 17 checks.
 
 ## Self-test and docs: ten windows, one binary, one camera
 
-Three harnesses drive the real GTK front end, and each covers ground the
+Five harnesses drive the real GTK front end, and each covers ground the
 others can't.
 
 **`bb gtk:selftest`** opens ten real GTK windows in turn and runs the
@@ -221,7 +221,7 @@ is `net.b12n.jonquil` on Linux (macOS keeps `jonquil`). The ninth group (`dev/gt
 throwaway shadow-cljs project whose `.shadow-cljs/nrepl.port` names a fake
 shadow-cljs nREPL server running in this same process
 (`dev/fake_shadow_nrepl.clj`), so it needs no node, no shadow-cljs and no
-browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 8 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, a `(read-line)` answered at the console prompt (the fake dances the stdin markers and reads the line off its own stdin, the pipe the real launcher relays), and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 316, 19, 15, 36, 4, 13, 5, 10 and 8 rows
+browser. The tenth group (`dev/gtk_selftest_cljs_node.clj`, 8 rows) opens a window on a throwaway project with a `src/demo/core.cljs` and no `shadow-cljs.edn`, so it selects ClojureScript on node. `JONQUIL_CLOJURE` names `dev/fake-cljs-clojure`, a script that starts the fake prepl in `dev/fake_cljs_prepl.clj` as a real child process, so the rows can check its pid on disk: the status bar before the first Run, a Run that prints its value, a JS error line, Stop restarting the process, a `(read-line)` answered at the console prompt (the fake dances the stdin markers and reads the line off its own stdin, the pipe the real launcher relays), and a quit that kills the child. A seventh row selects the browser target and checks the URL Jonquil opened; `JONQUIL_OPEN_URL` names `dev/fake-open-url`, which logs the URL to `FAKE_OPEN_URL_LOG` instead of opening a tab, so no browser starts. A full run reports 48, 389, 19, 15, 36, 4, 13, 5, 10 and 8 rows
 passing, in group order.
 
 </details>

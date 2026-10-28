@@ -21,7 +21,7 @@ flowchart TD
   session --> docs
 ```
 
-Phase 3 and the Themes phase added four more pure namespaces alongside
+Phase 3, the Themes phase and the later arcs added these pure namespaces alongside
 these:
 
 - `jonquil.commands`: the run-selection text, the form Run Form sends,
@@ -261,7 +261,7 @@ these:
   log, and `leftovers/prune!` removes it a day later. With no `jolt` the
   answer is `:unchecked? true` and nothing is written. `check!` is the
   protocol's isolated seam (`run-protocol` itself is embedded in the
-  child, so it can't start one), and nothing calls it until P9. The child
+  child, so it can't start one), and `plugin-loader/propose-check` calls it (P9). The child
   is isolation from Jonquil, not a sandbox: it runs as you, with your
   files and network. The environment scrub is by name, so a credential in
   a variable called something else (a proxy URL with a password in it)
@@ -425,7 +425,7 @@ these:
   `open-file!` as Open, and a path that fails, or throws, is named on the
   console instead of stopping the rest.
 
-P4 added a fourth: `jonquil.help`, the decisions behind completion, quick
+P4 added `jonquil.help`, the decisions behind completion, quick
 doc, jump to definition and rename, covered in its own section below.
 
 - `jonquil.file-tree`: the file tree's model as plain data: `{:root :expanded :ignore}`, listing one folder (ignore rules, folders first), flattening the expanded tree into rows (a symlink back to an ancestor shows collapsed instead of recursing), `expand-to` for a saved file, the launch root (`root-for`), and a directory's own project selection (`project-selection`, since `dialect/find-project` starts at a path's parent).
@@ -433,7 +433,7 @@ doc, jump to definition and rename, covered in its own section below.
 - `jonquil.tabs`: the window's tabs as plain data: the strip's labels, finding a file that's already open (compared canonically), whether a tab may run in the window's evaluator (`runnable-here?`: the same `dialect/selection-key`, or a Jolt file outside any project in any Jolt window), whether a lone tab keeps the window's Jolt instead of switching it (`keeps-window-jolt?`), and the text of the refusal, the unsaved-changes alert and the Run banner.
 - `jonquil.source`: where a definition outside the buffer lives and its text, from a lookup's `:file` (an absolute path or a `jar:file:…!/entry` URL, read locally with `java.util.zip.ZipFile`), whether it can be edited (a plain file under the project), line arithmetic, and the source panel's bounded history.
 
-This arc added two more: `jonquil.inspect.view`, the inspector's view
+The inspector arc added two more: `jonquil.inspect.view`, the inspector's view
 code lifted from clojure-cli.repl (`UPSTREAM.md` carries the provenance
 row), and `jonquil.inspect`, the panel's own pane state and its key-to-op
 decisions. Both are covered in their own section below, alongside the
@@ -512,7 +512,7 @@ path as well as the window's.
 
 ## GTK is not everywhere
 
-GTK4 is required only from `jonquil.main`. All of the pure core (tokenization, parsing, syntax highlighting, edit operations, the eval engine) runs without GTK or any GUI dependencies. This design lets the core be tested independently and potentially reused by a second front-end later.
+The GTK layer is required only from `jonquil.main` and `jonquil.mcp.window` (which takes just `gtk.callbacks`, `gtk.editor` and `gtk.ffi`, never `gtk.window`). All of the pure core (tokenization, parsing, syntax highlighting, edit operations, the eval engine) runs without GTK or any GUI dependencies. This design lets the core be tested independently and potentially reused by a second front-end later.
 
 Nothing enforces this automatically, which is why it is a rule. Jolt's build scanner follows `require` forms statically, so a `jonquil.gtk` namespace required from anywhere else would silently compile GTK into every binary built from that namespace, headless tools included. Phase 2 added the GTK libraries to `:jolt/native` in `deps.edn`.
 
@@ -527,7 +527,7 @@ Nothing enforces this automatically, which is why it is a rule. Jolt's build sca
 - `jonquil.gtk.console-view`: the Interactions console, one GtkTextView whose buffer holds read-only output history, an editable prompt and input region, and the key handling for Return, Up/Down and Ctrl/Cmd+D.
 - `jonquil.gtk.window`: the toolbar, the paned layout, the window-level key chords (all of them through `jonquil.command-registry/window-answer` and the keymap, see `jonquil.keymap` above), the file dialogs, and the wiring between `jonquil.session` and the two views.
 
-P4 added three more, all built on a shared popover base:
+P4 added these, and the command palette joined them in plugins S8, all built on a shared popover base:
 
 - `jonquil.gtk.popover`: a caret-anchored `GtkPopover`, shared by completion, quick doc, full doc, rename and the command palette.
 - `jonquil.gtk.help-popover`: the quick-doc popover, the full-doc popover a second quick-doc press opens, and the rename popover, all built on `jonquil.gtk.popover`.
@@ -569,12 +569,14 @@ The O1 spec decision is that Run resets by default: in `:reset` mode, `run-defin
 
 ### Self-test harnesses
 
-Three `bb` tasks drive the real GTK front end headlessly, without a human at the keyboard:
+Two `bb` tasks drive the real GTK front end from inside the process, without a human at the keyboard:
 
 - `bb gtk:selftest` opens ten real GTK windows in turn, one per group: the front end, the full window, out-of-process Jolt, ClojureDart, JVM Clojure, the file tree, jank, launch arguments, shadow-cljs and ClojureScript on node. Each drives the same button and key handlers a person would use, against a fake server or a fake child where the real one would need a toolchain. [Development](development.md#self-test-and-docs-ten-windows-one-binary-one-camera) describes every group and its rows.
 - `bb docs:shots` self-captures `docs/images/*.png` and one GIF for this guide and the user guide: one fresh `jolt -M:shots <scene>` process per scene, each driving `jonquil.main/start!` through exactly one demo, screenshotting it with `cgevent`, then exiting. A fresh process per scene keeps each screenshot to its own scene's console history.
 
-All three poll a condition against a deadline rather than sleeping, and all three hand any blocking subprocess call (screenshots, GIF recording, the nREPL window's own child) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
+Both poll a condition against a deadline rather than sleeping, and both hand any blocking subprocess call (screenshots, GIF recording, the nREPL window's own child) to a `future` so the GTK thread itself never blocks. See [Development](development.md) for how to run these tasks, the split layout of `dev/gtk_selftest_window/`, the binary smoke, and the traps that catch a first run.
+
+`bb smoke:binary`, `bb smoke:cljd` and `bb smoke:cljs` drive a built `./jonquil` from outside instead, sending real key events with `cgevent`; [Development](development.md) describes them.
 
 ### Themes
 
@@ -594,7 +596,7 @@ Completion's state moves through a small set of functions: `prefix-at` reads the
 
 Jump to definition is the one place `jonquil.help` overrides upstream's own logic rather than reusing it outright. `jonquil.syntax/find-definition` (lifted unchanged from DrClojure) checks top-level `def*` forms first and only then falls back to a scope-less "last earlier token with this name", which gets a shadowed local wrong: a function parameter or a `let` binding that reuses a top-level name should win, and an unbound name should report nothing rather than landing on an earlier use of it. `jonquil.help/jump-target` fixes this with a real scope search first: it walks the parenthesized forms enclosing the target, innermost first, collecting the names each one binds (`let`/`loop`/`binding`/`when-let`/`when-some`/`when-first`/`if-let`/`if-some`'s own bindings vector, `for`/`doseq`'s bindings vector, `fn`/`defn`/`defn-`/`defmacro` params for every arity, and `letfn`'s names), unpacking vector and map destructuring recursively along the way. Only when that search comes up empty does it call `find-definition` with no position at all, which runs just its top-level half; an external var's documentation is the last fallback. `rename-problem` mirrors `jonquil.edit/rename`'s own nil cases (no symbol at the caret, a blank or invalid new name, the same name, nothing to rename) as a sentence for the rename popover to show instead of applying anything.
 
-`jonquil.docs` resolves lookups in the namespace the user's program actually runs in, not the IDE's own. When that namespace no longer exists, because Reset on Run just removed it, `resolve-ns` falls back to `user` rather than letting `the-ns` throw. Both `symbol-doc` and `candidates` wrap their real lookup in `try`/`catch` and return nil (or `[]` for candidates) on any exception, so a bad lookup never escapes into a key handler. `symbol-doc` also memoises on `[namespace symbol text]`: looking up a name defined only in the buffer costs around 144 ms on a 2,000-line file, too slow for a preview that has to keep up with every arrow key. The cache is cleared after every completed evaluation, Run or REPL alike, from the same `on-complete` callback in `jonquil.gtk.window` that already reports the result; without that, a lookup made before a name existed would go on returning its stale answer forever after, even once the same evaluation had defined it.
+`jonquil.docs` resolves lookups in the namespace the user's program actually runs in, not the IDE's own. When that namespace no longer exists, because Reset on Run just removed it, `resolve-ns` falls back to `user` rather than letting `the-ns` throw. Both `symbol-doc` and `candidates` wrap their real lookup in `try`/`catch` and return nil (or `[]` for candidates) on any exception, so a bad lookup never escapes into a key handler. `symbol-doc` also memoises on `[namespace symbol text]`: looking up a name defined only in the buffer costs 6.5 ms on a 2,000-line file and 26 ms on 8,000 (measured 2026-10-20), too slow to repeat on every arrow key, which is why a hit (0.01 ms) matters. The cache is cleared after every completed evaluation, Run or REPL alike, from the same `on-complete` callback in `jonquil.gtk.window` that already reports the result; without that, a lookup made before a name existed would go on returning its stale answer forever after, even once the same evaluation had defined it.
 
 The three popover namespaces share `jonquil.gtk.popover` as their base. Its most important fact is where a popover's `GtkWidget` parent is: never the `GtkTextView` it's anchored to, always that view's own container (its `GtkScrolledWindow`, in both the editor and the console). Parenting a popover directly to the text view, which is what the P4 spike probes did, hangs a real window close: `GtkTextView`'s own dispose walks its structural children to detach them, doesn't recognise a popover as one of its own, and spins forever logging that the popover isn't a child of the text view, pinning the main thread at 100% CPU. The probes themselves never hit this because every probe process exits without ever destroying its window. A `GtkScrolledWindow` has no such override and tears down cleanly. `jonquil.gtk.window` keeps a registry of every P4 popover a window creates (`register-popover!`), and `close-popovers!` walks it to hide whichever one is open, whether that's Escape's own job or one popover making room for another. At window close, `close-request-fn`'s real-quit branch calls `unparent-registered-popovers!`, which hides an open popover before unparenting it (unparenting first would leave its `:open?` atom reading true against a widget that no longer exists, and a later focus-lost listener would then call `hide!` on it and hit a GTK-CRITICAL) and skips an entry that's already unparented, so the session's popovers detach cleanly instead of leaving `GtkScrolledWindow` still holding a child when it finalizes.
 
@@ -710,7 +712,7 @@ behind the `Evaluator` protocol: `start!` spawns and connects lazily, and
 refuses to spawn at all once `stop!` has run; `eval!` sends a `load-file`
 for Run or an `eval` for the REPL prompt; `stop!` interrupts whatever's
 pending and, failing that within about a second, kills and restarts the
-child instead. `jonquil.runtime-registry` is a fourth, GTK-free namespace
+child instead. `jonquil.runtime-registry` is a further GTK-free namespace
 that every evaluator a window makes joins as soon as it's made, so
 `jonquil.main` can stop every one of them, and wait for any still mid-
 start to settle, before the process exits. No child outlives Jonquil just
@@ -1136,7 +1138,7 @@ loopback-only.
 
 ### jank: `jonquil.jank`, `jonquil.nrepl.jank-child` and `jonquil.nrepl.jank`
 
-jank is the one dialect whose runtime is `:launch`: Jonquil starts the
+jank is the first dialect whose runtime is `:launch` (ClojureScript on node is the second): Jonquil starts the
 process, as it does for out-of-process Jolt, but nothing is shared with
 `jonquil.nrepl.child`, because jank differs in too many details. Three
 namespaces make it up, plus a profile in `jonquil.dialect`.
@@ -1462,7 +1464,7 @@ evaluate in, and the Jolt ones ignore it.
 
 ### Plug points for more dialects
 
-Five more dialects exist now: ClojureDart, JVM Clojure, ClojureScript,
+Besides Jolt there are five more dialects: ClojureDart, JVM Clojure, ClojureScript,
 jank, and the nREPL dialect (any nREPL server, on JVM Clojure's evaluator). The
 attach ones already use two of these plug points. `jonquil.paint/paint-plan` takes the active
 profile as an argument, so highlighting and completion both draw on each

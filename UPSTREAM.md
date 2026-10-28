@@ -22,7 +22,7 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 
 ## Code deltas from upstream
 
-- `src/jonquil/syntax.clj`: `Character/toLowerCase` is not shimmed in Jolt. Two call sites (lines 605 and 813 today) replaced with `(first (str/lower-case (subs ... 0 1)))`. This change was verified in a trial lift on 2026-09-23; upstream's 13 pure deftests pass on Jolt after the change.
+- `src/jonquil/syntax.clj`: `Character/toLowerCase` is not shimmed in Jolt. Two call sites (lines 590 and 798 at 2026-10-28) replaced with `(first (str/lower-case (subs ... 0 1)))`. This change was verified in a trial lift on 2026-09-23; upstream's 13 pure deftests pass on Jolt after the change.
 - `src/jonquil/syntax.clj`: `special-forms` and `core-builtins` read the Jolt dialect profile (`(:special-forms dialect/jolt)`, `(:builtins dialect/jolt)` in `src/jonquil/dialect.clj`), which holds upstream's two sets verbatim, so the file also requires `jonquil.dialect`. A re-sync that changes either set edits `src/jonquil/dialect.clj`.
 
 ## Syncing with upstream

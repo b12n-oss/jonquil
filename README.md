@@ -4,7 +4,7 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha, the window, editing, themes (including one that follows macOS light and dark), help and dialects work: Jolt in or out of process; JVM Clojure, ClojureDart (experimental), ClojureScript (experimental), which attaches to a shadow-cljs server you started or launches on node (or in a browser tab); any other nREPL server, such as babashka or Basilisp, attached to a server you started; and jank (experimental), which Jonquil launches itself**
+**Status: alpha.** The window, editing, themes (including one that follows macOS light and dark), help, plugins and an MCP server for agents all work. So do these dialects: Jolt in or out of process; JVM Clojure; ClojureDart (experimental); ClojureScript (experimental), attached to a shadow-cljs server you started or launched on node or in a browser tab; any other nREPL server you started, such as babashka or Basilisp; and jank (experimental), which Jonquil launches itself.
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
@@ -16,7 +16,7 @@ so one that calls `System/exit`, crashes or wedges Jolt takes down a
 separate child, not Jonquil. A loose file runs inline, in Jonquil's own
 process, and a project's `.jonquil.edn` `{:runtime :in-process}` keeps it
 there too. Stop, Reset on Run, help, `read-line` and the inspector work
-the same way across either choice. ClojureDart is here too now,
+the same way across either choice. ClojureDart is
 experimental: rather than starting anything, Jonquil attaches to a
 ClojureDart app you already have running, over its own nREPL server.
 JVM Clojure attaches the same way, to a project's own nREPL server, once
@@ -48,7 +48,9 @@ An agent can drive Jonquil too: `jonquil --mcp [DIR]` serves six tools (evaluate
 
 A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, where a click opens a file in a tab and a right click creates, renames or moves to the Trash. Several files can be open at once, one tab each, over one evaluator and one console, and Jonquil remembers them as they change, so starting it again in the same folder brings the same tabs back. Started from the Dock or Finder, it goes back to the project you quit last. Put `:reopen-tabs? false` in the settings file to turn that off. Reset on Run only clears what the running tab created, so a helper namespace in one tab survives a Run of the file that uses it in another.
 
-Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined: in the buffer, in a tab for another of your project's files (Cmd/Ctrl+[ goes back), or in a read-only panel for library code. Shift+F6 or F2 then Shift+F6 or F2 renames every code use of it. Shift+F10 or a right click reaches all of it from a context menu, and Cmd/Ctrl+Shift+P opens a command palette that lists every command with its keys and runs the one you pick. Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, whose editor commands and keys work alongside the built-in ones, and whose hooks hear about saves, Runs and errors, and can stop a Run before it starts, and an agent can propose one for you to accept or reject. The palette's Plugins… lists them, so you can disable one, enable it again, open its file, or see its history and revert to an older version. Each version of a plugin that goes live is kept in `plugins/.history/`. At the prompt, `*1`, `*2`, `*3` and `*e` hold the last results and the last error, and `doc`, `find-doc`, `apropos`, `dir`, `pprint` and `pp` are there without a `require`, whether Jolt runs in process or out of it.
+Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined: in the buffer, in a tab for another of your project's files (Cmd/Ctrl+[ goes back), or in a read-only panel for library code. Shift+F6 or F2 opens a rename popup, and confirming it renames every code use of the symbol. Shift+F10 or a right click reaches all of it from a context menu, and Cmd/Ctrl+Shift+P opens a command palette that lists every command with its keys and runs the one you pick. At the prompt, `*1`, `*2`, `*3` and `*e` hold the last results and the last error, and `doc`, `find-doc`, `apropos`, `dir`, `pprint` and `pp` are there without a `require`, whether Jolt runs in process or out of it.
+
+Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, whose editor commands and keys work alongside the built-in ones, and whose hooks hear about saves, Runs and errors and can stop a Run before it starts. An agent can propose a plugin too, which waits for you to accept or reject it. The palette's Plugins… lists them, so you can disable one, enable it again, open its file, or see its history and revert to an older version. Each version of a plugin that goes live is kept in `plugins/.history/`.
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
