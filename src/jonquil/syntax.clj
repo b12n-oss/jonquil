@@ -285,11 +285,26 @@
 
 ;; --- Smart Indentation, Search & Quick Documentation ---
 
+(defn- prefix-unclosed?
+  "Whether text before pos holds an unmatched bracket, as upstream 7056c61
+  checks by scanning (subs text 0 pos). Answered from text's whole bracket
+  result instead: the compute-brackets cache when it holds an equal string
+  (the painter's; an editor snapshot is a fresh string, so identical? would
+  miss), else compute-brackets* on text, uncached. A bracket before pos is
+  open in the prefix when it's unmatched, or an opener whose closer is at or
+  after pos."
+  [^String text pos]
+  (let [[last-text last-result] @compute-brackets-last
+        {:keys [matches unmatched]} (if (= last-text text) last-result (compute-brackets* text))]
+    (boolean (or (some #(< % pos) unmatched)
+                 (some (fn [[a b]] (and (< a pos) (>= b pos))) matches)))))
+
 (defn compute-smart-indent
   "Calculates the appropriate indentation spaces string for a new line created at `pos` in `text`.
    - Auto-indents (+2 spaces) when the line opened unclosed forms.
    - Auto-dedents (-2 spaces per net closed bracket) when the line closed forms.
-   - Auto-dedents (-2 spaces per closing bracket) when inserting a newline immediately before closing brackets.
+   - Auto-dedents (-2 spaces per closing bracket) when inserting a newline immediately before closing brackets
+     if the document prefix has no unclosed outer forms.
    - Preserves indentation when brackets on the line are balanced."
   [^String text pos]
   (if (or (nil? text) (not (pos? (.length text))) (not (pos? pos)))
@@ -317,7 +332,8 @@
           leading-suffix-close (count (take-while (fn [[tok-type s _]]
                                                     (and (= tok-type :bracket)
                                                          (close->open (.charAt line-suffix s))))
-                                                  suffix-tokens))]
+                                                  suffix-tokens))
+]
       (cond
         ;; 1. Line-prefix closed more brackets than it opened: Auto-dedent
         (neg? unclosed)
@@ -325,8 +341,9 @@
               target (max 0 (- base-len dedent-spaces))]
           (apply str (repeat target " ")))
 
-        ;; 2. Inserting immediately before closing bracket(s) and prefix didn't open forms: Auto-dedent
-        (and (pos? leading-suffix-close) (<= unclosed 0))
+        ;; 2. Inserting immediately before closing bracket(s), prefix didn't open forms,
+        ;; AND entire document prefix has no unclosed brackets: Auto-dedent
+        (and (pos? leading-suffix-close) (<= unclosed 0) (not (prefix-unclosed? text pos)))
         (let [dedent-spaces (* 2 leading-suffix-close)
               target (max 0 (- base-len dedent-spaces))]
           (apply str (repeat target " ")))

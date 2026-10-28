@@ -236,6 +236,20 @@
     (let [code "  (println \"hello\"))\n"]
       (is (= "" (syntax/compute-smart-indent code 20)))))
 
+  (testing "Preserves body indentation when inserting newline inside unclosed multi-line forms before closing parens"
+    ;; (defn foo\n  [x]|) -> should indent 2 spaces for body, not dedent to 0
+    (let [code "(defn foo\n  [x])"]
+      (is (= "  " (syntax/compute-smart-indent code 15))))
+    ;; (defn foo [x]\n  (+ a 1)|) -> should preserve 2 spaces for next body expression
+    (let [code "(defn foo [x]\n  (+ a 1))"]
+      (is (= "  " (syntax/compute-smart-indent code 23))))
+    ;; (if test\n  then|) -> should preserve 2 spaces for else branch
+    (let [code "(if test\n  then)"]
+      (is (= "  " (syntax/compute-smart-indent code 15))))
+    ;; (assoc m\n  :a 1|) -> should preserve 2 spaces
+    (let [code "(assoc m\n  :a 1)"]
+      (is (= "  " (syntax/compute-smart-indent code 15)))))
+
   (testing "Auto-dedents when inserting newline immediately before closing brackets"
     (let [code "    (+ a 1))"]
       ;; Cursor right before outer ')' (pos = 11): 1 closing bracket in suffix -> dedents 2 spaces to 2 spaces

@@ -5,7 +5,8 @@
   contract."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [jonquil.edit :as edit]))
+            [jonquil.edit :as edit]
+            [jonquil.syntax :as syntax]))
 
 (defn- snap
   "A snapshot with no selection: caret only."
@@ -290,3 +291,38 @@
       (is (= (:caret untrimmed) (:caret padded)))
       (is (= "(defn bar [x] (+ bar x))\n\"a string with foo inside\"\n; a comment about foo\n"
              (edit/apply-edits text (:edits padded)))))))
+
+(deftest smart-enter-keeps-body-indent-before-a-closer-test
+  ;; upstream 7056c61: Enter before a trailing closer inside an open form
+  (let [text "(defn foo\n  [x])"
+        r (edit/smart-enter (snap text 15))]
+    (is (= [[15 15 "\n  "]] (:edits r)))
+    (is (= 18 (:caret r)))))
+
+(deftest smart-indent-unclosed-prefix-edges-test
+  (testing "only a stray closer before the caret still stops the dedent (upstream's rule)"
+    (is (= "    " (syntax/compute-smart-indent ")\n    (+ a 1))" 13))))
+  (testing "a bracket inside a string doesn't count"
+    (is (= "" (syntax/compute-smart-indent "(def s \"(\")\n  x)" 15))))
+  (testing "the painter's compute-brackets cache survives an Enter"
+    (let [t "(defn foo\n  [x])"
+          r (syntax/compute-brackets t)]
+      (syntax/compute-smart-indent t 15)
+      (is (identical? r (syntax/compute-brackets t))))))
+
+(deftest prefix-unclosed-agrees-with-a-fresh-prefix-scan-test
+  ;; Jonquil's delta from upstream 7056c61: the whole-buffer bracket result
+  ;; must give the same answer as scanning the text before the caret
+  (doseq [t ["(defn foo\n  [x])"
+             ")\n    (+ a 1))"
+             "(def s \"(\")\n  x)"
+             "(a [b {c}] ;; (\n  \"]\" \\( d)"
+             "(re-find #\"(\" s)\n  (x))"]
+          warm? [false true]]
+    ;; cold: the cache holds other text, so it scans; warm: the cache holds
+    ;; an equal but distinct string, as the painter's does for a snapshot
+    (syntax/compute-brackets (if warm? (apply str t) "x"))
+    (doseq [pos (range (inc (count t)))]
+      (is (= (boolean (seq (:unmatched (#'syntax/compute-brackets* (subs t 0 pos)))))
+             (#'syntax/prefix-unclosed? t pos))
+          (pr-str t pos warm?)))))
