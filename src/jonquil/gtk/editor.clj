@@ -71,6 +71,15 @@
   [ed]
   (g/buffer-text (:buf ed)))
 
+(defn rebase-saved!
+  "Records s as the saved text without touching the buffer (plugins F2: a
+  dirty tab's file was rewritten by a plugin step, so what's on disk is
+  the baseline now). Marks a dirty recompute needed, as mark-saved! does."
+  [ed s]
+  (reset! (:saved-text ed) s)
+  (reset! (:dirty-check-needed? ed) true)
+  nil)
+
 (defn mark-saved!
   "Records the current text as saved, so dirty? reads false until the next
   change. Marks a dirty recompute needed (M7): this changes what dirty?

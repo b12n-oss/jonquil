@@ -119,3 +119,12 @@
   "v with x inserted right after index i."
   [v i x]
   (into (conj (subvec v 0 (inc i)) x) (subvec v (inc i))))
+
+(defn disk-sync
+  "What a tab on a file a plugin step may have rewritten should do (plugins
+  F2): :reload when its file holds other text than the tab last saved and
+  the tab has no unsaved edits, :warn when it has some, nil when the file
+  is unchanged or missing (disk nil)."
+  [{:keys [saved disk dirty?]}]
+  (when (and disk (not= disk saved))
+    (if dirty? :warn :reload)))
