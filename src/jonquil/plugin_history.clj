@@ -146,11 +146,12 @@
 (defn record-proposal!
   "Records an agent's proposal of text for id as its next version, with
   status :pending (keeping check, what its check reported) or
-  :rejected-by-checks (keeping problems), and based-on, the live version
+  :rejected-by-checks (keeping problems, and check-log, the path of the
+  check's kept log, when it's a string), and based-on, the live version
   it was made against: {:n n}, {:n n :superseded m} when a pending one
   replaced pending version m (in the same history.edn write), or {:error
   sentence}. Never throws."
-  [{:keys [plugins-dir id text reason status based-on check problems now]}]
+  [{:keys [plugins-dir id text reason status based-on check problems check-log now]}]
   (try
     (let [dir (history-dir plugins-dir id)
           {:keys [entries error]} (read-entries dir)]
@@ -164,7 +165,8 @@
               old (when (= :pending status) (:n (pending entries)))
               e (cond-> {:n n :at at :source :agent :reason reason :status status :based-on based-on}
                   (= :pending status) (assoc :check check)
-                  (= :rejected-by-checks status) (assoc :problems problems))]
+                  (= :rejected-by-checks status) (assoc :problems problems)
+                  (and (= :rejected-by-checks status) (string? check-log)) (assoc :check-log check-log))]
           (if-let [why (append! dir n text entries (cond-> [e] old (conj {:n old :at at :status :superseded})))]
             {:error why}
             (cond-> {:n n} old (assoc :superseded old))))))

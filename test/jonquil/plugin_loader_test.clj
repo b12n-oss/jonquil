@@ -546,6 +546,22 @@
     (is (= {:status :rejected-by-checks :n 1 :problems ["p"] :lines []}
            (propose! d "pw" (source "pw") {:ok? false :problems ["p"]})))))
 
+(deftest propose-rejected-keeps-the-log-path-test
+  (let [d (dir-with [])]
+    (is (= {:status :rejected-by-checks :n 1 :problems ["p"] :lines [] :log "/t/check.log"}
+           (propose! d "pw" (source "pw") {:ok? false :problems ["p"] :log "/t/check.log"})))
+    (is (= "/t/check.log" (:check-log (first (entries d "pw")))))))
+
+(deftest propose-rejected-without-a-log-records-none-test
+  (let [d (dir-with [])]
+    (is (not (contains? (propose! d "pw" (source "pw") {:ok? false :problems ["p"]}) :log)))
+    (is (not (contains? (first (entries d "pw")) :check-log)))))
+
+(deftest propose-pending-ignores-a-log-test
+  (let [d (dir-with [])]
+    (is (= :pending (:status (propose! d "pw" (source "pw") (assoc passed :log "/t/x")))))
+    (is (not (contains? (first (entries d "pw")) :check-log)))))
+
 (deftest propose-supersedes-test
   (let [d (dir-with [])]
     (propose! d "pw" (source "pw") passed)

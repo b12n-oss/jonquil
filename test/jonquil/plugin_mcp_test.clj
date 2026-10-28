@@ -159,6 +159,9 @@
            (status-of d "e")))))
 
 (deftest propose-text-test
+  (is (= {:error? true
+          :text "status: rejected-by-checks\nproposal: v5\nproblems:\n- p1\ncheck log: /t/a b/check.log\nFix the problems and call jonquil_plugin_propose again with id fmt."}
+         (pm/propose-text "fmt" {:status :rejected-by-checks :n 5 :problems ["p1"] :log "/t/a b/check.log"})))
   (is (= {:error? false
           :text "status: pending\nproposal: v4\nThe user reviews it in the window. Call jonquil_plugin_status with id fmt and n 4 to see what they decide."}
          (pm/propose-text "fmt" {:status :pending :n 4 :problems [] :lines ["x"]})))
@@ -171,3 +174,15 @@
   (is (= {:error? true
           :text "status: unknown\nCall jonquil_plugin_status with id fmt to see whether it was recorded."}
          (pm/propose-text "fmt" {:status :unknown :n nil :problems [] :lines ["didn't finish"]}))))
+
+(deftest status-text-shows-a-kept-log-test
+  (let [d (dir)
+        log (io/file (temp-dirs/temp-dir! "jonquil-pmcp-log-") "check.log")]
+    (spit log "out")
+    (propose! d "c" "(c1)" :status :rejected-by-checks :problems ["p"] :check-log (.getPath log))
+    (is (= (str "c v1: rejected-by-checks. Problems: p. The check's log: " (.getPath log)
+                ". Fix them and call jonquil_plugin_propose again.")
+           (:text (status-of d "c"))))
+    (.delete log)
+    (is (= "c v1: rejected-by-checks. Problems: p. Fix them and call jonquil_plugin_propose again."
+           (:text (status-of d "c"))))))

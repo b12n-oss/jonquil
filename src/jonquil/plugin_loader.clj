@@ -401,10 +401,10 @@
 (defn propose-step!
   "Records an agent's proposal of source for id, with reason, given its
   check's result (propose-check's), on the plugin agent: {:status :n
-  :problems :lines}. A pass, or an unchecked result when there's no jolt,
+  :problems :lines}, plus :log when the check kept its log (plugins F3). A pass, or an unchecked result when there's no jolt,
   is :pending, keeping what the check reported, superseding an older
   pending one, and announced in the lines; a fail is :rejected-by-checks
-  with no line. Both record the live version as :based-on. A bad id, a
+  with no line, recording the kept log's path. Both record the live version as :based-on. A bad id, a
   blank reason or a history that can't be written is :refused, recording
   nothing. opts are load-step!'s folder options. Never throws."
   [{:keys [id source reason result now] :as opts}]
@@ -426,7 +426,7 @@
                      pass? (assoc :check {:warnings (vec (:warnings result)) :timings (or (:timings result) {})
                                           :plugin (when-not (:unchecked? result) (:plugin result))
                                           :unchecked? (boolean (:unchecked? result))})
-                     (not pass?) (assoc :problems (vec (:problems result)))))]
+                     (not pass?) (assoc :problems (vec (:problems result)) :check-log (:log result))))]
             (cond
               (:error r) (refused (str "the proposal wasn't recorded: " (:error r)))
               pass? {:status :pending :n (:n r) :problems []
@@ -434,7 +434,8 @@
                                           (when (:unchecked? result) ", unchecked since there's no jolt to check it in")
                                           ": " reason " " review-hint)]
                               (:superseded r) (conj (str "plugin " id ": v" (:superseded r) " is superseded by v" (:n r))))}
-              :else {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}))))
+              :else (cond-> {:status :rejected-by-checks :n (:n r) :problems (vec (:problems result)) :lines []}
+                      (:log result) (assoc :log (:log result)))))))
       (catch Throwable e
         (refused (str "the proposal wasn't recorded: " (or (ex-message e) (str e))))))))
 
