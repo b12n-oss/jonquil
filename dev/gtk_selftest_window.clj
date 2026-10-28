@@ -36,6 +36,7 @@
             [gtk-selftest-window.palette :as palette-rows]
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
+            [gtk-selftest-window.no-plugins :as no-plugins-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
             [gtk-selftest-window.plugins :as plugin-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
@@ -302,6 +303,11 @@
    plugin-history-rows/row-plugin-history-unreadable
    plugin-history-rows/row-plugin-history-back-shows-the-list
    plugin-history-rows/row-plugin-history-refreshes-after-a-step
+   no-plugins-rows/row-no-plugins-reload-refuses
+   no-plugins-rows/row-no-plugins-disable-refuses
+   no-plugins-rows/row-no-plugins-revert-refuses
+   no-plugins-rows/row-no-plugins-accept-refuses
+   no-plugins-rows/row-plugin-list-shows-file-deleted
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns
