@@ -66,6 +66,7 @@
     jonquil.plugin-isolated
     jonquil.plugin-loader
     jonquil.plugin-review
+    jonquil.plugin-list
     jonquil.plugin-mcp
     jonquil.gtk.review-pane
     jonquil.gtk.palette
