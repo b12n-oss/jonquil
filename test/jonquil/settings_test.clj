@@ -227,3 +227,39 @@
   (let [path (str (temp-dir) "/settings.edn")]
     (spit path "{:theme :navy}")
     (is (nil? (:plugins (settings/load-settings path))))))
+
+;; --- plugins P11: the plugin list's Enable and Disable -----------------------
+
+(defn- temp-settings
+  "A settings file holding text, in its own temp folder."
+  [text]
+  (let [p (str (temp-dir) "/settings.edn")] (spit p text) p))
+
+(deftest save-plugin-disabled-keeps-other-keys-test
+  (let [p (temp-settings "{:theme :dark :plugins {:trusted-projects {\"/x\" 1} :disabled #{:a}}}")]
+    (is (nil? (settings/save-plugin-disabled! p :b true)))
+    (is (= {:theme :dark :plugins {:trusted-projects {"/x" 1} :disabled #{:a :b}}} (edn/read-string (slurp p))))
+    (is (nil? (settings/save-plugin-disabled! p :a false)))
+    (is (= #{:b} (get-in (edn/read-string (slurp p)) [:plugins :disabled])))))
+
+(deftest save-plugin-disabled-creates-the-file-test
+  (let [p (str (temp-dir) "/settings.edn")]
+    (is (nil? (settings/save-plugin-disabled! p :a true)))
+    (is (= {:plugins {:disabled #{:a}}} (edn/read-string (slurp p))))))
+
+(deftest save-plugin-disabled-refuses-an-unusable-value-test
+  (doseq [text ["{:plugins [:a]}" "{:plugins {:disabled [:a]}}" "{:plugins {:disabled #{\"a\"}}}" "{:plugins"]]
+    (let [p (temp-settings text)]
+      (is (str/includes? (str (settings/save-plugin-disabled! p :b true)) p) text)
+      (is (= text (slurp p)) text))))
+
+(deftest save-plugin-disabled-writes-through-a-symlink-test
+  (let [d (temp-dir)
+        target (str d "/real.edn")
+        link (str d "/settings.edn")]
+    (spit target "{:theme :dark}")
+    (java.nio.file.Files/createSymbolicLink (.toPath (io/file link)) (.toPath (io/file target))
+                                            (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (nil? (settings/save-plugin-disabled! link :a true)))
+    (is (java.nio.file.Files/isSymbolicLink (.toPath (io/file link))))
+    (is (= {:theme :dark :plugins {:disabled #{:a}}} (edn/read-string (slurp target))))))

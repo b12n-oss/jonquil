@@ -1969,16 +1969,37 @@ you wrote it, and the console names each problem. A reload also checks
 the plugins after the one that changed again, since their keys can
 depend on it: one that now fails, say because it binds a command that's
 gone, is removed and named, and comes back once what it needs is fixed
-and saved (or at the next Reload Plugins). To keep a plugin off without deleting it,
-list its id in `settings.edn`:
+and saved (or at the next Reload Plugins).
+
+**Plugins…** in the command palette lists every plugin on the right,
+where the source panel shows. A row says what `jonquil_plugins_list` says
+to an agent: the plugin's id, its live version, whether it's loaded,
+disabled or not loaded, its effects, any pending proposal and its doc. A
+plugin whose file fails its checks is listed too, as not loaded, so you
+can always turn it off from here. A plugin that once went live keeps its
+row after its file is deleted, because its history stays. Select a row,
+then:
+
+- **Disable** keeps the plugin off without deleting its file. It writes the
+  id into `settings.edn` and reloads, so its commands and keys go at once.
+- **Enable** takes it out again and reloads, so the plugin goes through
+  its checks and the console says how that went.
+- **Open** shows the plugin's file in a tab.
+- **Review Proposals** opens the review of any pending agent proposals,
+  described below.
+
+The footer says what the last button did. Disable writes this, keeping
+every other setting, the rest of `:plugins` included:
 
 ```clojure
 {:plugins {:disabled #{:wrap-when}}}
 ```
 
-then Reload Plugins. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a
-launch from the Dock or Finder, starts with none. Reload Plugins still
-loads them in a window started that way, and then their hooks fire,
+You can also write it by hand and then Reload Plugins. When that key holds
+something Jonquil can't use, Enable and Disable refuse and say so rather
+than overwrite it. `--no-plugins`, or `JONQUIL_NO_PLUGINS=1` for a
+launch from the Dock or Finder, starts with none. Reload Plugins, Enable
+and Disable still load them in a window started that way, and then their hooks fire,
 though saving a plugin file there doesn't reload it.
 
 Every version of a plugin that goes live is kept, so you can see what

@@ -8,6 +8,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.plugin-history :as history]
+            [jonquil.plugin-list :as plugin-list]
             [jonquil.plugin-loader :as loader]))
 
 (def MAX-SOURCE-CHARS
@@ -55,45 +56,15 @@
 
 ;; --- list --------------------------------------------------------------------
 
-(defn- ids
-  "Every plugin id: loaded, a file in the plugins folder, or a history."
-  [{:keys [plugins-dir registry]}]
-  (sort (distinct (concat (map name (keys (:plugins registry)))
-                          (map first (:files (loader/plugin-files plugins-dir)))
-                          (for [f (or (.listFiles (io/file plugins-dir ".history")) [])
-                                :when (.isDirectory ^java.io.File f)
-                                :let [n (.getName ^java.io.File f)]
-                                :when (loader/plugin-id? n)]
-                            n)))))
-
-(defn- list-line [{:keys [plugins-dir registry disabled]} id]
-  (let [{:keys [entries error]} (history/read-entries (history/history-dir plugins-dir id))
-        loaded (get-in registry [:plugins (keyword id)])
-        {:keys [doc effects]} (:definition loaded)
-        live (cond error "history unreadable"
-                   (history/latest-accepted entries) (str "live v" (:n (history/latest-accepted entries)))
-                   :else "no live version")
-        pending (cond error "history unreadable"
-                      (history/pending entries) (str "pending v" (:n (history/pending entries)))
-                      :else "no pending proposal")
-        state (cond (contains? (set disabled) (keyword id)) "disabled"
-                    loaded "loaded"
-                    :else "not loaded")
-        effects (cond (not loaded) "unknown"
-                      (empty? effects) "none"
-                      :else (str/join " " (map str (sort-by str effects))))]
-    (str id ": " live ", " state ", effects " effects ", " pending "."
-         (when doc (str " " doc)))))
-
 (defn list-text
   "jonquil_plugins_list: one line per plugin, sorted by id."
   [state]
   (guarded "listing the plugins"
            (fn []
-             (let [ids (ids state)]
-               (ok (if (empty? ids)
+             (let [rows (plugin-list/rows state)]
+               (ok (if (empty? rows)
                      "No plugins. Call jonquil_plugin_propose to propose one."
-                     (str/join "\n" (map #(list-line state %) ids))))))))
+                     (str/join "\n" (map :line rows))))))))
 
 ;; --- read and status ---------------------------------------------------------
 

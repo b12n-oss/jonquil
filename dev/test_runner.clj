@@ -50,6 +50,7 @@
     jonquil.plugin-isolated-test
     jonquil.plugin-loader-test
     jonquil.plugin-review-test
+    jonquil.plugin-list-test
     jonquil.plugin-mcp-test
     jonquil.help-test
     jonquil.source-test

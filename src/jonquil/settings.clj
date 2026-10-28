@@ -184,3 +184,33 @@
       (catch Exception e
         (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
         (str "couldn't save " path ": " (.getMessage e))))))
+
+(defn save-plugin-disabled!
+  "Adds plugin id (a keyword) to the settings file's :plugins :disabled, or
+  with disabled? false takes it out, keeping every other key, :plugins'
+  own included (plugins P11: save-settings! merges only the top level, so
+  handing it a :plugins map alone would drop :trusted-projects). Refuses,
+  naming the file, when :plugins isn't a map or :disabled isn't a set of
+  ids, and when the file can't be read or parsed. nil on success, else a
+  message."
+  [path id disabled?]
+  (try
+    (let [target (resolved-target path)
+          f (io/file target)
+          m (when (.exists f)
+              (let [content (try (slurp target)
+                                 (catch Exception _
+                                   (throw (Exception. (str "couldn't read " target "; nothing saved")))))]
+                (try (edn/read-string content)
+                     (catch Exception _
+                       (throw (Exception. (str target " isn't valid EDN, so it wasn't overwritten; fix or delete it")))))))
+          plugins (when (map? m) (:plugins m))
+          d (when (map? plugins) (:disabled plugins))]
+      (cond
+        (and (some? plugins) (not (map? plugins)))
+        (str target "'s :plugins isn't a map, so it wasn't changed; fix it by hand")
+        (and (some? d) (not (and (set? d) (every? keyword? d))))
+        (str target "'s :plugins :disabled isn't a set of plugin ids, so it wasn't changed; fix it by hand")
+        :else
+        (save-settings! path {:plugins (update (or plugins {}) :disabled (fnil (if disabled? conj disj) #{}) id)})))
+    (catch Exception e (str "couldn't save " path ": " (.getMessage e)))))

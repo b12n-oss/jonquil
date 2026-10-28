@@ -34,6 +34,7 @@
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]
             [gtk-selftest-window.palette :as palette-rows]
+            [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
             [gtk-selftest-window.plugins :as plugin-rows]
             [gtk-selftest-window.popovers-quickdoc :as popovers-quickdoc]
@@ -281,6 +282,15 @@
    plugin-mcp-rows/row-plugin-mcp-tool-gone-after-reload
    plugin-mcp-rows/row-plugin-mcp-tool-reads-the-buffer
    plugin-mcp-rows/row-plugin-mcp-list-changed-after-reload
+   plugin-list-rows/row-plugin-list-shows-each-plugin
+   plugin-list-rows/row-plugin-list-disable-takes-the-key
+   plugin-list-rows/row-plugin-list-enable-brings-it-back
+   plugin-list-rows/row-plugin-list-broken-plugin-can-be-disabled
+   plugin-list-rows/row-plugin-list-keeps-trusted-projects
+   plugin-list-rows/row-plugin-list-open-opens-its-file
+   plugin-list-rows/row-plugin-list-review-opens-the-review
+   plugin-list-rows/row-plugin-list-empty
+   plugin-list-rows/row-plugin-list-refreshes-after-a-step
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

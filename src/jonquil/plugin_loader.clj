@@ -266,6 +266,29 @@
     (catch Throwable e
       [(str "loading plugins failed: " (or (ex-message e) (str e)))])))
 
+(defn set-enabled-step!
+  "Enables or disables plugin id (a string) for the plugin list (plugins
+  P11), on the plugin agent like load-step! (opts as load-step!'s, which
+  need :settings-path, plus :id and :enabled?): writes the id into or out
+  of the settings file's :plugins :disabled
+  (jonquil.settings/save-plugin-disabled!), then reloads, so a disabled
+  plugin leaves the registry and an enabled one goes through the checks.
+  The console lines, the first saying what changed; a refused write is
+  one line and reloads nothing, and so is an id the settings already have
+  that way (two quick clicks queue two steps: final review I1). Never
+  throws."
+  [live {:keys [settings-path id enabled?] :as opts}]
+  (let [what (if enabled? "enabled" "disabled")]
+    (try
+      (if (= enabled? (not (contains? (set (:disabled (:plugins (settings/load-settings settings-path))))
+                                      (keyword id))))
+        [(str "plugin " id " is already " what ".")]
+        (if-let [why (settings/save-plugin-disabled! settings-path (keyword id) (not enabled?))]
+          [(str "plugin " id " wasn't " what ": " why)]
+          (into [(str "plugin " id " " what ".")] (load-step! live (dissoc opts :id :enabled?)))))
+      (catch Throwable e
+        [(str (if enabled? "enabling" "disabling") " plugin " id " failed: " (or (ex-message e) (str e)))]))))
+
 (defn- disk-changed
   "The line saying id's file changed since it was loaded, when id is live
   in reg and <dir>/<id>.clj holds other text: writing over it would lose
