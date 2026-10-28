@@ -3432,6 +3432,29 @@
                                       (when-let [l (last lines)]
                                         (plugin-history-pane/report! hp (str/join "\n" lines))
                                         (g/gtk-label-set-text status-label (str "; " l))))}))))
+        ;; plugins F2: after a plugin step, each tab on a plugin file whose
+        ;; file now holds other text than the tab last saved follows it: a
+        ;; clean tab reloads, keeping its caret's offset, and a dirty one
+        ;; keeps its edits, is warned once on the console and takes the disk
+        ;; text as its saved baseline. GTK-thread only.
+        sync-plugin-tabs! (fn []
+                            (let [dir (plugin-loader/plugins-dir @settings-path*)]
+                              (doseq [t @tabs
+                                      :let [path @(:path t)
+                                            ed (:ed t)]
+                                      :when (and path (plugin-loader/plugin-file? dir path))
+                                      :let [disk (try (slurp path) (catch :default _ nil))]]
+                                (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)})
+                                  :reload (let [caret (g/cursor-offset (:buf ed))
+                                                at (min caret (count disk))]
+                                            (editor/set-text! ed disk)
+                                            (g/with-iters* (:buf ed) at at (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+                                            (cview/append! cv :system (str "; " path " now holds the version the plugin step wrote, so this tab was reloaded.\n"))
+                                            (refresh-labels! @*tab-ctx))
+                                  :warn (do (editor/rebase-saved! ed disk)
+                                            (cview/append! cv :system (str "; " path " was changed by a plugin step (Revert or Accept). This tab keeps your unsaved edits, and saving it will write over that version.\n"))
+                                            (refresh-labels! @*tab-ctx))
+                                  nil))))
         ;; plugins P11: Open shows the selected plugin's file in a tab, or
         ;; says why it can't (no row, or no file now). GTK-thread only.
         plugin-open-fn (fn []
@@ -3910,6 +3933,8 @@
               (on-gui!
                (fn []
                  (try
+                   ;; plugins F2: tabs on a file the step rewrote follow it
+                   (sync-plugin-tabs!)
                    ;; plugins P11: the list, before the review, which hides
                    ;; it when it opens
                    (when (or open-list? (pos? (g/gtk-widget-get-visible (:root lp))))

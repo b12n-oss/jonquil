@@ -6,10 +6,12 @@
   closes the history."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [gtk-async :refer [go-row]]
+            [gtk-async :refer [go-row on-gtk]]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.review :as review]
             [gtk-selftest-window.support :as support]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-registry :as plugin-registry]))
@@ -213,3 +215,95 @@
                          (and (= 2 (count rows)) (str/starts-with? (first rows) "v2 accepted")
                               (= 1 selected) (= "History of ph-i: live v2" title))
                          s))))))
+
+;; --- plugins F2: a tab on the plugin's file follows a Revert or an Accept --
+
+(defn- open-tab!
+  "Opens id's file in a tab through the list's Open: the tab."
+  [ui id]
+  ((:plugins-list!* ui))
+  ((:plugin-open!* ui) id)
+  (on-gtk (first (filter #(some-> @(:path %) (str/ends-with? (str "/" id ".clj"))) ((:tabs* ui))))))
+
+(defn- tab-state [t] (on-gtk {:text (editor/editor-text (:ed t)) :dirty? (editor/dirty? (:ed t))}))
+
+(defn- count-of [ui s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) (support/console-text ui))))
+
+(def ^:private reloaded "now holds the version the plugin step wrote, so this tab was reloaded.")
+(def ^:private warned "was changed by a plugin step (Revert or Accept). This tab keeps your unsaved edits")
+
+(defn row-plugin-tab-follows-a-revert
+  "A clean tab on v2's file: Revert to v1 reloads it, clean."
+  [ui]
+  (go-row :plugin-tab-follows-a-revert support/check
+    (with-history ui (files "pt-a")
+      (fn []
+        (v1-then-v2! ui "pt-a")
+        (let [t (open-tab! ui "pt-a")
+              before (count-of ui reloaded)
+              _ ((:plugin-history!* ui) "pt-a")
+              lines ((:plugin-revert!* ui) 1 "")
+              st (tab-state t)]
+          (support/check :plugin-tab-follows-a-revert
+                         (and t (= (review/source "pt-a") (:text st)) (not (:dirty? st))
+                              (= (inc before) (count-of ui reloaded)))
+                         {:lines lines :st st}))))))
+
+(defn row-plugin-tab-keeps-edits-on-a-revert
+  "A dirty tab on v2's file: Revert keeps the edits, warns once, and a
+  later Reload doesn't warn again."
+  [ui]
+  (go-row :plugin-tab-keeps-edits-on-a-revert support/check
+    (with-history ui (files "pt-b")
+      (fn []
+        (v1-then-v2! ui "pt-b")
+        (let [t (open-tab! ui "pt-b")
+              _ (on-gtk (support/place-cursor! (:buf (:ed t)) 0)
+                        (g/gtk-text-buffer-insert-interactive-at-cursor (:buf (:ed t)) ";; mine\n" -1 1))
+              edited (:text (tab-state t))
+              before (count-of ui warned)
+              _ ((:plugin-history!* ui) "pt-b")
+              lines ((:plugin-revert!* ui) 1 "")
+              st (tab-state t)
+              once (count-of ui warned)
+              _ ((:reload-plugins!* ui))
+              again (count-of ui warned)]
+          (support/check :plugin-tab-keeps-edits-on-a-revert
+                         (and t (str/starts-with? edited ";; mine") (= edited (:text st)) (:dirty? st)
+                              (= (inc before) once again))
+                         {:lines lines :st st :before before :once once :again again}))))))
+
+(defn row-plugin-tab-follows-an-accept
+  "A clean tab on v1's file: accepting an agent's v2 reloads it."
+  [ui]
+  (go-row :plugin-tab-follows-an-accept support/check
+    (with-history ui (files "pt-c")
+      (fn []
+        (history/record-proposal! {:plugins-dir ((:plugins-dir* ui)) :id "pt-c" :text (v2 "pt-c")
+                                   :reason "an agent's pt-c" :status :pending :check {:unchecked? true}
+                                   :based-on 1})
+        (let [t (open-tab! ui "pt-c")
+              _ ((:review-proposals!* ui))
+              lines ((:review-accept!* ui))
+              st (tab-state t)]
+          (support/check :plugin-tab-follows-an-accept
+                         (and t (= (v2 "pt-c") (:text st)) (not (:dirty? st)))
+                         {:lines lines :st st}))))))
+
+(defn row-plugin-tab-untouched-by-a-refused-revert
+  "Revert to the live v2 is refused: the tab and the console are unchanged."
+  [ui]
+  (go-row :plugin-tab-untouched-by-a-refused-revert support/check
+    (with-history ui (files "pt-d")
+      (fn []
+        (v1-then-v2! ui "pt-d")
+        (let [t (open-tab! ui "pt-d")
+              st0 (tab-state t)
+              before [(count-of ui reloaded) (count-of ui warned)]
+              _ ((:plugin-history!* ui) "pt-d")
+              lines ((:plugin-revert!* ui) 2 "")
+              st (tab-state t)]
+          (support/check :plugin-tab-untouched-by-a-refused-revert
+                         (and t (= st0 st) (= before [(count-of ui reloaded) (count-of ui warned)])
+                              (str/includes? (str (last lines)) "already live"))
+                         {:lines lines :st st}))))))
