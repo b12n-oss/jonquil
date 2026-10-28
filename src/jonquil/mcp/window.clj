@@ -433,16 +433,19 @@
   after the built-ins (plugins P10b): a fn answering a table, for
   jonquil.mcp/serve! to read on every message. (:plugin-tools* ui) answers
   jonquil.plugin-registry/mcp-tools' rows; it's read once per table, so one
-  message's list and call agree. A ui without it serves base unchanged."
+  message's list and call agree. A ui without it serves base unchanged.
+  When the ui has :watch-plugin-tools* (plugins P10c), the table says
+  :list-changed? true, so initialize declares the capability."
   [base ui]
   (fn []
     (let [plugins (if-let [f (:plugin-tools* ui)] (f) [])
           by-name (into {} (map (juxt :name :call)) plugins)]
-      {:defs (into (:defs base) (map :def) plugins)
-       :call (fn [tname args]
-               (if-let [call (get by-name tname)]
-                 (call (or args {}))
-                 ((:call base) tname args)))})))
+      (cond-> {:defs (into (:defs base) (map :def) plugins)
+               :call (fn [tname args]
+                       (if-let [call (get by-name tname)]
+                         (call (or args {}))
+                         ((:call base) tname args)))}
+        (:watch-plugin-tools* ui) (assoc :list-changed? true)))))
 
 (defn serve-window!
   "Serves the window table over :read-line / :write-line until EOF, then quits
@@ -458,6 +461,7 @@
       (println "jonquil: MCP server driving the window on stdio, default directory" dir))
     (try
       (mcp/serve! {:tools (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui)
+                   :subscribe (:watch-plugin-tools* ui)
                    :read-line read-line
                    :write-line write-line})
       (catch Throwable e

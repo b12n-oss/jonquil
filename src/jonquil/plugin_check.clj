@@ -116,9 +116,12 @@
   #{"string" "integer" "number" "boolean"})
 
 (def MCP-NAME-MAX
-  ;; estimate, not measured (P10b review I2): the Anthropic API's tool-name
-  ;; limit as remembered, 64 (^[a-zA-Z0-9_-]{1,64}$), less Claude Code's
-  ;; own mcp__jonquil__ prefix, 14; P10c's probe measures it
+  ;; P10b review I2, then measured by P10c's probe (2026-10-28, Claude Code
+  ;; 2.1.311): Claude Code called tools whose full mcp__jonquil__ names were
+  ;; 64, 65 and 70 characters, so 50 isn't its limit. It stays as headroom
+  ;; for a client that hands names straight to an API with a 64-character
+  ;; limit (^[a-zA-Z0-9_-]{1,64}$, as remembered), less that 14-character
+  ;; prefix
   50)
 
 (def ^:private arg-name-pattern

@@ -279,6 +279,22 @@
           {:name served :plugin id :def (tool-def served row)
            :call (tool-call id served row (set (:effects definition)) (or deadline-ms PLUGIN-TOOL-DEADLINE-MS))}))))
 
+(defn- tool-defs [reg] (mapv :def (mcp-tools reg)))
+
+(defn watch-tools!
+  "Watches registry atom a and calls (notify!) on the swapping thread when
+  a swap changes the served plugin tools' definitions (plugins P10c): a
+  tool added, removed or renamed, or a changed doc or argument. A throw
+  from the comparison or from notify! is dropped, so the swap stands.
+  Returns a fn that removes the watch."
+  [a notify!]
+  (let [k (keyword "jonquil.plugin-registry" (str "tools-" (gensym)))]
+    (add-watch a k (fn [_ _ old new]
+                     (try (when (not= (tool-defs old) (tool-defs new))
+                            (notify!))
+                          (catch Throwable _ nil))))
+    (fn [] (remove-watch a k))))
+
 (defn all-commands
   "The built-in commands and reg's plugin commands, for the palette."
   [reg]

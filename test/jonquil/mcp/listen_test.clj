@@ -389,3 +389,52 @@
         (is (= 0 code))
         (is (not (str/includes? (str err) "relay failed")) (str err)))
       (finally (.close ss) (future-cancel srv)))))
+
+;; --- tools/list_changed (plugins P10c) ---------------------------------------
+
+(defn- watching-ui
+  "fake-ui with a :watch-plugin-tools* that keeps the latest notify! and
+  counts subscribes and unsubscribes."
+  []
+  (let [w {:notify (atom nil) :subs (atom 0) :unsubs (atom 0)}]
+    [(assoc (fake-ui) :watch-plugin-tools* (fn [n]
+                                             (reset! (:notify w) n)
+                                             (swap! (:subs w) inc)
+                                             (fn [] (swap! (:unsubs w) inc))))
+     w]))
+
+(defn- wait-until [f ms]
+  (let [t0 (System/currentTimeMillis)]
+    (loop [] (or (f) (when (< (- (System/currentTimeMillis) t0) ms) (Thread/sleep 10) (recur))))))
+
+(deftest listener-connection-notifies
+  (let [[ui w] (watching-ui)
+        l (listen/start-listener! {:ui ui :dir "/tmp" :gui (fn [f] (f)) :settings-path (settings-path)})
+        c (connect (:port l))]
+    (try
+      (send! c init-msg)
+      (is (= {"listChanged" true} (get-in (recv! c) ["result" "capabilities" "tools"])))
+      (send! c {"jsonrpc" "2.0" "method" "notifications/initialized"})
+      (send! c {"jsonrpc" "2.0" "id" 2 "method" "ping"})
+      (is (= 2 (get (recv! c) "id")))
+      (@(:notify w))
+      (is (= {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"} (recv! c)))
+      (finally (.close (:socket c)) ((:stop! l))))))
+
+(deftest listener-connection-unsubscribes
+  (let [[ui w] (watching-ui)
+        l (listen/start-listener! {:ui ui :dir "/tmp" :gui (fn [f] (f)) :settings-path (settings-path)})
+        c1 (connect (:port l))]
+    (try
+      (send! c1 init-msg)
+      (recv! c1)
+      (.close (:socket c1))
+      (is (wait-until #(= 1 @(:unsubs w)) 5000))
+      (let [c2 (connect (:port l))]
+        (try
+          (send! c2 init-msg)
+          (recv! c2)
+          (is (= 2 @(:subs w)))
+          (is (= 1 @(:unsubs w)))
+          (finally (.close (:socket c2)))))
+      (finally ((:stop! l))))))

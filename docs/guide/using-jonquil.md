@@ -2168,14 +2168,17 @@ still going at 30 s keeps the tool busy until it ends, since nothing can stop
 it.
 
 The served name can be at most 50 characters and an argument name at most 64,
-from letters, digits, `_`, `.` and `-`. Both limits are what the Anthropic API
-is remembered to accept, less Claude Code's own `mcp__jonquil__` prefix, and
-haven't been measured yet.
+from letters, digits, `_`, `.` and `-`. Claude Code 2.1.311 called tools whose
+full `mcp__jonquil__` names ran to 70 characters, so 50 is headroom for other
+clients rather than Claude Code's own limit, which wasn't found.
 
 The tool list is read on every call, so a reload, an Accept or a disable shows
-up on the client's next `tools/list`. Jonquil doesn't announce the change yet,
-so a client that lists its tools once when it connects sees a plugin's tools
-only after it reconnects, even the tools of plugins loaded at startup. When an
+up on the client's next `tools/list`. Jonquil also tells the client when a
+plugin's tools change, the startup load included, by sending
+`notifications/tools/list_changed`. Claude Code 2.1.311 lists its tools again
+on that and can call a new tool in the same turn (measured 2026-10-28). A
+client that ignores the notification still sees the tools on its next list, or
+after it reconnects. When an
 agent proposes a plugin, the review names its tools and marks new ones, and
 Accept refuses a plugin whose tools aren't the ones its check reported.
 

@@ -280,6 +280,7 @@
    plugin-mcp-rows/row-plugin-mcp-tool-listed-and-called
    plugin-mcp-rows/row-plugin-mcp-tool-gone-after-reload
    plugin-mcp-rows/row-plugin-mcp-tool-reads-the-buffer
+   plugin-mcp-rows/row-plugin-mcp-list-changed-after-reload
    dialects/row-dialect-label-default
    dialects/row-evaluator-is-the-session
    dialects/row-project-config-malformed-warns

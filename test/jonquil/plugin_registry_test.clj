@@ -356,3 +356,42 @@
       (is (= {:text "hi" :error? false} (call-tool (tool-plugin #{} echo-row) "plugin_fmt_echo" {"text" "hi"})))
       (is (zero? @turns))
       (finally (reset! reg/effects before)))))
+
+;; --- watch-tools! (plugins P10c) --------------------------------------------
+
+(deftest watch-tools-fires-on-tool-change
+  (let [a (atom (reg/empty-registry))
+        calls (atom 0)
+        unwatch (reg/watch-tools! a #(swap! calls inc))]
+    (reset! a (tool-plugin #{} echo-row))
+    (is (= 1 @calls))
+    (reset! a (tool-plugin #{} (assoc echo-row :doc "Echo it back.")))
+    (is (= 2 @calls))
+    (reset! a (reg/empty-registry))
+    (is (= 3 @calls))
+    (unwatch)))
+
+(deftest watch-tools-ignores-other-changes
+  (let [a (atom (tool-plugin #{} echo-row))
+        calls (atom 0)
+        unwatch (reg/watch-tools! a #(swap! calls inc))]
+    (swap! a reg/install :wrap {:definition (plugin "wrap" identity) :source "" :file "" :layer :user})
+    (reset! a (tool-plugin #{} echo-row))
+    (is (= 0 @calls))
+    (unwatch)))
+
+(deftest unwatch-stops-calls
+  (let [a (atom (reg/empty-registry))
+        calls (atom 0)
+        unwatch (reg/watch-tools! a #(swap! calls inc))]
+    (unwatch)
+    (reset! a (tool-plugin #{} echo-row))
+    (is (= 0 @calls))))
+
+(deftest throwing-notify-leaves-the-swap
+  (let [a (atom (reg/empty-registry))
+        r (tool-plugin #{} echo-row)
+        unwatch (reg/watch-tools! a (fn [] (throw (ex-info "boom" {}))))]
+    (reset! a r)
+    (is (= r @a))
+    (unwatch)))
