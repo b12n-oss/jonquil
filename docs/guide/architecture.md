@@ -470,6 +470,13 @@ is the way it is.
   line (`plugins-off`) when their opts carry `:plugins? false`. The window
   keeps that flag in a `plugins-on*` atom, seeded from `--no-plugins`, and
   passes it to every step.
+  Follow-up F2 (2026-10-28): after every plugin step the callback runs
+  `sync-plugin-tabs!` on the GTK thread, in its own `try`. For each tab on
+  a plugin file (`plugin-loader/plugin-file-or-target?`, so a symlink's
+  target counts) it reads the file and asks `tabs/disk-sync`: a clean tab
+  reloads with `set-text!`, a dirty one is warned once and takes the disk
+  text as its saved baseline (`editor/rebase-saved!`), and one whose edits
+  already equal the disk text just takes the baseline.
   Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes

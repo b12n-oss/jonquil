@@ -78,3 +78,11 @@
                                    :tab-sel {:profile dialect/cljd :runtime :attach :project-dir (str home "/dev/other")}
                                    :window-sel {:profile dialect/jolt :runtime :in-process :project-dir (str home "/dev/my-talk")}})]
     (is (= "; demo.cljd belongs to ~/dev/other (ClojureDart (not running)). This window runs ~/dev/my-talk (Jolt), so it can't run here.\n" msg))))
+
+(deftest disk-sync-test
+  (is (= :reload (tabs/disk-sync {:saved "a" :disk "b" :dirty? false})))
+  (is (= :warn (tabs/disk-sync {:saved "a" :disk "b" :dirty? true})))
+  (is (nil? (tabs/disk-sync {:saved "a" :disk "a" :dirty? true})))
+  (is (nil? (tabs/disk-sync {:saved "a" :disk nil :dirty? false})))
+  ;; final review I2: edits that already equal the new disk text lose nothing
+  (is (= :rebase (tabs/disk-sync {:saved "a" :disk "b" :dirty? true :buffer "b"}))))

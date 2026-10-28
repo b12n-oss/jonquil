@@ -2053,8 +2053,11 @@ plugin is disabled, when its text is already the live one, and when the
 plugin's file differs from the live version, because writing over it would
 lose an edit: one you haven't reloaded yet, or one that failed its checks.
 Fix that file or reload it first. A plugin whose file was deleted gets it
-back. A tab already open on the plugin's file keeps its old text after a
-Revert, so close it, or don't save it, if you want to keep the revert.
+back. A tab already open on the plugin's file follows the Revert: with no
+unsaved edits it reloads, and the console says so. With unsaved edits it
+keeps them, and the console warns once that saving the tab will write over
+the version on disk. The same happens after an Accept, and after any plugin
+step when another program changed a plugin file that's open in a tab.
 **Back** returns to the list.
 
 ### Proposals from an agent
