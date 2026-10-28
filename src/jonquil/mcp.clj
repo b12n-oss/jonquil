@@ -106,16 +106,19 @@
   at once. Nothing is sent until ready? holds (the client's
   notifications/initialized). The send runs on a future, so a swap on the
   GTK thread never waits on a slow client, and a burst makes one send in
-  flight plus one queued: pending is cleared before the write, so a change
-  during it sends again. A failed write says one line on err; the serve
-  loop finds the dead client on its own read."
-  [write! ready? err]
+  flight plus one queued: pending is cleared under the write lock, just
+  before the write, so a change during a write sends once more after it,
+  while a stuck write holds back every later one without a thread each. A
+  failed write says one line on err; the serve loop finds the dead client
+  on its own read."
+  [lock write-line ready? err]
   (let [pending (atom false)]
     (fn []
       (when (and @ready? (compare-and-set! pending false true))
         (future
-          (reset! pending false)
-          (try (write! list-changed-line)
+          (try (locking lock
+                 (reset! pending false)
+                 (write-line list-changed-line))
                (catch Throwable e
                  (binding [*out* err]
                    (println (str "jonquil: couldn't send tools/list_changed: " (or (ex-message e) (str e))))))))
@@ -136,7 +139,7 @@
   (let [lock (Object.)
         write! (fn [s] (locking lock (write-line s)))
         ready? (atom false)
-        unsubscribe (when subscribe (subscribe (notifier write! ready? *err*)))]
+        unsubscribe (when subscribe (subscribe (notifier lock write-line ready? *err*)))]
     (try
       (loop []
         (when-let [line (read-line)]

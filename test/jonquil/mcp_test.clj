@@ -272,7 +272,8 @@
     (let [n (deref (:notify s) 2000 nil)]
       (n)
       (Thread/sleep 100)
-      (dotimes [_ 5] (n)))
+      ;; spaced out, so each call's send has started if one was made
+      (dotimes [_ 5] (n) (Thread/sleep 50)))
     (deliver gate true)
     (Thread/sleep 500)
     (let [k (count (filter #(= list-changed (json/decode %)) @out))]
