@@ -331,6 +331,20 @@ these:
   takes a table or a fn that answers one, read once per message, and
   `mcp-window/with-plugin-tools` builds that fn from the built-in table and
   the ui's `:plugin-tools*`, for `--mcp --window` and the listener alike.
+  Slice P10c (2026-10-28) tells the client when those tools change.
+  `serve!` takes `:subscribe`, a fn that gets a `notify!` and answers its
+  unsubscribe, which runs however the session ends. Every write in a session
+  holds one lock, so a notification never splits an answer. `notify!` sends
+  nothing until the client's `notifications/initialized`, sends on a future
+  so a reload on the GTK thread never waits on a client, and coalesces: a
+  pending flag cleared under the lock gives one send in flight and one
+  queued, however many swaps come. `plugin-registry/watch-tools!` watches
+  the live registry and calls `notify!` when the served tool definitions
+  differ, and a throw there never reaches the loader's `reset!`. The ui's
+  `:watch-plugin-tools*` wraps it, `with-plugin-tools` then sets
+  `:list-changed?`, so `initialize` declares `"listChanged" true`, and stdio
+  and each listener connection subscribe on their own. Headless `--mcp`
+  passes no `:subscribe` and declares nothing.
   Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes

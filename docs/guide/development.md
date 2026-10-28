@@ -11,8 +11,8 @@ time.
 `bb check` requires every project namespace headlessly and exits 0; it
 currently loads 90 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (1154 tests, 6404 assertions
-on macOS, 6373 on Linux, measured with `bb linux:test` on 2026-10-27) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (1169 tests, 6432 assertions
+on macOS, 6401 on Linux, measured with `bb linux:test` on 2026-10-28) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,8 +20,8 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (1154 tests and 6373 assertions, 31
-fewer, measured 2026-10-27).
+reports fewer assertions than macOS (1169 tests and 6401 assertions, 31
+fewer, measured 2026-10-28).
 
 <details>
 <summary><strong>The live suites: <code>test:nrepl</code> (and <code>test:nightly</code>), <code>test:clj</code>, <code>test:jank</code>, <code>test:bb</code>, <code>test:basilisp</code> and <code>test:plugins</code></strong></summary>
@@ -101,9 +101,10 @@ first time).
 
 `bb mcp:smoke --window` smokes `jonquil --mcp --window` the same way, but it
 opens a real window, so don't type while it runs. It checks the handshake,
-the nineteen window tools plus a startup plugin's own tool (listed again until
-it shows, since the startup load can finish after the first list) and that
-tool's answer, opening a file, Run, a replace that leaves the tab dirty, a save that writes the new bytes, Run again, an evaluation, the
+that the handshake declares `listChanged`, the nineteen window tools plus a
+startup plugin's own tool (in the first list, or in the list after the
+`notifications/tools/list_changed` its load sends, and it prints which) and
+that tool's answer, opening a file, Run, a replace that leaves the tab dirty, a save that writes the new bytes, Run again, an evaluation, the
 console since mark 0, a runaway evaluation that must time out as an error
 within 10 s and leave the window usable, the plugin tools (a proposal that's
 pending, one its check refuses with its problems, the status, your note after a
@@ -111,17 +112,18 @@ rejection the smoke writes into its temp history, list and read), and then the
 EOF path: with an
 unsaved edit pending, closing stdin must end the process within 20 s, leave no
 Jolt child, and leave the file on disk unchanged. Every stdout line must parse
-as JSON. It prints 24 checks, and `--bin PATH` works with it too.
+as JSON, notifications included, and the smoke sets those aside when it reads
+an answer. It prints 25 checks, and `--bin PATH` works with it too.
 
 `bb mcp:smoke --attach` smokes the other half: it starts a real window with
 `:mcp-listen? true` under a temp `XDG_CONFIG_HOME`, so your own settings are
 untouched (don't type while it runs), waits for its registry entry, and runs
-`jonquil --mcp-attach` against it over real stdio. It checks the handshake,
-exactly the nineteen window tools, an evaluation and the console mark, that
+`jonquil --mcp-attach` against it over real stdio. It checks the handshake
+and that it declares `listChanged`, exactly the nineteen window tools, an evaluation and the console mark, that
 closing stdin ends the bridge within 10 s with the window still running, and
 that a second bridge then attaches and evaluates. It ends by sending SIGTERM
 to the window, which must exit within 20 s and remove its registry file. Every
-bridge stdout line must parse as JSON. It prints 16 checks.
+bridge stdout line must parse as JSON. It prints 17 checks.
 
 </details>
 
@@ -139,11 +141,11 @@ handlers a person would use rather than the internal functions directly.
 
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 369 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 370 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
-`console_layout`, `palette`, `plugins` (plugin files loading, keys, reloads, effects and hooks), `plugin_mcp` (the plugin MCP tools over the real window: a proposal that's pending and counted, one its check refuses, a bad id refused before any check, the status after a rejection with its note, an Accept refused once after an agent replaced the shown proposal, and a plugin's own tool listed, called with its console effect, reading the active tab, and gone after a reload), `review` (the review panel over recorded proposals: the pending count, Next, a live version that moved, Accept, Reject with its note, and refusals), `dialects`, `mcp` (the window hooks, the window tools and the listener driven in process), `contained` (a forced throw in each find-bar,
+`console_layout`, `palette`, `plugins` (plugin files loading, keys, reloads, effects and hooks), `plugin_mcp` (the plugin MCP tools over the real window: a proposal that's pending and counted, one its check refuses, a bad id refused before any check, the status after a rejection with its note, an Accept refused once after an agent replaced the shown proposal, and a plugin's own tool listed, called with its console effect, reading the active tab, gone after a reload, and a reload that adds one sending `list_changed` to an initialized session while a reload that changes nothing sends none), `review` (the review panel over recorded proposals: the pending count, Next, a live version that moved, Accept, Reject with its note, and refusals), `dialects`, `mcp` (the window hooks, the window tools and the listener driven in process), `contained` (a forced throw in each find-bar,
 toolbar and file-dialog handler is reported and the app carries on),
 `prompt` (the namespace prompt following a
 REPL line, a Run and a slow evaluation), `app_open` (Open With and Dock drops: two files through a real
