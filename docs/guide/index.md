@@ -1,10 +1,13 @@
 # Jonquil guide
 
-Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions
-editor, an Interactions console, Run and a Stop that really stops. Start
-with the `README.md` in the repository root for a quick look at the window
-and a one-line build and run; these pages go into what the README and the
-code don't cover on their own.
+Jonquil is a Clojure IDE written in Jolt, in the style of DrRacket. You
+write code in the Definitions editor, press Run, and the results show in
+the Interactions console below it. Stop ends a running program, even one
+stuck in a loop.
+
+New to Jonquil? The `README.md` in the repository root shows the window
+and builds it in one command. These pages cover the rest: how each feature
+works, the languages Jonquil runs, and how it's put together.
 
 ## Read in this order
 
