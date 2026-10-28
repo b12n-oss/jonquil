@@ -3349,15 +3349,15 @@
         ;; plugins P11: the plugin-step! opts for Enable (enabled? true) or
         ;; Disable of the list's selected plugin, its first line put on the
         ;; list's footer and the status bar once the window has changed;
-        ;; nil, with the footer saying why, when there's nothing to do.
+        ;; nil, with the footer saying so, when no row is selected.
         ;; GTK-thread only.
         toggle-step (fn [enabled?]
-                      (let [row (plugin-list-pane/selected-row lp)
-                            what (if enabled? "enabled" "disabled")]
+                      (let [row (plugin-list-pane/selected-row lp)]
                         (cond
                           (nil? row) (do (plugin-list-pane/report! lp "No plugin is selected.") nil)
-                          (= enabled? (not (:disabled? row)))
-                          (do (plugin-list-pane/report! lp (str "plugin " (:id row) " is already " what ".")) nil)
+                          ;; final review I1: whether it's already that way
+                          ;; is the step's to say, since the row shown may
+                          ;; be a step behind
                           :else
                           (let [path @settings-path*]
                             {:settings-path path

@@ -814,3 +814,18 @@
         lines (toggle! live sp "t-d" false)]
     (is (= "plugin t-d disabled." (first lines)) (pr-str lines))
     (is (= #{:t-d} (disabled-ids sp)))))
+
+(deftest a-second-disable-says-already-test
+  ;; final review I1: two quick clicks queue two steps; the second finds the
+  ;; id already disabled, says so, and neither writes nor reloads
+  (let [sp (settings-with "{}" [["t-e.clj" (source "t-e")]])
+        live (atom (reg/empty-registry))
+        _ (loader/load-step! live {:settings-path sp :os "Linux" :now now})
+        _ (toggle! live sp "t-e" false)
+        before @live
+        text (slurp sp)
+        lines (toggle! live sp "t-e" false)]
+    (is (= ["plugin t-e is already disabled."] lines))
+    (is (identical? before @live))
+    (is (= text (slurp sp)))
+    (is (= ["plugin t-x is already enabled."] (toggle! live sp "t-x" true)))))
