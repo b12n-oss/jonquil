@@ -345,6 +345,17 @@ these:
   `:list-changed?`, so `initialize` declares `"listChanged" true`, and stdio
   and each listener connection subscribe on their own. Headless `--mcp`
   passes no `:subscribe` and declares nothing.
+  Slice P11 (2026-10-28) adds the plugin list. `jonquil.plugin-list` builds
+  one row per plugin, from the registry, the plugin files and the histories,
+  and `jonquil_plugins_list` prints those rows' lines, so the panel and the
+  MCP tool never disagree. `settings/save-plugin-disabled!` merges inside
+  `:plugins`, because `save-settings!` merges only top-level keys and would
+  drop `:trusted-projects`. `plugin-loader/set-enabled-step!` runs on the
+  plugin agent like every other step: it reads the settings, answers
+  "already disabled" without writing when there's nothing to change (two
+  quick clicks queue two steps), else writes and reloads. `plugin-step!`
+  builds the rows after every step, beside the reviews, and
+  `jonquil.gtk.plugin-list-pane` shows them in the right-hand slot.
   Slice P4 (2026-10-25) made a change take effect
   without a restart. `plugin-loader/reload` diffs the files against the
   live registry: an unchanged file is left alone; a new or changed one goes

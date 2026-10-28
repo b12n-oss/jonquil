@@ -9,10 +9,10 @@ time.
 ## Verify: check, test, and the pre-commit gate
 
 `bb check` requires every project namespace headlessly and exits 0; it
-currently loads 90 namespaces in well under a second, and it's the fastest
+currently loads 92 namespaces in well under a second, and it's the fastest
 way to catch a namespace that doesn't compile before running anything
-slower. `bb test` runs the full unit suite (1169 tests, 6432 assertions
-on macOS, 6401 on Linux, measured with `bb linux:test` on 2026-10-28) with nothing outside the process, or pass namespace
+slower. `bb test` runs the full unit suite (1183 tests, 6483 assertions
+on macOS, 6452 on Linux, measured with `bb linux:test` on 2026-10-28) with nothing outside the process, or pass namespace
 names to run a subset for the TDD loop: `bb test jonquil.edit-test`. That
 count now includes both attach evaluators' own tests, run against an
 in-process fake server for each (ClojureDart's, the JVM's and
@@ -20,7 +20,7 @@ ClojureScript's, the last one `dev/fake_shadow_nrepl.clj`, which
 `jonquil.nrepl.shadow-test` and the window self-test share), so there's
 still no child process and nothing outside the repo. Some asserts are gated by
 OS, `desktop-file-validate` and `plutil` among them, so a Linux (arm64) run
-reports fewer assertions than macOS (1169 tests and 6401 assertions, 31
+reports fewer assertions than macOS (1183 tests and 6452 assertions, 31
 fewer, measured 2026-10-28).
 
 <details>
@@ -141,11 +141,11 @@ handlers a person would use rather than the internal functions directly.
 
 The first window covers the Definitions editor and the Interactions console
 (`dev/gtk_selftest.clj`, 48 rows); the second covers the full application
-window (`dev/gtk_selftest_window.clj`, 370 rows), with its rows split by
+window (`dev/gtk_selftest_window.clj`, 379 rows), with its rows split by
 feature area under `dev/gtk_selftest_window/`: `support`, `run_form`,
 `run_repl`, `files`, `find_replace`, `close_prerun`, `window_keys`,
 `themes`, `popovers_quickdoc`, `completion`, `rename_menus`,
-`console_layout`, `palette`, `plugins` (plugin files loading, keys, reloads, effects and hooks), `plugin_mcp` (the plugin MCP tools over the real window: a proposal that's pending and counted, one its check refuses, a bad id refused before any check, the status after a rejection with its note, an Accept refused once after an agent replaced the shown proposal, and a plugin's own tool listed, called with its console effect, reading the active tab, gone after a reload, and a reload that adds one sending `list_changed` to an initialized session while a reload that changes nothing sends none), `review` (the review panel over recorded proposals: the pending count, Next, a live version that moved, Accept, Reject with its note, and refusals), `dialects`, `mcp` (the window hooks, the window tools and the listener driven in process), `contained` (a forced throw in each find-bar,
+`console_layout`, `palette`, `plugins` (plugin files loading, keys, reloads, effects and hooks), `plugin_mcp` (the plugin MCP tools over the real window: a proposal that's pending and counted, one its check refuses, a bad id refused before any check, the status after a rejection with its note, an Accept refused once after an agent replaced the shown proposal, and a plugin's own tool listed, called with its console effect, reading the active tab, gone after a reload, and a reload that adds one sending `list_changed` to an initialized session while a reload that changes nothing sends none), `review` (the review panel over recorded proposals: the pending count, Next, a live version that moved, Accept, Reject with its note, and refusals), `plugin_list` (Plugins…: the rows, Disable taking a plugin's key and Enable bringing it back, a broken plugin disabled, `:trusted-projects` kept, Open, Review Proposals, the empty list, and a refresh keeping the selection), `dialects`, `mcp` (the window hooks, the window tools and the listener driven in process), `contained` (a forced throw in each find-bar,
 toolbar and file-dialog handler is reported and the app carries on),
 `prompt` (the namespace prompt following a
 REPL line, a Run and a slow evaluation), `app_open` (Open With and Dock drops: two files through a real
