@@ -130,7 +130,7 @@ these:
   the palette chord, and each context-menu item's command) and by the
   window self-test rows.
 - Plugins at a glance (Part 2, slices P1 to P11c, 2026-10-25 to
-  2026-10-28). The pure half is data and checks: `jonquil.plugin` (the
+  2026-10-28). The half with no GTK and no live state is data and checks: `jonquil.plugin` (the
   `defplugin` API), `plugin-check` (the validator), `plugin-protocol` (load,
   soak and validate one candidate), `plugin-history` (the version files),
   `plugin-list` (the list's rows and a plugin's version lines) and

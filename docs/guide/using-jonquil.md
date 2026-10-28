@@ -1829,7 +1829,8 @@ so the review of an agent's proposal can show it to you. None of the
 effects is a sandbox, though. A plugin's code can still call Java, read a
 file or start a process directly, and nothing in Jonquil stops it: a
 declaration decides which of Jonquil's own functions the plugin's ctx
-holds, and what you're shown before you accept someone else's plugin.
+holds, and what the review shows you before you accept an agent's
+proposal. A plugin file you put in the folder yourself gets no review.
 
 `p/eval!` runs the code in the tab's namespace (the one its `ns` form
 names, once that exists), and the console never hears of it. It adds
@@ -2072,11 +2073,14 @@ started for that one check, in a new temporary folder only you can open,
 with the environment variables whose names look like credentials taken
 out. That child is not a sandbox. It runs as you, with your files and
 your network, so a proposal whose top-level code deletes a file deletes
-it during the check, and the scrub only catches the obvious names. What
-the check keeps out of reach is Jonquil itself: until you press Accept,
-the agent's code can't touch your tabs, the REPL, the live plugins or
-your settings, and it can't crash or hang the window. That's no more than
-an agent can already do with `jonquil_eval`. A check that runs past 30
+it during the check, and the scrub only catches the obvious names. That
+reach on your machine is no more than an agent already has through
+`jonquil_eval`. The code could even rewrite a file on disk that Jonquil
+reads later, such as another plugin's file or `settings.edn`. What the
+check keeps out of reach is the running Jonquil: until you press Accept,
+the agent's code can't touch your open tabs, the REPL, the plugins that
+are loaded or the settings Jonquil has already read, and it can't crash
+or hang the window. A check that runs past 30
 seconds is stopped, and the agent gets that reason back. When there's no
 `jolt` to check in, the proposal waits unchecked, the review says so, and
 its checks run when you press Accept.
