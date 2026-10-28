@@ -59,7 +59,7 @@
                 (.put q l) (recur)))
             (catch Exception _ nil)
             (finally (.put q ::eof))))
-     {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom [])})))
+     {:proc proc :q q :in (io/writer (:in proc)) :id (atom 0) :lines (atom []) :notes (atom [])})))
 
 (defn- send! [{:keys [^java.io.Writer in]} msg]
   (.write in (str (json/generate-string msg) "\n"))
@@ -74,15 +74,38 @@
           :else (do (swap! lines conj l) l))))
 
 (defn- request!
-  "Sends a request and returns the parsed response, or {:fail why}."
+  "Sends a request and returns the parsed response, or {:fail why}. A
+  notification read while waiting (a map without \"id\", plugins P10c)
+  goes onto :notes, and the wait goes on, under the same deadline."
   [srv method params ms]
-  (let [id (swap! (:id srv) inc)]
+  (let [id (swap! (:id srv) inc)
+        deadline (+ (System/currentTimeMillis) ms)]
     (send! srv {"jsonrpc" "2.0" "id" id "method" method "params" params})
-    (let [l (next-line srv ms)]
-      (if (string? l)
-        (try (json/parse-string l)
-             (catch Exception _ {:fail (str "not JSON: " l)}))
-        {:fail l}))))
+    (loop []
+      (let [l (next-line srv (max 1 (- deadline (System/currentTimeMillis))))
+            m (when (string? l)
+                (try (json/parse-string l)
+                     (catch Exception _ {:fail (str "not JSON: " l)})))]
+        (cond
+          (not (string? l)) {:fail l}
+          (and (map? m) (not (:fail m)) (not (contains? m "id"))) (do (swap! (:notes srv) conj m) (recur))
+          :else m)))))
+
+(defn- await-note
+  "Waits up to ms for a notification with method, reading lines as they
+  come; true when one is on :notes."
+  [srv method ms]
+  (let [deadline (+ (System/currentTimeMillis) ms)
+        seen? #(some (fn [m] (= method (get m "method"))) @(:notes srv))]
+    (loop []
+      (cond
+        (seen?) true
+        (>= (System/currentTimeMillis) deadline) false
+        :else (let [l (next-line srv (min 500 (max 1 (- deadline (System/currentTimeMillis)))))]
+                (when (string? l)
+                  (let [m (try (json/parse-string l) (catch Exception _ nil))]
+                    (when (and (map? m) (not (contains? m "id"))) (swap! (:notes srv) conj m))))
+                (if (= ::eof l) false (recur)))))))
 
 (defn- tool! [srv name args ms]
   (let [r (request! srv "tools/call" {"name" name "arguments" args} ms)]
@@ -99,7 +122,8 @@
                                       "clientInfo" {"name" "mcp-smoke" "version" "0"}}
                     60000)]
     (check! (str label " initialize") (= "jonquil" (get-in r ["result" "serverInfo" "name"])) r)
-    (send! srv {"jsonrpc" "2.0" "method" "notifications/initialized"})))
+    (send! srv {"jsonrpc" "2.0" "method" "notifications/initialized"})
+    r))
 
 (defn- stop! [srv label]
   (.close ^java.io.Writer (:in srv))
@@ -235,20 +259,26 @@
     (let [srv (launch! proj xdg)
           pid (.pid ^java.lang.Process (:proc (:proc srv)))]
       (try
-        (handshake! srv "window")
+        (let [h (handshake! srv "window")]
+          (check! "initialize declares tools.listChanged"
+                  (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
         ;; the startup plugin load runs on the plugin agent, so the first
-        ;; tools/list can come before it; until P10c's list_changed, a
-        ;; client sees the tool on a later list
+        ;; tools/list can come before it; then its swap sends list_changed
+        ;; (plugins P10c) and the next list has the tool
         (let [want (conj window-tool-names "plugin_smoke-t_twice")
-              r (loop [i 0]
-                  (let [r (request! srv "tools/list" {} 60000)
-                        names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-                    (if (or (= want names) (>= i 60) (:fail r)) r (do (Thread/sleep 500) (recur (inc i))))))
-              names (set (map #(get % "name") (get-in r ["result" "tools"])))]
-          (check! "tools/list has the nineteen window tools and plugin_smoke-t_twice within 30 s"
-                  (and (= 20 (count (get-in r ["result" "tools"])))
-                       (= want names))
-                  r))
+              names-of (fn [r] (set (map #(get % "name") (get-in r ["result" "tools"]))))
+              r1 (request! srv "tools/list" {} 60000)
+              [path r] (if (= want (names-of r1))
+                         [:first-list r1]
+                         (if (await-note srv "notifications/tools/list_changed" 30000)
+                           [:after-list-changed (request! srv "tools/list" {} 60000)]
+                           [:no-list-changed r1]))]
+          (println "[mcp-smoke] startup plugin tool seen" (name path))
+          (check! "plugin_smoke-t_twice is served at startup: in the first list, or after list_changed"
+                  (and (not= :no-list-changed path)
+                       (= 20 (count (get-in r ["result" "tools"])))
+                       (= want (names-of r)))
+                  {:path path :r r}))
         (let [r (tool! srv "plugin_smoke-t_twice" {"text" "ab"} 60000)]
           (check! "a plugin's tool answers over real stdio"
                   (and (= "abab" (:text r)) (not (:error? r))) r))
@@ -360,7 +390,9 @@
                 {:dir reg-dir :files (when (fs/exists? reg-dir) (mapv str (fs/list-dir reg-dir)))})
         (when reg
           (let [b1 (track! (launch! proj xdg ["--mcp-attach"]))]
-            (handshake! b1 "bridge 1")
+            (let [h (handshake! b1 "bridge 1")]
+              (check! "the listener declares tools.listChanged"
+                      (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
             (let [r (request! b1 "tools/list" {} 60000)
                   names (set (map #(get % "name") (get-in r ["result" "tools"])))]
               (check! "tools/list has exactly the nineteen window tools"
