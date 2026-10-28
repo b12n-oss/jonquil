@@ -89,3 +89,13 @@
   (let [d (dir)]
     (propose! d "h" "(h1)")
     (is (not (str/includes? (:line (first (plugin-list/rows (state d)))) "file deleted")))))
+
+(deftest history-line-shows-a-kept-log-test
+  (let [d (dir)
+        log (io/file (temp-dirs/temp-dir! "jonquil-plist-log-") "check.log")
+        line #(plugin-list/history-line (:entries (history/read-entries (history/history-dir d "c"))) 1)]
+    (spit log "out")
+    (propose! d "c" "(c1)" :status :rejected-by-checks :problems ["p"] :check-log (.getPath log))
+    (is (str/ends-with? (line) (str "; problems: p; check log: " (.getPath log))) (line))
+    (.delete log)
+    (is (str/ends-with? (line) "; problems: p") (line))))

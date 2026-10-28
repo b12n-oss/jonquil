@@ -6,7 +6,9 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [jonquil.plugin-history :as history]
             [jonquil.plugin-isolated :as isolated]
+            [jonquil.plugin-list :as plugin-list]
             [jonquil.plugin-loader :as loader]
             [jonquil.plugin-registry :as reg]
             [temp-dirs]))
@@ -79,6 +81,22 @@
     (when dir
       (is (gone? (parse-long (str/trim (slurp (io/file dir "pid"))))) "the child")
       (is (gone? (parse-long (str/trim (slurp (io/file dir "kid.pid"))))) "what it started"))))
+
+(deftest an-overrun-proposal-records-its-log-test
+  (let [tmp (temp-dirs/temp-dir! "jonquil-isolated-live-")
+        d (temp-dirs/temp-dir! "jonquil-isolated-plugins-")
+        text (source "lrec" :extra "(loop [] (recur))")
+        result (loader/propose-check {:registry (reg/empty-registry) :id "lrec" :source text :os "Linux"
+                                      :check #(isolated/check! (assoc % :cache-base @cache :temp-base tmp
+                                                                       :deadline-ms 3000))})
+        r (loader/propose-step! {:dir d :os "Linux" :disabled #{} :id "lrec" :source text :reason "tidy"
+                                 :result result})
+        entries (:entries (history/read-entries (history/history-dir d "lrec")))
+        log (:check-log (first entries))]
+    (is (= :rejected-by-checks (:status r)) (pr-str r))
+    (is (and log (.isFile (io/file log))) (pr-str (first entries)))
+    (is (= log (:log r)))
+    (is (str/ends-with? (plugin-list/history-line entries 1) (str "; check log: " log)))))
 
 (deftest junk-output-doesnt-hide-the-result-test
   (let [[r _] (check "ljunk" (source "ljunk" :extra "(println \"junk\")\n(println \"__JONQUIL_CHECK__\")\n(println \"{:not\")"))]

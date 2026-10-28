@@ -70,14 +70,17 @@
 
 (defn history-line
   "One version's line: v<n>, its status, source, time and reason, with
-  the user's note or the check's problems."
+  the user's note or the check's problems and kept log (while it's there)."
   [entries n]
   (let [es (version-entries entries n)
         e0 (first es)
         e1 (last es)]
     (str "v" n " " (some-> (:status e1) name) " (" (some-> (:source e0) name) ", " (:at e0) "): " (:reason e0)
          (when (:note e1) (str "; note: " (:note e1)))
-         (when (= :rejected-by-checks (:status e1)) (str "; problems: " (str/join "; " (:problems e0)))))))
+         (when (= :rejected-by-checks (:status e1))
+           (str "; problems: " (str/join "; " (:problems e0))
+                (when-let [log (:check-log e0)]
+                  (when (.isFile (io/file log)) (str "; check log: " log))))))))
 
 (defn version-rows
   "id's versions, newest first, {:live-n :rows [{:n :line}]}, where :live-n

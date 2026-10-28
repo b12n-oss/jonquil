@@ -130,8 +130,11 @@
                           :pending " The user decides in the window. Call jonquil_plugin_status again later."
                           :rejected (str (if (:note e1) (str " The user's note: " (:note e1)) " The user left no note.")
                                          " Call jonquil_plugin_propose with a new version to try again.")
-                          :rejected-by-checks (str " Problems: " (str/join "; " (:problems (first es)))
-                                                   ". Fix them and call jonquil_plugin_propose again.")
+                          :rejected-by-checks (str " Problems: " (str/join "; " (:problems (first es))) "."
+                                                   ;; plugins F3: the kept log, while it's there
+                                                   (when-let [log (:check-log (first es))]
+                                                     (when (.isFile (io/file log)) (str " The check's log: " log ".")))
+                                                   " Fix them and call jonquil_plugin_propose again.")
                           :superseded " A newer proposal replaced it."
                           "")))))))))))
 
@@ -139,15 +142,16 @@
 
 (defn propose-text
   "jonquil_plugin_propose's answer for id from a propose result {:status
-  :n :problems}: its status, version and problems, then the call that
-  continues it. Only pending isn't an error."
-  [id {:keys [status n problems]}]
+  :n :problems :log}: its status, version, problems and the check's kept
+  log, then the call that continues it. Only pending isn't an error."
+  [id {:keys [status n problems log]}]
   (guarded
    "answering the proposal"
    (fn []
      {:text (str/join "\n" (concat [(str "status: " (name status))]
                                    (when n [(str "proposal: v" n)])
                                    (when (seq problems) (cons "problems:" (map #(str "- " %) problems)))
+                                   (when log [(str "check log: " log)])
                                    [(case status
                                       :pending (str "The user reviews it in the window. Call jonquil_plugin_status with id "
                                                     id " and n " n " to see what they decide.")
