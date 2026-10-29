@@ -170,6 +170,32 @@
             (run-case parinfer/paren-mode tc)
             (strict-case-checks parinfer/paren-mode tc)))))))
 
+(deftest line-col-offset-crlf-roundtrip-test
+  ;; Jonquil's delta, not upstream's test: upstream's line-col->offset adds
+  ;; 1 per crossed line, so on CRLF text it lands one char short per line
+  ;; (UPSTREAM.md). offset->line-col and line-col->offset must agree.
+  (testing "the #141 review's measured case"
+    (is (= 5 (parinfer/line-col->offset "ab\r\ncd" 1 1))))
+  (testing "every offset round-trips, and agrees with the LF twin plus its \\r s"
+    (let [crlf "(a\r\nbb\r\n  c)"
+          lf "(a\nbb\n  c)"]
+      (doseq [off (range (inc (count crlf)))
+              ;; the position between \r and \n has no line/col address;
+              ;; both helpers clamp it to the ending's start, pinned below
+              :when (not (and (pos? off) (< off (count crlf))
+                              (= \return (nth crlf (dec off)))))]
+        (let [[l x] (parinfer/offset->line-col crlf off)]
+          (is (= off (parinfer/line-col->offset crlf l x))
+              (str "offset " off " -> [" l " " x "] -> "
+                   (parinfer/line-col->offset crlf l x)))))
+      (testing "the unaddressable mid-ending offset clamps to the ending's start"
+        (is (= 2 (apply parinfer/line-col->offset crlf (parinfer/offset->line-col crlf 3))))
+        (is (= 6 (apply parinfer/line-col->offset crlf (parinfer/offset->line-col crlf 7)))))
+      (doseq [off (range (inc (count lf)))]
+        (let [[l x] (parinfer/offset->line-col lf off)]
+          (is (= [l x] (parinfer/offset->line-col crlf (+ off l)))
+              (str "LF offset " off)))))))
+
 (deftest parinfer-edge-inputs-test
   (testing "Empty text, a lone comment and CRLF text don't throw"
     (doseq [t ["" "; just a comment" "(foo\r\n  bar)"]
