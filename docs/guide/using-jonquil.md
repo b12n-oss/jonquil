@@ -161,6 +161,13 @@ the status bar while it's on.
   you're typing in.
 - **Paren** goes the other way: it re-indents from the brackets you type.
 
+A project can choose for its own files: `.jonquil.edn {:parinfer :smart}`
+turns Parinfer on for that project's tabs, and `{:parinfer :off}` keeps
+them off even when your setting is on. The label then says
+`Parinfer: Smart (project)`, and the key and palette keep changing the
+global setting. Like the other `.jonquil.edn` keys, it applies to tabs
+you open after editing the file.
+
 Parinfer works on the top-level form you're editing, never the whole file.
 Opening a file changes nothing. A form whose indentation disagrees with
 its brackets is re-indented the first time you edit it, as part of that
