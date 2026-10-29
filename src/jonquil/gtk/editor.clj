@@ -423,7 +423,10 @@
               ;; and the cached tail: three exact pieces (the span's head
               ;; and tail are untouched by construction), 0.12 ms against
               ;; the 10.8 ms full read (the splice plan). The length guard
-              ;; falls back to the full read on any surprise.
+              ;; only catches a ranged read disagreeing with GTK's char
+              ;; count (embedded objects, hidden text); a wrong span is
+              ;; invisible to it, which is why the span must stay sound
+              ;; (splice review M1).
               text (or (when (and (:cached? prev) span)
                          (let [pt ^String (:text prev)
                                n (count pt)
