@@ -143,6 +143,16 @@
         (reset! compute-brackets-last [text result])
         result))))
 
+(defn tokenize-equal
+  "tokenize, also answering from the cache when the cached text is equal to
+  text, not just the same object (see compute-brackets-equal; Jonquil, not
+  upstream)."
+  [^String text]
+  (let [[last-text last-result] @tokenize-last]
+    (if (and (some? text) (= last-text text))
+      last-result
+      (tokenize text))))
+
 (defn compute-brackets-equal
   "compute-brackets, also answering from the cache when the cached text is
   equal to text, not just the same object. The editor's text is a fresh

@@ -1,5 +1,6 @@
 (ns jonquil.parinfer-edit-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.edit :as edit]
             [jonquil.parinfer-edit :as pe]))
 
@@ -65,3 +66,30 @@
     (is (some? (pe/adjust {:mode :smart :max-lines 2
                            :prev-text "(z)\n(a\n  b)\n(y)" :prev-caret 9
                            :text "(z)\n(a\nb)\n(y)" :caret 7})))))
+
+(deftest adjust-tab-in-code-keeps-the-keystroke-column-test
+  (testing "Paren mode turns a tab in code into two spaces; the keystroke stays before c"
+    (let [before "(fn [a b]\n     (h\ta c))"
+          i (.indexOf before "c))")
+          after (str (subs before 0 i) "x" (subs before i))
+          [t] (run :smart before i after (inc i))]
+      (is (str/includes? t "a xc")))))
+
+(deftest adjust-whitespace-tidy-is-not-unstable-test
+  (testing "a form Paren mode would only tidy (a space before a closer) still runs Smart on a dedent"
+    ;; Smart tidies (foo ) itself, since the caret isn't beside it.
+    (is (= "(defn f [x]\n  (foo)\n  (bar)\n  baz)"
+           (first (run :smart "(defn f [x]\n  (foo )\n  (bar\n    baz))" 30
+                       "(defn f [x]\n  (foo )\n  (bar\n  baz))" 28))))))
+
+(deftest adjust-leaves-the-next-form-alone-test
+  (testing "Enter at the end of a form doesn't reach the misindented form below"
+    (is (nil? (run :smart "(a)\n(fn [a b]\n     (h a))" 3 "(a)\n\n(fn [a b]\n     (h a))" 4))))
+  (testing "deleting a whole line doesn't reach the form after it"
+    (is (nil? (run :smart "(x)\n(y)\n(fn [a b]\n     (h a))" 8 "(x)\n(fn [a b]\n     (h a))" 4)))))
+
+(deftest region-column-0-comment-stays-inside-a-form-test
+  (testing "in unbalanced text a ;; line at column 0 doesn't cut the form above it"
+    (is (= [0 29] (pe/region "(defn f [x]\n;; note\n  (g x))\n\n(h" 9)))
+    (is (nil? (run :smart "(defn f [x]\n;; note\n  (g x))\n\n(h" 9
+                   "(defn f [yx]\n;; note\n  (g x))\n\n(h" 10)))))

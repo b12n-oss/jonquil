@@ -58,11 +58,15 @@
 
 (defn- diff
   "[p a-end b-end]: a[p, a-end) became b[p, b-end), with the longest common
-  prefix and suffix left out."
-  [^String a ^String b]
-  (let [na (count a) nb (count b) m (min na nb)
+  prefix and suffix left out. limit caps the prefix: an edit's change ends
+  at the caret, so without it an insert or delete that repeats the text
+  after it would slide into the next form."
+  [^String a ^String b & [limit]]
+  (let [na (count a) nb (count b)
+        n (min na nb)
+        m (cond-> n limit (min (max 0 limit)))
         p (loop [i 0] (if (and (< i m) (= (.charAt a i) (.charAt b i))) (recur (inc i)) i))
-        q (loop [i 0] (if (and (< i (- m p)) (= (.charAt a (- na 1 i)) (.charAt b (- nb 1 i))))
+        q (loop [i 0] (if (and (< i (- n p)) (= (.charAt a (- na 1 i)) (.charAt b (- nb 1 i))))
                         (recur (inc i))
                         i))]
     [p (- na q) (- nb q)]))
@@ -81,20 +85,33 @@
                         spans)]
     (if (= [s e] [s' e']) [s e] (recur text spans [s' e']))))
 
+(defn- inside-span?
+  "Whether some [s e] in spans (sorted by s, not overlapping) has s < L < e."
+  [spans L]
+  (loop [lo 0 hi (dec (count spans))]
+    (when (<= lo hi)
+      (let [mid (quot (+ lo hi) 2)
+            [s e] (nth spans mid)]
+        (cond (<= L s) (recur lo (dec mid))
+              (< L e) true
+              :else (recur (inc mid) hi))))))
+
 (defn- boundary?
   "A line starting at L opens a region by indentation: its first char is at
-  column 0, isn't whitespace or a closer, and isn't inside a string."
+  column 0, isn't whitespace, a closer or a ; comment (Parinfer doesn't take
+  indentation from comment lines), and isn't inside a string. strings is a
+  vector of [start end] spans sorted by start."
   [^String text strings L]
   (and (< L (count text))
-       (not (contains? #{\space \tab \return \newline \) \] \}} (.charAt text L)))
-       (not-any? (fn [[s e]] (< s L e)) strings)))
+       (not (contains? #{\space \tab \return \newline \) \] \} \;} (.charAt text L)))
+       (not (inside-span? strings L))))
 
 (defn- indent-region
   "The region for unbalanced text: from the last boundary line at or before
   a's line to the line before the next boundary after b's line."
   [^String text a b]
   (let [n (count text)
-        strings (for [[t s e] (syntax/tokenize text) :when (= t :string)] [s e])
+        strings (vec (for [[t s e] (syntax/tokenize-equal text) :when (= t :string)] [s e]))
         s (loop [L (line-start text a)]
             (if (or (zero? L) (boundary? text strings L)) L (recur (line-start text (dec L)))))
         e (loop [L (inc (line-end text b))]
@@ -144,6 +161,9 @@
                (= (count P-lines) (count F-lines))
                (not (str/includes? old-text "\n"))
                (>= x ip)
+               ;; Paren mode also rewrites a tab in code as two spaces, so
+               ;; the code before x must be unchanged for x' to hold.
+               (= (subs p-line ip x) (subs f-line (leading-ws f-line) x'))
                (<= (+ x' (count old-text)) (count f-line))
                (= old-text (subs f-line x' (+ x' (count old-text))))
                (<= c0 rel-caret (+ c0 (count new-text))))
@@ -152,6 +172,20 @@
             [cl cx] (line-col R2 (+ (offset R2 line-no 0) x' (- rel-caret c0)))]
         (mode-fn R2 {:changes [(assoc change :x x')] :cursor-line cl :cursor-x cx})))))
 
+(defn- indent-width
+  "A line's indentation width, a tab counting two, as Parinfer reads it."
+  [^String line]
+  (reduce + (map #(if (= \tab %) 2 1) (take-while #(or (= \space %) (= \tab %)) line))))
+
+(defn- reindents?
+  "Whether Paren mode's text F for P changes some line's indentation width.
+  A change that only tidies whitespace in code, such as (foo ) to (foo),
+  doesn't count: Smart mode leaves that behind itself."
+  [^String P ^String F]
+  (let [ps (str/split P #"\n" -1) fs (str/split F #"\n" -1)]
+    (or (not= (count ps) (count fs))
+        (not= (map indent-width ps) (map indent-width fs)))))
+
 (defn- run-mode
   "Parinfer's result for the edited form R. P is the form before the edit."
   [mode P R change rel-caret opts]
@@ -159,7 +193,7 @@
     (parinfer/paren-mode R opts)
     (let [mode-fn (if (= mode :indent) parinfer/indent-mode parinfer/smart-mode)
           pr (parinfer/paren-mode P)
-          fixed (when (and (:success pr) (not= (:text pr) P)) (:text pr))]
+          fixed (when (and (:success pr) (reindents? P (:text pr))) (:text pr))]
       (if fixed
         (or (rebased mode-fn P fixed change rel-caret)
             (parinfer/paren-mode R opts))
@@ -176,7 +210,7 @@
   "adjust once the region [s e] of prev is known; p, old-end and new-end
   are diff's answer for prev and text."
   [mode prev prev-caret text caret p old-end new-end s e]
-  (let [e' (+ e (- (count text) (count prev)))
+  (let [e' (max s (+ e (- (count text) (count prev))))
         P (subs prev s e)
         R (subs text s e')
         ls (line-start text p)
@@ -212,7 +246,11 @@
   (let [prev (or prev-text "")
         text (or text "")]
     (when (not= prev text)
-      (let [[p old-end new-end] (diff prev text)
-            [s e] (region prev p old-end)]
+      (let [[p old-end new-end] (diff prev text (- caret (max 0 (- (count text) (count prev)))))
+            ;; Whole lines removed: the line after them isn't part of the edit.
+            b (if (and (< p old-end) (= p (line-start prev p)) (= old-end (line-start prev old-end)))
+                (dec old-end)
+                old-end)
+            [s e] (region prev p b)]
         (when (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
           (adjust-region mode prev prev-caret text caret p old-end new-end s e))))))
