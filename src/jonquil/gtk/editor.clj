@@ -360,15 +360,18 @@
         (doseq [[s e r] (rseq (vec (:edits result)))]
           (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
           (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a r -1))))
-        (finally (g/gtk-text-buffer-end-user-action buf)))
-      (if (and sel-a sel-b (< sel-a sel-b))
-        (let [caret-at-a? (= caret sel-a)
-              ins (if caret-at-a? sel-a sel-b)
-              bound (if caret-at-a? sel-b sel-a)]
-          (g/with-iters* buf ins bound
-            (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2))))
-        (g/with-iters* buf caret caret
-          (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
+        ;; The caret or selection lands INSIDE the user action (review I1):
+        ;; the Parinfer hook runs at end-user-action, so it must see the
+        ;; op's caret, and anything it places must land last.
+        (if (and sel-a sel-b (< sel-a sel-b))
+          (let [caret-at-a? (= caret sel-a)
+                ins (if caret-at-a? sel-a sel-b)
+                bound (if caret-at-a? sel-b sel-a)]
+            (g/with-iters* buf ins bound
+              (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2))))
+          (g/with-iters* buf caret caret
+            (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+        (finally (g/gtk-text-buffer-end-user-action buf))))
     true))
 
 (defn- parinfer-mode
@@ -384,6 +387,21 @@
                (not @(:preedit-active? ed)))
       m)))
 
+(defn- parinfer-asides?
+  "Whether the typed-bracket and pair-Backspace step-asides are on: Smart
+  and Indent balance brackets, but Paren mode doesn't, so there they'd
+  leave the buffer unbalanced (review I2)."
+  [ed]
+  (contains? #{:smart :indent} (parinfer-mode ed)))
+
+(defn- empty-string-pair?
+  "Whether snap's caret sits inside an empty \"\" (review I5): Backspace
+  must take both quotes, since a lone quote uncloses the form."
+  [{:keys [text caret]}]
+  (and (pos? caret) (< caret (count text))
+       (= \" (nth text (dec caret)))
+       (= \" (nth text caret))))
+
 (defn- parinfer-after-action!
   "The Parinfer hook at end-user-action: parinfer-edit/adjust from the
   begin-user-action snapshot, applied inside a nested user action, which
@@ -397,17 +415,36 @@
     (when-let [mode (parinfer-mode ed)]
       (try
         (let [buf (:buf ed)
+              text (g/buffer-text buf)
               r (pe/adjust {:mode mode
                             :prev-text (:text prev) :prev-caret (:caret prev)
-                            :text (g/buffer-text buf) :caret (g/cursor-offset buf)})
+                            :text text :caret (g/cursor-offset buf)})
               status @(:parinfer-status-fn ed)]
           (if (= ::pe/too-long r)
             (when status
               (status (str "form over " pe/default-max-lines " lines, not adjusted")))
             (do (when (map? r)
                   (reset! (:parinfer-busy? ed) true)
-                  (try (apply-op! ed r)
-                       (finally (reset! (:parinfer-busy? ed) false))))
+                  (try
+                    (let [[sa sb] (g/selection-offsets buf)]
+                      (if (and sa sb (< sa sb))
+                        ;; The op selected a range (indent, toggle-comment
+                        ;; on lines): the selection survives the fix, each
+                        ;; end mapped through the fix's one edit (review
+                        ;; I1). A delete would swallow the marks, so
+                        ;; following GTK's own mark motion isn't enough.
+                        (let [fixed (edit/apply-edits text (:edits r))
+                              remap (fn [x] (pe/remap-offset text fixed x))]
+                          (g/gtk-text-buffer-begin-user-action buf)
+                          (try
+                            (doseq [[s e rep'] (rseq (vec (:edits r)))]
+                              (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+                              (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a rep' -1))))
+                            (g/with-iters* buf (remap sa) (remap sb)
+                              (fn [i1 i2] (g/gtk-text-buffer-select-range buf i1 i2)))
+                            (finally (g/gtk-text-buffer-end-user-action buf))))
+                        (apply-op! ed r)))
+                    (finally (reset! (:parinfer-busy? ed) false))))
                 (when status (status nil)))))
         (catch :default e
           (when-let [f @(:on-error-fn ed)]
@@ -441,7 +478,7 @@
     ;; With Parinfer on, the closer is Parinfer's to manage, so the
     ;; three-line between-pair open steps aside (decision 7).
     (apply-op! ed (edit/smart-enter (snapshot ed)
-                                    {:between-pair? (nil? (parinfer-mode ed))}))))
+                                    {:between-pair? (not (parinfer-asides? ed))}))))
 
 ;; --- repaint + the debounce/dirty tick -------------------------------------
 
@@ -837,19 +874,20 @@
     ;; (decision 7, upstream's rule): 0 lets GTK insert the bare key and
     ;; the end-user-action hook balance it. The quote keeps pairing.
     (and (no-command-modifiers? state) (contains? open-chars keyval))
-    (if (and (parinfer-mode ed) (not= keyval KEY-QUOTEDBL))
+    (if (and (parinfer-asides? ed) (not= keyval KEY-QUOTEDBL))
       0
       (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval))))
 
     (and (no-command-modifiers? state) (contains? close-chars keyval))
-    (if (parinfer-mode ed)
+    (if (parinfer-asides? ed)
       0
       (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval))))
 
     (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
-    (if (parinfer-mode ed)
-      0
-      (apply-edit! ed (edit/backspace-pair (snapshot ed))))
+    (let [snap (snapshot ed)]
+      (if (and (parinfer-asides? ed) (not (empty-string-pair? snap)))
+        0
+        (apply-edit! ed (edit/backspace-pair snap))))
 
     ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
     ;; spanned line has leading whitespace), the way Tab always is.

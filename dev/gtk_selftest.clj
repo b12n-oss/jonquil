@@ -1093,6 +1093,68 @@
                             {:status @status}))
                    (finally (parinfer-off! ed)))))))
 
+
+(defn- row-parinfer-paren-mode-keeps-pairs [ed]
+  (go-row :parinfer-paren-mode-keeps-pairs check
+    (on-gtk (try (parinfer-on! ed :paren)
+                 (editor/set-text! ed "")
+                 (caret! ed 0)
+                 ;; Paren mode never balances, so the auto-pair stays on
+                 ;; (review I2): handle-key! takes the key and inserts the pair.
+                 (let [handled (editor/handle-key! ed 0x028 0)
+                       text (editor/editor-text ed)]
+                   (check :parinfer-paren-mode-keeps-pairs
+                          (and (= 1 handled) (= "()" text))
+                          {:handled handled :text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-quote-backspace-keeps-pair [ed]
+  (go-row :parinfer-quote-backspace-keeps-pair check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(a \"\")")
+                 (caret! ed 4)
+                 ;; Backspace in an empty string pair still removes both
+                 ;; quotes (review I5): a lone quote would unclose the form.
+                 (let [handled (editor/handle-key! ed 0xff08 0)
+                       text (editor/editor-text ed)]
+                   (check :parinfer-quote-backspace-keeps-pair
+                          (and (= 1 handled) (= "(a )" text))
+                          {:handled handled :text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-op-keeps-caret [ed]
+  (go-row :parinfer-op-keeps-caret check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(a\n  b)")
+                 (caret! ed 7)
+                 ;; Toggle comment through apply-op!: the fix moves the
+                 ;; closer, and the op's caret must survive it (review I1).
+                 (editor/do-toggle-comment! ed)
+                 (let [text (editor/editor-text ed)
+                       caret (g/cursor-offset (:buf ed))]
+                   (check :parinfer-op-keeps-caret
+                          (and (= "(a)\n;   b)" text) (= (count text) caret))
+                          {:text text :caret caret}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-op-keeps-selection [ed]
+  (go-row :parinfer-op-keeps-selection check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(a\n  b\n  c)")
+                 (g/with-iters* (:buf ed) 5 11
+                   (fn [i1 i2] (g/gtk-text-buffer-select-range (:buf ed) i1 i2)))
+                 ;; Shift+Tab over b and c: the closer moves up, and the
+                 ;; selection still covers the two dedented lines, so a
+                 ;; second Shift+Tab has nothing left to remove (review I1).
+                 (editor/do-unindent! ed)
+                 (let [text (editor/editor-text ed)
+                       [a b] (g/selection-offsets (:buf ed))
+                       sel (when (and a b (< a b)) (subs text a b))]
+                   (check :parinfer-op-keeps-selection
+                          (and (= "(a)\nb\nc" text) (= "b\nc" sel))
+                          {:text text :sel sel}))
+                 (finally (parinfer-off! ed))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -1134,7 +1196,11 @@
    row-parinfer-mcp-and-reload-unchanged
    row-parinfer-unstable-form-only
    row-parinfer-off-no-change
-   row-parinfer-too-long-form-says-so])
+   row-parinfer-too-long-form-says-so
+   row-parinfer-paren-mode-keeps-pairs
+   row-parinfer-quote-backspace-keeps-pair
+   row-parinfer-op-keeps-caret
+   row-parinfer-op-keeps-selection])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

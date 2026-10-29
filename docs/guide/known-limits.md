@@ -14,7 +14,7 @@ Known rough edges, parked for later:
 - Parinfer skips a top-level form over 300 lines (the status bar says so),
   and with Parinfer on a keystroke in a 4,500-line file costs about 30 ms.
 - Parinfer normalises what it touches: in an edited form, tabs become two
-  spaces and every line ending follows the file's first.
+  spaces and every line ending follows the form's first.
 
 </details>
 

@@ -4057,8 +4057,10 @@
                :status! (fn [s] (turn #(g/gtk-label-set-text status-label (str s))))
                :buffer-text (fn [id] (turn #(editor/editor-text (:ed (tab-of id)))))
                :replace-text! (fn [id text]
+                                ;; A plugin's text lands exactly as sent,
+                                ;; like an MCP edit (review I3).
                                 (turn #(let [ed (:ed (tab-of id))]
-                                         (when-not (editor/apply-op! ed (mcp-window/replace-op (editor/editor-text ed) text))
+                                         (when-not (editor/apply-op-plain! ed (mcp-window/replace-op (editor/editor-text ed) text))
                                            (throw (ex-info "that tab is read-only" {}))))))
                :open! (fn [path]
                         (turn #(let [r (open-file! @*tab-ctx (str path))]

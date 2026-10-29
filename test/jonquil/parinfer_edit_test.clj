@@ -94,3 +94,19 @@
     (is (= [0 29] (pe/region "(defn f [x]\n;; note\n  (g x))\n\n(h" 9)))
     (is (nil? (run :smart "(defn f [x]\n;; note\n  (g x))\n\n(h" 9
                    "(defn f [yx]\n;; note\n  (g x))\n\n(h" 10)))))
+
+(deftest adjust-indent-joins-the-form-above-test
+  (testing "indenting a top-level line pulls it into the form above (review I4)"
+    (is (= ["(a\n  b)" 5] (run :smart "(a)\nb" 4 "(a)\n  b" 6)))
+    (is (= ["(a\n  b)" 5] (run :indent "(a)\nb" 4 "(a)\n  b" 6))))
+  (testing "a blank line between doesn't stop the join"
+    (is (= ["(a\n\n  b)" 6] (run :smart "(a)\n\nb" 5 "(a)\n\n  b" 7))))
+  (testing "indenting a line already inside a form doesn't reach further up"
+    (is (nil? (run :smart "(z)\n(a\n  b)" 7 "(z)\n(a\n    b)" 9)))))
+
+(deftest remap-offset-test
+  (testing "an offset crosses a fix by its line and column (the fix moves
+           brackets, never the user's lines)"
+    (is (= 4 (pe/remap-offset "(a\nb\nc)" "(a)\nb\nc" 3)) "start of b")
+    (is (= 7 (pe/remap-offset "(a\nb\nc)" "(a)\nb\nc" 7)) "after c, was before )")
+    (is (= 2 (pe/remap-offset "ab\ncd" "ab" 4)) "a vanished line clamps to the end")))

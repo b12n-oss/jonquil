@@ -157,16 +157,18 @@ the status bar while it's on.
 
 - **Smart** (the usual choice) balances brackets from your indentation:
   typing `(` closes it, and dedenting a line moves its closer up.
-- **Indent** is Smart without the cursor awareness.
+- **Indent** is Smart without the edit tracking that protects the form
+  you're typing in.
 - **Paren** goes the other way: it re-indents from the brackets you type.
 
 Parinfer works on the top-level form you're editing, never the whole file.
 Opening a file changes nothing. A form whose indentation disagrees with
 its brackets is re-indented the first time you edit it, as part of that
-edit, so one undo reverts your keystroke and the fix together. While
-Parinfer is on, bracket auto-close and pair Backspace step aside (the
-quote keeps pairing), and in edited lines tabs become two spaces and line
-endings follow the file's first. Reloads, agent (MCP) edits, and forms
+edit, so one undo reverts your keystroke and the fix together. In Smart and
+Indent modes, bracket auto-close and pair Backspace step aside, since
+Parinfer balances for you (the quote keeps pairing, and Backspace still
+removes an empty pair of quotes); in an edited form, tabs become two
+spaces and line endings follow the form's first. Reloads, agent (MCP) edits, and forms
 over 300 lines are left alone; skipping a long form is named in the
 status bar.
 
