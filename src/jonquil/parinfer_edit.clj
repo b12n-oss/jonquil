@@ -204,13 +204,15 @@
         (not= (map indent-width ps) (map indent-width fs)))))
 
 (defn- run-mode
-  "Parinfer's result for the edited form R. P is the form before the edit."
-  [mode P R change rel-caret opts]
+  "Parinfer's result for the edited form R. P is the form before the edit.
+  prev-consistent? skips the re-indent probe: a cache hit's P is
+  Parinfer's own last output, which Paren mode cannot want to change."
+  [mode P R change rel-caret opts prev-consistent?]
   (if (= mode :paren)
     (parinfer/paren-mode R opts)
     (let [mode-fn (if (= mode :indent) parinfer/indent-mode parinfer/smart-mode)
-          pr (parinfer/paren-mode P)
-          fixed (when (and (:success pr) (reindents? P (:text pr))) (:text pr))]
+          pr (when-not prev-consistent? (parinfer/paren-mode P))
+          fixed (when (and pr (:success pr) (reindents? P (:text pr))) (:text pr))]
       (if fixed
         ;; A refused re-apply is nil, so the Paren fallback really runs
         ;; (#142 minor 5); an "unhandled" one is kept, so the shim gap is
@@ -242,7 +244,7 @@
 (defn- adjust-region
   "adjust once the region [s e] of prev is known; p, old-end and new-end
   are diff's answer for prev and text."
-  [mode prev prev-caret text caret p old-end new-end s e]
+  [mode prev prev-caret text caret p old-end new-end s e prev-consistent?]
   (let [e' (max s (+ e (- (count text) (count prev))))
         P (subs prev s e)
         R (subs text s e')
@@ -259,7 +261,7 @@
                    (merge (let [[pl px] (line-col P (- prev-caret s))]
                             {:prev-cursor-line pl :prev-cursor-x px}))))
                {})
-        result (run-mode mode P R change (- caret s) opts)
+        result (run-mode mode P R change (- caret s) opts prev-consistent?)
         NR (:text result)]
     (cond
       (and (:success result) (string? NR) (not= NR R))
@@ -283,12 +285,25 @@
   :smart, :indent or :paren; prev-text and prev-caret are the buffer and
   caret before the edit, text and caret after it. A form of more than
   max-lines lines (default-max-lines) is left as typed, answered as
-  ::too-long so the editor can say why nothing happened."
-  [{:keys [mode prev-text prev-caret text caret max-lines] :or {max-lines default-max-lines}}]
+  ::too-long so the editor can say why nothing happened.
+
+  Two editor-fed speedups, each optional and behaviour-identical:
+  :bounds [prefix suffix] is the edit's untouched head and tail length
+  (GTK's insert/delete signals know it), replacing the whole-buffer diff;
+  :prev-consistent? true skips the form's re-indent probe, and only ever
+  rides a cache hit whose prev-text is Parinfer's own last output."
+  [{:keys [mode prev-text prev-caret text caret max-lines bounds prev-consistent?]
+    :or {max-lines default-max-lines}}]
   (let [prev (or prev-text "")
         text (or text "")]
     (when (not= prev text)
-      (let [[p old-end new-end] (diff prev text (- caret (max 0 (- (count text) (count prev)))))
+      (let [[p old-end new-end]
+            (if-let [[bp bq] bounds]
+              (let [n (count prev) m (count text)
+                    p (min bp n m)
+                    q (min bq (- n p) (- m p))]
+                [p (- n q) (- m q)])
+              (diff prev text (- caret (max 0 (- (count text) (count prev))))))
             ;; Whole lines removed: the line after them isn't part of the edit.
             b (if (and (< p old-end) (= p (line-start prev p)) (= old-end (line-start prev old-end)))
                 (dec old-end)
@@ -307,5 +322,5 @@
                           (count (filter #(= \newline %)
                                          (subs text s (max s (+ e (- (count text) (count prev)))))))))
                 max-lines)
-          (adjust-region mode prev prev-caret text caret p old-end new-end s e)
+          (adjust-region mode prev prev-caret text caret p old-end new-end s e prev-consistent?)
           ::too-long)))))
