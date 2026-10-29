@@ -628,7 +628,7 @@
                                 (vals deduped)))
           by-char (group-by (fn [{:keys [symbol]}]
                               (if (pos? (count symbol))
-                                (first (str/lower-case (subs symbol 0 1)))
+                                (Character/toLowerCase ^Character (.charAt ^String symbol 0))
                                 nil))
                             all-vec)]
       {:all all-vec
@@ -836,7 +836,7 @@
 
          ;; Static candidate lookup via initial-char bucket
          static-pool (if has-prefix?
-                       (let [first-ch (first (str/lower-case (subs prefix 0 1)))]
+                       (let [first-ch (Character/toLowerCase ^Character (.charAt prefix 0))]
                          (get (:by-char @static-candidates) first-ch []))
                        (:all @static-candidates))
 

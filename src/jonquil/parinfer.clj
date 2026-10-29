@@ -1162,7 +1162,12 @@
       [line-no x])))
 
 (defn line-col->offset
-  "Converts 0-based `[line-no x]` in `text` to character offset."
+  "Converts 0-based `[line-no x]` in `text` to character offset.
+
+  Jonquil delta (UPSTREAM.md): upstream adds 1 per crossed line, so on
+  CRLF text every line above the target left it one char short and it
+  disagreed with offset->line-col. Each crossed line now counts its own
+  ending (2 for \\r\\n)."
   [^String text ^long line-no ^long x]
   (if (or (nil? text) (not (pos? (.length text))))
     0
@@ -1172,7 +1177,12 @@
         (if (= l target-line)
           (let [line-len (.length ^String (nth lines l))]
             (+ off (int (max 0 (min (int x) line-len)))))
-          (recur (inc l) (+ off (.length ^String (nth lines l)) 1)))))))
+          (let [line-len (.length ^String (nth lines l))
+                ending (if (and (< (+ off line-len) (.length text))
+                                (= \return (.charAt text (+ off line-len))))
+                         2
+                         1)]
+            (recur (inc l) (+ off line-len ending))))))))
 
 (defn compute-text-change
   "Computes change map `{:line-no :x :old-text :new-text}` between `old-text` and `new-text`."

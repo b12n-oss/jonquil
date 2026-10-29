@@ -25,10 +25,10 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 
 ## Code deltas from upstream
 
-- `src/jonquil/syntax.clj`: `Character/toLowerCase` is not shimmed in Jolt. Two call sites (lines 607 and 815 at 2026-10-29) replaced with `(first (str/lower-case (subs ... 0 1)))`. This change was verified in a trial lift on 2026-09-23; upstream's 13 pure deftests pass on Jolt after the change.
 - `src/jonquil/syntax.clj`: `compute-smart-indent` takes upstream `7056c61`'s rule (no dedent before a closer while a bracket before the caret is open) but not its method. Upstream scans the text before the caret on every Enter, which measured 82 ms at the end of a 4574-line file. Jonquil's private `prefix-unclosed?` answers the same question from the painter's cached whole-buffer `compute-brackets` result when the cached text is equal (about 0.2 ms there). Otherwise it scans the text before the caret, uncached, as upstream does. That happens on an Enter within about 120 ms of the last edit, before the painter has caught up, and on an Enter that replaces a selection. It's only checked when Enter is right before a closer and the line before the caret opened no form. A test checks it against upstream's prefix scan at every caret position. The rule also means the dedent before a closer now applies only when nothing before the caret is open, so in well-formed code a new line before `))` keeps the body's indent. That's upstream's intent, so don't restore the old dedent.
 - `src/jonquil/parinfer.clj`: `array-slice` copies through `(subvec (vec arr) f t)` in place of `.subList`, which the Jolt releases up to v0.8.23 lack (jolt-lang/jolt PR #1437 added it on main, unreleased as of 2026-10-29). Upstream copies the view into a new `ArrayList` at once, so the result is the same, and all 154 fixture cases pass. Once Jonquil's minimum Jolt has `.subList`, this can go back to upstream's line.
 - `test/jonquil/upstream/parinfer_test.clj` reads the fixtures with `clojure.data.json` (`:key-fn keyword`) in place of upstream's `test/DrClojure/json_helper.clj`, which isn't lifted. Both give keyword keys.
+- `src/jonquil/parinfer.clj`: `line-col->offset` counts each crossed line's own ending (2 for `\r\n`), where upstream adds 1 per line, so on CRLF text it landed one char short per line above the target and disagreed with `offset->line-col` (`(line-col->offset "ab\r\ncd" 1 1)` gave 4, want 5; found in the #141 review, fixed 2026-10-29 with a round-trip test over every offset). The position between `\r` and `\n` has no line/column address and clamps to the ending's start, in both helpers alike.
 - `src/jonquil/syntax.clj`: `compute-brackets-equal` is Jonquil's. It answers from `compute-brackets`'s cache when the cached text is equal, not just the same object, so `jonquil.parinfer-edit` reuses the painter's result (about 0.2 ms against an 80 ms scan on a 262k-char file).
 - The editor side of Parinfer is Jonquil's own `jonquil.parinfer-edit`, not upstream's `setup-parinfer!`. Upstream runs Parinfer on the whole buffer after each edit. Jonquil runs it on the top-level forms the edit touched, skips forms over 300 lines, and fixes a form's indentation with Paren mode before Smart or Indent mode first touch it.
 - `src/jonquil/syntax.clj`: `special-forms` and `core-builtins` read the Jolt dialect profile (`(:special-forms dialect/jolt)`, `(:builtins dialect/jolt)` in `src/jonquil/dialect.clj`), which holds upstream's two sets verbatim, so the file also requires `jonquil.dialect`. A re-sync that changes either set edits `src/jonquil/dialect.clj`.
@@ -50,6 +50,19 @@ To stay current with upstream developments:
 1. Run `bb upstream:diff` to list upstream commits that touch `src/` or `test/` since the pin.
 2. Review each commit; port what matters to Jonquil.
 3. Bump `UPSTREAM_PIN` to the new commit SHA in the same commit that lands the port.
+
+For the Parinfer engine, a sync is mechanical:
+
+1. `diff <(git -C <clone> show <pin>:src/DrClojure/parinfer.clj) src/jonquil/parinfer.clj`
+   must show exactly the deltas listed above (the ns line, `array-slice`,
+   `line-col->offset`), and nothing else.
+2. `cmp` each `test-resources/parinfer/*.json` against upstream's copy;
+   the fixtures are byte-identical on purpose.
+3. Run `bb test jonquil.upstream.parinfer-test`: `run-case` is upstream's
+   check, and the strict checks beside it compare tab stops, paren trails
+   and error positions wherever a fixture states them.
+4. The `array-slice` delta leaves when Jonquil's minimum Jolt reaches a
+   release carrying jolt-lang/jolt PR #1437 (`.subList`).
 
 This keeps Jonquil's provenance transparent and drift visible.
 
