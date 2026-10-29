@@ -1269,6 +1269,53 @@
                           {:text text}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-splice-equals-buffer [ed]
+  (go-row :parinfer-splice-equals-buffer check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; set-text! bumps the gen, so the FIRST action after it is
+                 ;; a cache miss; each sequence below primes with one
+                 ;; throwaway action, then measures a HIT action, counting
+                 ;; the ranged reads to prove the splice really ran
+                 ;; (splice review I1: the first version never spliced)
+                 (let [splices (atom 0)
+                       real g/buffer-text-range
+                       eqs (atom [])]
+                   (with-redefs-fn {#'g/buffer-text-range
+                                    (fn [& a] (swap! splices inc) (apply real a))}
+                     #(do
+                        ;; typing beside an emoji, through a hit
+                        (editor/set-text! ed "(a 🙂 b)")
+                        (caret! ed 7)
+                        (type-str! ed "x")      ; prime (miss)
+                        (type-str! ed "(")      ; hit, splice
+                        (swap! eqs conj (= (:text @(:parinfer-prev-cache ed))
+                                           (editor/editor-text ed)))
+                        ;; an op with a fix, through a hit
+                        (editor/set-text! ed "(a
+  b)")
+                        (caret! ed 6)
+                        (type-str! ed "z")      ; prime (miss)
+                        (editor/do-toggle-comment! ed)   ; hit, fix lands
+                        (swap! eqs conj (= (:text @(:parinfer-prev-cache ed))
+                                           (editor/editor-text ed)))
+                        ;; a one-action selection replace, through a hit
+                        (editor/set-text! ed "(a bb c)")
+                        (caret! ed 5)
+                        (type-str! ed "y")      ; prime (miss)
+                        (let [buf (:buf ed)]
+                          (g/gtk-text-buffer-begin-user-action buf)
+                          (g/with-iters* buf 3 6 (fn [i j] (g/gtk-text-buffer-delete buf i j)))
+                          (g/with-iters* buf 3 3 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                          (g/gtk-text-buffer-insert-interactive-at-cursor buf "(" -1 1)
+                          (g/gtk-text-buffer-end-user-action buf))
+                        (swap! eqs conj (= (:text @(:parinfer-prev-cache ed))
+                                           (editor/editor-text ed)))))
+                   (check :parinfer-splice-equals-buffer
+                          (and (= [true true true] @eqs) (= 3 @splices))
+                          {:eqs @eqs :splices @splices
+                           :t3 (editor/editor-text ed)}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-fix-moves-the-edit-offset [ed]
   (go-row :parinfer-fix-moves-the-edit-offset check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1386,7 +1433,8 @@
    row-parinfer-selection-replace-bounds
    row-parinfer-caret-move-keeps-first-edit-reindent
    row-parinfer-fix-moves-the-edit-offset
-   row-parinfer-noop-action-marks-nothing])
+   row-parinfer-noop-action-marks-nothing
+   row-parinfer-splice-equals-buffer])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

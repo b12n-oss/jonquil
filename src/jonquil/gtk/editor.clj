@@ -418,7 +418,26 @@
       (when-let [mode (parinfer-mode ed)]
        (try
         (let [buf (:buf ed)
-              text (g/buffer-text buf)
+              ;; On a cache hit with an armed span, the post-action text is
+              ;; the cached head, the changed middle read from the buffer,
+              ;; and the cached tail: three exact pieces (the span's head
+              ;; and tail are untouched by construction), 0.12 ms against
+              ;; the 10.8 ms full read (the splice plan). The length guard
+              ;; only catches a ranged read disagreeing with GTK's char
+              ;; count (embedded objects, hidden text); a wrong span is
+              ;; invisible to it, which is why the span must stay sound
+              ;; (splice review M1).
+              text (or (when (and (:cached? prev) span)
+                         (let [pt ^String (:text prev)
+                               n (count pt)
+                               m (g/gtk-text-buffer-get-char-count buf)
+                               p (min (:prefix span) n m)
+                               q (min (:suffix span) (- n p) (- m p))
+                               spliced (str (subs pt 0 p)
+                                            (g/buffer-text-range buf p (- m q))
+                                            (subs pt (- n q)))]
+                           (when (= (count spliced) m) spliced)))
+                       (g/buffer-text buf))
               r (pe/adjust {:mode mode
                             :prev-text (:text prev) :prev-caret (:caret prev)
                             :text text :caret (g/cursor-offset buf)
