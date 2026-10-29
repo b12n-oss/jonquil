@@ -26,6 +26,16 @@
   (testing "no edits is a no-op"
     (is (= "(foo)" (edit/apply-edits "(foo)" [])))))
 
+(deftest smart-enter-between-pair-off-test
+  (testing "with :between-pair? false (Parinfer on), (|) gets a plain
+           smart-indent newline instead of the three-line open"
+    (let [snap {:text "()" :caret 1 :sel-start 1 :sel-end 1}]
+      (is (= {:edits [[1 1 "\n  \n"]] :caret 4 :sel nil}
+             (edit/smart-enter snap)) "the pair branch as it is today")
+      (is (= {:edits [[1 1 "\n  "]] :caret 4 :sel nil}
+             (edit/smart-enter snap {:between-pair? false}))
+          "one line, indented inside the open paren, closer left in place"))))
+
 (deftest smart-enter-test
   (testing "indents from the unclosed form, no selection"
     (let [text "(defn f [x]"

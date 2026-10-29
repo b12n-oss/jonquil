@@ -34,6 +34,7 @@
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.ffi :as g]
             [jonquil.paint :as paint]
+            [jonquil.parinfer-edit :as pe]
             [jonquil.plugin-registry :as plugin-registry]
             [jonquil.theme :as theme]))
 
@@ -370,6 +371,64 @@
           (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))))
     true))
 
+(defn- parinfer-mode
+  "The Parinfer mode this edit runs under, or nil when Parinfer leaves the
+  buffer alone: off, the hook's own apply, an exempt edit (MCP), a
+  read-only editor, or an IME preedit composing."
+  [ed]
+  (let [m ((deref (:parinfer-mode-fn ed)))]
+    (when (and (contains? #{:smart :indent :paren} m)
+               (not @(:parinfer-busy? ed))
+               (not @(:parinfer-skip? ed))
+               (not @(:read-only? ed))
+               (not @(:preedit-active? ed)))
+      m)))
+
+(defn- parinfer-after-action!
+  "The Parinfer hook at end-user-action: parinfer-edit/adjust from the
+  begin-user-action snapshot, applied inside a nested user action, which
+  GTK folds into the keystroke's own undo group (the B1 probe), so one
+  undo reverts the keystroke and the fix together. ::pe/too-long goes to
+  :parinfer-status-fn, which it clears again on the next adjusted edit; a
+  throw is reported and the buffer stays as typed."
+  [ed]
+  (when-let [prev @(:parinfer-prev ed)]
+    (reset! (:parinfer-prev ed) nil)
+    (when-let [mode (parinfer-mode ed)]
+      (try
+        (let [buf (:buf ed)
+              r (pe/adjust {:mode mode
+                            :prev-text (:text prev) :prev-caret (:caret prev)
+                            :text (g/buffer-text buf) :caret (g/cursor-offset buf)})
+              status @(:parinfer-status-fn ed)]
+          (if (= ::pe/too-long r)
+            (when status
+              (status (str "form over " pe/default-max-lines " lines, not adjusted")))
+            (do (when (map? r)
+                  (reset! (:parinfer-busy? ed) true)
+                  (try (apply-op! ed r)
+                       (finally (reset! (:parinfer-busy? ed) false))))
+                (when status (status nil)))))
+        (catch :default e
+          (when-let [f @(:on-error-fn ed)]
+            (f (str "; parinfer: " (ex-message e)))))))))
+
+(defn set-parinfer-fns!
+  "Wires the window's Parinfer reads: mode-fn answers the current mode
+  keyword, and status-fn takes one line for the status bar (nil clears a
+  line it set)."
+  [ed mode-fn status-fn]
+  (reset! (:parinfer-mode-fn ed) mode-fn)
+  (reset! (:parinfer-status-fn ed) status-fn))
+
+(defn apply-op-plain!
+  "apply-op! with the Parinfer hook skipped, so an MCP edit or another
+  programmatic change lands exactly as sent."
+  [ed result]
+  (reset! (:parinfer-skip? ed) true)
+  (try (apply-op! ed result)
+       (finally (reset! (:parinfer-skip? ed) false))))
+
 (defn handle-return!
   "Applies jonquil.edit/smart-enter to the current snapshot as one user
   action. Returns nil, applying nothing, while an IME preedit composition
@@ -379,7 +438,10 @@
   the same as any other unhandled key: 0, so GTK/the IM context gets it."
   [ed]
   (when-not @(:preedit-active? ed)
-    (apply-op! ed (edit/smart-enter (snapshot ed)))))
+    ;; With Parinfer on, the closer is Parinfer's to manage, so the
+    ;; three-line between-pair open steps aside (decision 7).
+    (apply-op! ed (edit/smart-enter (snapshot ed)
+                                    {:between-pair? (nil? (parinfer-mode ed))}))))
 
 ;; --- repaint + the debounce/dirty tick -------------------------------------
 
@@ -771,14 +833,23 @@
     (plain-return? keyval state)
     (if (handle-return! ed) 1 0)
 
+    ;; With Parinfer on, brackets and pair Backspace are Parinfer's
+    ;; (decision 7, upstream's rule): 0 lets GTK insert the bare key and
+    ;; the end-user-action hook balance it. The quote keeps pairing.
     (and (no-command-modifiers? state) (contains? open-chars keyval))
-    (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval)))
+    (if (and (parinfer-mode ed) (not= keyval KEY-QUOTEDBL))
+      0
+      (apply-edit! ed (edit/insert-open (snapshot ed) (get open-chars keyval))))
 
     (and (no-command-modifiers? state) (contains? close-chars keyval))
-    (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval)))
+    (if (parinfer-mode ed)
+      0
+      (apply-edit! ed (edit/insert-close (snapshot ed) (get close-chars keyval))))
 
     (and (no-command-modifiers? state) (= keyval KEY-BACKSPACE))
-    (apply-edit! ed (edit/backspace-pair (snapshot ed)))
+    (if (parinfer-mode ed)
+      0
+      (apply-edit! ed (edit/backspace-pair (snapshot ed))))
 
     ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
     ;; spanned line has leading whitespace), the way Tab always is.
@@ -962,6 +1033,16 @@
             ;; Source panel: read-only mode (set-read-only!) and the
             ;; asynchronous paint's generation (paint-async!).
             :read-only? (atom false)
+            ;; Parinfer (step 2 B3). :parinfer-mode-fn answers the window's
+            ;; mode (set-parinfer-fns!); :parinfer-prev is the text and
+            ;; caret at begin-user-action; :parinfer-busy? guards the
+            ;; hook's own nested apply; :parinfer-skip? exempts one edit
+            ;; (apply-op-plain!, the MCP path).
+            :parinfer-mode-fn (atom (constantly :off))
+            :parinfer-status-fn (atom nil)
+            :parinfer-prev (atom nil)
+            :parinfer-busy? (atom false)
+            :parinfer-skip? (atom false)
             :paint (atom {:gen 0 :done? true})
             ;; Large-file speed T4: the tick's incremental repaint (repaint!).
             ;; :painted is {:text :plan} of what our tags show now, or nil
@@ -1023,6 +1104,26 @@
                                              (swap! (:edit-bounds ed) narrow-bounds o (- n o))))
                                          nil)
                                        [:pointer :pointer :pointer :int :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    ;; Parinfer (step 2 B3): the snapshot at begin-user-action and the
+    ;; hook at end-user-action. Every typed key, paste, cut and apply-op!
+    ;; is one user action; GTK's own undo and redo emit neither signal
+    ;; (the B1 probe), and set-text! is an irreversible action, so loads,
+    ;; reloads, undo and redo never reach the hook.
+    (g/g-signal-connect-data buf "begin-user-action"
+                             (callable (fn [_buf _data]
+                                         (when (parinfer-mode ed)
+                                           (reset! (:parinfer-prev ed)
+                                                   {:text (g/buffer-text buf)
+                                                    :caret (g/cursor-offset buf)}))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data buf "end-user-action"
+                             (callable (fn [_buf _data]
+                                         (parinfer-after-action! ed)
+                                         nil)
+                                       [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data buf "delete-range"
                              (callable (fn [_buf start end _data]

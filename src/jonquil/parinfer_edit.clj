@@ -241,7 +241,8 @@
   :caret n}, or nil when it wants nothing, can't run, or fails. mode is
   :smart, :indent or :paren; prev-text and prev-caret are the buffer and
   caret before the edit, text and caret after it. A form of more than
-  max-lines lines (default-max-lines) is left as typed."
+  max-lines lines (default-max-lines) is left as typed, answered as
+  ::too-long so the editor can say why nothing happened."
   [{:keys [mode prev-text prev-caret text caret max-lines] :or {max-lines default-max-lines}}]
   (let [prev (or prev-text "")
         text (or text "")]
@@ -252,5 +253,6 @@
                 (dec old-end)
                 old-end)
             [s e] (region prev p b)]
-        (when (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
-          (adjust-region mode prev prev-caret text caret p old-end new-end s e))))))
+        (if (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
+          (adjust-region mode prev prev-caret text caret p old-end new-end s e)
+          ::too-long)))))

@@ -341,7 +341,7 @@
                                    (if-not t
                                      (if id (no-tab id) {:text "No active tab." :error? true})
                                      (let [ed (:ed t)]
-                                       (if (editor/apply-op! ed (replace-op (editor/editor-text ed) text))
+                                       (if (editor/apply-op-plain! ed (replace-op (editor/editor-text ed) text))
                                          {:text (str "Replaced the text of tab " (:id t) ".") :error? false}
                                          {:text (str "Tab " (:id t) " is read-only.") :error? true}))))))))
         tool-save (fn [args]

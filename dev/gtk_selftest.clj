@@ -988,6 +988,111 @@
                  {:first-chunk first? :old-only (count old-only) :stale stale
                   :settled settled? :mismatches bad}))))))
 
+
+;; --- Parinfer rows (step 2 B3) --------------------------------------------
+;; Each row turns the mode on through editor/set-parinfer-fns! (what
+;; jonquil.gtk.window wires per tab) and makes the edit the way GTK's own
+;; commit does: one begin/end-user-action around an insert or delete, so
+;; the end-user-action hook runs. The last step of every row turns
+;; Parinfer back off, so the other rows are untouched.
+
+(defn- parinfer-on! [ed mode] (editor/set-parinfer-fns! ed (constantly mode) nil))
+(defn- parinfer-off! [ed] (editor/set-parinfer-fns! ed (constantly :off) nil))
+
+(defn- type-str! [ed s]
+  (let [buf (:buf ed)]
+    (g/gtk-text-buffer-begin-user-action buf)
+    (g/gtk-text-buffer-insert-interactive-at-cursor buf s -1 1)
+    (g/gtk-text-buffer-end-user-action buf)))
+
+(defn- delete-action! [ed a b]
+  (let [buf (:buf ed)]
+    (g/gtk-text-buffer-begin-user-action buf)
+    (g/with-iters* buf a b (fn [i j] (g/gtk-text-buffer-delete buf i j)))
+    (g/gtk-text-buffer-end-user-action buf)))
+
+(defn- caret! [ed pos]
+  (g/with-iters* (:buf ed) pos pos (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
+
+(defn- row-parinfer-open-paren [ed]
+  (go-row :parinfer-open-paren check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "")
+                 (caret! ed 0)
+                 (type-str! ed "(")
+                 (let [text (editor/editor-text ed)
+                       caret (g/cursor-offset (:buf ed))]
+                   (check :parinfer-open-paren (and (= "()" text) (= 1 caret))
+                          {:text text :caret caret}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-dedent-undo-redo [ed]
+  (go-row :parinfer-dedent-undo-redo check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(a\n  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)       ; the user dedents b
+                 (let [buf (:buf ed)
+                       dedented (editor/editor-text ed)
+                       _ (g/gtk-text-buffer-undo buf)
+                       undone (editor/editor-text ed)
+                       _ (g/gtk-text-buffer-redo buf)
+                       redone (editor/editor-text ed)]
+                   (check :parinfer-dedent-undo-redo
+                          (and (= "(a)\nb" dedented)
+                               (= "(a\n  b)" undone)
+                               (= "(a)\nb" redone))
+                          {:dedented dedented :undone undone :redone redone}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-mcp-and-reload-unchanged [ed]
+  (go-row :parinfer-mcp-and-reload-unchanged check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "")
+                 (editor/apply-op-plain! ed {:edits [[0 0 "(fn [a b]\n     (h a))"]] :caret 0})
+                 (let [mcp-text (editor/editor-text ed)]
+                   (editor/set-text! ed "(x\n  y)")   ; a reload
+                   (let [reload-text (editor/editor-text ed)]
+                     (check :parinfer-mcp-and-reload-unchanged
+                            (and (= "(fn [a b]\n     (h a))" mcp-text)
+                                 (= "(x\n  y)" reload-text))
+                            {:mcp mcp-text :reload reload-text})))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-unstable-form-only [ed]
+  (go-row :parinfer-unstable-form-only check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(fn [a b]\n     (h a))\n(q [c]\n     d)")
+                 (caret! ed 19)                 ; just after "a" in (h a)
+                 (type-str! ed "x")
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-unstable-form-only
+                          (= "(fn [a b]\n    (h ax))\n(q [c]\n     d)" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-off-no-change [ed]
+  (go-row :parinfer-off-no-change check
+    (on-gtk (editor/set-text! ed "(a\n  b)")
+            (caret! ed 5)
+            (delete-action! ed 3 5)
+            (let [text (editor/editor-text ed)]
+              (check :parinfer-off-no-change (= "(a\nb)" text) {:text text})))))
+
+(defn- row-parinfer-too-long-form-says-so [ed]
+  (go-row :parinfer-too-long-form-says-so check
+    (on-gtk (let [status (atom [])]
+              (try (editor/set-parinfer-fns! ed (constantly :smart) (fn [msg] (swap! status conj msg)))
+                   (editor/set-text! ed (str "(a\n" (apply str (repeat 301 "  b\n")) ")"))
+                   (caret! ed 5)                ; before the first b
+                   (type-str! ed "x")
+                   (let [text (editor/editor-text ed)]
+                     (check :parinfer-too-long-form-says-so
+                            (and (= [(str "form over 300 lines, not adjusted")] @status)
+                                 (= (str "(a\n  xb\n" (apply str (repeat 300 "  b\n")) ")") text))
+                            {:status @status}))
+                   (finally (parinfer-off! ed)))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -1023,7 +1128,13 @@
    row-incremental-matches-full
    row-incremental-supersede
    row-incremental-open-string
-   row-paint-async-drops-after-edit])
+   row-paint-async-drops-after-edit
+   row-parinfer-open-paren
+   row-parinfer-dedent-undo-redo
+   row-parinfer-mcp-and-reload-unchanged
+   row-parinfer-unstable-form-only
+   row-parinfer-off-no-change
+   row-parinfer-too-long-form-says-so])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

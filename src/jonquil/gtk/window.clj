@@ -2487,6 +2487,9 @@
         (install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
                                (fn [msg] (set-status! status-label msg)))]
     (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
+    ;; Parinfer (step 2 B3): the tab's editor reads the window's one mode.
+    (when-let [mf (:parinfer-mode-read ctx)]
+      (editor/set-parinfer-fns! ed mf (:parinfer-status-fn ctx)))
     (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [dirty]
                                    (refresh-labels! ctx)
@@ -3524,6 +3527,20 @@
                                    (do (g/gtk-label-set-text parinfer-label t)
                                        (g/gtk-widget-set-visible parinfer-label 1))
                                    (g/gtk-widget-set-visible parinfer-label 0)))
+        ;; The hook's one status line: a skipped long form names itself,
+        ;; and the next adjusted edit clears it back to Ready (B3).
+        parinfer-skip-shown* (atom false)
+        parinfer-status-fn (fn [msg]
+                             (if msg
+                               (do (reset! parinfer-skip-shown* true)
+                                   (when-not (evaluating-fn)
+                                     (set-status! status-label
+                                                  (str (or (commands/parinfer-label-text @parinfer-mode*)
+                                                           "Parinfer")
+                                                       " (" msg ")"))))
+                               (when (and (compare-and-set! parinfer-skip-shown* true false)
+                                          (not (evaluating-fn)))
+                                 (set-status! status-label "Ready"))))
         parinfer-fn (fn [choice]
                       (let [k (commands/parinfer-step @parinfer-mode* choice)]
                         (reset! parinfer-mode* k)
@@ -3827,7 +3844,9 @@
                    :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
                    :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
                    :session-restoring? (atom false)
-                   :window-key-args window-key-args :repl-complete-fn repl-complete-fn}
+                   :window-key-args window-key-args :repl-complete-fn repl-complete-fn
+                   :parinfer-mode-read (fn [] @parinfer-mode*)
+                   :parinfer-status-fn parinfer-status-fn}
           first-tab (add-tab! tab-ctx {:path file :text (or text "")})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project

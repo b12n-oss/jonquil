@@ -59,8 +59,9 @@
   (is (= ["(a)\n(c)\n(d)\n(b)" 10] (run :smart "(a)\n\n(b)" 4 "(a)\n(c\n(d\n(b)" 9))))
 
 (deftest adjust-skips-a-form-over-max-lines-test
-  (testing "a form longer than :max-lines is left as typed"
-    (is (nil? (pe/adjust {:mode :smart :max-lines 1
+  (testing "a form longer than :max-lines answers ::pe/too-long, so the
+           editor can say why nothing happened"
+    (is (= ::pe/too-long (pe/adjust {:mode :smart :max-lines 1
                           :prev-text "(z)\n(a\n  b)\n(y)" :prev-caret 9
                           :text "(z)\n(a\nb)\n(y)" :caret 7})))
     (is (some? (pe/adjust {:mode :smart :max-lines 2
