@@ -137,8 +137,12 @@
     ;; The new text is in hand, so the Parinfer cache primes for free and
     ;; the next keystroke is a hit (miss-path cut 2). The gen is read after
     ;; the set, in this same step, so the prime can't be stale; no :edit-at,
-    ;; so the first-edit re-indent still fires.
-    (reset! (:parinfer-prev-cache ed) {:text s :gen @(:edit-gen ed)})
+    ;; so the first-edit re-indent still fires. GTK takes a C string, so a
+    ;; NUL in s truncates what the buffer keeps: prime only when the counts
+    ;; agree, else clear and the next keystroke misses honestly (review I1).
+    (reset! (:parinfer-prev-cache ed)
+            (when (= (count s) (g/gtk-text-buffer-get-char-count buf))
+              {:text s :gen @(:edit-gen ed)}))
     (when @(:read-only? ed)
       (g/with-iters* buf 0 (count s)
         (fn [a b] (g/gtk-text-buffer-apply-tag buf (:readonly-tag ed) a b)))))
@@ -552,8 +556,13 @@
           r (apply-op! ed result)]
       (reset! (:parinfer-prev-cache ed)
               (when (and valid? r)
-                {:text (edit/apply-edits (:text cache) (:edits result))
-                 :gen @(:edit-gen ed)}))
+                ;; A NUL in an edit's text truncates what the buffer keeps
+                ;; (C string): keep the update only when the counts agree,
+                ;; else clear, never half-trust (review I1).
+                (let [t (edit/apply-edits (:text cache) (:edits result))]
+                  (when (= (count t)
+                           (g/gtk-text-buffer-get-char-count (:buf ed)))
+                    {:text t :gen @(:edit-gen ed)}))))
       r)
     (finally (reset! (:parinfer-skip? ed) false))))
 

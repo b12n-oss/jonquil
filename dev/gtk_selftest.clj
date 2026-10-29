@@ -1368,6 +1368,68 @@ b" text)
                           {:text text}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-nul-reload-clears-the-prime [ed]
+  (go-row :parinfer-nul-reload-clears-the-prime check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; GTK takes C strings, so a NUL truncates what the buffer
+                 ;; keeps; the prime must notice the counts disagree and
+                 ;; clear, or the next keystroke splices from a string the
+                 ;; buffer never held (miss-path review I1)
+                 (editor/set-text! ed (str "(a)" (char 0) "(b)"))
+                 (caret! ed 1)
+                 (type-str! ed "x")
+                 (let [text (editor/editor-text ed)
+                       eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                   (check :parinfer-nul-reload-clears-the-prime
+                          (and (= "(xa)" text) eq)
+                          {:text text :eq eq}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-nul-plain-op-clears-the-cache [ed]
+  (go-row :parinfer-nul-plain-op-clears-the-cache check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; an op's replacement text can carry a NUL the buffer
+                 ;; truncates away; the updated cache must notice and clear,
+                 ;; never trust a string the buffer never held (miss-path
+                 ;; review I1)
+                 (editor/set-text! ed "(a)")
+                 (editor/apply-op-plain!
+                  ed {:edits [[1 2 (str "x" (char 0) "y")]] :caret 0})
+                 (caret! ed 1)
+                 (type-str! ed "z")
+                 (let [text (editor/editor-text ed)
+                       eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                   (check :parinfer-nul-plain-op-clears-the-cache
+                          (and (= "(zx)" text) eq)
+                          {:text text :eq eq}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-redo-splices-the-end-read [ed]
+  (go-row :parinfer-redo-splices-the-end-read check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; redo is the undo row's mirror: a miss whose begin read
+                 ;; is ground truth, so the end-side splice must still run
+                 ;; and land the fallback's text (miss-path Review Focus 1)
+                 (editor/set-text! ed "(a
+  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (g/gtk-text-buffer-undo (:buf ed))
+                 (g/gtk-text-buffer-redo (:buf ed))
+                 (let [splices (atom 0)
+                       real g/buffer-text-range]
+                   (with-redefs-fn {#'g/buffer-text-range
+                                    (fn [& a] (swap! splices inc) (apply real a))}
+                     #(do (caret! ed 2)
+                          (type-str! ed "x")))
+                   (let [text (editor/editor-text ed)
+                         eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                     (check :parinfer-redo-splices-the-end-read
+                            (and (= "(ax)
+b" text) eq (pos? @splices))
+                            {:text text :eq eq :splices @splices})))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-reload-primes-the-cache [ed]
   (go-row :parinfer-reload-primes-the-cache check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1561,7 +1623,10 @@ b" text) eq (pos? @splices))
    row-parinfer-reload-primes-the-cache
    row-parinfer-reload-double-flip
    row-parinfer-plain-op-updates-a-valid-cache
-   row-parinfer-plain-op-leaves-an-invalid-cache])
+   row-parinfer-plain-op-leaves-an-invalid-cache
+   row-parinfer-nul-reload-clears-the-prime
+   row-parinfer-nul-plain-op-clears-the-cache
+   row-parinfer-redo-splices-the-end-read])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
