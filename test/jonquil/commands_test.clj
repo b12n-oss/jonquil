@@ -193,3 +193,15 @@
   (is (= "Parinfer: Smart" (c/parinfer-label-text :smart)))
   (is (= "Parinfer: Indent" (c/parinfer-label-text :indent)))
   (is (= "Parinfer: Paren" (c/parinfer-label-text :paren))))
+
+(deftest parinfer-effective-test
+  (is (= :smart (c/parinfer-effective nil :smart)) "no opinion: the global")
+  (is (= :indent (c/parinfer-effective :indent :smart)))
+  (is (= :off (c/parinfer-effective :off :smart)) "a project pins off"))
+
+(deftest parinfer-status-text-test
+  (is (= "Parinfer: Smart" (c/parinfer-status-text :smart false)))
+  (is (= "Parinfer: Smart (project)" (c/parinfer-status-text :smart true)))
+  (is (nil? (c/parinfer-status-text :off false)) "globally off: the label hides")
+  (is (= "Parinfer: off (project)" (c/parinfer-status-text :off true))
+      "pinned off under a non-off global stays visible"))

@@ -281,8 +281,25 @@
       (nth parinfer-cycle (mod (inc i) (count parinfer-cycle))))
     choice))
 
+(defn parinfer-effective
+  "The mode a tab runs under: its project's .jonquil.edn :parinfer when it
+  names one (:off pins Parinfer off there), else the global setting."
+  [override global]
+  (or override global))
+
 (defn parinfer-label-text
   "The status bar's text for mode, nil for :off (the label hides)."
   [mode]
   (when (not= :off mode)
     (str "Parinfer: " (str/capitalize (name mode)))))
+
+(defn parinfer-status-text
+  "The label for the active tab: its effective mode, with \" (project)\"
+  when the tab's .jonquil.edn decided. A project pinning :off shows
+  \"Parinfer: off (project)\", so a tab that ignores the global says why;
+  a plain :off is nil and the label hides."
+  [effective override?]
+  (cond
+    override? (str "Parinfer: " (if (= :off effective) "off" (str/capitalize (name effective)))
+                   " (project)")
+    :else (parinfer-label-text effective)))
