@@ -1307,8 +1307,14 @@
                                                         ;; live buffer swapping roles, so the
                                                         ;; same induction carries it, and the
                                                         ;; same length guard turns any surprise
-                                                        ;; into the full read
-                                                        (and cache os)
+                                                        ;; into the full read. Only on a NARROWED
+                                                        ;; span: a moved gen with a still-full
+                                                        ;; span means a change the signals never
+                                                        ;; saw (a child anchor), so the full read
+                                                        ;; (review M3, the plan's "anything
+                                                        ;; surprising")
+                                                        (and cache os
+                                                             (not= os {:prefix nc :suffix nc}))
                                                         (let [pt ^String (:text cache)
                                                               m (g/gtk-text-buffer-get-char-count buf)
                                                               p (min (:prefix os) nc m)
