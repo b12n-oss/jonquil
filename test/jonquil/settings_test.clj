@@ -211,6 +211,22 @@
       (is (not (contains? r :mcp-listen?)))
       (is (str/includes? (:warning r) ":mcp-listen?")))))
 
+(deftest parinfer-test
+  (doseq [mode [:off :smart :indent :paren]]
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path (str "{:theme :light :parinfer " mode "}"))
+      (is (= mode (:parinfer (settings/load-settings path))))))
+  (testing "absent: no key, which the window reads as :off"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :light}")
+      (is (not (contains? (settings/load-settings path) :parinfer)))))
+  (testing "an unknown mode is ignored with a warning"
+    (let [path (str (temp-dir) "/settings.edn")]
+      (spit path "{:theme :light :parinfer :fancy}")
+      (let [r (settings/load-settings path)]
+        (is (not (contains? r :parinfer)))
+        (is (str/includes? (:warning r) ":parinfer"))))))
+
 (deftest plugins-part-test
   ;; plugins P4: :plugins {:disabled #{id ...}}, read; malformed is ignored
   ;; with a warning; a save of another key keeps it

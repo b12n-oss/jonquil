@@ -24,4 +24,5 @@
   (is (= "l" (editor/physical-key "Mac OS X" 0xac 37 cmd-alt)))
   (is (nil? (editor/physical-key "Linux" 0xac 37 ctrl-alt)))
   (is (nil? (editor/physical-key "Mac OS X" 0xffe3 37 cmd-alt)) "Control_L's own press")
-  (is (nil? (editor/physical-key "Mac OS X" 0x8f6 3 0)) "no Option held"))
+  (is (nil? (editor/physical-key "Mac OS X" 0x8f6 3 0)) "no Option held")
+  (is (= "p" (editor/physical-key "Mac OS X" 0x3c0 35 cmd-alt)) "Option+P arrives as pi"))

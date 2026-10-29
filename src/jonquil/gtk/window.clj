@@ -2240,7 +2240,8 @@
   command is reported through set-status! and the key counts as used (1),
   instead of escaping into GTK's signal emission and killing the process."
   [{:keys [status-label] :as ctx}]
-  (fn [_ctl keyval0 _keycode state _data]
+  (let [os (System/getProperty "os.name")]
+   (fn [_ctl keyval0 keycode state _data]
     (try
       (let [keyval (g/gdk-keyval-to-lower keyval0)
             kctx (window-key-ctx ctx keyval0 state)
@@ -2253,12 +2254,15 @@
          {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
           ;; plugins P5: and their window-scope commands, so a :run one
           ;; bound to a key runs
+          ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
+          ;; keyval, and the keycode names the key (editor/physical-key)
+          :physical (editor/physical-key os keyval0 keycode state)
           :run! #(cmd-registry/run-command! (merge cmd-registry/window-commands
                                                    (plugin-registry/commands plugins))
                                             % kctx)}))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
-        1))))
+        1)))))
 
 ;; --- context menus (P4.T7) -----------------------------------------------
 
@@ -3155,6 +3159,7 @@
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
+        parinfer-label (g/gtk-label-new "")
         ;; plugins P9b: how many agent proposals are pending, hidden at zero
         pending-label (g/gtk-label-new "")
         ;; D1.T4: the window's dialect (and runtime, when it isn't the
@@ -3511,6 +3516,25 @@
         set-theme-fn (fn [k] (apply-choice! theme-ctx k))
         ;; TH.T5: the chord's/:cycle-theme!*'s action.
         cycle-theme-fn (fn [] (do-cycle-theme! theme-ctx))
+        ;; Parinfer (step 2 Part B): the window's one mode, read by every
+        ;; tab's editor hook (Part B3); :off unless settings.edn set one.
+        parinfer-mode* (atom (or (:parinfer (settings/load-settings @settings-path*)) :off))
+        update-parinfer-label! (fn [mode]
+                                 (if-let [t (commands/parinfer-label-text mode)]
+                                   (do (g/gtk-label-set-text parinfer-label t)
+                                       (g/gtk-widget-set-visible parinfer-label 1))
+                                   (g/gtk-widget-set-visible parinfer-label 0)))
+        parinfer-fn (fn [choice]
+                      (let [k (commands/parinfer-step @parinfer-mode* choice)]
+                        (reset! parinfer-mode* k)
+                        (update-parinfer-label! k)
+                        (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
+                          (cview/append! cv :system (str "; settings: " err "\n")))
+                        ;; same restraint as the theme: a live Running…
+                        ;; status isn't overwritten
+                        (when-not (evaluating-fn)
+                          (set-status! status-label (or (commands/parinfer-label-text k)
+                                                        "Parinfer: off")))))
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe
@@ -3578,6 +3602,7 @@
                                                               files-btn
                                                               (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                                       :open-palette-fn open-palette-fn
+                                      :parinfer-fn parinfer-fn
                                       :review-proposals-fn (fn [] (plugin-step! {:settings-path @settings-path*
                                                                                  :step (fn [] []) :open? true}))
                                       :plugins-list-fn (fn [] (plugin-step! {:settings-path @settings-path*
@@ -3657,6 +3682,8 @@
     (g/gtk-box-append status-box pending-label)
     (g/gtk-widget-set-visible pending-label 0)
     (g/gtk-box-append status-box dialect-label)
+    (g/gtk-box-append status-box parinfer-label)
+    (update-parinfer-label! @parinfer-mode*)
     (g/gtk-box-append status-box line-col-label)
     ;; Room at both ends, so "Ln N, Col N" doesn't touch the window's right
     ;; edge (P4 parked item) and the left matches it.

@@ -3,7 +3,8 @@
   $XDG_CONFIG_HOME/jonquil/settings.edn, or ~/.config/jonquil/settings.edn
   when XDG_CONFIG_HOME is unset or blank. It stores :theme, :dialect (the
   fallback dialect for a file no project decides) when the user set one by
-  hand, :file-tree {:visible? :width} and the booleans :reopen-tabs? and :mcp-listen?. A save
+  hand, :file-tree {:visible? :width}, the booleans :reopen-tabs? and :mcp-listen?,
+  and :parinfer (:off unless set). A save
   merges into what the file already holds, so each feature only writes its
   own keys. Loading never throws: a missing file gives the defaults with no
   warning, and an unreadable file, an unknown theme or an unknown dialect is the
@@ -88,6 +89,21 @@
       (boolean? v) {:mcp-listen? v}
       :else {:warning (str path " has an unusable :mcp-listen?, ignoring it")})))
 
+(def parinfer-modes
+  "The values :parinfer may hold. :off is the default (the user's call,
+  2026-10-29), and a file with no :parinfer means :off."
+  #{:off :smart :indent :paren})
+
+(defn- parinfer-part
+  "{:parinfer k} when m holds one of parinfer-modes, {} when it holds none,
+  and {:warning ..} otherwise."
+  [path m]
+  (let [v (when (map? m) (:parinfer m))]
+    (cond
+      (nil? v) {}
+      (contains? parinfer-modes v) {:parinfer v}
+      :else {:warning (str path " has an unknown :parinfer " (pr-str v) ", using :off")})))
+
 (defn- plugins-part
   "{:plugins {:disabled #{id ...}}} when m's :plugins holds a set of
   keyword ids under :disabled, {} when there's none, and {:warning ..}
@@ -104,7 +120,8 @@
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs? and :mcp-listen? when
-  they hold a boolean, :plugins when it holds a set of disabled ids, and
+  they hold a boolean, :plugins when it holds a set of disabled ids,
+  :parinfer when it holds one of parinfer-modes, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."
   [path]
@@ -118,10 +135,12 @@
             rt (reopen-tabs-part path m)
             ml (mcp-listen-part path m)
             pl (plugins-part path m)
+            pi (parinfer-part path m)
             warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt)
-                                   (:warning ml) (:warning pl)])]
+                                   (:warning ml) (:warning pl) (:warning pi)])]
         (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning)
-                       (dissoc rt :warning) (dissoc ml :warning) (dissoc pl :warning))
+                       (dissoc rt :warning) (dissoc ml :warning) (dissoc pl :warning)
+                       (dissoc pi :warning))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
 (defn- resolved-target

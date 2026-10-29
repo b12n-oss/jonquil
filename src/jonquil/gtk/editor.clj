@@ -648,6 +648,7 @@
 ;; physical-key's docstring for why keyval alone can't be used here.
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
+(def ^:private MAC-KEYCODE-P 35)
 
 ;; os.name read once. The keycode fallback is macOS-only: on Linux X11
 ;; keycode 37 is Control_L.
@@ -737,13 +738,14 @@
   37 is Control_L, and the keycode numbering means nothing there."
   [os keycode state]
   (and (= "Mac OS X" os)
-       (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L} keycode)
+       (contains? #{MAC-KEYCODE-F MAC-KEYCODE-L MAC-KEYCODE-P} keycode)
        (alt-held? state)))
 
 (defn physical-key
-  "The physical key's name, \"f\" or \"l\", for the editor keymap's
-  :physical? format-selection binding (Cmd/Ctrl+Alt+F or L), or nil. Pure,
-  so a test can pass any os.
+  "The physical key's name, \"f\", \"l\" or \"p\", for the :physical?
+  bindings (the editor's Cmd/Ctrl+Alt+F and L format chords, and the
+  window's Cmd/Ctrl+Alt+P Parinfer chord), or nil. Pure, so a test can
+  pass any os.
 
   On Linux, Alt doesn't remap the keyval, and the binding's plain f and l
   match. On macOS GDK reports the Option-translated character instead
@@ -756,7 +758,7 @@
   Control_L is 0xffe3, and on Linux keycode 37 is Control_L."
   [os keyval keycode state]
   (when (and (< keyval 0x1000) (keycode-fallback? os keycode state))
-    (if (= keycode MAC-KEYCODE-F) "f" "l")))
+    (condp = keycode MAC-KEYCODE-F "f" MAC-KEYCODE-L "l" "p")))
 
 (defn- typing-key!
   "The typing stages of the plugins design, 1 when one took the key, else
