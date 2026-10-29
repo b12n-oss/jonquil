@@ -4,11 +4,11 @@
 
 Jonquil is a DrRacket-style Clojure IDE written in Jolt: a Definitions editor, an Interactions console, Run and a Stop that really stops. It ports the idea of [DrClojure](https://github.com/kimtg/DrClojure-Neo), lifting its pure code for the text-analysis core (tokenizer, brackets, navigation, smart indent, formatter, doc and completion lookup).
 
-**Status: alpha.** The window, editing, themes (including one that follows macOS light and dark), help, plugins and an MCP server for agents all work. So do these dialects: Jolt in or out of process; JVM Clojure; ClojureDart (experimental); ClojureScript (experimental), attached to a shadow-cljs server you started or launched on node or in a browser tab; any other nREPL server you started, such as babashka or Basilisp; and jank (experimental), which Jonquil launches itself.
+**Status: alpha.** The window, editing, Parinfer (off by default), themes (including one that follows macOS light and dark), help, plugins and an MCP server for agents all work. So do these dialects: Jolt in or out of process; JVM Clojure; ClojureDart (experimental); ClojureScript (experimental), attached to a shadow-cljs server you started or launched on node or in a browser tab; any other nREPL server you started, such as babashka or Basilisp; and jank (experimental), which Jonquil launches itself.
 
 ![Jonquil's window: a toolbar, the Definitions editor above the Interactions console, and a status bar](docs/images/window.png)
 
-See the [guide](docs/guide/index.md), starting with [Using Jonquil](docs/guide/using-jonquil.md), for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
+See the [guide](docs/guide/index.md), starting with [Using Jonquil](docs/guide/using-jonquil.md), for a full walkthrough: the window layout, Run versus the REPL prompt, stdin, Stop, Reset on Run, editing keys, Parinfer, find and replace, Open and Save, tabs, themes, help, dialects and running Jolt out of process, and the keys.
 
 Jonquil picks a dialect for whatever file is open:
 
@@ -73,7 +73,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-29, 1230 tests pass (7262 assertions on macOS; 7231 on Linux, measured with `bb linux:test` the same day).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-29, 1235 tests pass (7310 assertions on macOS; 7279 on Linux, measured with `bb linux:test` the same day).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>

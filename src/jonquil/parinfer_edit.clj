@@ -56,6 +56,15 @@
                   :else (recur (inc i) l)))]
     (+ s (max 0 (min x (- (line-end text s) s))))))
 
+(defn remap-offset
+  "Offset x in text `from`, re-found in text `to` by its line and column,
+  both clamped to what `to` has. A Parinfer fix moves brackets and
+  indentation but keeps the user's lines, so the line/column frame crosses
+  it; the editor carries a selection over a fix this way (review I1)."
+  [from to x]
+  (let [[l c] (line-col from x)]
+    (offset to l c)))
+
 (defn- diff
   "[p a-end b-end]: a[p, a-end) became b[p, b-end), with the longest common
   prefix and suffix left out. limit caps the prefix: an edit's change ends
@@ -199,6 +208,18 @@
             (parinfer/paren-mode R opts))
         (mode-fn R (assoc opts :changes [change]))))))
 
+(defn- prev-form-start
+  "The start of the nearest non-blank region strictly above offset s,
+  walking past blank lines; s itself when nothing is above."
+  [text s]
+  (loop [q (- s 2)]
+    (if (neg? q)
+      s
+      (let [[s2 e2] (region text q)]
+        (if (str/blank? (subs text s2 e2))
+          (recur (- s2 2))
+          s2)))))
+
 (def default-max-lines
   "adjust leaves a form longer than this as typed. Parinfer costs about 0.22
   ms a line for each of its two passes (36 lines: 3.9 ms Paren, 4.0 ms
@@ -241,7 +262,8 @@
   :caret n}, or nil when it wants nothing, can't run, or fails. mode is
   :smart, :indent or :paren; prev-text and prev-caret are the buffer and
   caret before the edit, text and caret after it. A form of more than
-  max-lines lines (default-max-lines) is left as typed."
+  max-lines lines (default-max-lines) is left as typed, answered as
+  ::too-long so the editor can say why nothing happened."
   [{:keys [mode prev-text prev-caret text caret max-lines] :or {max-lines default-max-lines}}]
   (let [prev (or prev-text "")
         text (or text "")]
@@ -251,6 +273,14 @@
             b (if (and (< p old-end) (= p (line-start prev p)) (= old-end (line-start prev old-end)))
                 (dec old-end)
                 old-end)
-            [s e] (region prev p b)]
-        (when (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
-          (adjust-region mode prev prev-caret text caret p old-end new-end s e))))))
+            [s e] (region prev p b)
+            ;; Indenting a top-level line is Parinfer's "pull it into the
+            ;; form above" (review I4): pure whitespace inserted at the
+            ;; start of a line that was its own region joins the form above.
+            s (if (and (pos? s) (= s p) (= old-end p) (= s (line-start prev p))
+                       (str/blank? (subs text p new-end)))
+                (prev-form-start prev s)
+                s)]
+        (if (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
+          (adjust-region mode prev prev-caret text caret p old-end new-end s e)
+          ::too-long)))))

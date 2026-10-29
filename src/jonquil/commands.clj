@@ -265,3 +265,24 @@
     :reset DEFAULT-FONT-PX
     :in (or (first (filter (fn [s] (> s current)) ZOOM-SIZES)) (peek ZOOM-SIZES))
     :out (or (last (filter (fn [s] (< s current)) ZOOM-SIZES)) (first ZOOM-SIZES))))
+
+;; --- Parinfer (step 2 Part B) ----------------------------------------------
+
+(def parinfer-cycle
+  "The order Cmd/Ctrl+Alt+P walks, upstream's: off, Smart, Indent, Paren."
+  [:off :smart :indent :paren])
+
+(defn parinfer-step
+  "The mode after choosing choice from current: a mode names itself, :next
+  steps parinfer-cycle (an unknown current steps to :smart)."
+  [current choice]
+  (if (= :next choice)
+    (let [i (count (take-while #(not= current %) parinfer-cycle))]
+      (nth parinfer-cycle (mod (inc i) (count parinfer-cycle))))
+    choice))
+
+(defn parinfer-label-text
+  "The status bar's text for mode, nil for :off (the label hides)."
+  [mode]
+  (when (not= :off mode)
+    (str "Parinfer: " (str/capitalize (name mode)))))

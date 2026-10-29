@@ -22,8 +22,11 @@
   "Upstream ui.clj handle-smart-enter! (41c56b8) as data. Replaces the
   selection with a newline; between an empty pair opens an indented middle
   line with the closer on its own line; otherwise indents by
-  syntax/compute-smart-indent measured with the selection removed."
-  [{:keys [text sel-start sel-end]}]
+  syntax/compute-smart-indent measured with the selection removed.
+  {:between-pair? false} skips the pair branch: with Parinfer on the
+  closer is Parinfer's to manage, as upstream's handle-smart-enter! has it."
+  ([snap] (smart-enter snap {}))
+  ([{:keys [text sel-start sel-end]} {:keys [between-pair?] :or {between-pair? true}}]
   (let [text' (str (subs text 0 sel-start) (subs text sel-end))
         pos sel-start
         line-start (inc (or (str/last-index-of text' "\n" (dec pos)) -1))
@@ -31,7 +34,7 @@
         prev-ch (when (pos? pos) (nth text' (dec pos)))
         next-ch (when (< pos (count text')) (nth text' pos))
         base-indent (or (re-find #"^[ ]+" line-prefix) "")]
-    (if (and prev-ch next-ch (= (open->close prev-ch) next-ch))
+    (if (and between-pair? prev-ch next-ch (= (open->close prev-ch) next-ch))
       (let [inner (str base-indent "  ")]
         {:edits [[sel-start sel-end (str "\n" inner "\n" base-indent)]]
          :caret (+ pos 1 (count inner))
@@ -39,7 +42,7 @@
       (let [ins (str "\n" (syntax/compute-smart-indent text' pos))]
         {:edits [[sel-start sel-end ins]]
          :caret (+ pos (count ins))
-         :sel nil}))))
+         :sel nil})))))
 
 ;; --- Line ranges shared by indent, unindent and toggle-comment ---
 ;;

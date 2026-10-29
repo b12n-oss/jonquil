@@ -35,12 +35,13 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 
 ## Not ported
 
-From `7056c61` (Parinfer Smart Mode), the engine and its tests are lifted, but
-not the editor side, which step 2 adds with Parinfer off by default:
-
-- the Parinfer menu, status-bar indicator and Ctrl+Alt+P wiring in `src/DrClojure/ui.clj`
-- the Parinfer-aware branches of `handle-smart-enter!` and the auto-bracket handlers, and `update-document-diff!`
-- `test-format-all-and-selection-robustness` in `test/DrClojure/parinfer_test.clj`, which drives Swing
+From `7056c61`, the engine and its tests are lifted, and the editor side is
+re-expressed rather than copied: `jonquil.parinfer-edit` plus the editor's
+begin/end-user-action hook do what upstream's `setup-parinfer!`,
+`update-document-diff!` and the Parinfer branches of `handle-smart-enter!`
+and the auto-bracket handlers do, per form instead of whole-buffer (see
+"Code deltas"). `test-format-all-and-selection-robustness` in
+`test/DrClojure/parinfer_test.clj` stays behind: it drives Swing.
 
 ## Syncing with upstream
 

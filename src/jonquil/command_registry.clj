@@ -54,6 +54,13 @@
                   :run (fn [ctx _args] (if (= 1 ((:find-bar-key! ctx))) :handled :to-gtk))}
    :popover/close-all {:doc "Close any open popover." :scope :window :palette? false :passes? true
                        :run (fn [ctx _args] (if ((:close-popovers-fn ctx)) :handled :next))}
+   ;; Parinfer (step 2 Part B): one ctx fn, the mode as its argument.
+   :parinfer/smart {:doc "Parinfer: Smart mode." :scope :window :run (call :parinfer-fn :smart)}
+   :parinfer/indent {:doc "Parinfer: Indent mode." :scope :window :run (call :parinfer-fn :indent)}
+   :parinfer/paren {:doc "Parinfer: Paren mode." :scope :window :run (call :parinfer-fn :paren)}
+   :parinfer/off {:doc "Parinfer: off." :scope :window :run (call :parinfer-fn :off)}
+   :parinfer/next-mode {:doc "Parinfer: next mode (Smart, Indent, Paren, off)." :scope :window
+                        :run (call :parinfer-fn :next)}
    :inspector/close {:doc "Close the inspector panel." :scope :window :run (call :close-inspector-fn)}
    :source/close {:doc "Close the source panel." :scope :window :palette? false
                   :run (fn [ctx _args] ((:close! (:source-keys ctx))) :handled)}

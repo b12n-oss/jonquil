@@ -180,3 +180,16 @@
   (let [t "^:private (defn f [] 1)"
         {:keys [text start end]} (c/run-form {:text t :caret (str/index-of t "defn")})]
     (is (= text (subs t start end)) "the range still matches the text")))
+
+(deftest parinfer-step-test
+  (testing "a mode choice sets it, :next walks off -> Smart -> Indent -> Paren -> off"
+    (is (= :paren (c/parinfer-step :off :paren)))
+    (is (= :off (c/parinfer-step :smart :off)))
+    (is (= [:smart :indent :paren :off]
+           (rest (take 5 (iterate #(c/parinfer-step % :next) :off)))))))
+
+(deftest parinfer-label-text-test
+  (is (nil? (c/parinfer-label-text :off)) "off hides the label")
+  (is (= "Parinfer: Smart" (c/parinfer-label-text :smart)))
+  (is (= "Parinfer: Indent" (c/parinfer-label-text :indent)))
+  (is (= "Parinfer: Paren" (c/parinfer-label-text :paren))))

@@ -50,6 +50,7 @@ Keys by purpose; click a group to open it.
 | Cmd/Ctrl+Shift+F | Definitions editor | Format the whole file |
 | Cmd/Ctrl+Option(Alt)+F | Definitions editor | Format the selection or current line |
 | Cmd/Ctrl+Option(Alt)+L | Definitions editor | Format the selection or current line |
+| Cmd/Ctrl+Option(Alt)+P | anywhere in the window | Parinfer: next mode (Smart, Indent, Paren, off) |
 | Cmd/Ctrl+Z | anywhere in the window | Undo |
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
 | Cmd/Ctrl+Y | Definitions editor | Redo |
