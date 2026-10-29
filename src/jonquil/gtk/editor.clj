@@ -540,11 +540,22 @@
 
 (defn apply-op-plain!
   "apply-op! with the Parinfer hook skipped, so an MCP edit or another
-  programmatic change lands exactly as sent."
+  programmatic change lands exactly as sent. The op knows its own edits,
+  so a cache that is valid going in stays valid coming out, applied to
+  the cached string with no buffer read (miss-path cut 3); an invalid one
+  is cleared, never half-trusted, and the next keystroke misses honestly."
   [ed result]
   (reset! (:parinfer-skip? ed) true)
-  (try (apply-op! ed result)
-       (finally (reset! (:parinfer-skip? ed) false))))
+  (try
+    (let [cache @(:parinfer-prev-cache ed)
+          valid? (and cache (= (:gen cache) @(:edit-gen ed)))
+          r (apply-op! ed result)]
+      (reset! (:parinfer-prev-cache ed)
+              (when (and valid? r)
+                {:text (edit/apply-edits (:text cache) (:edits result))
+                 :gen @(:edit-gen ed)}))
+      r)
+    (finally (reset! (:parinfer-skip? ed) false))))
 
 (defn handle-return!
   "Applies jonquil.edit/smart-enter to the current snapshot as one user

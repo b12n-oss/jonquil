@@ -1319,6 +1319,55 @@
                            :t3 (editor/editor-text ed)}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-plain-op-updates-a-valid-cache [ed]
+  (go-row :parinfer-plain-op-updates-a-valid-cache check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; an MCP or plugin write knows its own edits: when the
+                 ;; cache is valid at that moment, apply-edits on the cached
+                 ;; string keeps it valid with no buffer read, and the next
+                 ;; keystroke is a hit (miss-path cut 3)
+                 (editor/set-text! ed "(a)")      ; primes (cut 2)
+                 (editor/apply-op-plain! ed {:edits [[1 2 "fn [a b]
+     (h a)"]] :caret 0})
+                 (let [fulls (atom 0)
+                       real g/buffer-text]
+                   (with-redefs-fn {#'g/buffer-text
+                                    (fn [& a] (swap! fulls inc) (apply real a))}
+                     #(do (caret! ed 18)
+                          (type-str! ed "x")))
+                   (let [text (editor/editor-text ed)
+                         eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                     (check :parinfer-plain-op-updates-a-valid-cache
+                            (and (= "(fn [a b]
+    (h xa))" text)
+                                 eq (zero? @fulls))
+                            {:text text :eq eq :full-reads @fulls})))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-plain-op-leaves-an-invalid-cache [ed]
+  (go-row :parinfer-plain-op-leaves-an-invalid-cache check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; after an undo the cache is stale; a plain op then must
+                 ;; NOT half-trust it, and the next keystroke misses
+                 ;; honestly and still lands the right text (miss-path
+                 ;; Review Focus 4)
+                 (editor/set-text! ed "(a
+  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (g/gtk-text-buffer-undo (:buf ed))   ; cache now stale
+                 (editor/apply-op-plain! ed {:edits [[0 0 "(q)
+"]] :caret 0})
+                 (caret! ed 9)
+                 (delete-action! ed 7 9)
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-plain-op-leaves-an-invalid-cache
+                          (= "(q)
+(a)
+b" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-reload-primes-the-cache [ed]
   (go-row :parinfer-reload-primes-the-cache check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1510,7 +1559,9 @@ b" text) eq (pos? @splices))
    row-parinfer-splice-equals-buffer
    row-parinfer-miss-still-splices-the-end-read
    row-parinfer-reload-primes-the-cache
-   row-parinfer-reload-double-flip])
+   row-parinfer-reload-double-flip
+   row-parinfer-plain-op-updates-a-valid-cache
+   row-parinfer-plain-op-leaves-an-invalid-cache])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
