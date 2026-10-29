@@ -50,7 +50,7 @@ bb upstream:diff
 ```
 
 The first run clones upstream into `~/.cache/jonquil/drclojure-neo` (under
-`$XDG_CACHE_HOME` when that's set), and later runs only fetch. To use a
+`$XDG_CACHE_HOME` when that's an absolute path), and later runs only fetch. To use a
 clone you already have, set `DRCLOJURE_DIR` to its folder. To compare
 against a fork or a mirror, set `DRCLOJURE_URL`. Over HTTPS the fetch
 never asks for credentials, so an HTTPS URL has to be public. An SSH URL
