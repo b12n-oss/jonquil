@@ -1008,6 +1008,125 @@
 
 (def ^:private clj-scenes #{:clj-attach :clj-quick-doc :clj-full-doc :clj-inspector :clj-source})
 
+(defn- parinfer-type!
+  "Types s into ui's editor one character per user action, about 60 ms
+  apart, so the GIF reads as typing and Parinfer's end-user-action hook
+  runs per keystroke, as it does for a real one. A plain fn with a <!
+  inside, called from a scene's go block (the gtk-async ns rule)."
+  [ui s]
+  (doseq [ch s]
+    (on-gtk (let [buf (:buf (:editor ui))]
+              (g/gtk-text-buffer-begin-user-action buf)
+              (g/gtk-text-buffer-insert-interactive-at-cursor buf (str ch) -1 1)
+              (g/gtk-text-buffer-end-user-action buf)))
+    (<! (timeout 60))))
+
+(defn- parinfer-delete!
+  "One user action deleting [a b) in ui's editor: the dedent gesture."
+  [ui a b]
+  (on-gtk (let [buf (:buf (:editor ui))]
+            (g/gtk-text-buffer-begin-user-action buf)
+            (g/with-iters* buf a b (fn [i j] (g/gtk-text-buffer-delete buf i j)))
+            (g/gtk-text-buffer-end-user-action buf))))
+
+(defn- scene-parinfer
+  "Smart mode as a GIF: every open bracket closes itself as it's typed,
+  dedenting the body line pulls the closer up, and re-indenting pulls it
+  back in. The still doubles as the section's non-animated fallback. The
+  final text is asserted before the recording's alts!, so a slow run can't
+  end the GIF early."
+  [ui]
+  (go-row :parinfer check!
+    (let [pid (own-pid)
+          ed (:editor ui)
+          _ (on-gtk ((:parinfer!* ui) :smart)
+                    (editor/set-text! ed "")
+                    (place-cursor! (:buf ed) 0))
+          gif (record-gif (image-path :parinfer "gif") pid 9 6 640)
+          _ (<! (timeout 600))
+          _ (parinfer-type! ui "(defn greet [name")
+          ;; past the ] Parinfer closed, so Enter opens the body line
+          _ (on-gtk (place-cursor! (:buf ed) 18))
+          _ (<! (timeout 300))
+          _ (on-gtk (editor/handle-return! ed))
+          _ (<! (timeout 300))
+          _ (parinfer-type! ui "(println name")
+          typed-ok? (await-until 2000 20
+                                 #(= "(defn greet [name]\n  (println name))"
+                                     (editor/editor-text ed)))
+          _ (<! (timeout 700))
+          ;; dedent the body line: its closer jumps up to the defn line
+          _ (parinfer-delete! ui 19 21)
+          dedent-ok? (await-until 2000 20
+                                  #(= "(defn greet [name])\n(println name)"
+                                      (editor/editor-text ed)))
+          _ (<! (timeout 700))
+          ;; and indenting pulls it back into the form above
+          _ (on-gtk (place-cursor! (:buf ed) 20))
+          _ (parinfer-type! ui "  ")
+          rejoin-ok? (await-until 2000 20
+                                  #(= "(defn greet [name]\n  (println name))"
+                                      (editor/editor-text ed)))
+          label (on-gtk (g/label-text (:parinfer-label ui)))
+          [gif-result port] (a/alts! [gif (timeout 15000)])
+          gif-finished? (= port gif)
+          _ (ga/settle 2)
+          {:keys [exit err]} (ga/screenshot (image-path :parinfer "png") pid)
+          final-text (on-gtk (let [t (editor/editor-text ed)]
+                               ;; typed text is dirty; clean, so the window
+                               ;; closes without the prompt
+                               (editor/set-text! ed "")
+                               t))]
+      (on-gtk (check! :parinfer
+                      (and typed-ok? dedent-ok? rejoin-ok? gif-finished?
+                           (= "Parinfer: Smart" label)
+                           (zero? (:exit gif-result)) (zero? exit))
+                      {:text final-text :label label
+                       :typed typed-ok? :dedent dedent-ok? :rejoin rejoin-ok?
+                       :gif-result gif-result :screenshot-exit exit :screenshot-err err})))))
+
+(defn- scene-parinfer-project
+  "The per-project override: a temp project's .jonquil.edn {:parinfer
+  :smart} turns the mode on for its tab while the global is off, and the
+  status bar says Parinfer: Smart (project). One typed ( shows the closed
+  pair. The temp project is the scene's own and deleted at its end."
+  [ui]
+  (go-row :parinfer-project check!
+    (let [pid (own-pid)
+          ed (:editor ui)
+          dir (io/file (System/getProperty "java.io.tmpdir")
+                       (str "jonquil-shots-parinfer-" (System/currentTimeMillis)))
+          f (io/file dir "src/demo/greeting.clj")]
+      (try
+        (.mkdirs (.getParentFile f))
+        (spit (io/file dir "deps.edn") "{:paths [\"src\"]}")
+        (spit (io/file dir ".jonquil.edn") "{:parinfer :smart}\n")
+        (spit f "(ns demo.greeting)\n\n(defn hello [name]\n  (str \"Hello, \" name \"!\"))\n")
+        (on-gtk ((:open-file! ui) (.getCanonicalPath f)))
+        (let [label-ok? (await-until 3000 20
+                                     #(= "Parinfer: Smart (project)"
+                                         (g/label-text (:parinfer-label ui))))
+              end (on-gtk (let [n (count (editor/editor-text ed))]
+                            (place-cursor! (:buf ed) n) n))
+              ;; no quote: the scenes type by raw insert, and only a real
+              ;; keystroke auto-pairs quotes, so an unclosed string would
+              ;; make Parinfer refuse
+              _ (parinfer-type! ui "(hello name")
+              typed-ok? (await-until 2000 20
+                                     #(str/includes? (editor/editor-text ed) "(hello name)"))
+              ;; the child's start line prints the temp dir; a cleared
+              ;; console keeps the machine path out of the image
+              _ (on-gtk ((:clear-console!* ui)))
+              _ (ga/settle 2)
+              {:keys [exit err]} (ga/screenshot (image-path :parinfer-project "png") pid)]
+          (on-gtk (editor/set-text! ed "")   ; clean, so the window closes without the prompt
+                  (check! :parinfer-project
+                          (and label-ok? typed-ok? (zero? exit) (pos? end))
+                          {:label (g/label-text (:parinfer-label ui))
+                           :typed typed-ok? :screenshot-exit exit :screenshot-err err})))
+        (finally
+          (doseq [child (reverse (file-seq dir))] (.delete child)))))))
+
 ;; id -> scene fn, in the order bb.edn's docs:shots task launches them.
 ;; Kept in sync by hand with that task's own scene-id list, the same way
 ;; dev/check.clj and dev/test_runner.clj's namespace lists are.
@@ -1037,6 +1156,8 @@
    [:clj-source scene-clj-source]
    [:tabs scene-tabs]
    [:file-tree scene-file-tree]
+   [:parinfer scene-parinfer]
+   [:parinfer-project scene-parinfer-project]
    [:jank scene-jank]
    [:cljs-node scene-cljs-node]
    [:cljs-browser scene-cljs-browser]
