@@ -436,13 +436,46 @@
    :task (apply shell "bb" "dev/smoke/cljs_smoke.clj" *command-line-args*)}
   upstream:diff
   {:doc "List upstream DrClojure commits since the pin that touch src or test"
-   :task (let [dir (or (System/getenv "DRCLOJURE_DIR")
-                       (str (System/getProperty "user.home")
-                            "/dev/b12n-oss/kimtg--DrClojure-Neo"))
-               pin (clojure.string/trim (slurp "UPSTREAM_PIN"))]
-           (shell {:dir dir} "git" "fetch" "--quiet" "upstream")
-           (shell {:dir dir} "git" "log" "--oneline"
-                  (str pin "..upstream/main") "--" "src" "test"))}
+   :task (let [blank->nil (fn [s] (when-not (clojure.string/blank? s) s))
+               url (or (blank->nil (System/getenv "DRCLOJURE_URL"))
+                       "https://github.com/kimtg/DrClojure-Neo")
+               given (blank->nil (System/getenv "DRCLOJURE_DIR"))
+               ;; A relative XDG_CACHE_HOME is invalid per the XDG spec and is
+               ;; ignored, as dev/jolt_nightly.clj does.
+               xdg (System/getenv "XDG_CACHE_HOME")
+               cache (if (and xdg (clojure.string/starts-with? xdg "/"))
+                       xdg
+                       (str (System/getProperty "user.home") "/.cache"))
+               dir (or given (str cache "/jonquil/drclojure-neo"))
+               pin (clojure.string/trim (slurp "UPSTREAM_PIN"))
+               fail (fn [msg] (println msg) (System/exit 1))
+               ;; Upstream is public: no credential helper and no prompt,
+               ;; so a wrong DRCLOJURE_URL fails instead of waiting on a
+               ;; login dialog (git-credential-manager did, 2026-10-29).
+               ;; An empty GIT_ASKPASS stops git from trying core.askPass
+               ;; and SSH_ASKPASS, which IDE terminals set.
+               net {:extra-env {"GIT_TERMINAL_PROMPT" "0" "GIT_ASKPASS" ""}}
+               anon ["-c" "credential.helper="]]
+           ;; DRCLOJURE_DIR is any clone; without it, a cache clone made on
+           ;; first use. Fetching by URL means no remote needs a set name.
+           (when (and given (not (fs/directory? dir)))
+             (fail (str "DRCLOJURE_DIR=" dir " isn't a folder")))
+           (when-not (fs/exists? dir)
+             (println (str "cloning " url " into " dir))
+             (apply shell net "git" (concat anon ["clone" "--quiet" url dir])))
+           ;; Only the cache folder is ours to suggest deleting.
+           (if given
+             (when-not (zero? (:exit (shell {:continue true :out :string :err :string}
+                                            "git" "-C" dir "rev-parse" "--git-dir")))
+               (fail (str "DRCLOJURE_DIR=" dir " isn't a git clone")))
+             (when-not (fs/exists? (fs/file dir ".git"))
+               (fail (str dir " isn't a git clone; delete it and run again"))))
+           (apply shell net "git" (concat anon ["-C" dir "fetch" "--quiet" url "main"]))
+           (let [log (:out (shell {:out :string} "git" "-C" dir "log" "--oneline"
+                                  (str pin "..FETCH_HEAD") "--" "src" "test"))]
+             (if (clojure.string/blank? log)
+               (println (str "no upstream commits since " pin))
+               (print log))))}
 
   verify
   {:doc "Pre-commit gate: lint (report) + test + test:nrepl (must pass)"
