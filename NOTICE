@@ -10,3 +10,10 @@ Jonquil's inspector view code (src/jonquil/inspect/view.clj) is lifted from
 clojure-cli.repl (https://github.com/clojure/clojure-cli.repl), also
 distributed under the Eclipse Public License 1.0. UPSTREAM.md records the
 pinned commit and the changes.
+
+Jonquil's Parinfer engine (src/jonquil/parinfer.clj), lifted from DrClojure,
+implements Parinfer v3.13.1 after parinfer.js
+(https://github.com/parinfer/parinfer.js), and its test cases
+(test-resources/parinfer/*.json) are parinfer.js's own. parinfer.js is
+Copyright (c) 2015 Shaun Williams and contributors and distributed under the
+MIT License, whose full text is in licenses/parinfer.js-LICENSE.md.

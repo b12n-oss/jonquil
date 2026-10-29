@@ -21,7 +21,7 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 | `test/jonquil/edit_test.clj` | `test/DrClojure/core_test.clj` | Cases derived from upstream |
 | `src/jonquil/parinfer.clj` | `src/DrClojure/parinfer.clj` | Lifted |
 | `test/jonquil/upstream/parinfer_test.clj` | `test/DrClojure/parinfer_test.clj` | Ported, without the Swing deftest |
-| `test-resources/parinfer/*.json` | `test-resources/parinfer/*.json` | Copied unchanged. These are Parinfer v3.13.1's own test cases (Shaun Lebron, MIT) |
+| `test-resources/parinfer/*.json` | `test-resources/parinfer/*.json` | Copied unchanged. These are parinfer.js v3.13.1's own test cases (Shaun Williams and contributors, MIT; see `NOTICE` and `licenses/parinfer.js-LICENSE.md`) |
 
 ## Code deltas from upstream
 
@@ -29,11 +29,7 @@ Jonquil ports the pure core of DrClojure, lifting its lexing, analysis, and comp
 - `src/jonquil/syntax.clj`: `compute-smart-indent` takes upstream `7056c61`'s rule (no dedent before a closer while a bracket before the caret is open) but not its method. Upstream scans the text before the caret on every Enter, which measured 82 ms at the end of a 4574-line file. Jonquil's private `prefix-unclosed?` answers the same question from the painter's cached whole-buffer `compute-brackets` result when the cached text is equal (about 0.2 ms there). Otherwise it scans the text before the caret, uncached, as upstream does. That happens on an Enter within about 120 ms of the last edit, before the painter has caught up, and on an Enter that replaces a selection. It's only checked when Enter is right before a closer and the line before the caret opened no form. A test checks it against upstream's prefix scan at every caret position. The rule also means the dedent before a closer now applies only when nothing before the caret is open, so in well-formed code a new line before `))` keeps the body's indent. That's upstream's intent, so don't restore the old dedent.
 - `src/jonquil/parinfer.clj`: `array-slice` copies through `(subvec (vec arr) f t)` in place of `.subList`, which the Jolt releases up to v0.8.23 lack (jolt-lang/jolt PR #1437 added it on main, unreleased as of 2026-10-29). Upstream copies the view into a new `ArrayList` at once, so the result is the same, and all 154 fixture cases pass. Once Jonquil's minimum Jolt has `.subList`, this can go back to upstream's line.
 - `test/jonquil/upstream/parinfer_test.clj` reads the fixtures with `clojure.data.json` (`:key-fn keyword`) in place of upstream's `test/DrClojure/json_helper.clj`, which isn't lifted. Both give keyword keys.
-| `test/jonquil/edit_test.clj` | `test/DrClojure/core_test.clj` | Cases derived from upstream |
-| `src/jonquil/parinfer.clj` | `src/DrClojure/parinfer.clj` | Lifted |
-| `test/jonquil/upstream/parinfer_test.clj` | `test/DrClojure/parinfer_test.clj` | Ported, without the Swing deftest |
-| `test-resources/parinfer/*.json` | `test-resources/parinfer/*.json` | Copied unchanged. These are Parinfer v3.13.1's own test cases (Shaun Lebron, MIT) |
- and `core-builtins` read the Jolt dialect profile (`(:special-forms dialect/jolt)`, `(:builtins dialect/jolt)` in `src/jonquil/dialect.clj`), which holds upstream's two sets verbatim, so the file also requires `jonquil.dialect`. A re-sync that changes either set edits `src/jonquil/dialect.clj`.
+- `src/jonquil/syntax.clj`: `special-forms` and `core-builtins` read the Jolt dialect profile (`(:special-forms dialect/jolt)`, `(:builtins dialect/jolt)` in `src/jonquil/dialect.clj`), which holds upstream's two sets verbatim, so the file also requires `jonquil.dialect`. A re-sync that changes either set edits `src/jonquil/dialect.clj`.
 
 ## Not ported
 
