@@ -41,7 +41,8 @@
 (defn- line-col
   "[line x] of offset off in text, both from 0. A \\r ending a line belongs
   to that line, so CRLF text gives the same x as LF text (upstream's
-  line-col->offset doesn't, see UPSTREAM.md)."
+  line-col->offset didn't; our copy counts CRLF since 2026-10-29, and the
+  editor keeps these helpers, see UPSTREAM.md)."
   [^String text off]
   (let [s (line-start text off)]
     [(count (filter #(= \newline %) (subs text 0 s))) (- off s)]))
