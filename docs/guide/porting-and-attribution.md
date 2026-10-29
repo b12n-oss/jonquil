@@ -32,14 +32,13 @@ Everything else, the GTK front end, the session and settings layers, the
 themes, and every P4 help feature, is new code with no upstream
 counterpart.
 
-## The one code delta the lift needed
+## The code deltas the lift needs
 
-`Character/toLowerCase` isn't shimmed on this project's Jolt pin. Two call
-sites in `src/jonquil/syntax.clj` (case-insensitive comparisons) were
-rewritten as `(first (str/lower-case (subs s 0 1)))` instead. This was
-verified in a trial lift on 2026-09-23: upstream's 13 pure deftests still
-pass on Jolt once the substitution is in place, so the delta is mechanical,
-not a behaviour change.
+`UPSTREAM.md` lists every place the lifted files differ from upstream and
+why; each delta names its exit condition where it has one. The early
+`Character/toLowerCase` workaround is gone: Jolt v0.8.23, the documented
+minimum, carries the method, so those two sites went back to upstream's
+text on 2026-10-29.
 
 ## Staying in sync
 
