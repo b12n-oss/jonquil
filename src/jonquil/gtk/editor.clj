@@ -114,6 +114,15 @@
   (when bounds
     {:prefix (min (:prefix bounds) prefix) :suffix (min (:suffix bounds) suffix)}))
 
+(defn- arm-outside-span!
+  "Arms the record of changes arriving outside the hook's sight, full
+  length n, in the same step as a cache prime: the hook's own fix signals
+  have already fired by then, so no busy flag is needed and every LATER
+  signal narrows it (the undo-path plan). nil clears it alongside a
+  cleared cache: no cache, nothing to recover from."
+  [ed n]
+  (reset! (:parinfer-outside-span ed) (when n {:prefix n :suffix n})))
+
 (defn set-text!
   "Replaces the whole buffer inside begin/end_irreversible_action, so it
   leaves no undo step, and records s as the saved text in the same call --
@@ -140,9 +149,10 @@
     ;; so the first-edit re-indent still fires. GTK takes a C string, so a
     ;; NUL in s truncates what the buffer keeps: prime only when the counts
     ;; agree, else clear and the next keystroke misses honestly (review I1).
-    (reset! (:parinfer-prev-cache ed)
-            (when (= (count s) (g/gtk-text-buffer-get-char-count buf))
-              {:text s :gen @(:edit-gen ed)}))
+    (let [ok? (= (count s) (g/gtk-text-buffer-get-char-count buf))]
+      (reset! (:parinfer-prev-cache ed)
+              (when ok? {:text s :gen @(:edit-gen ed)}))
+      (arm-outside-span! ed (when ok? (count s))))
     (when @(:read-only? ed)
       (g/with-iters* buf 0 (count s)
         (fn [a b] (g/gtk-text-buffer-apply-tag buf (:readonly-tag ed) a b)))))
@@ -528,9 +538,14 @@
                                          (or (nil? r) fixed?))
                                 (if fixed?
                                   (pe/remap-offset text final (:prefix span))
-                                  (:prefix span)))})))
+                                  (:prefix span)))})
+            ;; after the prime, in this same step: the fix's own signals
+            ;; have fired, so everything narrowing it from here on really
+            ;; is outside the hook's sight
+            (arm-outside-span! ed (count final))))
         (catch :default e
           (reset! (:parinfer-prev-cache ed) nil)
+          (arm-outside-span! ed nil)
           (when-let [f @(:on-error-fn ed)]
             (f (str "; parinfer: " (ex-message e))))))))))
 
@@ -554,15 +569,16 @@
     (let [cache @(:parinfer-prev-cache ed)
           valid? (and cache (= (:gen cache) @(:edit-gen ed)))
           r (apply-op! ed result)]
-      (reset! (:parinfer-prev-cache ed)
-              (when (and valid? r)
+      (let [v (when (and valid? r)
                 ;; A NUL in an edit's text truncates what the buffer keeps
                 ;; (C string): keep the update only when the counts agree,
                 ;; else clear, never half-trust (review I1).
                 (let [t (edit/apply-edits (:text cache) (:edits result))]
                   (when (= (count t)
                            (g/gtk-text-buffer-get-char-count (:buf ed)))
-                    {:text t :gen @(:edit-gen ed)}))))
+                    {:text t :gen @(:edit-gen ed)})))]
+        (reset! (:parinfer-prev-cache ed) v)
+        (arm-outside-span! ed (some-> v :text count)))
       r)
     (finally (reset! (:parinfer-skip? ed) false))))
 
@@ -1189,8 +1205,15 @@
             ;; :parinfer-span accumulates the action's untouched head and
             ;; tail from the insert/delete signals, feeding adjust's
             ;; :bounds; nil when unarmed.
+            ;; :parinfer-outside-span records what changed SINCE the last
+            ;; cache prime, armed full in the same step as each prime and
+            ;; narrowed by the same two signals, undo and redo replays
+            ;; included, so the begin handler can rebuild prev from the
+            ;; cache plus one ranged read (the undo-path plan); nil when
+            ;; there is no cache to recover from.
             :parinfer-prev-cache (atom nil)
             :parinfer-span (atom nil)
+            :parinfer-outside-span (atom nil)
             :paint (atom {:gen 0 :done? true})
             ;; Large-file speed T4: the tick's incremental repaint (repaint!).
             ;; :painted is {:text :plan} of what our tags show now, or nil
@@ -1250,9 +1273,11 @@
                                                n (g/gtk-text-buffer-get-char-count buf)]
                                            (when @(:edit-bounds ed)
                                              (swap! (:edit-bounds ed) narrow-bounds o (- n o)))
-                                           ;; the parinfer span sees the same edits
+                                           ;; the parinfer spans see the same edits
                                            (when @(:parinfer-span ed)
-                                             (swap! (:parinfer-span ed) narrow-bounds o (- n o))))
+                                             (swap! (:parinfer-span ed) narrow-bounds o (- n o)))
+                                           (when @(:parinfer-outside-span ed)
+                                             (swap! (:parinfer-outside-span ed) narrow-bounds o (- n o))))
                                          nil)
                                        [:pointer :pointer :pointer :int :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -1265,8 +1290,34 @@
                              (callable (fn [_buf _data]
                                          (when (parinfer-mode ed)
                                            (let [cache @(:parinfer-prev-cache ed)
-                                                 hit? (and cache (= (:gen cache) @(:edit-gen ed)))
-                                                 text (if hit? (:text cache) (g/buffer-text buf))
+                                                 os @(:parinfer-outside-span ed)
+                                                 nc (when cache (count ^String (:text cache)))
+                                                 ;; a hit also needs the outside-span still at
+                                                 ;; full length, a free cross-check: narrowed
+                                                 ;; would mean a signal fired without the gen
+                                                 ;; moving
+                                                 hit? (and cache (= (:gen cache) @(:edit-gen ed))
+                                                           (= os {:prefix nc :suffix nc}))
+                                                 text (cond
+                                                        hit? (:text cache)
+                                                        ;; outside recovery (the undo-path plan):
+                                                        ;; cached head, the changed middle read
+                                                        ;; from the buffer, cached tail; the end
+                                                        ;; splice's argument with prev and the
+                                                        ;; live buffer swapping roles, so the
+                                                        ;; same induction carries it, and the
+                                                        ;; same length guard turns any surprise
+                                                        ;; into the full read
+                                                        (and cache os)
+                                                        (let [pt ^String (:text cache)
+                                                              m (g/gtk-text-buffer-get-char-count buf)
+                                                              p (min (:prefix os) nc m)
+                                                              q (min (:suffix os) (- nc p) (- m p))
+                                                              rec (str (subs pt 0 p)
+                                                                       (g/buffer-text-range buf p (- m q))
+                                                                       (subs pt (- nc q)))]
+                                                          (if (= (count rec) m) rec (g/buffer-text buf)))
+                                                        :else (g/buffer-text buf))
                                                  n (count text)]
                                              (reset! (:parinfer-span ed) {:prefix n :suffix n})
                                              (reset! (:parinfer-prev ed)
@@ -1291,7 +1342,9 @@
                                            (when @(:edit-bounds ed)
                                              (swap! (:edit-bounds ed) narrow-bounds o (- n e)))
                                            (when @(:parinfer-span ed)
-                                             (swap! (:parinfer-span ed) narrow-bounds o (- n e))))
+                                             (swap! (:parinfer-span ed) narrow-bounds o (- n e)))
+                                           (when @(:parinfer-outside-span ed)
+                                             (swap! (:parinfer-outside-span ed) narrow-bounds o (- n e))))
                                          nil)
                                        [:pointer :pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
