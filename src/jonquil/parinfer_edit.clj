@@ -111,7 +111,7 @@
   Parinfer reads it, with a string's column-0 lines left inside the string."
   ([text pos] (region text pos pos))
   ([text a b]
-   (let [{:keys [bracket-tokens matches unmatched]} (syntax/compute-brackets text)
+   (let [{:keys [bracket-tokens matches unmatched]} (syntax/compute-brackets-equal text)
          s (line-start text a)
          e (line-end text b)]
      (if (seq unmatched)
@@ -165,39 +165,54 @@
             (parinfer/paren-mode R opts))
         (mode-fn R (assoc opts :changes [change]))))))
 
+(def default-max-lines
+  "adjust leaves a form longer than this as typed. Parinfer costs about 0.22
+  ms a line for each of its two passes (36 lines: 3.9 ms Paren, 4.0 ms
+  Smart; a 1,321-line form: 327 ms a keystroke, measured 2026-10-29), so
+  300 lines is about 66 ms."
+  300)
+
+(defn- adjust-region
+  "adjust once the region [s e] of prev is known; p, old-end and new-end
+  are diff's answer for prev and text."
+  [mode prev prev-caret text caret p old-end new-end s e]
+  (let [e' (+ e (- (count text) (count prev)))
+        P (subs prev s e)
+        R (subs text s e')
+        ls (line-start text p)
+        change {:line-no (first (line-col R (- ls s)))
+                :x (- p ls)
+                :old-text (subs prev p old-end)
+                :new-text (subs text p new-end)}
+        caret-in? (<= s caret e')
+        opts (if caret-in?
+               (let [[cl cx] (line-col R (- caret s))]
+                 (cond-> {:cursor-line cl :cursor-x cx}
+                   (and prev-caret (<= s prev-caret e))
+                   (merge (let [[pl px] (line-col P (- prev-caret s))]
+                            {:prev-cursor-line pl :prev-cursor-x px}))))
+               {})
+        result (run-mode mode P R change (- caret s) opts)
+        NR (:text result)]
+    (when (and (:success result) (string? NR) (not= NR R))
+      (let [[q r-end n-end] (diff R NR)]
+        {:edits [[(+ s q) (+ s r-end) (subs NR q n-end)]]
+         :caret (cond
+                  caret-in? (+ s (offset NR (:cursor-line result) (:cursor-x result)))
+                  (> caret e') (+ caret (- (count NR) (count R)))
+                  :else caret)}))))
+
 (defn adjust
   "What Parinfer wants after one edit, as jonquil.edit's {:edits [[s e r]]
   :caret n}, or nil when it wants nothing, can't run, or fails. mode is
   :smart, :indent or :paren; prev-text and prev-caret are the buffer and
-  caret before the edit, text and caret after it."
-  [{:keys [mode prev-text prev-caret text caret]}]
+  caret before the edit, text and caret after it. A form of more than
+  max-lines lines (default-max-lines) is left as typed."
+  [{:keys [mode prev-text prev-caret text caret max-lines] :or {max-lines default-max-lines}}]
   (let [prev (or prev-text "")
         text (or text "")]
     (when (not= prev text)
       (let [[p old-end new-end] (diff prev text)
-            [s e] (region prev p old-end)
-            e' (+ e (- (count text) (count prev)))
-            P (subs prev s e)
-            R (subs text s e')
-            ls (line-start text p)
-            change {:line-no (first (line-col R (- ls s)))
-                    :x (- p ls)
-                    :old-text (subs prev p old-end)
-                    :new-text (subs text p new-end)}
-            caret-in? (<= s caret e')
-            opts (if caret-in?
-                   (let [[cl cx] (line-col R (- caret s))]
-                     (cond-> {:cursor-line cl :cursor-x cx}
-                       (and prev-caret (<= s prev-caret e))
-                       (merge (let [[pl px] (line-col P (- prev-caret s))]
-                                {:prev-cursor-line pl :prev-cursor-x px}))))
-                   {})
-            result (run-mode mode P R change (- caret s) opts)
-            NR (:text result)]
-        (when (and (:success result) (string? NR) (not= NR R))
-          (let [[q r-end n-end] (diff R NR)]
-            {:edits [[(+ s q) (+ s r-end) (subs NR q n-end)]]
-             :caret (cond
-                      caret-in? (+ s (offset NR (:cursor-line result) (:cursor-x result)))
-                      (> caret e') (+ caret (- (count NR) (count R)))
-                      :else caret)}))))))
+            [s e] (region prev p old-end)]
+        (when (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
+          (adjust-region mode prev prev-caret text caret p old-end new-end s e))))))
