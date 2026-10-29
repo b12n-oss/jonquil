@@ -19,6 +19,7 @@
     jonquil.app-linux-test
     jonquil.smoke-test
     jonquil.upstream.syntax-test
+    jonquil.upstream.parinfer-test
     jonquil.theme-test
     jonquil.settings-test
     jonquil.paint-test

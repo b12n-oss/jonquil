@@ -10,14 +10,16 @@ needed along the way.
 The pin is [DrClojure-Neo](https://github.com/kimtg/DrClojure-Neo) at commit
 [`7056c61`](https://github.com/kimtg/DrClojure-Neo/commit/7056c61e09f8e9ad3c63fc4b1bd9ac35d15ad3ed) (2026-09-28), recorded in `UPSTREAM_PIN`.
 Most of the lifted code dates from the earlier pin `41c56b8` (2026-09-22);
-`7056c61` brought only its smart-indent fix, and its Parinfer half isn't
-ported (see `UPSTREAM.md`).
+`7056c61` brought its smart-indent fix and its Parinfer engine, which isn't
+wired to the editor yet (see `UPSTREAM.md`).
 
 ## What was lifted, and what was rebuilt
 
 `src/jonquil/syntax.clj` is a straight lift of upstream's `syntax.clj`, and
 its test, `test/jonquil/upstream/syntax_test.clj`, ports upstream's own
-tests over unchanged in spirit. Three files re-express upstream code rather
+tests over unchanged in spirit. `src/jonquil/parinfer.clj` is a straight
+lift too, apart from one Jolt delta, and its test runs Parinfer's 154
+official cases. Three files re-express upstream code rather
 than copy it: `jonquil.paint` re-expresses `highlight-doc!`, `jonquil.edit`
 re-expresses upstream's UI handlers as pure edit operations, and
 `jonquil.console` re-expresses upstream's `attr-normal`/`attr-prompt`/
