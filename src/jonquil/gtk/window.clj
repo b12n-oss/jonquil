@@ -3538,7 +3538,7 @@
         ;; (.jonquil.edn :parinfer), so the label follows the ACTIVE tab's
         ;; effective mode and says (project) when the override decides.
         active-parinfer-override (fn []
-                                   (when-let [t (try (active-tab) (catch :default _ nil))]
+                                   (when-let [t (active-tab)]
                                      (:parinfer (some-> (:project t) deref))))
         update-parinfer-label! (fn []
                                  (let [ov (active-parinfer-override)]
@@ -3566,6 +3566,9 @@
         parinfer-fn (fn [choice]
                       (let [k (commands/parinfer-step @parinfer-mode* choice)]
                         (reset! parinfer-mode* k)
+                        ;; A cleared skip note mustn't later stomp a newer
+                        ;; status (review #143 M5).
+                        (reset! parinfer-skip-shown* false)
                         (update-parinfer-label!)
                         (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
                           (cview/append! cv :system (str "; settings: " err "\n")))
@@ -3574,13 +3577,10 @@
                         ;; names its project's choice, since the command
                         ;; changed only the global (decision 2).
                         (when-not (evaluating-fn)
-                          (let [ov (active-parinfer-override)]
-                            (set-status! status-label
-                                         (str (or (commands/parinfer-label-text k) "Parinfer: off")
-                                              (when ov
-                                                (str " (this project says "
-                                                     (if (= :off ov) "off" (str/capitalize (name ov)))
-                                                     ")"))))))))
+                          (set-status! status-label
+                                       (str "Parinfer: " (commands/parinfer-mode-word k)
+                                            (commands/parinfer-pinned-note
+                                             k (active-parinfer-override)))))))
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe

@@ -420,9 +420,18 @@
                             :prev-text (:text prev) :prev-caret (:caret prev)
                             :text text :caret (g/cursor-offset buf)})
               status @(:parinfer-status-fn ed)]
-          (if (= ::pe/too-long r)
+          (cond
+            (= ::pe/too-long r)
             (when status
-              (status (str "form over " pe/default-max-lines " lines, not adjusted")))
+              (status (str "over " pe/default-max-lines " lines here, not adjusted")))
+
+            ;; A Jolt shim gap the engine caught (parinfer-edit): name it
+            ;; once; the buffer stays as typed.
+            (:engine-error r)
+            (when-let [f @(:on-error-fn ed)]
+              (f (str "; parinfer: " (:engine-error r))))
+
+            :else
             (do (when (map? r)
                   (reset! (:parinfer-busy? ed) true)
                   (try
