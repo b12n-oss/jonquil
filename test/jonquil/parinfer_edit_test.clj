@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.edit :as edit]
+            [jonquil.parinfer :as parinfer]
             [jonquil.parinfer-edit :as pe]))
 
 (defn- run
@@ -129,7 +130,7 @@
 
 (deftest adjust-reports-an-engine-failure-test
   (testing "an \"unhandled\" engine result (a Jolt shim gap) is named, not nil"
-    (with-redefs-fn {#'jonquil.parinfer/smart-mode
+    (with-redefs-fn {#'parinfer/smart-mode
                      (fn [& _] {:success false :error {:name "unhandled" :message "boom"}})}
       #(is (= {:engine-error "boom"}
               (pe/adjust {:mode :smart :prev-text "(a b)" :prev-caret 2
