@@ -2347,6 +2347,9 @@
   (let [[line col] (g/cursor-line-col (:buf (:ed t)))]
     (g/gtk-label-set-text line-col-label (str "Ln " (inc line) ", Col " (inc col))))
   (editor/focus! (:ed t))
+  ;; The Parinfer label follows the active tab, whose project may override
+  ;; the global mode.
+  (when-let [f (:parinfer-label-update! ctx)] (f))
   (session-changed! ctx))
 
 (defn- switch-page-fn
@@ -2487,9 +2490,15 @@
         (install-context-menu! (:view ed) (cmd-registry/menu-items cmd-registry/editor-menu menu-ctx)
                                (fn [msg] (set-status! status-label msg)))]
     (editor/set-error-fn! ed (fn [msg] (set-status! status-label msg)))
-    ;; Parinfer (step 2 B3): the tab's editor reads the window's one mode.
+    ;; Parinfer (step 2 B3): the tab's editor reads its effective mode on
+    ;; every user action: the project's .jonquil.edn :parinfer when it
+    ;; names one, else the window's global.
     (when-let [mf (:parinfer-mode-read ctx)]
-      (editor/set-parinfer-fns! ed mf (:parinfer-status-fn ctx)))
+      (editor/set-parinfer-fns! ed
+                                (fn [] (commands/parinfer-effective
+                                        (:parinfer (some-> (:project t) deref))
+                                        (mf)))
+                                (:parinfer-status-fn ctx)))
     (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [dirty]
                                    (refresh-labels! ctx)
@@ -2584,6 +2593,9 @@
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
                           (finally (editor/set-profile! ed (:profile tsel))
                                    (refresh-labels! ctx)
+                                   ;; The tab's project just changed, and
+                                   ;; its :parinfer with it (review I1).
+                                   (when-let [f (:parinfer-label-update! ctx)] (f))
                                    (when tree-saved! (tree-saved! t))))))))
     (assoc t
            :flash-fns flash-fns
@@ -3522,11 +3534,21 @@
         ;; Parinfer (step 2 Part B): the window's one mode, read by every
         ;; tab's editor hook (Part B3); :off unless settings.edn set one.
         parinfer-mode* (atom (or (:parinfer (settings/load-settings @settings-path*)) :off))
-        update-parinfer-label! (fn [mode]
-                                 (if-let [t (commands/parinfer-label-text mode)]
-                                   (do (g/gtk-label-set-text parinfer-label t)
-                                       (g/gtk-widget-set-visible parinfer-label 1))
-                                   (g/gtk-widget-set-visible parinfer-label 0)))
+        ;; The active tab's project may override the global either way
+        ;; (.jonquil.edn :parinfer), so the label follows the ACTIVE tab's
+        ;; effective mode and says (project) when the override decides.
+        active-parinfer-override (fn []
+                                   (when-let [t (try (active-tab) (catch :default _ nil))]
+                                     (:parinfer (some-> (:project t) deref))))
+        update-parinfer-label! (fn []
+                                 (let [ov (active-parinfer-override)]
+                                   (if-let [t (commands/parinfer-status-text
+                                               (commands/parinfer-effective ov @parinfer-mode*)
+                                               (some? ov)
+                                               @parinfer-mode*)]
+                                     (do (g/gtk-label-set-text parinfer-label t)
+                                         (g/gtk-widget-set-visible parinfer-label 1))
+                                     (g/gtk-widget-set-visible parinfer-label 0))))
         ;; The hook's one status line: a skipped long form names itself,
         ;; and the next adjusted edit clears it back to Ready (B3).
         parinfer-skip-shown* (atom false)
@@ -3544,14 +3566,21 @@
         parinfer-fn (fn [choice]
                       (let [k (commands/parinfer-step @parinfer-mode* choice)]
                         (reset! parinfer-mode* k)
-                        (update-parinfer-label! k)
+                        (update-parinfer-label!)
                         (when-let [err (settings/save-settings! @settings-path* {:parinfer k})]
                           (cview/append! cv :system (str "; settings: " err "\n")))
                         ;; same restraint as the theme: a live Running…
-                        ;; status isn't overwritten
+                        ;; status isn't overwritten. A pinned active tab
+                        ;; names its project's choice, since the command
+                        ;; changed only the global (decision 2).
                         (when-not (evaluating-fn)
-                          (set-status! status-label (or (commands/parinfer-label-text k)
-                                                        "Parinfer: off")))))
+                          (let [ov (active-parinfer-override)]
+                            (set-status! status-label
+                                         (str (or (commands/parinfer-label-text k) "Parinfer: off")
+                                              (when ov
+                                                (str " (this project says "
+                                                     (if (= :off ov) "off" (str/capitalize (name ov)))
+                                                     ")"))))))))
         open-find-fn (fn [] (find-bar/open! (:fb (active-tab)) :find))
         open-replace-fn (fn [] (find-bar/open! (:fb (active-tab)) :replace))
         ;; P4.T7: the editor's and the console's own context menus (probe
@@ -3700,7 +3729,7 @@
     (g/gtk-widget-set-visible pending-label 0)
     (g/gtk-box-append status-box dialect-label)
     (g/gtk-box-append status-box parinfer-label)
-    (update-parinfer-label! @parinfer-mode*)
+    (update-parinfer-label!)
     (g/gtk-box-append status-box line-col-label)
     ;; Room at both ends, so "Ln N, Col N" doesn't touch the window's right
     ;; edge (P4 parked item) and the left matches it.
@@ -3846,7 +3875,8 @@
                    :session-restoring? (atom false)
                    :window-key-args window-key-args :repl-complete-fn repl-complete-fn
                    :parinfer-mode-read (fn [] @parinfer-mode*)
-                   :parinfer-status-fn parinfer-status-fn}
+                   :parinfer-status-fn parinfer-status-fn
+                   :parinfer-label-update! update-parinfer-label!}
           first-tab (add-tab! tab-ctx {:path file :text (or text "")})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
@@ -3865,6 +3895,9 @@
       ;; Spike §1: switch-page fired inside that first append, before the
       ;; tab was in tabs, so the tab is made active here.
       (reset! active-id (:id first-tab))
+      ;; A launch on a project file: the first tab never goes through
+      ;; on-switch!, so its override reaches the label here (review I1).
+      (update-parinfer-label!)
       (reset! *tab-ctx tab-ctx)
       (reset! *folder-result folder-result!)
       ;; P5a: Open With and Dock drops. A directory re-roots the tree like an
@@ -4151,6 +4184,8 @@
                    :open-paths! (fn [paths] (@current-open-paths paths))
                    :app app
                    :active-tab* active-tab
+                   :parinfer-label parinfer-label
+                   :parinfer!* parinfer-fn
                  ;; Tabs plan P2.T3: the tab operations, exactly what the
                  ;; keys, the toolbar and the tabs' close buttons call.
                    :new-tab!* (fn [] (new-tab! @*tab-ctx {}))

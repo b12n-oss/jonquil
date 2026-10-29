@@ -34,6 +34,7 @@
             [gtk-selftest-window.inspector :as inspector]
             [gtk-selftest-window.mcp :as mcp]
             [gtk-selftest-window.palette :as palette-rows]
+            [gtk-selftest-window.parinfer :as parinfer-rows]
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
@@ -462,6 +463,13 @@
    mcp/row-mcp-listen-serves-and-registers
    mcp/row-mcp-listen-detach-leaves-window
    mcp/row-mcp-listen-stop-cleans
+   ;; The parinfer rows open files from their own temp projects, which
+   ;; re-roots the window's one project (D2), so they run after every row
+   ;; that Runs, beside the dialects rows that do the same.
+   parinfer-rows/row-parinfer-project-on
+   parinfer-rows/row-parinfer-project-pins-off
+   parinfer-rows/row-parinfer-label-follows-tab
+   parinfer-rows/row-parinfer-label-after-open-into-untitled
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

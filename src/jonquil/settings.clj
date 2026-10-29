@@ -90,9 +90,10 @@
       :else {:warning (str path " has an unusable :mcp-listen?, ignoring it")})))
 
 (def parinfer-modes
-  "The values :parinfer may hold. :off is the default (the user's call,
-  2026-10-29), and a file with no :parinfer means :off."
-  #{:off :smart :indent :paren})
+  "The values :parinfer may hold, shared with .jonquil.edn's reader. :off
+  is the default (the user's call, 2026-10-29), and a file with no
+  :parinfer means :off."
+  dialect/parinfer-modes)
 
 (defn- parinfer-part
   "{:parinfer k} when m holds one of parinfer-modes, {} when it holds none,

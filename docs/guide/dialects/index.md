@@ -75,6 +75,10 @@ and selection falls through to the next rule.
 - `:auto-require` lists namespaces to load as Jonquil connects. It works
   for JVM Clojure and Jolt; other dialects ignore it and the console says
   so (see [Auto-require](jvm-clojure.md#auto-require)).
+- `:parinfer` sets [Parinfer](../using-jonquil.md#parinfer) for the
+  project's tabs, overriding the global setting either way: `:smart`,
+  `:indent` or `:paren` turns it on here, and `:off` keeps it off here
+  even when the setting is on.
 
 ## Running Jolt out of process
 

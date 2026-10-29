@@ -88,6 +88,15 @@
   (is (str/includes? (first (:warnings (dialect/parse-config nil "Permission denied")))
                      "couldn't be read (Permission denied)")))
 
+(deftest parse-config-parinfer-test
+  (is (= :smart (:parinfer (dialect/parse-config "{:parinfer :smart}" nil))))
+  (is (= :off (:parinfer (dialect/parse-config "{:parinfer :off}" nil)))
+      "a project can pin Parinfer off")
+  (let [r (dialect/parse-config "{:parinfer :fancy}" nil)]
+    (is (not (contains? r :parinfer)))
+    (is (str/includes? (first (:warnings r)) ":parinfer")))
+  (is (not (contains? (dialect/parse-config "{:dialect :jolt}" nil) :parinfer))))
+
 (defn- proj [markers config]
   {:dir "/p" :markers markers :config config :config-error nil})
 
@@ -157,6 +166,14 @@
   (let [s (dialect/select dialect/profiles (proj #{"deps.edn"} "{:runtime :nrepl}") "/p/src/a.clj" nil)]
     (is (= [:jolt :nrepl "/p" []] [(:id (:profile s)) (:runtime s) (:project-dir s) (:warnings s)])))
   (is (= "Jolt (nREPL)" (dialect/label (dialect/select dialect/profiles (proj #{} "{:runtime :nrepl}") nil nil)))))
+
+(deftest select-passes-parinfer-through-test
+  (testing "any dialect's project carries its :parinfer override"
+    (is (= :paren (:parinfer (dialect/select dialect/profiles
+                                             (proj #{"deps.edn"} "{:parinfer :paren}")
+                                             "/p/a.clj" nil))))
+    (is (not (contains? (dialect/select dialect/profiles (proj #{"deps.edn"} "{:dialect :jolt}") "/p/a.clj" nil)
+                        :parinfer)))))
 
 (deftest selection-key-test
   (let [k (fn [config dir path]

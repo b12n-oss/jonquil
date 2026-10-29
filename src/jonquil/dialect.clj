@@ -210,6 +210,11 @@
 
 (def config-name ".jonquil.edn")
 
+(def parinfer-modes
+  "The values :parinfer may hold, in .jonquil.edn and in settings.edn
+  (jonquil.settings reuses this set). :off is everywhere the default."
+  #{:off :smart :indent :paren})
+
 (defn- marker-names [profiles]
   (into #{config-name} (mapcat :project-markers) profiles))
 
@@ -305,11 +310,16 @@
                 cl (get m :cljs)
                 clw (when-not (or (nil? cl) (map? cl))
                       ".jonquil.edn :cljs should be a map, like {:shadow-build :app}")
-                [nr nrw] (nrepl-part (get m :nrepl))]
-            (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw])) nrw)}
+                [nr nrw] (nrepl-part (get m :nrepl))
+                pi (get m :parinfer)
+                piw (when-not (or (nil? pi) (contains? parinfer-modes pi))
+                      (str ".jonquil.edn :parinfer should be one of :off :smart :indent :paren, not "
+                           (pr-str pi) ", so it is ignored"))]
+            (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw])) nrw)}
               ar (assoc :auto-require ar)
               (map? cl) (assoc :cljs cl)
-              nr (assoc :nrepl nr))))))))
+              nr (assoc :nrepl nr)
+              (contains? parinfer-modes pi) (assoc :parinfer pi))))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."
@@ -338,7 +348,7 @@
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
-  (let [{:keys [dialect runtime auto-require cljs nrepl warnings]} (if project
+  (let [{:keys [dialect runtime auto-require cljs nrepl parinfer warnings]} (if project
                                                                      (parse-config (:config project) (:config-error project))
                                                                      {:warnings []})
         by-config (when dialect (profile profiles dialect))
@@ -423,7 +433,9 @@
       (and cljs cljs?) (assoc :cljs cljs)
       cljs-target (assoc :cljs-target cljs-target)
       (some? cljs-console?) (assoc :cljs-console? cljs-console?)
-      (and nrepl nrepl?) (assoc :nrepl nrepl))))
+      (and nrepl nrepl?) (assoc :nrepl nrepl)
+      ;; Parinfer is the editor's, not a runtime's, so no dialect gates it.
+      parinfer (assoc :parinfer parinfer))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the
