@@ -17,7 +17,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.paint :as paint]))
+            [jonquil.paint :as paint]
+            [jonquil.parinfer-edit :as pe]))
 
 (defonce results (atom []))
 (defonce true-fire-count (atom 0))
@@ -1165,7 +1166,7 @@
                    ;; A Jolt shim gap surfaces as an "unhandled" engine
                    ;; result; the hook names it once and the text stays as
                    ;; typed (polish Review Focus 3).
-                   (with-redefs-fn {#'jonquil.parinfer-edit/adjust
+                   (with-redefs-fn {#'pe/adjust
                                     (fn [_] {:engine-error "boom"})}
                      #(type-str! ed "x"))
                    (let [after-fail (editor/editor-text ed)]
