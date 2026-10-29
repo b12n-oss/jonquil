@@ -182,8 +182,8 @@
              (run :smart before 24 after 25))))
     (testing "with the flag the stability probe is skipped and Smart runs as is;
              on text that IS unstable that means no re-indent on this edit,
-             which is the contract: the flag only ever rides a cache hit,
-             whose text is Parinfer's own output"
+             which is the contract: the editor only sets the flag when the
+             edit starts in the form its own previous action probed"
       (let [r (pe/adjust {:mode :smart :prev-text before :prev-caret 24
                           :text after :caret 25 :prev-consistent? true})]
         (is (map? r))
@@ -198,3 +198,25 @@
         #(do (pe/adjust {:mode :smart :prev-text "(a)\n\n(b)" :prev-caret 4
                          :text "(a)\n(\n(b)" :caret 5 :bounds [4 4]})
              (is (= 1 @calls) "only the fix's own diff"))))))
+
+(deftest adjust-signal-bounds-shared-affix-test
+  (testing "signal-exact bounds (what GTK reports) whose replacement shares
+           an affix with the replaced text give diff's answer, not the
+           raw span: the engine keys its change lookup on the span's end
+           (speedup review I4: select \"a(\" and type \"(\")"
+    (let [prev "(f a(b\n      c))" after "(f (b\n      c))"]
+      (is (= (pe/adjust {:mode :smart :prev-text prev :prev-caret 5 :text after :caret 4})
+             (pe/adjust {:mode :smart :prev-text prev :prev-caret 5 :text after :caret 4
+                         :bounds [3 11]})))))
+  (testing "a small brute force over selection retypes agrees everywhere"
+    (doseq [prev ["(a x(b\n     c)\n   d)" "(f a(b\n      c))" "(aa (bb)\n  cc)"]
+            a (range 1 5) w [1 2] rep ["(" "((" "x(" "(b"]]
+      (let [b (min (count prev) (+ a w))
+            after (str (subs prev 0 a) rep (subs prev b))
+            caret (+ a (count rep))
+            no-bounds (pe/adjust {:mode :smart :prev-text prev :prev-caret b
+                                  :text after :caret caret})
+            spanb [a (- (count prev) b)]
+            with-bounds (pe/adjust {:mode :smart :prev-text prev :prev-caret b
+                                    :text after :caret caret :bounds spanb})]
+        (is (= no-bounds with-bounds) (pr-str [prev a b rep]))))))

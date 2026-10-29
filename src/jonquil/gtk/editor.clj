@@ -481,12 +481,23 @@
                 (when status (status nil))))
           ;; prime the next action's prev: the final text without another
           ;; buffer copy, with the gen read after our own apply bumped it
-          (let [final (if (and (map? r) (:edits r)) (edit/apply-edits text (:edits r)) text)]
+          (let [fixed? (and (map? r) (:edits r))
+                final (if fixed? (edit/apply-edits text (:edits r)) text)]
             (reset! (:parinfer-prev-cache ed)
                     {:text final :gen @(:edit-gen ed)
-                     ;; where this action edited, in final coordinates (the
-                     ;; prefix is untouched text, so the offset carries over)
-                     :edit-at (when span (:prefix span))})))
+                     ;; Where this action edited, in final coordinates, and
+                     ;; only when Parinfer really probed a changed form:
+                     ;; the fix can move text before the offset, so it's
+                     ;; carried across by line and column (review I2), and
+                     ;; a no-op action, a too-long skip or an engine error
+                     ;; probed nothing, so nothing is marked consistent
+                     ;; (review I3).
+                     :edit-at (when (and span
+                                         (not= text (:text prev))
+                                         (or (nil? r) fixed?))
+                                (if fixed?
+                                  (pe/remap-offset text final (:prefix span))
+                                  (:prefix span)))})))
         (catch :default e
           (reset! (:parinfer-prev-cache ed) nil)
           (when-let [f @(:on-error-fn ed)]

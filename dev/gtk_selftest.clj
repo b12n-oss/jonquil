@@ -1269,6 +1269,46 @@
                           {:text text}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-fix-moves-the-edit-offset [ed]
+  (go-row :parinfer-fix-moves-the-edit-offset check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; the first edit's fix re-indents EARLIER lines, moving
+                 ;; text before the edit offset; the cached offset must
+                 ;; follow it, or the next form inherits the consistency
+                 ;; flag (speedup review I2)
+                 (editor/set-text! ed "(f [a b]
+        a)
+(fn [a b]
+     (h a))")
+                 (caret! ed 18)
+                 (type-str! ed "x")
+                 (caret! ed (+ 3 (.indexOf (editor/editor-text ed) "(h a")))
+                 (type-str! ed "y")
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-fix-moves-the-edit-offset
+                          (= "(f [a b]
+   ax)
+(fn [a b]
+    (h ya))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-noop-action-marks-nothing [ed]
+  (go-row :parinfer-noop-action-marks-nothing check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; stepping over a closing quote is a user action that
+                 ;; changes nothing; it must not mark the form consistent
+                 ;; (speedup review I3)
+                 (editor/set-text! ed "(q)\n(fn [a b]\n     (h \"a\"))")
+                 (caret! ed 24)                      ; just before the closing quote
+                 (editor/handle-key! ed 0x022 0)     ; quote over the closer: step past
+                 (type-str! ed "x")
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-noop-action-marks-nothing
+                          (= "(q)\n(fn [a b]\n    (h \"a\"x))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-selection-replace-bounds [ed]
   (go-row :parinfer-selection-replace-bounds check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1344,7 +1384,9 @@
    row-parinfer-cache-invalidated-by-set-text
    row-parinfer-cache-invalidated-by-plain-op
    row-parinfer-selection-replace-bounds
-   row-parinfer-caret-move-keeps-first-edit-reindent])
+   row-parinfer-caret-move-keeps-first-edit-reindent
+   row-parinfer-fix-moves-the-edit-offset
+   row-parinfer-noop-action-marks-nothing])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

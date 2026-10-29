@@ -301,9 +301,23 @@
     (when (not= prev text)
       (let [[p old-end new-end]
             (if-let [[bp bq] bounds]
+              ;; The signals' span is sound but not minimal: a replacement
+              ;; sharing an affix with what it replaced must be trimmed the
+              ;; way diff trims, since the engine keys its change lookup on
+              ;; the span's end (speedup review I4). Extending from the
+              ;; seed costs the span's width, not the buffer's.
               (let [n (count prev) m (count text)
-                    p (min bp n m)
-                    q (min bq (- n p) (- m p))]
+                    lim (min (min n m) (max 0 (- caret (max 0 (- m n)))))
+                    p (loop [i (min bp lim)]
+                        (if (and (< i lim)
+                                 (= (.charAt ^String prev i) (.charAt ^String text i)))
+                          (recur (inc i)) i))
+                    qmax (- (min n m) p)
+                    q (loop [i (min bq qmax)]
+                        (if (and (< i qmax)
+                                 (= (.charAt ^String prev (- n 1 i))
+                                    (.charAt ^String text (- m 1 i))))
+                          (recur (inc i)) i))]
                 [p (- n q) (- m q)])
               (diff prev text (- caret (max 0 (- (count text) (count prev))))))
             ;; Whole lines removed: the line after them isn't part of the edit.
