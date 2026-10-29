@@ -205,8 +205,9 @@
 
 (defn- run-mode
   "Parinfer's result for the edited form R. P is the form before the edit.
-  prev-consistent? skips the re-indent probe: a cache hit's P is
-  Parinfer's own last output, which Paren mode cannot want to change."
+  prev-consistent? skips the re-indent probe: the editor only sets it
+  when P is the form its own previous action produced, which Paren mode
+  cannot want to change."
   [mode P R change rel-caret opts prev-consistent?]
   (if (= mode :paren)
     (parinfer/paren-mode R opts)
@@ -290,8 +291,9 @@
   Two editor-fed speedups, each optional and behaviour-identical:
   :bounds [prefix suffix] is the edit's untouched head and tail length
   (GTK's insert/delete signals know it), replacing the whole-buffer diff;
-  :prev-consistent? true skips the form's re-indent probe, and only ever
-  rides a cache hit whose prev-text is Parinfer's own last output."
+  :prev-consistent? true skips the form's re-indent probe; the editor sets
+  it only when this edit starts in the same form its own previous action
+  edited, which is the one form a cache hit proves Parinfer-consistent."
   [{:keys [mode prev-text prev-caret text caret max-lines bounds prev-consistent?]
     :or {max-lines default-max-lines}}]
   (let [prev (or prev-text "")

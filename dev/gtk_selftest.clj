@@ -1249,6 +1249,26 @@
                           {:text text}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-caret-move-keeps-first-edit-reindent [ed]
+  (go-row :parinfer-caret-move-keeps-first-edit-reindent check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(q)
+(fn [a b]
+     (h a))")
+                 (caret! ed 2)
+                 (type-str! ed "q")               ; edit form A: cache primes
+                 ;; click into the misindented form B: a caret move, no
+                 ;; edit, so the gen still matches and the cache hits
+                 (caret! ed 24)
+                 (type-str! ed "x")               ; first edit of B
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-caret-move-keeps-first-edit-reindent
+                          (= "(qq)
+(fn [a b]
+    (h ax))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-selection-replace-bounds [ed]
   (go-row :parinfer-selection-replace-bounds check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1323,7 +1343,8 @@
    row-parinfer-cache-invalidated-by-undo
    row-parinfer-cache-invalidated-by-set-text
    row-parinfer-cache-invalidated-by-plain-op
-   row-parinfer-selection-replace-bounds])
+   row-parinfer-selection-replace-bounds
+   row-parinfer-caret-move-keeps-first-edit-reindent])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

@@ -423,10 +423,26 @@
                             :prev-text (:text prev) :prev-caret (:caret prev)
                             :text text :caret (g/cursor-offset buf)
                             ;; the signals' untouched head/tail replaces the
-                            ;; whole-buffer diff; a cache hit's prev is our
-                            ;; own last output, so the re-indent probe skips
+                            ;; whole-buffer diff. The re-indent probe skips
+                            ;; only when this edit starts in the SAME form
+                            ;; the previous action edited: a cache hit
+                            ;; proves the buffer is our last output, not
+                            ;; that the form under the caret ever met
+                            ;; Parinfer (a caret move changes no gen), so
+                            ;; same-form is the part that keeps the user's
+                            ;; first-edit re-indent (review of this plan).
                             :bounds (when span [(:prefix span) (:suffix span)])
-                            :prev-consistent? (boolean (:cached? prev))})
+                            :prev-consistent?
+                            (boolean
+                             (and (:cached? prev) span (some? (:edit-at prev))
+                                  ;; one region call, on the prev text the
+                                  ;; painter's tick has already bracketed:
+                                  ;; the last action's form, by its edit
+                                  ;; start, must contain this edit's start
+                                  (let [pt (:text prev)
+                                        n (count pt)
+                                        [ls le] (pe/region pt (min (:edit-at prev) n))]
+                                    (<= ls (:prefix span) le))))})
               status @(:parinfer-status-fn ed)]
           (cond
             (= ::pe/too-long r)
@@ -466,7 +482,11 @@
           ;; prime the next action's prev: the final text without another
           ;; buffer copy, with the gen read after our own apply bumped it
           (let [final (if (and (map? r) (:edits r)) (edit/apply-edits text (:edits r)) text)]
-            (reset! (:parinfer-prev-cache ed) {:text final :gen @(:edit-gen ed)})))
+            (reset! (:parinfer-prev-cache ed)
+                    {:text final :gen @(:edit-gen ed)
+                     ;; where this action edited, in final coordinates (the
+                     ;; prefix is untouched text, so the offset carries over)
+                     :edit-at (when span (:prefix span))})))
         (catch :default e
           (reset! (:parinfer-prev-cache ed) nil)
           (when-let [f @(:on-error-fn ed)]
@@ -1194,7 +1214,8 @@
                                              (reset! (:parinfer-prev ed)
                                                      {:text text
                                                       :caret (g/cursor-offset buf)
-                                                      :cached? hit?})))
+                                                      :cached? hit?
+                                                      :edit-at (when hit? (:edit-at cache))})))
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
