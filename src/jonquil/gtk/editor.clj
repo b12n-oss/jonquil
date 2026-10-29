@@ -134,6 +134,11 @@
     (g/gtk-text-buffer-set-text buf s -1)
     (g/gtk-text-buffer-end-irreversible-action buf)
     (reset! (:saved-text ed) s)
+    ;; The new text is in hand, so the Parinfer cache primes for free and
+    ;; the next keystroke is a hit (miss-path cut 2). The gen is read after
+    ;; the set, in this same step, so the prime can't be stale; no :edit-at,
+    ;; so the first-edit re-indent still fires.
+    (reset! (:parinfer-prev-cache ed) {:text s :gen @(:edit-gen ed)})
     (when @(:read-only? ed)
       (g/with-iters* buf 0 (count s)
         (fn [a b] (g/gtk-text-buffer-apply-tag buf (:readonly-tag ed) a b)))))

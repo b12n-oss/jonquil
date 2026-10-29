@@ -1319,6 +1319,50 @@
                            :t3 (editor/editor-text ed)}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-reload-primes-the-cache [ed]
+  (go-row :parinfer-reload-primes-the-cache check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; set-text! hands the new text in, so it primes the cache
+                 ;; for free (miss-path cut 2): the next keystroke is a hit
+                 ;; (zero full reads), and the first-edit re-indent still
+                 ;; lands because no consistency offset is stored
+                 (editor/set-text! ed "(q)
+(fn [a b]
+     (h a))")
+                 (let [fulls (atom 0)
+                       real g/buffer-text]
+                   (with-redefs-fn {#'g/buffer-text
+                                    (fn [& a] (swap! fulls inc) (apply real a))}
+                     #(do (caret! ed 22)
+                          (type-str! ed "x")))
+                   (let [text (editor/editor-text ed)
+                         eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                     (check :parinfer-reload-primes-the-cache
+                            (and (= "(q)
+(fn [a b]
+    (h xa))" text)
+                                 eq (zero? @fulls))
+                            {:text text :eq eq :full-reads @fulls})))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-reload-double-flip [ed]
+  (go-row :parinfer-reload-double-flip check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; two reloads back to back: the prime must carry the LAST
+                 ;; text with the LAST gen, or the next keystroke trusts a
+                 ;; stale string (miss-path Review Focus 3)
+                 (editor/set-text! ed "(zz)")
+                 (editor/set-text! ed "(a
+  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-reload-double-flip
+                          (= "(a)
+b" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-miss-still-splices-the-end-read [ed]
   (go-row :parinfer-miss-still-splices-the-end-read check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1464,7 +1508,9 @@ b" text) eq (pos? @splices))
    row-parinfer-fix-moves-the-edit-offset
    row-parinfer-noop-action-marks-nothing
    row-parinfer-splice-equals-buffer
-   row-parinfer-miss-still-splices-the-end-read])
+   row-parinfer-miss-still-splices-the-end-read
+   row-parinfer-reload-primes-the-cache
+   row-parinfer-reload-double-flip])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
