@@ -156,6 +156,8 @@ command per mode, and the choice is saved in `settings.edn`. The status
 bar shows the label whenever a mode is on for the tab you're in, or the
 tab's project overrides your setting either way.
 
+![Typing with Parinfer Smart on: each open bracket closes itself as it's typed, dedenting the body line pulls the closer up, and indenting pulls it back in](../images/parinfer.gif)
+
 - **Smart** (the usual choice) balances brackets from your indentation:
   typing `(` closes it, and dedenting a line moves its closer up.
 - **Indent** is Smart without the edit tracking that protects the form
@@ -168,6 +170,8 @@ them off even when your setting is on. The label then says
 `Parinfer: Smart (project)`, and the key and palette keep changing the
 global setting. Like the other `.jonquil.edn` keys, it applies to tabs
 you open after editing the file.
+
+![A file from a project whose .jonquil.edn says :parinfer :smart: the typed call got its closing bracket, and the status bar reads Parinfer: Smart (project)](../images/parinfer-project.png)
 
 Parinfer works on the top-level form you're editing, never the whole file.
 Opening a file changes nothing. A form whose indentation disagrees with
