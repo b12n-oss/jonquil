@@ -144,3 +144,79 @@
                           :text "(xa\nb)" :caret 2})))))
   (testing "Parinfer's own refusal stays nil (normal typing)"
     (is (nil? (run :paren "(a)\n" 4 "(a)\n(" 5)))))
+
+(deftest adjust-bounds-equals-diff-test
+  (testing "a :bounds hint computed like diff's own prefix/suffix changes nothing,
+           over every adjust case this file already pins"
+    (doseq [[mode prev pc text c] [[:smart "(a)\n\n(b)" 4 "(a)\n(\n(b)" 5]
+                                   [:smart "(z)\n(a\n  b)\n(y)" 9 "(z)\n(a\nb)\n(y)" 7]
+                                   [:indent "(z)\n(a\n  b)\n(y)" 9 "(z)\n(a\nb)\n(y)" 7]
+                                   [:smart "(z)\n(fn [a b]\n     (h a))" 22 "(z)\n(fn [a b]\n     (h (a))" 23]
+                                   [:smart "(a)\r\n\r\n(b)" 5 "(a)\r\n(\r\n(b)" 6]
+                                   [:smart "(a)\n\n(b)" 4 "(a)\n(c\n(d\n(b)" 9]
+                                   [:smart "(a)\nb" 4 "(a)\n  b" 6]
+                                   [:paren "(a)\n" 4 "(a)\n(" 5]]]
+      (let [n (count prev) m (count text)
+            p (loop [i 0] (if (and (< i (min n m)) (= (nth prev i) (nth text i))) (recur (inc i)) i))
+            p (min p c)
+            q (loop [i 0] (if (and (< i (- (min n m) p))
+                                   (= (nth prev (- n 1 i)) (nth text (- m 1 i))))
+                            (recur (inc i)) i))]
+        (is (= (pe/adjust {:mode mode :prev-text prev :prev-caret pc :text text :caret c})
+               (pe/adjust {:mode mode :prev-text prev :prev-caret pc :text text :caret c
+                           :bounds [p q]}))
+            (pr-str [mode prev text [p q]]))))))
+
+(deftest adjust-bounds-overlap-clamps-test
+  (testing "overlapping prefix+suffix (a selection retyped as itself plus one
+           char) clamps as diff does"
+    (is (= (pe/adjust {:mode :smart :prev-text "(aa)" :prev-caret 3 :text "(aaa)" :caret 4})
+           (pe/adjust {:mode :smart :prev-text "(aa)" :prev-caret 3 :text "(aaa)" :caret 4
+                       :bounds [3 3]})))))
+
+(deftest adjust-prev-consistent-skips-the-reindent-test
+  (let [before "(z)\n(fn [a b]\n     (h a))"
+        after "(z)\n(fn [a b]\n     (h ax))"]
+    (testing "without the flag, the unstable form is re-indented first (today's pin)"
+      (is (= ["(z)\n(fn [a b]\n    (h ax))" 24]
+             (run :smart before 24 after 25))))
+    (testing "with the flag the stability probe is skipped and Smart runs as is;
+             on text that IS unstable that means no re-indent on this edit,
+             which is the contract: the editor only sets the flag when the
+             edit starts in the form its own previous action probed"
+      (let [r (pe/adjust {:mode :smart :prev-text before :prev-caret 24
+                          :text after :caret 25 :prev-consistent? true})]
+        (is (map? r))
+        (is (not= ["(z)\n(fn [a b]\n    (h ax))" 24]
+                  [(edit/apply-edits after (:edits r)) (:caret r)]))))))
+
+(deftest adjust-bounds-skips-the-text-diff-test
+  (testing "with :bounds the prev/text diff never runs (the R/NR one still does)"
+    (let [calls (atom 0)
+          real @#'pe/diff]
+      (with-redefs-fn {#'pe/diff (fn [& a] (swap! calls inc) (apply real a))}
+        #(do (pe/adjust {:mode :smart :prev-text "(a)\n\n(b)" :prev-caret 4
+                         :text "(a)\n(\n(b)" :caret 5 :bounds [4 4]})
+             (is (= 1 @calls) "only the fix's own diff"))))))
+
+(deftest adjust-signal-bounds-shared-affix-test
+  (testing "signal-exact bounds (what GTK reports) whose replacement shares
+           an affix with the replaced text give diff's answer, not the
+           raw span: the engine keys its change lookup on the span's end
+           (speedup review I4: select \"a(\" and type \"(\")"
+    (let [prev "(f a(b\n      c))" after "(f (b\n      c))"]
+      (is (= (pe/adjust {:mode :smart :prev-text prev :prev-caret 5 :text after :caret 4})
+             (pe/adjust {:mode :smart :prev-text prev :prev-caret 5 :text after :caret 4
+                         :bounds [3 11]})))))
+  (testing "a small brute force over selection retypes agrees everywhere"
+    (doseq [prev ["(a x(b\n     c)\n   d)" "(f a(b\n      c))" "(aa (bb)\n  cc)"]
+            a (range 1 5) w [1 2] rep ["(" "((" "x(" "(b"]]
+      (let [b (min (count prev) (+ a w))
+            after (str (subs prev 0 a) rep (subs prev b))
+            caret (+ a (count rep))
+            no-bounds (pe/adjust {:mode :smart :prev-text prev :prev-caret b
+                                  :text after :caret caret})
+            spanb [a (- (count prev) b)]
+            with-bounds (pe/adjust {:mode :smart :prev-text prev :prev-caret b
+                                    :text after :caret caret :bounds spanb})]
+        (is (= no-bounds with-bounds) (pr-str [prev a b rep]))))))

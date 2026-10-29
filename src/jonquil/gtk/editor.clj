@@ -413,13 +413,36 @@
   [ed]
   (when-let [prev @(:parinfer-prev ed)]
     (reset! (:parinfer-prev ed) nil)
-    (when-let [mode (parinfer-mode ed)]
-      (try
+    (let [span @(:parinfer-span ed)]
+      (reset! (:parinfer-span ed) nil)
+      (when-let [mode (parinfer-mode ed)]
+       (try
         (let [buf (:buf ed)
               text (g/buffer-text buf)
               r (pe/adjust {:mode mode
                             :prev-text (:text prev) :prev-caret (:caret prev)
-                            :text text :caret (g/cursor-offset buf)})
+                            :text text :caret (g/cursor-offset buf)
+                            ;; the signals' untouched head/tail replaces the
+                            ;; whole-buffer diff. The re-indent probe skips
+                            ;; only when this edit starts in the SAME form
+                            ;; the previous action edited: a cache hit
+                            ;; proves the buffer is our last output, not
+                            ;; that the form under the caret ever met
+                            ;; Parinfer (a caret move changes no gen), so
+                            ;; same-form is the part that keeps the user's
+                            ;; first-edit re-indent (review of this plan).
+                            :bounds (when span [(:prefix span) (:suffix span)])
+                            :prev-consistent?
+                            (boolean
+                             (and (:cached? prev) span (some? (:edit-at prev))
+                                  ;; one region call, on the prev text the
+                                  ;; painter's tick has already bracketed:
+                                  ;; the last action's form, by its edit
+                                  ;; start, must contain this edit's start
+                                  (let [pt (:text prev)
+                                        n (count pt)
+                                        [ls le] (pe/region pt (min (:edit-at prev) n))]
+                                    (<= ls (:prefix span) le))))})
               status @(:parinfer-status-fn ed)]
           (cond
             (= ::pe/too-long r)
@@ -455,10 +478,30 @@
                             (finally (g/gtk-text-buffer-end-user-action buf))))
                         (apply-op! ed r)))
                     (finally (reset! (:parinfer-busy? ed) false))))
-                (when status (status nil)))))
+                (when status (status nil))))
+          ;; prime the next action's prev: the final text without another
+          ;; buffer copy, with the gen read after our own apply bumped it
+          (let [fixed? (and (map? r) (:edits r))
+                final (if fixed? (edit/apply-edits text (:edits r)) text)]
+            (reset! (:parinfer-prev-cache ed)
+                    {:text final :gen @(:edit-gen ed)
+                     ;; Where this action edited, in final coordinates, and
+                     ;; only when Parinfer really probed a changed form:
+                     ;; the fix can move text before the offset, so it's
+                     ;; carried across by line and column (review I2), and
+                     ;; a no-op action, a too-long skip or an engine error
+                     ;; probed nothing, so nothing is marked consistent
+                     ;; (review I3).
+                     :edit-at (when (and span
+                                         (not= text (:text prev))
+                                         (or (nil? r) fixed?))
+                                (if fixed?
+                                  (pe/remap-offset text final (:prefix span))
+                                  (:prefix span)))})))
         (catch :default e
+          (reset! (:parinfer-prev-cache ed) nil)
           (when-let [f @(:on-error-fn ed)]
-            (f (str "; parinfer: " (ex-message e)))))))))
+            (f (str "; parinfer: " (ex-message e))))))))))
 
 (defn set-parinfer-fns!
   "Wires the window's Parinfer reads: mode-fn answers the current mode
@@ -1091,6 +1134,16 @@
             :parinfer-prev (atom nil)
             :parinfer-busy? (atom false)
             :parinfer-skip? (atom false)
+            ;; The speedup's two slots (the per-form speedup plan):
+            ;; :parinfer-prev-cache holds {:text s :gen n}, the buffer as
+            ;; the hook last saw it with :edit-gen at that moment, so the
+            ;; next action starts without a 262k copy when the gen hasn't
+            ;; moved (any outside write bumps the gen through `changed`).
+            ;; :parinfer-span accumulates the action's untouched head and
+            ;; tail from the insert/delete signals, feeding adjust's
+            ;; :bounds; nil when unarmed.
+            :parinfer-prev-cache (atom nil)
+            :parinfer-span (atom nil)
             :paint (atom {:gen 0 :done? true})
             ;; Large-file speed T4: the tick's incremental repaint (repaint!).
             ;; :painted is {:text :plan} of what our tags show now, or nil
@@ -1146,10 +1199,13 @@
     ;; repaints the wrong range and colours go wrong.
     (g/g-signal-connect-data buf "insert-text"
                              (callable (fn [_buf iter _text _len _data]
-                                         (when @(:edit-bounds ed)
-                                           (let [o (g/gtk-text-iter-get-offset iter)
-                                                 n (g/gtk-text-buffer-get-char-count buf)]
-                                             (swap! (:edit-bounds ed) narrow-bounds o (- n o))))
+                                         (let [o (g/gtk-text-iter-get-offset iter)
+                                               n (g/gtk-text-buffer-get-char-count buf)]
+                                           (when @(:edit-bounds ed)
+                                             (swap! (:edit-bounds ed) narrow-bounds o (- n o)))
+                                           ;; the parinfer span sees the same edits
+                                           (when @(:parinfer-span ed)
+                                             (swap! (:parinfer-span ed) narrow-bounds o (- n o))))
                                          nil)
                                        [:pointer :pointer :pointer :int :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -1161,9 +1217,16 @@
     (g/g-signal-connect-data buf "begin-user-action"
                              (callable (fn [_buf _data]
                                          (when (parinfer-mode ed)
-                                           (reset! (:parinfer-prev ed)
-                                                   {:text (g/buffer-text buf)
-                                                    :caret (g/cursor-offset buf)}))
+                                           (let [cache @(:parinfer-prev-cache ed)
+                                                 hit? (and cache (= (:gen cache) @(:edit-gen ed)))
+                                                 text (if hit? (:text cache) (g/buffer-text buf))
+                                                 n (count text)]
+                                             (reset! (:parinfer-span ed) {:prefix n :suffix n})
+                                             (reset! (:parinfer-prev ed)
+                                                     {:text text
+                                                      :caret (g/cursor-offset buf)
+                                                      :cached? hit?
+                                                      :edit-at (when hit? (:edit-at cache))})))
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -1175,11 +1238,13 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data buf "delete-range"
                              (callable (fn [_buf start end _data]
-                                         (when @(:edit-bounds ed)
-                                           (let [o (g/gtk-text-iter-get-offset start)
-                                                 e (g/gtk-text-iter-get-offset end)
-                                                 n (g/gtk-text-buffer-get-char-count buf)]
-                                             (swap! (:edit-bounds ed) narrow-bounds o (- n e))))
+                                         (let [o (g/gtk-text-iter-get-offset start)
+                                               e (g/gtk-text-iter-get-offset end)
+                                               n (g/gtk-text-buffer-get-char-count buf)]
+                                           (when @(:edit-bounds ed)
+                                             (swap! (:edit-bounds ed) narrow-bounds o (- n e)))
+                                           (when @(:parinfer-span ed)
+                                             (swap! (:parinfer-span ed) narrow-bounds o (- n e))))
                                          nil)
                                        [:pointer :pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

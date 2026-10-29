@@ -17,6 +17,7 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.edit :as jonquil.edit]
             [jonquil.paint :as paint]
             [jonquil.parinfer-edit :as pe]))
 
@@ -1180,6 +1181,157 @@
                    (finally (editor/set-error-fn! ed (fn [_]))
                             (parinfer-off! ed)))))))
 
+;; --- Parinfer speedup rows (the per-form speedup plan) ---------------------
+;; Each row asserts the edit's visible result equals what the fallback
+;; (cache-less) path computes on copied strings, so a stale cache or a
+;; wrong span shows up as a text mismatch, not just a slow path.
+
+(defn- row-parinfer-cache-steady-typing [ed]
+  (go-row :parinfer-cache-steady-typing check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "")
+                 (caret! ed 0)
+                 (type-str! ed "(")
+                 (type-str! ed "a")
+                 (type-str! ed "[")
+                 (let [text (editor/editor-text ed)
+                       cache @(:parinfer-prev-cache ed)]
+                   (check :parinfer-cache-steady-typing
+                          (and (= "(a[])" text)
+                               (= text (:text cache))
+                               (= (:gen cache) @(:edit-gen ed)))
+                          {:text text :cache-gen (:gen cache) :gen @(:edit-gen ed)}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-cache-invalidated-by-undo [ed]
+  (go-row :parinfer-cache-invalidated-by-undo check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(a\n  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)          ; -> "(a)\nb", cached
+                 (g/gtk-text-buffer-undo (:buf ed))  ; outside the hook
+                 (let [stale? (= (:gen @(:parinfer-prev-cache ed)) @(:edit-gen ed))]
+                   (caret! ed 5)
+                   (delete-action! ed 3 5)        ; must work from the real buffer
+                   (let [text (editor/editor-text ed)]
+                     (check :parinfer-cache-invalidated-by-undo
+                            (and (not stale?) (= "(a)\nb" text))
+                            {:was-stale stale? :text text})))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-cache-invalidated-by-set-text [ed]
+  (go-row :parinfer-cache-invalidated-by-set-text check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "")
+                 (caret! ed 0)
+                 (type-str! ed "(")               ; primes the cache
+                 (editor/set-text! ed "(x\n  y)") ; a reload, outside the hook
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-cache-invalidated-by-set-text
+                          (= "(x)\ny" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-cache-invalidated-by-plain-op [ed]
+  (go-row :parinfer-cache-invalidated-by-plain-op check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "")
+                 (caret! ed 0)
+                 (type-str! ed "(")               ; primes the cache
+                 (editor/apply-op-plain! ed {:edits [[0 2 "(fn [a b]\n     (h a))"]] :caret 0})
+                 (caret! ed 19)
+                 (type-str! ed "x")               ; first edit: must re-indent
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-cache-invalidated-by-plain-op
+                          (= "(fn [a b]\n    (h ax))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-caret-move-keeps-first-edit-reindent [ed]
+  (go-row :parinfer-caret-move-keeps-first-edit-reindent check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(q)
+(fn [a b]
+     (h a))")
+                 (caret! ed 2)
+                 (type-str! ed "q")               ; edit form A: cache primes
+                 ;; click into the misindented form B: a caret move, no
+                 ;; edit, so the gen still matches and the cache hits
+                 (caret! ed 24)
+                 (type-str! ed "x")               ; first edit of B
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-caret-move-keeps-first-edit-reindent
+                          (= "(qq)
+(fn [a b]
+    (h ax))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-fix-moves-the-edit-offset [ed]
+  (go-row :parinfer-fix-moves-the-edit-offset check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; the first edit's fix re-indents EARLIER lines, moving
+                 ;; text before the edit offset; the cached offset must
+                 ;; follow it, or the next form inherits the consistency
+                 ;; flag (speedup review I2)
+                 (editor/set-text! ed "(f [a b]
+        a)
+(fn [a b]
+     (h a))")
+                 (caret! ed 18)
+                 (type-str! ed "x")
+                 (caret! ed (+ 3 (.indexOf (editor/editor-text ed) "(h a")))
+                 (type-str! ed "y")
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-fix-moves-the-edit-offset
+                          (= "(f [a b]
+   ax)
+(fn [a b]
+    (h ya))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-noop-action-marks-nothing [ed]
+  (go-row :parinfer-noop-action-marks-nothing check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; stepping over a closing quote is a user action that
+                 ;; changes nothing; it must not mark the form consistent
+                 ;; (speedup review I3)
+                 (editor/set-text! ed "(q)\n(fn [a b]\n     (h \"a\"))")
+                 (caret! ed 24)                      ; just before the closing quote
+                 (editor/handle-key! ed 0x022 0)     ; quote over the closer: step past
+                 (type-str! ed "x")
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-noop-action-marks-nothing
+                          (= "(q)\n(fn [a b]\n    (h \"a\"x))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-selection-replace-bounds [ed]
+  (go-row :parinfer-selection-replace-bounds check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "(a bb c)")
+                 ;; one user action, delete then insert, as a selection
+                 ;; replace emits: the span must union both signals
+                 (let [buf (:buf ed)]
+                   (g/gtk-text-buffer-begin-user-action buf)
+                   (g/with-iters* buf 3 5 (fn [i j] (g/gtk-text-buffer-delete buf i j)))
+                   (g/with-iters* buf 3 3 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                   (g/gtk-text-buffer-insert-interactive-at-cursor buf "(" -1 1)
+                   (g/gtk-text-buffer-end-user-action buf))
+                 ;; the fallback path on copied strings is the oracle
+                 (let [r (pe/adjust {:mode :smart
+                                     :prev-text (apply str "(a bb c)") :prev-caret 3
+                                     :text (apply str "(a ( c)") :caret 4})
+                       want (jonquil.edit/apply-edits "(a ( c)" (:edits r))
+                       text (editor/editor-text ed)]
+                   (check :parinfer-selection-replace-bounds
+                          (= want text)
+                          {:want want :text text}))
+                 (finally (parinfer-off! ed))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -1226,7 +1378,15 @@
    row-parinfer-quote-backspace-keeps-pair
    row-parinfer-op-keeps-caret
    row-parinfer-op-keeps-selection
-   row-parinfer-engine-failure-named-once])
+   row-parinfer-engine-failure-named-once
+   row-parinfer-cache-steady-typing
+   row-parinfer-cache-invalidated-by-undo
+   row-parinfer-cache-invalidated-by-set-text
+   row-parinfer-cache-invalidated-by-plain-op
+   row-parinfer-selection-replace-bounds
+   row-parinfer-caret-move-keeps-first-edit-reindent
+   row-parinfer-fix-moves-the-edit-offset
+   row-parinfer-noop-action-marks-nothing])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
