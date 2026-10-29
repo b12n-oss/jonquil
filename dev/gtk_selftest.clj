@@ -1269,6 +1269,28 @@
                           {:text text}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-splice-equals-buffer [ed]
+  (go-row :parinfer-splice-equals-buffer check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; the cache's text is the hook's spliced reconstruction;
+                 ;; it must equal the real buffer after every action shape:
+                 ;; typing with a fix, an op with a fix, and an edit beside
+                 ;; a multi-byte char (splice plan Review Focus 1 and 2)
+                 (editor/set-text! ed "(a 🙂 b)")
+                 (caret! ed 5)
+                 (type-str! ed "(")
+                 (let [eq1 (= (:text @(:parinfer-prev-cache ed)) (editor/editor-text ed))
+                       t1 (editor/editor-text ed)]
+                   (editor/set-text! ed "(a
+  b)")
+                   (caret! ed 7)
+                   (editor/do-toggle-comment! ed)   ; apply-op! with a fix
+                   (let [eq2 (= (:text @(:parinfer-prev-cache ed)) (editor/editor-text ed))]
+                     (check :parinfer-splice-equals-buffer
+                            (and eq1 eq2)
+                            {:eq1 eq1 :t1 t1 :eq2 eq2 :t2 (editor/editor-text ed)})))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-fix-moves-the-edit-offset [ed]
   (go-row :parinfer-fix-moves-the-edit-offset check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1386,7 +1408,8 @@
    row-parinfer-selection-replace-bounds
    row-parinfer-caret-move-keeps-first-edit-reindent
    row-parinfer-fix-moves-the-edit-offset
-   row-parinfer-noop-action-marks-nothing])
+   row-parinfer-noop-action-marks-nothing
+   row-parinfer-splice-equals-buffer])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
