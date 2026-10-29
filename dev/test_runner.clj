@@ -20,6 +20,7 @@
     jonquil.smoke-test
     jonquil.upstream.syntax-test
     jonquil.upstream.parinfer-test
+    jonquil.parinfer-edit-test
     jonquil.theme-test
     jonquil.settings-test
     jonquil.paint-test

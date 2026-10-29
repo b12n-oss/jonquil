@@ -7,6 +7,7 @@
     jonquil.dialect
     jonquil.syntax
     jonquil.parinfer
+    jonquil.parinfer-edit
     jonquil.theme
     jonquil.settings
     jonquil.paint

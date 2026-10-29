@@ -15,6 +15,26 @@
     (let [t sample]
       (is (identical? (syntax/compute-brackets t) (syntax/compute-brackets t))))))
 
+(deftest tokenize-equal-reuses-equal-text-test
+  (testing "an equal copy of the cached text gets the cached tokens back"
+    (let [copy (str (StringBuilder. ^String sample))
+          r (syntax/tokenize sample)]
+      (is (identical? r (syntax/tokenize-equal copy))))))
+
+(deftest compute-brackets-equal-reuses-equal-text-test
+  (testing "an equal copy of the cached text gets the cached result, without a new scan"
+    (let [copy (str (StringBuilder. ^String sample))
+          r (syntax/compute-brackets sample)
+          scans (atom 0)
+          real @#'syntax/compute-brackets*]
+      (with-redefs-fn {#'syntax/compute-brackets* (fn [t] (swap! scans inc) (real t))}
+        (fn []
+          (is (identical? r (syntax/compute-brackets-equal copy)))
+          (is (zero? @scans)))))
+    (testing "different text is scanned and becomes the cached entry"
+      (let [other "(x [y])"]
+        (is (= (syntax/compute-brackets other) (syntax/compute-brackets-equal (str (StringBuilder. other)))))))))
+
 (deftest tokenize-equal-but-distinct-text-test
   (testing "an equal copy of the text recomputes an equal result"
     (let [copy (str (StringBuilder. ^String sample))]

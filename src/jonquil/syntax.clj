@@ -143,6 +143,28 @@
         (reset! compute-brackets-last [text result])
         result))))
 
+(defn tokenize-equal
+  "tokenize, also answering from the cache when the cached text is equal to
+  text, not just the same object (see compute-brackets-equal; Jonquil, not
+  upstream)."
+  [^String text]
+  (let [[last-text last-result] @tokenize-last]
+    (if (and (some? text) (= last-text text))
+      last-result
+      (tokenize text))))
+
+(defn compute-brackets-equal
+  "compute-brackets, also answering from the cache when the cached text is
+  equal to text, not just the same object. The editor's text is a fresh
+  string on every read, so this is how a caller other than the painter
+  reuses the painter's result: the equality check costs about 0.2 ms on a
+  262k-char file, a fresh scan about 80 ms (Jonquil, not upstream)."
+  [^String text]
+  (let [[last-text last-result] @compute-brackets-last]
+    (if (and (some? text) (= last-text text))
+      last-result
+      (compute-brackets text))))
+
 ;; --- Symbol Analysis & Navigation ---
 
 (def def-forms
