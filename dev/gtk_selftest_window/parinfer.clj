@@ -52,6 +52,17 @@
   (editor/set-text! (:ed t) "")
   ((:close-tab! ui) (:id t)))
 
+(defn- caret! [ed pos]
+  (g/with-iters* (:buf ed) pos pos (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
+
+(defn- delete-action!
+  "One user action deleting [a b), as a selection Backspace makes."
+  [ed a b]
+  (let [buf (:buf ed)]
+    (g/gtk-text-buffer-begin-user-action buf)
+    (g/with-iters* buf a b (fn [i j] (g/gtk-text-buffer-delete buf i j)))
+    (g/gtk-text-buffer-end-user-action buf)))
+
 (defn- label-state [ui]
   {:visible (pos? (g/gtk-widget-get-visible (:parinfer-label ui)))
    :text (g/label-text (:parinfer-label ui))})
@@ -65,12 +76,14 @@
       (on-gtk (let [_ ((:open-file! ui) file)
                     t ((:active-tab* ui))]
                 (try
-                  (let [ed (:ed t)
+                  (let [opened? (= file @(:path t))
+                        ed (:ed t)
                         _ (type-str! ed "(")
                         text (editor/editor-text ed)
                         label (label-state ui)]
                     (support/check :parinfer-project-on
-                                   (and (= "()" text)
+                                   (and opened?
+                                        (= "()" text)
                                         (:visible label)
                                         (= "Parinfer: Smart (project)" (:text label)))
                                    {:text text :label label}))
@@ -92,6 +105,7 @@
                                (catch :default _ nil))
                           {:t t
                            :detail {:tab-id (:id t)
+                                    :opened? (= file @(:path t))
                                     :text (editor/editor-text ed)
                                     :label (label-state ui)}}))
           ;; An async Ready from an earlier row can land over the status,
@@ -103,8 +117,9 @@
                                                    (do ((:parinfer!* ui) :indent) false))))]
       (on-gtk (try
                 (support/check :parinfer-project-pins-off
-                               (let [{:keys [text label]} (:detail state)]
-                                 (and (= "(" text)
+                               (let [{:keys [opened? text label]} (:detail state)]
+                                 (and opened?
+                                      (= "(" text)
                                       (:visible label)
                                       (= "Parinfer: off (project)" (:text label))
                                       status-ok?))
@@ -126,14 +141,16 @@
                     project-tab ((:active-tab* ui))
                     plain-tab* (atom nil)]
                 (try
-                  (let [on-project (label-state ui)
+                  (let [on-project (assoc (label-state ui)
+                                          :opened? (= file @(:path project-tab)))
                         _ ((:new-tab!* ui))
                         _ (reset! plain-tab* ((:active-tab* ui)))
                         on-plain (label-state ui)
                         _ ((:select-tab! ui) (:id project-tab))
                         back (label-state ui)]
                     (support/check :parinfer-label-follows-tab
-                                   (and (:visible on-project)
+                                   (and (:opened? on-project)
+                                        (:visible on-project)
                                         (= "Parinfer: Smart (project)" (:text on-project))
                                         (not (:visible on-plain))
                                         (:visible back)
@@ -156,9 +173,10 @@
                 (try
                   ((:open-file! ui) file)
                   (let [same-tab? (= (:id t) (:id ((:active-tab* ui))))
+                        opened? (= file @(:path t))
                         label (label-state ui)]
                     (support/check :parinfer-label-after-open-into-untitled
-                                   (and same-tab?
+                                   (and same-tab? opened?
                                         (:visible label)
                                         (= "Parinfer: Smart (project)" (:text label)))
                                    {:same-tab same-tab? :label label
@@ -166,3 +184,34 @@
                   (finally
                     (close-clean! ui t)
                     (delete-tree! dir))))))))
+
+(defn row-parinfer-mode-change-clears-skip-note
+  "Polish Review Focus 4: after a too-long note, a mode change must not
+  let the note's later clear stomp the newer status with Ready. set-status!
+  goes through the idle queue (FIFO), so the writes land after the action
+  block; one flush wait makes the final text deterministic: broken code
+  ends on Ready, fixed code on Parinfer: Indent."
+  [ui]
+  (go-row :parinfer-mode-change-clears-skip-note support/check
+    (let [t* (atom nil)]
+      (on-gtk (let [_ ((:new-tab!* ui))
+                    t ((:active-tab* ui))
+                    ed (:ed t)]
+                (reset! t* t)
+                ((:parinfer!* ui) :smart)
+                (editor/set-text! ed (str "(a\n" (apply str (repeat 301 "  b\n")) ")"))
+                (caret! ed 5)
+                (type-str! ed "x")          ; schedules the skip note
+                ((:parinfer!* ui) :indent)  ; schedules the newer status
+                (editor/set-text! ed "(a\n  b)")
+                (caret! ed 5)
+                (delete-action! ed 3 5)))   ; an adjusted edit clears the note
+      (gtk-async/await-until 400 100 (constantly false))   ; let the idles land
+      (on-gtk (let [status (g/label-text (:status-label ui))
+                    text (editor/editor-text (:ed @t*))]
+                (support/check :parinfer-mode-change-clears-skip-note
+                               (and (= "(a)\nb" text)
+                                    (str/includes? status "Parinfer: Indent"))
+                               {:status status :text text})
+                (try ((:parinfer!* ui) :off) (catch :default _ nil))
+                (close-clean! ui @t*))))))

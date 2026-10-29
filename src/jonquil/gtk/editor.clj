@@ -407,8 +407,9 @@
   begin-user-action snapshot, applied inside a nested user action, which
   GTK folds into the keystroke's own undo group (the B1 probe), so one
   undo reverts the keystroke and the fix together. ::pe/too-long goes to
-  :parinfer-status-fn, which it clears again on the next adjusted edit; a
-  throw is reported and the buffer stays as typed."
+  :parinfer-status-fn, which it clears again on the next adjusted edit; an
+  {:engine-error msg} (a Jolt shim gap) is named through :on-error-fn, and
+  a throw is reported the same way with the buffer left as typed."
   [ed]
   (when-let [prev @(:parinfer-prev ed)]
     (reset! (:parinfer-prev ed) nil)
@@ -420,9 +421,18 @@
                             :prev-text (:text prev) :prev-caret (:caret prev)
                             :text text :caret (g/cursor-offset buf)})
               status @(:parinfer-status-fn ed)]
-          (if (= ::pe/too-long r)
+          (cond
+            (= ::pe/too-long r)
             (when status
-              (status (str "form over " pe/default-max-lines " lines, not adjusted")))
+              (status (str "over " pe/default-max-lines " lines here, not adjusted")))
+
+            ;; A Jolt shim gap the engine caught (parinfer-edit): name it
+            ;; once; the buffer stays as typed.
+            (:engine-error r)
+            (when-let [f @(:on-error-fn ed)]
+              (f (str "; parinfer: " (:engine-error r))))
+
+            :else
             (do (when (map? r)
                   (reset! (:parinfer-busy? ed) true)
                   (try

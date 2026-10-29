@@ -17,7 +17,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
-            [jonquil.paint :as paint]))
+            [jonquil.paint :as paint]
+            [jonquil.parinfer-edit :as pe]))
 
 (defonce results (atom []))
 (defonce true-fire-count (atom 0))
@@ -1088,7 +1089,7 @@
                    (type-str! ed "x")
                    (let [text (editor/editor-text ed)]
                      (check :parinfer-too-long-form-says-so
-                            (and (= [(str "form over 300 lines, not adjusted")] @status)
+                            (and (= [(str "over 300 lines here, not adjusted")] @status)
                                  (= (str "(a\n  xb\n" (apply str (repeat 300 "  b\n")) ")") text))
                             {:status @status}))
                    (finally (parinfer-off! ed)))))))
@@ -1155,6 +1156,30 @@
                           {:text text :sel sel}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-engine-failure-named-once [ed]
+  (go-row :parinfer-engine-failure-named-once check
+    (on-gtk (let [errors (atom [])]
+              (try (parinfer-on! ed :smart)
+                   (editor/set-error-fn! ed (fn [msg] (swap! errors conj msg)))
+                   (editor/set-text! ed "(a)")
+                   (caret! ed 2)
+                   ;; A Jolt shim gap surfaces as an "unhandled" engine
+                   ;; result; the hook names it once and the text stays as
+                   ;; typed (polish Review Focus 3).
+                   (with-redefs-fn {#'pe/adjust
+                                    (fn [_] {:engine-error "boom"})}
+                     #(type-str! ed "x"))
+                   (let [after-fail (editor/editor-text ed)]
+                     (type-str! ed "(")
+                     (check :parinfer-engine-failure-named-once
+                            (and (= ["; parinfer: boom"] @errors)
+                                 (= "(ax)" after-fail)
+                                 (= "(ax())" (editor/editor-text ed)))
+                            {:errors @errors :after-fail after-fail
+                             :text (editor/editor-text ed)}))
+                   (finally (editor/set-error-fn! ed (fn [_]))
+                            (parinfer-off! ed)))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -1200,7 +1225,8 @@
    row-parinfer-paren-mode-keeps-pairs
    row-parinfer-quote-backspace-keeps-pair
    row-parinfer-op-keeps-caret
-   row-parinfer-op-keeps-selection])
+   row-parinfer-op-keeps-selection
+   row-parinfer-engine-failure-named-once])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

@@ -199,6 +199,18 @@
   (is (= :indent (c/parinfer-effective :indent :smart)))
   (is (= :off (c/parinfer-effective :off :smart)) "a project pins off"))
 
+(deftest parinfer-mode-word-test
+  (is (= "off" (c/parinfer-mode-word :off)))
+  (is (= "Smart" (c/parinfer-mode-word :smart)))
+  (is (= "Indent" (c/parinfer-mode-word :indent))))
+
+(deftest parinfer-pinned-note-test
+  (is (= " (this project says off)" (c/parinfer-pinned-note :smart :off)))
+  (is (= " (this project says Paren)" (c/parinfer-pinned-note :off :paren)))
+  (is (nil? (c/parinfer-pinned-note :smart :smart))
+      "a global landing on the pin says nothing (review #145 M2)")
+  (is (nil? (c/parinfer-pinned-note :smart nil)) "no override, no note"))
+
 (deftest parinfer-status-text-test
   (is (= "Parinfer: Smart" (c/parinfer-status-text :smart false :smart)))
   (is (= "Parinfer: Smart (project)" (c/parinfer-status-text :smart true :off)))

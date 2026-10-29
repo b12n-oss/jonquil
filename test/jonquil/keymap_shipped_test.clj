@@ -91,7 +91,8 @@
 
 (deftest parinfer-chord-test
   ;; Cmd/Ctrl+Alt+P cycles the Parinfer mode (upstream's Ctrl+Alt+P). On
-  ;; macOS Option+P arrives as pi (0x3c0); :physical? matches it by keycode
+  ;; macOS Option+P arrives as pi (GDK_KEY_Greek_pi, 0x7f0, measured with
+  ;; gdk_keyval_from_name 2026-10-29); :physical? matches it by keycode
   ;; through dispatch's :physical option, as Format Selection does.
   (doseq [cmd [(:ctrl M) (:meta M)]]
     (let [st (bit-or cmd (:alt M))]
@@ -99,7 +100,7 @@
              (:command (km/resolve-binding (:window km/shipped) 0x70 st (constantly false)))))
       (is (nil? (km/resolve-binding (:window km/shipped) 0x70 cmd (constantly false)))
           "without Alt, Cmd+P is nothing")
-      (is (= :handled (km/dispatch (:window km/shipped) 0x3c0 st
+      (is (= :handled (km/dispatch (:window km/shipped) 0x7f0 st
                                    {:holds? (constantly false)
                                     :run! (fn [b] (when (= :parinfer/next-mode (:command b)) :handled))
                                     :physical "p"}))

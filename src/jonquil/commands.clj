@@ -287,11 +287,25 @@
   [override global]
   (or override global))
 
+(defn parinfer-mode-word
+  "A mode as the status bar writes it: off stays lower case, a mode is
+  capitalized."
+  [mode]
+  (if (= :off mode) "off" (str/capitalize (name mode))))
+
+(defn parinfer-pinned-note
+  "The suffix a global mode change shows while the active tab's project
+  pins another mode, or nil: no override, or the global landed on the pin
+  itself, says nothing."
+  [global override]
+  (when (and override (not= global override))
+    (str " (this project says " (parinfer-mode-word override) ")")))
+
 (defn parinfer-label-text
   "The status bar's text for mode, nil for :off (the label hides)."
   [mode]
   (when (not= :off mode)
-    (str "Parinfer: " (str/capitalize (name mode)))))
+    (str "Parinfer: " (parinfer-mode-word mode))))
 
 (defn parinfer-status-text
   "The label for the active tab: its effective mode, with \" (project)\"
@@ -302,5 +316,5 @@
   [effective override? global]
   (cond
     (and override? (= :off effective)) (when (not= :off global) "Parinfer: off (project)")
-    override? (str "Parinfer: " (str/capitalize (name effective)) " (project)")
+    override? (str "Parinfer: " (parinfer-mode-word effective) " (project)")
     :else (parinfer-label-text effective)))
