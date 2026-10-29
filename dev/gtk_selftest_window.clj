@@ -469,6 +469,7 @@
    parinfer-rows/row-parinfer-project-on
    parinfer-rows/row-parinfer-project-pins-off
    parinfer-rows/row-parinfer-label-follows-tab
+   parinfer-rows/row-parinfer-label-after-open-into-untitled
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

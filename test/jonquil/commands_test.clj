@@ -200,8 +200,10 @@
   (is (= :off (c/parinfer-effective :off :smart)) "a project pins off"))
 
 (deftest parinfer-status-text-test
-  (is (= "Parinfer: Smart" (c/parinfer-status-text :smart false)))
-  (is (= "Parinfer: Smart (project)" (c/parinfer-status-text :smart true)))
-  (is (nil? (c/parinfer-status-text :off false)) "globally off: the label hides")
-  (is (= "Parinfer: off (project)" (c/parinfer-status-text :off true))
-      "pinned off under a non-off global stays visible"))
+  (is (= "Parinfer: Smart" (c/parinfer-status-text :smart false :smart)))
+  (is (= "Parinfer: Smart (project)" (c/parinfer-status-text :smart true :off)))
+  (is (nil? (c/parinfer-status-text :off false :off)) "globally off: the label hides")
+  (is (= "Parinfer: off (project)" (c/parinfer-status-text :off true :smart))
+      "pinned off under a non-off global says why it's quiet")
+  (is (nil? (c/parinfer-status-text :off true :off))
+      "pinned off under an off global differs from nothing, so it hides (review I2)"))

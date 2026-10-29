@@ -2593,6 +2593,9 @@
                             (cview/append! cv :error (str "; project: " (ex-message e) "\n")))
                           (finally (editor/set-profile! ed (:profile tsel))
                                    (refresh-labels! ctx)
+                                   ;; The tab's project just changed, and
+                                   ;; its :parinfer with it (review I1).
+                                   (when-let [f (:parinfer-label-update! ctx)] (f))
                                    (when tree-saved! (tree-saved! t))))))))
     (assoc t
            :flash-fns flash-fns
@@ -3541,7 +3544,8 @@
                                  (let [ov (active-parinfer-override)]
                                    (if-let [t (commands/parinfer-status-text
                                                (commands/parinfer-effective ov @parinfer-mode*)
-                                               (some? ov))]
+                                               (some? ov)
+                                               @parinfer-mode*)]
                                      (do (g/gtk-label-set-text parinfer-label t)
                                          (g/gtk-widget-set-visible parinfer-label 1))
                                      (g/gtk-widget-set-visible parinfer-label 0))))
@@ -3891,6 +3895,9 @@
       ;; Spike §1: switch-page fired inside that first append, before the
       ;; tab was in tabs, so the tab is made active here.
       (reset! active-id (:id first-tab))
+      ;; A launch on a project file: the first tab never goes through
+      ;; on-switch!, so its override reaches the label here (review I1).
+      (update-parinfer-label!)
       (reset! *tab-ctx tab-ctx)
       (reset! *folder-result folder-result!)
       ;; P5a: Open With and Dock drops. A directory re-roots the tree like an

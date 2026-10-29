@@ -295,11 +295,12 @@
 
 (defn parinfer-status-text
   "The label for the active tab: its effective mode, with \" (project)\"
-  when the tab's .jonquil.edn decided. A project pinning :off shows
-  \"Parinfer: off (project)\", so a tab that ignores the global says why;
-  a plain :off is nil and the label hides."
-  [effective override?]
+  when the tab's .jonquil.edn decided. nil hides the label: a plain :off,
+  and a pinned :off while the global is off too, since nothing differs
+  (review I2). A pinned :off under a non-off global stays visible, so the
+  tab that ignores the global says why it's quiet."
+  [effective override? global]
   (cond
-    override? (str "Parinfer: " (if (= :off effective) "off" (str/capitalize (name effective)))
-                   " (project)")
+    (and override? (= :off effective)) (when (not= :off global) "Parinfer: off (project)")
+    override? (str "Parinfer: " (str/capitalize (name effective)) " (project)")
     :else (parinfer-label-text effective)))

@@ -2,9 +2,10 @@
   "The per-project Parinfer override: a project's .jonquil.edn :parinfer
   decides its tabs' mode either way, the label says (project), and the
   global commands leave a pinned tab alone. The edits go through one
-  begin/end-user-action, the same shape GTK's own commit makes. Every row
-  cleans up in a finally, so a failure can't leak a tab or the global mode
-  into the rows after it."
+  begin/end-user-action, the same shape GTK's own commit makes. Each row
+  closes its tab and deletes its temp project in a finally, and marks the
+  tab clean first (close-clean!), so a failed check doesn't leave the
+  unsaved-changes alert blocking the rows after it."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [gtk-async :as gtk-async :refer [go-row on-gtk]]
@@ -86,8 +87,9 @@
           state (on-gtk (let [_ ((:open-file! ui) file)
                               t ((:active-tab* ui))
                               ed (:ed t)]
-                          ((:parinfer!* ui) :smart)
-                          (type-str! ed "(")
+                          (try ((:parinfer!* ui) :smart)
+                               (type-str! ed "(")
+                               (catch :default _ nil))
                           {:t t
                            :detail {:tab-id (:id t)
                                     :text (editor/editor-text ed)
@@ -140,4 +142,27 @@
                   (finally
                     (when-let [pt @plain-tab*] (close-clean! ui pt))
                     (close-clean! ui project-tab)
+                    (delete-tree! dir))))))))
+
+(defn row-parinfer-label-after-open-into-untitled
+  "Review I1: Open on a project file fills an untouched Untitled tab in
+  place (no tab switch), and the label must still pick up the project's
+  override."
+  [ui]
+  (go-row :parinfer-label-after-open-into-untitled support/check
+    (let [[file dir] (temp-project! "{:parinfer :smart}")]
+      (on-gtk (let [_ ((:new-tab!* ui))
+                    t ((:active-tab* ui))]
+                (try
+                  ((:open-file! ui) file)
+                  (let [same-tab? (= (:id t) (:id ((:active-tab* ui))))
+                        label (label-state ui)]
+                    (support/check :parinfer-label-after-open-into-untitled
+                                   (and same-tab?
+                                        (:visible label)
+                                        (= "Parinfer: Smart (project)" (:text label)))
+                                   {:same-tab same-tab? :label label
+                                    :path @(:path t)}))
+                  (finally
+                    (close-clean! ui t)
                     (delete-tree! dir))))))))
