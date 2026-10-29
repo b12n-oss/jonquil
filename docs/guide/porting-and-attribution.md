@@ -8,7 +8,10 @@ This page carries the reasoning behind it, plus the Jolt fixes the port
 needed along the way.
 
 The pin is [DrClojure-Neo](https://github.com/kimtg/DrClojure-Neo) at commit
-[`41c56b8`](https://github.com/kimtg/DrClojure-Neo/commit/41c56b8563bb319bb940547c8982406eff1a6db0) (2026-09-22), recorded in `UPSTREAM_PIN`.
+[`7056c61`](https://github.com/kimtg/DrClojure-Neo/commit/7056c61e09f8e9ad3c63fc4b1bd9ac35d15ad3ed) (2026-09-28), recorded in `UPSTREAM_PIN`.
+Most of the lifted code dates from the earlier pin `41c56b8` (2026-09-22);
+`7056c61` brought only its smart-indent fix, and its Parinfer half isn't
+ported (see `UPSTREAM.md`).
 
 ## What was lifted, and what was rebuilt
 
