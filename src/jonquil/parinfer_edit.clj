@@ -8,7 +8,8 @@
   Smart and Indent mode trust indentation, so on a form whose indentation
   disagrees with its brackets they move closers. A form is checked before
   each edit: when Paren mode would change it, this edit fixes its
-  indentation first, and the form is stable from then on. Opening a file
+  indentation first, and later edits usually find it stable (one that
+  unbalances the form can leave Paren mode refusing). Opening a file
   changes nothing, and forms nobody edits stay as they are (the user's
   choice, 2026-10-29). Pure: no GTK."
   (:require [clojure.string :as str]
@@ -120,12 +121,18 @@
   a's line to the line before the next boundary after b's line."
   [^String text a b]
   (let [n (count text)
-        strings (vec (for [[t s e] (syntax/tokenize-equal text) :when (= t :string)] [s e]))
+        spans (vec (for [[t s e] (syntax/tokenize-equal text)
+                         :when (contains? #{:string :regex} t)]
+                     [s e]))
         s (loop [L (line-start text a)]
-            (if (or (zero? L) (boundary? text strings L)) L (recur (line-start text (dec L)))))
+            (if (or (zero? L) (boundary? text spans L)) L (recur (line-start text (dec L)))))
         e (loop [L (inc (line-end text b))]
             (cond (>= L n) (line-end text n)
-                  (boundary? text strings L) (line-end text (dec L))
+                  ;; (dec L) is the newline ending the previous line; a \r
+                  ;; before it belongs to that line's ending, not the region.
+                  (boundary? text spans L)
+                  (let [e (dec L)]
+                    (if (and (pos? e) (= \return (.charAt text (dec e)))) (dec e) e))
                   :else (recur (let [nl (line-end text L)]
                                  (inc (if (and (< nl n) (= \return (.charAt text nl))) (inc nl) nl))))))]
     [s (max e (line-end text b))]))
@@ -204,7 +211,10 @@
           pr (parinfer/paren-mode P)
           fixed (when (and (:success pr) (reindents? P (:text pr))) (:text pr))]
       (if fixed
-        (or (rebased mode-fn P fixed change rel-caret)
+        ;; A failed re-apply is nil, so the Paren fallback really runs
+        ;; (#142 minor 5); its own failure would otherwise mask it.
+        (or (when-let [r (rebased mode-fn P fixed change rel-caret)]
+              (when (:success r) r))
             (parinfer/paren-mode R opts))
         (mode-fn R (assoc opts :changes [change]))))))
 
@@ -249,13 +259,18 @@
                {})
         result (run-mode mode P R change (- caret s) opts)
         NR (:text result)]
-    (when (and (:success result) (string? NR) (not= NR R))
+    (cond
+      (and (:success result) (string? NR) (not= NR R))
       (let [[q r-end n-end] (diff R NR)]
         {:edits [[(+ s q) (+ s r-end) (subs NR q n-end)]]
          :caret (cond
                   caret-in? (+ s (offset NR (:cursor-line result) (:cursor-x result)))
                   (> caret e') (+ caret (- (count NR) (count R)))
-                  :else caret)}))))
+                  :else caret)})
+      ;; "unhandled" is the engine catching a Throwable, a Jolt shim gap
+      ;; the console should name; Parinfer's own refusals stay nil.
+      (and (not (:success result)) (= "unhandled" (:name (:error result))))
+      {:engine-error (or (:message (:error result)) "unhandled")})))
 
 (defn adjust
   "What Parinfer wants after one edit, as jonquil.edit's {:edits [[s e r]]
@@ -281,6 +296,11 @@
                        (str/blank? (subs text p new-end)))
                 (prev-form-start prev s)
                 s)]
-        (if (<= (inc (count (filter #(= \newline %) (subs prev s e)))) max-lines)
+        ;; The cap counts the edited after-text too, or a long paste onto
+        ;; a blank line would run Parinfer over all of it.
+        (if (<= (inc (max (count (filter #(= \newline %) (subs prev s e)))
+                          (count (filter #(= \newline %)
+                                         (subs text s (max s (+ e (- (count text) (count prev)))))))))
+                max-lines)
           (adjust-region mode prev prev-caret text caret p old-end new-end s e)
           ::too-long)))))

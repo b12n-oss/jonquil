@@ -110,3 +110,29 @@
     (is (= 4 (pe/remap-offset "(a\nb\nc)" "(a)\nb\nc" 3)) "start of b")
     (is (= 7 (pe/remap-offset "(a\nb\nc)" "(a)\nb\nc" 7)) "after c, was before )")
     (is (= 2 (pe/remap-offset "ab\ncd" "ab" 4)) "a vanished line clamps to the end")))
+
+(deftest region-crlf-fallback-ends-on-the-line-test
+  (testing "in unbalanced CRLF text the region ends before the line's \r"
+    (is (= [0 8] (pe/region "(a\r\n  b)\r\n(c\r\n(d" 1)))))
+
+(deftest region-regex-column-0-stays-inside-test
+  (testing "a multi-line regex's column-0 line doesn't split a fallback region"
+    (is (= [0 14] (pe/region "(def r #\"a\nb\")\n(h" 2)))))
+
+(deftest adjust-caps-the-after-text-too-test
+  (testing "a long paste onto a blank line answers ::pe/too-long (the cap
+           counted only the before-text's one line)"
+    (let [block (clojure.string/join "\n" (repeat 400 "(x)"))]
+      (is (= ::pe/too-long
+             (pe/adjust {:mode :smart :prev-text "(a)\n\n(b)" :prev-caret 4
+                         :text (str "(a)\n" block "\n(b)") :caret (+ 4 (count block))}))))))
+
+(deftest adjust-reports-an-engine-failure-test
+  (testing "an \"unhandled\" engine result (a Jolt shim gap) is named, not nil"
+    (with-redefs-fn {#'jonquil.parinfer/smart-mode
+                     (fn [& _] {:success false :error {:name "unhandled" :message "boom"}})}
+      #(is (= {:engine-error "boom"}
+              (pe/adjust {:mode :smart :prev-text "(a b)" :prev-caret 2
+                          :text "(a xb)" :caret 3})))))
+  (testing "Parinfer's own refusal stays nil (normal typing)"
+    (is (nil? (run :paren "(a)\n" 4 "(a)\n(" 5)))))
