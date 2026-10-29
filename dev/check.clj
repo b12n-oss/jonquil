@@ -6,6 +6,7 @@
   '[jonquil.core
     jonquil.dialect
     jonquil.syntax
+    jonquil.parinfer
     jonquil.theme
     jonquil.settings
     jonquil.paint
