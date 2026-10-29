@@ -172,7 +172,7 @@ the app directory to name one, removed on every exit path. 18 checks.
 
 **`bb docs:shots`** self-captures every `docs/images/*.png` and the GIFs
 the guide pages embed, launching a fresh `jolt -M:shots <scene-id>` per
-scene (30 scenes). Retake one image with that command directly. First runs
+scene (32 scenes). Retake one image with that command directly. First runs
 can download dependencies (ClojureScript and shadow-cljs scenes, and the
 ClojureDocs export for `clj-full-doc`). A scene whose tools are missing
 prints a line and exits 0 without an image.

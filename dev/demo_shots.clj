@@ -1033,8 +1033,8 @@
   "Smart mode as a GIF: every open bracket closes itself as it's typed,
   dedenting the body line pulls the closer up, and re-indenting pulls it
   back in. The still doubles as the section's non-animated fallback. The
-  final text is asserted before the recording's alts!, so a slow run can't
-  end the GIF early."
+  rejoin is asserted to land inside the recording's fixed window, so a
+  slow run fails instead of shipping a GIF that ends early."
   [ui]
   (go-row :parinfer check!
     (let [pid (own-pid)
@@ -1042,6 +1042,7 @@
           _ (on-gtk ((:parinfer!* ui) :smart)
                     (editor/set-text! ed "")
                     (place-cursor! (:buf ed) 0))
+          gif-t0 (System/currentTimeMillis)
           gif (record-gif (image-path :parinfer "gif") pid 9 6 640)
           _ (<! (timeout 600))
           _ (parinfer-type! ui "(defn greet [name")
@@ -1067,6 +1068,10 @@
           rejoin-ok? (await-until 2000 20
                                   #(= "(defn greet [name]\n  (println name))"
                                       (editor/editor-text ed)))
+          ;; the recording runs a fixed 9 s from gif-t0, so the rejoin must
+          ;; land inside it with a beat to spare, or the GIF ends early on
+          ;; a loaded machine while the scene still passes (review I2)
+          in-window? (< (- (System/currentTimeMillis) gif-t0) 8000)
           label (on-gtk (g/label-text (:parinfer-label ui)))
           [gif-result port] (a/alts! [gif (timeout 15000)])
           gif-finished? (= port gif)
@@ -1078,11 +1083,12 @@
                                (editor/set-text! ed "")
                                t))]
       (on-gtk (check! :parinfer
-                      (and typed-ok? dedent-ok? rejoin-ok? gif-finished?
+                      (and typed-ok? dedent-ok? rejoin-ok? in-window? gif-finished?
                            (= "Parinfer: Smart" label)
                            (zero? (:exit gif-result)) (zero? exit))
                       {:text final-text :label label
                        :typed typed-ok? :dedent dedent-ok? :rejoin rejoin-ok?
+                       :in-window in-window?
                        :gif-result gif-result :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-parinfer-project
@@ -1100,7 +1106,9 @@
       (try
         (.mkdirs (.getParentFile f))
         (spit (io/file dir "deps.edn") "{:paths [\"src\"]}")
-        (spit (io/file dir ".jonquil.edn") "{:parinfer :smart}\n")
+        ;; in process, as scene-file-tree: no nREPL child, so no async
+        ;; start line can print the temp path into the image (review I1)
+        (spit (io/file dir ".jonquil.edn") "{:parinfer :smart :runtime :in-process}\n")
         (spit f "(ns demo.greeting)\n\n(defn hello [name]\n  (str \"Hello, \" name \"!\"))\n")
         (on-gtk ((:open-file! ui) (.getCanonicalPath f)))
         (let [label-ok? (await-until 3000 20
@@ -1114,16 +1122,17 @@
               _ (parinfer-type! ui "(hello name")
               typed-ok? (await-until 2000 20
                                      #(str/includes? (editor/editor-text ed) "(hello name)"))
-              ;; the child's start line prints the temp dir; a cleared
-              ;; console keeps the machine path out of the image
-              _ (on-gtk ((:clear-console!* ui)))
               _ (ga/settle 2)
+              ;; a temp path in the console would ship in the image, so a
+              ;; leak FAILs the scene instead of passing silently (review I1)
+              no-leak? (on-gtk (not (str/includes? (console-text ui) (.getName dir))))
               {:keys [exit err]} (ga/screenshot (image-path :parinfer-project "png") pid)]
           (on-gtk (editor/set-text! ed "")   ; clean, so the window closes without the prompt
                   (check! :parinfer-project
-                          (and label-ok? typed-ok? (zero? exit) (pos? end))
+                          (and label-ok? typed-ok? no-leak? (zero? exit) (pos? end))
                           {:label (g/label-text (:parinfer-label ui))
-                           :typed typed-ok? :screenshot-exit exit :screenshot-err err})))
+                           :typed typed-ok? :no-leak no-leak?
+                           :screenshot-exit exit :screenshot-err err})))
         (finally
           (doseq [child (reverse (file-seq dir))] (.delete child)))))))
 
