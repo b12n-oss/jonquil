@@ -76,11 +76,12 @@
   is kept as it is, anything else is nil. Jolt from jolt-lang/jolt f714b0ed
   (2026-10-19, after v0.8.23) records a required namespace's :file this way,
   as JVM Clojure does; v0.8.23 recorded the root's spelling (an absolute
-  path, or ./src/...). Measured on f714b0ed in source mode: a stdlib name
-  such as clojure/string.clj resolves to a file: URL that doesn't exist,
-  and in a release binary to an image resource whose string is the bare
-  name again, so all of those come back nil. Never throws (a lookup
-  mustn't)."
+  path, or ./src/...). What a stdlib name such as clojure/string.clj gives
+  depends on the Jolt: releases to v0.8.23 answer a URL whose string is
+  the bare name (nil here), and jolt main (jolt-lang/jolt #1438, PR #1440,
+  2026-10-29) a jar:file:jolt-embedded-resources.jar!/... URL, kept like
+  any other jar entry; slurp reads it (measured, 6462 chars). Never
+  throws (a lookup mustn't)."
   [cp-name]
   (try
     (when-let [u (io/resource cp-name)]

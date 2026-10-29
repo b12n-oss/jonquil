@@ -63,11 +63,19 @@
   ;; namespace's :file as its classpath name, so these stand in for that.
   (testing "a name on this process's roots resolves to the file's path"
     (is (= (.getCanonicalPath (io/file "src/jonquil/help.clj")) (source/classpath-file "jonquil/help.clj"))))
-  (testing "nothing on the roots, or a Jolt image resource whose string is the bare name, is nil"
+  (testing "nothing on the roots is nil"
     (is (.isFile (io/file "README.md")) "it is in the directory, but not on a root")
     (is (nil? (source/classpath-file "README.md")))
-    (is (nil? (source/classpath-file "no/such/thing.clj")))
-    (is (nil? (source/classpath-file "clojure/string.clj")))))
+    (is (nil? (source/classpath-file "no/such/thing.clj"))))
+  (testing "a Jolt stdlib name answers whatever this Jolt can read, or nil.
+           Releases to v0.8.23 give a URL whose string is the bare name
+           (nil here); jolt main (#1438) a readable jar: URL; a source-mode
+           jolt a real file"
+    (let [r (source/classpath-file "clojure/string.clj")]
+      (is (or (nil? r)
+              (and (str/starts-with? r "jar:file:") (pos? (count (slurp r))))
+              (.isFile (io/file r)))
+          (pr-str r)))))
 
 (deftest resolve-file-test
   (let [help (.getCanonicalPath (io/file "src/jonquil/help.clj"))]
