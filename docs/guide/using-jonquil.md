@@ -153,8 +153,8 @@ All keys are in [Keys](keys.md).
 Parinfer keeps brackets and indentation in step as you type. It's off by
 default. Cmd/Ctrl+Option(Alt)+P cycles the mode, the palette has one
 command per mode, and the choice is saved in `settings.edn`. The status
-bar shows the label whenever Parinfer differs from off for the tab you're
-in: a mode is on, or the tab's project overrides your setting either way.
+bar shows the label whenever a mode is on for the tab you're in, or the
+tab's project overrides your setting either way.
 
 - **Smart** (the usual choice) balances brackets from your indentation:
   typing `(` closes it, and dedenting a line moves its closer up.

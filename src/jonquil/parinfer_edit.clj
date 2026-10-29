@@ -211,10 +211,11 @@
           pr (parinfer/paren-mode P)
           fixed (when (and (:success pr) (reindents? P (:text pr))) (:text pr))]
       (if fixed
-        ;; A failed re-apply is nil, so the Paren fallback really runs
-        ;; (#142 minor 5); its own failure would otherwise mask it.
+        ;; A refused re-apply is nil, so the Paren fallback really runs
+        ;; (#142 minor 5); an "unhandled" one is kept, so the shim gap is
+        ;; named instead of silently taking Paren mode's fix (polish I1).
         (or (when-let [r (rebased mode-fn P fixed change rel-caret)]
-              (when (:success r) r))
+              (when (or (:success r) (= "unhandled" (get-in r [:error :name]))) r))
             (parinfer/paren-mode R opts))
         (mode-fn R (assoc opts :changes [change]))))))
 
@@ -268,13 +269,16 @@
                   (> caret e') (+ caret (- (count NR) (count R)))
                   :else caret)})
       ;; "unhandled" is the engine catching a Throwable, a Jolt shim gap
-      ;; the console should name; Parinfer's own refusals stay nil.
+      ;; the editor's error line (the status bar) should name; Parinfer's
+      ;; own refusals stay nil.
       (and (not (:success result)) (= "unhandled" (:name (:error result))))
       {:engine-error (or (:message (:error result)) "unhandled")})))
 
 (defn adjust
   "What Parinfer wants after one edit, as jonquil.edit's {:edits [[s e r]]
-  :caret n}, or nil when it wants nothing, can't run, or fails. mode is
+  :caret n}; nil when it wants nothing, can't run, or Parinfer refuses;
+  {:engine-error msg} when the engine caught a Throwable (an \"unhandled\"
+  result, a Jolt shim gap the editor's error line names). mode is
   :smart, :indent or :paren; prev-text and prev-caret are the buffer and
   caret before the edit, text and caret after it. A form of more than
   max-lines lines (default-max-lines) is left as typed, answered as

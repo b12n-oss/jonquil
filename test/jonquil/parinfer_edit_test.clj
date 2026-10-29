@@ -135,5 +135,12 @@
       #(is (= {:engine-error "boom"}
               (pe/adjust {:mode :smart :prev-text "(a b)" :prev-caret 2
                           :text "(a xb)" :caret 3})))))
+  (testing "an \"unhandled\" during the unstable form's re-apply is named too,
+           not silently replaced by Paren mode's fix (polish review I1)"
+    (with-redefs-fn {#'parinfer/smart-mode
+                     (fn [& _] {:success false :error {:name "unhandled" :message "boom"}})}
+      #(is (= {:engine-error "boom"}
+              (pe/adjust {:mode :smart :prev-text "(a\nb)" :prev-caret 1
+                          :text "(xa\nb)" :caret 2})))))
   (testing "Parinfer's own refusal stays nil (normal typing)"
     (is (nil? (run :paren "(a)\n" 4 "(a)\n(" 5)))))
