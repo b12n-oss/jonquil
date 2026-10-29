@@ -14,9 +14,9 @@ Known rough edges, parked for later:
 - Parinfer leaves an edit alone once it reaches past 300 lines, one long
   form or a long paste alike; the status bar says "over 300 lines here,
   not adjusted". With Parinfer on, a keystroke in a 4,500-line file costs
-  about 4 ms while typing in one form, and about 27 ms for the first
-  keystroke after an undo, a reload or an agent edit (measured
-  2026-10-29).
+  about 4 ms while typing in one form, about 13 ms for the first
+  keystroke after a reload or an agent edit, about 22 ms after an undo
+  and about 14 ms after a redo (each measured 2026-10-29).
 - Parinfer normalises what it touches: in an edited form, tabs become two
   spaces and every line ending follows the form's first.
 

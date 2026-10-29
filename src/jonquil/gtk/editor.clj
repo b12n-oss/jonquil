@@ -134,6 +134,15 @@
     (g/gtk-text-buffer-set-text buf s -1)
     (g/gtk-text-buffer-end-irreversible-action buf)
     (reset! (:saved-text ed) s)
+    ;; The new text is in hand, so the Parinfer cache primes for free and
+    ;; the next keystroke is a hit (miss-path cut 2). The gen is read after
+    ;; the set, in this same step, so the prime can't be stale; no :edit-at,
+    ;; so the first-edit re-indent still fires. GTK takes a C string, so a
+    ;; NUL in s truncates what the buffer keeps: prime only when the counts
+    ;; agree, else clear and the next keystroke misses honestly (review I1).
+    (reset! (:parinfer-prev-cache ed)
+            (when (= (count s) (g/gtk-text-buffer-get-char-count buf))
+              {:text s :gen @(:edit-gen ed)}))
     (when @(:read-only? ed)
       (g/with-iters* buf 0 (count s)
         (fn [a b] (g/gtk-text-buffer-apply-tag buf (:readonly-tag ed) a b)))))
@@ -427,7 +436,10 @@
               ;; count (embedded objects, hidden text); a wrong span is
               ;; invisible to it, which is why the span must stay sound
               ;; (splice review M1).
-              text (or (when (and (:cached? prev) span)
+              ;; a miss's prev is a fresh read of the begin-time buffer,
+              ;; ground truth by construction, so the splice doesn't need
+              ;; the cache (miss-path cut 1)
+              text (or (when span
                          (let [pt ^String (:text prev)
                                n (count pt)
                                m (g/gtk-text-buffer-get-char-count buf)
@@ -532,11 +544,27 @@
 
 (defn apply-op-plain!
   "apply-op! with the Parinfer hook skipped, so an MCP edit or another
-  programmatic change lands exactly as sent."
+  programmatic change lands exactly as sent. The op knows its own edits,
+  so a cache that is valid going in stays valid coming out, applied to
+  the cached string with no buffer read (miss-path cut 3); an invalid one
+  is cleared, never half-trusted, and the next keystroke misses honestly."
   [ed result]
   (reset! (:parinfer-skip? ed) true)
-  (try (apply-op! ed result)
-       (finally (reset! (:parinfer-skip? ed) false))))
+  (try
+    (let [cache @(:parinfer-prev-cache ed)
+          valid? (and cache (= (:gen cache) @(:edit-gen ed)))
+          r (apply-op! ed result)]
+      (reset! (:parinfer-prev-cache ed)
+              (when (and valid? r)
+                ;; A NUL in an edit's text truncates what the buffer keeps
+                ;; (C string): keep the update only when the counts agree,
+                ;; else clear, never half-trust (review I1).
+                (let [t (edit/apply-edits (:text cache) (:edits result))]
+                  (when (= (count t)
+                           (g/gtk-text-buffer-get-char-count (:buf ed)))
+                    {:text t :gen @(:edit-gen ed)}))))
+      r)
+    (finally (reset! (:parinfer-skip? ed) false))))
 
 (defn handle-return!
   "Applies jonquil.edit/smart-enter to the current snapshot as one user
