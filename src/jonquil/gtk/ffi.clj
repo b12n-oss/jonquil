@@ -255,6 +255,16 @@
       (f i1 i2)
       (finally (ffi/free i1) (ffi/free i2)))))
 
+(defn buffer-text-range
+  "The buffer's text between character offsets a and b, buffer-text's
+  ranged sibling: the same get_text call and caller-owned g_free, over
+  with-iters*'s iters instead of the buffer's bounds."
+  [buf a b]
+  (with-iters* buf a b
+    (fn [i1 i2]
+      (let [p (gtk-text-buffer-get-text* buf i1 i2 0)]
+        (try (ffi/ptr->string p) (finally (g-free p)))))))
+
 (defn cursor-offset [buf]
   (let [it (ffi/alloc ITER-BYTES)]
     (try (gtk-text-buffer-get-iter-at-mark buf it (gtk-text-buffer-get-insert buf))
