@@ -427,7 +427,10 @@
               ;; count (embedded objects, hidden text); a wrong span is
               ;; invisible to it, which is why the span must stay sound
               ;; (splice review M1).
-              text (or (when (and (:cached? prev) span)
+              ;; a miss's prev is a fresh read of the begin-time buffer,
+              ;; ground truth by construction, so the splice doesn't need
+              ;; the cache (miss-path cut 1)
+              text (or (when span
                          (let [pt ^String (:text prev)
                                n (count pt)
                                m (g/gtk-text-buffer-get-char-count buf)

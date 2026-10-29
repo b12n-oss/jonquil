@@ -1311,9 +1311,38 @@
                         (swap! eqs conj (= (:text @(:parinfer-prev-cache ed))
                                            (editor/editor-text ed)))))
                    (check :parinfer-splice-equals-buffer
-                          (and (= [true true true] @eqs) (= 3 @splices))
+                          ;; six: the three primes splice too since the
+                          ;; miss-path cut (a fresh begin read is ground
+                          ;; truth), plus the three measured hits
+                          (and (= [true true true] @eqs) (= 6 @splices))
                           {:eqs @eqs :splices @splices
                            :t3 (editor/editor-text ed)}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-miss-still-splices-the-end-read [ed]
+  (go-row :parinfer-miss-still-splices-the-end-read check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; a miss's begin read is ground truth, so the end-side
+                 ;; splice is just as exact there (miss-path cut 1): after
+                 ;; an undo (a miss), the keystroke must still splice and
+                 ;; land the fallback's text
+                 (editor/set-text! ed "(a
+  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (g/gtk-text-buffer-undo (:buf ed))
+                 (let [splices (atom 0)
+                       real g/buffer-text-range]
+                   (with-redefs-fn {#'g/buffer-text-range
+                                    (fn [& a] (swap! splices inc) (apply real a))}
+                     #(do (caret! ed 5)
+                          (delete-action! ed 3 5)))
+                   (let [text (editor/editor-text ed)
+                         eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                     (check :parinfer-miss-still-splices-the-end-read
+                            (and (= "(a)
+b" text) eq (pos? @splices))
+                            {:text text :eq eq :splices @splices})))
                  (finally (parinfer-off! ed))))))
 
 (defn- row-parinfer-fix-moves-the-edit-offset [ed]
@@ -1434,7 +1463,8 @@
    row-parinfer-caret-move-keeps-first-edit-reindent
    row-parinfer-fix-moves-the-edit-offset
    row-parinfer-noop-action-marks-nothing
-   row-parinfer-splice-equals-buffer])
+   row-parinfer-splice-equals-buffer
+   row-parinfer-miss-still-splices-the-end-read])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
