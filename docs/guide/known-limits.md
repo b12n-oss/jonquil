@@ -11,8 +11,10 @@ Known rough edges, parked for later:
   ends the program. It isn't a Stop.
 - A keystroke in a very large Definitions pane can stall briefly (see
   [Development](development.md#benchmark)).
-- Parinfer skips a top-level form over 300 lines (the status bar says so),
-  and with Parinfer on a keystroke in a 4,500-line file costs about 30 ms.
+- Parinfer leaves an edit alone once it reaches past 300 lines, one long
+  form or a long paste alike; the status bar says "over 300 lines here,
+  not adjusted". With Parinfer on, a keystroke in a 4,500-line file costs
+  about 30 ms.
 - Parinfer normalises what it touches: in an edited form, tabs become two
   spaces and every line ending follows the form's first.
 
