@@ -42,18 +42,25 @@ not a behaviour change.
 ## Staying in sync
 
 `bb upstream:diff` lists the upstream commits since `UPSTREAM_PIN` that
-touch `src` or `test`. It needs a clone of DrClojure-Neo with a remote
-named `upstream` pointing at the original repository, and `DRCLOJURE_DIR`
-set to that clone's folder:
+touch `src` or `test`. It fetches `main` from
+https://github.com/kimtg/DrClojure-Neo each time, so it needs no setup:
 
 ```sh
-git clone https://github.com/kimtg/DrClojure-Neo
-git -C DrClojure-Neo remote add upstream https://github.com/kimtg/DrClojure-Neo
-export DRCLOJURE_DIR=$PWD/DrClojure-Neo
 bb upstream:diff
 ```
 
-The task fetches `upstream` and compares the pin with `upstream/main`.
+The first run clones upstream into `~/.cache/jonquil/drclojure-neo` (under
+`$XDG_CACHE_HOME` when that's set), and later runs only fetch. To use a
+clone you already have, set `DRCLOJURE_DIR` to its folder. To compare
+against a fork or a mirror, set `DRCLOJURE_URL`. Over HTTPS the fetch
+never asks for credentials, so an HTTPS URL has to be public. An SSH URL
+uses your SSH setup, and `GIT_SSH_COMMAND` picks the key:
+
+```sh
+GIT_SSH_COMMAND='ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes' \
+  DRCLOJURE_URL=git@github.com:kimtg/DrClojure-Neo.git bb upstream:diff
+```
+
 Review each commit, port what matters, and bump `UPSTREAM_PIN` to the new
 commit SHA in the same commit as the port, so `UPSTREAM.md` keeps
 matching the code Jonquil took from upstream.

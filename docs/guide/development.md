@@ -335,9 +335,9 @@ of the buffer text on the GTK thread, about 50 ms.
 ## Upstream
 
 `bb upstream:diff` lists upstream DrClojure-Neo commits since
-`UPSTREAM_PIN` that touch `src` or `test`, using the clone at
-`$DRCLOJURE_DIR` and its `upstream` remote. See
-[Porting and attribution](porting-and-attribution.md).
+`UPSTREAM_PIN` that touch `src` or `test`. It needs no setup: it keeps
+its own clone under `~/.cache/jonquil/`. See
+[Porting and attribution](porting-and-attribution.md#staying-in-sync).
 
 ## Docs
 
