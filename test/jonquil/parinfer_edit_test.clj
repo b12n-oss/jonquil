@@ -281,3 +281,15 @@
       "a tab in code becoming two spaces must not reject the reindent
       (review I1: the formatter only touches leading and trailing
       whitespace, so a mid-line tab survives into its output)"))
+
+(deftest whitespace-only-keeps-tokens-test
+  (testing "whitespace may move freely beside a bracket, never between two
+           atom characters: a space vanishing there merges two tokens (or
+           rewrites a string literal), which a format must never do"
+    (is (true? (#'pe/whitespace-only? "{:x 1 }" "{:x 1}")) "paren-trail tidy")
+    (is (true? (#'pe/whitespace-only? "(f a\tb)" "(f a  b)")) "tab in code")
+    (is (true? (#'pe/whitespace-only? "  (f a)" " (f a)")) "indentation")
+    (is (false? (#'pe/whitespace-only? "(f a b)" "(f ab)")) "token merge")
+    (is (false? (#'pe/whitespace-only? "(f ab)" "(f a b)")) "token split")
+    (is (false? (#'pe/whitespace-only? "(f \"a b\")" "(f \"ab\")"))
+        "a space inside a string is the string's own text")))
