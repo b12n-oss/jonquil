@@ -16,6 +16,7 @@
   (:require [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jonquil.gtk.callbacks :as callbacks]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
@@ -175,6 +176,26 @@
            (support/check :pane-measure
                           (and (<= 20 cols 200) (>= rows 5))
                           {:cols cols :rows rows})))))))
+
+(defn row-pane-ready-wait-survives-measure-throw
+  "measure-when-ready! on a pane that is never shown waits out its cap; a
+  throw from measure then is reported in the footer, and every queued f
+  is still called, with measure's floors, so the window's in-flight flag
+  (released only through f) can't stay stuck."
+  [_ui]
+  (go-row :row-pane-ready-wait-survives-measure-throw support/check
+    (let [pane (on-gtk (inspector-pane/make-pane (noop-opts)))
+          got (atom [])]
+      (with-redefs [inspector-pane/measure (fn [_] (throw (ex-info "forced measure failure" {})))]
+        (on-gtk (inspector-pane/measure-when-ready! pane #(swap! got conj [:a %]))
+                (inspector-pane/measure-when-ready! pane #(swap! got conj [:b %])))
+        (await-until 3000 20 #(= 2 (count @got))))
+      (on-gtk
+       (let [footer (g/label-text (:footer pane))]
+         (support/check :pane-ready-wait-survives-measure-throw
+                        (and (= [[:a {:cols 20 :rows 5}] [:b {:cols 20 :rows 5}]] @got)
+                             (str/includes? footer "forced measure failure"))
+                        {:got @got :footer footer}))))))
 
 (defn row-pane-note-clears
   "A state with :note \"not tabular\" shows it in the footer, and the
@@ -612,6 +633,35 @@
                           (and opened? laid-out? matched?)
                           {:sent-cols sent-cols :measured-cols measured-cols
                            :opened opened? :laid-out laid-out?})))))))
+
+(defn row-inspect-reopen-reuses-callback
+  "Closing the panel and reopening it, twice, through Inspect Last makes
+  no new foreign callable: each reopen waits for GTK's layout pass
+  (measure-when-ready!), and jonquil.gtk.callbacks retains every callable
+  for the process's life, so a fresh one per wait would leak. Leaves the
+  panel open, as row-inspect-cols-match did."
+  [ui]
+  (go-row :row-inspect-reopen-reuses-callback support/check
+    (let [pane (:inspector ui)
+          before (count @callbacks/retained)
+          cycle! (fn []
+                   (on-gtk (inspector-pane/focus! pane)
+                           ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil))
+                   (let [hidden? (await-until 2000 20 #(zero? (g/gtk-widget-get-visible (:root pane))))
+                         old-args ((:inspector-last-args* ui))
+                         ;; armed on the same GTK turn: the reopen took the deferred path
+                         deferred? (on-gtk ((:inspect-last!* ui)) @(:ready-armed? pane))
+                         laid-out? (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:root pane))))
+                         ;; the wait's callback has run once :start's args are new
+                         settled? (await-until 2000 20 #(not (identical? old-args ((:inspector-last-args* ui)))))]
+                     (and hidden? deferred? laid-out? settled?)))
+          ok1 (cycle!)
+          ok2 (cycle!)
+          after (count @callbacks/retained)]
+      (on-gtk
+       (support/check :row-inspect-reopen-reuses-callback
+                      (and ok1 ok2 (= before after))
+                      {:cycles [ok1 ok2] :retained-before before :retained-after after})))))
 
 (defn row-inspect-def-prompt-escape-safe
   "The def prompt joins the window's own close-popovers registry, so
