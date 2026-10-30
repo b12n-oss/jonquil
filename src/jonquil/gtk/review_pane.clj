@@ -1,5 +1,5 @@
 (ns jonquil.gtk.review-pane
-  "The review panel (plugins P9b): an agent's pending proposal shown in the
+  "The review panel: an agent's pending proposal shown in the
   right-hand slot the source panel uses. A wrapped summary (jonquil.plugin-
   review's lines) sits over a read-only jonquil.gtk.editor holding the diff
   against live, then a note entry for Reject, the Accept, Reject, Next and
@@ -51,7 +51,7 @@
 (defn update-summary!
   "Shows review's summary as the index-th of count, keeping the diff's
   caret, the note and the footer: for a refresh that leaves the same
-  proposal shown (review I2)."
+  proposal shown."
   [pane review index count]
   (g/gtk-label-set-text (:summary pane) (plugin-review/summary-text review index count))
   (g/gtk-widget-set-sensitive (:next-btn pane) (if (> count 1) 1 0))

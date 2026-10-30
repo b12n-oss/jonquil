@@ -14,7 +14,7 @@
             [jonquil.gtk.popover :as popover]
             [jonquil.session :as session]))
 
-;; --- P4.T3: the caret-anchored popover base, its theme colours, and the
+;; --- the caret-anchored popover base, its theme colours, and the
 ;; window's key order -------------------------------------------------------
 
 (defn row-popover-at-caret
@@ -70,9 +70,8 @@
                 (g/gtk-widget-unparent (:popover pp)))))))
 
 (defn row-window-shift-f6-reaches-editor
-  "P4.T3 key-order change #1 (probe 4): the window's F6 clause now also
-  requires (not shift-held?), so Shift+F6 no longer matches it and falls
-  through unconsumed -- returns 0, and focus (read via gtk_root_get_focus,
+  "The window's F6 clause also requires (not shift-held?), so Shift+F6
+  doesn't match it and falls through unconsumed -- returns 0, and focus (read via gtk_root_get_focus,
   the same pointer-identity check do-toggle-focus! itself uses) is
   unchanged. Grabs editor focus first so the row starts from a known
   state regardless of what an earlier row left focused."
@@ -88,8 +87,8 @@
                                {:handled handled :before before :after after}))))))
 
 (defn row-window-f6-still-toggles
-  "Plain F6 (no modifier) must still toggle focus after the Shift guard was
-  added -- console.clj's view first, editor's back, same pattern
+  "Plain F6 (no modifier) must still toggle focus despite the Shift guard
+  -- console.clj's view first, editor's back, same pattern
   row-toggle-focus already uses for the :toggle-focus!* hook, but driven
   through the WINDOW's own key dispatch (:handle-window-key!) instead,
   since that's the exact path a real F6 keystroke takes."
@@ -106,12 +105,11 @@
                                {:h1 h1 :h2 h2 :after-first after-first :after-second after-second}))))))
 
 (defn row-window-escape-closes-popover
-  "P4.T3 key-order change #2 (probe 4): a new clause ahead of the
-  evaluating? Stop clause closes any open P4 popover on Escape and returns
+  "A clause ahead of the evaluating? Stop clause closes any open popover
+  on Escape and returns
   1 without touching the program. Starts a real (loop [] (recur)), opens a
   test popover registered on the window's own registry
-  (:register-popover!*, the same join completion/quick-doc/rename will use
-  from P4.T4 on), sends window Escape: the popover must close and the
+  (:register-popover!*, the same join completion/quick-doc/rename use), sends window Escape: the popover must close and the
   program must still be running. A second Escape (nothing left open) must
   then fall through to the evaluating? clause and Stop it."
   [ui]
@@ -183,7 +181,7 @@
                 (g/gtk-widget-unparent (:popover pp))
                 ((:set-theme!* ui) :light))))))
 
-;; --- P4.T4: quick doc and jump to definition -------------------------------
+;; --- quick doc and jump to definition -------------------------------
 
 ;; The shared key table, this file's own private copies (measured
 ;; against gdkkeysyms.h, the keys the editor keymap names "q", "b", "F1"
@@ -213,7 +211,7 @@
 
 (defn row-quick-doc-run-defined
   "Runs a real Run defining greet with a docstring, waits for it to
-  actually land (run-and-await's own I1 gating), then Shift+F1 on a fresh
+  actually land (run-and-await's own gating), then Shift+F1 on a fresh
   (greet 1) shows that docstring."
   [ui]
   (go-row :quick-doc-run-defined support/check
@@ -236,7 +234,7 @@
   Runs a program that does NOT define greet: reset-namespaces! removes
   the whole `user` ns, including greet, before evaluating it. A quick doc
   on the SAME (greet 1) text afterward must not throw (docs/symbol-doc's
-  own `user`-missing fallback, P4.T2) and must read as not found -- and,
+  own `user`-missing fallback) and must read as not found -- and,
   since docs/symbol-doc memoises on [ns sym text] and this reuses the
   EXACT SAME key row-quick-doc-run-defined just cached with a real doc,
   this also depends on window.clj's clear-doc-cache! running after the
@@ -281,8 +279,8 @@
   "Calls every fn registered on ed's own :on-focus-fns directly -- the
   SAME ones GtkEventControllerFocus's own \"leave\" signal calls
   (editor.clj's make-editor) -- rather than trying to move real OS/window
-  focus, which the self-test window can't reliably do (P4.T3's own
-  has_focus finding: this window is never the OS's key window, so
+  focus, which the self-test window can't reliably do (gtk_widget_has_focus depends
+  on it: this window is never the OS's key window, so
   has_focus stays false throughout and a real focus transfer can't be
   observed here the way gtk_root_get_focus's own focus-WITHIN tracking
   can). A regression that drops window.clj's hide-on-focus-lost closure
@@ -300,8 +298,8 @@
                                {:opened opened? :still-open (popover/open? hp)}))))))
 
 (defn row-quick-doc-cmd-does-nothing
-  "0x71 with META-MASK only: the Ctrl+Q binding's :not #{:meta} rejects it (the P4 rule --
-  CONTROL-MASK checked, META-MASK rejected), so the chord falls through
+  "0x71 with META-MASK only: the Ctrl+Q binding's :not #{:meta} rejects it (CONTROL-MASK
+  checked, META-MASK rejected), so the chord falls through
   unhandled and no popover opens."
   [ui]
   (go-row :quick-doc-cmd-does-nothing support/check
@@ -329,8 +327,8 @@
 
 (defn row-quick-doc-ctrl-shift-f1-does-nothing
   "0xffbe (F1) with SHIFT and CONTROL together: :exact #{:shift} must reject the
-  Control side as it already rejects Meta (the parked P4 item: Ctrl+Shift+F1
-  also triggered quick doc), so the chord falls through unhandled."
+  Control side as it already rejects Meta (Ctrl+Shift+F1 must not trigger quick
+  doc), so the chord falls through unhandled."
   [ui]
   (go-row :quick-doc-ctrl-shift-f1-does-nothing support/check
     (on-gtk (let [ed (:editor ui) hp (:help-popover ui)]
@@ -381,8 +379,7 @@
 
 (defn row-jump-top-level
   "\"(defn greet [n] n)\\n(greet 1)\", caret 22 (inside the SECOND greet,
-  the usage) -- help/jump-target takes the symbol's START (P4.T1's
-  jump-target docstring), F12 (:exact #{}) lands the caret on the
+  the usage) -- help/jump-target takes the symbol's START, F12 (:exact #{}) lands the caret on the
   DEFN's own greet, offset 6."
   [ui]
   (go-row :jump-top-level support/check
@@ -398,7 +395,7 @@
 (defn row-jump-local-binding
   "\"(defn f [x] (let [y x] y))\", caret 23 (the LAST y, the usage inside
   the body) -- Ctrl+B (Control, not Meta) lands on the BINDING y inside
-  [y x], offset 18 (measured with the pure spike's help/jump-target)."
+  [y x], offset 18 (measured with help/jump-target)."
   [ui]
   (go-row :jump-local-binding support/check
     (on-gtk (let [ed (:editor ui)]
@@ -429,7 +426,7 @@
 (defn row-jump-none
   "\"(nope 1)\", caret 2, F12: a real symbol with no definition anywhere
   -- jump-target's own nil case -- reads as the status message, polled
-  (P4.T4: do-jump! goes through set-status!, which enqueues via on-gui!
+  (do-jump! goes through set-status!, which enqueues via on-gui!
   same as every other status update in this file, never synchronous)."
   [ui]
   (go-row :jump-none support/check
@@ -477,11 +474,11 @@
           (.delete dir))))))
 
 (defn row-jump-shadowed-param
-  "I1: \"(def x 1)\\n(defn f [x] x)\", caret 22 (the body's own x, a usage
+  "\"(def x 1)\\n(defn f [x] x)\", caret 22 (the body's own x, a usage
   of the PARAMETER, not the top-level def) -- jonquil.help/jump-target's
   scope-aware search finds the enclosing param first, so F12 lands on the
   param at offset 19, never the top-level def's own x at offset 5 (measured
-  live against the fix: test/jonquil/help_test.clj's own jump-target-
+  live: test/jonquil/help_test.clj's own jump-target-
   scope-test carries the same fixture/offsets, pure)."
   [ui]
   (go-row :jump-shadowed-param support/check
@@ -496,7 +493,7 @@
 
 (defn row-quick-doc-fits-its-text
   "The quick-doc popover sizes its width to the text, up to the 80-column
-  maximum (P4 parked item): a one-line doc gets a narrow popover, a long
+  maximum: a one-line doc gets a narrow popover, a long
   one the full width. Measured on the scroller's allocated width once each
   is showing."
   [ui]
@@ -525,7 +522,7 @@
   ";; filler\n")
 
 (defn row-quick-doc-follows-scroll
-  "P4 parked item: with quick doc open, scrolling the view re-points the
+  "With quick doc open, scrolling the view re-points the
   popover at the caret's new rectangle (a small scroll), and hides it once
   the caret leaves the visible text (a large one). gtk_adjustment_set_value
   emits value-changed synchronously on the GTK thread, so each read after

@@ -1,5 +1,5 @@
 (ns jonquil.plugin-check
-  "The plugin validator (plugins design, Part 2, the protocol's validate
+  "The plugin validator (the protocol's validate
   step): one plugin file's definitions against a description of Jonquil,
   answered as {:ok? :problems :warnings}, each problem or warning one
   sentence naming the item. Pure, and its request is plain data (the
@@ -116,8 +116,8 @@
   #{"string" "integer" "number" "boolean"})
 
 (def MCP-NAME-MAX
-  ;; P10b review I2, then measured by P10c's probe (2026-10-28, Claude Code
-  ;; 2.1.311): Claude Code called tools whose full mcp__jonquil__ names were
+  ;; Measured 2026-10-28 on Claude Code
+  ;; 2.1.311: Claude Code called tools whose full mcp__jonquil__ names were
   ;; 64, 65 and 70 characters, so 50 isn't its limit. It stays as headroom
   ;; for a client that hands names straight to an API with a 64-character
   ;; limit (^[a-zA-Z0-9_-]{1,64}$, as remembered), less that 14-character
@@ -125,7 +125,7 @@
   50)
 
 (def ^:private arg-name-pattern
-  ;; review I2: what the API accepts as a schema property key, as
+  ;; What the API accepts as a schema property key, as
   ;; remembered (not measured), so one plugin row can't break a client's
   ;; whole tool list
   #"[a-zA-Z0-9_.-]{1,64}")
@@ -173,7 +173,7 @@
         (not (fn? run)) (conj (str label ": :run isn't a function"))))))
 
 (defn- mcp-tools-problems
-  "Each :mcp-tools row's problems (plugins P10b). file-id names the served
+  "Each :mcp-tools row's problems. file-id names the served
   tools, so their length is checked against it."
   [d file-id]
   (let [ts (:mcp-tools d)]

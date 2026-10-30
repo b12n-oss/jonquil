@@ -33,7 +33,7 @@
     (is (not (loader/plugin-id? x)) (pr-str x))))
 
 (deftest propose-refusal-nul-test
-  ;; NUL arc review I2: the review pane shows source through GTK, which cuts
+  ;; the review pane shows source through GTK, which cuts
   ;; at a NUL, while Jolt's reader reads past one inside a string, so a
   ;; proposal could hide code from the person reviewing it. Refused at the
   ;; gate, naming the line.
@@ -42,7 +42,7 @@
            (pm/propose-refusal (assoc ok :source "(ns x)\n(def a \"y\u0000\")"))))
     (is (= "the source holds a NUL byte on line 1, which the review pane can't show"
            (pm/propose-refusal (assoc ok :source "\u0000"))))
-    ;; the sweep arc: the reason is agent text shown at the review gate
+    ;; the reason is agent text shown at the review gate
     ;; through GTK labels, which are C strings too
     (is (= "the reason holds a NUL byte on line 1, which the review pane can't show"
            (pm/propose-refusal (assoc ok :reason "fast\u0000er"))))
@@ -60,7 +60,7 @@
     (is (= "the source is 262145 characters, more than the 262144 a proposal may have"
            (pm/propose-refusal (assoc ok :source (apply str (repeat 262145 "x"))))))
     (is (nil? (pm/propose-refusal (assoc ok :source (apply str (repeat 262144 "x"))))))
-    ;; review I1: the reason reaches the history, the console and the panel
+    ;; the reason reaches the history, the console and the panel
     ;; too, and a refused id is echoed back
     (is (= "the reason is 4001 characters, more than the 4000 a proposal may have"
            (pm/propose-refusal (assoc ok :reason (apply str (repeat 4001 "r"))))))

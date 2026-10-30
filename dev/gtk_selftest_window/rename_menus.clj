@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.rename-menus
-  "Rename and the P4 context menus (editor and REPL)."
+  "Rename and the context menus (editor and REPL)."
   (:require [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -11,15 +11,15 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.popover :as popover]))
 
-;; --- P4.T7: rename and the P4 context menus --------------------------------
+;; --- rename and the context menus --------------------------------
 
 (def ^:private rename-fixture
   "\"(defn greet [n] n)\\n(greet 1) ; greet\\n\\\"greet\\\"\\n:greet greeting\"
   -- two CODE occurrences of greet (the defn and the call), one inside a
   comment, one inside a string, plus a keyword (:greet) and a longer symbol
-  (greeting) that share the substring but are never themselves greet (I4:
-  a rename that did a naive substring replace, or one that also touched the
-  keyword, would still pass the OLD fixture, which had neither). Shared by
+  (greeting) that share the substring but are never themselves greet (a rename that did a
+  naive substring replace, or one that also touched the keyword, would
+  still pass a fixture without them). Shared by
   every rename row below, each of which re-applies it fresh (the driver's
   own run-row only clears text/input, not this)."
   "(defn greet [n] n)\n(greet 1) ; greet\n\"greet\"\n:greet greeting")
@@ -36,7 +36,7 @@
   (editor/set-text! ed rename-fixture)
   (support/place-cursor! (:buf ed) (inc (str/index-of rename-fixture "(greet 1)"))))
 
-;; P4.T7: this file's own private copy (measured against gdkkeysyms.h,
+;; This file's own private copy (measured against gdkkeysyms.h,
 ;; the key the editor keymap names "F2"); KEY-F6 above already
 ;; covers Shift+F6.
 (def ^:private KEY-F2 0xffbf)
@@ -63,7 +63,7 @@
                               :status (g/label-text status)})))))
 
 (defn row-rename-skips-comments-strings
-  "Same fixture and rename as row-rename-applies (I4): the WHOLE
+  "Same fixture and rename as row-rename-applies: the WHOLE
   resulting text matches rename-fixture-renamed byte for byte, not just
   \"still contains ; greet and \\\"greet\\\"\" (true even when rename does
   nothing at all) -- the comment,
@@ -78,10 +78,9 @@
                 (support/check :rename-skips-comments-strings (= rename-fixture-renamed text) {:text text}))))))
 
 (defn row-rename-one-undo
-  "The SAME rename as row-rename-applies, checked BEFORE undoing (I4: the
-  old version of this row undid first and compared against the fixture,
-  which also holds when rename applied nothing at all -- an untouched
-  buffer undoes to itself), then ONE gtk_text_buffer_undo: apply-op! wraps
+  "The SAME rename as row-rename-applies, checked BEFORE undoing (undoing
+  first and comparing against the fixture also holds when rename applied
+  nothing at all: an untouched buffer undoes to itself), then ONE gtk_text_buffer_undo: apply-op! wraps
   every edit in one begin/end_user_action (its own contract), so one undo
   must restore the fixture verbatim."
   [ui]
@@ -134,8 +133,8 @@
                   (popover/hide! rp)))))))
 
 (defn row-rename-cmd-does-nothing
-  "0xffbf (F2) with META only: :exact #{} rejects it (the P4 rule),
-  same reasoning as every other P4 chord's own cmd-does-nothing row, so
+  "0xffbf (F2) with META only: :exact #{} rejects it,
+  same reasoning as every other chord's own cmd-does-nothing row, so
   the chord falls through unhandled and no popover opens."
   [ui]
   (go-row :rename-cmd-does-nothing support/check
@@ -163,8 +162,8 @@
 
 (defn row-rename-ctrl-shift-f6-does-nothing
   "0xffc3 (F6) with SHIFT and CONTROL together: :exact #{:shift} must reject the
-  Control side as it already rejects Meta (the parked P4 item: Ctrl+Shift+F6
-  also triggered rename), so the chord falls through unhandled."
+  Control side as it already rejects Meta (Ctrl+Shift+F6 must not trigger
+  rename), so the chord falls through unhandled."
   [ui]
   (go-row :rename-ctrl-shift-f6-does-nothing support/check
     (on-gtk (let [ed (:editor ui) rp (:rename-popover ui)]
@@ -201,7 +200,7 @@
   "Escape closes the rename popover and the editor has focus again, not
   the editor's scrolled window: GTK moves focus to the popover's parent
   once it unmaps, after its \"closed\" handler has run, so the handler's
-  own grab used to be undone (found with the command palette, step S8)."
+  own grab would be undone (found with the command palette)."
   [ui]
   (go-row :rename-escape-refocuses-editor support/check
     (let [ed (:editor ui) rp (:rename-popover ui)
@@ -259,7 +258,7 @@
   against the fixture/caret its own existing row (row-jump-top-level/
   row-quick-doc-core/dev/gtk_selftest.clj's row-edit-toggle-comment)
   already established, but fired through the
-  editor's own P4 GSimpleActionGroup (g_action_group_activate_action, per
+  editor's own GSimpleActionGroup (g_action_group_activate_action, per
   install-context-menu!'s own docstring) instead of the key."
   [ui]
   (go-row :menu-actions support/check
@@ -287,7 +286,7 @@
 
 (defn row-menu-actions-console-complete
   "Activates the REPL's own p4.complete (:repl-activate-menu-action!*,
-  the console's own P4 action group) and checks it has the SAME effect
+  the console's own action group) and checks it has the SAME effect
   Ctrl+Space does -- the completion popover opens over \"(ma\"'s own
   candidates."
   [ui]
@@ -324,7 +323,7 @@
                              {:status (g/label-text status) :text text})))))
 
 (defn row-menu-items-all-resolve
-  "Step S7, Review Focus 1: the editor menu's items now run commands over
+  "The editor menu's items run commands over
   a menu ctx wire-tab! builds, and an item whose ctx entry is missing
   throws only when picked, which install-context-menu!'s try/catch turns
   into \"; <action>: ...\" in the status bar. So this fires, through

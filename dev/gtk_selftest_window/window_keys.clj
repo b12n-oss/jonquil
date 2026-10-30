@@ -14,8 +14,8 @@
             [jonquil.keymap :as km]))
 
 (defn row-escape-yields-when-idle
-  "M5: the window-level capture controller used to consume Escape even
-  when nothing was evaluating, so Escape could never reach an IME
+  "The window-level capture controller must not consume Escape when
+  nothing is evaluating, or Escape could never reach an IME
   composition. Calls the exact fn the \"key-pressed\" signal calls (an
   ordinary function call with a synthetic keyval/state, not a synthesized
   OS keystroke) -- once while idle (must yield: 0) and once while a
@@ -37,7 +37,7 @@
                       :running-result running-result :stopped stopped?}))))
 
 (defn row-f5-runs-the-buffer
-  "F5 is a keymap binding since plugins PL1 S4, and no other row presses
+  "F5 is a keymap binding, and no other row presses
   it outside a rename (rename-entry-keeps-window-keys checks it's held
   back there). Sends F5 through the exact fn the \"key-pressed\" signal
   calls: it must answer 1 and Run the buffer."
@@ -55,8 +55,8 @@
 ;; window.clj keeps none, since its keys live in jonquil/keymap.edn.
 (def ^:private KEY-S-CAPS 0x53)
 (defn row-keymap-masks-match-gdk
-  "jonquil.keymap copies the GDK modifier bits so it loads without GTK
-  (plugins PL1 S1); this pins the copies against jonquil.gtk.ffi's, the
+  "jonquil.keymap copies the GDK modifier bits so it loads without GTK;
+  this pins the copies against jonquil.gtk.ffi's, the
   values the window's key controller actually reports."
   [ui]
   (go-row :keymap-masks-match-gdk support/check
@@ -66,8 +66,8 @@
                              {:keymap km/MODIFIER-MASKS :gdk want :window (some? (:window ui))})))))
 
 (defn row-command-chord-capslock
-  "M4: shortcuts compared the raw keyval, so Caps Lock -- which makes GDK
-  report the UPPERCASE keyval with no Shift bit set -- broke Ctrl+S (and
+  "Shortcuts must not compare the raw keyval: Caps Lock makes GDK
+  report the UPPERCASE keyval with no Shift bit set, which would break Ctrl+S (and
   Ctrl+R/O, not separately exercised here since they share the same
   gdk_keyval_to_lower normalisation). Establishes a path via the
   dialog-free :save-to! (no live dialog needed), dirties the editor, then
@@ -211,7 +211,7 @@
             ((:run!* ui)))
     ;; The window's live evaluator, not the starting :session: an earlier
     ;; tabs row switches the window to ClojureDart and back, which leaves a
-    ;; new in-process evaluator (tabs plan P2.T4).
+    ;; new in-process evaluator.
     (let [started? (await-until 2000 20 #(ev/evaluating? ((:evaluator* ui))))]
       ;; The close chord ends the GTK main loop, so the check is recorded in
       ;; the same on-gtk step: no on-gtk may follow this one.

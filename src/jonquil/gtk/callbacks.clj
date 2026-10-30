@@ -6,7 +6,7 @@
   ABI rule: every foreign-callable must be
   :collect-safe and kept alive in an atom for the process lifetime, or GTK's
   own event loop can invoke a callback jolt has already garbage-collected.
-  Engine callbacks that run on a worker thread (P2.T6's eval output, for
+  Engine callbacks that run on a worker thread (eval output, for
   instance) must only enqueue -- never print, block, or invoke-and-wait on
   the GTK thread themselves (the lock-caller rule) -- and on-gui! is that
   enqueue point."
@@ -48,7 +48,7 @@
   "Wraps f as a :collect-safe foreign-callable with signature sig and return
   ret, retaining it for the process lifetime so GTK's own event loop never
   invokes a collected callback. foreign-callable needs its signature as a
-  literal, so this has to be a macro (from the S2 spike).
+  literal, so this has to be a macro.
 
   Every callable is also contained: a throw from f never crosses the FFI
   boundary into GTK, where it would kill the process. It's reported on
@@ -107,8 +107,8 @@
 
 (defn on-gui!
   "Runs f on the GTK main thread. From any thread it enqueues f and
-  schedules one g_idle_add drain (the S2 spike's pending/drain-scheduled
-  pattern, generalized from console output chunks to arbitrary thunks). The
+  schedules one g_idle_add drain (the pending/drain-scheduled
+  pattern console output chunks use, generalized to arbitrary thunks). The
   drain runs every queued thunk in order; an exception in one thunk is
   reported on *err* and does not stop the rest."
   [f]

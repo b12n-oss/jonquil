@@ -22,7 +22,7 @@
   "The settings file's path. env is (fn [name] value), System/getenv in
   production and a map in tests; home is the user's home directory. A
   relative XDG_CONFIG_HOME (anything not starting with \"/\") is invalid
-  per the XDG spec (fix wave item 4) and is treated like a blank one."
+  per the XDG spec and is treated like a blank one."
   ([] (settings-path (fn [n] (System/getenv n)) (System/getProperty "user.home")))
   ([env home]
    (let [xdg (env "XDG_CONFIG_HOME")
@@ -59,7 +59,7 @@
 (defn- file-tree-part
   "{:file-tree {:visible? :width}} when m holds a usable one (a boolean
   :visible? and a positive integer :width), {} when it holds none, and
-  {:warning ..} otherwise (file-tree plan P1.T2)."
+  {:warning ..} otherwise."
   [path m]
   (let [ft (when (map? m) (get m :file-tree ::none))]
     (cond
@@ -91,8 +91,7 @@
 
 (def parinfer-modes
   "The values :parinfer may hold, shared with .jonquil.edn's reader. :off
-  is the default (the user's call, 2026-10-29), and a file with no
-  :parinfer means :off."
+  is the default, and a file with no :parinfer means :off."
   dialect/parinfer-modes)
 
 (defn- parinfer-part
@@ -108,7 +107,7 @@
 (defn- plugins-part
   "{:plugins {:disabled #{id ...}}} when m's :plugins holds a set of
   keyword ids under :disabled, {} when there's none, and {:warning ..}
-  otherwise (plugins P4; the plugin list writes it, P4 only reads it)."
+  otherwise (the plugin list writes it; this only reads it)."
   [path m]
   (let [v (when (map? m) (:plugins m))
         d (when (map? v) (:disabled v))]
@@ -146,10 +145,10 @@
 
 (defn- resolved-target
   "path itself, unless it exists and is a symlink, in which case the real
-  file it points at (fix wave item 3: a save used to replace the symlink
+  file it points at (a save would otherwise replace the symlink
   with a plain file, so a dotfiles-managed settings.edn lost its link and
   the linked target never saw the new value). Measured on this Jolt pin
-  (2026-09-26, throwaway probe): java.nio.file.Files/isSymbolicLink,
+  (2026-09-26): java.nio.file.Files/isSymbolicLink,
   Files/createSymbolicLink and Path/.toRealPath all work. isSymbolicLink
   answers false for a path that doesn't exist, so no separate .exists
   check is needed."
@@ -163,7 +162,7 @@
   "Merges map m (say {:theme k}, or {:file-tree {...}}) into the settings
   file at path and writes it atomically, so a save keeps every key the file
   already holds -- a theme change must not drop a hand-set :dialect or the
-    file tree's state (file-tree plan P1.T2). A missing file is created with m
+  file tree's state. A missing file is created with m
   alone; an unreadable or malformed one is left untouched and reported.
   nil on success, else a message.
   When path is a symlink, the real target is rewritten in place (the temp
@@ -183,8 +182,7 @@
                                                     (str "couldn't read " target
                                                          " to keep its other settings; nothing saved")))))
                              ;; Malformed EDN: refuse rather than overwrite the file's
-                             ;; other keys (final review finding 5, now that toggling
-                             ;; the tree saves too). Valid EDN that isn't a map has
+                             ;; other keys (toggling the tree saves too). Valid EDN that isn't a map has
                              ;; nothing to keep.
                              v (try (edn/read-string content)
                                     (catch Exception _
@@ -208,7 +206,7 @@
 (defn save-plugin-disabled!
   "Adds plugin id (a keyword) to the settings file's :plugins :disabled, or
   with disabled? false takes it out, keeping every other key, :plugins'
-  own included (plugins P11: save-settings! merges only the top level, so
+  own included (save-settings! merges only the top level, so
   handing it a :plugins map alone would drop :trusted-projects). Refuses,
   naming the file, when :plugins isn't a map or :disabled isn't a set of
   ids, and when the file can't be read or parsed. nil on success, else a

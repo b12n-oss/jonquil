@@ -11,7 +11,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]))
 
-;; --- P3.T4: find and replace bar ------------------------------------------
+;; --- find and replace bar ------------------------------------------
 ;; Each row is self-contained (its own editor/set-text!, open! and query)
 ;; rather than chaining off a prior row's leftover selection, since the
 ;; driver's own run-row resets the editor text before every row anyway.
@@ -37,7 +37,7 @@
                                {:tag0 tag0 :tag8 tag8 :tag16 tag16 :label label :sel sel}))))))
 
 (defn row-find-next-wraps
-  "From the initial [0 3] (find-highlights' own finding), three find-next!
+  "From the initial [0 3] (find-highlights' own first match), three find-next!
   calls step to [8 11], [16 19], then wrap back to [0 3]."
   [ui]
   (go-row :find-next-wraps support/check
@@ -158,11 +158,11 @@
                 (support/check :find-hangul (= [[0 2] [9 11]] matches) {:matches matches}))))))
 
 (defn row-find-survives-repaint
-  "editor.clj's repaint! (60ms debounce after
-  the buffer's own \"changed\" signal) used to strip EVERY tag over the
-  whole buffer via gtk_text_buffer_remove_all_tags, including
-  search-match -- and since a repaint's own tag-only mutation never fires
-  \"changed\" itself, nothing re-applied it afterward. Opens find, sets
+  "editor.clj's repaint! (60ms debounce after the buffer's own \"changed\"
+  signal) must not strip search-match: a whole-buffer
+  gtk_text_buffer_remove_all_tags would, and since a repaint's own
+  tag-only mutation never fires \"changed\" itself, nothing would re-apply
+  it afterward. Opens find, sets
   the query, types one character past the last match (so no match's own
   offsets move), then waits a FIXED delay well past the repaint debounce
   (there's no positive condition to poll for -- the tags either survive or
@@ -186,13 +186,13 @@
 
 (defn row-find-preedit-yields
   "find_bar.clj's handle-key! is a capture-phase
-  controller on the bar's own :box, so it used to consume Escape/Return
-  before either entry's IM context ever saw it -- setting the atom
+  controller on the bar's own :box, so it would consume Escape/Return
+  before either entry's IM context ever saw it unless it yields -- setting the atom
   directly proves the yield without needing a real IME, same pattern as
   editor.clj's row-edit-preedit-yields/row-editor-preedit-guard (the real
   preedit-changed wiring on each entry's GtkText delegate was verified
   separately with a throwaway probe, see ffi.clj's gtk-editable-get-
-  delegate citation)."
+  delegate)."
   [ui]
   (go-row :find-preedit-yields support/check
     (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
@@ -250,7 +250,7 @@
   earlier open! cycle (row-find-preedit-yields, right before this one,
   is exactly such a cycle): open!'s own recompute-matches! selects a
   match IN THE EDITOR, which revokes GTK's shared primary selection the
-  query had just claimed, and open! now runs recompute-matches! before
+  query had just claimed, and open! runs recompute-matches! before
   the query's own select_region, but a same-tick read still can't tell
   \"already settled\" apart from \"just hasn't been revoked yet\" -- so
   this polls with a deadline instead, and genuinely fails (not hangs) if
@@ -268,7 +268,7 @@
                               :sel (g/editable-selection-bounds (:query fb))})
               (find-bar/close! fb)))))
 
-;; --- P3.T4: Escape via the WINDOW's own dispatch -------------------------
+;; --- Escape via the WINDOW's own dispatch -------------------------
 ;; (:handle-window-key! ui), never find-bar/handle-key! directly -- these
 ;; rows exercise find-bar-focused?'s own routing, not the bar's internal
 ;; key handling (already covered by find-escape/find-preedit-yields).
@@ -347,7 +347,7 @@
       (await-until 3000 20 #(not (eval/evaluating? (:ctx (:session ui))))))))
 
 (defn row-window-escape-stops-when-editor-focused
-  "Escape must keep its P2 meaning (Stop) when focus is OUTSIDE the find
+  "Escape must keep its Stop meaning when focus is OUTSIDE the find
   bar -- find-bar-focused? must read false here.
   Explicitly grabs editor focus (not just relying on whatever an earlier
   row left focused), starts a real running program, sends window Escape:
@@ -367,18 +367,18 @@
                      (and started? (= 1 handled) stopped?)
                      {:started started? :handled handled :stopped stopped?}))))
 
-;; --- P3: find bar caret and key routing ----------------------------------
+;; --- find bar caret and key routing ----------------------------------
 
 ;; The shared key table (gdkkeysyms.h) -- the product's copies are private.
 (def ^:private KEY-F3 0xffc0)
 (def ^:private KEY-G 0x067)
 
 (defn row-find-typing-keeps-caret
-  "C1: typing in the editor while the bar is open must not move the
-  selection. The buffer's \"changed\" signal used to run the full
-  recompute, which selected (and scrolled to) the next match after the
-  caret, so the NEXT keystroke's commit deleted that selection and
-  replaced a match. Types \"z\" inside \"bar\" (away from every match)
+  "Typing in the editor while the bar is open must not move the
+  selection. If the buffer's \"changed\" signal ran the full recompute, it
+  would select (and scroll to) the next match after the caret, so the
+  NEXT keystroke's commit would delete that selection and replace a
+  match. Types \"z\" inside \"bar\" (away from every match)
   with insert_interactive_at_cursor, then asserts an empty selection with
   the caret right after the z. The second keystroke is reproduced the way
   GtkTextView's own commit_text does it (delete_selection, then insert at
@@ -404,10 +404,11 @@
                                  {:sel1 sel1 :caret1 caret1 :text text :matches matches})))))))
 
 (defn row-find-return-in-replacement
-  "I1: Return with focus in the replacement entry replaces the current
+  "Return with focus in the replacement entry replaces the current
   match. gtk_root_get_focus returns the entry's internal GtkText delegate,
-  so comparing it with the entry itself was always false and Return ran
-  find-next! instead."
+  so the focus check goes through gtk_widget_is_ancestor: comparing with
+  the entry itself is always false and Return would run find-next!
+  instead."
   [ui]
   (go-row :find-return-in-replacement support/check
     (let [fb (:find-bar ui)
@@ -421,8 +422,8 @@
                       (g/gtk-editable-set-text (:replacement fb) "X")
                       (g/gtk-widget-grab-focus (:replacement fb))))
           ;; Return reads where focus is, so wait for it to land rather than
-          ;; pressing in the same step (failed 1 run in 3 under load,
-          ;; 2026-10-19: Return ran find-next)
+          ;; pressing in the same step (failed 1 run in 3 under load:
+          ;; Return ran find-next)
           focused? (await-until 2000 20 in-replacement?)]
       (on-gtk (let [ed (:editor ui) buf (:buf ed)
                     handled (find-bar/handle-key! fb support/KEY-RETURN 0)
@@ -434,7 +435,7 @@
                                {:focused focused? :handled handled :text text :sel sel}))))))
 
 (defn row-window-find-keys-editor-focused
-  "I4: with the bar open and focus back in the editor, F3, Cmd+G and
+  "With the bar open and focus back in the editor, F3, Cmd+G and
   Shift+F3 still move between matches, through the WINDOW's own key
   dispatch (:handle-window-key!), not the bar's controller."
   [ui]

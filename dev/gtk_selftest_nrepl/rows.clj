@@ -22,7 +22,7 @@
 (def fixture-core
   "(ns demo.core)\n\n(defn greet\n  \"Says hi.\"\n  [n]\n  (println \"hi\" n)\n  :hi)\n")
 
-;; D2.T5: the fixture!-built project's own {:dir :file}, stashed here so a
+;; The fixture!-built project's own {:dir :file}, stashed here so a
 ;; row (row-nrepl-open-switches-evaluator, reopening it after switching
 ;; away) and after-close-checks! (checking its .nrepl-port is untouched, after
 ;; main/start! has returned and -main's own local is out of scope) can
@@ -30,7 +30,7 @@
 ;; signature.
 (defonce ^:private fixture* (atom nil))
 
-;; D2.T5: the pid row-nrepl-close-kills-child records right before quitting,
+;; The pid row-nrepl-close-kills-child records right before quitting,
 ;; read back by after-close-checks! once the GTK loop is gone.
 (defonce ^:private last-child-pid (atom nil))
 
@@ -39,14 +39,14 @@
   .nrepl-port that belongs to \"someone else\" (4242), and
   src/demo/core.clj. {:dir :file}, both canonical.
 
-  I2: the dir name is unique (currentTimeMillis plus a random-uuid, not
+  The dir name is unique (currentTimeMillis plus a random-uuid, not
   nanoTime, which counts from process start and can collide across
   processes). A collision was already harmless here, since this fn
   itself spits fresh deps.edn/.jonquil.edn/.nrepl-port/source content
   into the dir every time it runs, never trusting anything already
   there -- unlike dialects.clj's own open-then-run, which skips writing
   .jonquil.edn when :config is nil and so could inherit a stale one
-  (the real bug). Given the same unique name anyway (the brief), but
+  (a real bug there). Given the same unique name anyway, but
   cleanup stays out of scope: after-close-checks! reads this dir's own
   .nrepl-port after main/start! returns, so deleting it here isn't
   trivially safe: the driver deletes it (temp-dirs/delete-made!) only
@@ -72,7 +72,7 @@
   switch evaluators, where a loose file (no project at all) now runs in the
   window's own child instead (jonquil.tabs/keeps-window-jolt?).
 
-  I2: unique dir name, same reasoning as fixture!'s own docstring above."
+  Unique dir name, same reasoning as fixture!'s own docstring above."
   []
   (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-inproc-"))
         f (io/file d "scratch.clj")]
@@ -140,7 +140,7 @@
   [pid]
   (str/includes? (str (:out (sh-within ["ps" "-p" (str pid) "-o" "pid="]))) (str pid)))
 
-;; --- D2.T4 rows ------------------------------------------------------------
+;; --- rows ------------------------------------------------------------
 
 (defn row-nrepl-starts-and-reports
   "Waits (up to 20000 ms, a restart can be in flight at open) for the
@@ -220,7 +220,7 @@
                                 :closed closed? :kept kept? :after (support/since ui mark)}))))))
 
 (defn row-nrepl-error-is-text
-  "An out-of-process error is text (D2.T1), never a Throwable: result-line
+  "An out-of-process error is text, never a Throwable: result-line
   reads it through console/error-text without throwing."
   [ui]
   (go-row :nrepl-error-is-text support/check
@@ -230,7 +230,7 @@
                              {:text (support/since ui mark) :ready? ready?})))))
 
 (defn row-nrepl-reset-clears-child
-  "Reset on Run (Review focus 4): two Runs in :reset mode leave nothing of
+  "Reset on Run: two Runs in :reset mode leave nothing of
   user/kept behind for a submit to see; the same two Runs in :accumulate
   mode do."
   [ui]
@@ -302,8 +302,7 @@
 (defn row-nrepl-jump-to-another-file
   "F12 on demo.util/helper after the child has required demo.util: the
   child's jonquil-info names src/demo/util.clj and line 3, a project file,
-  so it opens in a tab there (jump opens a tab, 2026-10-19; it used to
-  open in the source panel, and before that stayed in the buffer).
+  so it opens in a tab there (not the source panel).
   Cmd/Ctrl+[ goes back to the first tab, and the row closes the new one
   so later rows see one tab again."
   [ui]
@@ -353,19 +352,18 @@
                                (and (str/includes? text "demo.core/greet") (str/includes? text "Says hi."))
                                {:text text}))))))
 
-;; --- D2.T5 rows: switching runtimes on open, and the window's failure
+;; --- rows: switching runtimes on open, and the window's failure
 ;; rows (Stop against an unresponsive child, a child that dies, quit with
 ;; a live child) ---------------------------------------------------------
 
 (defn row-nrepl-stop-interrupts
-  "A plain interrupt (Review focus 2's easy case): the child answers, so
+  "A plain interrupt (the easy case): the child answers, so
   Stop ends the evaluation without ever restarting it -- the same pid
   before and after, and `before`'s binding (set at the top of the same
   Run) survives, unlike a restart, which would lose it.
 
   Stop must land after the loop is running. Pressing it once the file was
-  read but before `(def before 1)` ran left `before` unbound (Linux spike
-  finding 4), so the row waits for proof the loop started before Stop.
+  read but before `(def before 1)` ran left `before` unbound (measured on Linux), so the row waits for proof the loop started before Stop.
   The server only sends a program's printed output when the evaluation
   ends, so a `println` can't be that proof: the buffer writes a marker
   file instead, which the row polls."
@@ -392,7 +390,7 @@
                               :text (support/since ui mark2)})))))
 
 (defn row-nrepl-stop-unresponsive-restarts
-  "Review focus 2's hard case: a SIGSTOPped child never answers interrupt,
+  "The hard case: a SIGSTOPped child never answers interrupt,
   so Stop falls back to killing and restarting it -- a different pid, the
   console naming both the interrupt and the restart, and the runtime
   working again afterward.
@@ -418,7 +416,7 @@
           msgs? (await-until 15000 20 #(let [t (support/since ui mark)]
                                          (and (str/includes? t "; interrupted")
                                               (str/includes? t "Stop restarted the Jolt runtime"))))
-          ;; D2's original re-check loop, inlined: retries own-child-pid
+          ;; A re-check loop, inlined: retries own-child-pid
           ;; every 200 ms up to 5000 ms, since restart-for-stop! prints its
           ;; own console line before it actually spawns the replacement
           ;; child.
@@ -441,7 +439,7 @@
                               :old-alive? old-alive? :text (support/since ui mark2)})))))
 
 (defn row-nrepl-child-dies-mid-eval
-  "Review focus 3: a child that dies outright (SIGKILL, no Stop pressed)
+  "A child that dies outright (SIGKILL, no Stop pressed)
   still ends the evaluation with a sentence instead of hanging, the
   status returns to Ready on its own, and the very next Run notices the
   runtime is gone and starts a fresh one before evaluating."
@@ -490,7 +488,7 @@
                                      (instance? jonquil.session.InProcess (evaluator ui))])
           [hidden? editor-focused?] (on-gtk [(zero? (g/gtk-widget-get-visible (:root pane)))
                                              (= (:view (:editor ui)) (g/gtk-root-get-focus (:window ui)))])
-          ;; D2's original re-check loop, inlined: retries alive? every
+          ;; A re-check loop, inlined: retries alive? every
           ;; 200 ms up to 5000 ms until old-pid is gone.
           dead1? (let [t0 (System/currentTimeMillis)]
                    (loop []
@@ -523,7 +521,7 @@
   ((:select-tab! ui) (:id (first ((:tabs* ui))))))
 
 (defn row-nrepl-two-tabs-owner-reset
-  "Tabs plan P2.T4 over nREPL: tab 1 and a new tab each define a
+  "Over nREPL: tab 1 and a new tab each define a
   namespace; Running tab 1 again (a reset) leaves tab 2's tabs.two."
   [ui]
   (go-row :nrepl-two-tabs-owner-reset support/check
@@ -574,13 +572,13 @@
   (go-row :nrepl-close-kills-child support/check
     (let [pid (own-child-pid ui)]
       ;; The close chord ends the GTK main loop, so nothing may follow
-      ;; this on-gtk: no check here, no next step (Review focus 3).
+      ;; this on-gtk: no check here, no next step.
       (on-gtk (reset! last-child-pid pid)
               (editor/set-text! (:editor ui) "")
               ((:activate-quit-action!* ui))))))
 
 (defn after-close-checks!
-  "Review focus 1's post-loop evidence: called by -main once main/start!
+  "Post-loop evidence: called by -main once main/start!
   returns, when the GTK loop is gone and a blocking clojure.java.shell/sh
   is fine (unlike sh-within above, which parks on a/thread and needs a
   running go block). Three checks, all against row-nrepl-close-kills-
@@ -590,14 +588,13 @@
     value fixture! wrote (4242\\n): the child writes no port file;
   - this process itself has no leftover children (pgrep -P).
 
-  Deviation from the brief (reported; see the report): the brief's own
-  first bullet reads \"ps -p <pid> prints nothing\", but measured (a
-  definitely-dead pid, still in range): bare `ps -p <pid>` always prints
+  The first check uses `ps -p <pid> -o pid=`, not bare `ps -p <pid>`,
+  measured (a definitely-dead pid, still in range): bare `ps -p <pid>` always prints
   its header line (\"PID TTY TIME CMD\") whether or not the pid is alive,
   so that check can never fail even when the process really is gone --
   it isn't the process's own aliveness. `ps -p <pid> -o pid=` (no header,
   same flag alive? above already uses) prints nothing exactly when
-  the pid is dead, measured against a pid this session spawned and
+  the pid is dead, measured against a pid spawned and
   waited on; used here instead."
   []
   (let [pid @last-child-pid

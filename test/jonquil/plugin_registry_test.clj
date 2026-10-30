@@ -157,7 +157,7 @@
 
 (deftest edit-op-checked-on-the-live-buffer-test
   ;; an op that's wrong for the buffer it ran on isn't applied, and the
-  ;; throw names the plugin (review I4)
+  ;; throw names the plugin
   (let [r (with (plugin "p3-oob" (fn [_] {:edits [[0 999 "x"]] :caret 0})))
         applied (atom [])
         e (try (cmd-registry/run-command! (reg/commands r) {:command :p3-oob/wrap}
@@ -169,7 +169,7 @@
     (is (= [] @applied))))
 
 (deftest gui-turn-abandons-a-late-thunk-test
-  ;; review I1: a turn that timed out must not apply later, or a plugin
+  ;; a turn that timed out must not apply later, or a plugin
   ;; told "the window did not respond" sees its edit land anyway
   (let [queued (atom [])
         gui #(swap! queued conj %)
@@ -237,11 +237,11 @@
     (is (= #{:eval! :repl!} (set (keys (::p/impl (deref seen 2000 nil))))))))
 
 (deftest await-eval-review-fixes-test
-  ;; review I1: a dialect's :notice result (no runtime, app asleep) is its
+  ;; a dialect's :notice result (no runtime, app asleep) is its
   ;; text, not an NPE from error-text
   (is (= {:value nil :out "" :err "" :error "; No runtime is connected."}
          (reg/await-eval! {:fire (fake-fire {:status :notice :text "; No runtime is connected."}) :interrupt! (fn [])})))
-  ;; review I2/I3: Jonquil's own lines (a restart, auto-require) reach
+  ;; Jonquil's own lines (a restart, auto-require) reach
   ;; :on-notice, the code's :out/:err don't
   (let [notices (atom [])
         r (reg/await-eval! {:fire (fake-fire {:status :ok :printed "1"}
@@ -256,7 +256,7 @@
            (ex-message (await-thrown {:fire (fn [_] (swap! fired inc) nil) :interrupt! (fn []) :timeout-ms "500"}))))
     (is (zero? @fired))))
 
-;; --- a plugin's MCP tools (plugins P10b) -------------------------------------
+;; --- a plugin's MCP tools -------------------------------------
 
 (defn- tool-plugin
   "A registry holding plugin :fmt declaring effects, with tool rows."
@@ -337,7 +337,7 @@
       (finally (reset! reg/effects before)))))
 
 (deftest mcp-tools-lazy-answer-is-under-the-deadline-test
-  ;; P10b review I1: realizing a lazy answer runs plugin code too, so it
+  ;; realizing a lazy answer runs plugin code too, so it
   ;; happens under the deadline, never on the serve thread
   (let [r (tool-plugin #{} (assoc echo-row :name "lazy" :run (fn [_ _] (lazy-seq (Thread/sleep 3000) [1]))))
         t0 (System/currentTimeMillis)
@@ -347,7 +347,7 @@
     (is (= {:text "plugin fmt: plugin_fmt_lazy didn't answer in 0 s; it may still be running" :error? true} a))))
 
 (deftest mcp-tools-without-buffer-dont-wait-on-the-window-test
-  ;; P10b review I3: a tool that doesn't declare :buffer never takes a GTK
+  ;; a tool that doesn't declare :buffer never takes a GTK
   ;; turn, so a busy window can't fail it
   (let [before @reg/effects
         turns (atom 0)]
@@ -357,7 +357,7 @@
       (is (zero? @turns))
       (finally (reset! reg/effects before)))))
 
-;; --- watch-tools! (plugins P10c) --------------------------------------------
+;; --- watch-tools! --------------------------------------------
 
 (deftest watch-tools-fires-on-tool-change
   (let [a (atom (reg/empty-registry))

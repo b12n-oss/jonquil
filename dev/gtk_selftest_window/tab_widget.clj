@@ -1,7 +1,7 @@
 (ns gtk-selftest-window.tab-widget
-  "jonquil.gtk.tab in isolation (tabs plan P2.T1): a tab's widgets build
+  "jonquil.gtk.tab in isolation: a tab's widgets build
   with the window's theme and profile, and dispose-popovers! leaves none of
-  its four popovers parented (spike: removing a page with a popover still
+  its four popovers parented (measured: removing a page with a popover still
   parented on its view spun GTK in a warning loop).
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
@@ -30,7 +30,7 @@
 
 (defn row-tab-widget-builds
   "A tab's editor holds its text, carries the jonquil-code class, takes a
-  label, and owns exactly five popovers (the palette is the fifth, step S8)."
+  label, and owns exactly five popovers (the palette is the fifth)."
   [_ui]
   (go-row :tab-widget-builds support/check
     (on-gtk (let [t (make)

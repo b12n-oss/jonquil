@@ -159,7 +159,7 @@
   (let [d {:status :found :symbol "greet" :ns "demo.core" :name "greet" :arglists "([who])" :doc "Says hello."}]
     (is (str/ends-with? (help/doc-text "greet" (assoc d :location "Defined in /p/core.clj:4")) "\n\nDefined in /p/core.clj:4"))
     (is (= (help/doc-text "greet" d) (help/doc-text "greet" (assoc d :file "unknown" :line 3)))
-        "ruling 13: :file alone adds nothing")))
+        ":file alone adds nothing")))
 
 (deftest full-doc-status-test
   (is (= "This server has no full-doc op." (help/full-doc-status "map" {:status :no-op})))
@@ -221,13 +221,13 @@
 
 (deftest jump-target-percent-as-plain-name-test
   ;; outside #(), % is a legal ordinary name; the #( short-circuit must
-  ;; not swallow it (review finding 1)
+  ;; not swallow it
   (is (= {:kind :buffer :offset 6} (help/jump-target (snap "(let [% 1] %)" 11) nil)))
   (is (= {:kind :buffer :offset 5} (help/jump-target (snap "(fn [%] (inc %))" 13) nil))))
 
 (deftest jump-target-when-modifier-argument-test
   ;; :when's argument isn't a pattern: a name used there binds to the
-  ;; OUTER scope, never to the :when form (review, sharper than the nil pin)
+  ;; OUTER scope, never to the :when form (a sharper pin than nil)
   (let [text "(let [y 1] (for [x xs :when y] y))"]
     ;; outer y at 6; the :when use at 29 and the body use at 32
     (doseq [c [29 32]]

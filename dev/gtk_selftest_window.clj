@@ -1,5 +1,5 @@
 (ns gtk-selftest-window
-  "P2.T7 self-test: opens the REAL Jonquil window via jonquil.main/start!
+  "Self-test: opens the REAL Jonquil window via jonquil.main/start!
   and runs the front-end self-test rows against its ui. Every wait polls a
   condition against a deadline, never a fixed sleep. Rows call ui's exposed
   functions (run!*, stop!*, open-path!, save-to!) directly, or drive the
@@ -468,7 +468,7 @@
    mcp/row-mcp-listen-detach-leaves-window
    mcp/row-mcp-listen-stop-cleans
    ;; The parinfer rows open files from their own temp projects, which
-   ;; re-roots the window's one project (D2), so they run after every row
+   ;; re-roots the window's one project, so they run after every row
    ;; that Runs, beside the dialects rows that do the same.
    parinfer-rows/row-parinfer-project-on
    parinfer-rows/row-parinfer-project-pins-off
@@ -503,8 +503,7 @@
                              support/check)
       (<! (row ui)))))
 
-;; P2.T10 fix round 1, Important #2: removing run-rows!'s old unconditional
-;; close made row-command-chord-close the only way out, so a REGRESSION in
+;; row-command-chord-close is the only way out of the run, so a REGRESSION in
 ;; the close chord (on-window-key stops matching KEY-W, close-fn stops
 ;; being wired, etc.) would leave the g_application main loop running
 ;; forever with nothing to stop it -- hanging `bb gtk:selftest` instead of
@@ -515,11 +514,11 @@
 ;; already-destroyed) widget pointer directly.
 (defonce ^:private window-destroyed? (atom false))
 
-;; P3 fix wave I3: set only where SUMMARY prints, i.e. when the driver
+;; Set only where SUMMARY prints, i.e. when the driver
 ;; reached the end of row-fns. An early g_application_quit (a row that
 ;; really closes or quits) ends g_application_run with the remaining rows
 ;; never run and no SUMMARY, and every result recorded so far can still be
-;; a PASS -- -main used to exit 0 then, and `bb gtk:selftest` reads only
+;; a PASS and -main would exit 0, while `bb gtk:selftest` reads only
 ;; exit codes.
 (defonce ^:private finished? (atom false))
 
@@ -528,7 +527,7 @@
   ;; (microseconds), so this only ever actually waits out its deadline
   ;; when the chord is broken. finish (below) uses this same constant
   ;; twice: once to wait for the chord's own close to land, and again
-  ;; (I1) as close-window-bounded!'s own deadline for the forced close
+  ;; as close-window-bounded!'s own deadline for the forced close
   ;; that follows when the chord didn't work.
   2000)
 
@@ -546,7 +545,7 @@
   gtk_window_close (via gtk-async/close-window-bounded!) keeps the process
   from hanging.
 
-  I1: a suppress-close? flag left stuck true by an earlier row's own throw
+  A suppress-close? flag left stuck true by an earlier row's own throw
   makes close-request-fn return its suppressed branch forever, so even
   the forced gtk_window_close never actually closes the window --
   g_application_run then never returns and -main's own thread, parked

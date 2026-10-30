@@ -17,8 +17,8 @@
    :effects #{}
    :commands [{:id :wrap-when/wrap :doc "Wrap the form at the caret in (when ...)."
                :scope :editor :edit (fn [s] s)}]
-   ;; the spec's example chord is Cmd+Alt+W, which the window's Cmd+W
-   ;; (close the tab) takes first; J is free in both scopes
+   ;; not Cmd+Alt+W: the window's Cmd+W (close the tab) takes it first;
+   ;; J is free in both scopes
    :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap}]})
 
 (defn- check
@@ -154,7 +154,7 @@
       (is (one-problem r) (pr-str b))
       (is (mentions? r :problems "bindings: ") (pr-str b)))))
 
-;; --- review fixes ----------------------------------------------------------
+;; --- further checks ----------------------------------------------------------
 
 (deftest conditional-window-binding-is-not-unreachable-test
   ;; the window takes these only sometimes: a :when guard (Cmd+G while the
@@ -206,7 +206,7 @@
 
 (deftest conditions-per-scope-test
   ;; with conditions given per scope, a binding's :when must name its own
-  ;; scope's (review I3: :tree-focused is a window condition)
+  ;; scope's (:tree-focused is a window condition)
   (let [per-scope (assoc request :conditions {:window (set (keys registry/window-conditions))
                                               :editor (set (keys registry/editor-conditions))})
         run (fn [b] (pc/validate (assoc per-scope :file-id "wrap-when" :definitions [(assoc both :bindings [b])])))]
@@ -217,7 +217,7 @@
 (deftest earlier-plugin-chord-never-fires-test
   ;; an earlier plugin's binding (tagged :plugin/source in the request's
   ;; keymap) on the same chord always wins, so this binding never fires: a
-  ;; warning that says so and names that plugin (review I-A)
+  ;; warning that says so and names that plugin
   (let [req (-> request
                 (assoc-in [:registered :p-a/wrap] {:scope :editor :passes? false :plugin :p-a})
                 (update-in [:keymap :editor] #(into [{:key "j" :mods #{:cmd :alt} :command :p-a/wrap
@@ -230,7 +230,7 @@
 (deftest earlier-plugin-window-binding-is-a-warning-test
   ;; an earlier plugin binding a built-in window command to a chord makes a
   ;; later :editor binding there dead: a warning naming that plugin, not a
-  ;; problem blaming the built-in (review I-B)
+  ;; problem blaming the built-in
   (let [req (update-in request [:keymap :window]
                        #(into [{:key "j" :mods #{:cmd :alt} :command :run/run :plugin/source :p-a}] %))
         r (pc/validate (assoc req :file-id "wrap-when" :definitions [good]))]
@@ -238,7 +238,7 @@
     (is (mentions? r :warnings "plugin p-a"))
     (is (mentions? r :warnings "never fires"))))
 
-;; --- review of 140c969: every case walked as dispatch walks it -------------
+;; --- every case walked as dispatch walks it -------------
 
 (defn- with-earlier
   "request with earlier plugin p-a's bindings bs (tagged) ahead of the
@@ -293,7 +293,7 @@
     (is (mentions? r :warnings "takes that chord from plugin p-a"))
     (is (not (mentions? r :warnings "never fires")))))
 
-;; --- review of c8735f3 -----------------------------------------------------
+;; --- reachability checks ---------------------------------------------------
 
 (deftest built-in-always-take-is-a-problem-behind-a-plugin-test
   ;; p-a's Cmd+R window binding hides the built-in Run, but Run would take
@@ -320,7 +320,7 @@
     (is (false? (:ok? r)))
     (is (not (mentions? r :warnings "only when")) (pr-str r))))
 
-;; --- :mcp-tools rows (plugins P10b) ------------------------------------------
+;; --- :mcp-tools rows ------------------------------------------
 
 (def ^:private tool-row
   {:name "echo" :doc "Echo the text back."
@@ -347,7 +347,7 @@
     (let [n (apply str (repeat 60 "a"))]
       (has [(assoc tool-row :name n)]
            (str "mcp tool 0 (\"" n "\"): its served name plugin_mt_" n " is longer than 50 characters")))
-    ;; review I2: plugin_mt_ is 10, so a 40-character name is the longest
+    ;; plugin_mt_ is 10, so a 40-character name is the longest
     (is (:ok? (check [(with-tools [(assoc tool-row :name (apply str (repeat 40 "a")))])] "mt")))
     (has [(assoc tool-row :name (apply str (repeat 41 "a")))]
          (str "mcp tool 0 (\"" (apply str (repeat 41 "a")) "\"): its served name plugin_mt_" (apply str (repeat 41 "a"))

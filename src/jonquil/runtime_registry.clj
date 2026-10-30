@@ -7,9 +7,9 @@
   window.clj adds an evaluator (jonquil.evaluator/make's result) as soon
   as it makes one, and asks to remove it once ev/stop! has run on it,
   whether that's a real window close (close-request-fn) or an evaluator
-  swap (D2.T5, opening a file from another runtime, via apply-selection!).
-  unregister! only honours that once the evaluator has actually settled
-  (fix-wave C1): ev/stop! (jonquil.nrepl.evaluator) can return while a
+  swap (opening a file from another runtime, via apply-selection!).
+  unregister! only honours that once the evaluator has actually settled:
+  ev/stop! (jonquil.nrepl.evaluator) can return while a
   start is still in flight, and until that start's own teardown finishes,
   this registry is the only thing that still knows the evaluator exists.
 
@@ -44,8 +44,8 @@
     :else true))
 
 (defn unregister!
-  "Removes ev from the registry -- but only once it has settled (C1, the
-  fix-wave's phase-close review): called once ev/stop! has run on it,
+  "Removes ev from the registry -- but only once it has settled: called once
+  ev/stop! has run on it,
   whether that's a real window close (close-request-fn) or an evaluator
   swap (apply-selection!), but ev/stop! itself never blocks on a start
   already in flight, so at that point ev may still be tearing itself

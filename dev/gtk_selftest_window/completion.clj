@@ -11,7 +11,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]))
 
-;; P4.T5: this file's own private copies (measured against gdkkeysyms.h,
+;; This file's own private copies (measured against gdkkeysyms.h,
 ;; same values jonquil.gtk.completion's own KEY-UP/KEY-DOWN/KEY-TAB use;
 ;; KEY-ESCAPE/KEY-RETURN above already cover Escape/Enter for this file).
 (def ^:private KEY-SPACE 0x020)
@@ -27,7 +27,7 @@
 (def ^:private KEY-BACKSPACE 0xff08)
 (def ^:private KEY-LEFT 0xff51)
 
-;; --- P4.T5: completion with a doc preview ----------------------------------
+;; --- completion with a doc preview ----------------------------------
 
 (defn row-completion-opens
   "\"(ma\", caret 3, :complete!*: the popover opens and its rows equal
@@ -160,10 +160,9 @@
 
 (defn row-completion-keys-reach-editor
   "Open on \"(ma\": p, Backspace and Left must never be swallowed by the
-  popup (I3 -- the old version of this row inserted \"p\" with
-  insert_interactive_at_cursor alone, bypassing editor/handle-key! entirely,
-  so it would still pass even if completion/handle-key! returned 1 for
-  every one of these). completion/handle-key! itself is checked directly
+  popup (inserting \"p\" with insert_interactive_at_cursor alone would
+  bypass editor/handle-key! entirely, and pass even if
+  completion/handle-key! returned 1 for every one of these). completion/handle-key! itself is checked directly
   first and must return 0 for all three (none of Up/Down/PageUp/PageDown/
   Return/KP-Enter/Tab), then editor/handle-key! -- the view's real dispatch
   -- is called for real and must agree: 0 for every one of them, since
@@ -174,8 +173,8 @@
   never triggers GTK's own default handling underneath a 0 return (there is
   no real key event driving it), so p's insert and Backspace's delete are
   still reproduced with insert/delete-interactive, the same stand-ins the
-  rest of this file uses for GTK's default -- now gated on the checks
-  above, unlike before the fix. The popover stays open and refines through
+  rest of this file uses for GTK's default -- gated on the checks
+  above. The popover stays open and refines through
   both (still-valid?'s own prefix-start check holds for \"map\" then back to
   \"ma\"). Left has no observable buffer effect to check beyond its own 0
   return -- a bare call doesn't move the caret either."
@@ -218,7 +217,7 @@
 
 (defn row-completion-closes-on-space
   "Open, then completion/handle-key! and editor/handle-key! must both
-  return 0 for a plain space (I3, the same check row-completion-keys-
+  return 0 for a plain space (the same check row-completion-keys-
   reach-editor makes for p/Backspace/Left -- the editor keymap's
   Ctrl+Space binding needs Control, so a bare space, mask 0, misses it). Only then insert a
   space with insert_interactive_at_cursor: help/prefix-at is nil right
@@ -273,7 +272,7 @@
 
 (defn row-completion-cmd-space-nothing
   "0x20 with META only: the Ctrl+Space binding rejects it (CONTROL-MASK checked,
-  META-MASK rejected, the P4 rule), so the chord falls through unhandled
+  META-MASK rejected), so the chord falls through unhandled
   and no popover opens."
   [ui]
   (go-row :completion-cmd-space-nothing support/check
@@ -286,7 +285,7 @@
                                {:handled handled :state (completion/state c)}))))))
 
 (defn row-completion-preedit-yields
-  "With ed's own preedit-active? flag set (I5, same flag editor.clj's
+  "With ed's own preedit-active? flag set (the same flag editor.clj's
   handle-key! checks first for every key), Ctrl+Space returns 0 and opens
   nothing."
   [ui]
@@ -305,8 +304,8 @@
   "Calls every fn registered on ed's own :on-focus-fns directly -- the
   SAME ones GtkEventControllerFocus's \"leave\" signal calls --
   mirroring row-quick-doc-closes-on-focus-loss, since this self-test
-  window is never the OS's key window and can't move real focus (P4.T3's
-  own has_focus finding)."
+  window is never the OS's key window and can't move real focus
+  (gtk_widget_has_focus depends on the OS window being active)."
   [ui]
   (go-row :completion-closes-on-focus-loss support/check
     (on-gtk (let [ed (:editor ui) c (:completion ui)]
@@ -322,7 +321,7 @@
 (defn row-completion-closes-other-popover
   "Opening completion while quick doc is showing closes quick doc, and
   opening quick doc while completion is showing closes completion --
-  both through close-popovers-fn (P4.T3's registry), never a pairwise
+  both through close-popovers-fn (the shared popover registry), never a pairwise
   special case naming the other popover."
   [ui]
   (go-row :completion-closes-other-popover support/check
@@ -409,7 +408,7 @@
                              (and (= 1 handled) (= "(+ 1 2)" text) status-ok?)
                              {:handled handled :text text :status (g/label-text status)})))))
 
-;; --- P4.T6: completion in the REPL input -----------------------------------
+;; --- completion in the REPL input -----------------------------------
 
 (defn row-repl-completion-opens
   "\"(ma\" in the console input, Ctrl+Space: the popover opens above the
@@ -574,7 +573,7 @@
 
 (defn row-repl-completion-cmd-space-nothing
   "0x20 with META only, caret in the input: control-only? rejects it
-  (CONTROL-MASK checked, META-MASK rejected, the same P4 rule the editor's
+  (CONTROL-MASK checked, META-MASK rejected, the same rule the editor's
   own completion chord follows), so the chord falls through unhandled and
   no popover opens."
   [ui]
@@ -587,7 +586,7 @@
                                {:handled handled :state (completion/state c)}))))))
 
 (defn row-repl-completion-preedit-yields
-  "With cv's own preedit-active? flag set (I5, the same flag console-
+  "With cv's own preedit-active? flag set (the same flag console-
   view/handle-key!'s Ctrl+Space clause checks), Ctrl+Space returns 0 and
   opens nothing."
   [ui]
@@ -605,8 +604,8 @@
   "Calls every fn registered on cv's own :on-focus-fns directly -- the
   SAME ones GtkEventControllerFocus's \"leave\" signal calls --
   mirroring row-completion-closes-on-focus-loss, since this self-test
-  window is never the OS's key window and can't move real focus (P4.T3's
-  own has_focus finding)."
+  window is never the OS's key window and can't move real focus
+  (gtk_widget_has_focus depends on the OS window being active)."
   [ui]
   (go-row :repl-completion-closes-on-focus-loss support/check
     (on-gtk (let [cv (:console ui) c (:repl-completion ui)]
@@ -620,7 +619,7 @@
 
 (defn row-repl-completion-keys-reach-console
   "Same reasoning as row-completion-keys-reach-editor, through the
-  console's own cview/handle-key! (I3: the REPL popup must not swallow
+  console's own cview/handle-key! (the REPL popup must not swallow
   keys the input needs either). Open on \"(ma\" in the input: completion/
   handle-key! itself returns 0 for p, Backspace and Left, and cview/
   handle-key! -- the console's real dispatch -- agrees: console-view.clj
@@ -672,7 +671,7 @@
 
 (defn row-repl-completion-closes-on-space
   "Same reasoning as row-completion-closes-on-space, through cview/
-  handle-key! (I3): completion/handle-key! and cview/handle-key! both
+  handle-key!: completion/handle-key! and cview/handle-key! both
   return 0 for a plain space (control-only? in console-view.clj's own
   Ctrl+Space clause rejects mask 0). Only then insert a space with
   insert_interactive_at_cursor: help/prefix-at is nil right after it, so
@@ -692,7 +691,7 @@
                                 :still-open (some? (completion/state c))}))))))
 
 (defn row-completion-sized-to-rows-and-labelled
-  "Two names the buffer defines (P4 parked items): the list is as tall as
+  "Two names the buffer defines: the list is as tall as
   its two rows rather than eight, and each row reads \"buffer\", not
   \"user\", before any Run. A long list (\"ma\") still gets the full
   height. Heights are the list's scrolled window, read once showing."
@@ -705,8 +704,7 @@
                                     (g/label-text (g/gtk-list-box-row-get-child (g/gtk-list-box-get-row-at-index lb i)))))))
           ;; ready? says when the height is this list's: the scrolled window
           ;; keeps its last height while closed, so the second open read
-          ;; the first list's 46 px before GTK resized it (2 runs of 4,
-          ;; 2026-10-19)
+          ;; the first list's 46 px before GTK resized it (2 runs of 4)
           open-on (fn [text caret ready?]
                     (on-gtk (let [ed (:editor ui)]
                               (editor/set-text! ed text)

@@ -597,9 +597,8 @@
           to-remove (take (- (count m) max-size) sorted-entries)]
       (apply dissoc m (map first to-remove)))))
 
-;; Doc lookups are cached in jonquil.docs/symbol-doc, keyed by namespace;
-;; upstream's cache here keyed by name alone, so the same name in two
-;; namespaces could be served the other's doc. It had no callers and is gone.
+;; Doc lookups are cached in jonquil.docs/symbol-doc, keyed by namespace, so
+;; the same name in two namespaces is never served the other's doc.
 (defonce buffer-symbols-cache (atom {}))
 
 (def all-core-builtins

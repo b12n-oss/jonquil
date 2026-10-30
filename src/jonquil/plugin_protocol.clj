@@ -1,5 +1,5 @@
 (ns jonquil.plugin-protocol
-  "The plugin protocol (plugins design, Part 2): every change to the live
+  "The plugin protocol: every change to the live
   plugin set goes through run-protocol, which loads a candidate file,
   validates it (jonquil.plugin-check) and soaks its :edit commands on
   fixture snapshots, answering {:ok? :problems :warnings :timings
@@ -57,7 +57,7 @@
 
 (def FIXTURES
   "The snapshots every :edit command is soaked on, [name snapshot]: the
-  spec's empty buffer, a small form with the caret at its start, middle and
+  an empty buffer, a small form with the caret at its start, middle and
   end, a selection, and two forms (the likeliest bug: assuming one)."
   [["empty" (fixture "" 0)]
    ["form, caret at start" (fixture form-text 0)]
@@ -82,7 +82,7 @@
       (not (and (vector? edits)
                 (every? #(and (vector? %) (= 3 (count %)) (string? (nth % 2))) edits)))
       ":edits isn't a vector of [start end string]"
-      ;; NUL arc review I1: apply-op! refuses such an op silently (GTK C
+      ;; apply-op! refuses such an op silently (GTK C
       ;; strings would truncate the insert), so the refusal is named here,
       ;; on the loud path the author already gets.
       (some (fn [[_ _ r]] (str/includes? r "\u0000")) edits)

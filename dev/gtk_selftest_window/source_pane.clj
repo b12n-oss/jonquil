@@ -55,7 +55,7 @@
   is on line 1500, the header names the file, Open in window is sensitive,
   the footer shows the key hints, and the caret's own rectangle actually
   lands inside the view -- not just that scroll_to_mark was called once,
-  but that the panel really scrolled there (P3.T1 fix round 1)."
+  but that the panel really scrolled there."
   [_ui]
   (go-row :source-pane-shows-line support/check
     (with-source-pane
@@ -76,11 +76,11 @@
                                  (assoc v :visible visible? :rect rect :view-height view-height))))))))
 
 (def ^:private USER-SCROLL-WINS-THRESHOLD
-  ;; MEASURED (not the brief's literal "must still be 0"): even with the
+  ;; MEASURED (the adjustment does not stay at 0): even with the
   ;; cancel working correctly, GTK's own internal re-validation of a
   ;; freshly loaded, very long buffer nudges the vadjustment on its own,
-  ;; independent of this fix's own re-scroll timer -- confirmed by a probe
-  ;; that disabled arm-scroll-settle! entirely (so nothing in this fix
+  ;; independent of the panel's own re-scroll timer -- confirmed by a probe
+  ;; that disabled arm-scroll-settle! entirely (so nothing
   ;; ever touches the adjustment again): the SAME 752.0 value still
   ;; appeared after 600 ms, twice, across separate runs. Re-scrolling
   ;; TOWARD line 1500 (the uncancelled failure mode, mutation-checked
@@ -90,7 +90,7 @@
 
 (defn row-source-pane-user-scroll-wins
   "A person's own scroll cancels the panel's re-scroll settling instead of
-  being fought by it (P3.T1 fix round 2): open the 2000-line file at line
+  being fought by it: open the 2000-line file at line
   1500, call the panel's own :on-user-scroll! handler at once -- the same
   fn GtkEventControllerScroll's real \"scroll\" signal calls, since there
   is no synthesizable GdkScroll event to drive here -- force the
@@ -122,8 +122,7 @@
   "Hiding the panel (source-pane/cancel-scroll-settle!, the same public fn
   jonquil.gtk.window's close-source-panel!/hide-right-panel! call when the
   source root hides) stops the settle timer in flight instead of leaving
-  it to keep re-scrolling a view nobody's looking at (final review
-  finding #1). Same shape as row-source-pane-user-scroll-wins, above,
+  it to keep re-scrolling a view nobody's looking at. Same shape as row-source-pane-user-scroll-wins, above,
   with cancel-scroll-settle! in place of :on-user-scroll! as the thing
   that's supposed to stop it: open the 2000-line file at line 1500,
   cancel at once the way hiding does, then force the vadjustment to 0 and

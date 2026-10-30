@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.plugin-history
-  "Plugins P11b's rows: a plugin's history opened from the plugin list over
+  "Rows for a plugin's history opened from the plugin list over
   files written into the selftest's own plugins folder (never the
   user's), with Revert and Back driven through the ui functions the
   buttons call. Each row cleans up through plugin-list's with-list, and
@@ -88,7 +88,7 @@
 
 (defn row-plugin-history-revert-keeps-the-reason-at-the-click
   "The reason recorded is the one in the entry when Revert was pressed,
-  even if the entry changes before the step runs (final review I1)."
+  even if the entry changes before the step runs."
   [ui]
   (go-row :plugin-history-revert-keeps-the-reason-at-the-click support/check
     (with-history ui (files "ph-j")
@@ -216,7 +216,7 @@
                               (= 1 selected) (= "History of ph-i: live v2" title))
                          s))))))
 
-;; --- plugins F2: a tab on the plugin's file follows a Revert or an Accept --
+;; --- a tab on the plugin's file follows a Revert or an Accept --
 
 (defn- open-tab!
   "Opens id's file in a tab through the list's Open: the tab."
@@ -310,8 +310,7 @@
 
 (defn row-plugin-tab-at-a-link-target-follows-a-revert
   "<plugins>/pt-e.clj links to a file kept elsewhere (a dotfiles setup), and
-  the tab is open at that target: Revert to v1 still reloads it (final
-  review I1)."
+  the tab is open at that target: Revert to v1 still reloads it."
   [ui]
   (go-row :plugin-tab-at-a-link-target-follows-a-revert support/check
     (let [elsewhere (str (java.nio.file.Files/createTempDirectory "jonquil-dots-" (make-array java.nio.file.attribute.FileAttribute 0)))

@@ -1,6 +1,5 @@
 (ns jonquil.plugin-checker
-  "The program an isolated check runs in a throwaway jolt child (plugins
-  design, Part 2, \"The isolated check\"; step P8). It reads request.edn
+  "The program an isolated check runs in a throwaway jolt child. It reads request.edn
   and candidate.clj from its working folder, puts the candidate through
   jonquil.plugin-protocol/run-protocol :in-process (the child's own
   process), prints one EDN result between MARK-START and MARK-END, and
@@ -16,7 +15,7 @@
 (defn summary
   "A plugin definition as plain data, nothing that can't print and read
   back: its id, doc and effects, each command's id, doc and scope, its
-  bindings, its hook points, and (plugins P10b, only when it has the key,
+  bindings, its hook points, and (only when it has the key,
   so a summary from before then still compares equal) its MCP tools'
   name, doc and args. nil for nil."
   [definition]

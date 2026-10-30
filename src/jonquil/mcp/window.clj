@@ -1,6 +1,6 @@
 (ns jonquil.mcp.window
   "The nineteen MCP tools over a live Jonquil window, four of them over its
-  plugins folder (plugins P10, through jonquil.plugin-mcp).
+  plugins folder (through jonquil.plugin-mcp).
 
   `make-window-tools` returns the same table shape as jonquil.mcp.tools:
   `{:defs [mcp-tool-def ...] :call (fn [name args] {:text s :error? b})}`,
@@ -337,7 +337,7 @@
         tool-replace (fn [args]
                        (let [text (required-text args "text")
                              id (number-arg args "id")]
-                         ;; ROADMAP Next 3: GTK text is C strings, so a NUL
+                         ;; GTK text is C strings, so a NUL
                          ;; would truncate the insert; apply-op! refuses such
                          ;; an op, and this pre-check names the reason instead
                          ;; of mislabelling the refusal as read-only.
@@ -392,7 +392,7 @@
                            :error? false}))
         tool-brackets (fn [args] (tools/brackets-result dir args))
         tool-project (fn [_] {:text (tools/selection-text ((:selection* ui))) :error? false})
-        ;; plugins P10: reads go straight to the plugins folder; a propose
+        ;; reads go straight to the plugins folder; a propose
         ;; is refused here before the window's hook runs any check
         tool-plugins-list (fn [_] (plugin-mcp/list-text ((:plugin-state* ui))))
         tool-plugin-read (fn [args]
@@ -439,11 +439,11 @@
 
 (defn with-plugin-tools
   "base (make-window-tools' table) with the window's live plugin tools
-  after the built-ins (plugins P10b): a fn answering a table, for
+  after the built-ins: a fn answering a table, for
   jonquil.mcp/serve! to read on every message. (:plugin-tools* ui) answers
   jonquil.plugin-registry/mcp-tools' rows; it's read once per table, so one
   message's list and call agree. A ui without it serves base unchanged.
-  When the ui has :watch-plugin-tools* (plugins P10c), the table says
+  When the ui has :watch-plugin-tools*, the table says
   :list-changed? true, so initialize declares the capability."
   [base ui]
   (fn []

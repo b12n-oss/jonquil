@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.review
-  "Plugins P9b's rows: the review panel opened by Review Plugin Proposals
+  "Rows for the review panel opened by Review Plugin Proposals
   over proposals recorded straight into the selftest's own plugins folder
   (beside its temp settings file, never the user's), the status bar's
   pending count, Next, a review against a live version that moved, and
@@ -241,7 +241,7 @@
                          {:lines lines :shown shown :live? live?}))))))
 
 (defn row-review-failed-accept-says-why
-  "review I1: an unchecked proposal whose checks fail at Accept stays shown,
+  "An unchecked proposal whose checks fail at Accept stays shown,
   and the footer names the problem, not only that it stays pending."
   [ui]
   (go-row :review-failed-accept-says-why support/check
@@ -256,7 +256,7 @@
                          (assoc p :lines lines)))))))
 
 (defn row-review-step-keeps-shown-and-note
-  "review I2 and I3: a plugin step while the second of two proposals is
+  "A plugin step while the second of two proposals is
   shown keeps it shown, and keeps the note being typed for Reject."
   [ui]
   (go-row :review-step-keeps-shown-and-note support/check

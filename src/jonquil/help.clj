@@ -1,5 +1,5 @@
 (ns jonquil.help
-  "The decisions behind P4's help features, pure. Snapshots are the editor's
+  "The decisions behind the help features, pure. Snapshots are the editor's
   {:text :caret :sel-start :sel-end}; edit results are the
   {:edits [[s e r]] :caret n :sel nil} shape jonquil.gtk.editor/apply-op!
   takes. Lookups that depend on the running program (candidates, docs)
@@ -58,8 +58,8 @@
 (defn candidate-label
   "The word a completion row shows beside the name: \"buffer\" for a name
   the buffer itself defines (buffer-defs, syntax/find-buffer-definitions),
-  which used to read \"user\" before the first Run as if it lived in the
-  user namespace (P4 parked item). The buffer wins when the running
+  which would otherwise read \"user\" before the first Run as if it lived
+  in the user namespace. The buffer wins when the running
   program defines the name too, since it's the definition you can edit
   and jump to. Other :user names (the program's own, other files', words
   in the buffer) still read \"user\"; any other category its own name."
@@ -133,7 +133,7 @@
 
 (defn location-line
   "\"Defined in <file>[:line]\" for the quick-doc footer of a definition
-  outside the buffer (ruling 13: keyed on :location, never on :file
+  outside the buffer (keyed on :location, never on :file
   alone). nil for a nil file. A jar:file:/any/path/NAME.jar!/entry URL is
   shortened to NAME.jar!/entry; any other string is used as is."
   [file line]
@@ -147,7 +147,7 @@
 
 (defn full-doc-status
   "The status-bar sentence for a jonquil.evaluator/full-doc result
-  (P3.T2, ruling 11's second press), or nil for :ok -- the caller shows
+  (the second quick-doc press), or nil for :ok -- the caller shows
   the text and clears the status itself then."
   [sym result]
   (case (:status result)
@@ -165,7 +165,7 @@
 (defn doc-text
   "The quick-doc text for a jonquil.docs/symbol-doc result, using upstream's
   formatter; a nil result reads as not found. Appends \"\\n\\n\" plus
-  :location when doc-info has one (ruling 13: help/doc-text never reads
+  :location when doc-info has one (help/doc-text never reads
   :file on its own)."
   [sym doc-info]
   (let [text (syntax/format-autocomplete-doc (or doc-info {:status :not-found :symbol sym})
@@ -186,11 +186,11 @@
 ;;
 ;; The search walks the '(' forms enclosing the target's start, innermost
 ;; first, and for each one collects the names it binds: let/loop/binding/
-;; when-let/when-some/when-first/if-let/if-some's own bindings vector (fix
-;; wave item 1b -- if-let/if-some's own binding only reaches their THEN
+;; when-let/when-some/when-first/if-let/if-some's own bindings vector
+;; (if-let/if-some's own binding only reaches their THEN
 ;; branch, via scoped-for?, below), for/doseq's own bindings vector,
 ;; fn/defn/defn-/defmacro params (every arity, and only a REAL arity
-;; clause -- fix wave item 1a's bare-arity-clause? -- never quoted or
+;; clause, per bare-arity-clause?, never quoted or
 ;; literal data that merely looks like one), letfn's names and each letfn
 ;; entry's own params (letfn-entry?), for/doseq's :let vectors, and
 ;; %-shaped names inside #() (resolved to the #( itself). Vector and
@@ -200,7 +200,7 @@
 ;; covered: any other macro that introduces bindings under a different
 ;; shape.
 
-;; Fix wave item 1b: when-let/when-some/when-first share let's own
+;; when-let/when-some/when-first share let's own
 ;; [pattern val ...] bindings-vector shape (bindings-vector-names doesn't
 ;; care how many pairs there are, so one pair works the same as let's own
 ;; many), and their binding is in scope for every body form the same way
@@ -378,8 +378,7 @@
 (defn- bare-arity-clause?
   "Whether the '(' at open is one of a multi-arity fn/defn/defn-/defmacro
   form's own clause lists, not quoted or literal data that merely LOOKS
-  like one because its own first child happens to be a vector (fix wave
-  item 1a). open's immediate structural parent -- the smallest '('
+  like one because its own first child happens to be a vector. open's immediate structural parent -- the smallest '('
   strictly enclosing open itself, i.e. enclosing-parens' own innermost
   result -- must be a fn-like form, AND that parent must actually be in
   multi-arity mode: fn-arity-params on its children (after its own
@@ -404,8 +403,8 @@
   vector, as each clause of a multi-arity fn/defn/defmacro is -- is
   detected directly (its parens are their own ancestor of anything in
   their body), without needing to consult the outer fn-def form's own
-  operator, PROVIDED bare-arity-clause? confirms it really is one (fix
-  wave item 1a) -- quoted/literal data whose first child happens to be a
+  operator, PROVIDED bare-arity-clause? confirms it really is one --
+  quoted/literal data whose first child happens to be a
   vector (e.g. `'([q] q)`) is never mistaken for one, since its immediate
   parent isn't a fn-like form in multi-arity mode."
   [^String text tokens matches open close]
@@ -445,7 +444,7 @@
 
 (defn- scoped-for?
   "Whether the [open close] ancestor's own binding, if any, is in scope at
-  pos (fix wave item 1b) -- false only for if-let/if-some when pos sits in
+  pos -- false only for if-let/if-some when pos sits in
   the ELSE branch (children index 3), the one place the shared let-shaped
   bindings-vector-names extraction would otherwise be wrong: if-let/
   if-some's binding covers only the THEN branch (children index 2), never
@@ -466,7 +465,7 @@
   :end}, or nil. Walks '(' forms enclosing pos outward; the first ancestor
   with a match wins, and within that ancestor's own name list the LAST
   match wins (a repeated name in one binding vector prefers the one
-  closest to the body). scoped-for? (fix wave item 1b) skips an ancestor
+  closest to the body). scoped-for? skips an ancestor
   entirely -- as if it bound nothing -- when it's an if-let/if-some whose
   binding doesn't reach pos (the ELSE branch)."
   [text pos sym-name]

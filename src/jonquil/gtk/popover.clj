@@ -1,42 +1,39 @@
 (ns jonquil.gtk.popover
-  "P4: a caret-anchored GtkPopover base, shared by completion, quick doc and
-  rename (P4.T4-T7). Anchored to the view it's built for (the editor or the
+  "A caret-anchored GtkPopover base, shared by completion, quick doc and
+  rename. Anchored to the view it's built for (the editor or the
   REPL input), so it moves with whichever pane actually has the caret --
   but its actual GtkWidget parent (gtk_widget_set_parent) is that view's
   own immediate container, never the view itself. Parenting straight to
-  the GtkTextView (what the P4 probes' own code does --
-  spikes/p4/p4_1_popover_focus.clj, p4_2_caret_anchor.clj,
-  p4_7_popover_colours.clj) hangs a real window close: GtkTextView's own
+  the GtkTextView hangs a real window close: GtkTextView's own
   dispose walks its structural children to detach them, doesn't recognise
   a foreign (non-anchor) child, logs \"GtkPopover is not a child of
   GtkTextView\" every iteration, and never actually detaches it, so the
   main thread pins at 100% CPU in gtk_text_view_dispose ->
   gtk_text_view_remove -> g_log_structured_standard forever (measured via
-  `sample <pid> 3` on a hung bb gtk:selftest). The probes themselves never
-  hit this, since every probe process ends with System/exit, which skips
-  GTK's own dispose cascade entirely, so none of them ever destroyed the
-  window they built. A plain GtkScrolledWindow (the view's actual parent
+  `sample <pid> 3` on a hung bb gtk:selftest). It only shows when the
+  window is really destroyed: a process that ends with System/exit skips
+  GTK's own dispose cascade entirely. A plain GtkScrolledWindow (the view's actual parent
   in both the editor and the console -- GTK4's GtkTextView implements
   GtkScrollable directly, so gtk_scrolled_window_set_child attaches it
   with no extra GtkViewport in between) has no such override and destroys
   cleanly, measured against the same real teardown path. jonquil.gtk.
   window's own registry (:close-popovers!*) still closes (popdown, not
-  unparent) whichever P4 popover is open; nothing here unparents on
+  unparent) whichever popover is open; nothing here unparents on
   hide!, since a production popover is built once and shown/hidden for
   the rest of the session.
 
-  Probe 1 (P4 findings #1): with autohide FALSE the popover stays visible
+  With autohide FALSE the popover stays visible
   and mapped, the window's focus widget stays the view, and the view's own
   capture-phase key controller keeps receiving every key -- so a
   completion/quick-doc popover (autohide off) never steals typing; nothing
   here needs to filter keys. Autohide TRUE is modal (GTK grabs the
   keyboard and closes on Escape/click-outside itself) -- the shape rename
-  wants (P4.T7). Either way this namespace never closes a popover on its
+  wants. Either way this namespace never closes a popover on its
   own initiative; jonquil.gtk.window's Escape handling
   (:close-popovers!*) does that, since the window's capture-phase
-  controller runs before a popover ever sees the key (probe 4).
+  controller runs before a popover ever sees the key.
 
-  Probe 2 (P4 findings #2): show-at-caret! points the popover at the
+  show-at-caret! points the popover at the
   view's insert-mark rectangle via gtk_text_view_get_iter_location then
   gtk_text_view_buffer_to_window_coords (GTK_TEXT_WINDOW_TEXT) --
   jonquil.gtk.ffi/caret-window-rect -- then, since the popover's real
@@ -51,7 +48,7 @@
   unconditionally rather than assumed, since a
   theme with a scrolled-window frame would make it nonzero.
 
-  P4.T7: make-popover's autohide branch connects the popover's own
+  make-popover's autohide branch connects the popover's own
   \"closed\" signal (GtkPopover, Gtk-4.0.gir: emitted whenever the popover
   closes, for any reason) to reset :open? to false. Rename (autohide ON)
   is the first caller this matters for: GTK itself closes an autohide
@@ -80,21 +77,21 @@
   "A GtkPopover carrying CSS class jonquil-popover (so
   jonquil.theme/code-css's popover rules apply), with autohide and position
   set as given -- (:bottom the editor's completion/quick-doc anchor below
-  the caret, :top the REPL input's anchor above it, per probe 2). Its
+  the caret, :top the REPL input's anchor above it). Its
   GtkWidget parent is (gtk_widget_get_parent view) -- view's own immediate
   container, not view itself (see the ns docstring) -- so view must already
   be inside one (true for the editor's and the console's views by the time
-  P4.T4-T7 or a self-test row ever calls this). Returns {:popover :view
+  this is called). Returns {:popover :view
   :open?}; :open? is this popover's own visibility bit, true only between
   show-at-caret! and hide! -- and, for an autohide popover, also kept
   false by the \"closed\" signal handler this connects when GTK closes it
-  on its own (see the ns docstring's P4.T7 paragraph)."
+  on its own (see the ns docstring's \"closed\" paragraph)."
   [view {:keys [autohide? position]}]
   (let [pop (g/gtk-popover-new)
         open? (atom false)]
     (g/gtk-widget-set-parent pop (g/gtk-widget-get-parent view))
     (g/gtk-widget-add-css-class pop "jonquil-popover")
-    ;; Fix wave item 5 (M2's left-edge finding): GTK_ALIGN_START on the
+    ;; GTK_ALIGN_START on the
     ;; popover's OWN widget, not just its child, moves its left edge to the
     ;; caret instead of centring the popover on the pointing-to rect --
     ;; measured live against the completion scene with a caret three
@@ -126,10 +123,10 @@
   "A scrolled, top-aligned, word-wrapped label (CSS class jonquil-doc, so
   jonquil.theme/code-css's popover rules give it the theme's monospace
   font), shared by jonquil.gtk.help-popover's quick-doc label and
-  jonquil.gtk.completion's doc-preview label -- fix wave item 5 (M2):
+  jonquil.gtk.completion's doc-preview label:
   gtk_label_set_wrap plus PANGO_WRAP_WORD_CHAR (falling back to a
-  character break only where a single word doesn't fit its own line) in
-  place of the old clipped, unwrapped label; GTK_POLICY_NEVER on the
+  character break only where a single word doesn't fit its own line);
+  GTK_POLICY_NEVER on the
   scroller's own horizontal axis, so a long unbroken token scrolls
   vertically with the rest of the text instead of falling back to a
   horizontal scrollbar the macOS overlay style hides; GTK_ALIGN_START on
@@ -137,13 +134,12 @@
   default centre; and gtk_scrolled_window_set_propagate_natural_height
   plus set_max_content_height in place of a fixed height request, so the
   popover sizes to its actual content up to max-height and only scrolls
-  beyond that -- no more tall empty box under a one-line doc. width is
-  still a fixed size request (height -1, so only the max-content-height
-  clamp bounds the vertical size), keeping each popover's own width
-  exactly as before. With {:fit-width? n}, the scroller takes the label's
+  beyond that (no tall empty box under a one-line doc). width is
+  a fixed size request (height -1, so only the max-content-height
+  clamp bounds the vertical size). With {:fit-width? n}, the scroller takes the label's
   natural width instead, capped at n characters (gtk_label_set_max_width_
   chars, so the cap follows the zoom), so a one-line doc gets a narrow
-  popover rather than the full 80 columns (P4 parked item). The cap is on
+  popover rather than the full 80 columns. The cap is on
   the label because the scroller's own max-content-width doesn't apply
   while its horizontal policy is NEVER: measured, a long doc grew to
   1175 px. The completion preview keeps the fixed width, so its
@@ -170,12 +166,12 @@
      {:label label :scroll scroll})))
 
 (defn show-at-caret!
-  "Points pp's popover at view's caret and pops it up. probe 2:
+  "Points pp's popover at view's caret and pops it up:
   g/caret-window-rect on the view, its origin translated
   (g/compute-point) from the view's own coordinates into the popover's
   actual GtkWidget parent's (see the ns docstring), then
   gtk_popover_set_pointing_to. Callers set the popover's child
-  (set-child!) before calling this, same order the probes used."
+  (set-child!) before calling this."
   [pp]
   (let [{:keys [popover view open?]} pp
         anchor (g/gtk-widget-get-parent popover)
@@ -244,7 +240,7 @@
   Posted (on-gui!), not done in the handler: GTK moves focus to the
   popover's parent (the view's scrolled window) once the popover unmaps,
   after \"closed\" has run, so a grab in the handler is undone (measured
-  with the command palette in step S8, and then on the rename popover:
+  with the command palette, and then on the rename popover:
   the root's focus was the scrolled window, not the view). And only while
   focus is still there or nowhere, so a popover a command just opened
   keeps the focus it took. The posted thunk holds its own ref on the view,

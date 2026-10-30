@@ -16,7 +16,7 @@
   "Builds the Jonquil window and blocks in the GTK main loop. opts is
   {:file path-or-nil :dir path-or-nil :cwd path-or-nil :argv [\"jonquil\" ...]
   :on-ready (fn [ui]) :settings-path path-or-nil :plugins? bool}
-  (:settings-path defaults to (jonquil.settings/settings-path), TH.T5;
+  (:settings-path defaults to (jonquil.settings/settings-path);
   :plugins? false starts with no plugins, --no-plugins); see
   jonquil.gtk.window/start! for ui's shape."
   [opts]
@@ -185,7 +185,7 @@
   (System/exit 0))
 
 (defn -main [& all-args]
-  ;; plugins P3: --no-plugins (or JONQUIL_NO_PLUGINS=1 from the Dock or
+  ;; --no-plugins (or JONQUIL_NO_PLUGINS=1 from the Dock or
   ;; Finder) starts the window with no plugins; nothing else sees the flag
   (let [{:keys [args plugins?]} (plugin-loader/plugin-flags all-args #(System/getenv %))]
     (run-main args plugins?)))

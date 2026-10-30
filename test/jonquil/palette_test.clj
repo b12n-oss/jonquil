@@ -65,12 +65,12 @@
   (is (= 0 (:index (palette/move {:shown [] :index 0} -1)))))
 
 (deftest review-plugin-proposals-is-found-test
-  ;; plugins P9b: the console's "(Review Plugin Proposals in the palette)"
+  ;; the console's "(Review Plugin Proposals in the palette)"
   ;; finds the command
   (let [es (palette/entries {:commands registry/window-commands :keymap {} :os "Linux"})]
     (is (some #(= :plugins/review (:id %)) (palette/filter-entries es "Review Plugin Proposals")))))
 
 (deftest plugins-is-found-test
-  ;; plugins P11: the guide's "Plugins…" finds the list's command
+  ;; the guide's "Plugins…" finds the list's command
   (let [es (palette/entries {:commands registry/window-commands :keymap {} :os "Linux"})]
     (is (some #(= :plugins/list (:id %)) (palette/filter-entries es "Plugins")))))

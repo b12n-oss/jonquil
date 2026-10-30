@@ -1,5 +1,5 @@
 (ns jonquil.eval-test
-  "Upstream eval_test.clj (41c56b8) ported to jonquil.eval, plus the P0 S1 rows.
+  "Upstream eval_test.clj (41c56b8) ported to jonquil.eval, plus Jonquil's own rows.
    Deviations from upstream are marked DEVIATION."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -109,7 +109,7 @@
       (sut/push-stdin! ctx "second-run")
       (is (= "second-run" (:value (deref c2 3000 :timeout)))))))
 
-;; ---------------------------------------------------------------- S1 rows
+;; ---------------------------------------------------------------- rows
 
 (def counter (atom 0))
 
@@ -153,12 +153,10 @@
 
 (def live (atom #{}))
 
-;; CHANGED in P1.T7 fix round 2: this test used to assume "Run pressed
-;; immediately after Stop, before the worker has exited" always gets the
-;; "already in progress" warning, then always started run 2 explicitly
-;; afterward. Round 1's tighter Stop handshake means that immediate call
-;; can now sometimes race ahead of run1's worker and actually START run 2
-;; (returning nil) instead of warning -- both outcomes are legitimate
+;; "Run pressed immediately after Stop, before the worker has exited" does
+;; not always get the "already in progress" warning: the tight Stop
+;; handshake means that immediate call can sometimes race ahead of run1's
+;; worker and actually START run 2 (returning nil) instead of warning -- both outcomes are legitimate
 ;; results of a real race, and the test's actual invariant (at most one
 ;; program is ever live, and a second run does get going once the first
 ;; has stopped) holds under either one. So: if the immediate call started
@@ -258,9 +256,9 @@
       ;; every later test that runs in the default namespace.
       (when (find-ns 'user) (ns-unmap 'user 'f)))))
 
-;; ---------------------------------------------------------------- fix round 1
+;; ---------------------------------------------------------------- idle notify
 
-(deftest fix1-idle-notify-throw-does-not-block-completion
+(deftest idle-notify-throw-does-not-block-completion
   (let [ctx (sut/make-eval-context)
         done (promise)
         status-threw? (atom false)]
@@ -277,7 +275,7 @@
       (is (= 2 (:value r)))
       (is (false? (sut/evaluating? ctx))))))
 
-(deftest fix2-stop-immediately-after-run-interrupts-promptly
+(deftest stop-immediately-after-run-interrupts-promptly
   (dotimes [i 5]
     (let [ctx (sut/make-eval-context)
           done (promise)
@@ -291,14 +289,14 @@
         (is (= :interrupted (:status r)) (str "iteration " i))
         (is (< elapsed 5000) (str "iteration " i " took " elapsed "ms, expected well under the 10000ms sleep"))))))
 
-(deftest fix3-no-stale-idle-after-next-run-starts
+(deftest no-stale-idle-after-next-run-starts
   ;; A watch on running-state fires SYNCHRONOUSLY, on run1's own worker
   ;; thread, as part of the very reset! that flips it to idle-state -- i.e.
   ;; strictly before run1 goes on to call on-status-change :idle. From
   ;; inside that watch we start run2 and then sleep briefly before letting
   ;; the watch (and so the reset!) return, which gives run2's own worker a
   ;; window to run if nothing serialises it against run1's still-pending
-  ;; :idle notification. This is exactly the gap S1's finding 3 describes
+  ;; :idle notification. This is exactly the gap
   ;; (a new run starting between the old worker's state reset and its
   ;; notification), widened deterministically instead of hoping a real
   ;; scheduler race lands the wrong way often enough to catch in CI.
@@ -340,9 +338,9 @@
         (is (< idle1-idx running2-idx)
             (str "iteration " i ": run2's :running notification must never precede run1's :idle notification, log=" entries))))))
 
-;; ---------------------------------------------------------------- phase-close fix wave
+;; ---------------------------------------------------------------- Stop races
 
-(deftest phase-close-i1-stop-clears-interrupt-before-blocking-oncomplete
+(deftest stop-clears-interrupt-before-blocking-oncomplete
   (let [ctx (sut/make-eval-context)
         q (java.util.concurrent.LinkedBlockingQueue.)]
     (sut/eval-async ctx "(loop [] (recur))" {:on-complete (fn [r] (.put q r))})
@@ -352,7 +350,7 @@
       (is (some? item) "on-complete's blocking .put must still deliver after Stop")
       (is (= :interrupted (:status item))))))
 
-(deftest phase-close-i2-create-writer-char-array-branches
+(deftest create-writer-char-array-branches
   (testing "1-arg write with a char array"
     (let [out (atom [])
           w (sut/create-writer (fn [s] (swap! out conj s)))]
@@ -368,7 +366,7 @@
       (is (= :ok (:status r)))
       (is (str/includes? (apply str (map second @out)) "hi")))))
 
-(deftest phase-close-i3-printed-realizes-under-binding-and-truncates
+(deftest printed-realizes-under-binding-and-truncates
   (testing "side effects of realizing :value arrive through on-output, :printed matches"
     (let [[r out] (run-sync (sut/make-eval-context)
                             "(map (fn [x] (println :side x) x) [1 2])")]
@@ -382,7 +380,7 @@
       (is (str/starts-with? (:printed r) "(0 1 2"))
       (is (str/ends-with? (:printed r) "...)")))))
 
-(deftest phase-close-i4-doc-referred-and-honours-bound-out
+(deftest doc-referred-and-honours-bound-out
   (let [[r out] (run-sync (sut/make-eval-context) "(doc inc)")]
     (is (= :ok (:status r)))
     (is (str/includes? (apply str (map second @out)) "inc"))))
@@ -423,7 +421,7 @@
       (is (= :ok (:status r)))
       (is (= [[:out "{:a 1, :b [1 2 3]}\n"]] @out)))))
 
-(deftest p2-stop-leaves-a-finishing-worker-alone
+(deftest stop-leaves-a-finishing-worker-alone
   (let [ctx (sut/make-eval-context)
         flag (atom false)]
     (reset! (:running-state ctx) {:status :running :finishing true

@@ -163,7 +163,7 @@
     (is (= {} (get-in rs [1 "result"])))))
 
 (deftest table-fn-is-read-per-message
-  ;; plugins P10b: a fn table is read on every message
+  ;; a fn table is read on every message
   (let [t (atom tools)
         f (fn [] @t)
         names (fn [] (map #(get % "name") (get-in (mcp/handle-message f (req 1 "tools/list" {})) ["result" "tools"])))]
@@ -178,7 +178,7 @@
     (is (= -32602 (get-in (mcp/handle-message f (req 3 "tools/call" {"name" "late" "arguments" {}}))
                           ["error" "code"])))))
 
-;; --- tools/list_changed (plugins P10c) ---------------------------------------
+;; --- tools/list_changed ---------------------------------------
 
 (deftest initialize-declares-list-changed
   (is (= {"tools" {"listChanged" true}}

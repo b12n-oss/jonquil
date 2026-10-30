@@ -1,8 +1,7 @@
 (ns jonquil.gtk.appearance
   "Asks macOS whether it is showing Light or Dark, for the `auto` theme.
   GTK reports gtk-interface-color-scheme as UNSUPPORTED on macOS, so this
-  goes through the Objective-C runtime instead (probed 2026-10-15, see the
-  auto-theme spec). A missing symbol fails at the call, not at load, so
+  goes through the Objective-C runtime instead (probed 2026-10-15). A missing symbol fails at the call, not at load, so
   this namespace loads on Linux too."
   (:require [clojure.string :as str]
             [jolt.ffi :as ffi]))

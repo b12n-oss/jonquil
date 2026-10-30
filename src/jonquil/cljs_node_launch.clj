@@ -252,7 +252,7 @@
   Chrome holds the page's open connection for about a minute after it
   leaves (measured 2026-10-22: 56 s from about:blank to CLOSE_WAIT), so the
   socket alone can't tell the server in time. The goodbye names its server
-  (review 2026-10-23): page generations restart at 1 in every process, so
+ : page generations restart at 1 in every process, so
   after an auto-reload the OLD page's late goodbye could match the NEW
   page's generation; the server ignores a goodbye for another server."
   [server gen]
@@ -325,8 +325,8 @@
   reload-message says. One loop per
   window (__jonquil_ping), bfcache restores included. The answer is
   prefixed (gen-prefix), so a 200 from some other program that later owns
-  the port ends the loop instead of reloading the page into it (review
-  2026-10-23: SPA dev servers answer any POST / with 200 and a body)."
+  the port ends the loop instead of reloading the page into it (SPA
+  dev servers answer any POST / with 200 and a body)."
   [gen]
   (str "\n;(function(){try{if(window.__jonquil_ping)return;window.__jonquil_ping=true;"
        "var g=" (pr-str gen) ",p=\"jonquil-gen:\",d=5000,e=0;"
@@ -453,7 +453,7 @@
   wait for read-line's first reader. {:path p :raf open-file}, or nil when
   mkfifo or the open failed, with one stderr line saying why. Opened here,
   before the ready line, so both failures take the one stdin:none path: an
-  open that failed later, in the relay, used to exit the whole launcher
+  open that failed later, in the relay, would exit the whole launcher
   (measured: before its ready line, so the session never started). read-line
   is then unavailable; the session is otherwise unchanged."
   []

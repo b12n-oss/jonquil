@@ -31,14 +31,13 @@
 (def ^:private KEY-M 0x06d)
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (its own gitignored planning-store
-  ;; file): demo.core with greet, a private secret returning :private-ok,
-  ;; and nested. Embedded rather than read at run time: the planning
-  ;; store is gitignored scratch, so this harness can't depend on it. The
+  ;; The fixture's exact text: demo.core with greet, a private secret
+  ;; returning :private-ok, and nested. Embedded rather than read at run
+  ;; time, so this harness doesn't depend on an external file. The
   ;; same text test/jonquil/nrepl/jvm_test.clj's own fixture-core-text
   ;; embeds.
   (str "(ns demo.core\n"
-       "  \"A fixture namespace for the clj-attach spike.\")\n"
+       "  \"A fixture namespace for the JVM attach tests.\")\n"
        "\n"
        "(defn greet\n"
        "  \"Says hello to someone.\"\n"
@@ -57,7 +56,7 @@
 ;; and set back to {} after each.
 (defonce ^:private slow-server (atom {}))
 
-;; P3.T2 step 5: the fake's own :full-docs answer for greet, referenced by
+;; The fake's own :full-docs answer for greet, referenced by
 ;; row-clj-full-doc below -- the same text test/jonquil/nrepl/jvm_test.clj's
 ;; own full-doc-greet-text embeds.
 (def full-doc-greet-text
@@ -105,15 +104,15 @@
 
 (defn fixture!
   "Starts the fake server and writes a JVM project directory for it:
-  deps.edn, .jonquil.edn {:dialect :clj}, src/demo/core.clj (the spike
+  deps.edn, .jonquil.edn {:dialect :clj}, src/demo/core.clj (the
   fixture's text), and .nrepl-port holding the fake's port. {:dir :file
   :server :lock-text}, paths canonical.
 
-  P3.T2: the project directory and its src/demo/core.clj are written
+  The project directory and its src/demo/core.clj are written
   BEFORE the fake starts, so greet's own :docs entry can point :file at
   this SAME file's real canonical path (mirroring jvm_test.clj's own
   lookup-test comment on the same ordering need); map's own :docs entry
-  is a fixed jar path, ruling 13's own jar-shortening shape.
+  is a fixed jar path, the jar-shortening shape.
   Also writes src/demo/util.clj and, in a temp-dirs dir outside the project,
   other/place.clj and lib.jar (clojure/core.clj inside), for the
   source-panel rows."
@@ -127,7 +126,7 @@
     (let [util (io/file d "src/demo/util.clj")
           outside-dir (temp-dirs/temp-dir! "jonquil-selftest-clj-outside-")
           outside (io/file outside-dir "other/place.clj")
-          ;; F12 opens a project file in a tab (2026-10-19), so the panel's
+          ;; F12 opens a project file in a tab, so the panel's
           ;; own rows follow this read-only copy of util.clj outside the
           ;; project; proj-helper still names the project's util.clj
           outside-util (io/file outside-dir "other/util.clj")
@@ -157,13 +156,13 @@
                          "ghost" {"ns" "clojure.core" "name" "ghost" "file" (str jar-url "nope/ghost.clj") "line" 1}
                          "late" {"ns" "demo.util" "name" "late" "file" (.getCanonicalPath outside-util) "line" 999}}
                   :full-docs {"greet" full-doc-greet-text}
-                  ;; P3.T2: row-clj-inspect-in-out's own REPL entry, a
+                  ;; row-clj-inspect-in-out's own REPL entry, a
                   ;; single-key map so :in always lands on idx 0 with no
                   ;; ambiguity. row-clj-inspect-lost-connection's own delay:
                   ;; every inspect-* op waits this long before answering, so
                   ;; dropping connections right after an in-step's own
                   ;; request is logged (fake/ops-seen) still finds it
-                  ;; genuinely pending -- review focus 5's own path.
+                  ;; genuinely pending.
                   :answers {"(pick)" "{:k 42}"}
                   :inspect-ms 300})
             lock-text (str (:port srv) "\n")]
@@ -205,7 +204,7 @@
 
 (defn- label [ui] (g/label-text (:dialect-label ui)))
 
-;; --- P2.T4 rows --------------------------------------------------------------
+;; --- rows --------------------------------------------------------------
 
 (defn row-clj-starts-not-running
   "The window opened src/demo/core.clj: the label says the JVM isn't
@@ -225,8 +224,8 @@
                               :tooltip (g/tooltip-text chk) :ops (fake/ops-seen (srv))})))))
 
 (defn row-clj-inspect-before-run
-  "I1 scenario A: Cmd/Ctrl+I before any Run. inspectable? is true (:ops
-  is still empty, ruling 5), so the panel opens and :start's own reply
+  "Cmd/Ctrl+I before any Run. inspectable? is true (:ops
+  is still empty), so the panel opens and :start's own reply
   is {:error clj/inspect-not-attached} -- a fresh, nil-state :error
   reply (jonquil.inspect/open) must show that sentence in the footer,
   not throw computing position text from a view with no :start."
@@ -245,7 +244,7 @@
 (defn row-clj-run-moves-prompt
   "Run is load-file over the fixture: the console shows the value line,
   the label turns to attached, and the prompt moves to the buffer's own
-  namespace (ruling 4)."
+  namespace."
   [ui]
   (go-row :clj-run-moves-prompt support/check
     (let [[ok? mark] (run-and-await ui fixture-core-text 10000 #(str/includes? % "=> #'demo.core/nested"))
@@ -353,7 +352,7 @@
                              {:ran ran? :moved moved? :not-running not-running? :answered answered?
                               :reset reset? :sent-ns sent-ns :tail (tail)})))))
 
-;; --- P3.T2 rows: quick doc, jump, and full doc on a second press -----------
+;; --- rows: quick doc, jump, and full doc on a second press -----------
 
 (defn row-clj-quick-doc
   "Ctrl+Q on greet in (greet \"x\"), with the evaluator already attached
@@ -374,7 +373,7 @@
                 (popover/hide! hp))))))
 
 (defn row-clj-full-doc
-  "Quick doc twice on greet (ruling 11): the second press is a repeat on
+  "Quick doc twice on greet: the second press is a repeat on
   the SAME target while the popover is still open, so it asks the fake's
   own doc op instead of re-showing the same text. Within 2000 ms
   full-doc-text holds the fake's own :full-docs answer, the quick-doc
@@ -400,7 +399,7 @@
 (defn row-clj-full-doc-escape
   "With the full-doc popover open (the same double quick-doc press as
   row-clj-full-doc), Escape closes it -- window.clj's own popover
-  registry (:close-popovers!*), the same path P4.T3's own escape row
+  registry (:close-popovers!*), the same path the popover escape row
   uses."
   [ui]
   (go-row :clj-full-doc-escape support/check
@@ -416,10 +415,10 @@
                                  (and opened? (= 1 handled) (not (popover/open? fp)))
                                  {:opened opened? :handled handled :open (popover/open? fp)})))))))
 
-;; --- P3.T2 rows: the inspector over the JVM attach evaluator ---------------
+;; --- rows: the inspector over the JVM attach evaluator ---------------
 
 (defn row-clj-inspect-after-run
-  "Run on the fixture, then :inspect-last!* (review focus 1): within
+  "Run on the fixture, then :inspect-last!*: within
   3000 ms the panel shows the Run's own value. load-file answers only
   the LAST form's own value, the def's own printed var string
   \"#'demo.core/nested\" -- MEASURED (jolt run, not recalled):
@@ -428,8 +427,7 @@
   plain STRING, and jonquil.inspect.view/start's own datafy is a no-op
   on a string -- entries answers nil for it (no map/set/sequential/
   List), so this renders as a LEAF, :info \"String\" (type-name's own
-  class name), never \"Var\": the brief's own guess didn't hold, this
-  is what's actually measured."
+  class name), never \"Var\" (measured, not assumed)."
   [ui]
   (go-row :clj-inspect-after-run support/check
     (let [pane (:inspector ui)
@@ -478,7 +476,7 @@
                            :h-out h-out :out out? :tag0 tag0? :text (support/since ui mark)})))))))
 
 (defn row-clj-inspect-lost-connection
-  "Review focus 5: the server dies while the panel is open. Continues
+  "The server dies while the panel is open. Continues
   from row-clj-inspect-in-out's own pane (back on *1, still the
   one-entry {:k 42} view): an in-step (Return) is sent, confirmed on
   the wire (fake/ops-seen sees \"inspect-in\" -- fixture!'s own
@@ -486,7 +484,7 @@
   every connection while that reply is still owed -- jonquil.nrepl.
   client's own open? flips only once ITS reader thread notices the
   close, so the request already went out and the reply itself reports
-  the drop (P3.T1 inspect-lost-connection-test's own path). Within
+  the drop. Within
   3000 ms the footer names jonquil.clj/lost-connection and the toolbar
   buttons go insensitive."
   [ui]
@@ -506,7 +504,7 @@
                         {:h h :sent sent? :shown shown? :footer footer :sensitive sensitive}))))))
 
 (defn row-clj-inspect-lost-idle
-  "I2: the server dies while the panel is IDLE (nothing in flight),
+  "The server dies while the panel is IDLE (nothing in flight),
   unlike row-clj-inspect-lost-connection above, which drops mid round-
   trip. Picks up from that row's own dead connection: a plain REPL
   entry reconnects (mirroring row-clj-reconnects-after-restart), a
@@ -589,7 +587,7 @@
   ((:select-tab! ui) (:id (first ((:tabs* ui))))))
 
 (defn row-clj-two-tabs-run
-  "Tabs plan P2.T4: a JVM attach window runs from a second tab too."
+  "A JVM attach window runs from a second tab too."
   [ui]
   (go-row :clj-two-tabs-run support/check
     (let [[t1 t2] (on-gtk [(first ((:tabs* ui))) ((:new-tab!* ui))])
@@ -721,7 +719,7 @@
 
 (defn row-clj-slow-quick-doc-tab-closed
   "A slow quick doc in a second tab that closes before the answer lands:
-  the answer touches nothing of the closed tab (review finding 4),
+  the answer touches nothing of the closed tab,
   nothing is shown, the status doesn't stay on Looking up, and the window
   still answers."
   [ui]

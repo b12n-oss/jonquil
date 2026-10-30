@@ -3,15 +3,14 @@
   and returns jonquil.edit's {:edits :caret} for what Parinfer wants there,
   or nil. It runs jonquil.parinfer on the top-level forms the edit touched,
   never the whole buffer: a Smart pass over a 4,574-line file takes about
-  426 ms (Parinfer step 1, 2026-10-29).
+  426 ms (measured 2026-10-29).
 
   Smart and Indent mode trust indentation, so on a form whose indentation
   disagrees with its brackets they move closers. A form is checked before
   each edit: when Paren mode would change it, this edit fixes its
   indentation first, and later edits usually find it stable (one that
   unbalances the form can leave Paren mode refusing). Opening a file
-  changes nothing, and forms nobody edits stay as they are (the user's
-  choice, 2026-10-29). Pure: no GTK."
+  changes nothing, and forms nobody edits stay as they are, by design. Pure: no GTK."
   (:require [clojure.string :as str]
             [jonquil.parinfer :as parinfer]
             [jonquil.syntax :as syntax]))
@@ -41,8 +40,8 @@
 (defn- line-col
   "[line x] of offset off in text, both from 0. A \\r ending a line belongs
   to that line, so CRLF text gives the same x as LF text (upstream's
-  line-col->offset didn't; our copy counts CRLF since 2026-10-29, and the
-  editor keeps these helpers, see UPSTREAM.md)."
+  line-col->offset didn't; our copy counts CRLF, and the editor keeps
+  these helpers, see UPSTREAM.md)."
   [^String text off]
   (let [s (line-start text off)]
     [(count (filter #(= \newline %) (subs text 0 s))) (- off s)]))
@@ -62,7 +61,7 @@
   "Offset x in text `from`, re-found in text `to` by its line and column,
   both clamped to what `to` has. A Parinfer fix moves brackets and
   indentation but keeps the user's lines, so the line/column frame crosses
-  it; the editor carries a selection over a fix this way (review I1)."
+  it; the editor carries a selection over a fix this way."
   [from to x]
   (let [[l c] (line-col from x)]
     (offset to l c)))
@@ -215,9 +214,9 @@
           pr (when-not prev-consistent? (parinfer/paren-mode P))
           fixed (when (and pr (:success pr) (reindents? P (:text pr))) (:text pr))]
       (if fixed
-        ;; A refused re-apply is nil, so the Paren fallback really runs
-        ;; (#142 minor 5); an "unhandled" one is kept, so the shim gap is
-        ;; named instead of silently taking Paren mode's fix (polish I1).
+        ;; A refused re-apply is nil, so the Paren fallback really runs; an
+        ;; "unhandled" one is kept, so the shim gap is named instead of
+        ;; silently taking Paren mode's fix.
         (or (when-let [r (rebased mode-fn P fixed change rel-caret)]
               (when (or (:success r) (= "unhandled" (get-in r [:error :name]))) r))
             (parinfer/paren-mode R opts))
@@ -278,9 +277,8 @@
   removed, and no whitespace run appearing or vanishing except beside a
   bracket (tokens-kept?). Paren mode on a balanced form moves indentation,
   tidies a paren trail's spaces and rewrites a tab in code as two spaces
-  (review I1: the first two guards here, left-trim and same indentation,
-  each rejected one of those and recreated the first-keystroke fight), and
-  all three pass; a space vanishing between two atom characters would
+  (a left-trim or same-indentation guard would reject one of those and
+  bring back the first-keystroke fight), and all three pass; a space vanishing between two atom characters would
   merge them into one token, so it never does, however the engine
   misbehaves. paren-stable refuses any result beyond that."
   [^String p ^String q]
@@ -293,10 +291,10 @@
 (defn paren-stable
   "text with every top-level form the character range [a b] touches
   re-indented the way Paren mode reads it, so the first keystroke in a
-  freshly formatted form has nothing to move (the format-interplay plan).
-  Every touched form takes the pass, however long (the user accepted the
-  cost over a 300-line carve-out: the full pass measured 425 ms over the
-  4,574-line window.clj, 2026-10-30). One form at a time: a form Paren
+  freshly formatted form has nothing to move. Every touched form takes the
+  pass, however long: the cost was accepted over a 300-line carve-out
+  (the full pass measured 425 ms over the 4,574-line window.clj,
+  2026-10-30). One form at a time: a form Paren
   mode refuses, or would change beyond spaces and tabs, stays as given.
   Text with an unmatched bracket comes back whole: Paren mode moves
   brackets there, and a format must never change code. Top-level text
@@ -393,7 +391,7 @@
               ;; The signals' span is sound but not minimal: a replacement
               ;; sharing an affix with what it replaced must be trimmed the
               ;; way diff trims, since the engine keys its change lookup on
-              ;; the span's end (speedup review I4). Extending from the
+              ;; the span's end. Extending from the
               ;; seed costs the span's width, not the buffer's.
               (let [n (count prev) m (count text)
                     lim (min (min n m) (max 0 (- caret (max 0 (- m n)))))
@@ -415,7 +413,7 @@
                 old-end)
             [s e] (region prev p b)
             ;; Indenting a top-level line is Parinfer's "pull it into the
-            ;; form above" (review I4): pure whitespace inserted at the
+            ;; form above": pure whitespace inserted at the
             ;; start of a line that was its own region joins the form above.
             s (if (and (pos? s) (= s p) (= old-end p) (= s (line-start prev p))
                        (str/blank? (subs text p new-end)))

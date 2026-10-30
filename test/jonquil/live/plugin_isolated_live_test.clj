@@ -57,7 +57,7 @@
     (is (empty? (check-folders tmp)))))
 
 (deftest a-plugin-with-mcp-tools-passes-test
-  ;; P10b review C1: the real child's summary carries :mcp-tools, and it's a result
+  ;; the real child's summary carries :mcp-tools, and it's a result
   (let [text (str/replace (source "ltools") "   :commands"
                           "   :mcp-tools [{:name \"echo\" :doc \"Echo it.\" :run (fn [_ a] \"x\")}]\n   :commands")
         [r _] (check "ltools" text)]
@@ -110,7 +110,7 @@
     (is (nil? (find-ns 'jonquil.plugins.lmark)))))
 
 (deftest a-hook-cant-start-a-process-at-the-kill-test
-  ;; review I2: a shutdown hook SIGTERM would run starts a process after
+  ;; a shutdown hook SIGTERM would run starts a process after
   ;; the descendants were taken; the overrun kill gives it no chance
   (let [[r _] (check "lhook" (source "lhook" :extra (str "(.addShutdownHook (Runtime/getRuntime) (Thread. (fn [] (spit \"late.pid\" (str (.pid (.start (ProcessBuilder. [\"sleep\" \"300\"]))))))))\n"
                                                         "(loop [] (recur))"))
@@ -121,7 +121,7 @@
         "the hook's process isn't left running")))
 
 (deftest a-kept-log-is-cut-to-its-tail-test
-  ;; review I3: a candidate printing until the deadline doesn't leave a log
+  ;; a candidate printing until the deadline doesn't leave a log
   ;; of hundreds of MB behind for a day
   (let [[r _] (check "lspam" (source "lspam" :extra "(let [l (apply str (repeat 1000 \"x\"))] (loop [] (println l) (recur)))")
                      :deadline-ms 3000)]

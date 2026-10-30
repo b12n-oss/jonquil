@@ -1,5 +1,5 @@
 (ns jonquil.gtk.plugin-history-pane
-  "A plugin's history (plugins P11b): its versions (jonquil.plugin-list
+  "A plugin's history: its versions (jonquil.plugin-list
   version rows, newest first) in the right-hand slot the plugin list uses,
   one wrapped label per version, then a reason entry, the Revert, Back and
   Close buttons and a footer for what the last step said.

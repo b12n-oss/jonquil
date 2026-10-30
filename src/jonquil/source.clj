@@ -1,14 +1,13 @@
 (ns jonquil.source
   "Where a definition outside the buffer lives, and its text: the pure half
   of the source panel. A lookup result's :file is either an absolute path
-  or a jar:file:<jar>!/<entry> URL; the clj-servers spike measured that
-  shape identical on clojure-cli.repl, plain nREPL 1.7.0 and cider-nrepl
-  0.62.2. Nothing here touches GTK."
+  or a jar:file:<jar>!/<entry> URL; that shape measured identical on
+  clojure-cli.repl, plain nREPL 1.7.0 and cider-nrepl 0.62.2. Nothing here touches GTK."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 
 (def history-limit
-  ;; The spec's bound on the panel's own back history.
+  ;; The bound on the panel's own back history.
   50)
 
 (def moved-note
@@ -96,8 +95,7 @@
 (defn- classpath-name?
   "True for a bare source name such as demo/util.clj: not a URL, not a path
   (absolute or ./), ending in a source extension. Leaves out
-  get-symbol-doc's \"unknown\" and v0.8.23's ./src/... spelling (review
-  finding 2)."
+  get-symbol-doc's \"unknown\" and v0.8.23's ./src/... spelling."
   [f]
   (and (string? f)
        (re-find #"\.(clj|cljc|jolt)$" f)

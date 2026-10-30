@@ -1,8 +1,8 @@
 (ns jonquil.keymap
-  "Key bindings as data (plugins design, Part 1): an ordered vector of
+  "Key bindings as data: an ordered vector of
   bindings per scope, matched first-match-wins against a keyval and a GDK
   modifier state. No GTK here, so the matcher runs headless; the window
-  lower-cases the keyval (gdk_keyval_to_lower, M4) before asking.
+  lower-cases the keyval (gdk_keyval_to_lower) before asking.
 
   A binding is {:key name | :keys #{name ...}, :mods #{...}, :not #{...},
   :command id, :args map}. Modifiers are :shift :alt :ctrl :meta :super and

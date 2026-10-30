@@ -102,7 +102,7 @@
 (deftest run-hooks-queues-while-busy-test
   ;; Save All saves each tab in one GTK callback, so a second event comes
   ;; while the first chain still waits on the GTK thread: it runs after,
-  ;; on the same worker, and nothing is reported (review I1)
+  ;; on the same worker, and nothing is reported
   (let [gate (promise)
         reports (atom [])
         seen (atom [])
@@ -167,7 +167,7 @@
 (deftest after-eval-reports-a-throw-test
   ;; an :error result with neither :error nor :error-text: building the
   ;; :on-error event throws; that's reported, never thrown at the eval's
-  ;; completion; each point is tried on its own (review I2)
+  ;; completion; each point is tried on its own
   (let [reports (atom [])
         r (with (hooked "a" #{} {:on-error (fn [_ e] e) :after-run (fn [_ e] e)}))]
     (with-live r {:report! #(swap! reports conj %)}
@@ -177,7 +177,7 @@
         (is (re-find #"^the :on-error hooks didn't start: " (first @reports)))
         (is (re-find #"^the :after-run hooks didn't start: " (second @reports)))))))
 
-;; --- :before-run (P6b) -------------------------------------------------------
+;; --- :before-run ------------------------------------------------------------
 
 (deftest refused-ctx-test
   (let [ctx {::p/effects #{:console} ::p/impl {:print! identity} ::p/refused "no effects here"}]
@@ -290,7 +290,7 @@
 
 (deftest before-run-odd-return-reported-test
   ;; a sorted map with string keys throws on (contains? m :abort): that's
-  ;; reported as the plugin's, never thrown onto the GTK thread (review I1)
+  ;; reported as the plugin's, never thrown onto the GTK thread
   (let [reports (atom [])
         r (with (hooked "a" #{} {:before-run (fn [_ _] (sorted-map "x" 1))})
                 (hooked "b" #{} {:before-run (fn [_ _] {:abort "stop"})}))]
@@ -302,7 +302,7 @@
 
 (deftest before-run-chain-failure-reported-test
   ;; anything that fails the chain itself (here report! throwing the
-  ;; first time) is reported and the Run goes ahead (review I1)
+  ;; first time) is reported and the Run goes ahead
   (let [reports (atom [])
         r (with (hooked "a" #{} {:before-run (fn [_ _] (throw (ex-info "boom" {})))}))]
     (with-live r {:report! (fn [line]

@@ -297,6 +297,6 @@
     (is (= 19 (count (:defs ((w/with-plugin-tools (tools-for {}) {}))))) "no :plugin-tools* serves the base table")))
 
 (deftest plugin-tools-table-says-list-changed
-  ;; plugins P10c: a window that can watch its plugin tools declares it
+  ;; a window that can watch its plugin tools declares it
   (is (true? (:list-changed? ((w/with-plugin-tools (tools-for {}) {:watch-plugin-tools* (fn [_] (fn []))})))))
   (is (not (contains? ((w/with-plugin-tools (tools-for {}) {})) :list-changed?))))

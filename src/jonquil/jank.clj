@@ -65,7 +65,7 @@
 (defn meta-doc-code
   "Code that answers [arglists-string doc] for sym, or nil when it doesn't
   resolve. Sent through eval, since the lookup op wedges jank (jank issue
-  998; jank re-check spike, 2026-10-12)."
+  998, measured 2026-10-12)."
   [sym]
   (str "(let [v (resolve '" sym ")] (when v (let [m (meta v)] [(pr-str (:arglists m)) (:doc m)])))"))
 

@@ -11,7 +11,7 @@
   `jank repl` always runs a terminal REPL next to the nREPL server, and EOF
   on its stdin ends the process. jank is spawned directly with the stdin
   pipe jolt.process opens by default, and the child map keeps that stream
-  open until kill! (jank re-check spike, 2026-10-12)."
+  open until kill! (measured 2026-10-12)."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jolt.process :as p]
@@ -75,12 +75,12 @@
     [binary "repl"]))
 
 (def default-timeout-ms
-  ;; estimate: the re-check spike saw the port file within about a second;
+  ;; estimate: a probe saw the port file within about a second;
   ;; 30 s leaves room for a cold start on a slow disk.
   30000)
 
 (def kill-wait-ms
-  ;; estimate: destroy-tree signals every process at once; the probe saw
+  ;; estimate: destroy-tree signals every process at once; a probe saw
   ;; alive? false immediately after.
   1000)
 

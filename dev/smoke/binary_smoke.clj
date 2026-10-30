@@ -1,4 +1,4 @@
-;; P2.T10: automated smoke of the BUILT Jonquil binary, driven by cgevent
+;; Automated smoke of the BUILT Jonquil binary, driven by cgevent
 ;; against a real macOS process -- everything dev/gtk_selftest_window.clj
 ;; and dev/demo_shots.clj can't cover, because both of those run IN the
 ;; GTK process under test and call its own handler functions directly.
@@ -6,20 +6,20 @@
 ;; drives it with real key events routed by pid, and reads back real file
 ;; bytes, real window titles and real screen pixels.
 ;;
-;; P4.T8 adds five steps driving the P4 help keys the same way: completion
-;; (Ctrl+Space), quick doc (Ctrl+Q), jump (F12), rename (F2) and the
-;; context menu (Shift+F10) -- see this file's own "P4.T8" section below.
+;; Five steps drive the help keys the same way: completion (Ctrl+Space),
+;; quick doc (Ctrl+Q), jump (F12), rename (F2) and the context menu
+;; (Shift+F10) -- see this file's help-keys section below.
 ;;
 ;; Run via `bb smoke:binary` (see bb.edn); this file is a plain babashka
 ;; script, not a jolt namespace -- it never touches the jolt/GTK process
 ;; from the inside, only from outside via cgevent and the filesystem.
 ;;
-;; Hard safety rules (p2t10-brief.md, this task's own instructions):
+;; Hard safety rules:
 ;;   - every input event carries --pid; cg-key! below takes pid as a
 ;;     required (not optional) argument and throws if it's nil, so there
 ;;     is no code path in this file that can post without one.
 ;;   - never --global, never click/drag/move, never `cgevent type` (probed
-;;     mangled against GTK -- p2t10-probe.md: "(+ 1 2)" arrived as "((" +
+;;     mangled against GTK: "(+ 1 2)" arrived as "((" +
 ;;     5 spaces, because GTK's macOS backend reads the key code, not the
 ;;     Unicode string cgevent attaches).
 ;;   - the binary under test always launches from target/smoke/ (gitignored
@@ -35,7 +35,7 @@
 ;;     should show nothing of this script's own.
 ;;
 ;; cgevent's coordinate systems, measured live against this build
-;; (2026-09-23, session probe, not carried over from p2t10-probe.md):
+;; (2026-09-23):
 ;;   `cgevent ocr-inspect` reports boxes in SCREEN points (matches
 ;;   `cgevent windows --edn`'s :x/:y, not window-relative) -- confirmed by
 ;;   comparing a window at x=900 against an OCR row's x=909 (inside it) for
@@ -50,8 +50,7 @@
 ;; correction: a PLAIN average of every pixel in an OCR'd line's box came
 ;; back close to white, because most of a text line's bounding box is
 ;; background, not ink; the box's DARKEST pixel is an exact match for
-;; light's :text, "#24292f" (TH.T6: was upstream's "#282828" before
-;; TH.T2/T4 moved console colours onto the theme). See dev/smoke/
+;; light's :text, "#24292f" (console colours come from the theme). See dev/smoke/
 ;; PixelAt.java's own docstring for the full measurement and the
 ;; darkest-cluster fix.
 ;; babashka itself can't do this sampling -- `bb -e '(import (javax.imageio
@@ -59,8 +58,7 @@
 ;; babashka is a GraalVM native image with a curated class list that
 ;; doesn't include AWT/ImageIO -- so this shells out to a full JDK's
 ;; `java` instead (JEP 330 single-file source-code programs, JDK 11+; a
-;; JDK is on PATH here, confirmed via `java -version`). sips, this task's
-;; other suggested option, has no per-pixel query, only whole-image
+;; JDK is on PATH here, confirmed via `java -version`). sips has no per-pixel query, only whole-image
 ;; property/profile queries, so it can't do this job at all.
 (ns binary-smoke
   (:require [babashka.fs :as fs]
@@ -74,7 +72,7 @@
 (def ^:private binary-path (str out-dir "/jonquil"))
 (def ^:private pixel-at-jar "dev/smoke/PixelAt.java")
 
-;; TH.T5 isolation: one XDG_CONFIG_HOME temp dir for this ENTIRE smoke run
+;; Isolation: one XDG_CONFIG_HOME temp dir for this ENTIRE smoke run
 ;; (a top-level def, evaluated once when this script loads), handed to
 ;; every launch! below via :extra-env -- so no jonquil process this script
 ;; starts can ever read or write the user's real $XDG_CONFIG_HOME/jonquil
@@ -94,7 +92,7 @@
 (defn- kill-all-launched!
   "Destroys every process this run started (destroy-tree, since babashka.
   process falls back to plain destroy pre-JDK9 but this project's own JDK
-  is 25 -- verified via `java -version` earlier this session). Safe to
+  is 25, verified via `java -version`). Safe to
   call more than once -- destroying an already-dead process is a no-op in
   babashka.process (measured: alive? false after destroy, no exception on
   a second destroy). Backed up per-process by :shutdown p/destroy-tree at
@@ -124,12 +122,12 @@
 ;; --- cgevent wrappers: every one of these requires a real pid ------------
 
 (def ^:private cgevent-timeout-ms
-  ;; Fix round 1, minor #4: p/shell has no deadline of its own, so one hung
-  ;; cgevent subcommand (ocr-inspect, windows, screenshot, key) used to be
-  ;; able to stall a step -- and everything after it -- forever. Every
-  ;; cgevent call in this file now goes through cgevent! below, which bounds
-  ;; it. 10s is generous, not measured precisely: every live cgevent call
-  ;; this session (probes and real runs alike) completed in well under 1s.
+  ;; p/shell has no deadline of its own, so one hung cgevent subcommand
+  ;; (ocr-inspect, windows, screenshot, key) would stall a step, and
+  ;; everything after it, forever. Every cgevent call in this file goes
+  ;; through cgevent! below, which bounds it. 10s is generous, not measured
+  ;; precisely: every live cgevent call (probes and real runs alike)
+  ;; completed in well under 1s.
   10000)
 
 (defn- cgevent!
@@ -163,11 +161,11 @@
 
 ;; letters, digits, space and the punctuation this smoke run's fixtures
 ;; and typed REPL/stdin answers need. cgevent names keys by their literal
-;; character (p2t10-probe.md); an unmapped character is a driver bug, not
+;; character; an unmapped character is a driver bug, not
 ;; something to skip silently -- type-text! throws rather than dropping
-;; it. "(" / ")" were measured in p2t10-probe.md; shift+= for "+", shift+'
-;; for '"', "-" and "." were measured live against this build in this
-;; task's own session (probe: select-all, delete, then those four chords
+;; it. "(" / ")" were measured; shift+= for "+", shift+'
+;; for '"', "-" and "." were measured live against this build in a
+;; probe (select-all, delete, then those four chords
 ;; in a row read back via OCR as exactly `+"-.`, with no stray spaces).
 (def ^:private char->chord
   (merge
@@ -185,7 +183,7 @@
 
 (defn- type-text!
   "Types s one character at a time via char->chord -- never `cgevent
-  type`, which p2t10-probe.md measured mangled against GTK (the buffer
+  type`, which was measured mangled against GTK (the buffer
   got \"((\" plus 5 spaces for the literal text \"(+ 1 2)\", because GTK's
   macOS backend reads the key code, not the Unicode string cgevent
   attaches)."
@@ -198,7 +196,7 @@
 
 (defn- windows-edn!
   "This pid's on-screen windows, parsed. Normally exactly one for jonquil
-  (M6: G_APPLICATION_NON_UNIQUE, one window per process) -- callers that
+  (G_APPLICATION_NON_UNIQUE, one window per process) -- callers that
   care about count (step-open-dirty-opens-panel!'s \"opens the panel\" check)
   read (count (windows-edn! pid)) directly rather than assuming 1."
   [pid]
@@ -210,7 +208,7 @@
 
 (defn- ocr-text!
   "This pid's visible window text, OCR'd and joined into one string for
-  loose substring matching (p2t10-probe.md: OCR drops the space after
+  loose substring matching (measured: OCR drops the space after
   \"(\" and mangles \"---\", so callers match distinctive words, never
   punctuation runs). Never throws -- a transient OCR/subprocess hiccup
   reads as \"no match yet\" to a poller, not a crash of the whole run."
@@ -225,7 +223,7 @@
 
 (defn- ocr-rows!
   "Like ocr-text!, but returns the parsed rows (with :x/:y/:w/:h in SCREEN
-  points -- measured live this session, see this file's own header) for
+  points -- measured live, see this file's own header) for
   callers that need a specific line's bounds, not just its text."
   [pid]
   (try
@@ -260,8 +258,8 @@
         :else (do (Thread/sleep (long interval-ms)) (recur))))))
 
 (defn- ocr-rows->loose-text
-  "rows' own :text values joined by a single SPACE (P3.T6), not ocr-text!'s
-  \"\\n\": measured live this session, cgevent sometimes renders a short
+  "rows' own :text values joined by a single SPACE, not ocr-text!'s
+  \"\\n\": measured live, cgevent sometimes renders a short
   result like \"=> 2\" as one OCR row and sometimes splits it into \"=>\"
   and \"2\" as two adjacent rows -- same console content, different OCR
   passes, not something a caller can rely on being stable run to run. A
@@ -294,7 +292,7 @@
   both the newline-joined and loose text; a java.util.regex.Pattern needle
   via re-find against the newline-joined text only) is true, or deadline-ms
   elapses. Returns {:ok bool :last last-ocr-text} -- \"prints what OCR saw\"
-  on a failed wait, per this task's own design; :last is the newline-joined
+  on a failed wait; :last is the newline-joined
   form. Reads ocr-rows! once per poll tick rather than calling
   ocr-text!/ocr-rows! separately (two cgevent calls per tick, from two
   different OCR passes that could disagree with each other)."
@@ -313,11 +311,11 @@
   against the NEWLINE-joined text of ocr-rows!, or deadline-ms elapses.
   Returns {:ok bool :count n :last last-joined-text}, the same \"prints
   what OCR saw\" shape wait-for-ocr! uses. Used where a step needs to
-  count repeated occurrences (P3.T6 step 1's two \"=> 2\" round trips),
+  count repeated occurrences (the two \"=> 2\" round trips of the history step),
   where a plain wait-for-ocr! could only ever prove \"at least once\".
 
   Matches against the newline-joined text, not ocr-rows->loose-text's
-  space-joined one: re is a (?m) line-anchored pattern (fix-wave pass 4),
+  space-joined one: re is a (?m) line-anchored pattern,
   needed to tolerate OCR dropping a result line's leading \"=>\" entirely
   without also matching a stray digit elsewhere on screen, and a line
   anchor is meaningless against loose text, which has no \\n at all. A
@@ -360,7 +358,7 @@
   stderr (step-close-while-running!, checking for a GTK critical/crash)
   can read it directly.
 
-  TH.T5: :extra-env sets XDG_CONFIG_HOME to smoke-xdg-config-home (merged
+  :extra-env sets XDG_CONFIG_HOME to smoke-xdg-config-home (merged
   onto the inherited environment, never replacing it -- babashka.process's
   own :env/:extra-env distinction), so every jonquil process this script
   starts reads and writes settings.edn under this run's own temp dir, never
@@ -401,12 +399,11 @@
   (wait-for! deadline-ms 200 (fn [] (seq (windows-edn! pid)))))
 
 (defn- ensure-window!
-  "Fix round 1, minor #3: wait-for-window!'s result used to be ignored at
-  every call site, so a binary that never opened a window (a crash on
-  launch, a missing library, a hung splash) fell through into the rest of
-  the step anyway -- every subsequent OCR read and key event just silently
-  went nowhere, and the step failed later with a confusing timeout that
-  named the wrong symptom. This throws instead, with the real reason,
+  "Throws when the binary never opened a window (a crash on launch, a
+  missing library, a hung splash), instead of letting the step carry on
+  with every subsequent OCR read and key event silently going nowhere and
+  failing later with a confusing timeout that names the wrong symptom. The
+  throw carries the real reason,
   which -main's own per-step catch turns into a FAIL naming it directly."
   [pid deadline-ms]
   (when-not (wait-for-window! pid deadline-ms)
@@ -416,7 +413,7 @@
   "The text jonquil.syntax/format-code produces for whatever is on disk at
   path right now, computed by shelling a real `jolt -M -e` (`jolt -e`
   ignores deps.edn; `-M` loads the project classpath) -- never
-  hand-written, per this task's own instructions, so a future change to
+  hand-written, so a future change to
   the formatter's own rules can't silently desync this step from the code
   it claims to check. Throws on a non-zero exit, naming jolt's own stderr:
   a step that silently compared against a blank/garbage expected string
@@ -460,7 +457,7 @@
     out))
 
 (defn- candidates-via-jolt!
-  "P4.T8: the exact :symbol list jonquil.docs/candidates returns for
+  "The exact :symbol list jonquil.docs/candidates returns for
   prefix/text/pos in the 'user namespace -- computed via a live `jolt -M
   -e` call (`jolt -e` ignores deps.edn; `-M` loads the project
   classpath), never hand-written, same reasoning as format-code-via-
@@ -486,15 +483,15 @@
 ;; OCR/pixel assertion never depends on what an earlier step left behind).
 
 (defn- step-run-and-colour!
-  "Brief step 2 (Run shows output and => nil, status Ready) plus the
+  "Run shows output and => nil, status Ready, plus the
   colour spot check (:out, not :prompt blue) on the same output line,
-  since the check needs exactly the line step 2 already produces.
+  since the check needs exactly the line the Run already produces.
 
-  TH.T6: the => nil match tolerates OCR dropping the '>' (matching '= nil'
-  too), diagnosed live this session rather than assumed. It is NOT a
+  The => nil match tolerates OCR dropping the '>' (matching '= nil'
+  too), diagnosed live rather than assumed. It is NOT a
   colour regression: an isolated crop of just this console line reads
   '=> nil' correctly under either the old or the new :result colour, and
-  reverting :result (or :system, or :prompt) back to their pre-TH.T2
+  reverting :result (or :system, or :prompt) to earlier
   values on an otherwise-current build does not fix it either -- only
   cropping the FULL WINDOW capture down to exclude the toolbar/definitions
   area above the console does, and a y-offset bisection of that crop
@@ -545,15 +542,13 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-repl-history!
-  "Brief step 1 (P3.T6): un-skips P2's own step 3. F6 (P3.T3,
-  do-toggle-focus!) now gives the console a keyboard-reachable focus path
-  that didn't exist when this step's earlier SKIP (P2.T10, see git
-  history) was written -- F6, type \"(inc 1)\" by chords, Return, then Up
+  "F6 (do-toggle-focus!) gives the console a keyboard-reachable focus
+  path: F6, type \"(inc 1)\" by chords, Return, then Up
   recalls it from history (console-view/handle-history!) and a second
   Return resubmits the SAME text, so the result line has to appear twice.
 
   Counted with wait-for-ocr-count! against #\"=>\\s*2\", not a plain
-  wait-for-ocr! substring check: measured live this session, the SAME
+  wait-for-ocr! substring check: measured live, the SAME
   console content read back split (\"=>\" then \"2\" as two OCR rows) on
   one OCR pass and unified (\"=> 2\", one row) on the next, so a literal
   substring search on ocr-text!'s newline join can miss an occurrence
@@ -564,7 +559,7 @@
     (cg-key! pid "f6")
     (type-text! pid "(inc 1)")
     (cg-key! pid "return")
-    ;; Measured live (2026-09-27 fix wave, pass 4): OCR renders the result
+    ;; Measured live (2026-09-27): OCR renders the result
     ;; line's leading arrow as "=>", "=", ">", "→", or drops it entirely --
     ;; an unanchored "bare 2 with a word boundary" pattern would also match
     ;; the "2" in "(inc 1)"'s own echoed line or a stray "Ln 2"/"Col 2" in
@@ -586,18 +581,13 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-read-line!
-  "Brief step 2 (P3.T6): completes P2's own step 4. F6 (P3.T3) closes the
-  console-focus gap that used to make read-line's own answer unreachable
-  (this fn's earlier docstring, and step-repl-history!'s, cover why) -- so
-  this now answers read-line for real instead of only interrupting it:
-  once the status shows Waiting for input, F6 focuses the console, \"kim\"
+  "Answers read-line for real instead of only interrupting it: F6 gives
+  the console a keyboard-reachable focus path, so, once the status shows Waiting for input, F6 focuses the console, \"kim\"
   is typed by chords, and Return submits it as :send-stdin
   (console/input-action, waiting? true), which greet.clj's own
-  `(read-line)` picks up and prints \"Hi kim\". This replaces the earlier
-  Escape-interrupt-while-waiting check (that path is still exercised by
-  step-stop-infinite-loop!/step-stop-print-forever!'s own Escape-from-
-  :running case; only the read-line-specific interrupt regression drops
-  out here, per the brief's own step 2 wording)."
+  `(read-line)` picks up and prints \"Hi kim\". The Escape-interrupt-while-waiting
+  path is not exercised here; step-stop-infinite-loop!/
+  step-stop-print-forever! cover Escape from :running."
   []
   (let [path (scratch-copy! "greet.clj")
         {:keys [proc pid]} (launch! path)]
@@ -614,23 +604,22 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-run-selection!
-  "Brief step 3: runsel.clj is two lines, each a self-contained expression
+  "Runsel.clj is two lines, each a self-contained expression
   (no line depends on the other, unlike run.clj/greet.clj which run
   through session/run-definitions! first) -- Run Selection (Cmd+E) sends
   straight to the REPL, so a fixture that needed a prior Run would read
   as broken here for the wrong reason. The caret sits at the end of the
-  buffer right after launch: measured live this session against this
+  buffer right after launch: measured live against this
   exact fixture shape (Ln 2, Col 9 after launch, exactly the last line's
-  own length, no trailing newline in the fixture) -- the brief's own
-  expectation, confirmed rather than assumed. With no selection,
-  commands/run-selection-text (P3.T1) sends the caret's own line, so
+  own length, no trailing newline in the fixture). With no selection,
+  commands/run-selection-text sends the caret's own line, so
   Cmd+E must show the LAST line's value, 42, not the first line's (3)."
   []
   (let [path (scratch-copy! "runsel.clj")
         {:keys [proc pid]} (launch! path)]
     (ensure-window! pid 8000)
     (cg-key! pid "command + e")
-    ;; Measured live (2026-09-27 fix wave, pass 4): OCR renders the result
+    ;; Measured live (2026-09-27): OCR renders the result
     ;; line's leading arrow as "=>", "=", ">", "→", or drops it entirely,
     ;; leaving a bare "42" -- not just a partial "=" with the ">" dropped,
     ;; the way step-run-and-colour!'s own "=>?\s*nil" tolerates. An
@@ -645,8 +634,8 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-toggle-comment!
-  "Brief step 4: select all (Cmd+A), toggle comment (Cmd+/,
-  edit/toggle-comment, P3.T2), Save (Cmd+S). Every non-blank line's own
+  "Select all (Cmd+A), toggle comment (Cmd+/,
+  edit/toggle-comment), Save (Cmd+S). Every non-blank line's own
   bytes on disk must start with \"; \" (edit/toggle-comment's own leading
   comment marker)."
   []
@@ -667,14 +656,13 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-format-all!
-  "Brief step 5: a mis-indented fixture, Cmd+Shift+F
-  (commands/format-all-op, P3.T2), Cmd+S. The file's own bytes on disk
+  "A mis-indented fixture, Cmd+Shift+F
+  (commands/format-all-op), Cmd+S. The file's own bytes on disk
   must equal jonquil.syntax/format-code's real output for the ORIGINAL
-  fixture text (format-code-via-jolt!, a live `jolt -M -e` call, per this
-  task's own instructions -- never hand-written). The extra (not=
-  original expected) assertion is this step's own falsifiability check
-  (subagent-prompt-conventions.md: \"each PASS would fail if the feature
-  broke\") -- without it, a fixture that happened to already be correctly
+  fixture text (format-code-via-jolt!, a live `jolt -M -e` call, never
+  hand-written). The extra (not= original expected) assertion is this
+  step's own falsifiability check (each PASS would fail if the feature
+  broke) -- without it, a fixture that happened to already be correctly
   formatted would let a completely broken format-all-op pass this step by
   doing nothing at all."
   []
@@ -712,8 +700,8 @@
   own comment: without it, a fixture that happened to already be
   correctly formatted would let a completely broken Cmd+Option+F pass
   this step by doing nothing at all. This step FAILS on the pre-fix
-  code (measured this task's own session, both via
-  dev/gtk_selftest.clj's new macOS rows and a live pid-driven probe
+  code (measured, both via
+  dev/gtk_selftest.clj's macOS rows and a live pid-driven probe
   against the built binary): the old dispatch only ever compared keyval
   against #{KEY-F KEY-L}, and Option's translated keyval never matches
   either member of that set."
@@ -735,15 +723,15 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-find!
-  "Brief step 6: Cmd+F opens the bar already focused on the query entry
-  (find-bar/open!, P3.T4), types \"findme\" by chords, Return. The title
+  "Cmd+F opens the bar already focused on the query entry
+  (find-bar/open!), types \"findme\" by chords, Return. The title
   must stay unchanged (the find bar never dirties the buffer), and at
   least one match's own highlighted pixels must sample close to the
   search-match tag's colour, #fff2a8 (jonquil.gtk.find-bar/SEARCH-MATCH-BG).
 
   \"At least one\" rather than \"whichever Return leaves selected\":
-  measured live this session against this exact two-line fixture, Return's
-  own find-next! (P3.T4) leaves ONE match as the buffer's text selection,
+  measured live against this exact two-line fixture, Return's
+  own find-next! leaves ONE match as the buffer's text selection,
   and GTK renders a SELECTED match's highlight visibly dimmer (198,191,155
   measured) than an unselected one's (255,242,168 measured -- an exact
   match) -- the tag and the selection paint blend. Sampling every OCR row
@@ -751,14 +739,14 @@
   this assertion true regardless of which of the two ends up selected.
 
   Pixel sampling reuses PixelAt.java's darkest/lightest-cluster idea
-  (step-run-and-colour!) but adds a \"near\" mode (this task): a plain
+  (step-run-and-colour!) but adds a \"near\" mode: a plain
   lightest-cluster read plain WHITE background ahead of the yellow
   highlight, because #fff2a8's own mean channel value (221) is lower than
   white's (255) -- measured live, see PixelAt.java's own comment. \"near\"
   sorts by distance to the target colour instead, so it finds the fill
   regardless of which cluster has the higher luminance. Window position
   is re-read fresh right before ocr-rows!/screenshot! (not from an earlier
-  call): measured live this session that this window's reported x/y drifts
+  call): measured live that this window's reported x/y drifts
   between separate cgevent calls after key events land, the same reason
   step-run-and-colour! already reads window-for immediately before using
   it."
@@ -800,8 +788,8 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-pre-run-check!
-  "Brief step 7: the (undefined-fn)\\n(defn g [y] fixture (unclosed.clj),
-  F5. commands/pre-run-problem (P3.T1) must catch the unclosed \"(\" on
+  "The (undefined-fn)\\n(defn g [y] fixture (unclosed.clj),
+  F5. commands/pre-run-problem must catch the unclosed \"(\" on
   line 2 BEFORE anything evaluates, so OCR shows \"never closed\" and
   never \"resolve\" (the unresolved-symbol error the first form would
   otherwise throw, if the bracket check didn't run first) -- the same
@@ -819,7 +807,7 @@
 
 (defn- dirty-title?
   "True once this pid's window title carries the \"* \" dirty marker
-  (update-title!, P2/P3.T5), polled rather than read once -- typed chords
+  (update-title!), polled rather than read once -- typed chords
   land asynchronously and the dirty tick (editor.clj's own 20ms debounce)
   needs a moment to catch up. Shared by step-close-with-unsaved! and
   step-quit-with-unsaved!, both of which need a genuinely dirty buffer
@@ -828,29 +816,27 @@
   (wait-for! 3000 200 (fn [] (let [w (window-for pid)] (and w (str/starts-with? (or (:name w) "") "*"))))))
 
 (defn- step-close-with-unsaved!
-  "Brief step 8: typing makes the editor dirty (title gains \"* \"), then
-  Cmd+W must open the close-confirmation alert (close-request-fn, P3.T5) as
+  "Typing makes the editor dirty (title gains \"* \"), then
+  Cmd+W must open the close-confirmation alert (close-request-fn) as
   a SECOND top-level window for this pid -- checked via `cgevent windows
   --pid`, since a real GtkAlertDialog renders as its own window, never a
-  native macOS sheet (P3 probe finding #3) -- with the process still alive
+  native macOS sheet (probed) -- with the process still alive
   (the alert only SUSPENDS the close, close-request-fn returns 1; it never
   quits on its own). This is a real check! (:close-with-unsaved-alert-
-  appears): fix round 1 (task review) found the earlier version SKIPped
-  here instead, so a total regression of the close-confirmation feature
-  (Cmd+W just closes/quits with no prompt at all) read as SKIP and dropped
-  out of -main's scored denominator -- SUMMARY still said \"N of N passed\"
-  while unsaved text was being silently discarded. No alert, or the
-  process already gone, is now :close-with-unsaved FAIL, not a skip.
+  appears), not a SKIP: a SKIP would drop out of -main's scored
+  denominator, so a total regression of the close-confirmation feature
+  (Cmd+W just closes/quits with no prompt at all) would still report
+  \"N of N passed\" while unsaved text was silently discarded. No alert,
+  or the process already gone, is :close-with-unsaved FAIL.
 
   Escape by pid is then tried as the alert's own Cancel (index 2,
-  close-choice!): measured live this session (not assumed from the brief)
+  close-choice!): measured live
   that it DOES reach the alert -- closes the SECOND window, back down to
   one, process still alive, title still carrying \"* \" (close-choice!'s
-  own index-2 branch touches nothing). The SKIP is now narrow and only
+  own index-2 branch touches nothing). The SKIP is narrow and only
   fires here: the alert appeared, Escape was sent, and NOTHING changed --
   still 2 windows, process still alive -- which is what \"the alert
-  doesn't take pid-routed keys\" (the brief's own SKIP wording) actually
-  means. If Escape instead closes the main window too, or the process
+  doesn't take pid-routed keys\" actually means. If Escape instead closes the main window too, or the process
   dies, that is not \"didn't take the key\" -- it took it and did the
   wrong (data-losing) thing, so it FAILs :close-with-unsaved rather than
   skipping."
@@ -888,21 +874,17 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-quit-with-unsaved!
-  "Controller-added step 9 (task-6-brief.md, not in the store plan);
-  corrected by task-7a's own controller ruling after the P3 phase-close
-  fix wave. This step's earlier docstring (git history) said Cmd/Ctrl+Q
-  was unbound and reached nothing in this codebase -- that was true when
-  it was written, but P3 fix wave C3 (window.clj, `quit-action`) gave the
+  "Cmd/Ctrl+Q with unsaved changes. window.clj's `quit-action` gives the
   GtkApplication a \"quit\" action wired to `(gtk-window-close win)`, which
   is exactly the accelerator GTK's macOS delegate takes for Cmd+Q. A
   dirty, unconfirmed close re-enters close-request-fn the same way Cmd+W
   does (step-close-with-unsaved!'s own path), so Cmd+Q on a dirty buffer
-  now shows the same real GtkAlertDialog instead of doing nothing.
+  shows the same real GtkAlertDialog.
 
   PASS needs the alert to appear as a SECOND top-level window for this
   pid (the same `cgevent windows --pid` check step-close-with-unsaved!
   uses -- a real GtkAlertDialog is its own window, never a native macOS
-  sheet, P3 probe finding #3) AND the process to stay alive throughout.
+  sheet, probed) AND the process to stay alive throughout.
   ANY process exit here is a FAIL outright (unsaved text silently
   discarded), checked immediately after the alert-appeared wait rather
   than assumed -- a process that died mid-wait reads as alert-appeared?
@@ -945,7 +927,7 @@
       (stop! {:proc proc :pid pid}))))
 
 (defn- step-stop-infinite-loop!
-  "Brief step 5: an infinite (silent) loop, stopped by Escape."
+  "An infinite (silent) loop, stopped by Escape."
   []
   (let [path (scratch-copy! "loop.clj")
         {:keys [proc pid]} (launch! path)]
@@ -961,7 +943,7 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-stop-print-forever!
-  "Brief step 9: a print-forever loop, stopped by Escape, window still
+  "A print-forever loop, stopped by Escape, window still
   responsive. Measured live: this fixture prints fast enough that by the
   time OCR runs, \"; interrupted\" itself can already have scrolled out of
   the console's visible viewport, pushed up by more \"tick\" lines that
@@ -988,10 +970,10 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-save!
-  "Brief step 7: Cmd+S; the file bytes on disk equal what the editor held,
+  "Cmd+S; the file bytes on disk equal what the editor held,
   and the title loses \"* \". The exact edit is select-all + delete + a
   freshly typed replacement (\"(+ 1 2)\") rather than a literal append at
-  the fixture's end -- probed live this session that select-all+delete+
+  the fixture's end -- probed live that select-all+delete+
   retype lands byte-for-byte as typed (four chords typed back to back read
   back via OCR as exactly `+\"-.`, no stray characters), which this step
   reuses directly for a robust, fully-verified path; positioning the caret
@@ -1015,8 +997,7 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-open-dirty-opens-panel!
-  "Brief step 10 (first half), as changed by tabs (plan P2.T3): Open never
-  replaces a buffer any more -- the chosen file lands in a new tab -- so
+  "Open never replaces a buffer: the chosen file lands in a new tab, so
   with a dirty buffer command+o opens the Open panel straight away (a real
   GtkFileDialog adds a second top-level window for this pid), prints no
   \"Unsaved changes\" refusal, and leaves the buffer dirty. Pid-routed keys
@@ -1049,10 +1030,10 @@
     path))
 
 (defn- step-latin1-warning!
-  "Brief step 10 (second half): the Latin-1 warning, checked by launching
+  "The Latin-1 warning, checked by launching
   a SECOND instance with the Latin-1 fixture as its file argument (opening
   through the native panel would need clicks, which pid-routing can't
-  deliver -- p2t10-brief.md is explicit about this). Also checks the
+  deliver). Also checks the
   file's bytes are unchanged on disk, since Jonquil must never rewrite a
   file it only opened."
   []
@@ -1068,10 +1049,10 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-command-chord-close!
-  "Brief step 11: the command chord plus W; the process exits 0. This
+  "The command chord plus W; the process exits 0. This
   step's own launch! process is deref'd for its REAL exit code (not just
   \"pid no longer in pgrep\"), which is the one thing this smoke test can
-  check that the in-process self-test (P2.T10's other commit) cannot --
+  check that the in-process self-test cannot --
   that self-test calls the key handler directly inside the same process
   it's testing, so it can prove the handler returns 1 but never that the
   OS process this handler's caller lives in actually terminates with
@@ -1088,24 +1069,22 @@
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
 
 (defn- step-close-while-running!
-  "Fix round 1, Important #1: closing while a program is running was
-  untested. window.clj's Cmd/Ctrl+W branch calls gtk_window_close with no
-  evaluating? guard, and the pre-existing close-request handler calls
-  g_application_quit unconditionally -- the eval worker may still call
-  on-gui! (g_idle_add) after the window and widgets are gone, and so may
-  the red close button, which predates this task. forever.clj floods
+  "Closing while a program is running. window.clj's Cmd/Ctrl+W branch
+  calls gtk_window_close with no evaluating? guard, and the close-request
+  handler calls g_application_quit unconditionally -- the eval worker may
+  still call on-gui! (g_idle_add) after the window and widgets are gone,
+  and so may the red close button. forever.clj floods
   cview/append! (itself on-gui!-based) from the eval worker thread far
   faster than a silent loop would, which is exactly the shape of race that
   would matter if there were one.
 
   Measured live against the built binary, outside this driver (bash +
-  cgevent directly, not this script), before writing this step: 10 runs
+  cgevent directly, not this script): 10 runs
   across two timing profiles (a normal ~1s gap between F5 and the close
   chord, and a zero-gap back-to-back send) all exited 0 with no stderr at
   all, except one run's single, already-documented-benign GLib warning
   (\"Trying to snapshot GtkGizmo ... without a current allocation\", the
-  same pane-resize noise smoke-results.md's human walkthrough already
-  saw). Zero crashes, zero GTK criticals, in 10 for 10. This step encodes
+  same pane-resize noise a manual walkthrough shows). Zero crashes, zero GTK criticals, in 10 for 10. This step encodes
   that same probe as a permanent regression check: real exit code, real
   stderr, read from the actual log launch! writes to, not inferred.
 
@@ -1134,7 +1113,7 @@
             (swap! launched (fn [v] (vec (remove (fn [m] (= pid (:pid m))) v)))))))))
 
 (defn- step-theme-persists!
-  "TH.T6 item 4: the theme Cmd/Ctrl+Shift+M saves survives a relaunch.
+  "The theme Cmd/Ctrl+Shift+M saves survives a relaunch.
   Launches into a blank buffer under THIS run's own temp config dir
   (smoke-xdg-config-home -- a single top-level def shared by every
   launch! in this file, so a second launch! below reads back exactly
@@ -1145,7 +1124,7 @@
   (window.clj's do-cycle-theme!, settings/save-settings!) and the status
   label are two different code paths, so this checks the save directly
   rather than trusting the status text alone. Command+W then closes with
-  no dirty buffer to prompt about (measured live this session: a blank,
+  no dirty buffer to prompt about (measured live: a blank,
   untouched buffer exits 0 with no alert), checked via the process's own
   real exit code -- the same falsifiability step-command-chord-close!
   already relies on, not just 'pid no longer in pgrep'.
@@ -1155,7 +1134,7 @@
   (window-local point coordinates, so unlike an OCR row's rect this
   needs no window x/y subtraction -- point (0,0) in a --pid screenshot
   IS the window's own top-left), clear of both the blinking caret at
-  (0,0) and the console divider below (measured live this session: a
+  (0,0) and the console divider below (measured live: a
   blank buffer's editor pane samples 0,0,0 in :dark, 252,252,251 in
   :light, at this exact rect). PixelAt.java's own 'near' mode
   (step-find!'s pattern) against black, then PASS needs the sampled
@@ -1202,21 +1181,19 @@
                 (check! :theme-persists false {:pixel-at-exit exit :pixel-at-err err :rect [px py pw ph]})))
             (stop! {:proc proc :pid pid})))))))
 
-;; --- P4.T8: completion, quick doc, jump, rename, the context menu -------
-;; Everything below drives the P4 help keys through the built binary the
+;; --- completion, quick doc, jump, rename, the context menu -------
+;; Everything below drives the help keys through the built binary the
 ;; same way every step above does -- pid-routed cgevent, no other input
 ;; path. editor.clj's own set-text! always leaves the caret at the END of
 ;; the buffer (a plain gtk_text_buffer_set_text moves the insert mark to
-;; the end of what it just inserted; this file's own header didn't need
-;; to say so before P4, since every earlier step either ran from the end
-;; of the buffer already or moved the caret with a chord of its own), so
+;; the end of what it just inserted), so
 ;; every fixture below is opened once and then, where a step needs the
 ;; caret somewhere other than the end, moved there with Home (start of
 ;; the CURRENT line) plus a measured number of Right presses -- never a
 ;; click, never place-cursor! (that's an in-process call this external
 ;; script has no access to). Every one of these landings was measured
-;; live against the built binary before being written here (see the
-;; report): Home+Right+Right on quickdoc.clj's one line lands on offset
+;; live against the built binary before being written here:
+;; Home+Right+Right on quickdoc.clj's one line lands on offset
 ;; 2 (Ln 1, Col 3, OCR'd), and the same three keys on jump.clj/rename.clj
 ;; (Home goes to the START OF LINE 2, since the caret starts at the end
 ;; of that line) land on offset 22, inside the call's own "greet" --
@@ -1224,17 +1201,15 @@
 ;; against this same fixture text.
 
 (defn- step-completion!
-  "P4.T8 step 1. Ctrl+Space (`control + space`) was measured live against
-  this build, outside this driver, before writing this step (see the
-  report): CGEventPostToPid delivered it straight to Jonquil with no
-  macOS input-source switch intercepting it, so both halves below use the
-  real chord rather than the context-menu workaround the brief's own
-  context notes as a fallback.
+  "Ctrl+Space (`control + space`) was measured live against
+  this build, outside this driver: CGEventPostToPid delivered it straight
+  to Jonquil with no macOS input-source switch intercepting it, so both
+  halves below use the real chord rather than a context-menu workaround.
 
   Sub-step A (single candidate, auto-commit): fixture \"(mapca\", caret at
   the end (set-text!'s own end-of-buffer caret). docs/candidates for
   \"mapca\" is exactly [\"mapcat\"] (measured live against this build, and
-  matching P4.T5's own row-completion-single-inserts), so completion/
+  matching the self-test's row-completion-single-inserts), so completion/
   open! commits it at once with no popover; Cmd+S, then the file's own
   bytes must read \"(mapcat\" -- anything else (nothing inserted, a
   literal space, a popover left open) fails this outright.
@@ -1242,8 +1217,7 @@
   Sub-step B (several candidates, navigate + commit): a FRESH process,
   fixture \"(ma\", caret at the end. The expected candidate list comes
   from a live `jolt -M -e` call into jonquil.docs/candidates
-  (candidates-via-jolt!, never hand-written, per this task's own
-  instructions); Down selects index 1, Return commits it -- the file's
+  (candidates-via-jolt!, never hand-written); Down selects index 1, Return commits it -- the file's
   own bytes after Cmd+S must equal \"(\" plus that SECOND candidate's own
   symbol. A broken completion (Down/Return doing nothing, or falling
   through to the plain editor -- Down moves a line, Return inserts a
@@ -1284,7 +1258,7 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-quick-doc!
-  "P4.T8 step 2: fixture \"(map inc [1])\", caret moved to offset 2
+  "Fixture \"(map inc [1])\", caret moved to offset 2
   (Home, Right, Right -- measured live to land Ln 1, Col 3), Ctrl+Q. OCR
   must find \"clojure.core/map\" while the popover is open; Escape then
   closes it, checked by OCR no longer finding it. :quick-doc-closes only
@@ -1309,7 +1283,7 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-jump!
-  "P4.T8 step 3: fixture \"(defn greet [n] n)\\n(greet 1)\", caret moved
+  "Fixture \"(defn greet [n] n)\\n(greet 1)\", caret moved
   to offset 22 (Home, Right, Right -- Home lands at the START of line 2
   since the caret starts at the end of the buffer; measured live to land
   Ln 2, Col 3, i.e. offset 22, inside the call's own \"greet\", the exact
@@ -1334,7 +1308,7 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-rename!
-  "P4.T8 step 4: same fixture/caret as step-jump! (offset 22, inside the
+  "Same fixture/caret as step-jump! (offset 22, inside the
   call's own \"greet\"), F2 opens the rename popover -- prefilled with
   \"greet\", selected (help-popover/show-rename!'s own contract), so
   typing \"hello\" by pid chords replaces the selection outright. Return
@@ -1363,7 +1337,7 @@
     (stop! {:proc proc :pid pid})))
 
 (defn- step-context-menu!
-  "P4.T8 step 5: Shift+F10 (`shift + f10`) opens the P4 extra-menu --
+  "Shift+F10 (`shift + f10`) opens the extra-menu --
   GTK's own native popup-menu keybinding, never anything jonquil.gtk.*
   wires itself -- checked both as a SECOND top-level window for this pid
   (the same `cgevent windows --pid` signal step-close-with-unsaved! uses
@@ -1388,10 +1362,10 @@
                 {:closed-windows closed-windows :closed-ocr closed-ocr})))
     (stop! {:proc proc :pid pid})))
 
-;; --- D2.T6: the built binary drives an nREPL project --------------------
+;; --- the built binary drives an nREPL project --------------------
 
 (defn- nrepl-fixture!
-  "D2.T6: a throwaway nREPL project under out-dir -- deps.edn, .jonquil.edn
+  "A throwaway nREPL project under out-dir -- deps.edn, .jonquil.edn
   {:runtime :nrepl}, a .nrepl-port that belongs to someone else (4242), and
   src/demo/core.clj ending in a call. {:file :dir}."
   []
@@ -1424,7 +1398,7 @@
   (try (p/sh "kill" "-9" (str pid)) (catch Exception _ nil)))
 
 (defn- step-nrepl-run-and-close!
-  "D2.T6: the built binary on a {:runtime :nrepl} project. It starts its own
+  "The built binary on a {:runtime :nrepl} project. It starts its own
   Jolt child, F5 prints through it, and Cmd+W quits with that child gone and
   the project's .nrepl-port untouched (the child writes none)."
   []
@@ -1435,7 +1409,7 @@
           kids (children-of pid)]
       (check! :nrepl-starts (and ready (= 1 (count kids))) {:children kids})
       (cg-key! pid "f5")
-      ;; Measured live (2026-09-27 fix wave, pass 4): three different OCR
+      ;; Measured live (2026-09-27): three different OCR
       ;; renderings of the SAME result line, seen across separate runs --
       ;; "=> : hi" (arrow intact, a stray space inserted inside the
       ;; keyword), and a bare ": hi" with no arrow at all. The editor pane's own

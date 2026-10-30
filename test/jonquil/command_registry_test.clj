@@ -36,7 +36,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the S1-S4 commands, S8's palette, P4's reload, P9b's review, P11's list and Parinfer's five")
+      "exactly the shipped window commands, the palette, plugin reload, review and list, and Parinfer's five")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))
@@ -51,7 +51,7 @@
     (is (and (string? (:doc c)) (seq (:doc c))) (str id))
     (is (= :window (:scope c)) (str id))))
 
-(deftest s2-commands-call-their-ctx-fns-test
+(deftest commands-call-their-ctx-fns-test
   (let [calls (atom [])
         rec (fn [k] (fn [& _] (swap! calls conj k) nil))
         ctx {:find-next! (rec :find-next!) :find-prev! (rec :find-prev!)
@@ -75,7 +75,7 @@
 (deftest unknown-command-runs-nothing-test
   (is (nil? (registry/run-command! registry/window-commands {:command :no/such} {}))))
 
-(deftest s3-escape-commands-answer-outcomes-test
+(deftest escape-commands-answer-outcomes-test
   (let [calls (atom [])
         rec (fn [k answer] (fn [& _] (swap! calls conj k) answer))
         ctx (fn [bar popovers]
@@ -94,7 +94,7 @@
                     [:tree/close-menu :close-menu!] [:tree/leave :leave!] [:run/stop :stop-fn]]]
       (is (= [:handled [k]] (run id (ctx nil nil))) (str id)))))
 
-(deftest s3-escape-conditions-test
+(deftest escape-conditions-test
   (let [holds (fn [ctx id] ((registry/holds-fn registry/window-conditions ctx) id))
         tree (fn [focused? menu?] {:focused? (constantly focused?) :menu-open? (constantly menu?)})]
     (is (true? (holds {:find-bar-focused? (constantly true)} :find-bar-focused)))
@@ -107,11 +107,11 @@
     (is (false? (holds {:tree-keys (tree false true)} :tree-focused)))
     (is (true? (holds {:tree-keys (tree false true)} :tree-menu-open)))
     (is (false? (holds {:tree-keys (tree true false)} :tree-menu-open)))
-    ;; Review Focus 5: a window with no tree
+    ;; a window with no tree
     (is (false? (holds {:tree-keys nil} :tree-focused)) "no tree-keys: not focused, no throw")
     (is (false? (holds {:tree-keys nil} :tree-menu-open)) "no tree-keys: no menu, no throw")))
 
-(deftest s4-source-commands-test
+(deftest source-commands-test
   (let [calls (atom [])
         rec (fn [k answer] (fn [& _] (swap! calls conj k) answer))
         run (fn [id ctx] (reset! calls []) [(registry/run-command! registry/window-commands {:command id} ctx) @calls])]
@@ -119,11 +119,11 @@
     (is (= [:handled [:jump-back!]] (run :source/jump-back {:source-keys {:jump-back! (rec :jump-back! true)}})))
     (is (= [:next [:jump-back!]] (run :source/jump-back {:source-keys {:jump-back! (rec :jump-back! nil)}}))
         "nothing to go back from: the key passes on")
-    ;; Review Focus 3: a window with no jump-back fn
+    ;; a window with no jump-back fn
     (is (= [:next []] (run :source/jump-back {:source-keys {}})) "no :jump-back!: :next, no throw")
     (is (= [:next []] (run :source/jump-back {})) "no source-keys at all")))
 
-(deftest s4-rename-condition-test
+(deftest rename-condition-test
   (let [holds (fn [v] ((registry/holds-fn registry/window-conditions {:entry-focused? (constantly v)})
                        :entry-focused))]
     (is (true? (holds true)))
@@ -149,7 +149,7 @@
     (is (= 0 (ans 0xff1b 0 false :next)) "the fixed :to-gtk is 0")
     (is (= 0 (ans 0x61 0 false :handled)) ":unmatched is 0")))
 
-;; --- step S5: the editor's commands ---------------------------------------
+;; --- the editor's commands -------- ---------------------------------------
 
 (deftest editor-commands-answer-outcomes-test
   (let [calls (atom [])
@@ -169,7 +169,7 @@
                     [:edit/format-selection :format-selection!] [:edit/redo :redo!]]]
       (is (= [:handled [k]] (run id (ctx 1))) (str id " 1 is :handled"))
       (is (= [:to-gtk [k]] (run id (ctx 0))) (str id " 0 is GTK's")))
-    ;; Review Focus 5: these answer :handled whatever their fn returns, nil
+    ;; these answer :handled whatever their fn returns, nil
     ;; included (no completion or quick-doc fn registered)
     (doseq [[id k] [[:completion/open :complete!] [:help/quick-doc :quick-doc!]
                     [:help/jump :jump!] [:edit/rename :rename!] [:run/form :run-form!]
@@ -186,7 +186,7 @@
     (is (true? (holds true)))
     (is (false? (holds false)))))
 
-;; --- step S6: Run Form and the editor's fixed stages ----------------------
+;; --- Run Form and the editor's fixed stages ----------------------
 
 (deftest editor-preedit-condition-test
   (let [holds (fn [v] ((registry/holds-fn registry/editor-conditions {:preedit-active? (constantly v)})
@@ -222,7 +222,7 @@
       (is (= [:popup :typing] @ran))
       (is (= 0 (ans 0x61 {:popup 0 :typing 0}))))))
 
-;; --- step S7: the context menus -------------------------------------------
+;; --- the context menus -------- -------------------------------------------
 
 (deftest console-commands-test
   (let [calls (atom [])
@@ -245,7 +245,7 @@
     (is (apply distinct? (map :label menu)))
     (is (apply distinct? (map :action menu)))))
 
-;; --- plugins P1: commands that can pass the key on ------------------------
+;; --- commands that can pass the key on ------------------------
 
 (deftest passes-flag-test
   ;; the commands that can answer :next or :to-gtk, so a window binding to
@@ -253,7 +253,7 @@
   (is (= #{:popover/close-all :source/jump-back :find/bar-key}
          (set (keep (fn [[id c]] (when (:passes? c) id)) registry/commands)))))
 
-;; --- step S8: the palette -------------------------------------------------
+;; --- the palette -------- -------------------------------------------------
 
 (deftest palette-hidden-commands-test
   (is (= #{:find/bar-key :popover/close-all :source/open-here :source/close :source/back

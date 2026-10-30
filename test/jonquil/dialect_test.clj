@@ -28,7 +28,7 @@
     dir))
 
 ;; A second, jank-shaped profile, so the tie-break rules have something to
-;; break a tie against. Test data only: D1 ships one profile.
+;; break a tie against. Test data only.
 (def ^:private other
   {:id :other :name "Other" :extensions #{"oth"} :project-markers ["other.edn"]
    :evaluator :nrepl :runtimes #{:nrepl} :special-forms #{} :builtins #{}})
@@ -121,7 +121,7 @@
       (is (= [:other :marker] [(:id (:profile s)) (:source s)])))
     (let [s (dialect/select two (proj #{"other.edn"} nil) nil :jolt)]
       (is (= [:other :marker] [(:id (:profile s)) (:source s)]))))
-  (testing "I2: a single marker doesn't outrank another profile's own extension"
+  (testing "a single marker doesn't outrank another profile's own extension"
     (let [s (dialect/select two (proj #{"other.edn"} nil) "/p/a.clj" :jolt)]
       (is (= [:jolt :extension] [(:id (:profile s)) (:source s)]))))
   (testing "two markers: the extension breaks the tie"
@@ -204,8 +204,8 @@
     (is (not= (k "{:runtime :nrepl}" "/p" "/p/a.clj") (k "{:runtime :nrepl}" "/q" "/q/a.clj"))
         "another nREPL project needs its own child")))
 
-;; P1.T1: the ClojureDart profile. `with-cljd` is the profile list the
-;; window will use once P2 wires the attach evaluator in.
+;; the ClojureDart profile. `with-cljd` is a two-profile list, Jolt and
+;; ClojureDart.
 (def ^:private with-cljd [dialect/jolt dialect/cljd])
 
 (deftest cljd-profile-test
@@ -219,7 +219,7 @@
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
   (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank dialect/cljs dialect/nrepl] dialect/profiles)
-      "clj joined in P2.T4, jank in D3 P1.T1, cljs next, then nrepl (claims no extension or marker)"))
+      "nrepl comes last (it claims no extension or marker)"))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
@@ -242,7 +242,7 @@
   (testing "a loose .cljd file: cljd by extension, no project"
     (is (= [:cljd :extension nil] ((juxt (comp :id :profile) :source :project-dir)
                                    (dialect/select with-cljd nil "/tmp/x.cljd" nil)))))
-  (testing "I2: a pubspec-only project's single marker (cljd) doesn't outrank a Jolt-extensioned file"
+  (testing "a pubspec-only project's single marker (cljd) doesn't outrank a Jolt-extensioned file"
     (let [pubspec-only (proj #{"pubspec.yaml"} nil)]
       (is (= [:jolt :extension] ((juxt (comp :id :profile) :source)
                                  (dialect/select with-cljd pubspec-only "/p/tool/build.clj" nil))))
@@ -280,9 +280,7 @@
     (is (= (k "/p" "/p/lib/a.cljd") (k "/p" "/p/dev/b.cljd")) "another file in the same app keeps the connection")
     (is (not= (k "/p" "/p/lib/a.cljd") (k "/q" "/q/lib/a.cljd")) "another app needs its own")))
 
-;; P1.T2: the :clj (JVM Clojure) profile. Not yet in dialect/profiles
-;; (ruling 3); joins it in P2.T4, once the window can reach
-;; make-attached :clj.
+;; the :clj (JVM Clojure) profile. Not yet in dialect/profiles; it joins once the window can reach make-attached :clj.
 (def ^:private all3 [dialect/jolt dialect/cljd dialect/clj])
 
 (deftest clj-profile-test
@@ -295,7 +293,7 @@
   (is (= ".nrepl-port" (:port-file dialect/clj)))
   (is (= "This is your own JVM, so Jonquil doesn't unload namespaces in it." (:reset-tooltip dialect/clj)))
   (is (= "Hot reload can't unload a namespace, so every Run adds to the running app." (:reset-tooltip dialect/cljd)))
-  (is (some #{dialect/clj} dialect/profiles) "ruling 3: joins profiles in P2.T4"))
+  (is (some #{dialect/clj} dialect/profiles) "clj is a profile"))
 
 (deftest clj-selection-test
   (let [src "(ns demo.core)\n"
@@ -315,12 +313,12 @@
         (is (= :jolt (:id (:profile (dialect/select all3 (dialect/find-project all3 core-path2) core-path2 nil))))))
       (testing "a settings default of :clj doesn't take a .clj file from Jolt"
         (is (= :jolt (:id (:profile (dialect/select all3 (dialect/find-project all3 core-path2) core-path2 :clj))))))
-      (testing "I2: a settings default of :clj doesn't take deps.edn or bb.edn from Jolt inside a deps.edn project"
+      (testing "a settings default of :clj doesn't take deps.edn or bb.edn from Jolt inside a deps.edn project"
         (let [sel-deps (dialect/select all3 (dialect/find-project all3 deps-path2) deps-path2 :clj)
               sel-bb (dialect/select all3 (dialect/find-project all3 bb-path2) bb-path2 :clj)]
           (is (= [:jolt :fallback] [(:id (:profile sel-deps)) (:source sel-deps)]))
           (is (= [:jolt :fallback] [(:id (:profile sel-bb)) (:source sel-bb)]))))
-      (testing "I2: a loose file with no project still gets the settings default of :clj"
+      (testing "a loose file with no project still gets the settings default of :clj"
         (let [sel (dialect/select all3 nil "/tmp/x.txt" :clj)]
           (is (= :clj (:id (:profile sel))))
           (is (= :settings (:source sel)))
@@ -329,7 +327,7 @@
         (let [sel (dialect/select all3 nil nil :clj)]
           (is (= :clj (:id (:profile sel))))
           (is (nil? (:project-dir sel)))))
-      (testing "I2: a settings default naming a profile with its own markers (:cljd) is unaffected inside a project"
+      (testing "a settings default naming a profile with its own markers (:cljd) is unaffected inside a project"
         (let [sel (dialect/select all3 (proj #{} nil) "/p/README" :cljd)]
           (is (= [:cljd :settings] [(:id (:profile sel)) (:source sel)]))))
       (testing "the label"
@@ -393,7 +391,7 @@
       (is (= 1 (count (:warnings s))))
       (is (str/includes? (first (:warnings s)) ":auto-require only applies to JVM Clojure and Jolt")))))
 
-;; D3 P1.T1: the :jank profile, which Jonquil launches itself.
+;; the :jank profile, which Jonquil launches itself.
 (def ^:private all4 [dialect/jolt dialect/cljd dialect/clj dialect/jank])
 
 (deftest jank-profile-test

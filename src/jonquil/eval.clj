@@ -130,10 +130,10 @@
    :running-state (atom idle-state)
    ;; Guards every running-state transition together with the
    ;; on-status-change notification it implies, so Stop's read of :thread
-   ;; and a worker's write of :thread can never miss each other (fix #2),
-   ;; and a finishing worker's :idle notification can never be overtaken by
-   ;; the next run's :running notification (fix #3). See fix-round-1 notes
-   ;; on eval-async and stop-eval! below.
+   ;; and a worker's write of :thread can never miss each other, and a
+   ;; finishing worker's :idle notification can never be overtaken by the
+   ;; next run's :running notification. See eval-async and stop-eval!
+   ;; below.
    :lock (Object.)})
 
 (defn push-stdin! [{:keys [queue]} text] (.offer queue (str text "\n")))
@@ -147,7 +147,7 @@
    or nil when nothing was running.
 
    Runs under the context's lock so its read of :thread can never race the
-   worker's own registration of :thread (fix #2): whichever of the two runs
+   worker's own registration of :thread: whichever of the two runs
    first is guaranteed visible to whichever runs second, so at least one of
    them always delivers a real thread interrupt. The same lock also keeps
    this EOF offer from landing in a different run's freshly cleared queue.
@@ -166,7 +166,7 @@
     (let [{:keys [status token thread done stop-requested finishing]} @running-state]
       ;; A worker that has marked itself :finishing has its result and is
       ;; about to clear its interrupt flag; interrupting it now would re-arm
-      ;; the flag for its callbacks (P2 hardening), so Stop leaves it alone.
+      ;; the flag for its callbacks, so Stop leaves it alone.
       (when (and (= :running status) (not finishing))
         (reset! stop-requested true)
         (jolt.host/interrupt! token)
@@ -179,7 +179,7 @@
    *err* (this runs outside the eval binding, so *err* is not the run's
    capture writer here), then lets the caller continue. Used so a
    throwing callback loses only itself, never the completion it would
-   otherwise have swallowed (fix I1)."
+   otherwise have swallowed."
   [who e]
   ;; Last resort: if even reporting fails (stderr closed), drop the report
   ;; rather than skip the deliver/on-complete the callers rely on.
@@ -259,7 +259,7 @@
           (future
             (let [result
                   (try
-                    ;; Registration happens under the lock (fix #2): either
+                    ;; Registration happens under the lock: either
                     ;; stop-eval! already ran and set stop-requested, in
                     ;; which case we self-interrupt right here before doing
                     ;; any work, or it hasn't, in which case it will see our
@@ -267,7 +267,7 @@
                     ;; directly. The :running notification is folded into
                     ;; this same critical section so it can never fire
                     ;; before a still-draining previous run's :idle
-                    ;; notification finishes (fix #3): both use this lock,
+                    ;; notification finishes: both use this lock,
                     ;; so whichever finishes its section first is fully
                     ;; visible before the other's section can begin.
                     (locking lock
@@ -285,16 +285,16 @@
                                   (when before-eval
                                     (try (before-eval)
                                          ;; A Stop during it stops the
-                                         ;; evaluation (review finding 1).
+                                         ;; evaluation.
                                          (catch :default e
                                            (if (interrupted? e)
                                              (throw e)
                                              (report-callback-exception! "before-eval" e)))))
                                   (when @stop-requested
                                     (throw (ex-info "stopped" {:jolt/interrupted true})))
-                                  ;; I4: unconditional -- the ns-resolve guard
-                                  ;; this replaced was always false on Jolt.
-                                  ;; Also refer the clojure.repl helpers that
+                                  ;; Unconditional (an ns-resolve guard would
+                                  ;; always be false on Jolt). Refer the
+                                  ;; clojure.repl helpers that
                                   ;; actually exist here (doc, find-doc,
                                   ;; apropos, dir -- source and pst do not),
                                   ;; so (doc ...) etc. work at the prompt like
@@ -310,7 +310,7 @@
                                   (let [{:keys [value printed]}
                                         (jolt.host/run-interruptible
                                          token (fn []
-                                                 ;; I3: printed inside the same
+                                                 ;; Printed inside the same
                                                  ;; interruptible thunk, under
                                                  ;; the same binding, as the
                                                  ;; evaluation itself -- so
@@ -336,7 +336,7 @@
                                   ;; normal return), the user asked for a stop.
                                   @stop-requested (-> (assoc :status :interrupted)
                                                       (dissoc :value :error :printed)))]
-                          ;; a :quiet eval (plugins P5b) leaves *1 *2 *3 *e alone
+                          ;; a :quiet eval leaves *1 *2 *3 *e alone
                           (case (when-not (:quiet opts) (:status r))
                             :ok (swap! repl-vars (fn [{v1 :1 v2 :2 :as m}] (assoc m :1 (:value r) :2 v1 :3 v2)))
                             :error (swap! repl-vars assoc :e (:error r))
@@ -344,7 +344,7 @@
                           r)))
                     (catch :default e
                       {:status :error :error e :ns ns-sym}))]
-              ;; I1: clear any pending Java interrupt before the tail. A
+              ;; Clear any pending Java interrupt before the tail. A
               ;; busy loop stopped via the token can leave this thread's
               ;; interrupt flag set (nothing inside it made a blocking call
               ;; to consume it), and a blocking call inside
@@ -362,21 +362,21 @@
               (try
                 (when before-idle (before-idle result))
                 (catch :default e (report-callback-exception! "before-idle" e)))
-              ;; Fix #3: reset-to-idle and its notification are one locked
+              ;; Reset-to-idle and its notification are one locked
               ;; unit, so a new eval-async's own registration (locked, above)
               ;; can never squeeze its :running notification in before this
               ;; :idle notification finishes.
               (locking lock
                 (reset! waiting-input? false)
                 (reset! running-state idle-state)
-                ;; Fix #1: on-status-change is isolated in its own try so a
+                ;; on-status-change is isolated in its own try so a
                 ;; throwing caller can never prevent the deliver/on-complete
-                ;; below from running. I1: the exception is reported, not
+                ;; below from running. The exception is reported, not
                 ;; silently dropped.
                 (try
                   (when on-status-change (on-status-change :idle))
                   (catch :default e (report-callback-exception! "on-status-change" e))))
-              ;; Fix #1: every exit path reaches here exactly once, whatever
+              ;; Every exit path reaches here exactly once, whatever
               ;; on-status-change did above.
               (deliver done result)
               (try

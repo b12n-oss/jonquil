@@ -1,8 +1,7 @@
 (ns fake-jvm-nrepl
   "A fake JVM nREPL server for jonquil.nrepl.jvm's tests and the :clj
   self-test window. It imitates clojure-cli.repl 0.1.0 / nREPL 1.7.0's
-  replies as measured (P0/P1 of the clj-dialect arc, the spike's own
-  measured reply shapes):
+  replies as measured:
 
   - describe advertises jvm-ops; clone answers a fresh session (ns
     \"user\").
@@ -42,8 +41,8 @@
   inspect-def never interns (the fake never evaluates Clojure): it answers
   the current view plus :defd instead. A session is registered -- so
   inspect-start sees its *1, not nil -- only once an eval op for it has
-  been received; load-file alone leaves it unregistered (the spike's own
-  measured probe 1 behaviour). *1 itself is the last eval/load-file value
+  been received; load-file alone leaves it unregistered (measured
+  behaviour). *1 itself is the last eval/load-file value
   the fake produced, read back with edn/read-string when it parses cleanly,
   else kept as the printed string."
   (:require [clojure.edn :as edn]
@@ -264,7 +263,7 @@
           ;; on this session must never bleed into this new one.
           (swap! sessions update sid dissoc :pending-interrupt :pending-stdin)
           ;; inspect-start only sees a session's *1 once it's registered
-          ;; this way (spike probe 1): load-file alone never registers it.
+          ;; this way (measured): load-file alone never registers it.
           (when (= "eval" (get m "op")) (swap! registered conj sid))
           (swap! futures conj (future (evaluate! srv stop-latch closed reply m))))
         "interrupt"
@@ -310,8 +309,7 @@
               sess-ns (get-in @sessions [sid :ns] "user")
               ns (or req-ns sess-ns)]
           ;; The real server's own doc op calls the-ns and throws when ns
-          ;; isn't loaded, and never answers at all (measured, the spike's
-          ;; probe output) -- so this sends nothing for that case either,
+          ;; isn't loaded, and never answers at all (measured) -- so this sends nothing for that case either,
           ;; instead of the plain "No doc for ..." fallback below.
           (when (contains? @loaded ns)
             (wait! stop-latch closed (:doc-ms opts 0))

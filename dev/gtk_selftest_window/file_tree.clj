@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.file-tree
-  "The file tree in the real window (file-tree plan P2.T2): the chord and
+  "The file tree in the real window: the chord and
   the button, opening from the tree into tabs, the highlight following the
   active tab, a save showing its file, Open Folder through a simulated
   result, the settings it writes, and the theme reaching it. The window
@@ -71,7 +71,7 @@
 
 (defn row-tree-chord-not-run-selection
   "Cmd/Ctrl+Shift+E toggles the tree and runs nothing; plain Cmd/Ctrl+E
-  still runs the selection (Review Focus 4)."
+  still runs the selection."
   [ui]
   (go-row :tree-chord-not-run-selection support/check
     (let [original (on-gtk (root ui))
@@ -184,7 +184,7 @@
 
 (defn row-tree-follows-theme
   "The tree's list carries jonquil-code, the class the shared provider
-  restyles on a theme change (Review Focus 5)."
+  restyles on a theme change."
   [ui]
   (go-row :tree-follows-theme support/check
     (on-gtk (let [before ((:theme-name* ui))
@@ -198,8 +198,8 @@
               (support/check :tree-follows-theme (and (= 1 (:class v)) (:changed v)) v)))))
 
 (defn row-tree-escape-returns-focus
-  "With the tree focused, Escape gives focus back to the active editor
-  (final review finding 4); hiding a focused tree does the same."
+  "With the tree focused, Escape gives focus back to the active editor;
+  hiding a focused tree does the same."
   [ui]
   (go-row :tree-escape-returns-focus support/check
     (on-gtk (let [original (root ui)
@@ -217,7 +217,7 @@
                                  {:in-tree in-tree :handled h :back back :back-after-hide back2}))
                 (finally (restore! ui original)))))))
 
-;; --- file operations from the tree (file-ops plan T4) ------------------------
+;; --- file operations from the tree ------------------------
 ;; Each row roots the tree at its own temp project through the simulated Open
 ;; Folder result, shows the tree, and drives the menu through the ui hooks
 ;; (:tree-menu!* :tree-press!* :tree-submit!* :tree-menu-state*). The trash
@@ -347,7 +347,7 @@
                 (finally (popdown! ui) (restore! ui original)))))))
 
 (defn row-tree-rename-folder-retargets
-  "Review Focus 1: a tab opened on src/x.clj through a non-canonical
+  "A tab opened on src/x.clj through a non-canonical
   spelling (a symlink to the root) follows a rename of src to lib."
   [ui]
   (go-row :tree-rename-folder-retargets support/check
@@ -430,7 +430,7 @@
                 (finally (restore! ui original)))))))
 
 (defn row-tree-trash-folder-dirty-tab
-  "Review Focus 4: trashing a folder holding a dirty open file keeps the
+  "Trashing a folder holding a dirty open file keeps the
   tab, its text and its dirty state."
   [ui]
   (go-row :tree-trash-folder-dirty-tab support/check
@@ -480,7 +480,7 @@
                 (finally (popdown! ui) (restore! ui original)))))))
 
 (defn row-tree-window-keys-reach-tree
-  "Ruling 2: with the tree's name entry open, the window's Escape closes it
+  "With the tree's name entry open, the window's Escape closes it
   (and doesn't hand focus to the editor); with the list focused, F2, Delete,
   Cmd/Ctrl+BackSpace, Shift+F10 and Menu pass through the window (0)."
   [ui]
@@ -509,7 +509,7 @@
                 (finally (popdown! ui) (restore! ui original)))))))
 
 (defn row-tree-trash-symlink
-  "Fix round 1, Critical 1: the menu on a symlink row records the link as
+  "The menu on a symlink row records the link as
   listed, and Move to Trash on it trashes the link, leaving its target (a
   file outside the project) where it is."
   [ui]
@@ -542,7 +542,7 @@
                 (finally (popdown! ui) (restore! ui original)))))))
 
 (defn row-tree-rename-retargets-case-spelling
-  "Final review Important 2: a tab opened through a different-case spelling
+  "A tab opened through a different-case spelling
   of a.clj (A.clj, on a case-insensitive volume) follows a rename of a.clj
   to b.clj. That spelling resolves only while a.clj exists, so the tab map
   is built before the move. On a case-sensitive volume there is no such
@@ -596,7 +596,7 @@
        (= (str n " is open in a tab; close that tab first.") (:problem state)) (:open? state)))
 
 (defn row-tree-new-file-stale-tab
-  "Final review minor 1: after trashing an open file its tab still holds
+  "After trashing an open file its tab still holds
   the path, so New File... with that name is refused with the entry's
   problem before touching the disk; no file is created and the stale tab
   keeps its path and text."
@@ -609,7 +609,7 @@
                 (finally (popdown! ui) (restore! ui original)))))))
 
 (defn row-tree-rename-stale-tab
-  "Final review minor 1, Rename's side: renaming c.clj onto the name a
+  "Renaming c.clj onto the name a
   stale tab still holds is refused the same way, and c.clj stays."
   [ui]
   (go-row :tree-rename-stale-tab support/check
@@ -621,7 +621,7 @@
                 (finally (popdown! ui) (restore! ui original)))))))
 
 (defn row-tree-rename-keeps-expanded
-  "Final review minor 5: with p/ and p/q/ expanded, renaming p to s shows
+  "With p/ and p/q/ expanded, renaming p to s shows
   s/ and s/q/ still expanded (and q's file)."
   [ui]
   (go-row :tree-rename-keeps-expanded support/check

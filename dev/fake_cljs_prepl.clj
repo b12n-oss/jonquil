@@ -2,7 +2,7 @@
   "A fake ClojureScript prepl for the cljs-node tests and the window
   self-test, usable in-process (start!) and as the process
   dev/fake-cljs-clojure runs (-main). It imitates the prepl of
-  ClojureScript 1.12.42 as measured for the cljs-node arc:
+  ClojureScript 1.12.42 as measured:
 
   - Line-oriented EDN replies on a loopback socket. Each top-level form
     read off the stream gets exactly one {:tag :ret :val :ns :ms :form}
@@ -61,7 +61,7 @@
        (catch Throwable e
          {:out (str sw) :exception true :val (error-val e)})))))
 
-;; --- the stdin dance (read-line over the child's stdin, 2026-10-23) -------
+;; --- the stdin dance (read-line over the child's stdin) -------
 
 (defn- read-line-set!?
   "True for the reader setup's own form, (set! cljs.core/read-line F): the

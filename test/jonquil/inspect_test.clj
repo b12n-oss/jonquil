@@ -29,7 +29,7 @@
     (is (nil? (:request (inspect/key-step (inspect/open {:path "*1" :info "String" :header "" :leaf "\"x\""}) :in))))))
 
 (deftest out-reselects-test
-  ;; Review focus 3: the reply's :cursor (relative) selects the row entered.
+  ;; the reply's :cursor (relative) selects the row entered.
   (let [s (:state (inspect/key-step (inspect/open (page-view 0 3 3)) :out))]
     (is (= 3 (:selected (inspect/on-reply s (assoc (page-view 10 10 25) :cursor 3)))))
     (is (= 9 (:selected (inspect/on-reply s (assoc (page-view 10 10 25) :cursor 42)))) "clamped")))
@@ -60,7 +60,7 @@
          (inspect/footer (inspect/open (page-view 0 0 0))))))
 
 (deftest footer-and-open-on-error-test
-  (testing "footer never throws on a view with no :start (I1)"
+  (testing "footer never throws on a view with no :start"
     (is (= "" (inspect/footer (inspect/open {:error "x"}))))
     (is (= "" (inspect/footer (inspect/open (inspect/parse-view "")))))
     (is (= "" (inspect/footer (inspect/on-reply (inspect/open (page-view 0 3 3))

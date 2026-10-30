@@ -17,12 +17,10 @@
 (use-fixtures :once temp-dirs/fixture)
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (its own gitignored planning-store
-  ;; file): demo.core with greet, a private secret returning :private-ok,
-  ;; and nested. Embedded rather than read at test time: the planning
-  ;; store is gitignored scratch, so tests can't depend on it.
+  ;; The fixture's exact text: demo.core with greet, a private secret returning :private-ok,
+  ;; and nested. Embedded rather than read from a file at test time.
   (str "(ns demo.core\n"
-       "  \"A fixture namespace for the clj-attach spike.\")\n"
+       "  \"A fixture namespace for the JVM attach tests.\")\n"
        "\n"
        "(defn greet\n"
        "  \"Says hello to someone.\"\n"
@@ -35,7 +33,7 @@
 
 (defn- temp-project
   "A throwaway JVM project: deps.edn, .jonquil.edn {:dialect :clj},
-  src/demo/core.clj (the spike fixture's text), and .nrepl-port holding
+  src/demo/core.clj (the fixture's text), and .nrepl-port holding
   port-text with no trailing newline (nil for none). [dir file]."
   [port-text]
   (let [d (io/file (temp-dirs/temp-dir! "jonquil-jvm-test-"))
@@ -329,7 +327,7 @@
         (is (= :interrupted (:status (deref done 2000 :timeout))))))))
 
 (deftest stop-during-connect-test
-  ;; The fake has no :slow-ops (ruling 9: only handle!/evaluate!/the
+  ;; The fake has no :slow-ops (only handle!/evaluate!/the
   ;; options differ from the cljd fake, and slow-ops isn't one of them).
   ;; :mute? true never answers anything, so connect!'s own describe
   ;; request sits pending -- a real, timing-based window (no with-redefs:
@@ -434,7 +432,7 @@
         (is (connection/connected? e))
         (is (nil? (ev/interrupt! e)))
         (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "an idle Stop sends nothing")
-        (is (connection/connected? e) "and stays connected (ruling 5)")))))
+        (is (connection/connected? e) "and stays connected")))))
 
 (deftest stdin-test
   (with-project {}
@@ -748,7 +746,7 @@
                          "greetings")))))))
 
 (def full-doc-greet-text
-  "The fake's own :full-docs answer for greet -- P3.T2's step 5 text,
+  "The fake's own :full-docs answer for greet,
   reused by the :clj self-test rows for the same fixture symbol."
   "demo.core/greet\n([who])\nSays hello.\n\n== examples")
 
@@ -890,7 +888,7 @@
      @calls)))
 
 (deftest registration-test
-  ;; Review focus 1: after a Run on a fresh connection, the fake saw an eval of "nil"
+  ;; after a Run on a fresh connection, the fake saw an eval of "nil"
   ;; before the load-file, and inspect! :start shows the Run's value, not nil.
   (with-project {}
     (fn [srv dir file]
@@ -970,7 +968,7 @@
         (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "well under the fake's own 1000 ms :inspect-ms")))))
 
 (deftest inspect-lost-connection-test
-  ;; review focus 5: fake/drop-connections! while :inspect-ms delays -> {:error clj/lost-connection :lost? true}
+  ;; fake/drop-connections! while :inspect-ms delays -> {:error clj/lost-connection :lost? true}
   (with-project {:inspect-ms 1000}
     (fn [srv dir _]
       (let [e (make dir)
@@ -982,7 +980,7 @@
         (is (= {:error clj/lost-connection :lost? true} (deref done 2000 :timeout)))))))
 
 (deftest inspect-lost-connection-idle-test
-  ;; I2: the connection drops while the panel is IDLE (nothing in flight),
+  ;; the connection drops while the panel is IDLE (nothing in flight),
   ;; not mid round-trip like inspect-lost-connection-test above. :conn is
   ;; non-nil but closed (connect! never nils it back out on a passive
   ;; drop -- only detach!/a fresh connect! does), so this must answer

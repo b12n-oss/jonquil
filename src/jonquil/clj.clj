@@ -104,7 +104,7 @@
               :refused refused-message
               :not-server not-server-message
               :connecting connecting-message}
-   ;; :inspect-registered? (ruling 4): whether the connect-time eval of
+   ;; :inspect-registered?: whether the connect-time eval of
    ;; nil has been sent on this connection's session yet, so a fresh
    ;; connect always resets it to false and a later reconnect registers
    ;; again. :prompt-ns: a new connection is a new session, so the

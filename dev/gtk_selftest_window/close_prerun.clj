@@ -26,7 +26,7 @@
       (on-gtk (support/check :run-unbalanced ok {:console (support/since ui mark)})))))
 
 (defn row-repl-eof-no-editor-hint
-  "M11: the EOF-unclosed-bracket hint reads the DEFINITIONS editor's text,
+  "The EOF-unclosed-bracket hint reads the DEFINITIONS editor's text,
   so it must fire only for Runs, never for a REPL error. Sets the
   Definitions text to something WITH an unclosed bracket -- if the guard
   were missing, on-complete would misapply this Run-only hint and name
@@ -50,7 +50,7 @@
                              (and ok (not (str/includes? (support/since ui mark) "is never closed.")))
                              {:console (support/since ui mark)})))))
 
-;; --- P3.T5: Line/Col, ask before closing, bracket check before Run --------
+;; --- Line/Col, ask before closing, bracket check before Run --------
 
 (defn row-line-col
   "place_cursor is one of probe 6's own two measured triggers for mark-set;
@@ -222,7 +222,7 @@
           ok (await-until 3000 20 #(str/includes? (support/since ui mark) "The ) on line 1 has no matching opener."))]
       (on-gtk (support/check :pre-run-stray-closer ok {:console (support/since ui mark)})))))
 
-;; --- P3.T5: close-alert dialog identity, and the run-while-running warning
+;; --- close-alert dialog identity, and the run-while-running warning
 
 (defn row-close-alert-pending-guard
   "The guard half: a second close request while the first alert is still
@@ -292,10 +292,10 @@
   "A Run while one is already running must not run commands/pre-run-
   problem on the SECOND buffer regardless: an unbalanced second buffer
   must not set status to Ready (the FIRST program is still running) or
-  append a bracket :error into the middle of its output instead of P2's
-  own 'already in progress' warning. Starts (loop []
+  append a bracket :error into the middle of its output instead of the
+  'already in progress' warning. Starts (loop []
   (recur)), waits for it to really be evaluating, THEN sets an unbalanced
-  buffer and calls run!* again: the console must show the P2 warning and
+  buffer and calls run!* again: the console must show that warning and
   no bracket sentence, and the status must still read the running status,
   not Ready."
   [ui]
@@ -321,7 +321,7 @@
                       :status status :console t}))))
 
 (defn row-line-col-typing
-  "I2: an insert moves the insert mark by gravity without emitting
+  "An insert moves the insert mark by gravity without emitting
   mark-set, so Ln/Col must follow the buffer's notify::cursor-position
   instead. \"ab\\ncd\" with the caret at 4 reads \"Ln 2, Col 2\"; typing
   \"x\" there must advance it to \"Ln 2, Col 3\"."

@@ -7,8 +7,7 @@
 
   A model is {:root path-or-nil :expanded #{folder-path} :ignore rules}.
   Every path in it is canonical (java.io.File/getCanonicalPath), so a
-  symlinked folder's children carry the target's paths (file-tree spike
-  §5) and match what tabs' find-open compares."
+  symlinked folder's children carry the target's paths and match what tabs' find-open compares."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.dialect :as dialect]))
@@ -103,7 +102,7 @@
     []
         ;; ancestors: the folders above this point. A symlink to one of them
     ;; (or to the folder itself) has the same canonical path, so it's shown
-    ;; collapsed instead of recursed into forever (final review finding 2).
+    ;; collapsed instead of recursed into forever.
     (letfn [(walk [dir depth ancestors]
               (let [cs (children model dir)]
                 (if (map? cs)
@@ -149,7 +148,7 @@
   file's :dialect: dir's own .jonquil.edn or marker decides, as it would for
   a file inside it with no extension to argue. find-project starts at a
   path's parent, so it's given a child of dir; select gets no path, so a
-  single marker decides (final review finding 1: a pubspec.yaml directory
+  single marker decides (a pubspec.yaml directory
   must select ClojureDart)."
   [dir default]
   (dialect/select dialect/profiles

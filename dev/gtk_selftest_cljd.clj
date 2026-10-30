@@ -1,5 +1,5 @@
 (ns gtk-selftest-cljd
-  "cljd plan P2.T4 self-test: opens the REAL Jonquil window via
+  "Self-test: opens the REAL Jonquil window via
   jonquil.main/start! on a throwaway ClojureDart app directory whose
   NREPL.lock names a fake fork server in this process, and runs the rows
   in gtk-selftest-cljd.rows against its ui. Mirrors gtk-selftest-nrepl's

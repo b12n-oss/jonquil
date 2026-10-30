@@ -31,12 +31,12 @@
   since it is a plain atom reset with no GTK call in it.
 
   :waiting?/:evaluating? are functions supplied at construction, read live
-  from the eval engine (I2) rather than mirrored into console-owned atoms:
+  from the eval engine rather than mirrored into console-owned atoms:
   a mirror set by the caller AFTER starting an eval can lose a race against
   a fast eval's own completion clearing it first, stranding the console in
   :busy forever.
 
-  P4.T6: the console hosts a second jonquil.gtk.completion instance, so
+  The console hosts a second jonquil.gtk.completion instance, so
   handle-key! asks it first (set-completion-fns!, mirroring jonquil.gtk.
   editor's own registration) before Return-evaluates or Up/Down-browses-
   history ever run. input-snapshot is that instance's :snapshot-fn and the
@@ -106,7 +106,7 @@
   input-start (0 there). nil when the caret sits before input-start (the
   read-only output region) -- jonquil.gtk.completion's :snapshot-fn and
   jonquil.gtk.window's own Ctrl+Space clause both read nil as \"not in the
-  input\", the P4.T6 brief's own gate."
+  input\"."
   [cv]
   (let [buf (:buf cv)
         start (mark-offset buf (:input-start cv))
@@ -138,7 +138,7 @@
   or deleting text at or after its own offset never moves it, and every
   edit here stays at or after that offset by construction (input-snapshot
   never hands out a negative one), so a commit can never reach into the
-  output region. Completion (P4.T6) is the only caller; its own result
+  output region. Completion is the only caller; its own result
   never carries a :sel, so this has no equivalent of apply-op!'s own
   selection branch for indent/unindent/toggle-comment."
   [cv result]
@@ -165,7 +165,7 @@
   output!, below): \"there's no last entry until the next one begins\"
   after a full Cmd+L, whatever a Shift+L right before it would have found.
 
-  Fix round 1: this never touches the QUEUE (:queue cv), only the live
+  This never touches the QUEUE (:queue cv), only the live
   buffer and the flag, so a mark request still sitting there (mark-entry-
   start!, queued, not yet drained) is untouched too -- it still takes
   effect on its own next drain, at whatever out-end is BY THEN (i.e. after
@@ -287,7 +287,7 @@
 
 (defn focus!
   "Grabs focus for the console view and places the cursor at the end of the
-  input, mirroring jonquil.gtk.editor/focus!. Used by F6 (P3.T3) so typing
+  input, mirroring jonquil.gtk.editor/focus!. Used by F6 so typing
   continues at the end of whatever's already there, rather than wherever an
   earlier click left the caret."
   [cv]
@@ -298,7 +298,7 @@
   nil)
 
 (defn apply-theme!
-  "Retints every tag in (:tags cv) to theme t's colours (TH.T4): sets each
+  "Retints every tag in (:tags cv) to theme t's colours: sets each
   tag's foreground to (:fg (console/style t k)). Only ever touches tag
   properties -- never buffer text, marks or undo history."
   [cv t]
@@ -307,7 +307,7 @@
   nil)
 
 (defn reset-busy-hint!
-  "Clears the once-per-run :busy hint flag (M3), so the next run that stalls
+  "Clears the once-per-run :busy hint flag, so the next run that stalls
   on a busy Return earns its own hint instead of staying silent because an
   earlier run already showed one. Safe from any thread: a plain atom reset."
   [cv]
@@ -332,7 +332,7 @@
             (when (and (not (str/blank? text)) (not= text @(:run-start-input cv)))
               (subs text 0)))))
 
-;; --- P4.T6: the console's own REPL completion registrations ---------------
+;; --- the console's own REPL completion registrations ----------------------
 
 (defn set-completion-fns!
   "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
@@ -351,8 +351,8 @@
   "Registers f (fn [] -> nil) to be called, on the GTK thread, whenever the
   buffer's insert-mark position changes -- the same \"notify::cursor-
   position\" signal jonquil.gtk.editor/on-cursor-moved! registers against
-  (P3 fix wave I2's own citation: it covers typing, deletion and every
-  mark-set case in one signal), wired here for the console's own REPL
+  (it covers typing, deletion and every mark-set case in one signal),
+  wired here for the console's own REPL
   completion popup to refine!/close! on, mirroring the editor's on-cursor-
   moved!. Multiple registrations fire in registration order."
   [cv f]
@@ -387,7 +387,7 @@
         (partition-by first chunks)))
 
 (defn- clip-to-cap
-  "text's last max characters, or text unchanged when it already fits (I7).
+  "text's last max characters, or text unchanged when it already fits.
   Applied per coalesced run before it's ever inserted: a print-forever
   program can queue a single batch far bigger than the cap before a drain
   gets a chance to run, and there's no point inserting (and read-only/
@@ -429,21 +429,19 @@
 (defn- trim!
   "When the output region (0..out-end) is over MAX-OUTPUT-CHARS, deletes
   characters from its front so it fits, reusing console/trim-length's
-  reviewed rule directly instead of duplicating its cut-after-newline math
-  (P2-close follow-up item 3 -- the duplication was itself a defect: two
-  copies of the same rule that could silently drift apart).
+  rule directly instead of duplicating its cut-after-newline math (two
+  copies of the same rule could silently drift apart).
 
   Measures the region's length from out-end's own offset
   (gtk_text_iter_get_offset, via mark-offset) instead of copying the whole
-  region just to measure it (I7), then reads only the small tail near the
+  region just to measure it, then reads only the small tail near the
   cut point: exactly MAX-OUTPUT-CHARS + 1 characters, from-to-n below. That
   exact size is what makes reuse work without passing trim-length the real
   total length n: trim-length's own internal `must` (its length minus
   max-chars) then always works out to exactly 1 in the no-newline case,
   which is exactly what a 1-character offset from `from` needs to equal
-  the true cut point -- verified against the original duplicated math
-  across 6 cases including the real ~589k-char flood size (see the
-  fix-wave report's Follow-up section).
+  the true cut point (checked against a hand-rolled copy of the math
+  across 6 cases including a ~589k-char flood).
 
   Also deactivates the last-entry mark (mark-entry-start!/clear-last-
   output!'s own citations) when the deletion is about to reach past it:
@@ -454,7 +452,7 @@
   slides it down by the deleted amount, same as out-end itself), so only
   the < case needs treating as gone.
 
-  Fix round 1: called only from drain!, AFTER its own doseq (above) has
+  Called only from drain!, AFTER its own doseq (above) has
   already resolved every :mark item in THIS batch via set-entry-start-
   mark! -- so :last-entry-active?/:last-entry-start here always reflect
   whatever this batch's own queue actually settled on, never a stale
@@ -484,16 +482,15 @@
 
 (defn- drain!
   "Runs on the GTK thread via on-gui!. Flips the scheduled flag BEFORE
-  taking the queue -- the same fix jonquil.gtk.callbacks/drain-pending
-  applies -- so a chunk that lands in the gap between the flip and the take
+  taking the queue (as jonquil.gtk.callbacks/drain-pending does), so a chunk that lands in the gap between the flip and the take
   is never stranded: it either lands in the vector this reset-vals! takes,
   or its own append! wins the next compare-and-set! and schedules a second,
   harmless drain. One drain handles everything queued: it coalesces, clips
-  each run to MAX-OUTPUT-CHARS before inserting it (I7 -- a print-forever
+  each run to MAX-OUTPUT-CHARS before inserting it (a print-forever
   program can queue a batch far bigger than the cap between drains), then
   trims once and scrolls once.
 
-  Fix round 1 (Important #2): a coalesced :mark entry (mark-entry-start!'s
+  A coalesced :mark entry (mark-entry-start!'s
   own queued request) is never inserted as text -- it resolves set-entry-
   start-mark! right here, in order, exactly where the doseq reaches it, so
   it lands after every chunk queued before it (already inserted, moving
@@ -528,8 +525,8 @@
   before it (a PREVIOUS entry's own output, still undrained) and before
   whatever this call's caller queues right after it.
 
-  Fix round 1 (Important #2): reading out-end SYNCHRONOUSLY, right here,
-  used to race a previous entry's own still-queued-but-undrained output:
+  Reading out-end SYNCHRONOUSLY, right here, would race a previous
+  entry's own still-queued-but-undrained output:
   append! only enqueues, a drain doesn't actually move out-end until it
   runs (jonquil.gtk.callbacks/on-gui!'s own g_idle_add citation -- always
   a LATER main-loop iteration, never this same call stack), so a
@@ -562,7 +559,7 @@
   in the order they were called, even though the eval's own output
   arrives asynchronously from the eval worker thread.
 
-  mark? (fix round 1, Important #1) gates whether this ALSO marks the
+  mark? gates whether this ALSO marks the
   console's own \"last entry start\" (mark-entry-start!, above), since
   Run Selection and Run Form both echo through here -- one call covers
   both. Callers pass (not (ev/evaluating? @ev*)), mirroring jonquil.gtk.
@@ -627,16 +624,16 @@
   plain newline itself, 1 when this function already handled the key.
 
   :waiting?/:evaluating? are read by CALLING the fns supplied at
-  construction (I2), not derefing a console-owned mirror atom: the engine
+  construction, not derefing a console-owned mirror atom: the engine
   is the source of truth, so there's nothing here for a fast eval's
   on-complete to race against and strand.
 
-  :busy hints once per run (M3): the first busy Return after a run starts
+  :busy hints once per run: the first busy Return after a run starts
   appends a :system reminder; later ones stay silent until
   reset-busy-hint! (called from on-complete) re-arms it for the next run.
 
   Returns 0 unconditionally while an IME preedit composition is active
-  (I5), before even reading input-action: the capture-phase key controller
+  before even reading input-action: the capture-phase key controller
   runs before the IM context filters the key, so consuming Return here
   would split or lose a pending Hangul/CJK composition."
   [cv shift?]
@@ -665,7 +662,7 @@
 
 (defn- on-first-line-of-input?
   "True when there's no newline between input-start and caret -- Up only
-  browses history from the input's first line (I3); on any other line GTK
+  browses history from the input's first line; on any other line GTK
   moves the caret up within a multi-line entry instead."
   [cv caret]
   (let [buf (:buf cv)
@@ -674,7 +671,7 @@
 
 (defn- on-last-line-of-input?
   "True when there's no newline between caret and the buffer's end -- Down's
-  half of the same I3 gate."
+  half of the same gate."
   [cv caret]
   (let [buf (:buf cv)
         end (g/gtk-text-buffer-get-char-count buf)]
@@ -686,15 +683,15 @@
   after input-start, the console isn't waiting on stdin, and the caret sits
   on the input's first line (Up) or last line (Down) -- otherwise a
   multi-line entry's own Up/Down caret movement would be hijacked into
-  browsing history instead (I3). A nil replacement (no history to move to,
+  browsing history instead. A nil replacement (no history to move to,
   or not currently browsing) leaves the input unchanged. Returns true when
   it replaced the input (the key controller returns 1), false otherwise
   (the key controller returns 0, so GTK's normal Up/Down caret movement
-  applies). Also false while an IME preedit composition is active (I5),
+  applies). Also false while an IME preedit composition is active,
   same reasoning as handle-return!.
 
-  Checks caret >= start BEFORE computing on-edge-line? (Minor #4 of the
-  P2-close follow-up): on-first/last-line-of-input? each read a text-range
+  Checks caret >= start BEFORE computing on-edge-line?:
+  on-first/last-line-of-input? each read a text-range
   from the caret out to input-start or the buffer's end. With the caret
   somewhere in the (potentially ~200k-char) output history and input-start
   far away, gtk_text_buffer_get_text silently reorders a start > end pair,
@@ -730,7 +727,7 @@
 (def ^:private KEY-DOWN 0xff54)
 (def ^:private KEY-D 0x64)
 
-;; P4.T6 addition (gdkkeysyms.h:380, the editor keymap's "space"):
+;; gdkkeysyms.h:380, the editor keymap's "space":
 ;; Ctrl+Space opens/commits the REPL completion popup.
 (def ^:private KEY-SPACE 0x020)
 
@@ -741,10 +738,9 @@
   (not (zero? (bit-and state (bit-or g/CONTROL-MASK g/META-MASK)))))
 
 (defn- control-only?
-  "P4.T6's own rule for the completion chord (00-overview.md's global
-  constraints, the same rule the editor keymap spells :mods #{:ctrl}
-  :not #{:meta} for quick doc/jump/completion there): Control held and
-  Meta NOT held,
+  "The completion chord's rule (the same one the editor keymap spells
+  :mods #{:ctrl} :not #{:meta} for quick doc/jump/completion): Control
+  held and Meta NOT held,
   unlike command-chord? above which treats either as the same chord."
   [state]
   (and (not (zero? (bit-and state g/CONTROL-MASK)))
@@ -756,12 +752,12 @@
   directly with a synthetic keyval/state, never a synthesized OS
   keystroke); on-key (below) is the real GTK callback's thin wrapper.
 
-  P4.T6: the REPL completion popup's own nav/commit/escape keys get first
+  The REPL completion popup's own nav/commit/escape keys get first
   look, ahead of Return-evaluates and Up/Down-browses-history below,
   whenever the popup is open -- jonquil.gtk.completion/handle-key! gates on
   that itself and returns 0 otherwise, so this clause is a safe no-op the
   rest of the time, same reasoning as set-completion-fns!'s own docstring.
-  Guarded against an IME preedit composition (I5), same as the Ctrl+Space
+  Guarded against an IME preedit composition, same as the Ctrl+Space
   clause below -- Return/Up/Down already guard themselves inside handle-
   return!/handle-history!, so they are left exactly as they were.
 
@@ -818,7 +814,7 @@
   idiom jonquil.gtk.editor/make-tags! uses for jonquil.paint's styles: fg
   via set-string-property!, bold via set-int-property! weight 700, italic
   via set-italic!. Tags start with theme/default-theme's colours;
-  apply-theme! (TH.T4) retints them in place, never recreating them."
+  apply-theme! retints them in place, never recreating them."
   [buf]
   (let [table (g/gtk-text-buffer-get-tag-table buf)]
     (into {}
@@ -847,9 +843,9 @@
 
   on-submit receives {:action :eval|:send-stdin|:eof :text s}. history-prev
   is (fn [current-input] -> string|nil); history-next is (fn [] ->
-  string|nil) -- the caller (P2.T7) wires both to the session's history
+  string|nil) -- the caller wires both to the session's history
   atom. evaluating?/waiting? are (fn [] bool), read live from the eval
-  engine (I2) -- default (constantly false) for callers with no engine at
+  engine -- default (constantly false) for callers with no engine at
   all (dev/gtk_selftest.clj's bare console rows).
 
   Returns {:view :buf :scroll} plus internal bookkeeping, mirroring
@@ -860,7 +856,7 @@
         buf (g/gtk-text-view-get-buffer view)
         scroll (g/gtk-scrolled-window-new)
         keyctl (g/gtk-event-controller-key-new)
-        ;; P4.T6: GtkEventControllerFocus's own "leave" signal, the same
+        ;; GtkEventControllerFocus's own "leave" signal, the same
         ;; one jonquil.gtk.editor/make-editor wires for on-focus-lost!.
         focusctl (g/gtk-event-controller-focus-new)
         tags (make-tags! buf)
@@ -871,7 +867,7 @@
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-left-margin view 8)
     (g/gtk-text-view-set-top-margin view 4)
-    ;; I5 (phase-review-report.md): GTK_WRAP_NONE let any line wider than
+    ;; GTK_WRAP_NONE let any line wider than
     ;; the view open a horizontal scroll range, and scroll-to-end!'s xalign
     ;; 0.0 then scrolled right past the prompt on every drain, clipping
     ;; every later line by its width. Word-char wrap removes the range
@@ -914,7 +910,7 @@
               :on-submit on-submit
               :history-prev history-prev
               :history-next history-next
-              ;; P4.T6: single-slot completion registration (set-
+              ;; Single-slot completion registration (set-
               ;; completion-fns!) plus the on-input-changed!/on-focus-
               ;; lost! registration lists -- see the ns docstring.
               :completion-fns (atom nil)
@@ -928,7 +924,7 @@
                                (callable (on-key cv) [:pointer :uint :uint :uint :pointer] :int)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (g/gtk-widget-add-controller view keyctl)
-      ;; I5: same GtkTextView::preedit-changed signal as editor.clj (see
+      ;; Same GtkTextView::preedit-changed signal as editor.clj (see
       ;; that namespace's citation for the exact gir/header sourcing).
       (g/g-signal-connect-data view "preedit-changed"
                                (callable (fn [_view preedit _data]
@@ -936,9 +932,9 @@
                                            nil)
                                          [:pointer :string :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
-      ;; P4.T6: the buffer's own "notify::cursor-position" property notify
-      ;; (jonquil.gtk.editor/make-editor's own citation: covers typing,
-      ;; deletion and every mark-set case in one signal) drives on-input-
+      ;; The buffer's own "notify::cursor-position" property notify
+      ;; (covers typing, deletion and every mark-set case in one signal)
+      ;; drives on-input-
       ;; changed!'s registrants -- the console's own refine!/close! trigger
       ;; for its REPL completion popup.
       (g/g-signal-connect-data buf "notify::cursor-position"
@@ -952,7 +948,7 @@
                                            nil)
                                          [:pointer :pointer :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
-      ;; P4.T6: mirrors jonquil.gtk.editor/make-editor's own focusctl wiring
+      ;; Mirrors jonquil.gtk.editor/make-editor's own focusctl wiring
       ;; -- see on-focus-lost!'s own docstring.
       (g/g-signal-connect-data focusctl "leave"
                                (callable (fn [_ctl _data]

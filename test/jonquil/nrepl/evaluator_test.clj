@@ -559,8 +559,8 @@
         (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
 
 (deftest no-spawn-after-stop-test
-  ;; I2 (phase-close review): start-runtime! didn't check :stopped? before
-  ;; spawning, so a queued eval! (or a direct start!) reached after stop!
+  ;; start-runtime! must check :stopped? before
+  ;; spawning: otherwise a queued eval! (or a direct start!) reached after stop!
   ;; still spawned a doomed child. Counts real spawns with a redef and
   ;; asserts eval! after stop! never triggers one, and completes instead of
   ;; hanging.
@@ -597,13 +597,12 @@
       (finally (ev/stop! e)))))
 
 (deftest stop-racing-finish-never-sticks-test
-  ;; I1 (phase-close review): interrupt! used to read :running and write
-  ;; it back in a separate step, so a finish! landing in between recreated
-  ;; :running out of nil, and eval! then refused every later Run as busy
-  ;; for good. Mirrors the reviewer's own probe (phase-review-report.md,
-  ;; probe/stuck.clj): a presser future hammers interrupt! against no
+  ;; interrupt! must not read :running and write
+  ;; it back in a separate step: a finish! landing in between would recreate
+  ;; :running out of nil, and eval! would then refuse every later Run as busy
+  ;; for good. A presser future hammers interrupt! against no
   ;; child (so :running never gets an :id) while this thread repeatedly
-  ;; sets and clears :running, the shape finish! uses. The probe found 921
+  ;; sets and clears :running, the shape finish! uses. This loop found 921
   ;; stuck states in 200000 cycles on the pre-fix code.
   (let [e (make (temp-project))
         state (:state e)
@@ -621,13 +620,13 @@
       (finally (ev/stop! e)))))
 
 (deftest stop-before-send-is-honoured-test
-  ;; I4 (phase-close review): a Stop landing after run-worker!'s own check
-  ;; but before send-main! records the request's :id used to be lost --
-  ;; interrupt! had nothing to act on yet, and nothing looked at the flag
+  ;; a Stop landing after run-worker!'s own check
+  ;; but before send-main! records the request's :id must not be lost:
+  ;; interrupt! has nothing to act on yet, and nothing looked at the flag
   ;; again once the id landed. Redefines client/request! to call
   ;; interrupt! right after the real send goes out (send! writes and
   ;; flushes synchronously inside request!, so the write can't be undone)
-  ;; but before send-main! records the id, exactly the gap I4 closes. Only
+  ;; but before send-main! records the id, exactly that gap. Only
   ;; the eval/load-file send is intercepted, not the interrupt op the fix
   ;; itself goes on to send.
   (let [dir (temp-project) e (make dir)
@@ -648,8 +647,8 @@
       (finally (ev/stop! e)))))
 
 (deftest failed-restart-is-reported-test
-  ;; I3 (phase-close review): restart-for-stop! used to always print the
-  ;; success line, even when the restart failed. Forces start-runtime! to
+  ;; restart-for-stop! must not print the
+  ;; success line when the restart failed. Forces start-runtime! to
   ;; fail during the restart and checks the console shows the failure
   ;; line instead of the "restarted" line.
   (let [e (make (temp-project)) done (promise) out (atom [])]
@@ -688,7 +687,7 @@
       (finally (ev/stop! e)))))
 
 (deftest history-vars-survive-owner-snapshots-test
-  ;; Final review finding 1: the owner snapshots are evals on the user's
+  ;; the owner snapshots are evals on the user's
   ;; session, and the server shifts *1/*2/*3 on every successful eval.
   (let [e (make (temp-project))]
     (try
@@ -724,7 +723,7 @@
       (finally (ev/stop! e)))))
 
 (deftest release-owner-over-nrepl-test
-  ;; Final review finding 2: a closed tab's namespaces go to :repl, so the
+  ;; a closed tab's namespaces go to :repl, so the
   ;; next Run clears them.
   (let [e (make (temp-project))]
     (try
@@ -760,7 +759,7 @@
 (deftest stop-during-auto-require-out-of-process-test
   ;; Stop while the list loads: interrupted, the user's request not sent,
   ;; and the next evaluation tries the list again and then runs normally
-  ;; (review findings 1 and 2: no stale request id, no silently skipped list).
+  ;; (no stale request id, no silently skipped list).
   (let [dir (temp-project)
         lib (io/file dir "src/arslow2/core.clj")
         e (ev/make {:profile dialect/jolt :runtime :nrepl :project-dir dir :auto-require '[arslow2.core]})]
@@ -791,7 +790,7 @@
     [(deref done 20000 :timeout) @out]))
 
 (deftest quiet-eval-keeps-history-live-test
-  ;; plugins P5b: a :quiet eval on a Jolt child leaves the REPL as it was
+  ;; a :quiet eval on a Jolt child leaves the REPL as it was
   (let [dir (temp-project) e (make dir)]
     (try
       (is (nil? (ev/start! e)))

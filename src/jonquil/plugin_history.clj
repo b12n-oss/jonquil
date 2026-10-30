@@ -1,11 +1,10 @@
 (ns jonquil.plugin-history
-  "Plugin history (plugins design, Part 2, \"History and revert\"; step
-  P7): <plugins-dir>/.history/<id>/ keeps each version that went live as
+  "Plugin history: <plugins-dir>/.history/<id>/ keeps each version that went live as
   <n>.clj, and history.edn holds one vector of {:n :at :source :reason
   :status}. No entry is ever changed or removed: a new one goes at the end
   and the file is replaced whole through a temp file and an atomic move. A
   history.edn that can't be read is never overwritten. An agent's proposal
-  (step P9) is a version too, :source :agent, :pending or
+  is a version too, :source :agent, :pending or
   :rejected-by-checks; a later change of a version's status (:superseded,
   :accepted, :rejected) is a short {:n :at :status} entry appended after
   it, so a version's status is its last entry's. Pure apart from
@@ -42,7 +41,7 @@
   folder: nil, or the sentence saying why it couldn't. A symlinked path
   is followed (save-path/resolve-target), so the link survives and its
   target is the file rewritten, keeping its POSIX mode, as the window's
-  Save does (review I2: a revert used to replace a dotfiles link)."
+  Save does (a revert must not replace a dotfiles link)."
   [path text]
   (let [tmp (atom nil)]
     (try
@@ -70,7 +69,7 @@
 (defn read-entries
   "{:entries [...]} from dir's history.edn ([] when it's missing), or
   {:error sentence} when it can't be read or isn't a vector of maps, each
-  with a whole-number :n (review I1: a bad :n threw in next-n)."
+  with a whole-number :n (a bad :n would throw in next-n)."
   [dir]
   (let [f (io/file dir "history.edn")]
     (if-not (.exists f)
@@ -157,7 +156,7 @@
           {:keys [entries error]} (read-entries dir)]
       (cond
         error {:error error}
-        ;; review I2: an entry never names a file that wasn't written
+        ;; an entry never names a file that wasn't written
         (not (string? text)) {:error "a proposal needs its text"}
         :else
         (let [n (next-n entries (file-ns dir))

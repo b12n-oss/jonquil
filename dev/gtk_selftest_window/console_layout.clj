@@ -1,12 +1,10 @@
 (ns gtk-selftest-window.console-layout
-  "I5 fix wave item 3: the console wraps a line wider than the view instead
-  of scrolling sideways to show it. Before the fix (jonquil.gtk.console-
-  view/make-console-view leaving the view at the default GTK_WRAP_NONE),
-  appending a line wider than the view opened a horizontal scroll range,
-  and scroll-to-end!'s own xalign 0.0 then pushed the view's horizontal
-  adjustment off 0 on every later drain -- clipping every subsequent line
-  by a couple of characters (phase-review-report.md's I5, reproduced
-  exactly in target/smoke/nrepl-run.png)."
+  "The console wraps a line wider than the view instead of scrolling
+  sideways to show it. With the view at the default GTK_WRAP_NONE
+  (jonquil.gtk.console-view/make-console-view), appending a line wider
+  than the view opens a horizontal scroll range, and scroll-to-end!'s own
+  xalign 0.0 then pushes the view's horizontal adjustment off 0 on every
+  later drain, clipping every subsequent line by a couple of characters."
   (:require [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
@@ -26,7 +24,7 @@
     (let [cv (:console ui)
           view (:view cv)
           ;; One unbroken run of 500 characters, wider than the 900px-default
-          ;; window (I5's own citation of the trap: a single unbreakable
+          ;; window (a single unbreakable
           ;; "word" this long still forces GTK_WRAP_WORD to fall back to
           ;; GTK_WRAP_CHAR-style breaking under WORD_CHAR -- plain WORD would
           ;; leave it unbroken and reopen the same horizontal-scroll bug).

@@ -1,5 +1,5 @@
 (ns gtk-selftest-clj
-  "clj plan P2.T4 self-test: opens the REAL Jonquil window via
+  "Self-test: opens the REAL Jonquil window via
   jonquil.main/start! on a throwaway JVM project directory whose
   .nrepl-port names a fake JVM nREPL server in this process, and runs the
   rows in gtk-selftest-clj.rows against its ui. Mirrors gtk-selftest-

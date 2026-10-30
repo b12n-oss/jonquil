@@ -111,7 +111,7 @@
     (is (some? (find-ns 'tabs.keep)) "the refused Run removed nothing")))
 
 (deftest release-owner-test
-  ;; Final review finding 2: a closed tab's namespaces would otherwise be
+  ;; a closed tab's namespaces would otherwise be
   ;; owned by nobody that ever Runs again, so a reopened file kept stale defs.
   (let [s (session/make-session)]
     (run session/run-definitions! s "(ns orphan.b) (defn old-fn [] 1)" {:owner 2})
@@ -142,7 +142,7 @@
     (is (= 42 @(ns-resolve 'scratch.inspect 'answer)))))
 
 (deftest inspect-throw-test
-  ;; Review focus 4: a value whose datafy throws answers with a :note, and
+  ;; a value whose datafy throws answers with a :note, and
   ;; on-view still fires exactly once.
   (let [s (session/make-session) calls (atom 0) p (promise)]
     (repl-sync s "(reify clojure.core.protocols/Datafiable (datafy [_] (throw (ex-info \"boom\" {}))))")
@@ -196,7 +196,7 @@
 
 (deftest unsaved-edits-are-not-the-file-test
   ;; Run sends the buffer's text; when that isn't what's on disk the vars'
-  ;; lines would point into the wrong text there (review finding 2).
+  ;; lines would point into the wrong text there.
   (let [path (saved! "runfile/d.clj" "(ns runfile.d)\n(defn f [] 1)\n")
         s (session/make-session)]
     (try
@@ -222,7 +222,7 @@
       (finally (remove-ns 'runfile.c)))))
 
 (deftest quiet-eval-keeps-history-test
-  ;; plugins P5b: a :quiet eval leaves the REPL as it was
+  ;; a :quiet eval leaves the REPL as it was
   (let [s (session/make-session)
         quiet (fn [code] (run ev/eval! s code {:quiet "T"}))]
     (doseq [c ["1" "2" "3"]] (repl-sync s c))
@@ -248,7 +248,7 @@
     (remove-ns 'jonquil.quiet-buf)))
 
 (deftest quiet-eval-auto-require-reaches-the-console-test
-  ;; review I3: a quiet eval that's the first in a project window still
+  ;; a quiet eval that's the first in a project window still
   ;; tells the person about the auto-require, as Jonquil's own line
   (let [s (session/make-session)
         dir (str (temp-dirs/temp-dir! "jonquil-quiet-ar-"))

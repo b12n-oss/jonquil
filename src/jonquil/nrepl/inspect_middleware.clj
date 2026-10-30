@@ -11,8 +11,8 @@
   evaluator maps requests and reads views the same way for both, plus ns on
   inspect-def for the target namespace. They're middleware ops rather than
   evals on purpose: jolt.nrepl/evaluate shifts the global *1 *2 *3 after
-  every successful eval, and an op leaves the user's history alone (spike,
-  2026-10-18). inspect-start reads that global *1."
+  every successful eval, and an op leaves the user's history alone
+  (measured 2026-10-18). inspect-start reads that global *1."
   (:require [jolt.nrepl :as server]
             [jonquil.inspect.view :as view]))
 
@@ -56,7 +56,7 @@
   (locking state), and returns that future. jolt.nrepl calls a handler on
   the connection's reader thread, and rendering a view realises part of
   *1, so a slow or endless value must not stop that thread reading Run,
-  completion or Stop's interrupt (review finding 3). A throw becomes a
+  completion or Stop's interrupt. A throw becomes a
   done reply carrying its message, so the client never waits on nothing."
   [state request]
   (future

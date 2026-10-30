@@ -77,7 +77,7 @@
     (is (= [{:name "echo" :doc "Echo it." :args {"text" {:type "string" :doc "t" :required? true}}}] (:mcp-tools s)))
     (is (not-any? fn? (tree-seq coll? seq s))))
   (is (not (contains? (checker/summary {:id :sm :doc "d" :effects #{}}) :mcp-tools))
-      "no key without tools, so proposals from before P10b still compare equal")
+      "no key without tools, so proposals from before plugins declared MCP tools still compare equal")
   (is (nil? (checker/summary nil))))
 
 (deftest result-text-has-no-namespaced-maps-test

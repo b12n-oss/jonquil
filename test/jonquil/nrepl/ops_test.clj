@@ -1,6 +1,5 @@
 (ns jonquil.nrepl.ops-test
-  "Reply shapes are the ones measured in the dialects spike and the plan's
-  live probe (spikes/dialects-plan/probes)."
+  "Reply shapes are the ones measured against live nREPL servers."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.nrepl.ops :as ops]))
@@ -146,8 +145,7 @@
     (is (str/includes? (ops/reset-code []) "(clojure.core/remove-ns 'user) (clojure.core/create-ns 'user)"))))
 
 (deftest ns-snapshot-code-test
-  ;; One form, printing the snapshot and returning the old *1 (final
-  ;; review finding 1); the live test history-vars-survive-owner-snapshots-
+  ;; One form, printing the snapshot and returning the old *1; the live test history-vars-survive-owner-snapshots-
   ;; test checks the effect on a real server.
   (let [form (read-string ops/ns-snapshot-code)]
     (is (= 'clojure.core/let (first form)))
@@ -298,7 +296,7 @@
   (is (= {:out "plain"} (ops/quiet-result "plain" "TOK:"))))
 
 (deftest quiet-reply-test
-  ;; review I4: the wrap returns the person's old *1, so an :ok reply whose
+  ;; the wrap returns the person's old *1, so an :ok reply whose
   ;; token line is missing must never hand that back as the value
   (is (= [{:status :ok :printed "42" :ns 'user} "side\n"]
          (ops/quiet-reply {:status :ok :printed "OLD-STAR-1" :ns 'user} "TOK:" "side\n\nTOK:{:value \"42\"}")))

@@ -2,8 +2,7 @@
   "A fake jank nREPL server for the jank dialect's tests and the :jank
   self-test window, usable in-process (start!) and as a stand-in `jank`
   executable (-main, run by dev/fake-jank). It imitates jank built from
-  upstream main 38a6382 as measured in the D3 re-check spike
-  (2026-10-12):
+  upstream main 38a6382 as measured 2026-10-12:
 
   - describe advertises jank-ops and {\"jank\" {\"version-string\"
     \"jank-0.1-alpha\"}}; clone answers a fresh session.
@@ -25,7 +24,7 @@
     [\"error\" \"unknown-op\" \"done\"]. jank has no interrupt, so a :slow
     form waits out its ms and wakes early only when the connection drops.
 
-  -main [dir] starts a server with two fixtures the P3.T1 self-test window
+  -main [dir] starts a server with two fixtures the jank self-test window
   relies on: :docs {\"greet\" [\"([w])\" \"Says hi.\"]} and
   :slow {\"(spin)\" 60000}. It writes the port to <dir>/.nrepl-port and
   blocks forever."

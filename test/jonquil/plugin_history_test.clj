@@ -78,7 +78,7 @@
   (is (nil? (history/version-source (temp-dirs/temp-dir! "jonquil-history-") 4))))
 
 (deftest record-refuses-a-bad-n-test
-  ;; review I1: a vector of maps whose :n isn't a number is left as it is
+  ;; a vector of maps whose :n isn't a number is left as it is
   (let [d (temp-dirs/temp-dir! "jonquil-history-")
         f (io/file (hdir d) "history.edn")
         bad "[{:n \"x\" :status :accepted}]"]
@@ -89,7 +89,7 @@
     (is (= bad (slurp f)))))
 
 (deftest write-atomic-keeps-a-symlink-and-its-mode-test
-  ;; review I2: the link survives, its target gets the text, the mode stays
+  ;; the link survives, its target gets the text, the mode stays
   (let [real-dir (temp-dirs/temp-dir! "jonquil-history-real-")
         d (temp-dirs/temp-dir! "jonquil-history-link-")
         target (io/file real-dir "wrap.clj")

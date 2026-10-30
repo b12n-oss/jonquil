@@ -390,7 +390,7 @@
         (is (not (str/includes? (str err) "relay failed")) (str err)))
       (finally (.close ss) (future-cancel srv)))))
 
-;; --- tools/list_changed (plugins P10c) ---------------------------------------
+;; --- tools/list_changed ---------------------------------------
 
 (defn- watching-ui
   "fake-ui with a :watch-plugin-tools* that keeps the latest notify! and

@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.app-open
-  "Files from Open With and Dock drops (P5a P2.T1): GApplication's `open`
+  "Files from Open With and Dock drops: GApplication's `open`
   signal, and the window's :open-paths! it ends in. Row 1 goes through the
   real g_application_open on the running app; the others call :open-paths!
   directly. Every row leaves only the first tab and the checkout as the

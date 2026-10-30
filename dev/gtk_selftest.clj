@@ -1,5 +1,5 @@
 (ns gtk-selftest
-  "P2.T5/P2.T6 self-test: opens a real GtkApplicationWindow around the
+  "Self-test: opens a real GtkApplicationWindow around the
   editor and the console under test, runs the rows as go blocks (never a
   fixed sleep -- each wait polls a condition against a deadline via
   gtk-async/await-until), prints PASS/FAIL per row and a SUMMARY line,
@@ -27,7 +27,7 @@
 ;; Set only where SUMMARY prints. An early g_application_quit (a row that
 ;; really quits) ends g_application_run with the remaining rows never run
 ;; and no SUMMARY, while every result recorded so far can still be a PASS;
-;; -main used to exit 0 then. The window group's own finished? is the same.
+;; -main would exit 0 in that case. The window group's own finished? is the same.
 (defonce ^:private finished? (atom false))
 
 (defn- check [row ok detail]
@@ -66,7 +66,7 @@
   actually fire and be counted, so the caller's own baseline isn't captured
   mid-flip. The stability window is wall-clock, which can't prove the main
   loop turned (a frozen loop reads as stable), so a trailing on-gtk round
-  trip proves it, as settle's does (M1)."
+  trip proves it, as settle's does."
   [deadline-ms]
   (let [t0 (System/currentTimeMillis)]
     (loop [last-seen @true-fire-count
@@ -103,10 +103,9 @@
 (defn- row-editor-undo-text-only
   "One interactive insert into an emptied buffer, then, once its colouring
   has landed (tags aren't undo steps, which is what this row pins), one
-  undo empties the buffer again. Self-contained: it used to undo whatever
-  the row before left, and a stray keystroke between the two (2026-10-19:
-  a space after the text, with no code path that inserts one) failed it as
-  an undo bug. The text is checked in the same GTK step as the undo, and a
+  undo empties the buffer again. Self-contained: undoing whatever the row
+  before left let a stray keystroke between the two (a space after the
+  text, with no code path that inserts one) fail it as an undo bug. The text is checked in the same GTK step as the undo, and a
   buffer that changed after the insert is reported as :stray-edit."
   [ed]
   (go-row :editor-undo-text-only check
@@ -182,7 +181,7 @@
                         :rainbow0-at-0 (g/has-tag-at? buf 0 (get tags [:rainbow 0]))}))))))
 
 (defn- row-on-gui-concurrent
-  "P2.T6 will call on-gui! from worker threads at flood rates; this proves
+  "Worker threads call on-gui! at flood rates; this proves
   no thunk enqueued concurrently from several threads is ever stranded."
   [_ed]
   (go-row :on-gui-concurrent check
@@ -201,7 +200,7 @@
                 :ms (- (System/currentTimeMillis) t0)})))))
 
 (defn- row-editor-preedit-guard
-  "I5: while an IME preedit composition is active, Return must not apply
+  "While an IME preedit composition is active, Return must not apply
   smart-enter -- setting the atom directly proves the handlers yield
   without needing a real IME (the real preedit-changed wiring is a human
   smoke step)."
@@ -217,7 +216,7 @@
                      {:result result :text text})))))
 
 (defn- row-editor-tick-skips-unchanged
-  "M7: tick! used to copy and compare the whole buffer every 20ms even when
+  "tick! must not copy and compare the whole buffer every 20ms when
   nothing changed. dirty-check-count only bumps on an actual recompute, so
   it must stay flat across ~200ms (10 ticks) of idle after a settled edit,
   then bump again once a real edit happens. dirty-check-count is a
@@ -243,7 +242,7 @@
              {:pre-edit pre-edit :recomputed-once recomputed-once? :baseline baseline
               :after-idle after-idle :after-edit @(:dirty-check-count ed)}))))
 
-;; --- P3.T2: handle-key! dispatch rows --------------------------------------
+;; --- handle-key! dispatch rows --------------------------------------
 ;; Key values from gdkkeysyms.h -- editor.clj's own copy is private, same pattern
 ;; gtk_selftest_window.clj already uses for its own KEY-ESCAPE/KEY-S-CAPS/
 ;; KEY-W. Every row calls editor/handle-key! directly with a synthetic
@@ -345,8 +344,8 @@
                        {:handled handled :text text}))))))
 
 (defn- row-edit-shift-tab-unindented
-  "P3 fix wave C2: edit/unindent returns nil when no spanned line has
-  leading whitespace. handle-key! used to return 0 then, handing
+  "edit/unindent returns nil when no spanned line has leading whitespace.
+  handle-key! must not return 0 then, which would hand
   ISO_Left_Tab to GtkTextView's own key handler, which commits a literal
   \"\\t\" over the selection (gtk/gtktextview.c at the 4.22.4 tag, the
   Tab/KP_Tab/ISO_Left_Tab branch). Shift+Tab must be consumed (1) and
@@ -362,10 +361,10 @@
                        {:handled handled :text text}))))))
 
 (defn- row-edit-toggle-comment
-  "Fix round 1: the selection is built BACKWARD -- with-iters* buf 0 7
+  "The selection is built BACKWARD -- with-iters* buf 0 7
   passes offset 0 first to gtk_text_buffer_select_range, so the insert
-  mark (probe 6: the FIRST iter argument) lands at 0, the LOW end, same as
-  the reviewer's verified (edit/toggle-comment {:text \"(+ 1 2)\" :caret 0
+  mark (the FIRST iter argument) lands at 0, the LOW end, same as
+  (edit/toggle-comment {:text \"(+ 1 2)\" :caret 0
   :sel-start 0 :sel-end 7}) => {:edits [[0 0 \"; \"]], :caret 2, :sel [2
   9]}. apply-op! must put the insert mark at 2 (where toggle-comment's own
   :caret says), not always at the selection's high end -- so this row
@@ -390,7 +389,7 @@
                         :h2 h2 :text2 text2 :caret2 caret2 :sel2 sel2}))))))
 
 (defn- row-edit-toggle-comment-forward
-  "Fix round 1's forward-direction counterpart: the selection is built
+  "The forward-direction counterpart: the selection is built
   FORWARD this time (with-iters* buf 7 0 -- offset 7 passed first, so the
   insert mark lands at 7, the HIGH end, matching a normal left-to-right
   drag). toggle-comment's own :caret then equals the selection's high end
@@ -615,7 +614,7 @@
   The timing starts once GTK has laid out the new text: on the dev Mac the
   first frame after set-text! of 8,000 lines holds the GTK thread 101-167 ms
   with no paint at all, and timing from set-text! charged that to the paint
-  (the row missed on most runs, 2026-10-17). Measured after that settle,
+  (the row missed on most runs). Measured after that settle,
   the paint's own worst gap was 86-94 ms. Under CPU emulation (JONQUIL_SELFTEST_EMULATED, set by bb linux:selftest
   for another arch than the host's) the budget is 5x: x86_64 emulated on
   arm64 measured 194 ms and 481 ms worst cases, which time the emulator."
@@ -685,7 +684,7 @@
                          (assoc r :done done? :gen gen))))))))
 
 (defn- row-read-only-off-supersedes-paint
-  "Fix round 1: set-read-only! supersedes any paint-async! still in flight
+  "set-read-only! supersedes any paint-async! still in flight
   (its :gen moves on), the same way set-text! does -- without that,
   toggling read-only off mid-paint re-permits apply-op! edits, and a
   stale chunk from the old paint can still land afterward at offsets
@@ -723,7 +722,7 @@
 
 (defn- row-paint-async-stops-on-destroy
   "A paint still in flight must stop touching the buffer once its own
-  window is destroyed -- the finding behind this row: a transient window
+  window is destroyed: a transient window
   (the source panel's own, F12's jump target) can close mid-paint, and
   every chunk after that was still landing on a buffer whose widget was
   already gone. Builds its own editor in its own window (not
@@ -731,7 +730,7 @@
   returns -- here the window has to close WHILE the paint is still
   running), reads/paints 8,000 lines, closes the window at once, then
   waits up to 5 s and checks the paint never finished and :destroyed?
-  went true. The wait is measured, not the brief's 1 s: mutation-checked
+  went true. The wait is measured, not a flat 1 s: mutation-checked
   (editor/paint-async!'s current? reverted to drop the destroyed? check)
   with this same 8,000-line text, (:done? @(:paint ed)) went true, but
   only after ~1.8 s -- every one of the ~24,000 no-op spans against the
@@ -785,7 +784,7 @@
                           (true? (:retyped r)) (false? (:saved r)))
                      r)))))
 
-;; --- large-file speed T4: the incremental repaint ---------------------------
+;; --- the incremental repaint ---------------------------
 
 (defn- expected-tags
   "{offset #{style-key}} at each offset in offs (a sorted set): the per-char
@@ -807,7 +806,7 @@
 
 (defn- compare-with-full
   "Parks. Compares ed's tags with a full repaint of its current text, at the
-  offsets (offs-fn text) returns. The plan is computed off the GTK thread.
+  offsets (offs-fn text) returns. The paint plan is computed off the GTK thread.
   Returns tag-mismatches' vector, empty when they agree."
   [ed offs-fn]
   (let [[text profile] (on-gtk [(editor/editor-text ed) @(:profile ed)])
@@ -991,7 +990,7 @@
                   :settled settled? :mismatches bad}))))))
 
 
-;; --- Parinfer rows (step 2 B3) --------------------------------------------
+;; --- Parinfer rows --------------------------------------------
 ;; Each row turns the mode on through editor/set-parinfer-fns! (what
 ;; jonquil.gtk.window wires per tab) and makes the edit the way GTK's own
 ;; commit does: one begin/end-user-action around an insert or delete, so
@@ -1102,7 +1101,7 @@
                  (editor/set-text! ed "")
                  (caret! ed 0)
                  ;; Paren mode never balances, so the auto-pair stays on
-                 ;; (review I2): handle-key! takes the key and inserts the pair.
+                 ;; (handle-key! takes the key and inserts the pair).
                  (let [handled (editor/handle-key! ed 0x028 0)
                        text (editor/editor-text ed)]
                    (check :parinfer-paren-mode-keeps-pairs
@@ -1116,7 +1115,7 @@
                  (editor/set-text! ed "(a \"\")")
                  (caret! ed 4)
                  ;; Backspace in an empty string pair still removes both
-                 ;; quotes (review I5): a lone quote would unclose the form.
+                 ;; quotes: a lone quote would unclose the form.
                  (let [handled (editor/handle-key! ed 0xff08 0)
                        text (editor/editor-text ed)]
                    (check :parinfer-quote-backspace-keeps-pair
@@ -1129,8 +1128,8 @@
     (on-gtk (try (parinfer-on! ed :smart)
                  (editor/set-text! ed "(a\n  b)")
                  (caret! ed 7)
-                 ;; Toggle comment through apply-op!: the fix moves the
-                 ;; closer, and the op's caret must survive it (review I1).
+                 ;; Toggle comment through apply-op!: Parinfer moves the
+                 ;; closer, and the op's caret must survive it.
                  (editor/do-toggle-comment! ed)
                  (let [text (editor/editor-text ed)
                        caret (g/cursor-offset (:buf ed))]
@@ -1147,7 +1146,7 @@
                    (fn [i1 i2] (g/gtk-text-buffer-select-range (:buf ed) i1 i2)))
                  ;; Shift+Tab over b and c: the closer moves up, and the
                  ;; selection still covers the two dedented lines, so a
-                 ;; second Shift+Tab has nothing left to remove (review I1).
+                 ;; second Shift+Tab has nothing left to remove.
                  (editor/do-unindent! ed)
                  (let [text (editor/editor-text ed)
                        [a b] (g/selection-offsets (:buf ed))
@@ -1166,7 +1165,7 @@
                    (caret! ed 2)
                    ;; A Jolt shim gap surfaces as an "unhandled" engine
                    ;; result; the hook names it once and the text stays as
-                   ;; typed (polish Review Focus 3).
+                   ;; typed.
                    (with-redefs-fn {#'pe/adjust
                                     (fn [_] {:engine-error "boom"})}
                      #(type-str! ed "x"))
@@ -1181,7 +1180,7 @@
                    (finally (editor/set-error-fn! ed (fn [_]))
                             (parinfer-off! ed)))))))
 
-;; --- Parinfer speedup rows (the per-form speedup plan) ---------------------
+;; --- Parinfer speedup rows ---------------------
 ;; Each row asserts the edit's visible result equals what the fallback
 ;; (cache-less) path computes on copied strings, so a stale cache or a
 ;; wrong span shows up as a text mismatch, not just a slow path.
@@ -1225,9 +1224,8 @@
                  (editor/set-text! ed "")
                  (caret! ed 0)
                  (type-str! ed "(")               ; primes the cache
-                 (editor/set-text! ed "(x\n  y)") ; a reload re-primes (miss-path cut 2)
-                 ;; the sweep arc: pin the re-prime itself, not just the
-                 ;; edit that follows it (#152's deferred text-only assert)
+                 (editor/set-text! ed "(x\n  y)") ; a reload re-primes
+                 ;; pin the re-prime itself, not just the edit that follows it
                  (let [c @(:parinfer-prev-cache ed)
                        primed? (and (= "(x\n  y)" (:text c))
                                     (= (:gen c) @(:edit-gen ed)))]
@@ -1281,8 +1279,7 @@
                  ;; a cache miss; each sequence below primes with one
                  ;; throwaway action, then measures a HIT action, counting
                  ;; the ranged reads to prove the splice really ran
-                 ;; (splice review I1: the first version never spliced)
-                 (let [splices (atom 0)
+                                  (let [splices (atom 0)
                        real g/buffer-text-range
                        eqs (atom [])]
                    (with-redefs-fn {#'g/buffer-text-range
@@ -1316,9 +1313,8 @@
                         (swap! eqs conj (= (:text @(:parinfer-prev-cache ed))
                                            (editor/editor-text ed)))))
                    (check :parinfer-splice-equals-buffer
-                          ;; six: the three primes splice too since the
-                          ;; miss-path cut (a fresh begin read is ground
-                          ;; truth), plus the three measured hits
+                          ;; six: the three primes splice too (a fresh begin
+                          ;; read is ground truth), plus the three measured hits
                           (and (= [true true true] @eqs) (= 6 @splices))
                           {:eqs @eqs :splices @splices
                            :t3 (editor/editor-text ed)}))
@@ -1330,8 +1326,8 @@
                  ;; an MCP or plugin write knows its own edits: when the
                  ;; cache is valid at that moment, apply-edits on the cached
                  ;; string keeps it valid with no buffer read, and the next
-                 ;; keystroke is a hit (miss-path cut 3)
-                 (editor/set-text! ed "(a)")      ; primes (cut 2)
+                 ;; keystroke is a hit
+                 (editor/set-text! ed "(a)")      ; primes
                  (editor/apply-op-plain! ed {:edits [[1 2 "fn [a b]
      (h a)"]] :caret 0})
                  (let [fulls (atom 0)
@@ -1354,8 +1350,7 @@
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; after an undo the cache is stale; a plain op then must
                  ;; NOT half-trust it, and the next keystroke misses
-                 ;; honestly and still lands the right text (miss-path
-                 ;; Review Focus 4)
+                 ;; honestly and still lands the right text
                  (editor/set-text! ed "(a
   b)")
                  (caret! ed 5)
@@ -1379,7 +1374,7 @@ b" text)
                  ;; GTK takes C strings, so a NUL truncates what the buffer
                  ;; keeps; the prime must notice the counts disagree and
                  ;; clear, or the next keystroke splices from a string the
-                 ;; buffer never held (miss-path review I1)
+                 ;; buffer never held
                  (editor/set-text! ed (str "(a)" (char 0) "(b)"))
                  (caret! ed 1)
                  (type-str! ed "x")
@@ -1394,18 +1389,16 @@ b" text)
   (go-row :parinfer-nul-plain-op-clears-the-cache check
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; an op's replacement text carrying a NUL is refused by
-                 ;; apply-op! outright (ROADMAP Next 3; it used to land
-                 ;; truncated, with the cache-count guard catching the
-                 ;; mismatch, miss-path review I1). The refusal still
+                 ;; apply-op! outright (never landed truncated). The refusal still
                  ;; clears the cache (one honest miss), and the next
                  ;; keystroke lands on the untouched text with the cache
                  ;; coherent again.
                  (editor/set-text! ed "(a)")
                  (let [r (editor/apply-op-plain!
                           ed {:edits [[1 2 (str "x" (char 0) "y")]] :caret 0})
-                       ;; the sweep arc: pin the clear itself (the accepted
-                       ;; one honest miss), so keeping the cache would have
-                       ;; to be a deliberate change
+                       ;; pin the clear itself (the accepted one honest
+                       ;; miss), so keeping the cache would have to be a
+                       ;; deliberate change
                        cleared? (nil? @(:parinfer-prev-cache ed))]
                    (caret! ed 1)
                    (type-str! ed "z")
@@ -1421,7 +1414,7 @@ b" text)
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; redo is the undo row's mirror: a miss whose begin read
                  ;; is ground truth, so the end-side splice must still run
-                 ;; and land the fallback's text (miss-path Review Focus 1)
+                 ;; and land the fallback's text
                  (editor/set-text! ed "(a
   b)")
                  (caret! ed 5)
@@ -1448,7 +1441,7 @@ b" text) eq (pos? @splices))
                  ;; undo replays through the buffer's own insert and delete,
                  ;; so the armed outside-span records what changed since the
                  ;; prime: the next keystroke rebuilds prev from the cache
-                 ;; plus one ranged read, no full copy (undo-path Task 2)
+                 ;; plus one ranged read, no full copy
                  (editor/set-text! ed "(a
   b)")
                  (caret! ed 5)
@@ -1512,7 +1505,7 @@ b" text) eq (zero? @fulls) (pos? @ranged))
                  ;; set-text! is an irreversible action: it empties the undo
                  ;; history, so an undo straight after it must change
                  ;; nothing, and the next keystroke lands on the real buffer
-                 ;; whatever the span says (undo-path degraded case)
+                 ;; whatever the span says
                  (editor/set-text! ed "(a
   b)")
                  (caret! ed 5)
@@ -1533,9 +1526,8 @@ b" text) eq (zero? @fulls) (pos? @ranged))
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; a recovered prev never carries :edit-at, so a form
                  ;; reached through undo still re-indents on its first
-                 ;; edit: recovery never fakes consistency (undo-path
-                 ;; Review Focus; the probe is the user's first-edit
-                 ;; re-indent)
+                 ;; edit: recovery never fakes consistency (the probe is the
+                 ;; user's first-edit re-indent)
                  (editor/set-text! ed "(q)
 (fn [a b]
      (h a))")
@@ -1556,7 +1548,7 @@ b" text) eq (zero? @fulls) (pos? @ranged))
   (go-row :parinfer-reload-primes-the-cache check
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; set-text! hands the new text in, so it primes the cache
-                 ;; for free (miss-path cut 2): the next keystroke is a hit
+                 ;; for free: the next keystroke is a hit
                  ;; (zero full reads), and the first-edit re-indent still
                  ;; lands because no consistency offset is stored
                  (editor/set-text! ed "(q)
@@ -1583,7 +1575,7 @@ b" text) eq (zero? @fulls) (pos? @ranged))
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; two reloads back to back: the prime must carry the LAST
                  ;; text with the LAST gen, or the next keystroke trusts a
-                 ;; stale string (miss-path Review Focus 3)
+                 ;; stale string
                  (editor/set-text! ed "(zz)")
                  (editor/set-text! ed "(a
   b)")
@@ -1600,7 +1592,7 @@ b" text)
   (go-row :parinfer-miss-still-splices-the-end-read check
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; a miss's begin read is ground truth, so the end-side
-                 ;; splice is just as exact there (miss-path cut 1): after
+                 ;; splice is just as exact there: after
                  ;; an undo (a miss), the keystroke must still splice and
                  ;; land the fallback's text
                  (editor/set-text! ed "(a
@@ -1628,7 +1620,7 @@ b" text) eq (pos? @splices))
                  ;; the first edit's fix re-indents EARLIER lines, moving
                  ;; text before the edit offset; the cached offset must
                  ;; follow it, or the next form inherits the consistency
-                 ;; flag (speedup review I2)
+                 ;; flag
                  (editor/set-text! ed "(f [a b]
         a)
 (fn [a b]
@@ -1651,8 +1643,7 @@ b" text) eq (pos? @splices))
     (on-gtk (try (parinfer-on! ed :smart)
                  ;; stepping over a closing quote is a user action that
                  ;; changes nothing; it must not mark the form consistent
-                 ;; (speedup review I3)
-                 (editor/set-text! ed "(q)\n(fn [a b]\n     (h \"a\"))")
+                                  (editor/set-text! ed "(q)\n(fn [a b]\n     (h \"a\"))")
                  (caret! ed 24)                      ; just before the closing quote
                  (editor/handle-key! ed 0x022 0)     ; quote over the closer: step past
                  (type-str! ed "x")
@@ -1685,12 +1676,12 @@ b" text) eq (pos? @splices))
                           {:want want :text text}))
                  (finally (parinfer-off! ed))))))
 
-;; --- Parinfer and Format All interplay rows (the format-interplay arc) -----
+;; --- Parinfer and Format All interplay rows -----
 ;; A format is a deliberate whole-text operation: with Parinfer on its
 ;; result lands through the plain path, already made Paren-stable by the
 ;; op builder, so the hook never rewrites it and never shows the too-long
 ;; note; with Parinfer off the formatter's output is byte-identical to
-;; before the arc.
+;; before.
 
 (def ^:private fi-unstable "(def a\n  [{:x 1}\n    {:y 2}])")
 (def ^:private fi-stable "(def a\n  [{:x 1}\n   {:y 2}])")
@@ -1757,7 +1748,7 @@ b" text) eq (pos? @splices))
   (go-row :parinfer-format-off-byte-identical check
     (on-gtk (try (parinfer-off! ed)
                  ;; with Parinfer off, format output is the formatter's
-                 ;; alone, byte for byte, exactly as before the arc
+                 ;; alone, byte for byte
                  (editor/set-text! ed fi-misindented)
                  (caret! ed 0)
                  (editor/do-format-all! ed)
@@ -1838,7 +1829,7 @@ b" text) eq (pos? @splices))
     (on-gtk (try (parinfer-off! ed)
                  ;; a project's :format-style :paren-stable runs the pass
                  ;; with the mode off, so a repo formats one way for
-                 ;; everyone (the format-style-pin plan)
+                 ;; everyone
                  (editor/set-format-style-fn! ed (constantly :paren-stable))
                  (editor/set-text! ed fi-misindented)
                  (caret! ed 0)
@@ -1870,8 +1861,8 @@ b" text) eq (pos? @splices))
 (defn- row-apply-op-refuses-nul [ed]
   (go-row :apply-op-refuses-nul check
     (on-gtk
-     ;; ROADMAP Next 3: GTK takes C strings, so an op whose edit text
-     ;; holds a NUL used to land truncated. The apply-op! funnel refuses
+     ;; GTK takes C strings, so an op whose edit text holds a NUL would
+     ;; land truncated. The apply-op! funnel refuses
      ;; it like a read-only editor: nil, buffer untouched. Every op path
      ;; (plugin :edit commands, MCP replace) goes through this funnel.
      (editor/set-text! ed "(+ 1 1)")
@@ -1960,7 +1951,7 @@ b" text) eq (pos? @splices))
    row-parinfer-format-style-pin-plain
    row-apply-op-refuses-nul])
 
-;; --- P2.T6: console rows -------------------------------------------------
+;; --- console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
 ;; atoms; the rows call the same functions the key handlers call
 ;; (handle-return!/handle-history!), never a synthesized keystroke.
@@ -2067,13 +2058,13 @@ b" text) eq (pos? @splices))
                       :input-after input-after :text text})))))
 
 (defn- row-console-style-after-submit
-  "P2.T9 round-1 fix: once a REPL entry is committed, out-end sits exactly
+  "Once a REPL entry is committed, out-end sits exactly
   on the boundary between the just-committed prompt+input span and the
   fresh \"user=> \" prompt right after it -- both tagged :prompt, no untagged
   character between them. GtkTextBuffer treats inserting text at such a
   boundary as inside one continuous :prompt span and extends it onto the
-  new text; insert-chunk! used to only ADD its kind's own tag on top via
-  gtk_text_buffer_apply_tag, never stripping a tag that leaked in from
+  new text; insert-chunk! must not only ADD its kind's own tag on top via
+  gtk_text_buffer_apply_tag but also strip a tag that leaked in from
   the insertion boundary. Submits an entry (so out-end lands on that
   boundary), appends plain :out text, and asserts the appended text
   carries :out but NOT :prompt -- and, the reverse direction, that the
@@ -2135,7 +2126,7 @@ b" text) eq (pos? @splices))
                                                      [:pointer] :int)
                                      ffi/null))
           _ (future (dotimes [i 100000] (cview/append! cv :out (str i "\n"))))
-          ;; M2: active? must always be reset, even if await-until itself
+          ;; active? must always be reset, even if await-until itself
           ;; throws (its predicate reads g/buffer-text, which could) --
           ;; otherwise the sampler's 20 ms GTK timer callable keeps
           ;; re-arming (its own (if @active? ... 1) branch) for the rest
@@ -2146,13 +2137,12 @@ b" text) eq (pos? @splices))
       (on-gtk (let [gaps (map - (rest @samples) @samples)
                     max-gap (if (seq gaps) (apply max gaps) 0)
                     out-chars (- (count (g/buffer-text (:buf cv))) (count @(:prompt-text cv)))]
-                ;; I7: drain! no longer inserts a whole oversized batch
+                ;; drain! doesn't insert a whole oversized batch
                 ;; before trimming, and trim! measures out-end's own
                 ;; offset instead of copying the output region just to
                 ;; count it -- both bounded costs, so the GTK main
                 ;; loop's tick cadence should stay well under 1s even
-                ;; under this flood (measured 90-144ms pre-fix, 99-111ms
-                ;; post-fix across this fix wave's own runs).
+                ;; under this flood (measured 99-111ms).
                 (check :console-flood (and ok (<= out-chars cview/MAX-OUTPUT-CHARS) (< max-gap 1000))
                        {:last-line-visible ok
                         :output-chars out-chars
@@ -2191,7 +2181,7 @@ b" text) eq (pos? @splices))
     (on-gtk (cview/clear-input! cv)
             (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "line1\nline2" -1 1)
             ;; the insert leaves the caret at the end of "line2" -- the input's
-            ;; second (last) line -- so Up must be gated off entirely (I3): a
+            ;; second (last) line -- so Up must be gated off entirely: a
             ;; multi-line entry's own caret movement must not be hijacked into
             ;; browsing history. history-prev must never even be CALLED.
             (let [before-calls (count @history-prev-calls)
@@ -2203,7 +2193,7 @@ b" text) eq (pos? @splices))
                       :calls-before before-calls :calls-after (count @history-prev-calls)})))))
 
 (defn- row-console-preedit-guard
-  "I5: an active IME preedit composition makes Return and Up/Down no-ops
+  "An active IME preedit composition makes Return and Up/Down no-ops
   (setting the atom directly proves the yield; the real preedit-changed
   wiring is a human smoke step)."
   [cv]
@@ -2321,7 +2311,7 @@ b" text) eq (pos? @splices))
     (g/gtk-paned-set-start-child paned (:scroll ed))
     (g/gtk-paned-set-end-child paned (:scroll cv))
     (g/gtk-paned-set-position paned 300)
-    (g/gtk-window-set-title win "Jonquil P2.T5+T6 self-test")
+    (g/gtk-window-set-title win "Jonquil editor self-test")
     (g/gtk-window-set-default-size win 700 700)
     (g/gtk-window-set-child win paned)
     (editor/on-dirty-changed! ed (fn [dirty] (when dirty (swap! true-fire-count inc))))

@@ -1,5 +1,5 @@
 (ns jonquil.tabs
-  "Pure helpers for a window's tabs (tabs spec): the tab strip's labels,
+  "Pure helpers for a window's tabs: the tab strip's labels,
   finding a file that's already open, whether a tab may run in the
   window's evaluator, and the text of the refusal, the unsaved-changes
   alert and the Run banner. A tab here is a plain map with :path (a string
@@ -121,10 +121,9 @@
   (into (conj (subvec v 0 (inc i)) x) (subvec v (inc i))))
 
 (defn disk-sync
-  "What a tab on a file a plugin step may have rewritten should do (plugins
-  F2): :reload when its file holds other text than the tab last saved and
+  "What a tab on a file a plugin step may have rewritten should do: :reload when its file holds other text than the tab last saved and
   the tab has no unsaved edits, :warn when it has some, :rebase when its
-  edits already equal the new text (nothing to lose: final review I2), nil
+  edits already equal the new text (nothing to lose), nil
   when the file is unchanged or missing (disk nil)."
   [{:keys [saved disk dirty? buffer]}]
   (when (and disk (not= disk saved))
@@ -137,7 +136,7 @@
   none. Lines are counted by \\n alone, so a CRLF file reports the line a
   person sees. The open paths refuse a NUL-bearing file on it: GTK text
   is C strings, so a NUL would silently cut everything after it and Save
-  would write the shortened text back (found 2026-10-29)."
+  would write the shortened text back."
   [text]
   (when-let [i (str/index-of text "\u0000")]
     (inc (count (filter #(= \newline %) (subs text 0 i))))))

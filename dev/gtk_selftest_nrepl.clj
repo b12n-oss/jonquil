@@ -1,10 +1,10 @@
 (ns gtk-selftest-nrepl
-  "D2.T4 self-test: opens the REAL Jonquil window via jonquil.main/start!
+  "Self-test: opens the REAL Jonquil window via jonquil.main/start!
   against a throwaway project whose .jonquil.edn opts into {:runtime
   :nrepl}, so a real Jolt child runs behind it, and runs the rows in
   gtk-selftest-nrepl.rows against its ui. Mirrors gtk-selftest-window's own
   driver (run-row/finish/-main; dev/gtk_selftest_window.clj), with the
-  differences the D2.T4 brief calls out:
+  differences:
 
   - run-row polls rows/idle? -- through the window's own evaluator, since
     an NRepl evaluator has no :ctx for support/idle? to read -- with a
@@ -14,20 +14,19 @@
     (jonquil.nrepl.child/middleware-root) before it starts a window at
     all; without one, it records a single failing check and never opens
     anything (by design: child-test/middleware-root-test fails the same
-    way, D2.T2's ruling).
+    way).
 
-  D2.T5 adds the real close row (row-nrepl-close-kills-child, deliberately
-  last in row-fns) and after-close-checks! at the end of the run. Unlike
-  D2.T4 (which had no close row and just called gtk-window-close directly
-  once every row had run), the close row itself now fires the app's own
+  The real close row (row-nrepl-close-kills-child, deliberately last in
+  row-fns) and after-close-checks! at the end of the run: the close row
+  itself fires the app's own
   \"quit\" action -- window.clj's :activate-quit-action!*, the same path a
-  Quit AppleEvent takes -- so finish (below) is now a close-forced
+  Quit AppleEvent takes -- so finish (below) is a close-forced
   FALLBACK only, the same shape as the window group's own finish
   (dev/gtk_selftest_window.clj): it polls window-destroyed? (a \"destroy\"
   signal this file connects in -main, independent of window.clj's own
   close-request->quit wiring) and forces the close through gtk-async/
   close-window-bounded! only if the real quit action somehow didn't
-  already close it, recording a FAIL if so, and (I1) a second FAIL plus a
+  already close it, recording a FAIL if so, and a second FAIL plus a
   process exit if even the forced close is stuck. Nothing here needs the
   alert-dialog path close-request-fn also has to guard, since row-nrepl-
   close-kills-child leaves the editor clean (set-text! never marks it
@@ -74,7 +73,7 @@
 ;; --- driver ----------------------------------------------------------------
 
 (def ^:private PER-ROW-MS
-  ;; estimate (D2.T5's row tables): row-nrepl-close-kills-child's own
+  ;; estimate: row-nrepl-close-kills-child's own
   ;; failing path plus its shell waits and runs is about 35000 ms, plus
   ;; run-row's idle wait (20000 ms, twice when it has to press Stop).
   80000)
@@ -98,7 +97,7 @@
 ;; runs too (-main, below), not from finish itself.
 (defonce ^:private finished? (atom false))
 
-;; D2.T5: mirrors gtk-selftest-window's own window-destroyed? (a plain
+;; Mirrors gtk-selftest-window's own window-destroyed? (a plain
 ;; atom flip from a "destroy" signal, safe to poll without ever touching
 ;; the possibly-already-destroyed window pointer directly).
 (defonce ^:private window-destroyed? (atom false))
@@ -108,10 +107,8 @@
   ;; one main-loop iteration, so this only actually waits out its deadline
   ;; when that quit path is broken. finish (below) uses this same constant
   ;; twice: once to wait for the quit action's own close to land, and
-  ;; again (I1) as close-window-bounded!'s own deadline for the forced
-  ;; close that follows when the quit action didn't work. M3: this was
-  ;; 2000 before the arc; AH.T1 changed it to 10000 by mistake, restored
-  ;; here.
+  ;; again as close-window-bounded!'s own deadline for the forced
+  ;; close that follows when the quit action didn't work.
   2000)
 
 (defn- print-summary!
@@ -127,7 +124,7 @@
   it worked: if that regressed, the window is still open here, and
   without this fallback nothing would ever end the run.
 
-  I1: a suppress-close?-shaped stuck flag would make even the forced
+  A suppress-close?-shaped stuck flag would make even the forced
   gtk_window_close (via gtk-async/close-window-bounded!) never actually
   close the window, so close-window-bounded!'s on-stuck is the real way
   out: it records a second FAIL, makes sure SUMMARY has printed, and
@@ -171,7 +168,7 @@
                                          PER-ROW-MS support/check))
                         (<! (finish ui))
                         (a/put! driver-done :done)))})
-      ;; D2.T5: the GTK loop is gone once main/start! returns -- rows/
+      ;; The GTK loop is gone once main/start! returns -- rows/
       ;; after-close-checks!'s own blocking shell/sh calls are safe here,
       ;; unlike inside a row (which must go through sh-within, bounded to
       ;; 5000 ms, so a row never hangs the whole run waiting on a shell

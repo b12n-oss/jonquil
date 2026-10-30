@@ -1,4 +1,4 @@
-;; P4.T3 automated: drives the BUILT Jonquil binary, via cgevent --pid, to
+;; Drives the BUILT Jonquil binary, via cgevent --pid, to
 ;; smoke the ClojureDart attach dialect against the user's REAL, running
 ;; ClojureDart app (named by dev/smoke/cljd_app.local.edn). Run via `bb smoke:cljd` (see
 ;; bb.edn); a plain babashka script, not a jolt namespace, exactly like
@@ -6,17 +6,14 @@
 ;; the inside, only from outside via cgevent, a raw TCP connect check, and
 ;; the filesystem (read-only against the app's own files).
 ;;
-;; This file automates the P4.T3 human walkthrough
-;; (.superpowers/sdd/cljd/p4t3-brief.md); .superpowers/sdd/cljd/
-;; smoke-cljd-brief.md is this task's own scope and is authoritative where
-;; the two differ (p4t3-brief is a reference for expected text, written for
-;; a human's own keystrokes -- e.g. its two-line Run Form snippet, typed
-;; here the same way but positioned by search rather than by hand).
+;; This file automates a human walkthrough of the attach dialect; the
+;; two-line Run Form snippet is typed here the same way but positioned by
+;; search rather than by hand.
 ;;
 ;; Mechanisms copied from binary_smoke.clj (not required -- its helpers are
-;; private, and it is never refactored by this task): cgevent! with its own
+;; private): cgevent! with its own
 ;; deadline, cg-key!/char->chord/type-text! (extended here with ! [ ] : --
-;; measured live against this build before being relied on, see the report),
+;; measured live against this build before being relied on),
 ;; windows-edn!/window-for, ocr-text!/ocr-rows!/screenshot!, wait-for!/
 ;; wait-for-ocr!, launch!/stop!/ensure-window!, and the kill-all-launched!
 ;; try/finally shape.
@@ -26,13 +23,11 @@
 ;; next!-prev!/run-form/help (steps 1-5), matching the human walkthrough's
 ;; own single sitting, then a detach/reconnect within that SAME session
 ;; (step 6), then closes it (step 9). A fresh process per step would mean a
-;; fresh nREPL attach cycle per step against the REAL app, which the hard
-;; rules ask this script to keep to a minimum, and would also cost more
+;; fresh nREPL attach cycle per step against the REAL app, which should
+;; be kept to a minimum, and would also cost more
 ;; wall-clock time reconnecting than the caret bookkeeping it would save.
 ;;
-;; Caret placement (p4t3-brief: "place the caret by the text search you'd
-;; use for Find, or by line and column through the editor's go-to; pick the
-;; most robust mechanism binary_smoke already uses"): this file leans on
+;; Caret placement: this file leans on
 ;; Cmd+F (find-text!, below). jonquil.gtk.find-bar's own open!/recompute-
 ;; matches! select the match nearest the CURRENT caret on every keystroke
 ;; (commands/next-match: the first match at or after the caret, else wrap to
@@ -50,13 +45,12 @@
 ;; the very start of) that form either way (jonquil.commands/form-around).
 ;;
 ;; Search strings were checked against the live file's own line numbers
-;; (this task's session, `grep -n`) for uniqueness or safe wrap-to-first
-;; behaviour before being relied on:
-;;   "(where)"    -- 8 occurrences (re-counted in fix round 2; a first
-;;                   pass missed retitle-live!'s and restore-live!'s own
-;;                   bodies, one of them followed by FIVE closing parens
-;;                   on the SAME line -- see step-next-prev!'s own
-;;                   docstring for what that cost). Caret starts at buffer
+;; (`grep -n`) for uniqueness or safe wrap-to-first behaviour before
+;; being relied on:
+;;   "(where)"    -- 8 occurrences (retitle-live!'s and restore-live!'s own
+;;                   bodies each end in one, one of them followed by FIVE
+;;                   closing parens on the SAME line -- see
+;;                   step-next-prev!'s docstring). Caret starts at buffer
 ;;                   END on a fresh open (editor.clj's set-text!), so the
 ;;                   FIRST find of this query (no match at/after caret)
 ;;                   wraps to the FIRST occurrence in the file, the
@@ -127,7 +121,7 @@
 ;; key the version check is skipped.
 (def ^:private want-fork-sha (:fork-sha app-config))
 
-;; TH.T5-style isolation (binary_smoke.clj's own smoke-xdg-config-home): one
+;; Isolation (binary_smoke.clj's own smoke-xdg-config-home): one
 ;; XDG_CONFIG_HOME temp dir for this run, handed to launch! via :extra-env,
 ;; so this script's own jonquil process never reads or writes the user's
 ;; real ~/.config/jonquil.
@@ -185,10 +179,10 @@
       (throw (ex-info (str "cgevent key failed: " chord) {:pid pid :chord chord :err err})))))
 
 ;; char->chord: binary_smoke.clj's own map, plus ! [ ] : -- measured live
-;; against this build before this script relied on them (session probe:
+;; against this build before this script relied on them (probe:
 ;; select-all, delete, then "shift + 1" "[" "]" "shift + ;" in a row read
 ;; back via cgevent's OWN window/OCR path as exactly `![]:`, no stray
-;; characters -- see the report for the transcript).
+;; characters).
 (def ^:private char->chord
   (merge
    (into {} (map (fn [c] [c (str c)])) "abcdefghijklmnopqrstuvwxyz")
@@ -299,15 +293,13 @@
   returns false for it same as a genuinely dirty title: a caller polling
   this in a loop just tries again.
 
-  Fix round: the old version only checked `(not (str/starts-with? name
-  \"*\"))`, which a blank/missing name satisfies vacuously. A live run
-  this session recorded :help-completion-undo-clean's own :title as \"\"
-  (empty, not the real window name) -- a transient windows-edn! read that
-  the old check accepted as \"clean\", stopping step-help!'s own undo
-  loop one Cmd+Z short of a genuinely restored buffer. That leftover-
-  dirty buffer then triggered Jonquil's own real close-confirmation alert
-  in step-close!, which this script never answers -- root-caused with a
-  screenshot + a `sample` stack in the same report, not guessed."
+  A check of only `(not (str/starts-with? name \"*\"))` would be
+  satisfied vacuously by a blank/missing name: a live run recorded a
+  :title of \"\" (a transient windows-edn! read), which would stop
+  step-help!'s own undo loop one Cmd+Z short of a genuinely restored
+  buffer. That leftover-dirty buffer would then trigger Jonquil's own real
+  close-confirmation alert in step-close!, which this script never
+  answers."
   [pid]
   (= clean-window-title (:name (window-for pid))))
 
@@ -332,18 +324,16 @@
   Cmd+F was pressed (the nearest one at or after it, else the first in
   the buffer).
 
-  Fix round 1 (live run, this task's session) added the settle alone
-  (250ms after Escape), on the theory that the very first character typed
-  right after find-text! was racing editor/focus!'s own return of input
-  focus. Fix round 2, after a live probe against a throwaway scratch file
-  (never the app -- see the report), found the REAL mechanism and it
-  isn't a race: close! (jonquil.gtk.find_bar.clj) leaves the MATCH ITSELF
+  The Left matters (the 250ms settle after Escape is not the fix). The
+  mechanism, found with a live probe against a throwaway scratch file
+  (never the app), is not a focus race: close! (jonquil.gtk.find_bar.clj)
+  leaves the MATCH ITSELF
   selected (gtk_text_buffer_select_range with start<end), not just a
   caret, and jonquil.edit/insert-open treats an open-bracket typed onto an
   active selection completely differently from one typed onto a bare
   caret -- it WRAPS the selection in that bracket and its closer, rather
   than inserting an empty pair. Typing `(let [w (where)]` onto a selected
-  `\"  nil)\"` therefore never inserted a fresh `(let ...)` at all: probed
+  `\"  nil)\"` would never insert a fresh `(let ...)` at all: probed
   directly (scratch file `(foo bar baz)`, find \"bar\", type one
   character with the selection still active) -- `q` typed onto a
   selection REPLACES it outright (`\"(foo bar baz)\"` -> `\"(foo q
@@ -352,14 +342,13 @@
   by contrast, collapses the selection to its START with no other effect
   (probed the same way: `\"(foo bar baz)\"`, find \"bar\", Left, type
   `q` -> `\"(foo qbar baz)\"`, `q` landing exactly at the match's own
-  start) -- so this now presses it before returning, every time, turning
+  start) -- so this presses it before returning, every time, turning
   every call site's selection into the caret-only case every check in
-  this file was already written to assume. Cmd+E (Run Selection) on a
+  this file assumes. Cmd+E (Run Selection) on a
   bare caret with no selection falls back to sending the caret's own
-  LINE (jonquil.commands/run-selection-text) -- confirmed harmless for
+  LINE (jonquil.commands/run-selection-text) -- harmless for
   this file's own Cmd+E use (on `(where)`, which sits alone on its own
-  line): a fourth probe found it sends and evaluates the same line
-  correctly either way."
+  line): it sends and evaluates the same line correctly either way (probed)."
   [pid text]
   (cg-key! pid "command + f")
   (type-text! pid text)
@@ -378,15 +367,15 @@
   same on-screen text. See parse-title below for that one, used only where
   an exact title match isn't what's being asked.
 
-  Fix round 1: takes the LAST match of each keyword in `text`, not the
-  first. drive.cljd's own first comment block carries a literal worked
-  example, `;; => {:slide 1, :of 54, :step 1, :title \"Production
+  Takes the LAST match of each keyword in `text`, not the first.
+  drive.cljd's own first comment block carries a literal worked example,
+  `;; => {:slide 1, :of 54, :step 1, :title \"Production
   ClojureDart...\"}`, which sits in the editor pane above the console and
-  is visible in OCR for most of this run -- re-find (first match) grabbed
-  THAT static example instead of the console's own live result below it,
-  every time. The live result is always the most recently PRINTED one, so
-  it's always the last match in top-to-bottom OCR text; the example line
-  never moves and is always first."
+  is visible in OCR for most of the run; the first match would grab THAT
+  static example instead of the console's own live result below it. The
+  live result is always the most recently PRINTED one, so it's always the
+  last match in top-to-bottom OCR text; the example line never moves and
+  is always first."
   [text]
   (let [grab (fn [re] (some-> (seq (re-seq re text)) last second parse-long))
         slide (grab #"(?i)slide\D{0,4}(\d+)")
@@ -406,7 +395,7 @@
   SOURCE TEXT (visible above the console, e.g. inside a docstring) let the
   first version of this regex swallow everything from `where`'s own
   :title key, through several unrelated lines of source, up to that
-  distant stray quote -- measured live this session, :expect-title came
+  distant stray quote -- measured live, :expect-title came
   back as several lines of `where`'s own defn body."
   [text]
   (some-> (seq (re-seq #"(?i)title\D{0,4}\"([^\"\n]*)\"" text)) last second))
@@ -476,8 +465,7 @@
   feeds step-next-prev!'s exact position comparisons, :title feeds
   step-run-form!'s (best-effort, see parse-title) result check. :of isn't
   pinned to a literal 54 here: the deck's own slide count is real data,
-  not this script's to assume (plan-authoring.md's own \"don't invent
-  expected numbers\"), so this only requires a fully-parsed position, and
+  not this script's to assume, so this only requires a fully-parsed position, and
   records whatever :of actually reads."
   [pid]
   (find-text! pid "(where)")
@@ -490,39 +478,32 @@
     {:pos parsed :title title}))
 
 (defn- step-next-prev!
-  "Step 3b, rewritten per the coordinator's own safety ruling after a live
-  run moved the deck without restoring it (see the report): (next!) is
-  read back BEFORE (prev!) is ever sent, not just before/after as a pair
+  "Step 3b. Safety: a live run once moved the deck without restoring it, so
+  (next!) is read back BEFORE (prev!) is ever sent, not just before/after as a pair
   of independent checks. (prev!) is sent ONLY when that read shows the
   deck moved by exactly one step, per the deck's own semantics (the same
   slide's step +1, or the next slide, any step) -- (next!) itself is
   still sent exactly once either way (the hard rule), but a FAIL here
   means this fn sends nothing else at all: no retry of (next!), no
   (prev!) either, since (prev!) alone (with no real (next!) behind it)
-  is itself a real, undo-worthy deck move, not a safe no-op -- exactly
-  what happened live this session before this rewrite. `before` is
+  is itself a real, undo-worthy deck move, not a safe no-op. `before` is
   step-where!'s own parsed position. The restore is confirmed from
   (prev!)'s OWN echoed return value, which IS a real (where) call
   (drive.cljd: `(defn prev! [] (state/go-prev!) (where))`) -- not a
   THIRD find-text!/Cmd+E round trip for a fresh one.
 
-  A third round trip was tried first and dropped: `\"(where)\"` has
-  SEVEN occurrences in drive.cljd, not the six this file's own ns
-  docstring originally counted -- retitle-live! and restore-live! both
-  end their body in `(where)`, one of them followed by FIVE closing
+  A third find-text!/Cmd+E round trip for a fresh (where) is avoided:
+  `\"(where)\"` occurs in retitle-live! and restore-live! too, both
+  ending their body in `(where)`, one of them followed by FIVE closing
   parens on the very same line (closing several nested forms at once).
-  With the selection collapsed to a caret (fix round 2's own find-text!
-  change), Cmd+E with no selection falls back to sending the CARET'S
+  With the selection collapsed to a caret (find-text!), Cmd+E with no selection falls back to sending the CARET'S
   OWN LINE, so landing on one of those two occurrences sent the whole
   line -- `(where)))))`, unbalanced -- to the REPL, which answered a
-  reader exception instead of a position. Measured live this session:
-  harmless (a reader error, not an eval, so nothing about the deck
-  moved or was touched), but real -- the search-string uniqueness
-  analysis this file's own ns docstring keeps just wasn't complete for
-  a third `\"(where)\"` search from a caret position this far into the
-  file. Reusing (prev!)'s own answer sidesteps needing that analysis at
-  all: it already forced this exact fn to type-check `(prev!)`'s
-  result as a real (where) map before ever reaching this checkpoint."
+  reader exception instead of a position. Measured live: harmless (a
+  reader error, not an eval, so nothing about the deck moved), but the
+  search-string uniqueness analysis in the ns docstring doesn't cover a
+  third `\"(where)\"` search from a caret this far into the file. Reusing
+  (prev!)'s own answer sidesteps that analysis."
   [pid before]
   (find-text! pid "(next!)")
   (cg-key! pid "command + return")
@@ -550,24 +531,23 @@
                   {:console last :before before :restored restored}))))))
 
 (defn- step-run-form!
-  "Step 4. Types the two-line let from p4t3-brief right before the last
+  "Step 4. Types the two-line let right before the last
   comment block's own \"  nil)\" (found via find-text!, unique -- see the
   ns docstring), moves the caret onto :title with 4 Lefts (measured against
   the literal typed text \"(:title w))\", 11 chars, landing right after
   \"title\"), Cmd+Enter, then undoes until the title loses its \"*\" (a
-  generous 15s/200ms bound -- measured live this session, a real full
+  generous 15s/200ms bound -- measured live, a real full
   undo here took as few as 14 presses, well under what 6s would have
   allowed, but flaked once at that shorter bound, so this is deliberately
   more headroom than the measured number, not a tight fit to it).
-  find-text! now returns a plain CARET (fix round 2, see its own
-  docstring), so jonquil.edit/insert-open auto-pairs every ( and [ this
+  find-text! leaves a plain CARET (see its docstring), so jonquil.edit/insert-open auto-pairs every ( and [ this
   types the ordinary way (an empty pair at the caret, not a wrap of
   stale selected text), and insert-close steps over the matching pair
   instead of duplicating it -- the buffer ends up with exactly the
-  intended text. Confirmed live against a throwaway scratch file before
-  trusting it here (see the report): the echoed form now reads the WHOLE
-  let, both lines, and the result is the real title, not an \"Unknown
-  symbol: w\" error from evaluating `(:title w)` on its own.
+  intended text. Confirmed live against a throwaway scratch file: the
+  echoed form reads the WHOLE let, both lines, and the result is the real
+  title, not an \"Unknown symbol: w\" error from evaluating `(:title w)` on
+  its own.
 
   expect-title (from step-where!'s own OCR read) is used as the needle
   itself when it's known -- the specific title text appearing IS the
@@ -658,8 +638,8 @@
   losing a diagnostic here must not also lose the eventual close-exits
   result.
 
-  Root cause, found live with these diagnostics (2026-09-28 run, see the
-  report): close-stuck.png shows a real, native \"Save changes to
+  Root cause, found live with these diagnostics (2026-09-28 run):
+  close-stuck.png shows a real, native \"Save changes to
   drive.cljd before closing?\" alert (Save / Don't Save / Cancel) sitting
   in front of the editor -- Jonquil's own close-request-fn, doing exactly
   what it does for any dirty buffer (the SAME alert binary_smoke.clj's own
@@ -673,14 +653,10 @@
   isn't Jonquil being slow at all; it's this tool waiting on a dialog it
   never answers, because the buffer was ALREADY dirty (\"* drive.cljd -
   Jonquil\", visible in the close-before capture taken moments earlier)
-  by the time Cmd+W ran. `title-clean?` can't tell a genuinely clean
-  title from a momentarily EMPTY one read off `windows --edn` (both
-  satisfy `(not (str/starts-with? \"\" \"*\"))`) -- this run's own
-  `:help-completion-undo-clean` result recorded `:title \"\"`, a strong
-  match for exactly that gap letting step-help!'s own undo loop stop
-  early, one Cmd+Z short of clean. Named here, not fixed: the
-  coordinator's own instructions for this dispatch were diagnose and
-  report, not touch `src/` or `title-clean?`."
+  by the time Cmd+W ran. A title check that only rejects a leading \"*\"
+  can't tell a genuinely clean title from a momentarily EMPTY one read off
+  `windows --edn`, which would let step-help!'s own undo loop stop early,
+  one Cmd+Z short of clean; title-clean? requires the exact clean title."
   [pid proc]
   (let [alive? (p/alive? proc)
         ps-out (try (:out (p/shell {:out :string :err :string :continue true}
@@ -703,16 +679,13 @@
 
 (defn- step-close!
   "Step 9. 15s, not binary_smoke.clj's usual 5s/8s bound for a plain Cmd+W
-  exit: measured live this session, this window (a longer session, one
+  exit: measured live, this window (a longer session, one
   real attach/detach/reattach cycle and several evals behind it by now)
   took longer than 8s to exit on a CLEAN buffer -- 15s is generous
   headroom over that, not a tight fit to it.
 
-  Coordinator's own follow-up ruling, after root-causing a live
-  close-exits FAIL down to a leftover-dirty buffer (a screenshot showed
-  Jonquil's own real \"Save changes?\" alert; title-clean?'s old, loose
-  check had let an undo loop stop one Cmd+Z short of actually clean; full
-  chain in the report): NEVER send Cmd+W at all unless the title already
+  A live close-exits FAIL was traced to a leftover-dirty buffer (a
+  screenshot showed Jonquil's own real \"Save changes?\" alert). So NEVER send Cmd+W at all unless the title already
   reads EXACTLY clean-window-title, polled for up to ~2s first. If it
   doesn't, this FAILs :close-exits with reason \"buffer dirty before
   close\" and force-kills this pid directly -- no Cmd+W, so Jonquil's own
@@ -827,7 +800,7 @@
       ;; A failed pre-flight (the app isn't up, the fork is too old, or the
       ;; screen is locked) is "nothing to test right now", not a tool
       ;; failure -- exit 0 regardless of its own checks' pass/fail count
-      ;; (brief: "If the app isn't up, SKIP everything and exit 0").
+      ;; (if the app isn't up, SKIP everything and exit 0).
       (System/exit (if (and @preflight-ok (not= passed total)) 1 0)))))
 
 (apply -main *command-line-args*)

@@ -170,14 +170,14 @@
         :else (do (Thread/sleep 50) (recur))))))
 
 (def ready-deadline-ms
-  ;; estimate: the follow-up spike measured spawn-to-describe at 163-221 ms
+  ;; estimate: a probe measured spawn-to-describe at 163-221 ms
   ;; (median 214.8 ms, middleware); 15 s leaves room for a first run that
   ;; resolves the injected dep's jars.
   15000)
 
 (def term-grace-ms
-  ;; estimate: SIGTERM ran jolt's shutdown hook and exited promptly in the
-  ;; dialects spike; a stopped or wedged child gets SIGKILL after this.
+  ;; estimate: SIGTERM ran jolt's shutdown hook and exited promptly in a
+  ;; probe; a stopped or wedged child gets SIGKILL after this.
   1000)
 
 (defn- terminate!

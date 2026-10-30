@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.dialects
-  "D1.T4 rows: the dialect label, the in-process engine behind the
+  "Rows for the dialect label, the in-process engine behind the
   Evaluator protocol, and .jonquil.edn warnings when a file opens."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
@@ -19,13 +19,12 @@
   through .jonquil.edn, so Jolt stays in process there; with it, Jolt runs
   out of process unless the config says {:runtime :in-process}.
 
-  I2: nanoTime counts from process start (Jolt), measured at about 97 to
-  99 ms on a fresh `jolt -e` run, and the dirs were never deleted -- about
-  785 sit in $TMPDIR from before this fix. So two rows in the same run
-  could collide on the same dir name, and when :config was nil, nothing
-  removed a stale .jonquil.edn a collision left behind. currentTimeMillis
-  plus a random-uuid can't collide, and the row deletes its own dir when
-  it's done (below)."
+  The name is not nanoTime-based: nanoTime counts from process start
+  (Jolt), measured at about 97 to 99 ms on a fresh `jolt -e` run, so two
+  rows in the same run could collide on the same dir name, and when
+  :config was nil nothing would remove a stale .jonquil.edn a collision
+  left behind. currentTimeMillis plus a random-uuid can't collide, and the
+  row deletes its own dir when it's done (below)."
   [config deps?]
   (let [d (io/file (System/getProperty "java.io.tmpdir")
                    (str "jonquil-selftest-dialect-" (System/currentTimeMillis) "-" (random-uuid)))
@@ -58,20 +57,19 @@
   one, and the console since the open holds expect (a string) or, for
   nil, no \"; project:\" line at all.
 
-  Deviation from the brief's verbatim code (reported; see the report):
   cview/append! (window.clj's show-selection!, called synchronously from
   open-path!'s add-watch) never writes the buffer itself -- it queues and
   schedules a drain via on-gui!, which always defers through g_idle_add,
   even when already called from the GTK thread (measured: jonquil.gtk.
   callbacks/on-gui!'s own doc). Reading `since` right after (:open-path!
-  ui) returns -- the brief's own ordering -- races that drain and reads
+  ui) returns races that drain and reads
   the console before the warning (if any) has actually landed, so `warned`
   is read here, inside run-and-await's own second on-gtk step, after the
   run has gone idle -- by then the main loop has ticked many times, and
   every other row's own on-gui!-deferred output (the run's banner, its
   own \"=> 3\") is already proven to land reliably by that same point.
 
-  I2: deletes the row's own temp dir in a finally, once the run above has
+  Deletes the row's own temp dir in a finally, once the run above has
   gone idle (so the evaluator has let go of the file), through on-gtk --
   the same GTK-thread discipline as the rest of the row, since the
   deleted deps.edn/.jonquil.edn/source file sit next to state open-path!'s
@@ -127,14 +125,13 @@
                      :deps? true :expect nil}))
 
 (defn row-editor-paints-profile-sets
-  "P1.T2 (cljd plan): with the cljd profile, the editor paints f/widget
+  "With the cljd profile, the editor paints f/widget
   with the special-form tag; back on the window's own profile (Jolt's) it
   paints plain. The row restores the window's profile before it records,
   so later rows paint as before.
 
-  Deviation from the brief's verbatim code (reported; see the report):
-  the brief names the has-tag-at? check `special?`, a let-bound fn passed
-  to await-until by symbol and reused negated. audit_gtk_calls.clj only
+  The has-tag-at? check is inlined, not a let-bound `special?` fn passed
+  to await-until by symbol and reused negated: audit_gtk_calls.clj only
   exempts a GTK-touching call sitting INSIDE on-gtk or literally as
   await-until's own third argument -- a fn bound earlier and passed by
   name is walked at its OWN definition site (the let), where it isn't
@@ -152,19 +149,17 @@
         (support/check :editor-paints-profile-sets (and cljd? plain?) {:cljd cljd? :plain plain?})))))
 
 (defn row-selection-throw-still-paints-new-profile
-  "Fix round 1 (Important): window.clj's add-watch ::dialect callback used
-  to call editor/set-profile! only after apply-selection! returned, in
-  the SAME try -- a throw anywhere inside apply-selection!, once past its
-  own (reset! sel* sel), skipped set-profile! outright and left the
-  editor painting whatever profile it held before the open, even though
-  @sel* had already moved to the new selection. The fix moved
-  set-profile! into a finally, so it runs from @sel* whether or not
-  apply-selection! threw.
+  "window.clj's add-watch ::dialect callback calls editor/set-profile!
+  in a finally, so it runs from @sel* whether or not apply-selection!
+  threw. A throw anywhere inside apply-selection!, once past its own
+  (reset! sel* sel), must not skip set-profile! and leave the editor
+  painting whatever profile it held before the open, even though @sel*
+  has already moved to the new selection.
 
   This row forces dialect/label to throw for one open: show-selection!
   (apply-selection!'s own second statement, right after reset! sel*
   sel) calls it first, so the throw fires at the earliest point
-  apply-selection! can fail -- the exact shape the finding describes.
+  apply-selection! can fail -- the exact shape of the failure.
 
   Measured, not g/gtk-label-set-text (the more obvious place to throw,
   show-selection!'s OWN next call): editor/set-text! -- open-path!'s
@@ -173,7 +168,7 @@
   window.clj's own listener calls g/gtk-label-set-text on the line/col
   label. Redefining that var throws there first, inside open-path!'s
   OWN try, before the watch ever fires at all -- caught by open-path!'s
-  \"; open:\" catch, never reaching apply-selection! or our fix.
+  \"; open:\" catch, never reaching apply-selection! or the finally.
   dialect/label has no such second caller in this path: show-selection!,
   dialect-text and start-and-report!'s status text are the only
   callers, and none of those three run before the watch fires.
@@ -181,7 +176,7 @@
   Seeding the editor with the cljd profile first (a profile the temp
   project's own Jolt selection can never produce on its own) means only
   a real editor/set-profile! call after the throw can put it back to
-  Jolt's; before the fix, it would have stayed cljd."
+  Jolt's; without the finally it would stay cljd."
   [ui]
   (go-row :selection-throw-still-paints-new-profile support/check
     (let [ed (:editor ui)

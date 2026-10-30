@@ -1,12 +1,12 @@
 (ns jonquil.gtk.completion
-  "The completion popover (P4.T5): a jonquil.gtk.popover carrying a
+  "The completion popover: a jonquil.gtk.popover carrying a
   GtkListBox of candidates over a doc-preview label (class jonquil-doc,
   same as jonquil.gtk.help-popover's), anchored to the editor's or the
   console's view and built once per view by jonquil.gtk.window's activate!
   -- open!/close!/refine! show, hide and update it for the rest of the
   session, the popover itself is never rebuilt.
 
-  P4.T6: a second instance lives on the console's input region. open!'s
+  A second instance lives on the console's input region. open!'s
   snapshot argument and refine!'s own :snapshot-fn opt are already generic
   ({:text :caret :sel-start :sel-end}, optionally :extra-context for docs/
   candidates' 5-arity) -- jonquil.gtk.editor/snapshot is only the DEFAULT
@@ -16,7 +16,7 @@
   behaviour; the console instance overrides them to read and write its own
   input region (jonquil.gtk.console-view/input-snapshot and its own grouped-
   edit apply fn) instead of :ed. :position (:bottom default, :top for the
-  console, per probe 2) is the third opt this reuse needed.
+  console) is the third opt this reuse needed.
 
   Unlike jonquil.gtk.help-popover, this namespace owns real interaction
   state (:state, a jonquil.help open-state map or nil) on top of the
@@ -36,13 +36,13 @@
   closures' own source of the running namespace, called at every lookup
   by them, not captured once (same reasoning as window.clj's own
   (ev/prompt-ns @ev*) call sites) -- render!/open!/refine! call
-  :candidates-fn/:doc-fn themselves (D1.T4), never docs/candidates or
+  :candidates-fn/:doc-fn themselves, never docs/candidates or
   docs/symbol-doc directly, so window.clj can route both through
   jonquil.evaluator instead while ns-fn keeps its old meaning for any
   caller that still passes it.
 
-  close-others! (opts) is jonquil.gtk.window's own close-popovers-fn
-  (P4.T3): open!'s own multi-candidate branch calls it right before
+  close-others! (opts) is jonquil.gtk.window's own close-popovers-fn:
+  open!'s own multi-candidate branch calls it right before
   showing, so opening completion closes quick doc/jump's popover the same
   way Escape closes any of them -- through the registry, never a pairwise
   special case. It is NOT called from refine! (already-open, only its
@@ -62,10 +62,10 @@
   does.
 
   refine! is wired by jonquil.gtk.window into editor/on-cursor-moved!
-  (P3.T5's own Ln/Col mechanism), not a new editor.clj hook: that signal
+  (the Ln/Col mechanism), not a new editor.clj hook: that signal
   already fires for every insert, delete and mark-set on the insert mark
-  (editor.clj's own on-cursor-moved! docstring), which covers BOTH of the
-  brief's two closing conditions in one place -- a buffer change (typing
+  (editor.clj's own on-cursor-moved! docstring), which covers BOTH
+  closing conditions in one place -- a buffer change (typing
   narrows/widens the candidates) and a plain caret move out of the word
   (still-valid? false, no text touched at all, e.g. a Left arrow) -- with
   no separate 'buffer changed' registration needed. The console instance is
@@ -102,9 +102,9 @@
 (def ^:private LIST-WIDTH 320)
 (def ^:private LIST-HEIGHT 160)
 (def ^:private DOC-HEIGHT 110)
-;; Fix wave item 2: the doc-preview label's own width, no longer tied to
-;; LIST-WIDTH (the candidate list column stays LIST-WIDTH-wide; only the
-;; doc area below it widens) -- see jonquil.gtk.help-popover's DOC-WIDTH
+;; The doc-preview label's own width, independent of LIST-WIDTH (the
+;; candidate list column stays LIST-WIDTH-wide; only the doc area below
+;; it widens) -- see jonquil.gtk.help-popover's DOC-WIDTH
 ;; comment for the measurement this shares (monospace 13px, ~7.83px/char,
 ;; 660 covers an 80-column docstring line with a cushion).
 (def ^:private DOC-WIDTH 660)
@@ -123,8 +123,7 @@
 (def ^:private KEY-KP-ENTER 0xff8d)
 (def ^:private KEY-TAB 0xff09)
 
-;; PageUp/PageDown move by 8, clamped -- a plain UI constant, not derived
-;; from a probe.
+;; PageUp/PageDown move by 8, clamped.
 (def ^:private PAGE-STEP 8)
 
 (def ^:private waiting-text "Asking the server...")
@@ -134,23 +133,23 @@
 (defn make-completion
   "Builds the completion popover on view (the editor's or the console's
   GtkTextView): autohide off, position given by opts (:bottom default),
-  per jonquil.gtk.popover's own docstring and P4 probe 2 -- same anchor as
-  jonquil.gtk.help-popover, so it never steals keys from its view (probe
-  1). Its child is a vertical box: a
+  per jonquil.gtk.popover's own docstring -- same anchor as
+  jonquil.gtk.help-popover, so it never steals keys from its view.
+  Its child is a vertical box: a
   GtkListBox (BROWSE selection, so exactly one candidate row is always
   selected) inside a GtkScrolledWindow LIST-WIDTH wide and as tall as its
   rows up to LIST-HEIGHT, over
   jonquil.gtk.popover/make-doc-scroll's own doc-preview label+scroll at
-  DOC-WIDTHxDOC-HEIGHT (fix wave item 5: wrapped, top-aligned, no
-  horizontal scrolling, sized to content up to DOC-HEIGHT; fix wave item 2:
-  DOC-WIDTH is now its own constant, wider than LIST-WIDTH, so a docstring's
+  DOC-WIDTHxDOC-HEIGHT (wrapped, top-aligned, no
+  horizontal scrolling, sized to content up to DOC-HEIGHT; DOC-WIDTH is
+  its own constant, wider than LIST-WIDTH, so a docstring's
   own hard breaks decide its line ends instead of an early soft wrap --
   see DOC-WIDTH's own comment) -- mirroring help-popover's own doc popover
   shape, so a long docstring scrolls instead of growing the popover without
   bound. opts is {:ed :ns-fn :candidates-fn :doc-fn
   :close-others! :on-error :position :snapshot-fn :apply-op! :server-ev} -- see the ns docstring.
-  :position is :bottom (default, the editor's own anchor, probe 2) or :top
-  (the console's, P4.T6). :snapshot-fn (fn [] -> a snapshot map, optionally
+  :position is :bottom (default, the editor's own anchor) or :top
+  (the console's). :snapshot-fn (fn [] -> a snapshot map, optionally
   carrying :extra-context) defaults to (fn [] (editor/snapshot ed)) and is
   refine!'s only source of a fresh one. :apply-op! (fn [edit-op] -> nil)
   defaults to (fn [result] (editor/apply-op! ed result)) and is the only
@@ -173,8 +172,7 @@
         pp (popover/make-popover view {:autohide? false :position position})]
     (g/gtk-list-box-set-selection-mode list-box g/SELECTION-MODE-BROWSE)
     ;; Sized to its rows up to LIST-HEIGHT (eight rows), scrolling beyond,
-    ;; so two candidates don't leave a six-row gap above the doc preview
-    ;; (P4 parked item).
+    ;; so two candidates don't leave a six-row gap above the doc preview.
     (g/gtk-widget-set-size-request list-scroll LIST-WIDTH -1)
     (g/gtk-scrolled-window-set-propagate-natural-height list-scroll 1)
     (g/gtk-scrolled-window-set-max-content-height list-scroll LIST-HEIGHT)
@@ -217,7 +215,7 @@
 (defn- current?
   "Whether a late answer from evaluator e for token (from gen-key) still
   applies: the newest request, from the window's current evaluator, to an
-  open popup whose editor is still there (review findings 2 and 4)."
+  open popup whose editor is still there."
   [c gen-key token e]
   (and (= token @(gen-key c)) (identical? e (server-ev c)) (not (gone? c)) (popover/open? c)))
 
@@ -264,7 +262,7 @@
           (if-let [e (server-ev c)]
             ;; A request a newer one superseded before it went out is
             ;; skipped, so a slow connection doesn't queue stale lookups
-            ;; ahead of the current one (review finding 3).
+            ;; ahead of the current one.
             (let [[k doc] (ev/ask-help! ev/help-grace-ms
                                         (fn [] (when (= token @(:doc-gen c)) (ev/lookup e sym text pos)))
                                         (fn [doc] (on-gui! (fn [] (doc-arrived! c e token sym doc)))))]
@@ -279,7 +277,7 @@
   docs/symbol-doc looked up with st's own :text (the snapshot text open!/
   refine! saw when they built st -- mirroring window.clj's do-quick-doc!/
   do-jump!, which pass the target symbol's own start as pos) and the
-  prefix's own start. Fix wave item 5 (M2): each row's label gets xalign
+  prefix's own start. Each row's label gets xalign
   0 and halign START -- GTK_ALIGN_FILL's default centres a GtkListBoxRow's
   child when the row is wider than the label's own natural size, which is
   every row here (list-box is LIST-WIDTH wide, a candidate name is not)."
@@ -327,7 +325,7 @@
 
 (defn- offline-on-error
   "cands, or, when the request threw (ev/help-error), offline after saying
-  so through :on-error (review finding 1)."
+  so through :on-error."
   [c offline cands]
   (if-let [msg (ev/help-error cands)]
     (do ((:on-error c) (str "; complete: " msg)) offline)
@@ -359,7 +357,7 @@
   (let [token (swap! (:gen c) inc)
         offline (fn [] (ev/offline-candidates e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot)))
         [k cands] (ev/ask-help! ev/help-grace-ms
-                                ;; skipped when superseded before it went out (finding 3)
+                                ;; skipped when superseded before it went out
                                 (fn [] (when (= token @(:gen c))
                                          (ev/complete e (:prefix p) (:text snapshot) (:end p) (:extra-context snapshot))))
                                 (fn [cands] (on-gui! (fn [] (arrived! c e token snapshot cands)))))]
@@ -372,8 +370,8 @@
   in the program namespace (ns-fn) with snapshot's own text/prefix-end/
   extra-context, then help/open-state: nil (no candidates) does nothing; a
   single candidate commits at once through c's own :apply-op! (no
-  popover); otherwise close-others! (P4.T3's registry, so any OTHER open
-  P4 popover closes first -- see the ns docstring) then renders and
+  popover); otherwise close-others! (the popover registry, so any OTHER open
+  popover closes first -- see the ns docstring) then renders and
   shows. The state kept for a shown popover carries snapshot's own :text
   alongside help/open-state's own keys, so render!/refine! never need a
   second way to read \"the text this popup is showing candidates for\".

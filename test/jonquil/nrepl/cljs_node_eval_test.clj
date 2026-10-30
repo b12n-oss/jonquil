@@ -327,7 +327,7 @@
         (is (str/includes? (text-of out) (str "; The browser port changed: open " (url-of launches 2) ".")))))))
 
 (deftest browser-token-survives-relaunch-test
-  ;; Review Focus 5: the window's token outlives the child, or the tab's
+  ;; the window's token outlives the child, or the tab's
   ;; self-reload (PR #94) would be turned away by its own window's gate.
   (with-browser {} {}
     (fn [_ {:keys [ev launches opened]}]
@@ -648,7 +648,7 @@
         (is (= node/busy-doc (:doc @looking))
             "a lookup an evaluation cancelled answers busy, not timed out")))))
 
-;; --- read-line over the stdin pipe (stdin design, 2026-10-23) --------------
+;; --- read-line over the stdin pipe --------------
 
 (defn- with-stdin-node
   "with-node for the stdin dance: the fake takes input lines from a pipe
@@ -753,7 +753,7 @@
         (is (wait-until #(false? (ev/waiting-for-input? ev)) 3000) "Stop resets waiting")))))
 
 (deftest a-multi-line-send-feeds-one-read-test
-  ;; review I2: Shift+Return can put newlines in the console's input, and
+  ;; Shift+Return can put newlines in the console's input, and
   ;; a send must still feed exactly one line, or the rest sits in the
   ;; pipe and answers a LATER evaluation's read without waiting.
   (with-stdin-node {}
