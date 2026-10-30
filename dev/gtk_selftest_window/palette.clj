@@ -267,6 +267,10 @@
 (def ^:private KEY-A 0x061)
 (def ^:private KEY-B 0x062)
 (def ^:private KEY-SHIFT-L 0xffe1)
+;; typing keys GDK names with words, from gdkkeysyms.h
+(def ^:private KEY-PARENLEFT 0x028)
+(def ^:private KEY-SPACE 0x020)
+(def ^:private KEY-CYRILLIC-A 0x6c1)
 
 (defn- run-palette!
   "Opens the palette, filters it to query and runs the first entry.
@@ -325,20 +329,28 @@
                              {:start (subs out 0 (min 200 (count out)))})))))
 
 (defn row-recent-keys-hides-typing
-  "Recent keys counts plain typing without keeping it, and names F6's
-  command. F6 goes first, so the typing can't merge into an earlier row's,
-  and twice, so focus ends where it started."
+  "Recent keys counts typing without keeping it, word-named keys included
+  (parenleft, space, Cyrillic_a), names the command that actually ran for
+  F6, and says passed on for an Escape the window let go (nothing open).
+  F6 goes first, so the typing can't merge into an earlier row's, and
+  twice, so focus ends where it started."
   [ui]
   (go-row :recent-keys-hides-typing support/check
     (let [mark (on-gtk (support/out-end-offset ui))
           _ (on-gtk (window-key! ui support/KEY-F6 0)
                     (window-key! ui KEY-A 0)
                     (window-key! ui KEY-B 0)
+                    (window-key! ui KEY-PARENLEFT 0)
+                    (window-key! ui KEY-SPACE 0)
+                    (window-key! ui KEY-CYRILLIC-A 0)
+                    (window-key! ui support/KEY-ESCAPE 0)
                     (window-key! ui support/KEY-F6 0)
                     (run-palette! ui "show the keys you pressed last"))
           out (on-gtk (support/since ui mark))]
       (on-gtk (close! ui)
               (support/check :recent-keys-hides-typing
-                             (and (str/includes? out "; typing (2 keys)") (str/includes? out "; F6  :focus/toggle")
-                                  (not (re-find #"(?m)^; [ab]  " out)))
+                             (and (str/includes? out "; typing (5 keys)") (str/includes? out "; F6  :focus/toggle")
+                                  (str/includes? out "; Esc  passed on (editor or GTK)")
+                                  (not (re-find #"(?m)^; [ab]  " out))
+                                  (not-any? #(str/includes? out %) ["parenleft" "space" "Cyrillic"]))
                              {:out out})))))

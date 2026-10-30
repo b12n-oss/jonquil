@@ -449,6 +449,12 @@
 ;; (const char *gdk_keyval_name (guint keyval)). A static string, never freed.
 (ffi/defcfn gdk-keyval-name* "gdk_keyval_name" [:uint] :pointer)
 
+(defn printable-key?
+  "True when keyval yields a printable character (not a control code)."
+  [keyval]
+  (let [c (gdk-keyval-to-unicode keyval)]
+    (and (>= c 0x20) (not= c 0x7f))))
+
 (defn keyval-name
   "keyval's GDK name (\"s\", \"F6\", \"Shift_L\"), or nil for a keyval with
   none."

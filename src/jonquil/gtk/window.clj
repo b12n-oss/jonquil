@@ -2222,32 +2222,41 @@
             plugins @plugin-registry/live
             physical (editor/physical-key os keyval0 keycode state)
             kname (g/keyval-name keyval)
-            ;; matched only when needed: plain typing is just counted
-            matches (delay (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
-                                                        :state state :physical physical)))]
-        ;; Every key but a lone modifier goes into recent keys
-        (when (and kname (not (describe/modifier-key? kname)))
-          (swap! (:recent-keys ctx) describe/remember
-                 (describe/recent-entry kname state os
-                                        (when-not (describe/typing? kname state) @matches))))
-        (if (and kname (not (describe/modifier-key? kname))
-                 (compare-and-set! (:describe-pending ctx) true false))
+            key? (and kname (not (describe/modifier-key? kname)))
+            ;; the command that took the key, for recent keys
+            ran (volatile! nil)]
+        (if (and key? (compare-and-set! (:describe-pending ctx) true false))
           ;; it answers a pending Describe Key: described, never run
-          (do ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) @matches))
-              1)
+          (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
+                                                     :state state :physical physical))]
+            ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) matches))
+            1)
           ;; The live plugins' :window bindings ahead of the shipped ones
           ;; (a plugin may bind a built-in window command)
-          (cmd-registry/window-answer
-           (plugin-registry/window-bindings plugins) keyval state
-           {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
-            ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
-            ;; keyval, and the keycode names the key (editor/physical-key)
-            :physical physical
-            ;; plugins' window-scope commands run too, so a :run one bound
-            ;; to a key runs
-            :run! #(cmd-registry/run-command! (merge cmd-registry/window-commands
-                                                     (plugin-registry/commands plugins))
-                                              % kctx)})))
+          (let [answer (cmd-registry/window-answer
+                        (plugin-registry/window-bindings plugins) keyval state
+                        {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
+                         ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
+                         ;; keyval, and the keycode names the key (editor/physical-key)
+                         :physical physical
+                         ;; plugins' window-scope commands run too, so a :run one bound
+                         ;; to a key runs
+                         :run! (fn [b]
+                                 (let [o (cmd-registry/run-command! (merge cmd-registry/window-commands
+                                                                           (plugin-registry/commands plugins))
+                                                                    b kctx)]
+                                   (when (= :handled o) (vreset! ran (:command b)))
+                                   o))})]
+            ;; Every key but a lone modifier goes into recent keys, after
+            ;; the fact and on its own, so recording never blocks a key
+            (when key?
+              (try
+                (swap! (:recent-keys ctx) describe/remember
+                       (describe/recent-entry kname state os
+                                              (describe/typing? kname state (g/printable-key? keyval))
+                                              @ran))
+                (catch :default _ nil)))
+            answer)))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
         1)))))

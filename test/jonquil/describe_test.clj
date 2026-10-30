@@ -21,7 +21,23 @@
   (is (d/modifier-key? "Shift_L"))
   (is (d/modifier-key? "Meta_R"))
   (is (not (d/modifier-key? "s")))
-  (is (not (d/modifier-key? "F6"))))
+  (is (not (d/modifier-key? "F6")))
+  (testing "the less common modifiers and locks"
+    (is (every? d/modifier-key? ["Num_Lock" "Shift_Lock" "Mode_switch" "ISO_Level5_Shift" "ISO_Next_Group"]))))
+
+(deftest typing-test
+  (testing "a key that yields a printable character, with nothing but Shift held, is typing"
+    (doseq [k ["a" "parenleft" "space" "comma" "eacute" "Cyrillic_a" "KP_1"]]
+      (is (d/typing? k 0 true) k))
+    (is (d/typing? "A" (:shift M) true)))
+  (testing "the editing keys are typing too"
+    (doseq [k ["Return" "KP_Enter" "Tab" "ISO_Left_Tab" "BackSpace" "Delete"]]
+      (is (d/typing? k 0 false) k)))
+  (testing "a command chord, a function key or an arrow is not"
+    (is (not (d/typing? "s" (:meta M) true)))
+    (is (not (d/typing? "Return" (:ctrl M) false)))
+    (is (not (d/typing? "F6" 0 false)))
+    (is (not (d/typing? "Left" 0 false)))))
 
 (deftest key-matches-test
   (testing "Cmd+S is the window's Save"
@@ -52,16 +68,15 @@
                                 {:typing 1} {:typing 1} {:typing 1}]))))
 
 (deftest recent-entry-test
-  (is (= {:typing 1} (d/recent-entry "a" 0 "Mac OS X" [])))
-  (is (= {:typing 1} (d/recent-entry "A" (:shift M) "Mac OS X" [])))
-  (is (= {:chord "F6" :command :focus/toggle}
-         (d/recent-entry "F6" 0 "Mac OS X" (mac-matches "F6" 0))))
-  (is (= {:chord "Cmd+S" :command :file/save}
-         (d/recent-entry "s" (:meta M) "Mac OS X" (mac-matches "s" (:meta M))))))
+  (testing "typing keeps only a count"
+    (is (= {:typing 1} (d/recent-entry "parenleft" 0 "Mac OS X" true nil))))
+  (testing "a chord keeps the command that actually ran, nil when the key passed on"
+    (is (= {:chord "F6" :command :focus/toggle} (d/recent-entry "F6" 0 "Mac OS X" false :focus/toggle)))
+    (is (= {:chord "Esc" :command nil} (d/recent-entry "Escape" 0 "Mac OS X" false nil)))))
 
 (deftest recent-lines-test
   (is (= ["; No keys yet."] (d/recent-lines [])))
-  (is (= ["; Recent keys, oldest first:" "; F6  :focus/toggle" "; typing (2 keys)" "; Cmd+K  unbound"]
+  (is (= ["; Recent keys, oldest first:" "; F6  :focus/toggle" "; typing (2 keys)" "; Cmd+K  passed on (editor or GTK)"]
          (d/recent-lines [{:chord "F6" :command :focus/toggle} {:typing 2} {:chord "Cmd+K" :command nil}]))))
 
 (deftest binding-lines-test

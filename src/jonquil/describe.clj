@@ -12,7 +12,8 @@
 
 (def ^:private modifier-names
   #{"Shift_L" "Shift_R" "Control_L" "Control_R" "Alt_L" "Alt_R" "Meta_L" "Meta_R"
-    "Super_L" "Super_R" "Hyper_L" "Hyper_R" "Caps_Lock" "ISO_Level3_Shift"})
+    "Super_L" "Super_R" "Hyper_L" "Hyper_R" "Caps_Lock" "Shift_Lock" "Num_Lock"
+    "ISO_Level3_Shift" "ISO_Level5_Shift" "Mode_switch" "ISO_Next_Group"})
 
 (defn modifier-key?
   "True for a key that only modifies others (Shift, Control, Cmd, ...)."
@@ -77,19 +78,26 @@
         n (count r)]
     (if (> n RECENT-MAX) (subvec r (- n RECENT-MAX)) r)))
 
+(def ^:private editing-keys
+  #{"Return" "KP_Enter" "Tab" "ISO_Left_Tab" "BackSpace" "Delete"})
+
 (defn typing?
-  "True for a printable key held with nothing but Shift: plain typing."
-  [key-name state]
-  (and (= 1 (count key-name)) (empty? (disj (held state) :shift))))
+  "True for plain typing: a key that yields a printable character
+  (char?, from the key's Unicode value, since GDK names many of them with
+  words: parenleft, space, eacute, Cyrillic_a) or an editing key, held with
+  nothing but Shift."
+  [key-name state char?]
+  (and (or char? (contains? editing-keys key-name))
+       (empty? (disj (held state) :shift))))
 
 (defn recent-entry
-  "One recent key: {:typing 1} for plain typing (typing?), so what was
-  typed is never kept; otherwise the chord and the command its first
-  match runs (nil when none)."
-  [key-name state os matches]
-  (if (typing? key-name state)
+  "One recent key: {:typing 1} for typing (typing?'s answer), so what was
+  typed is never kept; otherwise the chord and the command that actually
+  ran for it, nil when the window passed the key on."
+  [key-name state os typing ran]
+  (if typing
     {:typing 1}
-    {:chord (chord-text key-name state os) :command (:command (first matches))}))
+    {:chord (chord-text key-name state os) :command ran}))
 
 (defn recent-lines
   "Console lines listing the recent keys, oldest first."
@@ -100,7 +108,7 @@
           (map (fn [{:keys [typing chord command]}]
                  (if typing
                    (str "; typing (" typing (if (= 1 typing) " key)" " keys)"))
-                   (str "; " chord "  " (if command (str command) "unbound"))))
+                   (str "; " chord "  " (if command (str command) "passed on (editor or GTK)"))))
                ring))))
 
 (defn binding-lines
