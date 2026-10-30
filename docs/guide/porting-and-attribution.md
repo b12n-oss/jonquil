@@ -29,8 +29,7 @@ following its shape, since Jonquil's Stop and stdin handling need a
 different threading model than upstream's own.
 
 Everything else, the GTK front end, the session and settings layers, the
-themes, and every P4 help feature, is new code with no upstream
-counterpart.
+themes, and every help feature, is new code with no upstream counterpart.
 
 ## The code deltas the lift needs
 
