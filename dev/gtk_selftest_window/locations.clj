@@ -8,6 +8,7 @@
             [jolt.ffi :as ffi]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.locations-pane :as lpane]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
@@ -186,3 +187,52 @@
               (f8! ui false)))
     (let [st (await-status ui "; No locations list.")]
       (on-gtk (support/check :locations-tab-close-clears (= "; No locations list." st) {:status st})))))
+
+(def ^:private replaced-status
+  "; The buffer was replaced (Format All or a reload), so the list is out of date: list again.")
+
+(defn row-locations-buffer-replaced
+  "A whole-buffer replace (a reload's set-text!, Format All's one edit)
+  collapses every place: F8 says the buffer was replaced, not that one
+  place is gone."
+  [ui]
+  (go-row :locations-buffer-replaced support/check
+    (let [ed (:editor ui)]
+      (on-gtk (start-on-area! ed)
+              (run-palette! ui "list the uses")
+              (editor/set-text! ed fixture)
+              (f8! ui false))
+      (let [st (await-status ui replaced-status)]
+        (on-gtk (close-panel! ui)
+                (support/check :locations-buffer-replaced (= replaced-status st) {:status st}))))))
+
+(defn row-locations-matches-empty-find
+  "With the find bar open but empty, List every match uses the selection."
+  [ui]
+  (go-row :locations-matches-empty-find support/check
+    (let [ed (:editor ui)
+          [s e] (let [i (str/index-of fixture "shape")] [i (+ i 5)])]
+      (on-gtk (start-on-area! ed)
+              (find-bar/open! (:find-bar ui) :find)
+              ;; earlier find rows leave their query in the entry
+              (g/gtk-editable-set-text (:query (:find-bar ui)) "")
+              (g/with-iters* (:buf ed) s e (fn [a b] (g/gtk-text-buffer-select-range (:buf ed) a b)))
+              (run-palette! ui "list every match"))
+      (let [rows (on-gtk (lpane/row-texts (:locations-pane ui)))]
+        (on-gtk (close-panel! ui)
+                (find-bar/close! (:find-bar ui))
+                (support/check :locations-matches-empty-find (= 2 (count rows)) {:rows rows}))))))
+
+(defn row-locations-empty-says-no-places
+  "F8 on a list with no places says so."
+  [ui]
+  (go-row :locations-empty-says-no-places support/check
+    (let [ed (:editor ui)]
+      ;; + has uses here but no definition in the buffer: an empty list
+      (on-gtk (editor/set-text! ed "(+ 1 2)")
+              (support/place-cursor! (:buf ed) 1)
+              (run-palette! ui "list the definitions")
+              (f8! ui false))
+      (let [st (await-status ui "; No places.")]
+        (on-gtk (close-panel! ui)
+                (support/check :locations-empty-says-no-places (= "; No places." st) {:status st}))))))

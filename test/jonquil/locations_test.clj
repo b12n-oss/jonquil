@@ -46,6 +46,23 @@
       (is (= 120 (count (:text e))))
       (is (= \x (first (:text e)))))))
 
+(deftest long-list-test
+  (testing "a list stops at LIST-MAX places and its title says so"
+    (let [text (apply str (repeat 2500 "x\n"))
+          {:keys [title entries]} (loc/matches text "x")]
+      (is (= loc/LIST-MAX (count entries)))
+      (is (= "Matches for x (the first 1000 of 2500)" title))
+      (testing "and every line number is right, counted in one pass"
+        (is (= (range 1 (inc loc/LIST-MAX)) (map :line entries))))))
+  (testing "a list under the cap keeps its plain title"
+    (is (= "Matches for x" (:title (loc/matches "x\nx" "x")))))
+  (testing "a big file's one-letter search stays fast (was 18 s)"
+    (let [text (apply str (repeat 4000 "(defn e [e] (e e))\n"))
+          t0 (System/nanoTime)
+          _ (loc/matches text "e")
+          ms (/ (- (System/nanoTime) t0) 1e6)]
+      (is (< ms 2000) (str ms " ms")))))
+
 (deftest step-test
   (let [l (loc/uses src "area")]
     (is (= 0 (get-in (loc/step l 1) [:list :index])))

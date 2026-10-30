@@ -260,6 +260,9 @@
    locations-rows/row-locations-ends
    locations-rows/row-locations-definitions
    locations-rows/row-locations-tab-close-clears
+   locations-rows/row-locations-buffer-replaced
+   locations-rows/row-locations-matches-empty-find
+   locations-rows/row-locations-empty-says-no-places
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named

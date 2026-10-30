@@ -17,16 +17,29 @@
         line (str/trim (subs text start end))]
     (if (> (count line) TEXT-MAX) (subs line 0 TEXT-MAX) line)))
 
+(def LIST-MAX
+  ;; a choice: past this a list stops being something to step through, and
+  ;; every place costs two marks in the buffer and a row in the panel
+  1000)
+
 (defn entries
-  "One entry per [start end] range: its 1-based line and that whole line,
-  trimmed and cut to TEXT-MAX characters."
-  [text ranges]
-  (mapv (fn [[s e]] {:start s :end e :line (syntax/line-number-at-offset text s)
-                     :text (line-text text s)})
-        ranges))
+  "One entry per [start end] range, ranges in buffer order: its 1-based
+  line and that whole line, trimmed and cut to TEXT-MAX characters. Line
+  numbers are counted in one pass over the text, not from the start for
+  each range."
+  [^String text ranges]
+  (loop [rs ranges pos 0 line 1 acc (transient [])]
+    (if-let [[s e] (first rs)]
+      (let [line (loop [i pos line line]
+                   (let [j (.indexOf text "\n" (int i))]
+                     (if (and (>= j 0) (< j s)) (recur (inc j) (inc line)) line)))]
+        (recur (rest rs) s line (conj! acc {:start s :end e :line line :text (line-text text s)})))
+      (persistent! acc))))
 
 (defn- make-list [title text ranges]
-  {:title title :entries (entries text ranges) :index nil})
+  (let [n (count ranges)]
+    {:title (if (> n LIST-MAX) (str title " (the first " LIST-MAX " of " n ")") title)
+     :entries (entries text (take LIST-MAX ranges)) :index nil}))
 
 (defn uses
   "Every use of the symbol sym in text, as code (never in a comment,

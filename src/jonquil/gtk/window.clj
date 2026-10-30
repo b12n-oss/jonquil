@@ -3690,7 +3690,13 @@
                            (swap! locations-state assoc :list lst)
                            (locations-pane/select! locp lst)
                            (if (>= s e)
-                             (set-status! status-label "; That place is gone.")
+                             ;; Every place collapsed at once is a whole-buffer
+                             ;; replace (Format All's one edit, a reload's
+                             ;; set-text!), not one deleted place
+                             (set-status! status-label
+                                          (if (every? (fn [[a b]] (>= (g/mark-offset buf a) (g/mark-offset buf b))) marks)
+                                            "; The buffer was replaced (Format All or a reload), so the list is out of date: list again."
+                                            "; That place is gone."))
                              (do (select-tab! @*tab-ctx tab-id)
                                  (place-caret-and-scroll! ed s)
                                  (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
@@ -3698,9 +3704,9 @@
         locations-step-fn (fn [delta]
                             (if-let [lst (:list @locations-state)]
                               (let [{l :list moved? :moved?} (loc/step lst delta)]
-                                (if moved?
-                                  (goto-location! l)
-                                  (set-status! status-label (if (pos? delta) "; End of the list." "; Start of the list."))))
+                                (cond moved? (goto-location! l)
+                                      (empty? (:entries l)) (set-status! status-label "; No places.")
+                                      :else (set-status! status-label (if (pos? delta) "; End of the list." "; Start of the list."))))
                               (set-status! status-label "; No locations list.")))
         symbol-at-caret (fn []
                           (let [snap (editor/snapshot (:ed (active-tab)))]
@@ -3716,9 +3722,12 @@
         locations-matches-fn (fn []
                                (let [{:keys [ed fb]} (active-tab)
                                      snap (editor/snapshot ed)
-                                     q (if (pos? (g/gtk-widget-get-visible (:box fb)))
-                                         (g/editable-text (:query fb))
-                                         (subs (:text snap) (:sel-start snap) (:sel-end snap)))]
+                                     find-q (when (pos? (g/gtk-widget-get-visible (:box fb)))
+                                              (g/editable-text (:query fb)))
+                                     ;; the find query when the bar has one, else the selection
+                                     q (if (str/blank? find-q)
+                                         (subs (:text snap) (:sel-start snap) (:sel-end snap))
+                                         find-q)]
                                  (if (str/blank? q)
                                    (set-status! status-label "; Nothing to list: open Find, or select some text.")
                                    (make-locations! (loc/matches (:text snap) q)))))
