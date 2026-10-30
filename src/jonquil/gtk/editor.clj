@@ -371,8 +371,10 @@
   nil. A read-only editor (set-read-only!) applies nothing and returns
   nil. An op whose edit text holds a NUL byte is refused the same way
   (ROADMAP Next 3): GTK text is C strings, so the insert would silently
-  cut everything after it. Every op path funnels through here, so a
-  plugin's :edit command or an MCP replace can't truncate a buffer."
+  cut everything after it. Every editor op path funnels through here, so
+  a plugin's :edit command or an MCP replace can't truncate a buffer
+  (the console's input ops are a separate funnel, but nothing saves from
+  the console)."
   [ed result]
   (when (and result
              (not @(:read-only? ed))
@@ -583,9 +585,11 @@
           valid? (and cache (= (:gen cache) @(:edit-gen ed)))
           r (apply-op! ed result)]
       (let [v (when (and valid? r)
-                ;; A NUL in an edit's text truncates what the buffer keeps
-                ;; (C string): keep the update only when the counts agree,
-                ;; else clear, never half-trust (review I1).
+                ;; The count guard: keep the update only when the cached
+                ;; string's length matches what the buffer really kept,
+                ;; else clear, never half-trust (review I1). A NUL op no
+                ;; longer reaches here (apply-op! refuses it); this guards
+                ;; any future path that lands text the buffer shortened.
                 (let [t (edit/apply-edits (:text cache) (:edits result))]
                   (when (= (count t)
                            (g/gtk-text-buffer-get-char-count (:buf ed)))

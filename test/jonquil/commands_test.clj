@@ -225,11 +225,11 @@
 
 (deftest format-all-op-paren-stable-test
   (let [text "(def a\n  [{:x 1}\n    {:y 2}])"]
-    (testing "with :paren-stable? the result takes Paren mode's indentation"
+    (testing "with a :stabilize function the result takes Paren mode's indentation"
       (is (= "(def a\n  [{:x 1}\n   {:y 2}])"
              (edit/apply-edits text (:edits (c/format-all-op (snap text 0)
                                                              {:stabilize pe/paren-stable}))))))
-    (testing "without the flag, formatter-clean text is a no-op as today"
+    (testing "without :stabilize, formatter-clean text is a no-op as today"
       (is (nil? (c/format-all-op (snap text 0)))))
     (testing "a second Paren-stable format is a no-op"
       (is (nil? (c/format-all-op (snap "(def a\n  [{:x 1}\n   {:y 2}])" 0)
@@ -244,5 +244,5 @@
              (edit/apply-edits text (:edits (c/format-selection-op
                                              (snap text 2 10)
                                              {:stabilize pe/paren-stable}))))))
-    (testing "without the flag, a formatter-clean selection is a no-op as today"
+    (testing "without :stabilize, a formatter-clean selection is a no-op as today"
       (is (nil? (c/format-selection-op (snap text 2 10)))))))
