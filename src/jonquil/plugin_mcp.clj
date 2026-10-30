@@ -56,6 +56,11 @@
     (str "the source holds a NUL byte on line " (tabs/nul-line source)
          ", which the review pane can't show")
     (or (not (string? reason)) (str/blank? reason)) "a proposal needs a reason"
+    ;; the reason is agent text shown at the review gate through GTK
+    ;; labels, C strings too, so a NUL would display it truncated
+    (tabs/nul-line reason)
+    (str "the reason holds a NUL byte on line " (tabs/nul-line reason)
+         ", which the review pane can't show")
     (> (count source) MAX-SOURCE-CHARS)
     (str "the source is " (count source) " characters, more than the " MAX-SOURCE-CHARS " a proposal may have")
     (> (count reason) MAX-REASON-CHARS)
