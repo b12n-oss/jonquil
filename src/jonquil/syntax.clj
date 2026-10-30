@@ -307,6 +307,33 @@
 
 ;; --- Smart Indentation, Search & Quick Documentation ---
 
+(defn find-definitions
+  "Every def* form defining `sym-name` in `text`, in order: the scan
+   find-definition's first part makes (a `(` followed by a def-forms head,
+   past metadata to the defined symbol), collecting instead of stopping at
+   the first. Each is `{:symbol :start :end :line :kind :def :form head}`."
+  [^String text sym-name]
+  (if (or (not (string? text)) (str/blank? sym-name))
+    []
+    (let [tokens (vec (filter #(not= (first %) :comment) (tokenize text)))
+          n (count tokens)]
+      (vec
+       (for [i (range n)
+             :let [[tok-type s _] (nth tokens i)]
+             :when (and (= tok-type :bracket) (= (.charAt text s) \() (< (inc i) n))
+             :let [[_ next-s next-e] (nth tokens (inc i))
+                   head (.substring text next-s next-e)]
+             :when (def-forms head)
+             :let [[_ ts te] (loop [j (+ i 2)]
+                               (when (< j n)
+                                 (let [[t-type :as tok] (nth tokens j)]
+                                   (cond (= t-type :metatag) (recur (inc j))
+                                         (= t-type :symbol) tok
+                                         :else nil))))]
+             :when (and ts (= (.substring text ts te) sym-name))]
+         {:symbol sym-name :start ts :end te :line (line-number-at-offset text ts)
+          :kind :def :form head})))))
+
 (defn- prefix-unclosed?
   "Whether text before pos holds an unmatched bracket, as upstream 7056c61
   checks by scanning (subs text 0 pos). When the compute-brackets cache holds

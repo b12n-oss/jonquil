@@ -7,7 +7,8 @@
    :clear-last-fn :clear-console-fn :open-find-fn :open-replace-fn :zoom-fn
    :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn
    :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn :parinfer-fn
-   :describe-key-fn :key-bindings-fn :recent-keys-fn])
+   :describe-key-fn :key-bindings-fn :recent-keys-fn
+   :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -31,7 +32,10 @@
    :parinfer/paren [:parinfer-fn :paren] :parinfer/off [:parinfer-fn :off]
    :parinfer/next-mode [:parinfer-fn :next]
    :help/describe-key [:describe-key-fn] :help/key-bindings [:key-bindings-fn]
-   :help/recent-keys [:recent-keys-fn]})
+   :help/recent-keys [:recent-keys-fn]
+   :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
+   :locations/matches [:locations-matches-fn]
+   :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)
@@ -39,7 +43,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the shipped window commands, the palette, plugin reload, review and list, Parinfer's five, and the three key-describing commands")
+      "exactly the shipped window commands, the palette, plugin reload, review and list, Parinfer's five, the three key-describing commands and the five locations commands")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))

@@ -89,6 +89,24 @@ on to the editor or GTK. Typing, including Return, Tab and Backspace, shows
 only as a count, never as the characters typed. A command's own keys are in the
 palette's row for it.
 
+### The locations list
+
+Three palette commands list places in the buffer, in a panel on the right:
+**List the uses of the symbol at the caret** (code only, never comments,
+strings or keywords), **List the definitions of the symbol at the caret**
+(a `defmulti` and each of its `defmethod`s, for example), and **List every
+match of the find query, or of the selection** (the find bar's query when
+it has one). A list stops at 1,000 places, and its title says when it did.
+F8 or Cmd/Ctrl+. goes to the next place and Shift+F8 or Cmd/Ctrl+Shift+. to
+the previous one, selecting it (on a Mac, F8 needs fn, see [Keys](keys.md)); a
+click on a row goes there too, and F8 keeps working after the panel is
+closed. Places follow ordinary edits, so a line added above one doesn't
+move it off its text. A place whose text you deleted is reported gone.
+Format All and reloading the file from disk replace the whole buffer, which
+leaves the list out of date: F8 says so, and listing again fixes it.
+Stepping past either end says so. A list belongs to the tab it came from:
+closing that tab clears it.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System

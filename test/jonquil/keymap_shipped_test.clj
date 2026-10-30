@@ -146,6 +146,22 @@
     (is (= expected (window-command kv st holds))
         (str (format "0x%x" kv) " state " st " " holds))))
 
+(deftest locations-chords-test
+  ;; F8 steps forward through the locations list, Shift+F8 back; nothing
+  ;; else on F8
+  (is (= [:locations/next {}] (window-command 0xffc5 0 #{})))
+  (is (= [:locations/previous {}] (window-command 0xffc5 (:shift M) #{})))
+  (is (nil? (window-command 0xffc5 (:meta M) #{})))
+  (is (nil? (window-command 0xffc5 (:ctrl M) #{})))
+  ;; and Cmd/Ctrl+. and Cmd/Ctrl+Shift+. (the Lisp Machine's C-.), since a
+  ;; Mac keyboard sends F8 to Music unless fn is held. Shift+. arrives as
+  ;; greater (0x3e), as Cmd/Ctrl+Shift+] arrives as braceright.
+  (doseq [cmd [(:ctrl M) (:meta M)]]
+    (is (= [:locations/next {}] (window-command 0x2e cmd #{})))
+    (is (= [:locations/previous {}] (window-command 0x3e (bit-or cmd (:shift M)) #{}))))
+  (is (nil? (window-command 0x2e 0 #{})) "a plain . is typing")
+  (is (nil? (window-command 0x2e (bit-or (:meta M) (:alt M)) #{}))))
+
 (deftest f5-runs-whatever-the-modifiers-test
   (doseq [st states]
     (is (= [:run/run {}] (window-command 0xffc2 st #{})) (str "state " st))))

@@ -36,6 +36,7 @@
             [gtk-selftest-window.palette :as palette-rows]
             [gtk-selftest-window.parinfer :as parinfer-rows]
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
+            [gtk-selftest-window.locations :as locations-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
@@ -252,6 +253,16 @@
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists
    palette-rows/row-recent-keys-hides-typing
+   locations-rows/row-locations-pane-shows
+   locations-rows/row-locations-uses-step
+   locations-rows/row-locations-survive-edit
+   locations-rows/row-locations-gone
+   locations-rows/row-locations-ends
+   locations-rows/row-locations-definitions
+   locations-rows/row-locations-tab-close-clears
+   locations-rows/row-locations-buffer-replaced
+   locations-rows/row-locations-matches-empty-find
+   locations-rows/row-locations-empty-says-no-places
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named
