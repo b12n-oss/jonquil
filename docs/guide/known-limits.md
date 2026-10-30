@@ -50,7 +50,7 @@ Known rough edges, parked for later:
 <summary><strong>ClojureDart</strong> (7)</summary>
 
 - Stop detaches instead of interrupting, and there is no stdin.
-- It needs the fork that adds an nREPL server.
+- It needs the fork that adds an nREPL server, which is private for now.
 - `println` output is lost once the form that printed it throws.
 - Jonquil never re-sends your code; if the REPL doesn't answer its wake-up
   probe, it says so.

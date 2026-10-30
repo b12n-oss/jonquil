@@ -98,8 +98,8 @@
       "Where the engine is checked out: $JLT_DOCS_ENGINE, else the usual
        jlt-commons spot, else a sibling directory. nil when none exist. The
        jlt-commons checkout comes before ../docs-engine because a sibling
-       there can be an unrelated older fork (measured: ~/dev/b12n-oss has
-       one), which would otherwise shadow the real engine silently."
+       there can be an unrelated older fork, which would otherwise shadow
+       the real engine silently."
       []
       (let [home (System/getProperty "user.home")]
         (->> [(System/getenv "JLT_DOCS_ENGINE")
@@ -243,7 +243,7 @@
          col (fn [c s] (str esc c "m" s esc "0m"))
          hdr (fn [s] (println (str "\n" (col "35" (str "── " s " ──")))))
          row (fn [t d] (println (str "  " (col "36" (format "%-32s" (str runner " " t))) d)))]
-     (println (col "1;35" "\nJonquil — a DrRacket-style Clojure IDE written in Jolt"))
+     (println (col "1;35" "\nJonquil: a DrRacket-style Clojure IDE written in Jolt"))
      (println (col "2" (str "  runner: " runner "   ·   both `bb <task>` and `jolt <task>` work")))
      (hdr "Verify")
      (row "check" "require every project namespace headlessly, exit 0")
@@ -256,7 +256,7 @@
      (row "test:bb" "live nREPL-dialect tests: start a real bb nrepl-server (need bb on PATH; skips without one)")
      (row "test:basilisp" "the same against a real basilisp nrepl-server (JONQUIL_BASILISP or basilisp on PATH; skips without one)")
      (row "test:plugins" "live isolated plugin checks: run real jolt checker children (skips without jolt)")
-     (row "verify" "lint (report) + test + test:nrepl (must pass) — pre-commit gate")
+     (row "verify" "lint (report) + test + test:nrepl (must pass), the pre-commit gate")
      (hdr "Run and build")
      (row "app:run [file|dir]" "launch Jonquil, optionally on a file or a project folder")
      (row "app:build" "build the ./jonquil binary (unsigned on macOS)")
@@ -272,13 +272,13 @@
      (hdr "Self-test and docs")
      (row "gtk:selftest" "open real GTK windows and run the front-end self-test rows")
      (row "docs:shots" "self-capture docs/images/*.png (+ one GIF), one process per scene")
-     (hdr "Quality — lint and format")
+     (hdr "Quality: lint and format")
      (row "lint" "clj-kondo over src, test and dev (report only)")
      (row "lint:strict" "lint, but exit non-zero if there are any findings")
      (row "lsp:format" "reformat Clojure files (clojure-lsp; mutating)")
-     (row "lsp:format-check" "check formatting — dry run")
+     (row "lsp:format-check" "check formatting (dry run)")
      (row "lsp:clean-ns" "clean + organize ns forms (clojure-lsp; mutating)")
-     (row "lsp:clean-ns-check" "check ns forms — dry run")
+     (row "lsp:clean-ns-check" "check ns forms (dry run)")
      (row "lsp:check" "format + clean-ns, both dry run")
      (hdr "Git hooks")
      (row "hooks:install" "install FAST pre-commit hook (lint errors + format --dry)")
@@ -363,8 +363,7 @@
            (System/exit (if (and ok1 ok2 ok3 ok4 ok5 ok6 ok7 ok8 ok9 ok10) 0 1)))}
   docs:shots
   {:doc "Self-capture docs/images/*.png (+ one GIF): one fresh process per scene"
-   ;; P2.T9 round 1: one shared process/window for all 7 scenes let every
-   ;; scene inherit every earlier scene's console history, so a scene's
+   ;; One shared process/window for every scene let every scene inherit every earlier scene's console history, so a scene's
    ;; screenshot showed more than its own output. A fresh `jolt -M:shots
    ;; <scene-id>` process per scene means a fresh session and an empty
    ;; console every time. This scene-id list is kept in sync by hand with
@@ -425,13 +424,13 @@
              (shell "sips" "-s" "format" "png" "-z" "256" "256" "resources/Jonquil.icns" "--out" "resources/icon/jonquil-256.png")
              (finally (fs/delete-tree tmp))))}
   smoke:binary
-  {:doc "P2.T10: automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
+  {:doc "Automated smoke of the BUILT ./jonquil binary via cgevent --pid. Builds into target/smoke/jonquil first unless --no-build is given."
    :task (apply shell "bb" "dev/smoke/binary_smoke.clj" *command-line-args*)}
   mcp:smoke
   {:doc "Smoke of `jonquil --mcp` over real stdio (a checkout; pass --bin PATH for the built binary)"
    :task (apply shell "bb" "dev/smoke/mcp_smoke.clj" *command-line-args*)}
   smoke:cljd
-  {:doc "P4.T3 automated: smokes the ClojureDart attach dialect against your running ClojureDart app (dev/smoke/cljd_app.local.edn names it) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
+  {:doc "Automated smoke of the ClojureDart attach dialect against your running ClojureDart app (dev/smoke/cljd_app.local.edn names it) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
    :task (apply shell "bb" "dev/smoke/cljd_smoke.clj" *command-line-args*)}
   smoke:cljs
   {:doc "Smokes the ClojureScript attach dialect against your running shadow-cljs app (dev/smoke/cljs_app.local.edn names it; start the watch and the node script first) via cgevent --pid. Builds ./jonquil first unless --no-build is given."
@@ -502,7 +501,7 @@
    :task (shell "clojure-lsp" "format" "--filenames" (lsp-filenames))}
 
   lsp:format-check
-  {:doc "Check formatting — dry run"
+  {:doc "Check formatting (dry run)"
    :task (shell "clojure-lsp" "format" "--dry" "--filenames" (lsp-filenames))}
 
   lsp:clean-ns
@@ -510,7 +509,7 @@
    :task (shell "clojure-lsp" "clean-ns" "--filenames" (lsp-filenames))}
 
   lsp:clean-ns-check
-  {:doc "Check ns forms — dry run"
+  {:doc "Check ns forms (dry run)"
    :task (shell "clojure-lsp" "clean-ns" "--dry" "--filenames" (lsp-filenames))}
 
   lsp:check

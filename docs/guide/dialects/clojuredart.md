@@ -8,7 +8,7 @@ to a live process. It never starts, stops or signals the app.
 - Run the app under `bb dev:macos` (or `clj -M:cljd flutter`) on the
   ClojureDart fork that adds an nREPL server. It writes its port to
   `NREPL.lock` in the app directory, which Jonquil reads (never writes).
-  Upstream has no nREPL server, and the fork isn't published yet.
+  Upstream has no nREPL server, and the fork is private for now.
 - Open a file and Run. The first answer takes a few seconds and brings the
   ClojureDart banner. Then evaluate forms one at a time from a
   `(comment ...)` block.

@@ -32,7 +32,7 @@
   ;; GTK self-test: opens a real window and runs the front-end rows.
   :selftest {:extra-paths ["dev"]
              :main-opts ["-m" "gtk-selftest"]}
-  ;; P2.T7: the same self-test, but against the real jonquil.main/start!
+  ;; The same self-test, but against the real jonquil.main/start!
   ;; window instead of a bare editor+console -- needs its own alias because
   ;; :main-opts picks the FIRST -m it sees, so appending "-m
   ;; gtk-selftest-window" after :selftest's own "-m gtk-selftest" on the
@@ -40,34 +40,34 @@
   ;; those two tokens to gtk-selftest/-main as args.
   :selftest-window {:extra-paths ["dev"]
                     :main-opts ["-m" "gtk-selftest-window"]}
-  ;; D2.T4: the nREPL window rows -- a real window whose project opts into
+  ;; The nREPL window rows -- a real window whose project opts into
   ;; {:runtime :nrepl}, so a real Jolt child runs behind it.
   :selftest-nrepl {:extra-paths ["dev"]
                    :main-opts ["-m" "gtk-selftest-nrepl"]}
-  ;; cljd plan P2.T4: the ClojureDart window rows -- a real window on a
+  ;; The ClojureDart window rows -- a real window on a
   ;; throwaway app directory whose NREPL.lock names a fake fork server in
   ;; the same process (dev/fake_cljd_nrepl.clj). No real app is involved.
   :selftest-cljd {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-cljd"]}
-  ;; clj plan P2.T4: the JVM Clojure window rows -- a real window on a
+  ;; The JVM Clojure window rows -- a real window on a
   ;; throwaway JVM project directory whose .nrepl-port names a fake nREPL
   ;; server in the same process (dev/fake_jvm_nrepl.clj). No real JVM
   ;; server is involved.
   :selftest-clj {:extra-paths ["dev"]
                  :main-opts ["-m" "gtk-selftest-clj"]}
-  ;; D3 plan P1.T2: the fake jank nREPL server as a stand-in `jank`
+  ;; The fake jank nREPL server as a stand-in `jank`
   ;; executable (dev/fake-jank runs -m fake-jank-nrepl).
   :fake-jank {:extra-paths ["dev"]}
-  ;; cljs-node plan T3: a fake prepl as a stand-in `clojure` (dev/fake-cljs-clojure).
+  ;; A fake prepl as a stand-in `clojure` (dev/fake-cljs-clojure).
   :fake-cljs {:extra-paths ["dev"]}
-  ;; D3 plan P3.T1: a jank window against the fake jank process. Run it
+  ;; A jank window against the fake jank process. Run it
   ;; with JONQUIL_JANK pointing at dev/fake-jank (bb gtk:selftest sets it).
   :selftest-jank {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-jank"]}
   ;; The ClojureScript-on-node window rows: dev/fake-cljs-clojure as JONQUIL_CLOJURE.
   :selftest-cljs-node {:extra-paths ["dev"]
                        :main-opts ["-m" "gtk-selftest-cljs-node"]}
-  ;; File-tree plan P2.T3: a window launched on a directory.
+  ;; A window launched on a directory.
   :selftest-tree {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-tree"]}
   ;; The ClojureScript window rows -- a real window on throwaway shadow-cljs
@@ -75,14 +75,14 @@
   ;; same process (dev/fake_shadow_nrepl.clj). No real shadow-cljs is involved.
   :selftest-cljs {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-cljs"]}
-  ;; P1.T4: a launch with file and folder arguments (jonquil.main/gtk-argv).
+  ;; A launch with file and folder arguments (jonquil.main/gtk-argv).
   :selftest-args {:extra-paths ["dev"]
                   :main-opts ["-m" "gtk-selftest-args"]}
   ;; bb bench:edit [sizes...]: editing-stall benchmark on large files (opens
   ;; a real window per size).
   :bench {:extra-paths ["dev"]
           :main-opts ["-m" "bench-edit"]}
-  ;; P2.T9: opens the real window and self-captures docs/images/*.png (+
+  ;; Opens the real window and self-captures docs/images/*.png (+
   ;; one GIF) for the guide, driving jonquil.main/start! the same way
   ;; :selftest-window does.
   :shots {:extra-paths ["dev"]

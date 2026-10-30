@@ -29,7 +29,7 @@ A collapsible file tree (Cmd/Ctrl+Shift+E) shows the folder you launched on, whe
 
 Ctrl+Space completes as you type, with a documentation preview beside the candidate list, in both the Definitions editor and the console's input line. Ctrl+Q or Shift+F1 shows a symbol's documentation on the spot. F12 or Ctrl+B jumps to where it's defined: in the buffer, in a tab for another of your project's files (Cmd/Ctrl+[ goes back), or in a read-only panel for library code. Shift+F6 or F2 opens a rename popup, and confirming it renames every code use of the symbol. Shift+F10 or a right click reaches all of it from a context menu, and Cmd/Ctrl+Shift+P opens a command palette that lists every command with its keys and runs the one you pick. At the prompt, `*1`, `*2`, `*3` and `*e` hold the last results and the last error, and `doc`, `find-doc`, `apropos`, `dir`, `pprint` and `pp` are there without a `require`, whether Jolt runs in process or out of it.
 
-Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, whose editor commands and keys work alongside the built-in ones, and whose hooks hear about saves, Runs and errors and can stop a Run before it starts. An agent can propose a plugin too, which waits for you to accept or reject it. The palette's Plugins… lists them, so you can disable one, enable it again, open its file, or see its history and revert to an older version. Each version of a plugin that goes live is kept in `plugins/.history/`.
+Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, whose editor commands and keys work alongside the built-in ones, and whose hooks hear about saves, Runs and errors and can stop a Run before it starts. An agent can propose a plugin too, which waits for you to accept or reject it. The palette's "Show the plugins" entry lists them, so you can disable one, enable it again, open its file, or see its history and revert to an older version. Each version of a plugin that goes live is kept in `plugins/.history/`.
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
@@ -38,7 +38,7 @@ Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, who
 - [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`
 - GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
 - `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.0 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
-- A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork isn't published yet
+- A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork is private for now
 - Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
 - A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect when it attaches: Jonquil never starts it
 - The `clojure` CLI and `node` on `PATH` (or `JONQUIL_CLOJURE`), only for ClojureScript on node: Jonquil starts ClojureScript itself, and the first start can download the Closure Compiler
@@ -122,7 +122,7 @@ bb test jonquil.edit-test # one namespace (the TDD loop)
 bb linux:test             # bb test in a Linux container (local Docker; also linux:selftest, linux:build, linux:vnc; no CI)
 bb gtk:selftest           # real-window self-tests, opens ten windows (don't type while it runs)
 bb docs:shots             # re-capture docs/images/*.png, one process per scene
-bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows)
+bb smoke:binary           # build ./jonquil and drive it with cgevent key --pid (keys go only to its own windows; cgevent is private for now)
 bb smoke:cljd             # drive the built binary against a running ClojureDart app (start your ClojureDart app first; see the development guide)
 bb smoke:cljs             # drive the built binary against a running shadow-cljs app (start its watch and open the app first; see the development guide)
 bb bench:edit             # time editing stalls on large files (opens a real window per size)

@@ -19,7 +19,7 @@ Each other dialect needs one more thing, only when you use it:
 - **JVM Clojure**: Java 17+, the `clojure` CLI, and an nREPL server you
   start. See [JVM Clojure](dialects/jvm-clojure.md).
 - **ClojureDart** (experimental): a running app built with the ClojureDart
-  fork that serves nREPL. See [ClojureDart](dialects/clojuredart.md).
+  fork that serves nREPL (private for now). See [ClojureDart](dialects/clojuredart.md).
 - **ClojureScript** (experimental): `npx shadow-cljs watch <build>` in a
   shadow-cljs project, or just the Clojure CLI and `node` for a loose
   `.cljs` file. See
