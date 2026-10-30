@@ -3713,6 +3713,8 @@
      (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
     (source-pane/apply-theme! sp (theme/theme @theme-name))
     (add-watch theme-name ::source-pane (fn [_ _ _ k] (source-pane/apply-theme! sp (theme/theme k))))
+    (inspector-pane/apply-theme! pane (theme/theme @theme-name))
+    (add-watch theme-name ::inspector-pane (fn [_ _ _ k] (inspector-pane/apply-theme! pane (theme/theme k))))
     (g/g-signal-connect-data run-btn "clicked"
                              (callable (contain-click status-label "run" (fn [_] (run-fn))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)

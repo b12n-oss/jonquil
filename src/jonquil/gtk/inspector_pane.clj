@@ -76,6 +76,13 @@
   (g/gtk-label-set-text (:footer pane) (str "; " msg))
   nil)
 
+(defn apply-theme!
+  "Sets the selected row's tag background to theme t's :selection. Only
+  ever touches the tag's colour, never the rows or the selection."
+  [pane t]
+  (g/set-string-property! (:selected-tag pane) "background" (:selection t))
+  nil)
+
 (def ^:private NOTE-POLL-MS
   ;; estimate: frequent enough that a note's clear lands close to its own
   ;; NOTE-CLEAR-MS deadline, far enough apart not to spin the main loop.

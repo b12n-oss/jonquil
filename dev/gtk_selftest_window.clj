@@ -150,6 +150,7 @@
    close-prerun/row-close-alert-build-throws
    close-prerun/row-quit-action-prompts
    themes/row-theme-retints-tags
+   themes/row-theme-retints-inspector-selection
    themes/row-theme-css
    themes/row-theme-prefer-dark
    themes/row-theme-keeps-text-and-undo
