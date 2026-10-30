@@ -41,7 +41,12 @@
     (is (= "the source holds a NUL byte on line 2, which the review pane can't show"
            (pm/propose-refusal (assoc ok :source "(ns x)\n(def a \"y\u0000\")"))))
     (is (= "the source holds a NUL byte on line 1, which the review pane can't show"
-           (pm/propose-refusal (assoc ok :source "\u0000"))))))
+           (pm/propose-refusal (assoc ok :source "\u0000"))))
+    ;; the sweep arc: the reason is agent text shown at the review gate
+    ;; through GTK labels, which are C strings too
+    (is (= "the reason holds a NUL byte on line 1, which the review pane can't show"
+           (pm/propose-refusal (assoc ok :reason "fast\u0000er"))))
+    (is (nil? (pm/propose-refusal ok)))))
 
 (deftest propose-refusal-test
   (let [ok {:id "fmt" :source "(ns x)" :reason "faster" :plugins? true}]

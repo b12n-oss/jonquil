@@ -1219,19 +1219,24 @@
                             {:was-stale stale? :text text})))
                  (finally (parinfer-off! ed))))))
 
-(defn- row-parinfer-cache-invalidated-by-set-text [ed]
-  (go-row :parinfer-cache-invalidated-by-set-text check
+(defn- row-parinfer-cache-reprimed-by-set-text [ed]
+  (go-row :parinfer-cache-reprimed-by-set-text check
     (on-gtk (try (parinfer-on! ed :smart)
                  (editor/set-text! ed "")
                  (caret! ed 0)
                  (type-str! ed "(")               ; primes the cache
-                 (editor/set-text! ed "(x\n  y)") ; a reload, outside the hook
-                 (caret! ed 5)
-                 (delete-action! ed 3 5)
-                 (let [text (editor/editor-text ed)]
-                   (check :parinfer-cache-invalidated-by-set-text
-                          (= "(x)\ny" text)
-                          {:text text}))
+                 (editor/set-text! ed "(x\n  y)") ; a reload re-primes (miss-path cut 2)
+                 ;; the sweep arc: pin the re-prime itself, not just the
+                 ;; edit that follows it (#152's deferred text-only assert)
+                 (let [c @(:parinfer-prev-cache ed)
+                       primed? (and (= "(x\n  y)" (:text c))
+                                    (= (:gen c) @(:edit-gen ed)))]
+                   (caret! ed 5)
+                   (delete-action! ed 3 5)
+                   (let [text (editor/editor-text ed)]
+                     (check :parinfer-cache-reprimed-by-set-text
+                            (and primed? (= "(x)\ny" text))
+                            {:primed primed? :cache (update c :text pr-str) :text text})))
                  (finally (parinfer-off! ed))))))
 
 (defn- row-parinfer-cache-invalidated-by-plain-op [ed]
@@ -1397,14 +1402,18 @@ b" text)
                  ;; coherent again.
                  (editor/set-text! ed "(a)")
                  (let [r (editor/apply-op-plain!
-                          ed {:edits [[1 2 (str "x" (char 0) "y")]] :caret 0})]
+                          ed {:edits [[1 2 (str "x" (char 0) "y")]] :caret 0})
+                       ;; the sweep arc: pin the clear itself (the accepted
+                       ;; one honest miss), so keeping the cache would have
+                       ;; to be a deliberate change
+                       cleared? (nil? @(:parinfer-prev-cache ed))]
                    (caret! ed 1)
                    (type-str! ed "z")
                    (let [text (editor/editor-text ed)
                          eq (= (:text @(:parinfer-prev-cache ed)) text)]
                      (check :parinfer-nul-plain-op-clears-the-cache
-                            (and (nil? r) (= "(za)" text) eq)
-                            {:r r :text text :eq eq})))
+                            (and (nil? r) cleared? (= "(za)" text) eq)
+                            {:r r :cleared cleared? :text text :eq eq})))
                  (finally (parinfer-off! ed))))))
 
 (defn- row-parinfer-redo-splices-the-end-read [ed]
@@ -1921,7 +1930,7 @@ b" text) eq (pos? @splices))
    row-parinfer-engine-failure-named-once
    row-parinfer-cache-steady-typing
    row-parinfer-cache-invalidated-by-undo
-   row-parinfer-cache-invalidated-by-set-text
+   row-parinfer-cache-reprimed-by-set-text
    row-parinfer-cache-invalidated-by-plain-op
    row-parinfer-selection-replace-bounds
    row-parinfer-caret-move-keeps-first-edit-reindent
