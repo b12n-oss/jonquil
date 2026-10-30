@@ -22,7 +22,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
-            [jonquil.inspect :as inspect]))
+            [jonquil.inspect :as inspect]
+            [jonquil.inspect.view :as view]))
 
 ;; gdkkeysyms.h (GTK 4.22.4 installed headers): Down 0xff54, Return 0xff0d,
 ;; Escape 0xff1b -- this file's own private copies, same convention as
@@ -662,6 +663,28 @@
        (support/check :row-inspect-reopen-reuses-callback
                       (and ok1 ok2 (= before after))
                       {:cycles [ok1 ok2] :retained-before before :retained-after after})))))
+
+(defn row-inspect-form-queues-behind-request
+  "Inspect Form's open, arriving while another panel request is still in
+  flight, runs once that request's reply lands instead of being dropped:
+  the form sleeps 400 ms, an Inspect Last sent meanwhile holds a :start
+  for the old *1 in flight (every inspector op answers 1200 ms late), and
+  the panel still ends on the form's value."
+  [ui]
+  (go-row :row-inspect-form-queues-behind-request support/check
+    (let [slow-op (let [orig view/run-op]
+                    (fn [& args] (let [r (apply orig args)] (Thread/sleep 1200) r)))
+          shows-form? #(str/includes? (pr-str ((:inspector-state* ui))) ":queued-form")]
+      (with-redefs [view/run-op slow-op]
+        (on-gtk (let [ed (:editor ui)]
+                  (editor/set-text! ed "(do (Thread/sleep 400) [:queued-form])")
+                  (support/place-cursor! (:buf ed) 1)
+                  ((:inspect-form!* ui))
+                  ((:inspect-last!* ui))))
+        (let [shown? (await-until 8000 50 shows-form?)]
+          (on-gtk
+           (support/check :row-inspect-form-queues-behind-request shown?
+                          {:shown shown? :state (subs (pr-str ((:inspector-state* ui))) 0 120)})))))))
 
 (defn row-inspect-def-prompt-escape-safe
   "The def prompt joins the window's own close-popovers registry, so
