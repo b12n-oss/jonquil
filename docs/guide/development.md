@@ -138,8 +138,13 @@ It checks file bytes, window titles, and screen pixels (OCR through
 `cgevent ocr-inspect`, plus a colour check of the theme's text and prompt).
 Every process it starts is killed on every exit path.
 
+`bb smoke:binary`, `smoke:cljd`, `smoke:cljs` and `bb docs:shots` drive the
+macOS `cgevent` tool, which is private for now, so they run only where it
+is installed. The unit suite, the self-tests and `bb linux:test` never need
+it.
+
 **`bb smoke:cljd`** drives a built `./jonquil` against a real, running
-ClojureDart app built with nREPL support. The gitignored
+ClojureDart app built on the nREPL fork (private for now). The gitignored
 `dev/smoke/cljd_app.local.edn` names it: `:dir` (absolute path), `:main-ns`
 (the namespace Run loads), and optionally `:fork-sha` (a prefix the app's
 `deps.edn` `:git/sha` must start with). Without the file the task prints
