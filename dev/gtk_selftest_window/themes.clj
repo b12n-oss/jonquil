@@ -57,6 +57,21 @@
                                   :result-light result-light :fb-light fb-light :fbfg-light fbfg-light})
                   ((:zoom!* ui) :reset)))))))
 
+(defn row-theme-retints-inspector-selection
+  "The inspector's selected-row tag follows the theme: its background-rgba
+  is navy's :selection (#2e3250) after switching to navy, then light's
+  (#b6d7ff)."
+  [ui]
+  (go-row :theme-retints-inspector-selection support/check
+    (on-gtk (let [tag (:selected-tag (:inspector ui))]
+              ((:set-theme!* ui) :navy)
+              (let [navy (g/rgba-property-hex tag "background-rgba")]
+                ((:set-theme!* ui) :light)
+                (let [light (g/rgba-property-hex tag "background-rgba")]
+                  (support/check :theme-retints-inspector-selection
+                                 (and (= "#2e3250" navy) (= "#b6d7ff" light))
+                                 {:navy navy :light light})))))))
+
 (defn row-theme-css
   "dark's code-css (jonquil.theme/code-css) at the default font size, read
   back from the shared GtkCssProvider's OWN serialisation (:code-css*
