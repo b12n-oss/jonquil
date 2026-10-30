@@ -10,8 +10,9 @@ needed along the way.
 The pin is [DrClojure-Neo](https://github.com/kimtg/DrClojure-Neo) at commit
 [`7056c61`](https://github.com/kimtg/DrClojure-Neo/commit/7056c61e09f8e9ad3c63fc4b1bd9ac35d15ad3ed) (2026-09-28), recorded in `UPSTREAM_PIN`.
 Most of the lifted code dates from the earlier pin `41c56b8` (2026-09-22);
-`7056c61` brought its smart-indent fix and its Parinfer engine, which isn't
-wired to the editor yet (see `UPSTREAM.md`).
+`7056c61` brought its smart-indent fix and its Parinfer engine, which
+Jonquil wires to the editor through its own `jonquil.parinfer-edit` (off
+by default; see `UPSTREAM.md`).
 
 ## What was lifted, and what was rebuilt
 

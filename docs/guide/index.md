@@ -33,7 +33,7 @@ works, the languages Jonquil runs, and how it's put together.
    the unit suite, the self-test and binary-smoke harnesses, screenshots,
    and lint, format, and the git hooks.
 4. **[Architecture](architecture/index.md)**: the namespace layers, why GTK is
-   only ever required from `jonquil.main`, the inspector and the eval
+   only ever required from `jonquil.main` and `jonquil.mcp.window`, the inspector and the eval
    engine, with pages for [commands, keys and plugins](architecture/commands-keys-plugins.md),
    [MCP](architecture/mcp.md), [dialects](architecture/dialects.md),
    [attached](architecture/attached-runtimes.md) and
