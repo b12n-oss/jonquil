@@ -108,3 +108,7 @@
       (is (= "The server's view couldn't be read." (:note (inspect/parse-view ""))))
       (is (= "The server's view couldn't be read." (:note (inspect/parse-view nil))))
       (is (= "The server's view couldn't be read." (:note (inspect/parse-view "42")))))))
+
+(deftest history-requests-test
+  (is (= {:op "inspect-earlier"} (inspect/request :earlier {})))
+  (is (= {:op "inspect-later"} (inspect/request :later {}))))

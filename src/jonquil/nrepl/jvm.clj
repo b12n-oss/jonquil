@@ -627,6 +627,8 @@
                   (nil? conn) {:error clj/inspect-not-attached}
                   (not (client/open? conn)) {:error clj/lost-connection :lost? true}
                   (not (contains? ops "inspect-start")) {:error inspect/unavailable-message}
+                  ;; the server's inspector has no history: say so, send nothing
+                  (#{:earlier :later} op) {:error inspect/no-history-message}
                   :else
                   (let [r (client/request-sync conn (assoc (inspect/request op args) :session session)
                                                (:inspect-timeout-ms timings))]

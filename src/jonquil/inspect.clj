@@ -6,6 +6,11 @@
 
 (def timeout-message "The server didn't answer.")
 
+(def no-history-message
+  "A JVM server's inspector (clojure-cli.repl's) keeps only its current
+  object, so Earlier and Later can't go back to another one."
+  "This server keeps only the object it shows now.")
+
 (defn request
   "The wire op for a jonquil.evaluator/Inspector call: op/args to the
   server's inspect-* op and its keys, before :session is merged in. The
@@ -19,7 +24,10 @@
     :page {:op "inspect-page" :delta (:delta args)}
     :meta {:op "inspect-toggle-meta" :cursor (:cursor args)}
     :table {:op "inspect-toggle-table"}
-    :def {:op "inspect-def" :name (:name args)}))
+    :def {:op "inspect-def" :name (:name args)}
+    ;; Jonquil's own history ops: only its Jolt middleware answers them
+    :earlier {:op "inspect-earlier"}
+    :later {:op "inspect-later"}))
 
 (defn parse-view
   "Parse a server view string to a map. A blank or unreadable string gives

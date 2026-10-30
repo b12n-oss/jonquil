@@ -955,6 +955,17 @@
         (is (false? (ev/inspectable? e)))
         (is (= {:error inspect/unavailable-message} (inspect-sync e :start {:rows 10 :cols 40} 2000)))))))
 
+(deftest inspect-history-refused-test
+  ;; a JVM server keeps only its current object: earlier and later answer a
+  ;; sentence and send nothing
+  (with-project {}
+    (fn [srv dir _]
+      (let [e (make dir)]
+        (run e "1" {:run? false})
+        (doseq [op [:earlier :later]]
+          (is (= {:error inspect/no-history-message} (inspect-sync e op {} 2000))))
+        (is (not-any? #{"inspect-earlier" "inspect-later"} (fake/ops-seen srv)))))))
+
 (deftest inspect-timeout-test
   ;; fake :inspect-ms 1000 with :inspect-timeout-ms 200 -> {:error inspect/timeout-message} in < 1000 ms
   (with-project {:inspect-ms 1000}
