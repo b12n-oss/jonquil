@@ -40,7 +40,7 @@
    "braceright" 0x07d "braceleft" 0x07b
    "F3" 0xffc0 "F5" 0xffc2 "F6" 0xffc3 "F8" 0xffc5 "Escape" 0xff1b "bracketleft" 0x05b
    "space" 0x020 "slash" 0x02f "semicolon" 0x03b "F1" 0xffbe "F2" 0xffbf "F12" 0xffc9
-   "Return" 0xff0d "KP_Enter" 0xff8d})
+   "Return" 0xff0d "KP_Enter" 0xff8d "period" 0x02e "greater" 0x03e})
 
 (defn key-value
   "The keyval a binding's key name stands for: a lower-case letter or a

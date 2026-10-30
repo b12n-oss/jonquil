@@ -97,7 +97,8 @@ strings or keywords), **List the definitions of the symbol at the caret**
 (a `defmulti` and each of its `defmethod`s, for example), and **List every
 match of the find query, or of the selection** (the find bar's query when
 it has one). A list stops at 1,000 places, and its title says when it did.
-F8 goes to the next place and Shift+F8 to the previous one, selecting it; a
+F8 or Cmd/Ctrl+. goes to the next place and Shift+F8 or Cmd/Ctrl+Shift+. to
+the previous one, selecting it (on a Mac, F8 needs fn, see [Keys](keys.md)); a
 click on a row goes there too, and F8 keeps working after the panel is
 closed. Places follow ordinary edits, so a line added above one doesn't
 move it off its text. A place whose text you deleted is reported gone.

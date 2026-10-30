@@ -32,6 +32,10 @@
   ;; the locations list: F8 steps forward, Shift+F8 back
   {:key "F8" :exact #{} :command :locations/next}
   {:key "F8" :exact #{:shift} :command :locations/previous}
+  ;; and Cmd/Ctrl+. and Cmd/Ctrl+Shift+., since a Mac keyboard sends F8 to
+  ;; Music unless fn is held; Shift+. arrives as greater
+  {:key "period" :mods #{:cmd} :not #{:alt} :command :locations/next}
+  {:key "greater" :mods #{:cmd} :not #{:alt} :command :locations/previous}
   {:key "o" :mods #{:cmd :shift} :when [:source-focused] :command :source/open-here}
   ;; Parinfer: Cmd/Ctrl+Alt+P cycles the mode (upstream's Ctrl+Alt+P). On
   ;; macOS Option remaps P's keyval; :physical? matches the keycode, as the

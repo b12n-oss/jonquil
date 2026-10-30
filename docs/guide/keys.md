@@ -2,6 +2,11 @@
 
 Keys by purpose; click a group to open it.
 
+On a Mac keyboard the top row sends media and brightness keys by default,
+so every F-key here (F5 Run, F6, F8, F12 and the rest) needs fn held, unless
+System Settings > Keyboard has "Use F1, F2, etc. keys as standard function
+keys" turned on. F8 without fn plays or pauses Music.
+
 <details>
 <summary><strong>Run, files and tabs</strong></summary>
 
@@ -57,6 +62,8 @@ Keys by purpose; click a group to open it.
 | F6 | anywhere in the window | Move focus between the editor and the console |
 | F8 | anywhere in the window | Go to the next place in the locations list |
 | Shift+F8 | anywhere in the window | Go to the previous place in the locations list |
+| Cmd/Ctrl+. | anywhere in the window | Go to the next place in the locations list |
+| Cmd/Ctrl+Shift+. | anywhere in the window | Go to the previous place in the locations list |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |

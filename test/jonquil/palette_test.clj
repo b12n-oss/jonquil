@@ -4,6 +4,10 @@
             [jonquil.keymap :as km]
             [jonquil.palette :as palette]))
 
+(deftest period-labels-test
+  (is (= "Cmd+." (palette/chord-label {:key "period" :mods #{:cmd}} "Mac OS X")))
+  (is (= "Ctrl+>" (palette/chord-label {:key "greater" :mods #{:cmd}} "Linux"))))
+
 (deftest chord-label-test
   (doseq [[b mac linux] [[{:key "p" :mods #{:cmd :shift}} "Cmd+Shift+P" "Ctrl+Shift+P"]
                          [{:key "q" :mods #{:ctrl} :not #{:meta}} "Ctrl+Q" "Ctrl+Q"]

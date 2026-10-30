@@ -8,7 +8,7 @@
 (def ^:private key-display
   {"equal" "=" "plus" "+" "minus" "-" "slash" "/" "semicolon" ";" "bracketleft" "["
    "braceleft" "{" "braceright" "}" "space" "Space" "Return" "Enter" "KP_Enter" "Enter"
-   "Escape" "Esc"})
+   "Escape" "Esc" "period" "." "greater" ">"})
 
 (defn- key-label [k]
   (or (key-display k) (if (= 1 (count k)) (str/upper-case k) k)))

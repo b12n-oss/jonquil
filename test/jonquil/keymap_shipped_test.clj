@@ -152,7 +152,15 @@
   (is (= [:locations/next {}] (window-command 0xffc5 0 #{})))
   (is (= [:locations/previous {}] (window-command 0xffc5 (:shift M) #{})))
   (is (nil? (window-command 0xffc5 (:meta M) #{})))
-  (is (nil? (window-command 0xffc5 (:ctrl M) #{}))))
+  (is (nil? (window-command 0xffc5 (:ctrl M) #{})))
+  ;; and Cmd/Ctrl+. and Cmd/Ctrl+Shift+. (the Lisp Machine's C-.), since a
+  ;; Mac keyboard sends F8 to Music unless fn is held. Shift+. arrives as
+  ;; greater (0x3e), as Cmd/Ctrl+Shift+] arrives as braceright.
+  (doseq [cmd [(:ctrl M) (:meta M)]]
+    (is (= [:locations/next {}] (window-command 0x2e cmd #{})))
+    (is (= [:locations/previous {}] (window-command 0x3e (bit-or cmd (:shift M)) #{}))))
+  (is (nil? (window-command 0x2e 0 #{})) "a plain . is typing")
+  (is (nil? (window-command 0x2e (bit-or (:meta M) (:alt M)) #{}))))
 
 (deftest f5-runs-whatever-the-modifiers-test
   (doseq [st states]
