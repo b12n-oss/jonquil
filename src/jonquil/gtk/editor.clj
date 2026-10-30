@@ -14,14 +14,12 @@
   without waiting on the tick -- and because repaint! only ever touches
   tags, never buffer text, a repaint can never itself flip dirty?.
 
-  P3.T4 fix round 1: repaint! removes and reapplies only the tags it owns
-  (this namespace's own paint/rainbow/unmatched set, keyed in :tags), never
-  gtk_text_buffer_remove_all_tags over the whole buffer -- that used to
-  strip ANY other tag applied over the same range too, including
-  jonquil.gtk.find-bar's search-match tag, and since a repaint's own
-  tag-only mutation never itself fires `changed`, nothing re-applied it
-  afterward; the search-match highlight silently vanished up to 60-80ms
-  after every keystroke while the find bar stayed open.
+  repaint! removes and reapplies only the tags it owns (this namespace's
+  paint/rainbow/unmatched set, keyed in :tags), never
+  gtk_text_buffer_remove_all_tags over the whole buffer: that would strip
+  any other tag over the same range too, including jonquil.gtk.find-bar's
+  search-match tag, and since a tag-only repaint never fires `changed`,
+  nothing would re-apply it.
 
   Every GTK call here already runs on the GTK thread: signal emission and
   g_timeout_add callbacks are both delivered by GTK's own main loop, so
@@ -47,9 +45,8 @@
 (defn- make-tags!
   "One GtkTextTag per paint/style key: every paint/token-styles key,
   [:rainbow 0..6], and :unmatched. :bold sets weight 700; :italic goes
-  through set-italic! (the S2 italic gap the p2c probe closed). Tags start
-  with theme/default-theme's colours; apply-theme! (TH.T4) retints them in
-  place, never recreating them."
+  through set-italic!. Tags start with theme/default-theme's colours;
+  apply-theme! retints them in place, never recreating them."
   [buf]
   (let [table (g/gtk-text-buffer-get-tag-table buf)
         ks (concat (keys paint/token-styles)
@@ -74,9 +71,9 @@
   (g/buffer-text (:buf ed)))
 
 (defn rebase-saved!
-  "Records s as the saved text without touching the buffer (plugins F2: a
-  dirty tab's file was rewritten by a plugin step, so what's on disk is
-  the baseline now). Marks a dirty recompute needed, as mark-saved! does."
+  "Records s as the saved text without touching the buffer (a dirty
+  tab's file was rewritten by a plugin step, so what's on disk is the
+  baseline now). Marks a dirty recompute needed, as mark-saved! does."
   [ed s]
   (reset! (:saved-text ed) s)
   (reset! (:dirty-check-needed? ed) true)
@@ -84,9 +81,9 @@
 
 (defn mark-saved!
   "Records the current text as saved, so dirty? reads false until the next
-  change. Marks a dirty recompute needed (M7): this changes what dirty?
-  will return without any buffer mutation, so no `changed` signal fires on
-  its own to trigger tick!'s usual recompute trigger."
+  change. Marks a dirty recompute needed: this changes what dirty?
+  will return without any buffer mutation, so no `changed` signal fires to
+  trigger tick!'s usual recompute."
   [ed]
   (reset! (:saved-text ed) (editor-text ed))
   (reset! (:dirty-check-needed? ed) true)
@@ -119,7 +116,7 @@
   "Arms the record of changes arriving outside the hook's sight, full
   length n, in the same step as a cache prime: the hook's own fix signals
   have already fired by then, so no busy flag is needed and every LATER
-  signal narrows it (the undo-path plan). nil clears it alongside a
+  signal narrows it. nil clears it alongside a
   cleared cache: no cache, nothing to recover from."
   [ed n]
   (reset! (:parinfer-outside-span ed) (when n {:prefix n :suffix n})))
@@ -128,7 +125,7 @@
   "Replaces the whole buffer inside begin/end_irreversible_action, so it
   leaves no undo step, and records s as the saved text in the same call --
   before the next tick can run -- so set-text! never itself marks dirty or
-  fires on-dirty-changed!. Also marks a dirty recompute needed (M7),
+  fires on-dirty-changed!. Also marks a dirty recompute needed,
   belt-and-braces alongside the `changed` signal set-text buffer itself
   emits. Also supersedes any paint-async! still in flight (its :gen moves
   on). set-text! fully replaces the buffer, so a read-only editor
@@ -145,11 +142,11 @@
     (g/gtk-text-buffer-end-irreversible-action buf)
     (reset! (:saved-text ed) s)
     ;; The new text is in hand, so the Parinfer cache primes for free and
-    ;; the next keystroke is a hit (miss-path cut 2). The gen is read after
+    ;; the next keystroke is a hit. The gen is read after
     ;; the set, in this same step, so the prime can't be stale; no :edit-at,
     ;; so the first-edit re-indent still fires. GTK takes a C string, so a
     ;; NUL in s truncates what the buffer keeps: prime only when the counts
-    ;; agree, else clear and the next keystroke misses honestly (review I1).
+    ;; agree, else clear and the next keystroke misses honestly.
     (let [ok? (= (count s) (g/gtk-text-buffer-get-char-count buf))]
       (reset! (:parinfer-prev-cache ed)
               (when ok? {:text s :gen @(:edit-gen ed)}))
@@ -158,8 +155,8 @@
       (g/with-iters* buf 0 (count s)
         (fn [a b] (g/gtk-text-buffer-apply-tag buf (:readonly-tag ed) a b)))))
   (reset! (:dirty-check-needed? ed) true)
-  ;; P3.T5: belt-and-braces alongside the buffer's own cursor notify (below),
-  ;; same reasoning as the dirty-check-needed? line above it.
+  ;; Belt-and-braces alongside the buffer's own cursor notify (below), same
+  ;; reasoning as the dirty-check-needed? line above it.
   (doseq [f @(:on-cursor-fns ed)] (f (g/cursor-line-col (:buf ed))))
   nil)
 
@@ -186,8 +183,8 @@
 (defn on-cursor-moved!
   "Registers f (fn [[line col]], both 0-based) to be called, on the GTK
   thread, whenever the insert mark's position changes: on the buffer's
-  own \"notify::cursor-position\" (P3 fix wave I2, replacing P3.T5's
-  mark-set, which an insert or delete never emits), and on set-text! (which
+  own \"notify::cursor-position\" (not mark-set, which an insert or delete
+  never emits), and on set-text! (which
   resets the cursor without necessarily firing mark-set itself, same
   belt-and-braces reasoning as dirty-check-needed?). Multiple
   registrations fire in registration order, mirroring on-dirty-changed!."
@@ -198,8 +195,7 @@
 (defn on-focus-lost!
   "Registers f (fn [] -> nil) to be called, on the GTK thread, whenever
   the editor's view (or a descendant) stops being the root's focus widget
-  -- GtkEventControllerFocus's own \"leave\" signal (P4.T4, ffi.clj's own
-  citation), which tracks focus-within independent of OS window-
+  -- GtkEventControllerFocus's own \"leave\" signal, which tracks focus-within independent of OS window-
   activation, unlike gtk_widget_has_focus (window.clj's do-toggle-focus!
   docstring). Multiple registrations fire in registration order, mirroring
   on-dirty-changed!/on-cursor-moved!."
@@ -244,15 +240,15 @@
 
 (defn set-run-form-fn!
   "Registers f (fn [] -> nil), the ui's own :run-form!* action, to run for
-  the editor's Run Form chord (Cmd/Ctrl+Enter, cljd plan P3.T2). See
+  the editor's Run Form chord (Cmd/Ctrl+Enter). See
   set-quick-doc-fn!."
   [ed f]
   (reset! (:run-form-fn ed) f)
   nil)
 
 (defn set-flash-cancel-fn!
-  "Registers f (fn [] -> nil), Run Form's own flash cancel (I2 fix wave:
-  window.clj's make-flash-fn, called from handle-key! below before any
+  "Registers f (fn [] -> nil), Run Form's own flash cancel (window.clj's
+  make-flash-fn, called from handle-key! below before any
   other key handling). See set-quick-doc-fn!."
   [ed f]
   (reset! (:flash-cancel-fn ed) f)
@@ -260,7 +256,7 @@
 
 (defn set-completion-fns!
   "Registers fns ({:complete! (fn [] -> nil) :handle-key! (fn [keyval
-  state] -> 0/1)}), the ui's own completion actions (P4.T5): :complete! is
+  state] -> 0/1)}), the ui's own completion actions: :complete! is
   the editor's Ctrl+Space chord's own action (jonquil.gtk.window's
   :complete!*, single slot, same reasoning as set-quick-doc-fn!/
   set-jump-fn!'s own docstrings). :handle-key! is asked FIRST, ahead of
@@ -268,7 +264,7 @@
   preedit -- jonquil.gtk.completion/handle-key! itself gates on whether
   completion is actually open and returns 0 for every key otherwise, so
   this is a safe, cheap no-op call before completion is wired (this
-  namespace's own pre-P4.T5 self-test callers) or while the popup is
+  namespace's own self-test callers) or while the popup is
   closed. Completion's OWN close conditions (a caret move out of the word,
   focus lost, another popover opening) are wired by jonquil.gtk.window
   through the EXISTING on-cursor-moved!/on-focus-lost! hooks above, not a
@@ -300,20 +296,18 @@
   repaints, since a read-only editor paints through paint-async! instead.
   Caret movement, selection, copy and the F12/Ctrl+B jump slot still work.
 
-  Deviation from the brief's step 3(g): the view's own editable property
-  (set above) only gates the view's OWN key/IM/paste handling -- it has no
+  The view's own editable property (set above) only gates the view's OWN key/IM/paste handling -- it has no
   effect on a direct buffer call like
   gtk_text_buffer_insert_interactive_at_cursor, which checks per-range
   `editable` tags against its own default_editable argument, independent of
-  any view. Measured: the brief's verbatim set-read-only! (view-editable
-  toggle only) left row-read-only-refuses-edits FAILing -- its buffer-level
-  insert went through with the editor read-only. jonquil.gtk.console-view
+  any view. Toggling only the view's editable property let a buffer-level insert
+  through with the editor read-only (measured). jonquil.gtk.console-view
   already solves exactly this for its own read-only regions with a
   `readonly-tag` (editable false); this editor applies that same tag over
   the whole buffer here, and set-text! (above) reapplies it after a full
   text replacement.
 
-  Fix round 1: also supersedes any paint-async! still in flight (its
+  Also supersedes any paint-async! still in flight (its
   :gen moves on), the same way set-text! does -- toggling read-only off
   mid-paint re-permits apply-op! edits, and a chunk from the old paint
   landing afterward would apply tags at offsets computed from text that
@@ -333,7 +327,7 @@
   nil)
 
 (defn apply-theme!
-  "Retints every tag in (:tags ed) to theme t's colours (TH.T4): sets each
+  "Retints every tag in (:tags ed) to theme t's colours: sets each
   tag's foreground to (:fg (paint/style t k)). Only ever touches tag
   properties -- never buffer text, the selection or undo history -- so
   repaint! keeps working unchanged against the same tag objects, which
@@ -343,7 +337,7 @@
     (g/set-string-property! tag "foreground" (:fg (paint/style t k))))
   nil)
 
-;; --- snapshot / apply-op!, from the S2 spike ------------------------------
+;; --- snapshot / apply-op! ------------------------------
 
 (defn snapshot
   "{:text :caret :sel-start :sel-end} for the core edit fns in jonquil.edit."
@@ -354,12 +348,12 @@
 
 (defn apply-op!
   "Applies an edit-op result inside one user action, back to front, then
-  places the caret -- or, when result has :sel [a b] with a < b (P3.T2:
-  indent/unindent/toggle-comment on a selection), selects that range
+  places the caret -- or, when result has :sel [a b] with a < b (indent,
+  unindent, toggle-comment on a selection), selects that range
   instead, so a chained op (a second Tab) sees the same selection through
   snapshot. gtk_text_buffer_select_range's first iter argument becomes the
-  insert mark (probe 6: reading the insert mark back after select_range(a,
-  b) shows it lands on a, the FIRST argument). Fix round 1: :caret is NOT
+  insert mark (measured: reading the insert mark back after select_range(a,
+  b) shows it lands on a, the FIRST argument). :caret is NOT
   always the selection's high end (b) -- indent/unindent/insert-open do
   put it there, but toggle-comment's :caret comes from shift-offset on the
   raw pre-edit caret, which can land on EITHER end depending on which way
@@ -369,12 +363,12 @@
   2 = a). So the iter that matches :caret goes first, whichever end that
   is, not always b. Returns true when the op applied, nil when result was
   nil. A read-only editor (set-read-only!) applies nothing and returns
-  nil. An op whose edit text holds a NUL byte is refused the same way
-  (ROADMAP Next 3): GTK text is C strings, so the insert would silently
-  cut everything after it. Every editor op path funnels through here, so
-  a plugin's :edit command or an MCP replace can't truncate a buffer
-  (the console's input ops are a separate funnel, but nothing saves from
-  the console)."
+  nil. An op whose edit text holds a NUL byte is refused the same way:
+  GTK text is C strings, so the insert would silently cut everything
+  after it. Every op that brings outside text in (commands,
+  plugin :edit ops, MCP and plugin replaces) funnels through here, so none
+  can truncate a buffer. The console's input ops are a separate funnel, but
+  nothing saves from the console."
   [ed result]
   (when (and result
              (not @(:read-only? ed))
@@ -387,7 +381,7 @@
         (doseq [[s e r] (rseq (vec (:edits result)))]
           (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
           (g/with-iters* buf s s (fn [a _] (g/gtk-text-buffer-insert buf a r -1))))
-        ;; The caret or selection lands INSIDE the user action (review I1):
+        ;; The caret or selection lands INSIDE the user action:
         ;; the Parinfer hook runs at end-user-action, so it must see the
         ;; op's caret, and anything it places must land last.
         (if (and sel-a sel-b (< sel-a sel-b))
@@ -417,12 +411,12 @@
 (defn- parinfer-asides?
   "Whether the typed-bracket and pair-Backspace step-asides are on: Smart
   and Indent balance brackets, but Paren mode doesn't, so there they'd
-  leave the buffer unbalanced (review I2)."
+  leave the buffer unbalanced."
   [ed]
   (contains? #{:smart :indent} (parinfer-mode ed)))
 
 (defn- empty-string-pair?
-  "Whether snap's caret sits inside an empty \"\" (review I5): Backspace
+  "Whether snap's caret sits inside an empty \"\": Backspace
   must take both quotes, since a lone quote uncloses the form."
   [{:keys [text caret]}]
   (and (pos? caret) (< caret (count text))
@@ -432,7 +426,7 @@
 (defn- parinfer-after-action!
   "The Parinfer hook at end-user-action: parinfer-edit/adjust from the
   begin-user-action snapshot, applied inside a nested user action, which
-  GTK folds into the keystroke's own undo group (the B1 probe), so one
+  GTK folds into the keystroke's own undo group (probed), so one
   undo reverts the keystroke and the fix together. ::pe/too-long goes to
   :parinfer-status-fn, which it clears again on the next adjusted edit; an
   {:engine-error msg} (a Jolt shim gap) is named through :on-error-fn, and
@@ -449,14 +443,13 @@
               ;; the cached head, the changed middle read from the buffer,
               ;; and the cached tail: three exact pieces (the span's head
               ;; and tail are untouched by construction), 0.12 ms against
-              ;; the 10.8 ms full read (the splice plan). The length guard
+              ;; the 10.8 ms full read. The length guard
               ;; only catches a ranged read disagreeing with GTK's char
               ;; count (embedded objects, hidden text); a wrong span is
-              ;; invisible to it, which is why the span must stay sound
-              ;; (splice review M1).
-              ;; a miss's prev is a fresh read of the begin-time buffer,
+              ;; invisible to it, which is why the span must stay sound.
+              ;; A miss's prev is a fresh read of the begin-time buffer,
               ;; ground truth by construction, so the splice doesn't need
-              ;; the cache (miss-path cut 1)
+              ;; the cache.
               text (or (when span
                          (let [pt ^String (:text prev)
                                n (count pt)
@@ -479,7 +472,7 @@
                             ;; that the form under the caret ever met
                             ;; Parinfer (a caret move changes no gen), so
                             ;; same-form is the part that keeps the user's
-                            ;; first-edit re-indent (review of this plan).
+                            ;; first-edit re-indent.
                             :bounds (when span [(:prefix span) (:suffix span)])
                             :prev-consistent?
                             (boolean
@@ -512,8 +505,7 @@
                       (if (and sa sb (< sa sb))
                         ;; The op selected a range (indent, toggle-comment
                         ;; on lines): the selection survives the fix, each
-                        ;; end mapped through the fix's one edit (review
-                        ;; I1). A delete would swallow the marks, so
+                        ;; end mapped through the fix's one edit. A delete would swallow the marks, so
                         ;; following GTK's own mark motion isn't enough.
                         (let [fixed (edit/apply-edits text (:edits r))
                               remap (fn [x] (pe/remap-offset text fixed x))]
@@ -537,10 +529,9 @@
                      ;; Where this action edited, in final coordinates, and
                      ;; only when Parinfer really probed a changed form:
                      ;; the fix can move text before the offset, so it's
-                     ;; carried across by line and column (review I2), and
+                     ;; carried across by line and column, and
                      ;; a no-op action, a too-long skip or an engine error
-                     ;; probed nothing, so nothing is marked consistent
-                     ;; (review I3).
+                     ;; probed nothing, so nothing is marked consistent.
                      :edit-at (when (and span
                                          (not= text (:text prev))
                                          (or (nil? r) fixed?))
@@ -576,7 +567,7 @@
   "apply-op! with the Parinfer hook skipped, so an MCP edit or another
   programmatic change lands exactly as sent. The op knows its own edits,
   so a cache that is valid going in stays valid coming out, applied to
-  the cached string with no buffer read (miss-path cut 3); an invalid one
+  the cached string with no buffer read; an invalid one
   is cleared, never half-trusted, and the next keystroke misses honestly."
   [ed result]
   (reset! (:parinfer-skip? ed) true)
@@ -587,7 +578,7 @@
       (let [v (when (and valid? r)
                 ;; The count guard: keep the update only when the cached
                 ;; string's length matches what the buffer really kept,
-                ;; else clear, never half-trust (review I1). A NUL op no
+                ;; else clear, never half-trust. A NUL op no
                 ;; longer reaches here (apply-op! refuses it); this guards
                 ;; any future path that lands text the buffer shortened.
                 (let [t (edit/apply-edits (:text cache) (:edits result))]
@@ -602,14 +593,14 @@
 (defn handle-return!
   "Applies jonquil.edit/smart-enter to the current snapshot as one user
   action. Returns nil, applying nothing, while an IME preedit composition
-  is active (I5): the capture-phase key controller runs before the IM
+  is active: the capture-phase key controller runs before the IM
   context gets to filter the key, so consuming Return here would split or
   lose a pending Hangul/CJK composition. handle-key! (below) treats this
   the same as any other unhandled key: 0, so GTK/the IM context gets it."
   [ed]
   (when-not @(:preedit-active? ed)
     ;; With Parinfer on, the closer is Parinfer's to manage, so the
-    ;; three-line between-pair open steps aside (decision 7).
+    ;; three-line between-pair open steps aside.
     (apply-op! ed (edit/smart-enter (snapshot ed)
                                     {:between-pair? (not (parinfer-asides? ed))}))))
 
@@ -656,8 +647,7 @@
             (if-let [more (next chunks)]
               (later more)
               (done!)))]
-    ;; P3.T4 fix round 1: remove only OUR OWN tags, one at a time, never
-    ;; remove_all_tags -- a tag another namespace applies over the same
+    ;; Remove only OUR OWN tags, one at a time, never remove_all_tags: a tag another namespace applies over the same
     ;; range (jonquil.gtk.find-bar's search-match) must survive a repaint.
     (doseq [tag (vals (:tags ed))]
       (g/with-iters* (:buf ed) a b (fn [i j] (g/gtk-text-buffer-remove-tag (:buf ed) tag i j))))
@@ -684,7 +674,7 @@
   :done?, the same as any other superseded paint, so nothing but the
   :destroyed? flag need be read to tell the two apart.
 
-  Large-file speed T4: the tags are unknown while the paint runs, so it
+  The tags are unknown while the paint runs, so it
   clears the tick's baseline (:painted) at the start, and records the
   baseline when its last chunk lands, unless an edit came in meanwhile
   (:edit-gen moved), since its text would then be stale. (:paint ed) also
@@ -751,7 +741,7 @@
          (= (:profile p) @(:profile ed)))))
 
 (defn- repaint!
-  "The tick's repaint (large-file speed T4). With a baseline (:painted), it
+  "The tick's repaint. With a baseline (:painted), it
   reads the text, :edit-gen, :edit-bounds and the profile here, on the GTK
   thread, then computes the plan and paint/plan-diff against the baseline
   on a future. Back on the GTK thread the result lands only when no edit
@@ -822,7 +812,7 @@
   (if @(:destroyed? ed)
     0
     (do
-      ;; M7: dirty? copies and compares the whole buffer, which used to run
+      ;; dirty? copies and compares the whole buffer, so it must not run
       ;; every 20ms regardless of whether anything changed. Only recompute when
       ;; a `changed` happened since the last check (or set-text!/mark-saved!
       ;; ran) -- both set dirty-check-needed?; this consumes it. dirty-check-
@@ -857,7 +847,7 @@
   (and (contains? #{KEY-RETURN KEY-KP-ENTER} keyval)
        (zero? (bit-and state (bit-or g/SHIFT-MASK g/CONTROL-MASK g/META-MASK)))))
 
-;; --- keys: the rest of the dispatch (P3.T2) ---------------------------------
+;; --- keys: the rest of the dispatch ---------------------------------
 
 (def ^:private KEY-PARENLEFT 0x028)
 (def ^:private KEY-PARENRIGHT 0x029)
@@ -870,8 +860,8 @@
 (def ^:private KEY-TAB 0xff09)
 (def ^:private KEY-ISO-LEFT-TAB 0xfe20)
 
-;; macOS hardware keycodes for the physical F and L keys (measured live
-;; this session, pid-driven cgevent cmd+option+f/l against this build:
+;; macOS hardware keycodes for the physical F and L keys (measured live with
+;; pid-driven cgevent cmd+option+f/l against this build:
 ;; keycode 3 and 37 respectively, state carrying both ALT-MASK and
 ;; META-MASK correctly). These match Carbon/HIToolbox's own kVK_ANSI_F =
 ;; 0x03 and kVK_ANSI_L = 0x25 (37) -- Events.h:200 and :232 in the macOS
@@ -901,7 +891,7 @@
 (defn- modifier-keyval?
   "True for a modifier key's own keyval -- Shift/Control/Meta/Alt/Super/
   Hyper, Caps Lock or Shift Lock, either side (gdkkeysyms.h 0xffe1-0xffee,
-  a contiguous block). I2: the flash-cancel guard in handle-key! below
+  a contiguous block). The flash-cancel guard in handle-key! below
   must never fire on the Cmd/Ctrl/Shift/Alt press itself, only on the key
   that follows it."
   [keyval]
@@ -917,18 +907,15 @@
 (defn- apply-edit! [ed result]
   (if (apply-op! ed result) 1 0))
 
-;; P4.T7: named so the context menu's own items (window.clj) call the
-;; EXACT same function as their key -- these five used to be inline
-;; lambdas inside handle-key!'s old cond, which a menu item could only
-;; have duplicated, never reused. Each does exactly what its own inline
-;; body used to.
+;; Named (not inline lambdas in handle-key!) so the context menu's items
+;; (window.clj) call the EXACT same function as their key.
 
 (defn do-toggle-comment! [ed]
   (apply-edit! ed (edit/toggle-comment (snapshot ed))))
 
 (defn- scroll-to-caret!
   "Brings the insert mark into view. Formatting replaces the whole buffer,
-  so the caret can land far from where the view was (ROADMAP P3).
+  so the caret can land far from where the view was.
   scroll_to_mark rather than scroll_mark_onscreen: right after a
   whole-buffer replace the layout isn't valid yet, and scroll_mark_onscreen
   scrolls by it at once (measured: the caret stayed 5,000 px below a
@@ -948,7 +935,7 @@
   when the op changed anything. Plain, not the hook path: the op's text is
   already Paren-stable while Parinfer is on (the builder's pass), so the
   hook has nothing to add, and the too-long note would only mislead after
-  a deliberate format (the format-interplay plan). A nil op never reaches
+  a deliberate format. A nil op never reaches
   apply-op-plain!, which would clear a cache the no-op left valid."
   [ed op]
   (let [r (if (and op (apply-op-plain! ed op)) 1 0)]
@@ -1022,7 +1009,7 @@
     (if (handle-return! ed) 1 0)
 
     ;; With Parinfer on, brackets and pair Backspace are Parinfer's
-    ;; (decision 7, upstream's rule): 0 lets GTK insert the bare key and
+    ;; (upstream's rule): 0 lets GTK insert the bare key and
     ;; the end-user-action hook balance it. The quote keeps pairing.
     (and (no-command-modifiers? state) (contains? open-chars keyval))
     (if (and (parinfer-asides? ed) (not= keyval KEY-QUOTEDBL))
@@ -1040,7 +1027,7 @@
         0
         (apply-edit! ed (edit/backspace-pair snap))))
 
-    ;; P3 fix wave C2: consumed (1) even when unindent returns nil (no
+    ;; Consumed (1) even when unindent returns nil (no
     ;; spanned line has leading whitespace), the way Tab always is.
     ;; Returning 0 handed the key to GtkTextView's own handler, which
     ;; commits a literal "\t" for Tab, KP_Tab and ISO_Left_Tab alike,
@@ -1059,7 +1046,7 @@
   "The editor keymap's ctx (jonquil.command-registry/editor-commands) for
   ed: thunks, so each reads its atom when its command runs. handle-key!
   builds it per key, and the command palette builds the same one to run an
-  editor command as its key would (step S8)."
+  editor command as its key would."
   [ed]
   (let [cfns @(:completion-fns ed)]
     {:complete! #(when-let [f (:complete! cfns)] (f))
@@ -1076,7 +1063,7 @@
      :preedit-active? #(deref (:preedit-active? ed))
      :run-form! #(when-let [f @(:run-form-fn ed)] (f))
      ;; no key reads these two (Tab is a typing stage); the context menu's
-     ;; and the palette's Indent and Unindent do (S7, S8)
+     ;; and the palette's Indent and Unindent do
      :indent! #(do-indent! ed)
      :unindent! #(do-unindent! ed)
      ;; a plugin's :edit command (jonquil.plugin-registry) reads the
@@ -1085,30 +1072,30 @@
      :apply-op! #(apply-op! ed %)}))
 
 (defn handle-key!
-  "The editor's key dispatch (P3.T2). Returns 1 when it handled the key,
+  "The editor's key dispatch. Returns 1 when it handled the key,
   0 otherwise -- the key controller (on-key, below) only calls this, so
   self-test rows can call the exact same function with a synthetic
   keyval/keycode/state, never a synthesized OS keystroke. Yields (0) on
-  every key while a preedit is active (I5), not just Return, since GTK/the
+  every key while a preedit is active, not just Return, since GTK/the
   IM context need every key while composing. keyval0 is normalised with
-  gdk_keyval_to_lower before every comparison (M4: same reason window.clj's
-  on-window-key does it -- Caps Lock reports the uppercase keyval with no
+  gdk_keyval_to_lower before every comparison (same reason window.clj's
+  on-window-key does it: Caps Lock reports the uppercase keyval with no
   Shift bit set).
 
-  Two arities: the 3-arg form (no keycode) is every pre-existing caller,
-  defaulting keycode to 0 -- harmless, since 0 never matches
+  Two arities: the 3-arg form (no keycode) defaults keycode to 0, which is
+  harmless since 0 never matches
   MAC-KEYCODE-F/MAC-KEYCODE-L. on-key (below), the real GTK callback,
   always uses the 4-arg form so physical-key's macOS fallback has a real
   hardware keycode to check.
 
-  I2: before the pipeline below runs, a pending Run Form flash is
+  Before the pipeline below runs, a pending Run Form flash is
   cancelled at once (window.clj's set-flash-cancel-fn!, restoring the
   caret and clearing the selection) unless keyval is a bare modifier
   press (modifier-keyval?) -- otherwise a printable key, Backspace or Tab
   would act on the flash's own selection instead of the buffer's real
   one.
 
-  Plugins PL1 steps S5 and S6: the rest is
+  The rest is
   jonquil.command-registry/editor-answer's pipeline, preedit yield,
   completion popup, the :editor keymap in jonquil/keymap.edn (Run Form,
   completion, comment, the two formats, redo, quick doc, jump, rename) over
@@ -1119,7 +1106,7 @@
    (let [keyval (g/gdk-keyval-to-lower keyval0)
          cfns @(:completion-fns ed)
          ectx (key-ctx ed)
-         ;; plugins P3: the live plugins' bindings ahead of the shipped ones,
+         ;; The live plugins' bindings ahead of the shipped ones,
          ;; over the built-in commands and theirs; with none, the shipped tables
          plugins @plugin-registry/live
          cmds (merge cmd-registry/editor-commands (plugin-registry/commands plugins))]
@@ -1130,7 +1117,7 @@
       {:holds? (cmd-registry/holds-fn cmd-registry/editor-conditions ectx)
        :run! #(cmd-registry/run-command! cmds % ectx)
        :physical (physical-key OS-NAME keyval keycode state)
-       ;; P4.T5: completion's own nav/commit/escape keys (Up/Down/
+       ;; Completion's own nav/commit/escape keys (Up/Down/
        ;; PageUp/PageDown/Enter/Tab/Escape) get first look, ahead of smart
        ;; enter and Tab, whenever the popup is open --
        ;; jonquil.gtk.completion/handle-key! gates on that itself and
@@ -1190,28 +1177,27 @@
             :on-focus-fns (atom [])
             :dirty-at (atom nil)
             :preedit-active? (atom false)
-            ;; M7: starts true so the first tick always checks, establishing
+            ;; Starts true so the first tick always checks, establishing
             ;; a baseline; `changed` (below), set-text! and mark-saved! are
             ;; the only writers after that.
             :dirty-check-needed? (atom true)
             :dirty-check-count (atom 0)
-            ;; P4.T4: single-slot registrations for the quick-doc/jump
-            ;; chords -- see set-quick-doc-fn!/set-jump-fn!.
+            ;; Single-slot registrations for the quick-doc/jump chords: see
+            ;; set-quick-doc-fn!/set-jump-fn!.
             :quick-doc-fn (atom nil)
             :jump-fn (atom nil)
-            ;; P4.T7: single-slot registration for the rename chords --
-            ;; see set-rename-fn!.
+            ;; Single-slot registration for the rename chords: see
+            ;; set-rename-fn!.
             :rename-fn (atom nil)
-            ;; cljd plan P3.T2: single-slot registration for Run Form --
-            ;; see set-run-form-fn!.
+            ;; Single-slot registration for Run Form: see set-run-form-fn!.
             :run-form-fn (atom nil)
-            ;; I2 fix wave: single-slot registration for Run Form's flash
-            ;; cancel -- see set-flash-cancel-fn!.
+            ;; Single-slot registration for Run Form's flash cancel: see
+            ;; set-flash-cancel-fn!.
             :flash-cancel-fn (atom nil)
-            ;; P4.T5: single-slot registration for completion -- see
+            ;; Single-slot registration for completion: see
             ;; set-completion-fns!. nil until jonquil.gtk.window wires it.
             :completion-fns (atom nil)
-            ;; P1.T2 (cljd plan): the dialect profile whose sets paint
+            ;; The dialect profile whose sets paint
             ;; symbols -- see set-profile!. nil until the window sets it.
             :profile (atom nil)
             ;; Single-slot registration for error reporting -- see
@@ -1222,7 +1208,7 @@
             ;; Source panel: read-only mode (set-read-only!) and the
             ;; asynchronous paint's generation (paint-async!).
             :read-only? (atom false)
-            ;; Parinfer (step 2 B3). :parinfer-mode-fn answers the window's
+            ;; Parinfer: :parinfer-mode-fn answers the window's
             ;; mode (set-parinfer-fns!); :parinfer-prev is the text and
             ;; caret at begin-user-action; :parinfer-busy? guards the
             ;; hook's own nested apply; :parinfer-skip? exempts one edit
@@ -1230,15 +1216,13 @@
             :parinfer-mode-fn (atom (constantly :off))
             ;; :format-style-fn answers the tab's .jonquil.edn
             ;; :format-style (set-format-style-fn!): :paren-stable or
-            ;; :plain pins what a format produces, nil follows the mode
-            ;; (the format-style-pin plan).
+            ;; :plain pins what a format produces, nil follows the mode.
             :format-style-fn (atom (constantly nil))
             :parinfer-status-fn (atom nil)
             :parinfer-prev (atom nil)
             :parinfer-busy? (atom false)
             :parinfer-skip? (atom false)
-            ;; The speedup's two slots (the per-form speedup plan):
-            ;; :parinfer-prev-cache holds {:text s :gen n}, the buffer as
+            ;; The speedup slots: :parinfer-prev-cache holds {:text s :gen n}, the buffer as
             ;; the hook last saw it with :edit-gen at that moment, so the
             ;; next action starts without a 262k copy when the gen hasn't
             ;; moved (any outside write bumps the gen through `changed`).
@@ -1249,13 +1233,13 @@
             ;; cache prime, armed full in the same step as each prime and
             ;; narrowed by the same two signals, undo and redo replays
             ;; included, so the begin handler can rebuild prev from the
-            ;; cache plus one ranged read (the undo-path plan); nil when
+            ;; cache plus one ranged read; nil when
             ;; there is no cache to recover from.
             :parinfer-prev-cache (atom nil)
             :parinfer-span (atom nil)
             :parinfer-outside-span (atom nil)
             :paint (atom {:gen 0 :done? true})
-            ;; Large-file speed T4: the tick's incremental repaint (repaint!).
+            ;; The tick's incremental repaint (repaint!).
             ;; :painted is {:text :plan} of what our tags show now, or nil
             ;; when unknown. :edit-gen is bumped by every `changed`.
             ;; :edit-bounds is {:prefix m :suffix n}, no edit since :painted
@@ -1296,7 +1280,7 @@
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; Large-file speed T4: insert-text and delete-range narrow
+    ;; insert-text and delete-range narrow
     ;; :edit-bounds. Connected without G_CONNECT_AFTER, both run before
     ;; GTK's default handler, so the iters and the char count are pre-edit.
     ;; Probe 2026-10-14: inserting "XYé" at 3 into "abcdef" read offset
@@ -1321,10 +1305,9 @@
                                          nil)
                                        [:pointer :pointer :pointer :int :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; Parinfer (step 2 B3): the snapshot at begin-user-action and the
-    ;; hook at end-user-action. Every typed key, paste, cut and apply-op!
-    ;; is one user action; GTK's own undo and redo emit neither signal
-    ;; (the B1 probe), and set-text! is an irreversible action, so loads,
+    ;; Parinfer: the snapshot at begin-user-action and the hook at
+    ;; end-user-action. Every typed key, paste, cut and apply-op! is one
+    ;; user action; GTK's own undo and redo emit neither signal (probed), and set-text! is an irreversible action, so loads,
     ;; reloads, undo and redo never reach the hook.
     (g/g-signal-connect-data buf "begin-user-action"
                              (callable (fn [_buf _data]
@@ -1340,7 +1323,7 @@
                                                            (= os {:prefix nc :suffix nc}))
                                                  text (cond
                                                         hit? (:text cache)
-                                                        ;; outside recovery (the undo-path plan):
+                                                        ;; outside recovery:
                                                         ;; cached head, the changed middle read
                                                         ;; from the buffer, cached tail; the end
                                                         ;; splice's argument with prev and the
@@ -1351,8 +1334,6 @@
                                                         ;; span: a moved gen with a still-full
                                                         ;; span means a change the signals never
                                                         ;; saw (a child anchor), so the full read
-                                                        ;; (review M3, the plan's "anything
-                                                        ;; surprising")
                                                         (and cache os
                                                              (not= os {:prefix nc :suffix nc}))
                                                         (let [pt ^String (:text cache)
@@ -1394,8 +1375,8 @@
                                          nil)
                                        [:pointer :pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; P3 fix wave I2: the buffer's "cursor-position" property notify, in
-    ;; place of P3.T5's "mark-set" filtered to the insert mark. An insert or
+    ;; The buffer's "cursor-position" property notify, in place of
+    ;; "mark-set" filtered to the insert mark. An insert or
     ;; delete moves the insert mark by gravity without emitting mark-set,
     ;; so Ln/Col went stale while typing. GtkTextBuffer notifies
     ;; cursor-position from real_insert_text, real_delete_range and
@@ -1414,7 +1395,7 @@
                                          nil)
                                        [:pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; I5: GtkTextView's OWN "preedit-changed" signal (distinct from
+    ;; GtkTextView's OWN "preedit-changed" signal (distinct from
     ;; GtkIMContext's identically-named one) -- gtk/gtktextview.c:1529 per
     ;; Gtk-4.0.gir (not declared in the public gtktextview.h header; GTK
     ;; signals are registered at runtime and documented via GIR/gtk-doc,
@@ -1436,8 +1417,7 @@
                              (callable (fn [_view _data] (reset! (:destroyed? ed) true) nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; P4.T4: GtkEventControllerFocus's own "leave" signal (ffi.clj's
-    ;; citation) -- fires whenever view (or a descendant) stops being the
+    ;; GtkEventControllerFocus's own "leave" signal: fires whenever view (or a descendant) stops being the
     ;; root's focus widget. No signal args beyond instance/user_data.
     (g/g-signal-connect-data focusctl "leave"
                              (callable (fn [_ctl _data]
