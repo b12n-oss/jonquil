@@ -123,7 +123,7 @@ panel takes focus until you close it.
 ![The inspector panel open on a map, with a vector of same-shaped maps rendered as a table](../images/inspector.png)
 
 The panel on the right shows a path, the value's type and size, a toolbar
-(Back, Meta, Table, Def, Close), the rows, and a footer of keys. A
+(Back, Earlier, Later, Meta, Table, Def, Close), the rows, and a footer of keys. A
 collection's rows read `label · preview`; maps sharing the same keys
 become a table.
 
@@ -131,7 +131,19 @@ become a table.
 - Page Up and Page Down page through long collections.
 - `m` toggles metadata; `v` switches a table to a list and back.
 - `d` prompts for a name and defines that var from the current value.
+- `[` and `]`, or Earlier and Later, go back and forward among the objects
+  you inspected, each opened at its top; the footer then reads `object 2 of
+  3`.
 - Escape closes the panel (inside the `d` prompt, only the prompt).
+
+The inspector remembers the last 10 objects it was opened on (an object
+inspected twice in a row counts once), and opening a new one after going
+back drops the later ones, as a browser does. It keeps the objects
+themselves so they can be browsed again, so a large result stays in memory
+until 10 newer inspections push it out. The history works with Jolt, in
+process and out; a JVM server's inspector keeps only its current object, so
+there Earlier and Later say "This server keeps only the object it shows
+now."
 
 Out of process, Jonquil loads the inspector into its Jolt child as nREPL
 middleware, so stepping through a value never changes `*1`, `*2` or `*3`. Collections cap
