@@ -42,7 +42,8 @@
 
 (defn propose-refusal
   "Why a proposal is refused before any check runs, or nil: plugins off in
-  the window, a bad id, a source that isn't text, a blank reason, or a
+  the window, a bad id, a source that isn't text, a blank reason, a source
+  or reason holding a NUL byte (the review pane couldn't show it), or a
   source or reason longer than MAX-SOURCE-CHARS or MAX-REASON-CHARS."
   [{:keys [id source reason plugins?]}]
   (cond
