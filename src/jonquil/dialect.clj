@@ -363,7 +363,7 @@
   :clj) only wins when there's no project; inside one, it's skipped and
   selection falls through to :fallback (I2)."
   [profiles project path default]
-  (let [{:keys [dialect runtime auto-require cljs nrepl parinfer warnings]} (if project
+  (let [{:keys [dialect runtime auto-require cljs nrepl parinfer format-style warnings]} (if project
                                                                      (parse-config (:config project) (:config-error project))
                                                                      {:warnings []})
         by-config (when dialect (profile profiles dialect))
@@ -449,8 +449,10 @@
       cljs-target (assoc :cljs-target cljs-target)
       (some? cljs-console?) (assoc :cljs-console? cljs-console?)
       (and nrepl nrepl?) (assoc :nrepl nrepl)
-      ;; Parinfer is the editor's, not a runtime's, so no dialect gates it.
-      parinfer (assoc :parinfer parinfer))))
+      ;; Parinfer is the editor's, not a runtime's, so no dialect gates it;
+      ;; the format-style pin rides the same way.
+      parinfer (assoc :parinfer parinfer)
+      format-style (assoc :format-style format-style))))
 
 (defn selection-key
   "What makes two selections need different evaluators: the dialect, the

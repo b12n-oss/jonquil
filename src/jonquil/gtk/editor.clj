@@ -557,6 +557,13 @@
   (reset! (:parinfer-mode-fn ed) mode-fn)
   (reset! (:parinfer-status-fn ed) status-fn))
 
+(defn set-format-style-fn!
+  "Wires the window's per-tab read of .jonquil.edn's :format-style:
+  style-fn answers :paren-stable, :plain or nil (follow the Parinfer
+  mode, the default)."
+  [ed style-fn]
+  (reset! (:format-style-fn ed) style-fn))
+
 (defn apply-op-plain!
   "apply-op! with the Parinfer hook skipped, so an MCP edit or another
   programmatic change lands exactly as sent. The op knows its own edits,
@@ -939,12 +946,18 @@
     r))
 
 (defn- format-opts
-  "The format op builders' opts: Paren-stable output whenever the Parinfer
-  hook would run on an ordinary keystroke. Passed as a function because the
-  plugin checker embeds jonquil.commands' closure, which must not grow by
-  the Parinfer engine."
+  "The format op builders' opts. The project's .jonquil.edn :format-style
+  pins the choice, :paren-stable always running the pass and :plain never,
+  so a repo formats one way for everyone; without a pin, the pass runs
+  whenever the Parinfer hook would run on an ordinary keystroke. Passed as
+  a function because the plugin checker embeds jonquil.commands' closure,
+  which must not grow by the Parinfer engine."
   [ed]
-  {:stabilize (when (parinfer-mode ed) pe/paren-stable)})
+  {:stabilize (when (case ((deref (:format-style-fn ed)))
+                      :paren-stable true
+                      :plain false
+                      (some? (parinfer-mode ed)))
+                pe/paren-stable)})
 
 (defn do-format-all! [ed]
   (formatted! ed (commands/format-all-op (snapshot ed) (format-opts ed))))
@@ -1205,6 +1218,11 @@
             ;; hook's own nested apply; :parinfer-skip? exempts one edit
             ;; (apply-op-plain!, the MCP path).
             :parinfer-mode-fn (atom (constantly :off))
+            ;; :format-style-fn answers the tab's .jonquil.edn
+            ;; :format-style (set-format-style-fn!): :paren-stable or
+            ;; :plain pins what a format produces, nil follows the mode
+            ;; (the format-style-pin plan).
+            :format-style-fn (atom (constantly nil))
             :parinfer-status-fn (atom nil)
             :parinfer-prev (atom nil)
             :parinfer-busy? (atom false)

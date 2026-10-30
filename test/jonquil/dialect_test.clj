@@ -184,6 +184,15 @@
     (is (not (contains? (dialect/select dialect/profiles (proj #{"deps.edn"} "{:dialect :jolt}") "/p/a.clj" nil)
                         :parinfer)))))
 
+(deftest select-passes-format-style-through-test
+  (testing "any dialect's project carries its :format-style pin (the window
+           row caught select dropping it while parse-config was green)"
+    (is (= :paren-stable (:format-style (dialect/select dialect/profiles
+                                                        (proj #{"deps.edn"} "{:format-style :paren-stable}")
+                                                        "/p/a.clj" nil))))
+    (is (not (contains? (dialect/select dialect/profiles (proj #{"deps.edn"} "{:dialect :jolt}") "/p/a.clj" nil)
+                        :format-style)))))
+
 (deftest selection-key-test
   (let [k (fn [config dir path]
             (dialect/selection-key
