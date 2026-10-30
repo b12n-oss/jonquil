@@ -242,14 +242,19 @@
   300 lines is about 66 ms."
   300)
 
-(defn- reindent-only?
-  "Whether q differs from p by leading whitespace alone: the same lines,
-  each equal once left-trimmed. Paren mode on a balanced form only moves
-  indentation; paren-stable refuses any result that says otherwise."
+(defn- whitespace-only?
+  "Whether q differs from p by spaces and tabs alone: the same lines, each
+  equal once every space and tab is removed, so no other character changes,
+  appears, vanishes or crosses a line. Paren mode on a balanced form moves
+  indentation, tidies a paren trail's spaces and rewrites a tab in code as
+  two spaces (review I1: the first two guards here, left-trim and same
+  indentation, each rejected one of those and recreated the
+  first-keystroke fight); paren-stable refuses any result beyond that."
   [^String p ^String q]
-  (let [ps (str/split p #"\n" -1) qs (str/split q #"\n" -1)]
+  (let [ws #"[ \t]" ps (str/split p #"\n" -1) qs (str/split q #"\n" -1)]
     (and (= (count ps) (count qs))
-         (every? true? (map #(= (str/triml %1) (str/triml %2)) ps qs)))))
+         (every? true? (map #(= (str/replace %1 ws "") (str/replace %2 ws ""))
+                            ps qs)))))
 
 (defn paren-stable
   "text with every top-level form the character range [a b] touches
@@ -258,7 +263,7 @@
   Every touched form takes the pass, however long (the user accepted the
   cost over a 300-line carve-out: the full pass measured 425 ms over the
   4,574-line window.clj, 2026-10-30). One form at a time: a form Paren
-  mode refuses, or would change beyond leading whitespace, stays as given.
+  mode refuses, or would change beyond spaces and tabs, stays as given.
   Text with an unmatched bracket comes back whole: Paren mode moves
   brackets there, and a format must never change code. Top-level text
   outside brackets (comments, bare values) stays as given. [a b] defaults
@@ -287,7 +292,7 @@
                        (parinfer/paren-mode form))
                    fixed (when (and (:success r) (string? (:text r))
                                     (not= (:text r) form)
-                                    (reindent-only? form (:text r)))
+                                    (whitespace-only? form (:text r)))
                            (:text r))]
                (recur (conj pieces (subs text pos s) (or fixed form))
                       e (next spans))))))))))

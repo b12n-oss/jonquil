@@ -267,3 +267,17 @@
   (is (= ";; a comment\n(def a\n  [{:x 1}\n   {:y 2}])\n;; after"
          (pe/paren-stable ";; a comment\n(def a\n  [{:x 1}\n    {:y 2}])\n;; after"))
       "comment lines around a form stay as given"))
+
+(deftest paren-stable-accepts-a-paren-trail-tidy-test
+  (is (= "(def a\n  [{:x 1}\n   {:y 2}])"
+         (pe/paren-stable "(def a\n  [{:x 1 }\n    {:y 2}])"))
+      "a space tidied out of a paren trail must not reject the reindent
+      (review I1: the formatter keeps mid-line spaces, so its output can
+      carry one; rejecting the form recreates the first-keystroke fight)"))
+
+(deftest paren-stable-accepts-a-tab-rewrite-test
+  (is (= "(def a\n  [{:x  1}\n   {:y 2}])"
+         (pe/paren-stable "(def a\n  [{:x\t1}\n    {:y 2}])"))
+      "a tab in code becoming two spaces must not reject the reindent
+      (review I1: the formatter only touches leading and trailing
+      whitespace, so a mid-line tab survives into its output)"))
