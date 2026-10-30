@@ -184,6 +184,16 @@ spaces and line endings follow the form's first. Reloads, agent (MCP) edits, and
 over 300 lines are left alone; skipping a long form is named in the
 status bar.
 
+Format All and Format Selection land exactly what they made, with no
+skip and no status note. While Parinfer is on, the formatter's output
+takes Paren mode's indentation per touched top-level form as a last
+step, so the two styles agree and the next keystroke has nothing to
+re-indent: a second format changes nothing, and formatting again after
+an edit is whitespace-stable. On Jonquil's own sources the two styles
+disagreed on 80 of 2,421 forms before this pass, each a one-space shift
+on a wrapped line (measured 2026-10-29). With Parinfer off, a format is
+the formatter's output alone, unchanged.
+
 ## Find and replace
 
 ![The find bar open over a query, with matches highlighted and a count](../images/find.png)
