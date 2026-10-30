@@ -470,6 +470,7 @@
    parinfer-rows/row-parinfer-project-pins-off
    parinfer-rows/row-parinfer-label-follows-tab
    parinfer-rows/row-parinfer-label-after-open-into-untitled
+   parinfer-rows/row-format-style-project-pin
    parinfer-rows/row-parinfer-mode-change-clears-skip-note
    window-keys/row-command-chord-close])
 

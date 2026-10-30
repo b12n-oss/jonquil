@@ -2499,6 +2499,11 @@
                                         (:parinfer (some-> (:project t) deref))
                                         (mf)))
                                 (:parinfer-status-fn ctx)))
+    ;; The format-style pin: the project's .jonquil.edn :format-style, when
+    ;; it names one, decides what this tab's Format All and Format
+    ;; Selection produce; nil follows the Parinfer mode.
+    (editor/set-format-style-fn! ed
+                                 (fn [] (:format-style (some-> (:project t) deref))))
     (find-bar/set-error-fn! fb (fn [msg] (set-status! status-label msg)))
     (editor/on-dirty-changed! ed (fn [dirty]
                                    (refresh-labels! ctx)

@@ -185,6 +185,29 @@
                     (close-clean! ui t)
                     (delete-tree! dir))))))))
 
+(defn row-format-style-project-pin
+  "Format-style pin Review Focus 1: a project saying {:format-style
+  :paren-stable} makes Format All stabilize its tab's output while the
+  global Parinfer stays off, so a repo formats one way for everyone."
+  [ui]
+  (go-row :format-style-project-pin support/check
+    (let [[file dir] (temp-project! "{:format-style :paren-stable}")]
+      (on-gtk (let [_ ((:open-file! ui) file)
+                    t ((:active-tab* ui))]
+                (try
+                  (let [opened? (= file @(:path t))
+                        ed (:ed t)
+                        _ (editor/set-text! ed "(def a\n  [{:x 1}\n    {:y 2}])")
+                        _ (editor/do-format-all! ed)
+                        text (editor/editor-text ed)]
+                    (support/check :format-style-project-pin
+                                   (and opened?
+                                        (= "(def a\n  [{:x 1}\n   {:y 2}])" text))
+                                   {:opened? opened? :text text}))
+                  (finally
+                    (close-clean! ui t)
+                    (delete-tree! dir))))))))
+
 (defn row-parinfer-mode-change-clears-skip-note
   "Polish Review Focus 4: after a too-long note, a mode change must not
   let the note's later clear stomp the newer status with Ready. set-status!

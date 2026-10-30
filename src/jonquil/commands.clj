@@ -180,8 +180,10 @@
   "Re-indents the whole buffer as one edit (one undo step). nil when the
   text is already formatted. :stabilize, a (fn [text a b] text') or nil,
   runs over the formatter's output as a last step: the editor passes
-  parinfer-edit/paren-stable while Parinfer is on, so format output takes
-  Paren mode's indentation and nothing ping-pongs on the next edit. A
+  parinfer-edit/paren-stable while Parinfer is on or the project pins
+  :format-style :paren-stable (and nothing under a :plain pin), so format
+  output takes Paren mode's indentation and nothing ping-pongs on the
+  next edit. A
   function, not a require: the plugin checker embeds this namespace's
   closure, which must not grow by the Parinfer engine."
   ([snap] (format-all-op snap {}))

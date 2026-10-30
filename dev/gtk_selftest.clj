@@ -1821,6 +1821,40 @@ b" text) eq (pos? @splices))
                             {:text text :eq eq :full-reads @fulls})))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-format-style-pin-paren-stable [ed]
+  (go-row :parinfer-format-style-pin-paren-stable check
+    (on-gtk (try (parinfer-off! ed)
+                 ;; a project's :format-style :paren-stable runs the pass
+                 ;; with the mode off, so a repo formats one way for
+                 ;; everyone (the format-style-pin plan)
+                 (editor/set-format-style-fn! ed (constantly :paren-stable))
+                 (editor/set-text! ed fi-misindented)
+                 (caret! ed 0)
+                 (editor/do-format-all! ed)
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-format-style-pin-paren-stable
+                          (= fi-stable text) {:text text}))
+                 (finally (editor/set-format-style-fn! ed (constantly nil))
+                          (parinfer-off! ed))))))
+
+(defn- row-parinfer-format-style-pin-plain [ed]
+  (go-row :parinfer-format-style-pin-plain check
+    (on-gtk (let [status (atom [])]
+              (try (editor/set-parinfer-fns! ed (constantly :smart)
+                                             (fn [msg] (swap! status conj msg)))
+                   ;; :plain keeps the plain formatter's bytes under a live
+                   ;; mode, still with no hook and no status noise
+                   (editor/set-format-style-fn! ed (constantly :plain))
+                   (editor/set-text! ed fi-misindented)
+                   (caret! ed 0)
+                   (editor/do-format-all! ed)
+                   (let [text (editor/editor-text ed)]
+                     (check :parinfer-format-style-pin-plain
+                            (and (= fi-unstable text) (= [] @status))
+                            {:text text :status @status}))
+                   (finally (editor/set-format-style-fn! ed (constantly nil))
+                            (parinfer-off! ed)))))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -1895,7 +1929,9 @@ b" text) eq (pos? @splices))
    row-parinfer-format-off-byte-identical
    row-parinfer-format-selection-scoped
    row-parinfer-format-second-is-noop
-   row-parinfer-format-next-keystroke-hits])
+   row-parinfer-format-next-keystroke-hits
+   row-parinfer-format-style-pin-paren-stable
+   row-parinfer-format-style-pin-plain])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

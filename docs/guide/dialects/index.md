@@ -79,6 +79,12 @@ and selection falls through to the next rule.
   project's tabs, overriding the global setting either way: `:smart`,
   `:indent` or `:paren` turns it on here, and `:off` keeps it off here
   even when the setting is on.
+- `:format-style` pins what Format All and Format Selection produce for
+  the project's tabs, so the repo formats one way for everyone whatever
+  each person's Parinfer mode: `:paren-stable` always runs the Paren
+  pass over the formatter's output, `:plain` never does. Left out, a
+  format follows the tab's mode (see
+  [Parinfer](../using-jonquil.md#parinfer)).
 
 ## Running Jolt out of process
 
