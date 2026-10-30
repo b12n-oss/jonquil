@@ -40,6 +40,7 @@
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -787,14 +788,16 @@
 (defn- right-roots
   "{which root} for the panels right's slot holds; a right without
   :review-root, :plugins-root or :history-root (a test's) has fewer."
-  [{:keys [inspector-root source-root review-root plugins-root history-root]}]
+  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root]}]
   (cond-> {:inspector inspector-root :source source-root}
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
-    history-root (assoc :history history-root)))
+    history-root (assoc :history history-root)
+    locations-root (assoc :locations locations-root)))
 
 (defn- show-right-panel!
-  "Shows which (:inspector, :source, :review, :plugins or :history) in
+  "Shows which (:inspector, :source, :review, :plugins, :history or
+  :locations) in
   the slot and hides the others; any but :history clears
   plugin-history-shown. When the slot was hidden, also sizes h-paned so
   the panel claims about PANEL-WIDTH; while
@@ -3230,6 +3233,7 @@
         ;; The plugin list shares the slot too; its rows are rebuilt after
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
+        locp (locations-pane/make-pane)
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
@@ -3357,7 +3361,7 @@
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :review-root (:root rp) :plugins-root (:root lp)
+               :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
                :history-root (:root hp) :source-pane sp}
         _ (reset! *right right)
         ;; The plugin-step! opts for Accept or Reject of the
@@ -3732,6 +3736,8 @@
     (g/gtk-box-append slot (:root lp))
     (g/gtk-widget-set-vexpand (:root hp) 1)
     (g/gtk-box-append slot (:root hp))
+    (g/gtk-widget-set-vexpand (:root locp) 1)
+    (g/gtk-box-append slot (:root locp))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -3739,6 +3745,7 @@
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible (:root lp) 0)
+    (g/gtk-widget-set-visible (:root locp) 0)
     (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
