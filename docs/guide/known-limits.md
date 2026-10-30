@@ -3,8 +3,11 @@
 Known rough edges, parked for later:
 
 <details>
-<summary><strong>The window and editing</strong> (5)</summary>
+<summary><strong>The window and editing</strong> (6)</summary>
 
+- Text can't contain a NUL byte: a file holding one is refused at open,
+  and an agent's or plugin's replacement text holding one is refused with
+  an error, rather than either being silently truncated.
 - Return during an IME composition commits the syllable and inserts a plain
   newline; a second Return does the rest.
 - Closing the window or Cmd/Ctrl+W while a program runs quits at once and

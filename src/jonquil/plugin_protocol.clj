@@ -5,7 +5,8 @@
   fixture snapshots, answering {:ok? :problems :warnings :timings
   :definition}. No GTK; nothing here goes live, and a caller (the user's
   reload, Accept, a revert) swaps the registry on a pass."
-  (:require [jonquil.plugin :as p]
+  (:require [clojure.string :as str]
+            [jonquil.plugin :as p]
             [jonquil.plugin-check :as plugin-check]))
 
 (defn- load-problem
@@ -81,6 +82,11 @@
       (not (and (vector? edits)
                 (every? #(and (vector? %) (= 3 (count %)) (string? (nth % 2))) edits)))
       ":edits isn't a vector of [start end string]"
+      ;; NUL arc review I1: apply-op! refuses such an op silently (GTK C
+      ;; strings would truncate the insert), so the refusal is named here,
+      ;; on the loud path the author already gets.
+      (some (fn [[_ _ r]] (str/includes? r "\u0000")) edits)
+      "an edit's text holds a NUL byte, which Jonquil's editor can't keep"
       (not (every? (fn [[a b]] (and (offset? a len) (offset? b len) (<= a b))) edits))
       (str "an edit is outside the text (0.." len ")")
       (not (every? (fn [[[_ e1] [s2]]] (<= e1 s2)) (partition 2 1 edits)))

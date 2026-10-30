@@ -20,7 +20,8 @@
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
             [jonquil.mcp.tools :as tools]
-            [jonquil.plugin-mcp :as plugin-mcp]))
+            [jonquil.plugin-mcp :as plugin-mcp]
+            [jonquil.tabs :as tabs]))
 
 (def ^:private gui-deadline-ms 5000)
 (def ^:private default-grace-ms 5000)
@@ -336,14 +337,22 @@
         tool-replace (fn [args]
                        (let [text (required-text args "text")
                              id (number-arg args "id")]
-                         (turn (fn []
-                                 (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
-                                   (if-not t
-                                     (if id (no-tab id) {:text "No active tab." :error? true})
-                                     (let [ed (:ed t)]
-                                       (if (editor/apply-op-plain! ed (replace-op (editor/editor-text ed) text))
-                                         {:text (str "Replaced the text of tab " (:id t) ".") :error? false}
-                                         {:text (str "Tab " (:id t) " is read-only.") :error? true}))))))))
+                         ;; ROADMAP Next 3: GTK text is C strings, so a NUL
+                         ;; would truncate the insert; apply-op! refuses such
+                         ;; an op, and this pre-check names the reason instead
+                         ;; of mislabelling the refusal as read-only.
+                         (if-let [n (when (string? text) (tabs/nul-line text))]
+                           {:text (str "The new text holds a NUL byte on line " n
+                                       ", which Jonquil's editor can't keep, so nothing was changed.")
+                            :error? true}
+                           (turn (fn []
+                                   (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
+                                     (if-not t
+                                       (if id (no-tab id) {:text "No active tab." :error? true})
+                                       (let [ed (:ed t)]
+                                         (if (editor/apply-op-plain! ed (replace-op (editor/editor-text ed) text))
+                                           {:text (str "Replaced the text of tab " (:id t) ".") :error? false}
+                                           {:text (str "Tab " (:id t) " is read-only.") :error? true})))))))))
         tool-save (fn [args]
                     (let [arg-path (when (get args "path")
                                      (tools/absolute dir (tools/required-string args "path")))]

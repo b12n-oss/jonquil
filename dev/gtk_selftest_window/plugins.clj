@@ -251,6 +251,26 @@
           (support/check :plugin-run-replaces-text up?
                          {:text (on-gtk (editor/editor-text (:editor ui))) :lines lines}))))))
 
+(defn row-plugin-replace-text-refuses-nul
+  "ROADMAP Next 3: p/replace-text! with a NUL in the text throws, naming
+  the line (the effect impl's pre-check), so the command fails loudly
+  instead of landing truncated text, and the tab is untouched. Without
+  the pre-check the apply-op! funnel's nil would mislabel this as
+  read-only."
+  [ui]
+  (go-row :plugin-replace-text-refuses-nul support/check
+    (with-plugins ui {"p5-nul.clj" (run-source "p5-nul" "#{:buffer}"
+                                               "(p/replace-text! ctx (str \"a\" (char 0) \"b\"))")}
+      (fn [lines]
+        (on-gtk (editor/set-text! (:editor ui) "(a b)"))
+        (press-j! ui)
+        (let [said? (await-until 3000 20 #(str/includes? (support/console-text ui)
+                                                         "holds a NUL byte on line 1"))
+              text (on-gtk (editor/editor-text (:editor ui)))]
+          (support/check :plugin-replace-text-refuses-nul
+                         (and said? (= "(a b)" text))
+                         {:said said? :text text :lines lines}))))))
+
 (defn row-plugin-run-closed-tab
   "A :run command started on a second tab keeps that tab: once it has
   closed, the command's buffer-text throws \"that tab was closed\" and the

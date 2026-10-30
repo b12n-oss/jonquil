@@ -69,7 +69,7 @@ on the live window:
 | `jonquil_tabs` | One line per tab: id, active marker, dirty or saved, path or Untitled |
 | `jonquil_select_tab` | Makes the tab `id` active |
 | `jonquil_read_tab` | The tab's full text (active tab without `id`) |
-| `jonquil_replace_text` | Replaces the tab's text as one undoable edit; the tab reads dirty |
+| `jonquil_replace_text` | Replaces the tab's text as one undoable edit; the tab reads dirty. Text holding a NUL byte is refused with an error naming the line |
 | `jonquil_save` | Saves the active tab to `path` or its own path |
 | `jonquil_console` | `mark <N>` then the output since the `since` mark; pass back `N` to read only what's new |
 | `jonquil_doc` | Documentation for a symbol, from the window's evaluator |

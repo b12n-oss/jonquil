@@ -10,6 +10,10 @@ Opening and saving files, tabs, opening from Finder and the Dock, and the file t
   none. Cmd/Ctrl+Shift+S always opens the dialog.
 - A file that isn't valid UTF-8 still opens: bad bytes show as �, the
   console warns, and the disk is untouched until you save.
+- A file with a NUL byte in it doesn't open: the console names the line,
+  and the file on disk is untouched. A NUL usually means a binary file,
+  and GTK's text can't hold one, so opening it would silently cut
+  everything after it.
 
 Saves are atomic (a temporary file, then a rename), so a crash can't leave
 half a file. Saving through a symlink updates the file it points to.

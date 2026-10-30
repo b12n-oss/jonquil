@@ -1388,20 +1388,23 @@ b" text)
 (defn- row-parinfer-nul-plain-op-clears-the-cache [ed]
   (go-row :parinfer-nul-plain-op-clears-the-cache check
     (on-gtk (try (parinfer-on! ed :smart)
-                 ;; an op's replacement text can carry a NUL the buffer
-                 ;; truncates away; the updated cache must notice and clear,
-                 ;; never trust a string the buffer never held (miss-path
-                 ;; review I1)
+                 ;; an op's replacement text carrying a NUL is refused by
+                 ;; apply-op! outright (ROADMAP Next 3; it used to land
+                 ;; truncated, with the cache-count guard catching the
+                 ;; mismatch, miss-path review I1). The refusal still
+                 ;; clears the cache (one honest miss), and the next
+                 ;; keystroke lands on the untouched text with the cache
+                 ;; coherent again.
                  (editor/set-text! ed "(a)")
-                 (editor/apply-op-plain!
-                  ed {:edits [[1 2 (str "x" (char 0) "y")]] :caret 0})
-                 (caret! ed 1)
-                 (type-str! ed "z")
-                 (let [text (editor/editor-text ed)
-                       eq (= (:text @(:parinfer-prev-cache ed)) text)]
-                   (check :parinfer-nul-plain-op-clears-the-cache
-                          (and (= "(zx)" text) eq)
-                          {:text text :eq eq}))
+                 (let [r (editor/apply-op-plain!
+                          ed {:edits [[1 2 (str "x" (char 0) "y")]] :caret 0})]
+                   (caret! ed 1)
+                   (type-str! ed "z")
+                   (let [text (editor/editor-text ed)
+                         eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                     (check :parinfer-nul-plain-op-clears-the-cache
+                            (and (nil? r) (= "(za)" text) eq)
+                            {:r r :text text :eq eq})))
                  (finally (parinfer-off! ed))))))
 
 (defn- row-parinfer-redo-splices-the-end-read [ed]
@@ -1855,6 +1858,20 @@ b" text) eq (pos? @splices))
                    (finally (editor/set-format-style-fn! ed (constantly nil))
                             (parinfer-off! ed)))))))
 
+(defn- row-apply-op-refuses-nul [ed]
+  (go-row :apply-op-refuses-nul check
+    (on-gtk
+     ;; ROADMAP Next 3: GTK takes C strings, so an op whose edit text
+     ;; holds a NUL used to land truncated. The apply-op! funnel refuses
+     ;; it like a read-only editor: nil, buffer untouched. Every op path
+     ;; (plugin :edit commands, MCP replace) goes through this funnel.
+     (editor/set-text! ed "(+ 1 1)")
+     (let [r (editor/apply-op-plain! ed {:edits [[0 0 "x\u0000y"]] :caret 0})
+           text (editor/editor-text ed)]
+       (check :apply-op-refuses-nul
+              (and (nil? r) (= "(+ 1 1)" text))
+              {:r r :text text})))))
+
 (def ^:private row-fns
   [row-editor-colours
    row-editor-undo-text-only
@@ -1931,7 +1948,8 @@ b" text) eq (pos? @splices))
    row-parinfer-format-second-is-noop
    row-parinfer-format-next-keystroke-hits
    row-parinfer-format-style-pin-paren-stable
-   row-parinfer-format-style-pin-plain])
+   row-parinfer-format-style-pin-plain
+   row-apply-op-refuses-nul])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in

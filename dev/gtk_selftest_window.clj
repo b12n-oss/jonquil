@@ -82,6 +82,8 @@
    close-prerun/row-repl-eof-no-editor-hint
    files/row-open-refuses-dirty
    files/row-open-invalid-utf8
+   files/row-open-refuses-nul
+   files/row-open-nul-new-tab
    files/row-save-atomic
    files/row-save-follows-symlink
    files/row-save-dangling-symlink
@@ -255,6 +257,7 @@
    plugin-rows/row-plugin-removed-file
    plugin-rows/row-plugin-run-prints
    plugin-rows/row-plugin-run-replaces-text
+   plugin-rows/row-plugin-replace-text-refuses-nul
    plugin-rows/row-plugin-run-closed-tab
    plugin-rows/row-plugin-eval-quiet
    plugin-rows/row-plugin-repl-visible
@@ -454,6 +457,7 @@
    mcp/row-mcp-run-selection-done
    mcp/row-mcp-tools-open-read-select
    mcp/row-mcp-tools-replace-save
+   mcp/row-mcp-tools-replace-nul
    mcp/row-mcp-tools-run-eval-console
    mcp/row-mcp-tools-run-selection
    mcp/row-mcp-tools-timeout-stop

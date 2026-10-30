@@ -64,6 +64,61 @@
                                {:text text :warned warned? :console (support/since ui mark)})
                 (.delete (java.io.File. ^String tmp)))))))
 
+(defn row-open-refuses-nul
+  "ROADMAP Next 3: GTK text is C strings, so opening a file holding a NUL
+  used to land only the text before it and Save would write that
+  shortened text back. The open must refuse instead: console names the
+  line, the editor and the disk are both untouched. Same on-gui! drain
+  lesson as the rows above: poll for the console line."
+  [ui]
+  (go-row :open-refuses-nul support/check
+    (let [ed (:editor ui)
+          s "(def a 1)\n\u0000(def b 2)\n"
+          tmp (str (System/getProperty "java.io.tmpdir")
+                   "/jonquil-selftest-nul-" (System/currentTimeMillis) ".clj")
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (with-open [os (java.io.FileOutputStream. ^String tmp)]
+                           (.write os (.getBytes s "UTF-8")))
+                         (editor/set-text! ed "(+ 1 1)")
+                         ((:open-path! ui) tmp)
+                         m))
+          refused? (await-until 1000 20 #(str/includes? (support/since ui mark)
+                                                        "holds a NUL byte on line 2"))]
+      (on-gtk (let [text (editor/editor-text ed)
+                    disk (slurp tmp)]
+                (support/check :open-refuses-nul
+                               (and refused? (= "(+ 1 1)" text) (= s disk))
+                               {:refused refused? :text text :disk-intact (= s disk)
+                                :console (support/since ui mark)})
+                (.delete (java.io.File. ^String tmp)))))))
+
+(defn row-open-nul-new-tab
+  "The new-tab branch (read-for-tab) refuses a NUL-bearing file too, and
+  answers {:error msg}, the shape the MCP open tool reports. The active
+  tab's text was made non-empty first so untouched-untitled? is false and
+  open-file! takes the new-tab branch."
+  [ui]
+  (go-row :open-nul-new-tab support/check
+    (let [ed (:editor ui)
+          s "\u0000binary"
+          tmp (str (System/getProperty "java.io.tmpdir")
+                   "/jonquil-selftest-nul-tab-" (System/currentTimeMillis) ".clj")
+          [mark r] (on-gtk (let [m (support/out-end-offset ui)]
+                             (with-open [os (java.io.FileOutputStream. ^String tmp)]
+                               (.write os (.getBytes s "UTF-8")))
+                             (editor/set-text! ed "(+ 1 1)")
+                             [m ((:open-file! ui) tmp)]))
+          refused? (await-until 1000 20 #(str/includes? (support/since ui mark)
+                                                        "holds a NUL byte on line 1"))]
+      (on-gtk (let [text (editor/editor-text ed)]
+                (support/check :open-nul-new-tab
+                               (and refused? (string? (:error r))
+                                    (str/includes? (:error r) "holds a NUL byte on line 1")
+                                    (= "(+ 1 1)" text) (= s (slurp tmp)))
+                               {:refused refused? :r r :text text
+                                :console (support/since ui mark)})
+                (.delete (java.io.File. ^String tmp)))))))
+
 (defn row-save-atomic
   "M12: save-to! writes a temp file beside the target and renames over it,
   never truncating the target in place. Saving into a missing directory

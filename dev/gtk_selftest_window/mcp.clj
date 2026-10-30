@@ -266,6 +266,27 @@
                                   :disk disk :saved-line saved-line})))
         (finally (on-gtk (close-extra-tabs! ui)))))))
 
+(defn row-mcp-tools-replace-nul [ui]
+  (go-row :mcp-tools-replace-nul support/check
+    ;; ROADMAP Next 3: replacement text holding a NUL used to land
+    ;; truncated at the first NUL (GTK C strings). The tool refuses it
+    ;; with an error naming the line, and the tab is untouched; without
+    ;; the tool's own pre-check the funnel's nil would mislabel this
+    ;; refusal as "read-only".
+    (let [t (tools-for ui)
+          p (file! "nul-replace.clj" "(def old 1)\n")]
+      (on-gtk (occupy-first! ui))
+      (try
+        (let [id (tab-id (:text (call t "jonquil_open" {"path" p})))
+              r (call t "jonquil_replace_text" {"text" "a\u0000b"})
+              ed-text (on-gtk (editor/editor-text (:ed ((:active-tab* ui)))))]
+          (on-gtk (support/check :mcp-tools-replace-nul
+                                 (and id (:error? r)
+                                      (str/includes? (:text r) "holds a NUL byte on line 1")
+                                      (= "(def old 1)\n" ed-text))
+                                 {:r r :ed-text ed-text})))
+        (finally (on-gtk (close-extra-tabs! ui)))))))
+
 (defn row-mcp-tools-run-eval-console [ui]
   (go-row :mcp-tools-run-eval-console support/check
     (let [t (tools-for ui)

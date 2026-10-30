@@ -244,16 +244,25 @@
   I6: Jolt's slurp maps bad bytes to U+FFFD without throwing, so a
   non-UTF-8 file loads silently and Save would then write EF BF BD in
   place of whatever the original bytes were. When the loaded text
-  contains U+FFFD, appends a :system warning naming the risk."
+  contains U+FFFD, appends a :system warning naming the risk. A file
+  holding a NUL byte is refused outright (ROADMAP Next 3): GTK text is C
+  strings, so the buffer would keep only the text before it and Save
+  would write that shortened text back; the console names the line."
   [ed cv path-atom path]
   (try
     (let [text (slurp path)]
-      (editor/set-text! ed text)
-      (reset! path-atom path)
-      (when (str/includes? text "�")
-        (cview/append! cv :system
-                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
-      nil)
+      (if-let [n (tabs/nul-line text)]
+        (let [msg (str path " holds a NUL byte on line " n
+                       ", which Jonquil can't edit, so it wasn't opened.")]
+          (cview/append! cv :error (str "; open: " msg "\n"))
+          {:error msg})
+        (do
+          (editor/set-text! ed text)
+          (reset! path-atom path)
+          (when (str/includes? text "�")
+            (cview/append! cv :system
+                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
+          nil)))
     (catch :default e
       (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
       {:error (ex-message e)})))
@@ -2647,14 +2656,22 @@
 
 (defn- read-for-tab
   "{:text t} for path, warning on the console when it isn't UTF-8 (as
-  open-path! does), or {:error msg} after appending it."
+  open-path! does), or {:error msg} after appending it. A file holding a
+  NUL byte is refused, as open-path! refuses it, before the U+FFFD
+  warning can print."
   [cv path]
   (try
     (let [text (slurp path)]
-      (when (str/includes? text "�")
-        (cview/append! cv :system
-                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
-      {:text text})
+      (if-let [n (tabs/nul-line text)]
+        (let [msg (str path " holds a NUL byte on line " n
+                       ", which Jonquil can't edit, so it wasn't opened.")]
+          (cview/append! cv :error (str "; open: " msg "\n"))
+          {:error msg})
+        (do
+          (when (str/includes? text "�")
+            (cview/append! cv :system
+                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
+          {:text text})))
     (catch :default e
       (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
       {:error (ex-message e)})))
@@ -3472,7 +3489,15 @@
                                         :let [path @(:path t)
                                               ed (:ed t)]
                                         :when (and path (plugin-loader/plugin-file-or-target? dir path))
-                                        :let [disk (try (slurp path) (catch :default _ nil))]]
+                                        :let [disk (try (slurp path) (catch :default _ nil))
+                                              ;; ROADMAP Next 3: NUL-bearing disk text must never
+                                              ;; reach set-text! or rebase-saved! (either would
+                                              ;; truncate or leave the tab permanently dirty), so
+                                              ;; it gets disk-sync's "missing" case, with one line.
+                                              nul (when disk (tabs/nul-line disk))
+                                              disk (when-not nul disk)]]
+                                  (when nul
+                                    (cview/append! cv :system (str "; " path " changed on disk but now holds a NUL byte, so this tab keeps its text.\n")))
                                   (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
                                                     :buffer (editor/editor-text ed)})
                                     :reload (let [caret (g/cursor-offset (:buf ed))
@@ -3859,6 +3884,11 @@
           ;; Open button's dialog result, this is the documented normal
           ;; case, not an error to report.
           text (when file (try (slurp file) (catch :default _ nil)))
+          ;; ROADMAP Next 3: a launch file holding a NUL is refused like
+          ;; any open. Its path must NOT be remembered (Save would write
+          ;; "" over the binary), but `file` stays bound so the
+          ;; session-reopen gate below (when-not file) is untouched.
+          file-nul (when text (tabs/nul-line text))
           ;; File-tree plan P2.T2: a save (or a path change) under the root
           ;; expands to the file and highlights it when its tab is active.
           tree-saved! (fn [t]
@@ -3882,7 +3912,8 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!}
-          first-tab (add-tab! tab-ctx {:path file :text (or text "")})
+          first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
+                                       :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
           ;; follows only while its one tab is an untouched Untitled one.
@@ -3961,8 +3992,13 @@
                                (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (load-and-apply-theme! theme-ctx @settings-path*)
+      ;; ROADMAP Next 3: same refusal as open-path!, for the launch file.
+      (when file-nul
+        (cview/append! cv :error
+                       (str "; open: " file " holds a NUL byte on line " file-nul
+                            ", which Jonquil can't edit, so it wasn't opened.\n")))
       ;; I6: same non-UTF-8 warning as open-path!.
-      (when (and text (str/includes? text "�"))
+      (when (and text (not file-nul) (str/includes? text "�"))
         (cview/append! cv :system
                        "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
       (try
@@ -4096,7 +4132,13 @@
                :buffer-text (fn [id] (turn #(editor/editor-text (:ed (tab-of id)))))
                :replace-text! (fn [id text]
                                 ;; A plugin's text lands exactly as sent,
-                                ;; like an MCP edit (review I3).
+                                ;; like an MCP edit (review I3). A NUL in it
+                                ;; would truncate at the insert (apply-op!
+                                ;; refuses the op), so the throw names it
+                                ;; rather than claiming read-only.
+                                (when-let [n (when (string? text) (tabs/nul-line text))]
+                                  (throw (ex-info (str "the new text holds a NUL byte on line " n
+                                                       ", which Jonquil's editor can't keep, so nothing was changed") {})))
                                 (turn #(let [ed (:ed (tab-of id))]
                                          (when-not (editor/apply-op-plain! ed (mcp-window/replace-op (editor/editor-text ed) text))
                                            (throw (ex-info "that tab is read-only" {}))))))
