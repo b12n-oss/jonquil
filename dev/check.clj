@@ -58,6 +58,7 @@
     jonquil.command-registry
     jonquil.palette
     jonquil.describe
+    jonquil.locations
     jonquil.plugin
     jonquil.plugin-check
     jonquil.plugin-protocol
