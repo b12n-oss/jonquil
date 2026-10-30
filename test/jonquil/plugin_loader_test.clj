@@ -78,7 +78,7 @@
   (is (= "/x/jonquil/plugins" (loader/plugins-dir "/x/jonquil/settings.edn"))))
 
 (deftest same-chord-warns-test
-  ;; review I2: a later plugin on an earlier one's chord is warned about
+  ;; a later plugin on an earlier one's chord is warned about
   (let [d (dir-with [["p3l-x.clj" (source "p3l-x")] ["p3l-y.clj" (source "p3l-y")]])
         {:keys [lines]} (load-dir d)]
     (is (some #(and (str/starts-with? % "plugin p3l-y: ") (str/includes? % "never fires")
@@ -89,7 +89,7 @@
   (let [{:keys [lines]} (load-dir (dir-with [["p3l-one.clj" (source "p3l-one")]]))]
     (is (some #(= "plugin p3l-one loaded (1 command)" %) lines) (pr-str lines))))
 
-;; --- plugins P4: reload ----------------------------------------------------
+;; --- reload ----------------------------------------------------
 
 (defn- reload [d reg & {:as more}]
   (loader/reload (merge {:dir d :os "Linux" :registry reg :disabled #{}} more)))
@@ -177,7 +177,7 @@
     (is (true? (loader/plugin-file? d (str link "/wrap.clj"))))))
 
 (deftest plugin-file-or-target?-test
-  ;; plugins F2 final review I1: a tab opened at a symlinked plugin file's
+  ;; a tab opened at a symlinked plugin file's
   ;; target is that plugin's file too
   (let [d (temp-dirs/temp-dir! "jonquil-plugins-pt-")
         elsewhere (temp-dirs/temp-dir! "jonquil-plugins-dots-")
@@ -203,7 +203,7 @@
 
 (deftest loads-are-serial-test
   ;; two load steps on one agent: the second reads the registry the first
-  ;; left, so an unchanged file gives it nothing to do (review focus 5)
+  ;; left, so an unchanged file gives it nothing to do
   (let [slow (str "(ns jonquil.plugins.p4l-slow\n  (:require [jonquil.plugin :as p]))\n(Thread/sleep 300)\n"
                   "(p/defplugin {:id :p4l-slow :doc \"d\" :effects #{} :commands [] :bindings []})\n")
         d (dir-with [["p4l-slow.clj" slow]])
@@ -223,10 +223,10 @@
     (is (= ["loading plugins failed: kaboom"] lines))
     (is (= (reg/empty-registry) @live))))
 
-;; --- review fixes: later plugins re-checked; the agent; settings warning ---
+;; --- later plugins re-checked; the agent; settings warning ---
 
 (deftest reload-rechecks-later-plugins-test
-  ;; I1: p4l-a moves onto p4l-z's chord; p4l-z is told its binding now
+  ;; p4l-a moves onto p4l-z's chord; p4l-z is told its binding now
   ;; never fires, as a fresh start would say
   (let [d (dir-with [["p4l-a.clj" (source "p4l-a")] ["p4l-z.clj" (source "p4l-z" :key "k")]])
         {reg :registry} (load-dir d)
@@ -236,7 +236,7 @@
         (pr-str (:lines r)))))
 
 (deftest reload-removes-a-dependent-that-now-fails-test
-  ;; I2: p4l-c binds p4l-b's command; disabling p4l-b leaves p4l-c naming
+  ;; p4l-c binds p4l-b's command; disabling p4l-b leaves p4l-c naming
   ;; an unregistered command, so p4l-c is removed and named, not kept dead
   (let [d (dir-with [["p4l-b.clj" (source "p4l-b")]
                      ["p4l-c.clj" (str/replace (source "p4l-c" :key "k")
@@ -249,7 +249,7 @@
         (pr-str (:lines r)))))
 
 (deftest load-agent-keeps-going-after-a-throw-test
-  ;; I3: a throw in a step is reported, and later steps still run
+  ;; a throw in a step is reported, and later steps still run
   (let [errors (atom [])
         a (loader/load-agent #(swap! errors conj (ex-message %)))]
     (send-off a (fn [_] (throw (ex-info "kaboom" {}))))
@@ -259,14 +259,14 @@
     (is (= ["kaboom"] @errors))))
 
 (deftest load-step-prints-a-settings-warning-test
-  ;; I4: a malformed :plugins :disabled is named, not ignored silently
+  ;; a malformed :plugins :disabled is named, not ignored silently
   (let [d (temp-dirs/temp-dir! "jonquil-settings-pl-")
         sp (str d "/settings.edn")
         _ (spit sp "{:plugins {:disabled [:x]}}")
         lines (loader/load-step! (atom (reg/empty-registry)) {:settings-path sp :os "Linux"})]
     (is (some #(str/includes? % ":plugins :disabled") lines) (pr-str lines))))
 
-;; --- review of the recheck --------------------------------------------------
+;; --- the recheck --------------------------------------------------
 
 (defn- binds [id target key]
   (str/replace (source id :key key) (str ":command :" id "/wrap}]})") (str ":command :" target "/wrap}]})")))
@@ -303,7 +303,7 @@
         lines (loader/load-step! (atom (reg/empty-registry)) {:settings-path sp :os "Linux"})]
     (is (some #(str/starts-with? % "settings: ") lines) (pr-str lines))))
 
-;; --- plugins P7: history and revert -----------------------------------------
+;; --- history and revert -----------------------------------------
 
 (def ^:private now (constantly "2026-10-26T00:00:00Z"))
 
@@ -451,7 +451,7 @@
     (is (= (reg/empty-registry) @live))))
 
 (deftest load-step-bad-history-n-is-a-line-test
-  ;; review I1: a history.edn with a non-numeric :n is a line, not a failed load
+  ;; a history.edn with a non-numeric :n is a line, not a failed load
   (let [d (dir-with [["wrap.clj" (source "wrap")]])
         f (io/file (history/history-dir d "wrap") "history.edn")
         live (atom (reg/empty-registry))]
@@ -464,7 +464,7 @@
 (defn- marked [id n] (str (str/replace (source id) "Wrap it." (str "Wrap it v" n ".")) "(def marker " n ")\n"))
 
 (deftest revert-whose-write-fails-restores-the-namespace-test
-  ;; review I3: the check loaded v1 into the namespace; a failed write puts v2 back
+  ;; the check loaded v1 into the namespace; a failed write puts v2 back
   (let [d (dir-with [["pc.clj" (marked "pc" 1)]])
         live (atom (reg/empty-registry))
         _ (step! live d)
@@ -480,7 +480,7 @@
     (is (= 2 @(ns-resolve 'jonquil.plugins.pc 'marker)))))
 
 (deftest revert-keeps-a-symlinked-plugin-file-test
-  ;; review I2: reverting through a symlinked <id>.clj updates its target
+  ;; reverting through a symlinked <id>.clj updates its target
   (let [real-dir (temp-dirs/temp-dir! "jonquil-plugins-real-")
         d (dir-with [])
         target (io/file real-dir "wrap.clj")
@@ -496,7 +496,7 @@
     (is (java.nio.file.Files/isSymbolicLink (.toPath link)))
     (is (= (source "wrap") (slurp target)))))
 
-;; --- plugins P9: proposals --------------------------------------------------
+;; --- proposals --------------------------------------------------
 
 (defn- propose! [d id text result & {:as more}]
   (loader/propose-step! (merge {:dir d :os "Linux" :disabled #{} :now now :id id :source text
@@ -662,7 +662,7 @@
       (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker))))))
 
 (deftest accept-refuses-unreported-mcp-tools-test
-  ;; P9 review I5: a check that reported no tools can't bring some in at Accept
+  ;; a check that reported no tools can't bring some in at Accept
   (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
         live (atom (reg/empty-registry))
         v2 (str/replace (marked "pw" 2) "   :effects #{:console}\n"
@@ -721,10 +721,10 @@
 (deftest reject-not-pending-test
   (is (= ["plugin pw has no pending v3"] (reject! (dir-with []) "pw" 3))))
 
-;; --- plugins P9: the final review's fixes ------------------------------------
+;; --- later fixes to proposals ------------------------------------
 
 (deftest accept-with-a-missing-version-file-loads-nothing-test
-  ;; review I1: with <n>.clj gone, Accept checked the file on disk instead
+  ;; with <n>.clj gone, Accept checked the file on disk instead
   (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
         live (atom (reg/empty-registry))
         v2 (marked "pw" 2)
@@ -737,14 +737,14 @@
     (is (= 1 @(ns-resolve 'jonquil.plugins.pw 'marker)))))
 
 (deftest propose-needs-source-text-test
-  ;; review I2: a nil source made an entry naming a file that was never written
+  ;; a nil source made an entry naming a file that was never written
   (let [d (dir-with [])]
     (is (= {:status :refused :n nil :lines [] :problems ["a proposal needs its source as text"]}
            (propose! d "pw" nil {:ok? false :unchecked? true :problems [] :warnings [] :timings {} :plugin nil})))
     (is (not (.exists (io/file d ".history"))))))
 
 (deftest revert-refuses-a-version-that-was-never-live-test
-  ;; review I3: a proposal's <n>.clj made it a revert target, skipping Accept
+  ;; a proposal's <n>.clj made it a revert target, skipping Accept
   (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
         live (atom (reg/empty-registry))
         v2 (marked "pw" 2)
@@ -759,7 +759,7 @@
     (is (= (marked "pw" 1) (slurp (io/file d "pw.clj"))))))
 
 (deftest accept-keeps-an-edit-that-wasnt-reloaded-test
-  ;; review I4: Accept wrote over a change to pw.clj that no Reload had seen
+  ;; Accept wrote over a change to pw.clj that no Reload had seen
   (let [d (dir-with [["pw.clj" (marked "pw" 1)]])
         live (atom (reg/empty-registry))
         v2 (marked "pw" 2)
@@ -794,7 +794,7 @@
     (is (= 2 (count (entries d "wrap"))))))
 
 (deftest revert-to-the-live-version-restores-a-deleted-file-test
-  ;; final review I2: deleted with no reload since, so v2 is still live
+  ;; deleted with no reload since, so v2 is still live
   (let [[d live] (with-v1-and-v2 "wrap")]
     (io/delete-file (io/file d "wrap.clj"))
     (let [lines (revert! live d "wrap" 2)]
@@ -811,7 +811,7 @@
     (is (= "(ns broken" (slurp (io/file d "wrap.clj"))))
     (is (= 2 (count (entries d "wrap"))))))
 
-;; --- plugins P11: Enable and Disable -----------------------------------------
+;; --- Enable and Disable -----------------------------------------
 
 (defn- settings-with
   "A temp settings file holding settings-text, with files in its plugins
@@ -872,7 +872,7 @@
     (is (= #{:t-d} (disabled-ids sp)))))
 
 (deftest a-second-disable-says-already-test
-  ;; final review I1: two quick clicks queue two steps; the second finds the
+  ;; two quick clicks queue two steps; the second finds the
   ;; id already disabled, says so, and neither writes nor reloads
   (let [sp (settings-with "{}" [["t-e.clj" (source "t-e")]])
         live (atom (reg/empty-registry))

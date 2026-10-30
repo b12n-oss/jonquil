@@ -114,7 +114,7 @@
       (is (= (str root "/src/a.clj") (:path (first (ft/children m (:path linked)))))))))
 
 (deftest symlink-cycle-test
-  ;; Final review finding 2: a link to the folder itself (or an ancestor)
+  ;; a link to the folder itself (or an ancestor)
   ;; has the same canonical path as an expanded folder; rows must not
   ;; recurse forever.
   (let [root (tree! {"a/x.clj" ""})
@@ -130,7 +130,7 @@
       (is (not-any? :expanded? (rest rs)) "a cycle's row is shown collapsed"))))
 
 (deftest project-selection-test
-  ;; Final review finding 1: a directory's own marker decides its dialect.
+  ;; a directory's own marker decides its dialect.
   (let [cljd (tree! {"pubspec.yaml" "name: x\n"})
         jolt (tree! {"deps.edn" "{}"})]
     (is (= :cljd (get-in (ft/project-selection cljd nil) [:profile :id])))
@@ -139,7 +139,7 @@
     (is (= jolt (:project-dir (ft/project-selection jolt nil))))))
 
 (deftest listed-symlink-test
-  ;; File-ops fix round 1, Critical 1: :path is the canonical target, :listed
+  ;; :path is the canonical target, :listed
   ;; the entry itself, for a symlinked file and a symlinked folder.
   (let [root (tree! {"proj/a.clj" "" "else/notes.txt" "n" "else/vd/v.clj" ""})
         proj (str root "/proj")

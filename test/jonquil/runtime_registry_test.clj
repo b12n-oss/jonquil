@@ -50,7 +50,7 @@
         (when (and @captured (child/alive? @captured)) (child/kill! @captured))))))
 
 (deftest window-close-order-during-start-leaves-no-child-test
-  ;; C1 (phase-close review): close-request-fn's own order is stop!, then
+  ;; close-request-fn's own order is stop!, then
   ;; registry/unregister! in a finally, then (later, from jonquil.main)
   ;; registry/stop-all!. Reproduces that exact order against a start still
   ;; mid-spawn, and asserts stop-all! doesn't return before the delayed
@@ -123,7 +123,7 @@
     (boolean (and (zero? (:exit r)) (not (str/blank? (:out r)))))))
 
 (deftest quit-while-jank-starts-leaves-nothing-behind-test
-  ;; Finding 1 of the whole-branch review: the window's close order (stop!,
+  ;; the window's close order (stop!,
   ;; unregister!, stop-all!) used to find a Jank evaluator "settled" while
   ;; its launch was still polling for the port file, so System/exit could
   ;; cut the launch off with the process and run dir still there. The

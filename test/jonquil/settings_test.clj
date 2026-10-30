@@ -141,7 +141,7 @@
           (.setReadable f true false)))
       (is (= "{:theme :navy :dialect :jolt}" (slurp path)) "file should be unchanged byte-for-byte")))
   (testing "malformed EDN: refuse with a message and leave the file alone"
-    ;; File-tree final review finding 5: saves now also happen when the
+    ;; saves now also happen when the
     ;; tree is toggled, so overwriting a file mid-edit would silently drop
     ;; its other keys.
     (let [path (str (temp-dir) "/settings.edn")]
@@ -156,7 +156,7 @@
       (is (= {:theme :dark} (settings/load-settings path))))))
 
 (deftest save-merges-test
-  ;; File-tree plan P1.T2: a save keeps every key the file already holds.
+  ;; a save keeps every key the file already holds.
   (let [path (str (temp-dir) "/settings.edn")]
     (spit path "{:theme :light :dialect :jolt :file-tree {:visible? true :width 240}}")
     (is (nil? (settings/save-settings! path {:theme :dark})))
@@ -228,7 +228,7 @@
         (is (str/includes? (:warning r) ":parinfer"))))))
 
 (deftest plugins-part-test
-  ;; plugins P4: :plugins {:disabled #{id ...}}, read; malformed is ignored
+  ;; :plugins {:disabled #{id ...}}, read; malformed is ignored
   ;; with a warning; a save of another key keeps it
   (let [path (str (temp-dir) "/settings.edn")]
     (spit path "{:theme :navy :plugins {:disabled #{:a :b}}}")
@@ -244,7 +244,7 @@
     (spit path "{:theme :navy}")
     (is (nil? (:plugins (settings/load-settings path))))))
 
-;; --- plugins P11: the plugin list's Enable and Disable -----------------------
+;; --- the plugin list's Enable and Disable -----------------------
 
 (defn- temp-settings
   "A settings file holding text, in its own temp folder."

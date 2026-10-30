@@ -82,7 +82,7 @@
       (is (string? (protocol/edit-result-problem s r)) (pr-str r)))))
 
 (deftest edit-result-nul-test
-  ;; NUL arc review I1: apply-op! refuses an op whose text holds a NUL
+  ;; apply-op! refuses an op whose text holds a NUL
   ;; (GTK C strings would truncate the insert), silently. The validator
   ;; names it instead, reaching the author as "plugin <id>: <why>".
   (let [s {:text text :caret 0 :sel-start 0 :sel-end 0}]
@@ -156,7 +156,7 @@
 
 (deftest load-deadline-test
   ;; a file that loops at top level is a problem after :load-ms, so the
-  ;; files after it still load (review I1)
+  ;; files after it still load
   (reset! stop-spin false)
   (let [t0 (System/currentTimeMillis)
         r (try (protocol/load-candidate
@@ -170,7 +170,7 @@
 
 (deftest edit-result-check-is-linear-test
   ;; the check runs on every plugin keypress, on the GTK thread: 5000 edits
-  ;; on a 20,000-line buffer must not rebuild the text per edit (review I-C)
+  ;; on a 20,000-line buffer must not rebuild the text per edit
   (let [line "(defn f [x] (inc x)) ; a line of about forty chars\n"
         text (apply str (repeat 20000 line))
         edits (vec (for [i (range 5000) :let [o (* i (count line))]] [o o "  "]))

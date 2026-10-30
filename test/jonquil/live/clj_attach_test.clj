@@ -225,7 +225,7 @@
       (finally (clj-server/stop! srv)))))
 
 (deftest inspect-after-first-run-live
-  ;; review focus 1: Cmd/Ctrl+I right after the first Run of a JVM file
+  ;; Cmd/Ctrl+I right after the first Run of a JVM file
   ;; must never show nil -- register-inspect!'s own connect-time eval of
   ;; nil registers the session before the Run's own load-file runs. A
   ;; fresh jvm/make-jvm (not the shared `make` helper above, though it

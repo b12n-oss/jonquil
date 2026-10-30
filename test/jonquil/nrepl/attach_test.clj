@@ -222,7 +222,7 @@
             (is (= [cljd/probe-code "(println :side-effect)"] (codes srv)))))))))
 
 (deftest still-waiting-test
-  ;; M5: the 200ms still-waiting-ms threshold (make) also covers the
+  ;; the 200ms still-waiting-ms threshold (make) also covers the
   ;; fresh-session wake probe's own request, so under load a slow connect
   ;; can print the line once for the probe and once for "(slow)" itself.
   ;; Connecting and waking first, off the clock, means the timed run below
@@ -284,7 +284,7 @@
         (is (ev/evaluating? e))
         (is (= :ok (:status (deref done 5000 :timeout))))))))
 
-;; P4.T1: offline completion and lookup-backed quick doc.
+;; offline completion and lookup-backed quick doc.
 
 (deftest complete-is-offline-test
   (with-app {}
@@ -348,7 +348,7 @@
   ;; otherwise succeed: op-set will carry eval and load-file, and clone
   ;; would answer fine.
   ;;
-  ;; Fix round 3, finding 2: a fixed (Thread/sleep 100) here can overrun
+  ;; A fixed (Thread/sleep 100) here can overrun
   ;; the 400ms describe delay when a full suite is loading the machine,
   ;; so connect! finishes (describe's own stop-check sees nothing yet)
   ;; before Stop ever lands. Polling fake/ops-seen for "describe" (the
@@ -433,9 +433,8 @@
         (client/close! conn)))))
 
 (deftest load-error-survives-stop-test
-  ;; Fix round 2, finding A: finish! used to squash EVERY non-:interrupted
-  ;; result to :interrupted whenever stop-requested? was true, which
-  ;; masked load-result's own "Load stopped at form N" diagnostic end to
+  ;; finish! must not squash a non-:interrupted result to :interrupted just
+  ;; because stop-requested? is true; that would mask load-result's own "Load stopped at form N" diagnostic end to
   ;; end. :stop-requested? is set directly on state, not through
   ;; ev/interrupt! (which always detaches too, closing the socket and
   ;; injecting a disconnected status into this SAME in-flight load-file
@@ -444,7 +443,7 @@
   ;; alone, while the socket stays open, isolates finish!'s own decision:
   ;; the load keeps running for real and fails on (boom) with its own
   ;; eval-error, never a disconnect, so the diagnostic is what must
-  ;; survive. M5: a fixed 100ms wait before setting the flag can land before
+  ;; survive. A fixed 100ms wait before setting the flag can land before
   ;; the load-file request has even been sent under load, so this polls
   ;; fake/requests for "load-file" instead (the same technique
   ;; stop-during-wake-probe-test uses for the probe's own code).
@@ -463,7 +462,7 @@
 (deftest stop-during-wake-probe-test
   ;; Stop pressed while the fresh-session wake probe is in flight still
   ;; reads as :interrupted -- a regression guard for wake!'s own new
-  ;; stop-check (finding A), now that finish! no longer squashes this
+  ;; stop-check, now that finish! no longer squashes this
   ;; for it.
   (with-app {:slow {cljd/probe-code 300}}
     (fn [srv dir _]
@@ -476,7 +475,7 @@
             "Stop during the wake probe still ends the evaluation as :interrupted")))))
 
 (deftest stop-before-ns-switch-test
-  ;; I1: a Stop that lands between the wake probe and the next request
+  ;; a Stop that lands between the wake probe and the next request
   ;; (here, the ns-switch eval Run Selection sends first) used to crash
   ;; instead of ending as :interrupted: request! was called after detach!
   ;; had already set :conn nil, so client/request! swapped on (:counter
@@ -494,7 +493,7 @@
                 "no user code, and no ns-switch, is ever sent")))))))
 
 (deftest stale-publish-race-test
-  ;; I4: Stop can land in the gap between connect!'s (stop-requested? ev)
+  ;; Stop can land in the gap between connect!'s (stop-requested? ev)
   ;; check (guarding whether the fresh clone gets published) and the
   ;; swap! that actually publishes it. with-redefs on the private
   ;; stop-requested? makes the race deterministic: its SECOND call (the
@@ -517,12 +516,12 @@
         (is (not (attach/connected? e)) "the connection connect! was building was never published")))))
 
 (deftest stop-during-asleep-probe-test
-  ;; Fix round 3, finding 1: wake!'s stop-check only covered #{:lost
-  ;; :failed}, so a Stop that lands while BOTH probes answer asleep (r
-  ;; stays :asleep after the retry is exhausted) fell through to the
-  ;; :notice not-awake-message instead of :interrupted -- reachable
+  ;; wake!'s stop-check must cover more than #{:lost :failed}: a Stop that
+  ;; lands while BOTH probes answer asleep (r stays :asleep after the
+  ;; retry is exhausted) must give :interrupted, not fall through to the
+  ;; :notice not-awake-message -- reachable
   ;; whenever the app's genuine nil reply beats a detach's synthetic
-  ;; disconnect (round 2's finding A note: cljd's own connect skill
+  ;; disconnect (cljd's own connect skill
   ;; already documents a hot-restart REPL answering nil).
   ;;
   ;; :stop-requested? is set directly on state, not through
@@ -535,10 +534,10 @@
   ;; code (the same technique stop-during-wake-probe-test uses) before
   ;; setting the flag guarantees connect! has already finished, so the
   ;; flag can only be read by wake!'s own check, never connect!'s
-  ;; (fixed in round 2, finding 7) -- a fixed sleep here raced exactly
+  ;; -- a fixed sleep here raced exactly
   ;; that and was measured to pass for the wrong reason under load.
   ;;
-  ;; I3: this test used to need a 400ms settle here, because
+  ;; this test used to need a 400ms settle here, because
   ;; stop-during-wake-probe-test's own fake server (immediately before this
   ;; one) left its per-connection thread alive up to its own :slow duration
   ;; after ev/interrupt! had already unblocked that test's client side --

@@ -131,7 +131,7 @@
     (fake/stop! srv)))
 
 (deftest stop-wakes-sleepers-and-waits-for-them-test
-  ;; I3: the fake's connection threads used to outlive stop!, and through fd
+  ;; the fake's connection threads used to outlive stop!, and through fd
   ;; reuse could go on to answer the NEXT test's socket (measured: server A's
   ;; woken thread served server B's requests, in 2 of 3 runs). stop! now
   ;; wakes every :slow/:slow-ops sleeper at once and waits (bounded) for

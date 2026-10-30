@@ -338,7 +338,7 @@
           (pr-str t pos warm?)))))
 
 (deftest prefix-unclosed-cold-path-scans-only-the-prefix-test
-  ;; review I1: on a cache miss the scan stops at the caret, as upstream's
+  ;; on a cache miss the scan stops at the caret, as upstream's
   ;; does, rather than reading the whole buffer
   (let [orig @#'syntax/compute-brackets*
         seen (atom [])

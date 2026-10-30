@@ -221,7 +221,7 @@
                                     :text after :caret caret :bounds spanb})]
         (is (= no-bounds with-bounds) (pr-str [prev a b rep]))))))
 
-;; --- paren-stable (the format-interplay arc) --------------------------------
+;; --- paren-stable --------------------------------
 
 (deftest paren-stable-shifts-a-wrapped-line-test
   (is (= "(def a\n  [{:x 1}\n   {:y 2}])"

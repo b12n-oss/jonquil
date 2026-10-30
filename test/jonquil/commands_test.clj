@@ -110,7 +110,7 @@
   (is (= 9 (c/zoom 9 :out)) "clamps at the bottom")
   (is (= 13 (c/zoom 24 :reset))))
 
-;; cljd plan P3.T1: Run Form's choice of form.
+;; Run Form's choice of form.
 (defn- form-at [text needle & [delta]]
   (:text (c/run-form {:text text :caret (+ (str/index-of text needle) (or delta 0))})))
 
@@ -165,7 +165,7 @@
     (let [t "(ns a.b)\r\n\r\n(defn f [x]\r\n  (inc x))\r\n"]
       (is (= "(defn f [x]\r\n  (inc x))" (form-at t "inc"))))))
 
-;; cljd plan P3.T1 fix round 1: #_ discards its form, ^meta stays attached.
+;; #_ discards its form, ^meta stays attached.
 (deftest run-form-discard-test
   (is (nil? (c/run-form {:text "#_(a b)" :caret 3})) "a #_-discarded form isn't runnable")
   (is (nil? (c/run-form {:text "#_(a b)" :caret 0})) "nor is the #_ marker itself")
@@ -221,7 +221,7 @@
   (is (nil? (c/parinfer-status-text :off true :off))
       "pinned off under an off global differs from nothing, so it hides (review I2)"))
 
-;; --- the Paren-stable format pass (the format-interplay arc) ----------------
+;; --- the Paren-stable format pass ----------------
 
 (deftest format-all-op-paren-stable-test
   (let [text "(def a\n  [{:x 1}\n    {:y 2}])"]

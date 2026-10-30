@@ -48,7 +48,7 @@
   (is (= [] (paint/paint-plan nil)))
   (is (nil? (paint/style-at light (paint/paint-plan "abc") 0))))
 
-;; P1.T2: a profile's own sets decide how symbols paint.
+;; a profile's own sets decide how symbols paint.
 (deftest paint-plan-profile-test
   (let [text "(ns a.b (:require [cljd.flutter :as f]))\n(f/widget :padding 8 (await (fetch)))\n(defn g [x] (map inc x))"
         kind-at (fn [plan pos] (some (fn [[k s e]] (when (and (keyword? k) (<= s pos) (< pos e)) k)) plan))

@@ -84,7 +84,7 @@
   (is (= :warn (tabs/disk-sync {:saved "a" :disk "b" :dirty? true})))
   (is (nil? (tabs/disk-sync {:saved "a" :disk "a" :dirty? true})))
   (is (nil? (tabs/disk-sync {:saved "a" :disk nil :dirty? false})))
-  ;; final review I2: edits that already equal the new disk text lose nothing
+  ;; edits that already equal the new disk text lose nothing
   (is (= :rebase (tabs/disk-sync {:saved "a" :disk "b" :dirty? true :buffer "b"}))))
 
 (deftest nul-line-test

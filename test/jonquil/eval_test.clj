@@ -109,7 +109,7 @@
       (sut/push-stdin! ctx "second-run")
       (is (= "second-run" (:value (deref c2 3000 :timeout)))))))
 
-;; ---------------------------------------------------------------- S1 rows
+;; ---------------------------------------------------------------- rows
 
 (def counter (atom 0))
 
@@ -153,12 +153,10 @@
 
 (def live (atom #{}))
 
-;; CHANGED in P1.T7 fix round 2: this test used to assume "Run pressed
-;; immediately after Stop, before the worker has exited" always gets the
-;; "already in progress" warning, then always started run 2 explicitly
-;; afterward. Round 1's tighter Stop handshake means that immediate call
-;; can now sometimes race ahead of run1's worker and actually START run 2
-;; (returning nil) instead of warning -- both outcomes are legitimate
+;; "Run pressed immediately after Stop, before the worker has exited" does
+;; not always get the "already in progress" warning: the tight Stop
+;; handshake means that immediate call can sometimes race ahead of run1's
+;; worker and actually START run 2 (returning nil) instead of warning -- both outcomes are legitimate
 ;; results of a real race, and the test's actual invariant (at most one
 ;; program is ever live, and a second run does get going once the first
 ;; has stopped) holds under either one. So: if the immediate call started
@@ -258,7 +256,7 @@
       ;; every later test that runs in the default namespace.
       (when (find-ns 'user) (ns-unmap 'user 'f)))))
 
-;; ---------------------------------------------------------------- fix round 1
+;; ---------------------------------------------------------------- idle notify
 
 (deftest fix1-idle-notify-throw-does-not-block-completion
   (let [ctx (sut/make-eval-context)
@@ -298,7 +296,7 @@
   ;; inside that watch we start run2 and then sleep briefly before letting
   ;; the watch (and so the reset!) return, which gives run2's own worker a
   ;; window to run if nothing serialises it against run1's still-pending
-  ;; :idle notification. This is exactly the gap S1's finding 3 describes
+  ;; :idle notification. This is exactly the gap
   ;; (a new run starting between the old worker's state reset and its
   ;; notification), widened deterministically instead of hoping a real
   ;; scheduler race lands the wrong way often enough to catch in CI.
@@ -340,7 +338,7 @@
         (is (< idle1-idx running2-idx)
             (str "iteration " i ": run2's :running notification must never precede run1's :idle notification, log=" entries))))))
 
-;; ---------------------------------------------------------------- phase-close fix wave
+;; ---------------------------------------------------------------- Stop races
 
 (deftest phase-close-i1-stop-clears-interrupt-before-blocking-oncomplete
   (let [ctx (sut/make-eval-context)

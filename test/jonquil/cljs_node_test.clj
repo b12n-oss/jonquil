@@ -210,7 +210,7 @@
     (is (str/includes? t cljs-node/got-input-marker))
     (is (str/includes? t cljs-node/input-eof-marker))
     ;; an empty line must answer "", not nil: cljs split-lines pops the
-    ;; trailing "" of "\n" and (first []) is nil (review I1, measured
+    ;; trailing "" of "\n" and (first []) is nil (measured
     ;; against ClojureScript 1.12.42), so the reader cuts at indexOf
     (is (not (str/includes? t "split-lines")))
     (is (str/includes? t ".indexOf"))

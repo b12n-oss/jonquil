@@ -204,7 +204,7 @@
     (is (not= (k "{:runtime :nrepl}" "/p" "/p/a.clj") (k "{:runtime :nrepl}" "/q" "/q/a.clj"))
         "another nREPL project needs its own child")))
 
-;; P1.T1: the ClojureDart profile. `with-cljd` is the profile list the
+;; the ClojureDart profile. `with-cljd` is the profile list the
 ;; window will use once P2 wires the attach evaluator in.
 (def ^:private with-cljd [dialect/jolt dialect/cljd])
 
@@ -280,9 +280,7 @@
     (is (= (k "/p" "/p/lib/a.cljd") (k "/p" "/p/dev/b.cljd")) "another file in the same app keeps the connection")
     (is (not= (k "/p" "/p/lib/a.cljd") (k "/q" "/q/lib/a.cljd")) "another app needs its own")))
 
-;; P1.T2: the :clj (JVM Clojure) profile. Not yet in dialect/profiles
-;; (ruling 3); joins it in P2.T4, once the window can reach
-;; make-attached :clj.
+;; the :clj (JVM Clojure) profile. Not yet in dialect/profiles; it joins once the window can reach make-attached :clj.
 (def ^:private all3 [dialect/jolt dialect/cljd dialect/clj])
 
 (deftest clj-profile-test
@@ -393,7 +391,7 @@
       (is (= 1 (count (:warnings s))))
       (is (str/includes? (first (:warnings s)) ":auto-require only applies to JVM Clojure and Jolt")))))
 
-;; D3 P1.T1: the :jank profile, which Jonquil launches itself.
+;; the :jank profile, which Jonquil launches itself.
 (def ^:private all4 [dialect/jolt dialect/cljd dialect/clj dialect/jank])
 
 (deftest jank-profile-test

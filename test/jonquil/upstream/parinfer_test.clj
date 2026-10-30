@@ -35,7 +35,7 @@
 ;; run-case checks success, text, cursor and error name, upstream's set.
 ;; Wherever a fixture also states tabStops, parenTrails or an error
 ;; position, these must match too, or a re-sync could regress them
-;; silently (#141 review, #146 re-sync plan). The engine answers kebab
+;; silently. The engine answers kebab
 ;; keys; the fixtures camelCase.
 
 (def ^:private camel->kebab

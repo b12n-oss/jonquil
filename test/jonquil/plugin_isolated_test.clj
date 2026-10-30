@@ -50,7 +50,7 @@
 (defn- one-problem [r] (is (false? (:ok? r))) (is (= 1 (count (:problems r))) (pr-str r)) (first (:problems r)))
 
 (deftest parse-tools-summary-test
-  ;; P10b review C1: a summary with :mcp-tools is a result, so an agent can
+  ;; a summary with :mcp-tools is a result, so an agent can
   ;; propose a plugin with tools; forged tool shapes still aren't
   (let [tools {:mcp-tools [{:name "echo" :doc "Echo it." :args {"text" {:type "string" :doc "t" :required? true}}}]}
         ok (update good :plugin merge tools)]
@@ -83,7 +83,7 @@
          (one-problem (parse (checker/result-text good) 3)))))
 
 (deftest parse-rejects-a-half-shaped-result-test
-  ;; review I2: a pass must carry no problems and a whole :plugin summary;
+  ;; a pass must carry no problems and a whole :plugin summary;
   ;; a fail carries no :plugin; :warnings and :timings have their shapes
   (doseq [v [{:ok? true :problems ["x"] :warnings [] :timings {} :plugin (:plugin good)}
              {:ok? true :problems [] :warnings [] :timings {} :plugin {:id :cw :effects #{}}}

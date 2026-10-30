@@ -79,7 +79,7 @@
 
 (deftest project-roots-come-after-jolts-own-test
   ;; Jolt and Jonquil share this process: a project's folders must not
-  ;; shadow their namespaces (review finding 4).
+  ;; shadow their namespaces.
   (let [dir (project! {"src/a.clj" ""})
         before (vec ((requiring-resolve 'jolt.host/source-roots)))]
     (try
@@ -92,8 +92,7 @@
 
 (deftest two-projects-on-one-evaluator-test
   ;; A window keeps one in-process evaluator when it opens a file from
-  ;; another in-process project, so each Run applies its own file's project
-  ;; (review finding 1).
+  ;; another in-process project, so each Run applies its own file's project.
   (let [mk (fn [ns-a ns-u]
              (project! {"deps.edn" "{:paths [\"src\"]}"
                         ".jonquil.edn" "{:runtime :in-process}"
@@ -167,7 +166,7 @@
 
 (deftest a-failure-is-retried-test
   ;; A failure is kept only a little while, so a network blip heals on a
-  ;; later Run (review finding 2).
+  ;; later Run.
   (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {nope/nope {:git/url \"file:///no/such/repo\" :git/sha \"1111111111111111111111111111111111111111\"}}}"
                        ".jonquil.edn" "{:runtime :in-process}"
                        "src/depsretry.clj" "(ns depsretry)\n(+ 1 2)\n"})
@@ -183,7 +182,7 @@
 
 (deftest stop-during-a-resolve-test
   ;; Stop while dependencies are being fetched stops the Run, and isn't
-  ;; remembered as a failure (review finding 1).
+  ;; remembered as a failure.
   (let [dir (project! {"deps.edn" "{:paths [\"src\"] :deps {slow/slow {:local/root \"/nowhere\"}}}"
                        ".jonquil.edn" "{:runtime :in-process}"
                        "src/depsstop.clj" "(ns depsstop)\n(+ 1 2)\n"})
@@ -249,7 +248,7 @@
 
 (deftest stop-during-auto-require-test
   ;; Stop while the list loads stops the Run, and the next evaluation tries
-  ;; the list again rather than skipping it (review finding 2).
+  ;; the list again rather than skipping it.
   (let [dir (project! {"deps.edn" "{:paths [\"src\"]}"
                        ".jonquil.edn" "{:runtime :in-process :auto-require [arslow.core]}"
                        "src/arslow/core.clj" (str "(ns arslow.core)\n(Thread/sleep 10000)\n;; " (System/nanoTime) "\n")

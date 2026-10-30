@@ -17,10 +17,8 @@
 (use-fixtures :once temp-dirs/fixture)
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (its own gitignored planning-store
-  ;; file): demo.core with greet, a private secret returning :private-ok,
-  ;; and nested. Embedded rather than read at test time: the planning
-  ;; store is gitignored scratch, so tests can't depend on it.
+  ;; The fixture's exact text: demo.core with greet, a private secret returning :private-ok,
+  ;; and nested. Embedded rather than read from a file at test time.
   (str "(ns demo.core\n"
        "  \"A fixture namespace for the clj-attach spike.\")\n"
        "\n"
@@ -970,7 +968,7 @@
         (is (< (/ (- (System/nanoTime) start) 1e6) 1000.0) "well under the fake's own 1000 ms :inspect-ms")))))
 
 (deftest inspect-lost-connection-test
-  ;; review focus 5: fake/drop-connections! while :inspect-ms delays -> {:error clj/lost-connection :lost? true}
+  ;; fake/drop-connections! while :inspect-ms delays -> {:error clj/lost-connection :lost? true}
   (with-project {:inspect-ms 1000}
     (fn [srv dir _]
       (let [e (make dir)
@@ -982,7 +980,7 @@
         (is (= {:error clj/lost-connection :lost? true} (deref done 2000 :timeout)))))))
 
 (deftest inspect-lost-connection-idle-test
-  ;; I2: the connection drops while the panel is IDLE (nothing in flight),
+  ;; the connection drops while the panel is IDLE (nothing in flight),
   ;; not mid round-trip like inspect-lost-connection-test above. :conn is
   ;; non-nil but closed (connect! never nils it back out on a passive
   ;; drop -- only detach!/a fresh connect! does), so this must answer

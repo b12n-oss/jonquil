@@ -245,7 +245,7 @@
     (is (apply distinct? (map :label menu)))
     (is (apply distinct? (map :action menu)))))
 
-;; --- plugins P1: commands that can pass the key on ------------------------
+;; --- commands that can pass the key on ------------------------
 
 (deftest passes-flag-test
   ;; the commands that can answer :next or :to-gtk, so a window binding to
