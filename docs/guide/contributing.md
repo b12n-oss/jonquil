@@ -40,6 +40,10 @@ in the repo's conventional style (`feat(scope): ...`, `fix(scope): ...`,
 `docs: ...`), and say in the body what you measured, not what you expect:
 test counts, self-test rows, and any timing that matters.
 
+Writing a change with an LLM's help is fine. Either way you own what you
+submit, so it meets the same review, tests and gates as any other change.
+[AI_POLICY.md](../../AI_POLICY.md) states the project's stance in full.
+
 ## Where things are
 
 The [Architecture](architecture/index.md) page maps the namespaces. The
