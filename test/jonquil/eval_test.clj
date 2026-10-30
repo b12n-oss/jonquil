@@ -258,7 +258,7 @@
 
 ;; ---------------------------------------------------------------- idle notify
 
-(deftest fix1-idle-notify-throw-does-not-block-completion
+(deftest idle-notify-throw-does-not-block-completion
   (let [ctx (sut/make-eval-context)
         done (promise)
         status-threw? (atom false)]
@@ -275,7 +275,7 @@
       (is (= 2 (:value r)))
       (is (false? (sut/evaluating? ctx))))))
 
-(deftest fix2-stop-immediately-after-run-interrupts-promptly
+(deftest stop-immediately-after-run-interrupts-promptly
   (dotimes [i 5]
     (let [ctx (sut/make-eval-context)
           done (promise)
@@ -289,7 +289,7 @@
         (is (= :interrupted (:status r)) (str "iteration " i))
         (is (< elapsed 5000) (str "iteration " i " took " elapsed "ms, expected well under the 10000ms sleep"))))))
 
-(deftest fix3-no-stale-idle-after-next-run-starts
+(deftest no-stale-idle-after-next-run-starts
   ;; A watch on running-state fires SYNCHRONOUSLY, on run1's own worker
   ;; thread, as part of the very reset! that flips it to idle-state -- i.e.
   ;; strictly before run1 goes on to call on-status-change :idle. From
@@ -340,7 +340,7 @@
 
 ;; ---------------------------------------------------------------- Stop races
 
-(deftest phase-close-i1-stop-clears-interrupt-before-blocking-oncomplete
+(deftest stop-clears-interrupt-before-blocking-oncomplete
   (let [ctx (sut/make-eval-context)
         q (java.util.concurrent.LinkedBlockingQueue.)]
     (sut/eval-async ctx "(loop [] (recur))" {:on-complete (fn [r] (.put q r))})
@@ -350,7 +350,7 @@
       (is (some? item) "on-complete's blocking .put must still deliver after Stop")
       (is (= :interrupted (:status item))))))
 
-(deftest phase-close-i2-create-writer-char-array-branches
+(deftest create-writer-char-array-branches
   (testing "1-arg write with a char array"
     (let [out (atom [])
           w (sut/create-writer (fn [s] (swap! out conj s)))]
@@ -366,7 +366,7 @@
       (is (= :ok (:status r)))
       (is (str/includes? (apply str (map second @out)) "hi")))))
 
-(deftest phase-close-i3-printed-realizes-under-binding-and-truncates
+(deftest printed-realizes-under-binding-and-truncates
   (testing "side effects of realizing :value arrive through on-output, :printed matches"
     (let [[r out] (run-sync (sut/make-eval-context)
                             "(map (fn [x] (println :side x) x) [1 2])")]
@@ -380,7 +380,7 @@
       (is (str/starts-with? (:printed r) "(0 1 2"))
       (is (str/ends-with? (:printed r) "...)")))))
 
-(deftest phase-close-i4-doc-referred-and-honours-bound-out
+(deftest doc-referred-and-honours-bound-out
   (let [[r out] (run-sync (sut/make-eval-context) "(doc inc)")]
     (is (= :ok (:status r)))
     (is (str/includes? (apply str (map second @out)) "inc"))))
@@ -421,7 +421,7 @@
       (is (= :ok (:status r)))
       (is (= [[:out "{:a 1, :b [1 2 3]}\n"]] @out)))))
 
-(deftest p2-stop-leaves-a-finishing-worker-alone
+(deftest stop-leaves-a-finishing-worker-alone
   (let [ctx (sut/make-eval-context)
         flag (atom false)]
     (reset! (:running-state ctx) {:status :running :finishing true

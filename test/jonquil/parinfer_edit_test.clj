@@ -97,7 +97,7 @@
                    "(defn f [yx]\n;; note\n  (g x))\n\n(h" 10)))))
 
 (deftest adjust-indent-joins-the-form-above-test
-  (testing "indenting a top-level line pulls it into the form above (review I4)"
+  (testing "indenting a top-level line pulls it into the form above"
     (is (= ["(a\n  b)" 5] (run :smart "(a)\nb" 4 "(a)\n  b" 6)))
     (is (= ["(a\n  b)" 5] (run :indent "(a)\nb" 4 "(a)\n  b" 6))))
   (testing "a blank line between doesn't stop the join"
@@ -136,7 +136,7 @@
               (pe/adjust {:mode :smart :prev-text "(a b)" :prev-caret 2
                           :text "(a xb)" :caret 3})))))
   (testing "an \"unhandled\" during the unstable form's re-apply is named too,
-           not silently replaced by Paren mode's fix (polish review I1)"
+           not silently replaced by Paren mode's fix"
     (with-redefs-fn {#'parinfer/smart-mode
                      (fn [& _] {:success false :error {:name "unhandled" :message "boom"}})}
       #(is (= {:engine-error "boom"}
@@ -203,7 +203,7 @@
   (testing "signal-exact bounds (what GTK reports) whose replacement shares
            an affix with the replaced text give diff's answer, not the
            raw span: the engine keys its change lookup on the span's end
-           (speedup review I4: select \"a(\" and type \"(\")"
+           (e.g. select \"a(\" and type \"(\")"
     (let [prev "(f a(b\n      c))" after "(f (b\n      c))"]
       (is (= (pe/adjust {:mode :smart :prev-text prev :prev-caret 5 :text after :caret 4})
              (pe/adjust {:mode :smart :prev-text prev :prev-caret 5 :text after :caret 4
@@ -272,14 +272,14 @@
   (is (= "(def a\n  [{:x 1}\n   {:y 2}])"
          (pe/paren-stable "(def a\n  [{:x 1 }\n    {:y 2}])"))
       "a space tidied out of a paren trail must not reject the reindent
-      (review I1: the formatter keeps mid-line spaces, so its output can
+      (the formatter keeps mid-line spaces, so its output can
       carry one; rejecting the form recreates the first-keystroke fight)"))
 
 (deftest paren-stable-accepts-a-tab-rewrite-test
   (is (= "(def a\n  [{:x  1}\n   {:y 2}])"
          (pe/paren-stable "(def a\n  [{:x\t1}\n    {:y 2}])"))
       "a tab in code becoming two spaces must not reject the reindent
-      (review I1: the formatter only touches leading and trailing
+      (the formatter only touches leading and trailing
       whitespace, so a mid-line tab survives into its output)"))
 
 (deftest whitespace-only-keeps-tokens-test

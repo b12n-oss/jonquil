@@ -17,8 +17,8 @@
    :effects #{}
    :commands [{:id :wrap-when/wrap :doc "Wrap the form at the caret in (when ...)."
                :scope :editor :edit (fn [s] s)}]
-   ;; the spec's example chord is Cmd+Alt+W, which the window's Cmd+W
-   ;; (close the tab) takes first; J is free in both scopes
+   ;; not Cmd+Alt+W: the window's Cmd+W (close the tab) takes it first;
+   ;; J is free in both scopes
    :bindings [{:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap}]})
 
 (defn- check

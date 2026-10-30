@@ -35,7 +35,7 @@
   ;; returning :private-ok, and nested. Embedded rather than read at run
   ;; time, so tests don't depend on an external file.
   (str "(ns demo.core\n"
-       "  \"A fixture namespace for the clj-attach spike.\")\n"
+       "  \"A fixture namespace for the JVM attach tests.\")\n"
        "\n"
        "(defn greet\n"
        "  \"Says hello to someone.\"\n"

@@ -19,7 +19,7 @@
 
 (deftest physical-key-test
   ;; the Option-translated keyvals measured on macOS, and the Control_L
-  ;; guard (Review Focus 1, 2)
+  ;; guard
   (is (= "f" (editor/physical-key "Mac OS X" 0x8f6 3 cmd-alt)))
   (is (= "l" (editor/physical-key "Mac OS X" 0xac 37 cmd-alt)))
   (is (nil? (editor/physical-key "Linux" 0xac 37 ctrl-alt)))

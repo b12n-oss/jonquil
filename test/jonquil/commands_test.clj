@@ -209,7 +209,7 @@
   (is (= " (this project says off)" (c/parinfer-pinned-note :smart :off)))
   (is (= " (this project says Paren)" (c/parinfer-pinned-note :off :paren)))
   (is (nil? (c/parinfer-pinned-note :smart :smart))
-      "a global landing on the pin says nothing (review #145 M2)")
+      "a global landing on the pin says nothing")
   (is (nil? (c/parinfer-pinned-note :smart nil)) "no override, no note"))
 
 (deftest parinfer-status-text-test
@@ -219,7 +219,7 @@
   (is (= "Parinfer: off (project)" (c/parinfer-status-text :off true :smart))
       "pinned off under a non-off global says why it's quiet")
   (is (nil? (c/parinfer-status-text :off true :off))
-      "pinned off under an off global differs from nothing, so it hides (review I2)"))
+      "pinned off under an off global differs from nothing, so it hides"))
 
 ;; --- the Paren-stable format pass ----------------
 

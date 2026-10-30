@@ -2,8 +2,8 @@
   "Drives jonquil.nrepl.jvm against a REAL clojure -M:serve nREPL server
   (clojure-cli.repl-server 0.1.0 on nREPL 1.7.0), started once for this
   namespace by dev/clj_server.clj, plus one test (eof-live-1-8) on its own
-  nREPL 1.8.0 server. Run with `bb test:clj`, not `bb test`
-  (ruling 12): it needs Java 17+, the clojure CLI and, on a first run
+  nREPL 1.8.0 server. Run with `bb test:clj`, not `bb test`:
+  it needs Java 17+, the clojure CLI and, on a first run
   that hasn't cached clojure-cli.repl-server yet, the network.
 
   clj-server plays the human who already has a server running, the way
@@ -124,7 +124,7 @@
   ;; has widely variable latency on its first few calls in a fresh JVM --
   ;; measured single doc requests here took 3.8 s, 7.0 s and over 10 s
   ;; (once even a 12 s wait), regardless of which ns answered. That's the
-  ;; server warming up its own doc machinery, not this fix wave's own
+  ;; server warming up its own doc machinery, not Jonquil's own
   ;; resolution (two lookup requests, each bounded by :help-timeout-ms,
   ;; which answer in low milliseconds every time -- see
   ;; lookup-not-loaded-live above). The first doc call downloads the
@@ -132,7 +132,7 @@
   ;; default :full-doc-timeout-ms, which allows for that, and asserts the
   ;; functional outcome: full-doc resolves via the prompt ns to a real
   ;; :ok, never :not-loaded, rather than racing a tight deadline against
-  ;; server-side warm-up latency this fix wave doesn't control.
+  ;; server-side warm-up latency Jonquil doesn't control.
   (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)})]
     (run e "1" {:run? false})
     (let [done (promise)]
@@ -289,7 +289,7 @@
       (is (:jar loc) (str "a jar entry: " (pr-str doc)))
       (is (str/starts-with? (:label loc) "string.clj in clojure-") (:label loc))
       (is (false? (:editable? loc)))
-      ;; MEASURED (not the brief's literal "(defn join"): clojure-1.12.5's
+      ;; MEASURED (not a plain "(defn join"): clojure-1.12.5's
       ;; string.clj hints join's return type, so the real line reads
       ;; "(defn ^String join". The regex allows that optional hint so the
       ;; assertion still fails if :line ever points at the wrong defn.

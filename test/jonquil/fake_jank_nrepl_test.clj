@@ -1,6 +1,6 @@
 (ns jonquil.fake-jank-nrepl-test
   "The fake jank nREPL server answers the way jank (upstream main 38a6382)
-  was measured to in the D3 re-check spike."
+  was measured to (2026-10-12)."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [fake-jank-nrepl :as fake]

@@ -1,6 +1,6 @@
 (ns jonquil.fake-jvm-nrepl-test
   "The fake JVM nREPL server answers the way clojure-cli.repl / nREPL 1.7.0
-  was measured to (the spike's own measured reply shapes), so the :clj
+  was measured to, so the :clj
   evaluator's and self-test's tests rest on the right shapes."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]

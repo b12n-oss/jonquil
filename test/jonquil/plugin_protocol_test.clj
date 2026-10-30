@@ -8,7 +8,7 @@
             [jonquil.plugin-protocol :as protocol]))
 
 (defn- source
-  "A plugin file for id, the spec's wrap-when with the J chord, whose :edit
+  "A plugin file for id, the plugins guide's wrap-when with the J chord, whose :edit
   body is edit-body (a form over the snapshot s)."
   ([id] (source id "(p/wrap-form s \"(when \" \")\")"))
   ([id edit-body]

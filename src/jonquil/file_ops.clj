@@ -116,7 +116,7 @@
   in its canonical form (a path reached through .. or a symlink) or, failing
   that, as given (a tab's stale spelling after a case-only rename). The
   canonical form goes first: a given path like /r/src/../src/x.clj starts
-  with /r/src/ too, and its rest would keep the .. (Task 4 report, concern 2)."
+  with /r/src/ too, and its rest would keep the .."
   [path old new]
   (let [given (str path)
         canon (try (canonical path) (catch Exception _ nil))

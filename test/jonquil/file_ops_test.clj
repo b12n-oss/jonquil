@@ -161,7 +161,7 @@
         (when (.exists (io/file d "CORE.CLJ"))
           (is (nil? (:error (ops/rename! o "Core.clj"))))
           (is (= n (ops/retarget o o n))))))
-    (testing "retarget runs before the move (final review Important 2)"
+    (testing "retarget runs before the move"
       ;; A tab spelled A.clj for a.clj on a case-insensitive volume resolves
       ;; to a.clj only while a.clj exists, so the rename's {tab -> new} map
       ;; is built before ops/rename!; after the move the spelling is stale.

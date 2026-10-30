@@ -14,7 +14,7 @@
   (is (= "/x/cfg/jonquil/settings.edn" (settings/settings-path {"XDG_CONFIG_HOME" "/x/cfg"} "/home/u")))
   (is (= "/home/u/.config/jonquil/settings.edn" (settings/settings-path {} "/home/u")))
   (is (= "/home/u/.config/jonquil/settings.edn" (settings/settings-path {"XDG_CONFIG_HOME" ""} "/home/u")))
-  ;; fix wave item 4: a relative XDG_CONFIG_HOME is invalid per the XDG spec.
+  ;; a relative XDG_CONFIG_HOME is invalid per the XDG spec.
   (is (= "/home/u/.config/jonquil/settings.edn"
          (settings/settings-path {"XDG_CONFIG_HOME" "relative/cfg"} "/home/u"))))
 
@@ -51,7 +51,7 @@
         (is (str/includes? (:warning r) "no known :theme") content)))))
 
 (deftest save-preserves-symlink-test
-  ;; fix wave item 3: saving through a symlinked settings.edn must rewrite
+  ;; saving through a symlinked settings.edn must rewrite
   ;; the real target in place, not replace the link with a plain file.
   (let [dir (temp-dir)
         real (str dir "/real-target.edn")

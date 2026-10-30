@@ -220,7 +220,7 @@
   (str "(ns jonquil.plugins." id "\n  (:require [clojure.string :as str]\n            [jonquil.plugin :as p]))\n\n"
        "(p/defplugin\n"
        "  {:id :" id "\n"
-       "   :doc \"A P5 row's plugin.\"\n"
+       "   :doc \"A :run command row's plugin.\"\n"
        "   :effects " effects "\n"
        "   :commands [{:id :" id "/go :doc \"Go.\" :scope :window :run (fn [ctx] " run-body ")}]\n"
        "   :bindings [{:key \"j\" :mods #{:cmd :alt} :command :" id "/go}]})\n"))
@@ -369,7 +369,7 @@
   (str "(ns jonquil.plugins." id "\n  (:require [jonquil.plugin :as p]))\n\n"
        "(p/defplugin\n"
        "  {:id :" id "\n"
-       "   :doc \"A P6 row's plugin.\"\n"
+       "   :doc \"A hook row's plugin.\"\n"
        "   :effects " effects "\n"
        "   :hooks " hooks-text "})\n"))
 

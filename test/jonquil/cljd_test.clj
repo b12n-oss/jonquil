@@ -1,5 +1,5 @@
 (ns jonquil.cljd-test
-  "Reply shapes here are copied from the C0 spike's probe output against the
+  "Reply shapes here are copied from probe output against the
   ClojureDart nREPL fork (2026-09-28), with :id and :session dropped as the
   probes printed them."
   (:require [clojure.test :refer [deftest is testing]]

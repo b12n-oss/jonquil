@@ -31,7 +31,7 @@
     (is (= {:dialect :nope} (ex-data ex)))))
 
 (deftest message-text-test
-  ;; ruling 6: a message is a string or a fn of its argument
+  ;; a message is a string or a fn of its argument
   (is (= "plain" (#'connection/message-text {:k "plain"} :k 42)))
   (is (= "port 42" (#'connection/message-text {:k (fn [p] (str "port " p))} :k 42))))
 

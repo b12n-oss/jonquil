@@ -123,8 +123,8 @@
 
 (defn row-plugin-list-broken-plugin-can-be-disabled
   "A file that doesn't compile is listed as not loaded, and Disable puts
-  it in the settings file (the spec's anti-goal: a broken plugin can always
-  be turned off from the list)."
+  it in the settings file (by design, a broken plugin can always be turned
+  off from the list)."
   [ui]
   (go-row :plugin-list-broken-plugin-can-be-disabled support/check
     (with-list ui {:files [["pl-f.clj" "(ns jonquil.plugins.pl-f) (this does not compile"]] :ids ["pl-f"]}

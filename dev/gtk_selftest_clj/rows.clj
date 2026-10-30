@@ -37,7 +37,7 @@
   ;; same text test/jonquil/nrepl/jvm_test.clj's own fixture-core-text
   ;; embeds.
   (str "(ns demo.core\n"
-       "  \"A fixture namespace for the clj-attach spike.\")\n"
+       "  \"A fixture namespace for the JVM attach tests.\")\n"
        "\n"
        "(defn greet\n"
        "  \"Says hello to someone.\"\n"

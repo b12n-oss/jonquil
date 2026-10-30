@@ -20,7 +20,7 @@
   ;; The fixture's exact text: demo.core with greet, a private secret returning :private-ok,
   ;; and nested. Embedded rather than read from a file at test time.
   (str "(ns demo.core\n"
-       "  \"A fixture namespace for the clj-attach spike.\")\n"
+       "  \"A fixture namespace for the JVM attach tests.\")\n"
        "\n"
        "(defn greet\n"
        "  \"Says hello to someone.\"\n"
@@ -33,7 +33,7 @@
 
 (defn- temp-project
   "A throwaway JVM project: deps.edn, .jonquil.edn {:dialect :clj},
-  src/demo/core.clj (the spike fixture's text), and .nrepl-port holding
+  src/demo/core.clj (the fixture's text), and .nrepl-port holding
   port-text with no trailing newline (nil for none). [dir file]."
   [port-text]
   (let [d (io/file (temp-dirs/temp-dir! "jonquil-jvm-test-"))
@@ -327,7 +327,7 @@
         (is (= :interrupted (:status (deref done 2000 :timeout))))))))
 
 (deftest stop-during-connect-test
-  ;; The fake has no :slow-ops (ruling 9: only handle!/evaluate!/the
+  ;; The fake has no :slow-ops (only handle!/evaluate!/the
   ;; options differ from the cljd fake, and slow-ops isn't one of them).
   ;; :mute? true never answers anything, so connect!'s own describe
   ;; request sits pending -- a real, timing-based window (no with-redefs:
@@ -432,7 +432,7 @@
         (is (connection/connected? e))
         (is (nil? (ev/interrupt! e)))
         (is (not-any? #{"interrupt"} (fake/ops-seen srv)) "an idle Stop sends nothing")
-        (is (connection/connected? e) "and stays connected (ruling 5)")))))
+        (is (connection/connected? e) "and stays connected")))))
 
 (deftest stdin-test
   (with-project {}
@@ -746,7 +746,7 @@
                          "greetings")))))))
 
 (def full-doc-greet-text
-  "The fake's own :full-docs answer for greet -- P3.T2's step 5 text,
+  "The fake's own :full-docs answer for greet,
   reused by the :clj self-test rows for the same fixture symbol."
   "demo.core/greet\n([who])\nSays hello.\n\n== examples")
 

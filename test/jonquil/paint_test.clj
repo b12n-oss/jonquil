@@ -148,7 +148,7 @@
                  (pr-str {:at i :del del :ins ins :start start})))))))
 
 (defn- bounds-after
-  "Task 4's running bounds: the min of o and L - o for an insert of len at o,
+  "The running edit bounds: the min of o and L - o for an insert of len at o,
   of o and L - e for a delete of [o e), where L is the text length before."
   [bounds text-len o del ins-len]
   (let [e (+ o del)

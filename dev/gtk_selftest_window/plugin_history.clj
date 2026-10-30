@@ -216,7 +216,7 @@
                               (= 1 selected) (= "History of ph-i: live v2" title))
                          s))))))
 
-;; --- plugins F2: a tab on the plugin's file follows a Revert or an Accept --
+;; --- a tab on the plugin's file follows a Revert or an Accept --
 
 (defn- open-tab!
   "Opens id's file in a tab through the list's Open: the tab."

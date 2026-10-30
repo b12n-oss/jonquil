@@ -886,7 +886,7 @@
     (is (= text (slurp sp)))
     (is (= ["plugin t-x is already enabled."] (toggle! live sp "t-x" true)))))
 
-;; --- plugins F1: refusing under --no-plugins ---------------------------------
+;; --- refusing under --no-plugins ---------------------------------
 
 (def ^:private off "plugins are off in this window (--no-plugins), so ")
 

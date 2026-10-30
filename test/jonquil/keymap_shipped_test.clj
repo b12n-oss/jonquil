@@ -1,12 +1,11 @@
 (ns jonquil.keymap-shipped-test
-  "The shipped keymap's own pins (plugins design, Part 1). Steps S1 to S8
-  were each gated by a differential oracle, a transcription of the key
-  clauses they replaced; S9 deleted those once every step was merged
-  green. What they checked now lives here and in the window self-test
-  rows: every binding names a registered command and condition (the spec's
-  pin), the editor's format chords pass the window by, the palette chord,
+  "The shipped keymap's own pins. When the key handling moved from
+  hand-written clauses to the keymap, each step was gated by a
+  differential oracle against the clauses it replaced; what those oracles
+  checked now lives here and in the window self-test
+  rows: every binding names a registered command and condition, the editor's format chords pass the window by, the palette chord,
   and what only an oracle had checked: no editor binding takes a plain
-  Return (what let smart enter move into the typing stages, S6), Run Form
+  Return (what let smart enter move into the typing stages), Run Form
   takes Cmd/Ctrl+Enter whatever else is held, the Escape chain's order and
   conditions (S3), no window binding takes an editor chord, what each
   window chord runs (Shift forms ahead of plain ones), F5 under any
@@ -41,7 +40,7 @@
                          (set (keys registry/editor-conditions))))))
 
 (deftest format-chords-pass-through-test
-  ;; Review Focus 2: Cmd+Alt+L and Cmd+Alt+F belong to the editor
+  ;; Cmd+Alt+L and Cmd+Alt+F belong to the editor
   (let [ctrl-alt (bit-or (:ctrl M) (:alt M))]
     (is (nil? (keymap-answer 0x06c ctrl-alt)))
     (is (nil? (keymap-answer 0x066 ctrl-alt)))))

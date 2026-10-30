@@ -327,7 +327,7 @@
         (is (str/includes? (text-of out) (str "; The browser port changed: open " (url-of launches 2) ".")))))))
 
 (deftest browser-token-survives-relaunch-test
-  ;; Review Focus 5: the window's token outlives the child, or the tab's
+  ;; the window's token outlives the child, or the tab's
   ;; self-reload (PR #94) would be turned away by its own window's gate.
   (with-browser {} {}
     (fn [_ {:keys [ev launches opened]}]

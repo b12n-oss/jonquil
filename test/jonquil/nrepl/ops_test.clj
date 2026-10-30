@@ -1,6 +1,5 @@
 (ns jonquil.nrepl.ops-test
-  "Reply shapes are the ones measured in the dialects spike and the plan's
-  live probe (spikes/dialects-plan/probes)."
+  "Reply shapes are the ones measured against live nREPL servers."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.nrepl.ops :as ops]))

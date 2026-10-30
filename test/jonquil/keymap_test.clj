@@ -97,7 +97,7 @@
 
 (deftest when-order-test
   ;; conditions run only after the key and modifiers match, in order,
-  ;; stopping at the first false (Review Focus 4)
+  ;; stopping at the first false
   (let [calls (atom [])
         holds? (fn [id] (swap! calls conj id) (= id :b))
         b {:key "o" :mods #{:cmd :shift} :when [:a :b] :command :x}
@@ -147,7 +147,7 @@
 
 (deftest exact-test
   ;; :exact is exactly that set among Shift, Alt, Control and Meta; Super is
-  ;; ignored, as shift-only? and no-modifiers? ignored it (Review Focus 4)
+  ;; ignored, as shift-only? and no-modifiers? ignored it
   (let [b {:key "F1" :exact #{:shift}} f1 0xffbe]
     (is (km/matches? b f1 shift))
     (is (km/matches? b f1 (bit-or shift super)))

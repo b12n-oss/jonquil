@@ -159,7 +159,7 @@
   (let [d {:status :found :symbol "greet" :ns "demo.core" :name "greet" :arglists "([who])" :doc "Says hello."}]
     (is (str/ends-with? (help/doc-text "greet" (assoc d :location "Defined in /p/core.clj:4")) "\n\nDefined in /p/core.clj:4"))
     (is (= (help/doc-text "greet" d) (help/doc-text "greet" (assoc d :file "unknown" :line 3)))
-        "ruling 13: :file alone adds nothing")))
+        ":file alone adds nothing")))
 
 (deftest full-doc-status-test
   (is (= "This server has no full-doc op." (help/full-doc-status "map" {:status :no-op})))

@@ -219,7 +219,7 @@
       (is (every? added ["await" "dart/await" "new" "." "widget" "f/widget" "f/$"]))
       (is (empty? (set/intersection added (:builtins dialect/jolt))))))
   (is (= [dialect/jolt dialect/cljd dialect/clj dialect/jank dialect/cljs dialect/nrepl] dialect/profiles)
-      "clj joined in P2.T4, jank in D3 P1.T1, cljs next, then nrepl (claims no extension or marker)"))
+      "nrepl comes last (it claims no extension or marker)"))
 
 (deftest cljd-select-test
   (testing "a .cljd file in a pubspec.yaml project: cljd by its marker"
@@ -293,7 +293,7 @@
   (is (= ".nrepl-port" (:port-file dialect/clj)))
   (is (= "This is your own JVM, so Jonquil doesn't unload namespaces in it." (:reset-tooltip dialect/clj)))
   (is (= "Hot reload can't unload a namespace, so every Run adds to the running app." (:reset-tooltip dialect/cljd)))
-  (is (some #{dialect/clj} dialect/profiles) "ruling 3: joins profiles in P2.T4"))
+  (is (some #{dialect/clj} dialect/profiles) "clj is a profile"))
 
 (deftest clj-selection-test
   (let [src "(ns demo.core)\n"

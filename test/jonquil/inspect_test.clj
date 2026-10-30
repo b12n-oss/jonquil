@@ -60,7 +60,7 @@
          (inspect/footer (inspect/open (page-view 0 0 0))))))
 
 (deftest footer-and-open-on-error-test
-  (testing "footer never throws on a view with no :start (I1)"
+  (testing "footer never throws on a view with no :start"
     (is (= "" (inspect/footer (inspect/open {:error "x"}))))
     (is (= "" (inspect/footer (inspect/open (inspect/parse-view "")))))
     (is (= "" (inspect/footer (inspect/on-reply (inspect/open (page-view 0 3 3))

@@ -50,7 +50,7 @@
 (def odd-meta 1)
 
 (deftest metadata-it-can-meet-test
-  (testing "a bare classpath name isn't resolved against the directory (review finding 1)"
+  (testing "a bare classpath name isn't resolved against the directory"
     ;; README.md exists in this directory, so resolving the bare name here
     ;; would name an unrelated file
     (is (.isFile (io/file "README.md")))
