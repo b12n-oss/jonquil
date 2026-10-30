@@ -8,7 +8,7 @@ and the traps that catch first-time runners.
 
 - `bb check` requires every project namespace headlessly and exits 0. It's
   the fastest way to catch a namespace that doesn't compile.
-- `bb test` runs the unit suite: 1267 tests, 7548 assertions on macOS, 7517
+- `bb test` runs the unit suite: 1268 tests, 7554 assertions on macOS, 7523
   on Linux (some asserts are gated by OS, such as `desktop-file-validate`
   and `plutil`). Nothing outside the process runs; the attach evaluators
   use in-process fake servers. Pass namespaces for a subset:

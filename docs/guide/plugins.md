@@ -68,7 +68,7 @@ status bar and console with the plugin's id.
 | Effect | Functions |
 |---|---|
 | `:console` | `(p/print! ctx s)` console line, `(p/status! ctx s)` status bar |
-| `:buffer` | `(p/buffer-text ctx)`, `(p/replace-text! ctx text)` (one undo step), `(p/open! ctx path)` opens a tab and returns its id; `(assoc ctx ::p/tab id)` acts on it |
+| `:buffer` | `(p/buffer-text ctx)`, `(p/replace-text! ctx text)` (one undo step; text holding a NUL byte throws, naming the line), `(p/open! ctx path)` opens a tab and returns its id; `(assoc ctx ::p/tab id)` acts on it |
 | `:eval` | `(p/eval! ctx code)` quiet, returns `{:value :out :err}`; `(p/repl! ctx code)` at the console, returns `{:value :out}`. Both take `{:timeout-ms n}` as a third argument |
 
 Calling a function whose effect wasn't declared throws "this plugin didn't
