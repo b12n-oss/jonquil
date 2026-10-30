@@ -1,5 +1,5 @@
 (ns gtk-selftest-jank
-  "D3 plan P3.T1 self-test: opens the REAL Jonquil window via
+  "Self-test: opens the REAL Jonquil window via
   jonquil.main/start! on a throwaway jank project and runs the rows in
   gtk-selftest-jank.rows against its ui. The jank binary is dev/fake-jank
   (JONQUIL_JANK), so the real launcher, its held-open stdin and its run dir

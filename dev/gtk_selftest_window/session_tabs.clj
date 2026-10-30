@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.session-tabs
-  "Reopening the last session's tabs (session-tabs plan Task 2): the
+  "Reopening the last session's tabs: the
   window's :save-session!* and :restore-session!*, against sessions.edn
   beside the self-test's own temp settings file. Rows that need a known
   session write sessions.edn themselves. Every row leaves only the first

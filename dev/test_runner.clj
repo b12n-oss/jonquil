@@ -113,7 +113,7 @@
 (def live-clj-namespaces
   ;; The :clj dialect's live suite: starts a real clojure -M:serve nREPL
   ;; server (dev/clj_server.clj) instead of a Jolt child. Run with `bb
-  ;; test:clj`, not `bb test` or `bb test:nrepl` (ruling 12): needs Java
+  ;; test:clj`, not `bb test` or `bb test:nrepl`: needs Java
   ;; 17+, the clojure CLI and, on a first run, the network.
   '[jonquil.live.clj-attach-test])
 

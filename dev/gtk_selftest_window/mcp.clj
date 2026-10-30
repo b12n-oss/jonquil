@@ -170,7 +170,7 @@
                              {:msg m :shown shown? :sel sel :m2 m2
                               :console (support/since ui mark)})))))
 
-;; --- the tool table over the live window (Task 3) -----------------------------
+;; --- the tool table over the live window -----------------------------
 ;; Tool calls block (promise derefs with deadlines): they run on the row
 ;; thread, never inside on-gtk. Reads of GTK state still go through on-gtk.
 
@@ -268,8 +268,8 @@
 
 (defn row-mcp-tools-replace-nul [ui]
   (go-row :mcp-tools-replace-nul support/check
-    ;; ROADMAP Next 3: replacement text holding a NUL used to land
-    ;; truncated at the first NUL (GTK C strings). The tool refuses it
+    ;; Replacement text holding a NUL would land truncated at the
+    ;; first NUL (GTK C strings). The tool refuses it
     ;; with an error naming the line, and the tab is untouched; without
     ;; the tool's own pre-check the funnel's nil would mislabel this
     ;; refusal as "read-only".
@@ -369,7 +369,7 @@
                                   (str/includes? (:text project) "Dialect: "))
                              {:doc doc :comp comp :brackets brackets :project project})))))
 
-;; --- the listener over the live window (mcp3 Task 3) ---------------------------
+;; --- the listener over the live window ---------------------------
 ;; Socket IO runs on the row thread, never inside on-gtk; every read has a
 ;; socket timeout. Each row owns its listener and stops it in finally.
 

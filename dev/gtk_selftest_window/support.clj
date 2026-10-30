@@ -21,7 +21,7 @@
     (println "[gtk-selftest-window]" (name row) (if ok "PASS" "FAIL") (pr-str detail))))
 
 (defn fresh-settings-path
-  "TH.T5 isolation: a settings.edn under a fresh temp directory (one per
+  "A settings.edn under a fresh temp directory (one per
   run of this file, never the user's real $XDG_CONFIG_HOME/jonquil), so
   this self-test can never read or write the real settings file."
   []
@@ -95,7 +95,7 @@
   offset, sets the editor to code and Runs it; then it parks until BOTH
   the engine is idle AND (expect-fn text-since-start) is true, or
   deadline-ms passes. Returns [ok mark], so a caller can scope its own
-  further assertions to exactly this run's output. I1: engine-idle alone
+  further assertions to exactly this run's output. Engine-idle alone
   is not enough, because the result line lands through a later on-gui!
   drain."
   [ui code deadline-ms expect-fn]

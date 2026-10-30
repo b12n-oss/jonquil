@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.run-form
-  "cljd plan P3.T2 rows: Run Form on the window's in-process Jolt, through
+  "Run Form rows: Run Form on the window's in-process Jolt, through
   the ui's own :run-form!*, the editor's key dispatch and the editor menu."
   (:require [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
@@ -70,7 +70,7 @@
                              {:flashed flashed :restored? restored?})))))
 
 (defn row-run-form-key-cancels-flash
-  "I2: a key delivered while the flash is still showing cancels it AT
+  "A key delivered while the flash is still showing cancels it AT
   ONCE -- the caret goes back to where Run Form found it and the
   selection clears, in the same call, rather than waiting out the timer
   (during which GTK's own key handling would otherwise act on the still-
@@ -96,7 +96,7 @@
                              {:flashed flashed :after-key after-key :handled? handled? :text-after text-after})))))
 
 (defn row-run-form-flash-overlap
-  "I2: the menu item's Run Form, fired right after the chord, with
+  "The menu item's Run Form, fired right after the chord, with
   nothing in between touching the selection, is a second flash while the
   first is still showing -- it carries the FIRST flash's own saved caret
   over, instead of capturing the still-selected first flash's own mark
@@ -152,7 +152,7 @@
   "On a blank line between forms: nothing is echoed or run, and the status
   says why.
 
-  Fix round (audit/measured): since is always non-empty -- it includes the
+  since is always non-empty -- it includes the
   live \"user=> \" prompt -- so \"nothing echoed\" is asserted against a
   BASELINE captured right before the action, the same pattern
   run-repl/row-run-selection-blank uses, never a literal

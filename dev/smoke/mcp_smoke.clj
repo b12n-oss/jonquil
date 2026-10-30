@@ -75,7 +75,7 @@
 
 (defn- request!
   "Sends a request and returns the parsed response, or {:fail why}. A
-  notification read while waiting (a map without \"id\", plugins P10c)
+  notification read while waiting (a map without \"id\")
   goes onto :notes, and the wait goes on, under the same deadline."
   [srv method params ms]
   (let [id (swap! (:id srv) inc)
@@ -204,7 +204,7 @@
        "               :edit (fn [s] (p/wrap-form s \"(when \" \")\"))}]})\n"))
 
 (defn- plugin-checks!
-  "Plugins P10 over real stdio: a propose that's pending, one its check
+  "Plugin tools over real stdio: a propose that's pending, one its check
   refuses, the status, the user's note after a rejection (written into
   the temp history here, since no tool can reject), list and read."
   [srv xdg]
@@ -248,7 +248,7 @@
     ;; In process, as this window block was written against.
     (spit (str proj "/.jonquil.edn") "{:runtime :in-process}")
     (spit a "(ns demo.a) (def y 7) y")
-    ;; plugins P10b: a pure plugin with one MCP tool, loaded at startup
+    ;; a pure plugin with one MCP tool, loaded at startup
     (fs/create-dirs (str xdg "/jonquil/plugins"))
     (spit (str xdg "/jonquil/plugins/smoke-t.clj")
           (str "(ns jonquil.plugins.smoke-t\n  (:require [jonquil.plugin :as p]))\n\n"
@@ -264,7 +264,7 @@
                   (= {"listChanged" true} (get-in h ["result" "capabilities" "tools"])) h))
         ;; the startup plugin load runs on the plugin agent, so the first
         ;; tools/list can come before it; then its swap sends list_changed
-        ;; (plugins P10c) and the next list has the tool
+        ;; and the next list has the tool
         (let [want (conj window-tool-names "plugin_smoke-t_twice")
               names-of (fn [r] (set (map #(get % "name") (get-in r ["result" "tools"]))))
               r1 (request! srv "tools/list" {} 60000)

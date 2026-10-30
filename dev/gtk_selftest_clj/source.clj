@@ -50,7 +50,7 @@
   "F12 on map in (map inc [1]): the panel opens the fixture jar's
   clojure/core.clj on line 20, read-only, Open in window insensitive.
 
-  Fix round 1: the row before this one (row-clj-inspect-lost-idle) leaves
+  The row before this one (row-clj-inspect-lost-idle) leaves
   the JVM attach connection dropped on purpose, and ev/lookup never
   reconnects on its own (jonquil.nrepl.jvm's own lookup docstring: \"never
   connecting on its own\") -- so this row reconnects first with a plain
@@ -80,7 +80,7 @@
   status \"Jumped to greet.\", the panel stays hidden, the buffer's text is
   unchanged.
 
-  Fix round 1: set-status! defers through on-gui!/g_idle_add even when
+  set-status! defers through on-gui!/g_idle_add even when
   already called from the GTK thread (jonquil.gtk.callbacks/on-gui!'s own
   docstring), so reading the status label in the SAME on-gtk step that
   triggers the jump would still see the PREVIOUS row's own status, never
@@ -150,7 +150,7 @@
 (defn row-clj-source-project-file-opens-a-tab
   "F12 on proj-helper, defined in the project's own util.clj (line 6),
   opens that file in a new tab with the caret on line 6 and no panel,
-  leaving the first tab's dirty text alone (jump opens a tab, 2026-10-19).
+  leaving the first tab's dirty text alone.
   Cmd/Ctrl+[ then goes back to the first tab, caret where F12 was pressed.
   The row closes the new tab so later rows see one tab again."
   [ui]
@@ -184,7 +184,7 @@
 (defn row-clj-source-back-skips-a-closed-untitled-tab
   "F12 on proj-helper from a new Untitled tab opens util.clj in its own
   tab; closing the Untitled tab leaves Cmd/Ctrl+[ nothing to go back to,
-  so it says so instead of claiming \"Back.\" (review finding 2), and
+  so it says so instead of claiming \"Back.\", and
   leaves util.clj showing. The row closes the tabs it made."
   [ui]
   (go-row :clj-source-back-skips-a-closed-untitled-tab support/check
@@ -299,7 +299,7 @@
           evaled? (await-until 5000 20 #(and (rows/idle? ui) (str/includes? (support/since ui mark) "=> {:k 42}")))
           _ (on-gtk ((:source-close!* ui)) ((:inspect-last!* ui)))
           ;; Wait for the first view to land: a second Cmd/Ctrl+I while a
-          ;; request is in flight is dropped on purpose (ruling 9).
+          ;; request is in flight is dropped on purpose.
           inspector? (await-until 3000 20 #(and (visible? (:root (:inspector ui)))
                                                 (= "*1" (g/label-text (:header (:inspector ui))))))
           _ (on-gtk (jump-on! ui "(map inc [1])" "map"))

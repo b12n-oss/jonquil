@@ -1,8 +1,8 @@
 (ns gtk-selftest-window.tabs
-  "Tabs in the real window (tabs plan P2.T3 to P2.T5): new, open, switch
+  "Tabs in the real window: new, open, switch
   and close, labels, popovers across a switch, the theme across tabs, Run
   per tab, and the close alerts. Every row leaves the window with only its
-  first tab (ruling 3: rows never close the first tab), through
+  first tab (rows never close the first tab), through
   close-extra-tabs! in a finally.
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
@@ -199,8 +199,8 @@
 
 (defn row-tab-close-with-open-popover
   "Closing a tab whose quick-doc popover is open: the tab goes, all four of
-  its popovers are unparented, and the GTK thread keeps answering (the
-  spike's warning loop never let it)."
+  its popovers are unparented, and the GTK thread keeps answering (without it,
+  removing a page with a popover still parented spins GTK in a warning loop)."
   [ui]
   (go-row :tab-close-with-open-popover support/check
     (let [t2 (on-gtk (let [t ((:new-tab!* ui))]
@@ -278,7 +278,7 @@
                         v))
        (finally (close-extra-tabs! ui))))))
 
-;; --- Run per tab (tabs plan P2.T4) -------------------------------------------
+;; --- Run per tab -------------------------------------------
 
 (defn run-tab
   "A go-block step: selects tab t, sets its text to code (when given) and
@@ -380,7 +380,7 @@
       (on-gtk (support/check :tab-close-to-one-adopts-project (and kept? adopted? back?)
                              {:kept kept? :adopted adopted? :back back? :out (support/since ui m)})))))
 
-;; --- closing the window with several dirty tabs (tabs plan P2.T5) ----------
+;; --- closing the window with several dirty tabs ----------
 
 (defn- two-dirty-tabs!
   "Opens two temp files in new tabs and types into both; [t2 t3 f2 f3].
@@ -463,10 +463,10 @@
                               (and (:f2 v) (not (:closing v)) (:active-failing v) (:t3-dirty v)) v))
              (finally (when @dir (.setWritable ^java.io.File @dir true))))))))))
 
-;; --- final review fixes ------------------------------------------------------
+;; --- further tab-close behaviour ------------------------------------------------
 
 (defn row-tab-close-releases-namespaces
-  "Final review finding 2: a closed tab's namespaces go back to the REPL's
+  "A closed tab's namespaces go back to the REPL's
   set, so reopening the file and Running it no longer keeps a deleted defn."
   [ui]
   (go-row :tab-close-releases-namespaces support/check
@@ -483,7 +483,7 @@
                 (finally (close-extra-tabs! ui)))))))
 
 (defn row-tab-close-cancels-flash
-  "Final review finding 3a: Run Form flashes the form for 250 ms; closing
+  "Run Form flashes the form for 250 ms; closing
   the tab inside that window cancels the flash, so its restore never reads
   the destroyed buffer."
   [ui]
@@ -501,7 +501,7 @@
        (finally (close-extra-tabs! ui))))))
 
 (defn row-tab-close-while-running-eof
-  "Final review finding 3b: a tab closed while its Run is still going,
+  "A tab closed while its Run is still going,
   which then ends in an EOF error: the EOF hint skips the destroyed editor
   instead of reading its buffer, and the window keeps answering."
   [ui]
@@ -520,7 +520,7 @@
                                {:done done :out out}))))))
 
 (defn row-tab-foreign-refuses-inspect-form
-  "Final review finding 4: Inspect Form in a foreign tab is refused like
+  "Inspect Form in a foreign tab is refused like
   Run, Run Selection and Run Form."
   [ui]
   (go-row :tab-foreign-refuses-inspect-form support/check

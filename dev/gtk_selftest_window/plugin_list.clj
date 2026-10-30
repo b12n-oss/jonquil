@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.plugin-list
-  "Plugins P11's rows: the plugin list opened by Plugins… over files written
+  "Rows for the plugin list opened by Plugins… over files written
   into the selftest's own plugins folder (beside its temp settings file,
   never the user's), with Enable, Disable, Open and Review Proposals driven
   through the ui functions the buttons call. Each row deletes its files

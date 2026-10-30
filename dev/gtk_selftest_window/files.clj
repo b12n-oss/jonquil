@@ -8,12 +8,12 @@
             [jonquil.gtk.ffi :as g]))
 
 (defn row-open-refuses-dirty
-  "I4: Open silently discarded unsaved edits. Dirties the editor without
+  "Open must not silently discard unsaved edits. Dirties the editor without
   going through set-text! (which marks clean), then drives (:open-path!
   ui) -- the SAME guarded-open! gate do-open! uses -- twice: the first
   attempt must refuse and leave the text untouched, the second (still
   dirty) must proceed. The refusal text arrives through cview/append!,
-  an on-gui!-scheduled drain (same I1 lesson: poll for it, don't read
+  an on-gui!-scheduled drain (poll for it, don't read
   the console immediately after the synchronous call that queued it)."
   [ui]
   (go-row :open-refuses-dirty support/check
@@ -43,7 +43,7 @@
                 (.delete (java.io.File. ^String tmp)))))))
 
 (defn row-open-invalid-utf8
-  "I6: a file with a stray non-UTF-8 byte (0xE9) loads as U+FFFD without
+  "A file with a stray non-UTF-8 byte (0xE9) loads as U+FFFD without
   throwing; Open must append a :system warning
   rather than silently accept the loss. Poll for the warning -- same
   on-gui! drain lesson as row-open-refuses-dirty."
@@ -65,9 +65,9 @@
                 (.delete (java.io.File. ^String tmp)))))))
 
 (defn row-open-refuses-nul
-  "ROADMAP Next 3: GTK text is C strings, so opening a file holding a NUL
-  used to land only the text before it and Save would write that
-  shortened text back. The open must refuse instead: console names the
+  "GTK text is C strings, so opening a file holding a NUL would land only
+  the text before it and Save would write that shortened text back. The
+  open must refuse instead: console names the
   line, the editor and the disk are both untouched. Same on-gui! drain
   lesson as the rows above: poll for the console line."
   [ui]
@@ -120,7 +120,7 @@
                 (.delete (java.io.File. ^String tmp)))))))
 
 (defn row-save-atomic
-  "M12: save-to! writes a temp file beside the target and renames over it,
+  "save-to! writes a temp file beside the target and renames over it,
   never truncating the target in place. Saving into a missing directory
   must still show :error (and never create the bad path); saving to a
   real path round-trips. Poll for the :error line -- same on-gui! drain
@@ -149,13 +149,11 @@
                   (.delete (java.io.File. ^String good-tmp))))))))
 
 (defn row-save-follows-symlink
-  "M12 follow-up (a): the atomic rename used to target the SAVE PATH
-  directly, so if that path is a symlink, java.nio.file.Files/move
-  replaces the link itself with a regular file -- the link stops being a
-  link, and whatever it used to point at is never touched (probed:
-  reproduced exactly this against the old, unfixed code before writing
-  this row -- see the fix-wave report's Follow-up section). save-to! now
-  resolves the path first (.getCanonicalPath) and renames onto THAT, so
+  "An atomic rename onto the SAVE PATH directly would, when that path is
+  a symlink, make java.nio.file.Files/move replace the link itself with a
+  regular file: the link stops being a link, and whatever it pointed at
+  is never touched (probed). save-to! resolves the path first
+  (.getCanonicalPath) and renames onto THAT, so
   saving through a symlink updates the real file and the link stays a
   link pointing at the same place."
   [ui]
@@ -269,9 +267,9 @@
                 (.delete (java.io.File. ^String dir)))))))
 
 (defn row-save-executable-keeps-mode
-  "M12 follow-up (b): a freshly spit temp file gets the process umask's
-  default mode (probed: 644), so the old save-to! silently turned a 755
-  file into 644 on every save. copy-permissions! now copies the target's
+  "A freshly spit temp file gets the process umask's default mode
+  (probed: 644), which would silently turn a 755 file into 644 on every
+  save. copy-permissions! copies the target's
   real POSIX permissions onto the temp file before the rename."
   [ui]
   (go-row :save-executable-keeps-mode support/check
@@ -293,7 +291,7 @@
                 (.delete (java.io.File. ^String path)))))))
 
 (defn row-save-failure-leaves-original-intact
-  "M12 follow-up: a target directory made read-only AFTER the file
+  "A target directory made read-only AFTER the file
   already exists there -- spit can't create the temp file inside it, so
   the rename never runs at all. Must leave the original content intact,
   leave no stray .jonquil-tmp-* file in the directory, and show :error
@@ -338,7 +336,7 @@
                 (.delete (java.io.File. ^String dir)))))))
 
 (defn row-dialog-dismissed-silent
-  "M2 follow-up: cancelling/dismissing a file dialog
+  "Cancelling/dismissing a file dialog
   (GTK_DIALOG_ERROR_DISMISSED, code 2, IN GTK's OWN error domain) must not
   print an error line -- but code 2 is ALSO G_IO_ERROR_EXISTS in a
   different domain, so dialog-dismissed? must check the domain too, not
@@ -347,12 +345,11 @@
   shaped like g/finish-file's.
 
   Every append! (real or, if the dismissed guard were ever broken, errant)
-  goes through on-gui!'s async drain. The FIRST version of this row read
-  (since ui mark) synchronously right after the simulate calls, with
-  nothing real ever enqueued -- so it could never fail no matter what
-  dialog-dismissed? actually did. Fixed by adding a wrong-domain code-2
-  case and a genuine different-code error, both real appends the row can
-  poll for; once the last one lands, the SAME drain call has already
+  goes through on-gui!'s async drain. Reading (since ui mark) synchronously
+  right after the simulate calls, with nothing real enqueued, could never
+  fail no matter what dialog-dismissed? did. So the row adds a
+  wrong-domain code-2 case and a genuine different-code error, both real
+  appends it can poll for; once the last one lands, the SAME drain call has already
   flushed everything queued before it (drain! processes the whole queue
   in one pass), including any errant dismissed-case append, so the scoped
   text at that point is a real assertion, not a foregone conclusion."

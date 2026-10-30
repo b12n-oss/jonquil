@@ -1,12 +1,12 @@
 (ns gtk-selftest-window.plugins
-  "Plugins P3's rows: a plugin file in the selftest's own plugins folder
+  "Plugin rows: a plugin file in the selftest's own plugins folder
   (beside its temp settings file, never the user's) loads through
   :load-plugins!*, its key runs its :edit command, the palette lists and
   runs it, a broken file is named while a good one works, and a throwing
-  :edit is contained with the plugin's id; P4's reload rows; P5's :run
-  commands printing, editing the tab they started on, and refusing it
-  once it has closed; P5b's quiet and visible evals and a timed-out eval
-  that's stopped. Each row restores the live registry and deletes its
+  :edit is contained with the plugin's id; reload rows; :run commands
+  printing, editing the tab they started on, and refusing it once it has
+  closed; quiet and visible evals and a timed-out eval that's stopped.
+  Each row restores the live registry and deletes its
   files."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -122,7 +122,7 @@
                                  {:handled handled :text text :status (g/label-text (:status-label ui))
                                   :lines lines})))))))
 
-;; --- plugins P4: reload, a failed reload, save-to-reload, a removed file --
+;; --- reload, a failed reload, save-to-reload, a removed file --
 
 (def ^:private KEY-K 0x06b)
 
@@ -209,7 +209,7 @@
                          (and j0 (not j1) (some #(= "plugin p4-gone removed: its file is gone" %) lines))
                          {:j-before j0 :j-after j1 :lines lines}))))))
 
-;; --- plugins P5: :run commands and their effects ----------------------------
+;; --- :run commands and their effects ----------------------------
 
 (defonce captured (atom nil))
 
@@ -252,7 +252,7 @@
                          {:text (on-gtk (editor/editor-text (:editor ui))) :lines lines}))))))
 
 (defn row-plugin-replace-text-refuses-nul
-  "ROADMAP Next 3: p/replace-text! with a NUL in the text throws, naming
+  "p/replace-text! with a NUL in the text throws, naming
   the line (the effect impl's pre-check), so the command fails loudly
   instead of landing truncated text, and the tab is untouched. Without
   the pre-check the apply-op! funnel's nil would mislabel this as
@@ -299,7 +299,7 @@
               (on-gtk (when (some #(= second-id (:id %)) ((:tabs* ui))) ((:close-tab! ui) second-id))
                       ((:select-tab! ui) first-id)))))))))
 
-;; --- plugins P5b: the :eval effect -----------------------------------------
+;; --- the :eval effect -----------------------------------------
 
 (defn- typed!
   "code entered the way the MCP's eval enters it (echoed, in the history,
@@ -360,7 +360,7 @@
                          (and said? (= "2" (get-in next-eval [:done :result :printed])))
                          {:status (status-text ui) :next next-eval :lines lines}))))))
 
-;; --- plugins P6: the after-hooks ---------------------------------------------
+;; --- the after-hooks ---------------------------------------------
 
 (defn- hook-source
   "A plugin file for id declaring effects whose :hooks are hooks-text, a

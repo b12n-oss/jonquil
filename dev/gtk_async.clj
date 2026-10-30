@@ -8,7 +8,7 @@
   GTK, editor, console or `since` call goes through on-gtk or await-until,
   which run it on the GTK thread via jonquil.gtk.callbacks/on-gui! and park
   the go block until it's done. call-gtk refuses to run on the GTK thread,
-  because a take there freezes the main loop (spike probe: a 300 ms <! on
+  because a take there freezes the main loop (measured: a 300 ms <! on
   the GTK thread advanced 0 idle ticks).
 
   Jolt only: call-gtk, await-until, settle, sh and close-window-bounded!
@@ -25,9 +25,8 @@
 
 (defn gtk-thread?
   "True on GTK's thread, the one running g_application_run. It asks GLib
-  who owns the default main context. The spike measured that pthread_main_np
-  exists only on macOS, and planning probe 3 measured this check on both
-  systems: 0 before g_application_run, 1 inside an open handler."
+  who owns the default main context. pthread_main_np exists only on
+  macOS, and this check was measured on both systems: 0 before g_application_run, 1 inside an open handler."
   []
   (= 1 (g-main-context-is-owner (g-main-context-default))))
 
@@ -40,9 +39,9 @@
 ;; the story). The throw fires ONCE per row: it unwinds the body at its
 ;; first helper call, and the row's own finally then runs its cleanup
 ;; helpers unchecked, so an abandoned row still closes its tabs and windows
-;; (review 2026-10-23: skipping cleanup left state that poisoned every
-;; later row, worse than the late cleanup it replaced). Bindings convey
-;; into go blocks and across parks (probed 2026-10-23), so the row's
+;; (skipping cleanup left state that poisoned every
+;; later row, worse than a late cleanup). Bindings convey
+;; into go blocks and across parks (probed), so the row's
 ;; identity rides a dynamic var; code outside a row has no binding and is
 ;; never checked, and each run-rows owns its counter, so two runs could
 ;; never stale each other's rows.
@@ -67,7 +66,7 @@
 
 (defn assert-off-gtk!
   "Throws when called on the GTK thread, where a parking helper's take
-  would freeze the main loop (spike probe: a 300 ms <! there advanced 0
+  would freeze the main loop (measured: a 300 ms <! there advanced 0
   idle ticks). call-gtk always checked; sh and settle here, and the nREPL
   rows' sh-within, refuse by construction too. who names the helper."
   [who]
@@ -134,12 +133,10 @@
   repaints before a screenshot reads it. A settle for painting, never a
   sleep for correctness.
 
-  M1: this used to park on GTK ticks (settle!'s own poll-until-style
-  loop), so it proved the main loop turned. Now that it parks on
-  wall-clock time instead, that proof is gone -- a frozen main loop would
-  pass this the same as a healthy one. The trailing on-gtk round trip
-  restores it: it can only return once the GTK thread has actually run
-  the thunk."
+  It parks on wall-clock time, so the wait alone proves nothing about the
+  main loop: a frozen main loop would pass it the same as a healthy one.
+  The trailing on-gtk round trip restores that proof: it can only return
+  once the GTK thread has actually run the thunk."
   [n]
   (assert-off-gtk! "settle")
   (<! (timeout (* 20 n)))
@@ -203,7 +200,7 @@
   has passed. Calls (on-stuck) if the window is still alive at the
   deadline.
 
-  I1: a stuck self-test flag (suppress-close? left true by a throw
+  A stuck self-test flag (suppress-close? left true by a throw
   between a row's set and its own reset) makes close-request-fn return
   the suppressed branch forever, so gtk-window-close alone never ends
   g_application_run -- the driver's own thread stays parked inside

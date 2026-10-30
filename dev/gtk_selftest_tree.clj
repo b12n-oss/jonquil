@@ -1,9 +1,9 @@
 (ns gtk-selftest-tree
-  "File-tree plan P2.T3: opens the REAL Jonquil window launched on a
+  "Opens the REAL Jonquil window launched on a
   directory (jonquil.main/start! with :dir, as `jonquil ~/dev/project`
   does) and checks the tree is rooted there and showing, the window runs
   that directory's project, and the one tab is Untitled when the window
-  first shows. A group of its own (plan ruling 2): the window group starts
+  first shows. A group of its own: the window group starts
   with no argument and every one of its rows relies on that.
 
   sessions.edn remembers two of the fixture's files and one that's gone,
@@ -102,7 +102,7 @@
 
 (defn- row-tree-dir-launch-no-save
   "Showing the tree for a directory launch is the starting default, not a
-  choice: nothing is written to the settings file (final review finding 6)."
+  choice: nothing is written to the settings file."
   [ui]
   (go-row :tree-dir-launch-no-save support/check
     (on-gtk (let [p ((:settings-path* ui))

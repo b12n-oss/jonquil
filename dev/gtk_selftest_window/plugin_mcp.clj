@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.plugin-mcp
-  "Plugins P10's rows: the plugin MCP tools over the real window, called
+  "The plugin MCP tools over the real window, called
   through the window tool table's :call off the GTK thread, the way the
   MCP server calls them. A propose runs the real isolated check in a jolt
   child and records into the selftest's own plugins folder (beside its
@@ -90,7 +90,7 @@
                          st))))))
 
 (defn row-plugin-mcp-supersede-while-shown-needs-a-second-accept
-  "Review I2: an agent's newer proposal replacing the one the user is
+  "An agent's newer proposal replacing the one the user is
   reading makes the next Accept refuse and say so, so a click aimed at v1
   never accepts v2 unseen; the Accept after that takes v2."
   [ui]
@@ -113,7 +113,7 @@
                               (= "plugin mcps: v2 accepted" (last second-lines)) live?)
                          {:shown shown :first first-lines :footer footer :second second-lines}))))))
 
-;; --- a plugin's own MCP tools (plugins P10b) ---------------------------------
+;; --- a plugin's own MCP tools ---------------------------------
 
 (def ^:private tools-source
   (str "(ns jonquil.plugins.mcpt\n  (:require [jonquil.plugin :as p]))\n\n"
@@ -200,7 +200,7 @@
 (def ^:private list-changed {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"})
 
 (defn row-plugin-mcp-list-changed-after-reload
-  "Plugins P10c: a reload that adds a plugin's tools sends list_changed to
+  "A reload that adds a plugin's tools sends list_changed to
   a session that's initialized, and the next tools/list has them; a reload
   that changes nothing sends none; the session ends on EOF."
   [ui]

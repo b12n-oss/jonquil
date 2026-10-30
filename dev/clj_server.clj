@@ -10,7 +10,7 @@
   dialect's own live suite.
 
   A second temp dir is passed as CLJ_CONFIG so the real
-  ~/.config/clojure tree is never touched (P0.3). .nrepl-port is the
+  ~/.config/clojure tree is never touched. .nrepl-port is the
   server's own file to write and delete; this namespace never reads,
   writes or deletes it directly -- only the readiness log line is
   polled, and the whole temp tree is deleted only after the process has
@@ -20,7 +20,7 @@
             [jolt.process :as p]))
 
 (def deps-edn-text
-  ;; P0.4's :serve alias.
+  ;; The :serve alias.
   "{:paths [\"src\"] :aliases {:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version \"0.1.0\"}} :main-opts [\"-m\" \"clojure-cli.repl.server\"]}}}\n")
 
 (defn- deps-edn-with-nrepl
@@ -31,10 +31,9 @@
   (str "{:paths [\"src\"] :aliases {:serve {:extra-deps {io.github.clojure/clojure-cli.repl-server {:mvn/version \"0.1.0\"} nrepl/nrepl {:mvn/version \"" version "\"}} :main-opts [\"-m\" \"clojure-cli.repl.server\"]}}}\n"))
 
 (def fixture-core-text
-  ;; The spike fixture's exact text (its own gitignored planning-store
-  ;; file): demo.core with greet, a private secret returning :private-ok,
-  ;; and nested. Embedded rather than read at run time: the planning
-  ;; store is gitignored scratch, so tests can't depend on it.
+  ;; The fixture's exact text: demo.core with greet, a private secret
+  ;; returning :private-ok, and nested. Embedded rather than read at run
+  ;; time, so tests don't depend on an external file.
   (str "(ns demo.core\n"
        "  \"A fixture namespace for the clj-attach spike.\")\n"
        "\n"
@@ -102,7 +101,7 @@
 
 (defn start!
   "Launches clojure -M:serve in a fresh temp project (deps.edn with the
-  :serve alias, src/demo/core.clj holding the spike fixture) with
+  :serve alias, src/demo/core.clj holding the fixture) with
   CLJ_CONFIG pointing at a second temp dir. Waits for the server's own
   readiness line and reads the port from it. Returns {:proc :pid :port
   :dir :config-dir :log}. Throws ex-info with the log's tail when the

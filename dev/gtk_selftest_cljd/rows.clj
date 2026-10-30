@@ -30,7 +30,7 @@
 (def ^:private where-answer "{:slide 21, :of 54}")
 
 (def ^:private where-info
-  ;; cljd plan P4.T1: lookup's found shape (fork 685e56de: nREPL's stock
+  ;; lookup's found shape (fork 685e56de: nREPL's stock
   ;; info, string keys, no file or line).
   {"ns" "demo.drive" "name" "where" "doc" "Where the deck is now." "arglists" "([])" "arglists-str" "([])"})
 
@@ -88,7 +88,7 @@
 
 (defn- label [ui] (g/label-text (:dialect-label ui)))
 
-;; --- P2.T4 rows --------------------------------------------------------------
+;; --- rows --------------------------------------------------------------
 
 (defn row-cljd-starts-not-running
   "The window opened drive.cljd: an attach evaluator, not connected, the
@@ -154,7 +154,7 @@
                              {:ok? ok? :sent sent :text (support/since ui mark)})))))
 
 (defn row-cljd-run-form-in-comment
-  "cljd plan P3.T2: Cmd/Ctrl+Enter's fn on a multi-line form inside a
+  "Cmd/Ctrl+Enter's fn on a multi-line form inside a
   comment block sends exactly that form, in the buffer's namespace (the
   session is already there, so nothing else is sent)."
   [ui]
@@ -174,7 +174,7 @@
                              {:ok? ok? :sent sent :text (support/since ui mark)})))))
 
 (defn row-cljd-quick-doc-from-app
-  "cljd plan P4.T1: attached, quick doc on where shows the app's own doc,
+  "Attached, quick doc on where shows the app's own doc,
   from lookup in the buffer's namespace."
   [ui]
   (go-row :cljd-quick-doc-from-app support/check
@@ -190,7 +190,7 @@
                                {:text text :req req}))))))
 
 (defn row-cljd-completion-offline
-  "cljd plan P4.T1: completion is offline. \"(wher\" commits to the
+  "Completion is offline. \"(wher\" commits to the
   buffer's own where, and nothing was sent to the app for it."
   [ui]
   (go-row :cljd-completion-offline support/check
@@ -230,7 +230,7 @@
                               :text (support/since ui mark)})))))
 
 (defn row-cljd-quick-doc-detached
-  "cljd plan P4.T1: detached (after the Stop above), quick doc says so and
+  "Detached (after the Stop above), quick doc says so and
   doesn't connect."
   [ui]
   (go-row :cljd-quick-doc-detached support/check
@@ -259,7 +259,7 @@
                              {:ok? ok? :clones clones :text (support/since ui mark)})))))
 
 (defn row-cljd-idle-stop-detaches
-  "Fix round 2, finding B: Stop pressed while connected but idle (nothing
+  "Stop pressed while connected but idle (nothing
   running) also detaches and prints the same detached line a running
   Stop's on-output prints -- exactly once -- and the label goes back to
   not running."
@@ -303,8 +303,8 @@
 
 (defn row-cljd-inspect-unavailable
   "cljd's attach evaluator never extends jonquil.evaluator/Inspector at
-  all (jonquil.nrepl.attach.Attach has no such protocol impl), so ruling
-  6's availability check in inspect-last! fails before building any
+  all (jonquil.nrepl.attach.Attach has no such protocol impl), so the
+  availability check in inspect-last! fails before building any
   request: the status bar gets the unavailable sentence and the pane's
   root stays hidden."
   [ui]
@@ -329,7 +329,7 @@
   ((:select-tab! ui) (:id (first ((:tabs* ui))))))
 
 (defn row-cljd-two-tabs-run
-  "Tabs plan P2.T4: an attach window runs from a second tab too. The cljd
+  "An attach window runs from a second tab too. The cljd
   runtime only loads saved files, so tab 1 gets the fixture back (an
   earlier row pointed the window at another app; with one tab the window
   follows) and tab 2 opens a second file of the same app. Both Runs reach

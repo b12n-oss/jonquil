@@ -1,11 +1,11 @@
 (ns gtk-selftest-window.inspector
-  "P2.T1: the inspector pane widget in isolation. Every row builds its own
+  "The inspector pane widget in isolation. Every row builds its own
   pane (jonquil.gtk.inspector-pane/make-pane) and hosts its :root in a
   fresh, real, transient GtkWindow -- never the self-test's own main
   window, and never disturbing it for later rows -- long enough to check
   rendering, keys and measurement, then closes that window.
 
-  P2.T2's own rows (below the P2.T1 ones) drive the REAL window's own
+  The later rows (below the isolated-pane ones) drive the REAL window's own
   pane instead (ui's :inspector), through the ui's own :inspect-last!*/
   :inspect-form!* entry fns and the pane's own key dispatch -- the actual
   wiring: layout, Cmd/Ctrl+I, Cmd/Ctrl+Shift+I, the menu, Escape, and the
@@ -192,7 +192,7 @@
                          (and (str/includes? before "not tabular") cleared?)
                          {:before before :cleared cleared?}))))))
 
-;; --- P2.T2: the window's own pane, wired end to end ------------------------
+;; --- the window's own pane, wired end to end ------------------------
 
 ;; This file's own private copies, gdkkeysyms.h (GTK 4.22.4 installed
 ;; headers), same convention as every sibling gtk-selftest-window.* key
@@ -224,16 +224,16 @@
   (dec (Integer/parseInt (first (str/split (g/label-text (:footer pane)) #"-")))))
 
 (defn row-inspect-focus-after-open
-  "I3 + I4, on the panel's FIRST open in this real window (every P2.T1
+  "On the panel's FIRST open in this real window (every isolated-pane
   row above builds its own throwaway pane -- :ui's own pane has never
   been shown before this row runs): inspect-last! grabs the rows view's
   own focus, so Return goes into the panel instead of inserting a
-  newline in the editor's own buffer (I3); and the :start it sends
+  newline in the editor's own buffer; and the :start it sends
   carries the SAME :cols/:rows a measure taken right after opening gives,
-  not the zero-floor measure an unallocated view would give (I4:
-  show-inspector-panel! used to measure in the very callback that first
-  makes the root visible, before GTK's own layout pass had ever run).
-  A self-contained REPL entry: every later P2.T2 row's own
+  not the zero-floor measure an unallocated view would give
+  (show-inspector-panel! must not measure in the very callback that first
+  makes the root visible, before GTK's own layout pass has run).
+  A self-contained REPL entry: every later row's own
   :inspect-last!* resets inspector-state to nil before its own :start
   anyway, so this row's own :in step below can't leak into what
   row-inspect-last-after-repl and row-inspect-in-out expect next."
@@ -252,7 +252,7 @@
             h (on-gtk (inspector-pane/dispatch-key! pane KEY-RETURN))
             after (on-gtk (editor/editor-text ed))
             ;; Let the async :in round trip settle before the next row's
-            ;; own :inspect-last!* -- ruling 9 drops a fresh :start while
+            ;; own :inspect-last!* -- a fresh :start is dropped while
             ;; one request is still pending.
             settled? (await-until 2000 20 #(str/includes? (g/label-text (:header pane)) "/"))]
         (on-gtk
@@ -317,9 +317,9 @@
 (defn row-inspect-page-edge
   "A REPL entry (vec (range n)), open, then Down past the last visible
   row: the footer's start moves on and line 0 is selected (jonquil.inspect/
-  key-step's own :page {:delta 1} request). Ruling 9, folded into this same
-  row (context bullet: \"add a row check in row-inspect-in-out or a
-  separate one\"): a SECOND, fresh page -- (vec (range (* rows 5))), sized
+  key-step's own :page {:delta 1} request). The same
+  row also checks that a fresh :start is dropped while a request is
+  pending: a SECOND, fresh page -- (vec (range (* rows 5))), sized
   off the pane's own measured rows so it always spans exactly 5 real pages
   regardless of the real window's size -- crossed with TWO Down presses
   back to back, no wait between them, must still land on page 1 (start
@@ -357,7 +357,7 @@
                                       #(str/includes? (g/label-text (:info pane)) (str big-n " items")))
                 start2-0 (on-gtk (footer-start pane))]
             (on-gtk (dotimes [_ (dec rows)] (inspector-pane/dispatch-key! pane KEY-DOWN)))
-                  ;; ruling 9: two rapid presses across the edge, no await in between.
+                  ;; two rapid presses across the edge, no await in between.
             (on-gtk (inspector-pane/dispatch-key! pane KEY-DOWN)
                     (inspector-pane/dispatch-key! pane KEY-DOWN))
             (let [advanced2? (await-until 2000 20 #(> (footer-start pane) start2-0))
@@ -393,7 +393,7 @@
   later page of a long vector, row 0 selected): Up goes back a page and
   selects that page's LAST row. Then a fresh [10 20 30 40]: Down, Down,
   Return goes in on row 2, and Left comes back out with row 2 selected,
-  not row 0 (review focus 2 and 3)."
+  not row 0."
   [ui]
   (go-row :row-inspect-reselect support/check
     (let [pane (:inspector ui)
@@ -575,7 +575,7 @@
 
 (defn row-inspect-escape
   "With the pane focused, the ui's own key handler with Escape hides it and
-  the editor has focus (ruling 8)."
+  the editor has focus."
   [ui]
   (go-row :row-inspect-escape support/check
     (let [pane (:inspector ui) win (:window ui) ed (:editor ui)]
@@ -614,10 +614,10 @@
                            :opened opened? :laid-out laid-out?})))))))
 
 (defn row-inspect-def-prompt-escape-safe
-  "I5: the def prompt joins the window's own close-popovers registry, so
-  Escape closes it before it can fall through to Stop (ruling 8),
+  "The def prompt joins the window's own close-popovers registry, so
+  Escape closes it before it can fall through to Stop,
   instead of Stopping a running program the way an unregistered popover
-  did. A program running ((Thread/sleep 5000) via Run), the def prompt
+  would. A program running ((Thread/sleep 5000) via Run), the def prompt
   open (continuing from row-inspect-cols-match's own open panel):
   Escape must close the prompt and leave the program running, then Stop
   ends it cleanly. The rows view has keyboard focus again once the prompt

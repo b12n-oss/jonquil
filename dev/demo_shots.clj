@@ -1,5 +1,5 @@
 (ns demo-shots
-  "P2.T9: opens the REAL Jonquil window via jonquil.main/start! and drives it
+  "Opens the REAL Jonquil window via jonquil.main/start! and drives it
   through exactly ONE scene per process, screenshotting it with cgevent
   once its expected text is visible and the frame has settled, then closes
   the window and exits. `-main` takes the scene id as its one argument
@@ -9,14 +9,10 @@
   list, hand-kept in sync the same way dev/check.clj and
   dev/test_runner.clj's namespace lists are).
 
-  Round 1 (P2.T9 controller review) replaced an earlier version that ran
-  all 7 scenes against ONE shared window/process: every scene after the
-  first inherited every earlier scene's console history, so stdin.png
-  showed hello.clj's output twice plus a REPL entry, and
-  run-while-running.png was mostly other scenes' leftover text. A fresh
-  process per scene means a fresh session, a fresh window and an empty
-  console every time -- each image shows only its own scene. Window size
-  stays identical across scenes for the same reason it always did:
+  One fresh process per scene (rather than all scenes against one shared
+  window) means a fresh session, a fresh window and an empty console every
+  time: each image shows only its own scene, with no earlier scene's
+  console history. Window size stays identical across scenes because
   window.clj opens at a fixed 900x700 default size on every construction,
   and every scene here still only ever builds one window for its one
   scene, never rebuilding.
@@ -73,7 +69,7 @@
 (def ^:private demos-dir "docs/demos")
 
 (defn- fresh-settings-path
-  "TH.T5 isolation: a settings.edn under a fresh temp directory (one per
+  "A settings.edn under a fresh temp directory (one per
   process -- bb docs:shots launches a fresh `jolt -M:shots <scene-id>`
   process per scene, so this is also one per scene), never the user's real
   $XDG_CONFIG_HOME/jonquil. No file exists there yet, so activate!'s
@@ -117,7 +113,7 @@
 (defn- since [ui mark] (subs (console-text ui) mark))
 
 (defn- place-cursor!
-  "P4.T8: places buf's cursor at offset -- an ordinary GtkTextBuffer call,
+  "Places buf's cursor at offset -- an ordinary GtkTextBuffer call,
   copied from dev/gtk_selftest_window.clj's own place-cursor! (same
   category as this file's own g/gtk-text-buffer-insert-interactive-at-
   cursor calls elsewhere: never a synthesized keystroke)."
@@ -309,7 +305,7 @@
                       {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-find
-  "P3.T7: find.clj open, find-bar/open! (the same fn Cmd+F calls), then a
+  "find.clj open, find-bar/open! (the same fn Cmd+F calls), then a
   query set the same way dev/gtk_selftest_window.clj's own find-bar rows
   do it -- g/gtk-editable-set-text on the query entry, which fires the
   entry's real \"changed\" signal and so runs recompute-matches! exactly
@@ -330,7 +326,7 @@
                        :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-run-selection
-  "P3.T7: run-selection.clj's last line, with the caret already there
+  "run-selection.clj's last line, with the caret already there
   (editor/set-text! leaves the caret at the end, the same fact
   binary_smoke.clj's own step-run-selection! measured live and depends
   on), run via :run-selection!* -- the exact fn Cmd+E calls
@@ -352,17 +348,16 @@
                       {:console (since ui mark) :screenshot-exit exit :screenshot-err err})))))
 
 (defn- scene-close-prompt
-  "P3.T7: close-prompt.clj, dirtied by one inserted character (the same
+  "close-prompt.clj, dirtied by one inserted character (the same
   editor/set-text! + insert-interactive-at-cursor shape dev/gtk_selftest_
   window.clj's row-close-dirty-cancel uses), then :request-close!* -- the
-  real gtk_window_close path Cmd+W/Cmd+Q both take (P3 fix wave C3) --
+  real gtk_window_close path Cmd+W/Cmd+Q both take --
   which shows the REAL GtkAlertDialog (Save / Don't Save / Cancel)
   because the buffer is dirty and unconfirmed (close-request-fn). The
   alert is its own top-level window, never a native macOS sheet (measured
-  live, a cgevent windows --pid --edn probe this session): found here by
+  live, a cgevent windows --pid --edn probe): found here by
   diffing that call's result against the ONE window id present just
-  before the close request, then screenshotted by --window-id (the
-  brief's own instruction; measured live this session that on this build
+  before the close request, then screenshotted by --window-id (measured live that on this build
   it captures the alert together with the main window's own dirty '*'
   title behind it, not just the alert's own small bounds).
 
@@ -379,18 +374,16 @@
   hang this process forever.
 
   If cgevent never lists a second window, this scene records a PASS with
-  :skipped true and says why in its detail map (the brief: \"otherwise
-  skip that scene and say so\") rather than guessing which window to
+  :skipped true and says why in its detail map rather than guessing which window to
   shoot -- no docs/images/close-prompt.png is written in that case.
 
-  I1: the cleanup below (dismissing the real alert, resetting
-  alert-pending?, mark-saved!) used to run only after a found alert's own
-  screenshot, so a throw from screenshot-by-id or check!, or the :skipped
-  branch itself, left the buffer dirty with alert-pending? still true --
-  -main's own end-of-scene close then met close-request-fn's dirty
-  branch, which never quits, and the process hung. The cleanup now runs
-  in a go-level finally, unconditionally, whether or not an alert was
-  ever found."
+  The cleanup (dismissing the real alert, resetting alert-pending?,
+  mark-saved!) runs in a go-level finally, unconditionally, whether or not
+  an alert was ever found: a throw from screenshot-by-id or check!, or the
+  :skipped branch, would otherwise leave the buffer dirty with
+  alert-pending? still true, and -main's own end-of-scene close would meet
+  close-request-fn's dirty branch, which never quits, and hang the
+  process."
   [ui]
   (go-row :close-prompt check!
     (let [pid (own-pid)
@@ -419,7 +412,7 @@
                   (editor/mark-saved! ed)))))))
 
 (defn- scene-theme
-  "TH.T6: theme-sample.clj (a comment, a string, a keyword, a number, a
+  "theme-sample.clj (a comment, a string, a keyword, a number, a
   defn and three levels of nested brackets) Run to completion so the
   console shows both output and a result, then (:set-theme!* ui) k --
   the same fn Cmd/Ctrl+Shift+M's cycle calls, applied directly rather
@@ -453,12 +446,12 @@
 (defn- scene-theme-navy [ui] (scene-theme :theme-navy :navy ui))
 
 (defn- scene-completion
-  "P4.T8: \"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
+  "\"(ma\" in the editor, :complete!* -- the exact fn Ctrl+Space
   calls (jonquil.gtk.window's own do-complete!). \"ma\" has several
   candidates (docs/candidates, measured live: macroexpand and friends),
   so the popover opens with its own rows AND the selected candidate's doc
-  preview, both visible in the same shot -- the brief's own \"popup with
-  its preview\". set-text! already leaves the caret at the end of the
+  preview, both visible in the same shot -- a popup with
+  its preview. set-text! already leaves the caret at the end of the
   buffer (this file's own editor/set-text! calls elsewhere never move it
   afterward either), so no place-cursor! call is needed here."
   [ui]
@@ -474,7 +467,7 @@
               (completion/close! c)))))
 
 (defn- scene-quick-doc
-  "P4.T8: \"(map inc [1])\", caret on \"map\" (offset 2, place-cursor!),
+  "\"(map inc [1])\", caret on \"map\" (offset 2, place-cursor!),
   :quick-doc!* -- the exact fn Ctrl+Q calls (do-quick-doc!). The popover
   opens over clojure.core/map's own arglists and doc."
   [ui]
@@ -491,7 +484,7 @@
               (popover/hide! hp)))))
 
 (defn- scene-rename
-  "P4.T8: \"(defn greet [n] n)\\n(greet 1)\", caret on the call's own
+  "\"(defn greet [n] n)\\n(greet 1)\", caret on the call's own
   greet (offset 22, place-cursor! -- the same fixture/offset dev/smoke/
   binary_smoke.clj's own step-rename! measures against the built binary),
   :rename!* -- the exact fn Shift+F6/F2 calls (do-rename!). The rename
@@ -517,7 +510,7 @@
 (def ^:private KEY-RETURN 0xff0d)
 
 (defn- scene-inspector
-  "P4.T1: a REPL entry with a 3-key map (a string, a long vector and a
+  "A REPL entry with a 3-key map (a string, a long vector and a
   vector of two same-shaped maps), Cmd/Ctrl+I opens on it, then Down twice
   and Return goes in on :speakers (the map's third, last-defined key, so
   its insertion order -- PersistentArrayMap keeps it for this few keys --
@@ -653,7 +646,7 @@
               (popover/hide! fp)))))
 
 (defn- scene-clj-inspector
-  "P4.T1: Run attaches to the server and loads the demo text, then a REPL
+  "Run attaches to the server and loads the demo text, then a REPL
   entry of the SAME 3-key map scene-inspector uses, then Cmd/Ctrl+I opens
   the panel against the real server -- the JVM's own inspect-* ops, not
   jonquil.inspect.view running locally."
@@ -687,7 +680,7 @@
           ok (await-until 10000 20 #(and (pos? (g/gtk-widget-get-visible (:root sp)))
                                          (str/starts-with? (g/label-text (:header sp)) "string.clj in clojure-")
                                          (:done? @(:paint (:editor sp)))))
-          ;; P3.T1 fix round 1/2: jonquil.gtk.source-pane/place-caret!
+          ;; jonquil.gtk.source-pane/place-caret!
           ;; keeps re-scrolling on its own shared timeout until this
           ;; is true (or a deadline passes), so this scene only needs
           ;; to wait for it -- no scene-local re-scrolling of its own.
@@ -1070,7 +1063,7 @@
                                       (editor/editor-text ed)))
           ;; the recording runs a fixed 9 s from gif-t0, so the rejoin must
           ;; land inside it with a beat to spare, or the GIF ends early on
-          ;; a loaded machine while the scene still passes (review I2)
+          ;; a loaded machine while the scene still passes
           in-window? (< (- (System/currentTimeMillis) gif-t0) 8000)
           label (on-gtk (g/label-text (:parinfer-label ui)))
           [gif-result port] (a/alts! [gif (timeout 15000)])
@@ -1107,7 +1100,7 @@
         (.mkdirs (.getParentFile f))
         (spit (io/file dir "deps.edn") "{:paths [\"src\"]}")
         ;; in process, as scene-file-tree: no nREPL child, so no async
-        ;; start line can print the temp path into the image (review I1)
+        ;; start line can print the temp path into the image
         (spit (io/file dir ".jonquil.edn") "{:parinfer :smart :runtime :in-process}\n")
         (spit f "(ns demo.greeting)\n\n(defn hello [name]\n  (str \"Hello, \" name \"!\"))\n")
         (on-gtk ((:open-file! ui) (.getCanonicalPath f)))
@@ -1124,7 +1117,7 @@
                                      #(str/includes? (editor/editor-text ed) "(hello name)"))
               _ (ga/settle 2)
               ;; a temp path in the console would ship in the image, so a
-              ;; leak FAILs the scene instead of passing silently (review I1)
+              ;; leak FAILs the scene instead of passing silently
               no-leak? (on-gtk (not (str/includes? (console-text ui) (.getName dir))))
               {:keys [exit err]} (ga/screenshot (image-path :parinfer-project "png") pid)]
           (on-gtk (editor/set-text! ed "")   ; clean, so the window closes without the prompt
@@ -1184,7 +1177,7 @@
   ;; A cold ClojureScript start plus the page's 60 s connect bound.
   200000)
 
-;; I1: a plain atom flip from the window's own "destroy" signal (-main,
+;; A plain atom flip from the window's own "destroy" signal (-main,
 ;; below, connects it), the same pattern dev/gtk_selftest_window.clj's own
 ;; window-destroyed? uses -- safe to poll without ever touching the
 ;; (possibly already-destroyed) widget pointer directly.
@@ -1277,7 +1270,7 @@
                             (<! (ga/run-rows [(fn [] (run-scene ui scene-fn))]
                              (if (cljs-scenes scene-id) CLJS-SCENE-MS PER-SCENE-MS) check!))
                             (<! (timeout 50))
-                          ;; I1: scene-close-prompt (or any scene) could leave
+                          ;; scene-close-prompt (or any scene) could leave
                           ;; the buffer dirty with an alert pending if its own
                           ;; cleanup didn't run; a plain gtk-window-close would
                           ;; then meet close-request-fn's dirty branch, which

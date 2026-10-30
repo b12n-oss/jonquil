@@ -10,7 +10,7 @@
             [jonquil.settings :as settings]
             [jonquil.theme :as theme]))
 
-;; --- TH.T4: apply-theme! (retint tags, reload the CSS, flip prefer-dark) --
+;; --- apply-theme! (retint tags, reload the CSS, flip prefer-dark) --
 ;; Every row here ends by restoring :light and zoom :reset, per the shared
 ;; rule (02-gtk.md) that later rows see the colours/size they expect.
 
@@ -214,7 +214,7 @@
   jonquil.settings/load-settings itself, not a raw slurp.
 
   set-status! (window.clj) is on-gui!-scheduled, the same async-drain
-  lesson (I1) every console-text assertion in this file already respects
+  lesson every console-text assertion in this file already respects
   -- a synchronous read right after :cycle-theme!* can race the queued
   update and see a PRIOR row's leftover status text, so status1 is polled
   for, not read once."
@@ -341,7 +341,7 @@
                 ((:zoom!* ui) :reset))))))
 
 (defn row-theme-save-failure-reported
-  "Test hook: :settings-path!* (TH.T5's own self-test-only addition,
+  "Test hook: :settings-path!* (a self-test-only hook in
   window.clj) repoints the window's own settings-path atom -- here at an
   IMPOSSIBLE path (a regular file used as the would-be parent directory,
   so io/make-parents can't create it and the temp-file spit inside it

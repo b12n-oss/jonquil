@@ -207,7 +207,7 @@
                              {:status (g/label-text status) :text text})))))
 
 (defn row-palette-closes-its-own-tab
-  "Review fix I1: running Close the tab from a second tab's palette frees
+  "Running Close the tab from a second tab's palette frees
   that tab's editor view while the palette's posted refocus is still
   queued. The refocus must hold its own ref on the view and skip a view
   that's no longer in a window: the process lives, the first tab is left,
@@ -228,9 +228,9 @@
                              {:before n0 :after n1})))))
 
 (defn row-palette-arrow-keys
-  "Review fix I2: Up and Down, through the entry controller's own handler,
+  "Up and Down, through the entry controller's own handler,
   move the selection and are taken (1); another key isn't (0), and
-  neither is an arrow while an IME preedit is active (fix-review I1). A
+  neither is an arrow while an IME preedit is active. A
   composition the palette was closed over (Escape, a click outside)
   doesn't outlive it: open! starts with no preedit."
   [ui]

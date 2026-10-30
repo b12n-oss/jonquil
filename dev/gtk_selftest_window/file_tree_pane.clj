@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.file-tree-pane
-  "jonquil.gtk.file-tree-pane in isolation (file-tree plan P2.T1), each row
+  "jonquil.gtk.file-tree-pane in isolation, each row
   on a fresh pane in its own throwaway window over a temp folder tree.
 
   Every row is go-style (dev/gtk_async.clj): (fn [ui] ch), one check each."
@@ -139,7 +139,7 @@
                     (finally (.setReadable f true false)))))))))
 
 (defn row-tree-pane-large-folder
-  "A folder of 3,000 files expands in under a second (Review Focus 1)."
+  "A folder of 3,000 files expands in under a second."
   [_ui]
   (go-row :tree-pane-large-folder support/check
     (with-pane
@@ -157,8 +157,8 @@
                     (support/check :tree-pane-large-folder (and (< ms 1000) (= 3001 n)) {:ms ms :rows n}))))))))
 
 (defn row-tree-pane-select-non-canonical
-  "select-path! finds a row from a non-canonical path to the same file
-  (final review finding 3): temp-dirs hands out /var/... paths, rows hold
+  "select-path! finds a row from a non-canonical path to the same file:
+  temp-dirs hands out /var/... paths, rows hold
   /private/var/... on macOS."
   [_ui]
   (go-row :tree-pane-select-non-canonical support/check
@@ -175,7 +175,7 @@
 
 (defn row-tree-pane-deferred-activation-by-path
   "A click's deferred action acts on the row that was clicked even if the
-  list was rebuilt in between (final review finding 7)."
+  list was rebuilt in between."
   [_ui]
   (go-row :tree-pane-deferred-activation-by-path support/check
     (with-pane
@@ -193,7 +193,7 @@
                                  (and done (= [(str root "/README.md")] @opened))
                                  {:opened @opened})))))))
 
-;; --- file operations: menu, name entry, keys (file-ops plan T3) -----------------
+;; --- file operations: menu, name entry, keys -----------------
 
 (defn- ops-tree!
   "A temp folder with a/, a/x.clj and b.clj; its canonical path."
@@ -297,7 +297,7 @@
 
 (defn row-tree-pane-menu-target-survives-refresh
   "The menu's target is recorded at open time: a refresh in between
-  (Review Focus 5) doesn't redirect Move to Trash."
+  doesn't redirect Move to Trash."
   [_ui]
   (go-row :tree-pane-menu-target-survives-refresh support/check
     (with-ops-pane
@@ -394,7 +394,7 @@
                                  v)))))))
 
 (defn row-tree-pane-error-row-no-menu
-  "Final review Important 1: an expanded folder that can't be read shows a
+  "An expanded folder that can't be read shows a
   \"(can't read)\" row; the menu on that row's path (what a right click on
   it passes) and Menu with it selected open nothing, rather than the full
   menu for its parent folder."

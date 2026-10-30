@@ -40,7 +40,7 @@
           warned? (await-until 2000 20 #(str/includes? (support/since ui mark) "already in progress"))
           _ (on-gtk ((:stop!* ui)))
           stopped? (await-until 3000 20 #(str/includes? (support/since ui mark) "; interrupted"))]
-      ;; M1: the refused second Run must not print a second banner --
+      ;; The refused second Run must not print a second banner --
       ;; exactly one for the whole row.
       (on-gtk (let [banner-count (count (re-seq #"; --- Running Definitions ---"
                                                 (support/since ui mark)))]
@@ -100,9 +100,9 @@
   output THAT step produced. Without this, run-row's reset (editor + input
   only, never the console's output history) would let the first (greet)'s
   own leftover error line -- or even a PRIOR row's -- satisfy first-error?
-  regardless of whether Reset actually removed anything; see the fix-round-1
-  can-fail proof in the P2.T7 report. Each run-and-await also gates on its
-  OWN expected text (I1), not just engine-idle, so mark1/mark3 are captured
+  regardless of whether Reset actually removed anything; as the can-fail
+  proof for this row. Each run-and-await also gates on its
+  OWN expected text, not just engine-idle, so mark1/mark3 are captured
   only once the previous step's result is actually visible."
   [ui]
   (go-row :reset-vs-accumulate support/check
@@ -130,14 +130,14 @@
                          (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(inc x)" -1 1)
                          (cview/handle-return! cv false)
                          m))
-          ;; I1 again: gate on the text itself, not idle? alone.
+          ;; Gate on the text itself, not idle? alone.
           ok (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "=> 42")))]
       (on-gtk (support/check :repl-after-run (and defined? ok)
                              {:defined defined? :console (support/since ui mark)})))))
 
 (defn row-fast-repl-twice
-  "I2: a fast REPL eval (nil, completing in microseconds) must not strand
-  the console in :busy. With the old console-mirrored evaluating? atom, a
+  "A fast REPL eval (nil, completing in microseconds) must not strand
+  the console in :busy. With a console-mirrored evaluating? atom, a
   fast on-complete could clear the mirror BEFORE do-repl-eval!'s own
   `set-evaluating! true` ran, leaving it stuck true and every later Return
   silently hitting :busy. Submits nil twice in a row and requires both
@@ -159,7 +159,7 @@
                               :console1 (support/since ui mark1) :console2 (support/since ui mark2)})))))
 
 (defn row-busy-hint-once
-  "M3: Return while a program runs and isn't waiting on stdin does nothing
+  "Return while a program runs and isn't waiting on stdin does nothing
   silently by default; the FIRST such Return during a run appends a hint,
   later ones during the SAME run stay silent."
   [ui]
@@ -225,7 +225,7 @@
                               :console (support/since ui mark)})))))
 
 (defn row-console-history-down-empty
-  "I3: eval/history-next returns \"\" for both an empty history and a
+  "eval/history-next returns \"\" for both an empty history and a
   not-currently-browsing index; the window.clj adapter must tell those
   apart from a real replacement, or Down erases whatever the user typed.
   Forces a fresh, empty history on THIS window's real session (not a stub)
@@ -245,7 +245,7 @@
                                {:got got :input input}))))))
 
 (defn row-run-selection-line
-  "Caret on line 2, no selection: commands/run-selection-text (P3.T1) sends
+  "Caret on line 2, no selection: commands/run-selection-text sends
   the whole line. Asserts BOTH the echoed \"user=> (inc 41)\" (console-view/
   echo-entry!) and the real result \"=> 42\", so a path that evaluates
   without echoing (or echoes without evaluating) still fails."
@@ -323,7 +323,7 @@
 (def ^:private KEY-L 0x06c)
 
 (defn row-clear-last-two-entries
-  "Cmd/Ctrl+Shift+L (CIDER's C-c C-o, brief Test 1): two REPL entries
+  "Cmd/Ctrl+Shift+L (CIDER's C-c C-o): two REPL entries
   submitted in turn, then the chord removes only the SECOND entry's own
   echo+output. console-view's mark-entry-start! re-marks at each
   commit-input!, so the mark always points at whichever entry is actually
@@ -356,7 +356,7 @@
                                 :before-second before-second :text text :input input}))))))
 
 (defn row-clear-last-while-running
-  "Cmd/Ctrl+Shift+L while a program is STILL printing (brief Test 2): the
+  "Cmd/Ctrl+Shift+L while a program is STILL printing: the
   chord clears what it has printed SO FAR -- everything since the Run
   banner, which is exactly where window.clj's do-run! marks the entry's
   own start -- without needing the program to finish, and output the
@@ -386,7 +386,7 @@
                               :cleared cleared? :printed-after printed-after? :stopped stopped?})))))
 
 (defn row-clear-last-twice-noop
-  "A second Shift+L immediately after the first (brief Test 3): clear-
+  "A second Shift+L immediately after the first: clear-
   last-output! deactivates the mark on the first clear, and nothing has
   begun a NEW entry since, so the second press finds nothing left to
   clear -- the buffer must come out byte-for-byte identical to what the
@@ -411,8 +411,8 @@
                                 :text-after-first text-after-first :text-after-second text-after-second}))))))
 
 (defn row-clear-console-key-regression
-  "Regression check (brief Test 4): with the new Shift-qualified clause
-  now sitting ahead of it in the window keymap, plain Cmd/Ctrl+L (no
+  "With the Shift-qualified clause
+  sitting ahead of it in the window keymap, plain Cmd/Ctrl+L (no
   Shift) must still clear the WHOLE output history, exactly as before.
   Driven through the real key-controller fn (:handle-window-key!), not
   the raw :clear-console!* hook row-clear-console above already covers,
@@ -436,7 +436,7 @@
 
 (defn row-clear-last-menu-item
   "The console's right-click 'Clear Last Output' item does exactly what
-  the key does (brief Test 5) -- fired through :repl-activate-menu-
+  the key does -- fired through :repl-activate-menu-
   action!* (install-context-menu!'s own unprefixed action-name
   activation), the same path rename-menus.clj's own row-menu-actions-
   console-complete already exercises for the console's Complete item."
@@ -459,9 +459,9 @@
                                  {:produced produced? :before before :after after})))))))
 
 (defn row-clear-last-run-selection-mid-run-keeps-mark
-  "Fix round 1, Important #1: Cmd+E (Run Selection) while a program is
+  "Cmd+E (Run Selection) while a program is
   STILL running must NOT move the last-entry mark -- only do-run!'s own
-  idle-only marking may, and do-run-selection!/do-run-form! now pass
+  idle-only marking may, and do-run-selection!/do-run-form! pass
   echo-entry! a mark? flag gated on (not (ev/evaluating? @ev*)), mirroring
   do-run!'s own busy/idle branching. Starts a printing loop (marked at the
   banner), Runs Selection on OTHER text mid-run (echoes as before, but
@@ -499,7 +499,7 @@
                               :cleared cleared? :stopped stopped?})))))
 
 (defn row-clear-last-mark-lands-after-queued-tail
-  "Fix round 1, Important #2: mark-entry-start! must not read out-end
+  "mark-entry-start! must not read out-end
   synchronously while a PREVIOUS entry's own output is still queued (via
   append!) but not yet drained -- doing so would place the mark BEFORE
   that pending tail, so a later Shift+L would delete it along with the

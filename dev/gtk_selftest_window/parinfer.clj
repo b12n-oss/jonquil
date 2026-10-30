@@ -68,7 +68,7 @@
    :text (g/label-text (:parinfer-label ui))})
 
 (defn row-parinfer-project-on
-  "Review Focus 1 and 4: a project saying {:parinfer :smart} turns the
+  "A project saying {:parinfer :smart} turns the
   mode on for its tab while the global stays off, from the first edit."
   [ui]
   (go-row :parinfer-project-on support/check
@@ -92,7 +92,7 @@
                     (delete-tree! dir))))))))
 
 (defn row-parinfer-project-pins-off
-  "Review Focus 1: {:parinfer :off} pins the tab off under a global
+  "{:parinfer :off} pins the tab off under a global
   :smart, the label says so, and a global cycle names the pin."
   [ui]
   (go-row :parinfer-project-pins-off support/check
@@ -132,7 +132,7 @@
                   (delete-tree! dir)))))))
 
 (defn row-parinfer-label-follows-tab
-  "Review Focus 2: switching between a project tab and a plain tab flips
+  "Switching between a project tab and a plain tab flips
   the label between Smart (project) and hidden (the global is off)."
   [ui]
   (go-row :parinfer-label-follows-tab support/check
@@ -162,7 +162,7 @@
                     (delete-tree! dir))))))))
 
 (defn row-parinfer-label-after-open-into-untitled
-  "Review I1: Open on a project file fills an untouched Untitled tab in
+  "Open on a project file fills an untouched Untitled tab in
   place (no tab switch), and the label must still pick up the project's
   override."
   [ui]
@@ -186,7 +186,7 @@
                     (delete-tree! dir))))))))
 
 (defn row-format-style-project-pin
-  "Format-style pin Review Focus 1: a project saying {:format-style
+  "A project saying {:format-style
   :paren-stable} makes Format All stabilize its tab's output while the
   global Parinfer stays off, so a repo formats one way for everyone."
   [ui]
@@ -209,7 +209,7 @@
                     (delete-tree! dir))))))))
 
 (defn row-parinfer-mode-change-clears-skip-note
-  "Polish Review Focus 4: after a too-long note, a mode change must not
+  "After a too-long note, a mode change must not
   let the note's later clear stomp the newer status with Ready. set-status!
   goes through the idle queue (FIFO), so the writes land after the action
   block; one flush wait makes the final text deterministic: broken code

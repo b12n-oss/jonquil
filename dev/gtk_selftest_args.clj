@@ -1,11 +1,11 @@
 (ns gtk-selftest-args
-  "P1.T4: opens the REAL Jonquil window the way a terminal launch does:
+  "Opens the REAL Jonquil window the way a terminal launch does:
   jonquil.main/start! with :argv from jonquil.main/gtk-argv for a folder
   (sub/) and two files (src/a.clj and b.clj of a project with a deps.edn), so
   GApplication emits \"open\" (and not \"activate\"). Checks the two files
   are the only tabs, the folder roots the tree and shows it without saving
-  the tree's visibility (Ruling C), the last file is the active tab, and the
-  process's prgname is the launcher's net.b12n.jonquil on Linux. A group of its own (plan ruling 2):
+  the tree's visibility (a tree opened by a folder argument is not a user choice), the last file is the active tab, and the
+  process's prgname is the launcher's net.b12n.jonquil on Linux. A group of its own:
   g_application_run can't be re-run from a row of a running app.
 
   Mirrors gtk-selftest-tree's driver; the last row fires the app's quit
@@ -59,7 +59,7 @@
                              {:root root :want (:sub @fixture*) :shown? shown?})))))
 
 (defn- row-args-folder-launch-saves-no-tree-visibility
-  "Ruling C's third regression: showing the tree for a folder launch is the
+  "Showing the tree for a folder launch is the
   starting state, not a person's choice, so the settings file holds no
   :file-tree."
   [_ui]
