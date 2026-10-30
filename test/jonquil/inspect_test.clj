@@ -128,3 +128,18 @@
     (is (= "← out · d def · m meta · v table · object 1 of 2 · [ ] earlier/later"
            (inspect/footer (inspect/open {:path "*1" :info "String" :header "" :leaf "\"x\""
                                           :history {:at 1 :count 2}}))))))
+
+(deftest history-ends-answered-locally-test
+  ;; at the oldest or newest object, [ and ] send nothing and keep the
+  ;; selection; the note says why
+  (let [oldest (assoc (inspect/open (assoc (page-view 0 3 3) :history {:at 1 :count 3})) :selected 2)
+        newest (assoc (inspect/open (assoc (page-view 0 3 3) :history {:at 3 :count 3})) :selected 2)]
+    (let [{:keys [state request]} (inspect/key-step oldest :earlier)]
+      (is (nil? request))
+      (is (= 2 (:selected state)))
+      (is (= "No earlier object." (:note state))))
+    (let [{:keys [state request]} (inspect/key-step newest :later)]
+      (is (nil? request))
+      (is (= "No later object." (:note state))))
+    (testing "away from the ends it still asks"
+      (is (= [:later] (:request (inspect/key-step oldest :later)))))))

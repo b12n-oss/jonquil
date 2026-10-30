@@ -193,8 +193,9 @@
   HISTORY-MAX are kept."
   [{:keys [roots at]} value]
   (let [kept (if at (subvec roots 0 (inc at)) [])]
-    (if (and (seq kept) (identical? value (peek kept)))
-      {:roots kept :at (dec (count kept))}
+    ;; the root shown now, inspected again: nothing new, so nothing dropped
+    (if (and at (identical? value (nth roots at)))
+      {:roots roots :at at}
       (let [r (conj kept value)
             r (if (> (count r) HISTORY-MAX) (subvec r (- (count r) HISTORY-MAX)) r)]
         {:roots r :at (dec (count r))}))))

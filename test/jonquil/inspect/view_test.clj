@@ -137,3 +137,13 @@
     (is (= {:at view/HISTORY-MAX :count view/HISTORY-MAX} (:history (view/run-op a :page {:delta 0}))))
     (dotimes [_ (dec view/HISTORY-MAX)] (view/run-op a :earlier {}))
     (is (= 16 (:total (view/run-op a :page {:delta 0}))) "the oldest kept is the 16th (25 - 10 + 1)")))
+
+(deftest history-reinspecting-current-keeps-later-ones-test
+  ;; back on the first of three, inspecting that same object again keeps
+  ;; the later two (a browser's reload, not a new page)
+  (let [a (fresh) first-root [1]]
+    (start! a first-root) (start! a [1 2]) (start! a [1 2 3])
+    (view/run-op a :earlier {})
+    (view/run-op a :earlier {})
+    (is (= {:at 1 :count 3} (:history (start! a first-root))))
+    (is (= 2 (:total (view/run-op a :later {}))))))

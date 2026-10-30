@@ -141,12 +141,14 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>The inspector</strong> (6)</summary>
+<summary><strong>The inspector</strong> (7)</summary>
 
 - The panel never refreshes itself; reopen it after a later evaluation.
 - A collection shows at most 1000 entries.
 - On JVM Clojure, another client inspecting on the same server replaces
   Jonquil's view.
+- On JVM Clojure, Earlier and Later can't go back to another object: the
+  server's inspector keeps only the one it shows.
 - Resizing the panel doesn't reflow rows already shown.
 - No inspector for ClojureDart or ClojureScript.
 - JVM Clojure's inspector needs your server to offer clojure-cli.repl's

@@ -73,8 +73,15 @@
         :meta {:state (assoc state :pending :cursor) :request [:meta {:cursor selected}]}
         :table {:state (assoc state :pending :keep) :request [:table]}
         ;; the history of inspected objects: another root, its first row
-        :earlier {:state (assoc state :pending :first) :request [:earlier]}
-        :later {:state (assoc state :pending :first) :request [:later]}
+        ;; at either end the view's own :history answers, without a request,
+        ;; so the selection stays where it was
+        :earlier (if (= 1 (:at (:history view)))
+                   {:state (assoc state :note "No earlier object.") :request nil}
+                   {:state (assoc state :pending :first) :request [:earlier]})
+        :later (let [{at :at n :count} (:history view)]
+                 (if (and at (= at n))
+                   {:state (assoc state :note "No later object.") :request nil}
+                   {:state (assoc state :pending :first) :request [:later]}))
         ;; Row keys: nothing to move over on a leaf or an empty collection.
         (if (or (leaf? view) (zero? n-entries))
           none

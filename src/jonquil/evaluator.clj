@@ -160,7 +160,8 @@
   "Inspecting the value an evaluator's last :ok result produced,
   through jonquil.inspect.view's lifted ops. op and args are
   jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
-  :def), except :start takes {:rows :cols} (the evaluator supplies the
+  :def :earlier :later; a JVM server's inspector has no history, so its
+  evaluator answers :earlier and :later with {:error s}), except :start takes {:rows :cols} (the evaluator supplies the
   value) and :def takes {:name} (the evaluator supplies the target
   namespace). on-view is called exactly once, from any thread, with a
   view map (jonquil.inspect.view/run-op's shape) or {:error s} (plus
