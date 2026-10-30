@@ -113,9 +113,13 @@
   ([view] (render view))
   ([view extras] (merge (render view) extras)))
 
+(declare push-root)
+
 (defn start [view value rows cols]
-  (reset! view {:stack [{:label "*1" :value (datafy value)}]
-                :page 0 :rows rows :cols cols :table true})
+  ;; Jonquil: the history of roots (push-root, below) outlives the reset
+  (reset! view (merge {:stack [{:label "*1" :value (datafy value)}]
+                       :page 0 :rows rows :cols cols :table true}
+                      (push-root @view value)))
   (respond view))
 
 (defn toggle-table [view]
@@ -177,20 +181,70 @@
 
 ;; --- Jonquil's own addition ---
 
+(def HISTORY-MAX
+  ;; a choice: the objects you were just looking at, not a session log
+  20)
+
+(defn push-root
+  "{:roots :at} once value is the newest root: the roots after :at are
+  dropped first (as a browser drops its forward history), a value
+  identical? to the current root isn't added again, and only the newest
+  HISTORY-MAX are kept."
+  [{:keys [roots at]} value]
+  (let [kept (if at (subvec roots 0 (inc at)) [])]
+    (if (and (seq kept) (identical? value (peek kept)))
+      {:roots kept :at (dec (count kept))}
+      (let [r (conj kept value)
+            r (if (> (count r) HISTORY-MAX) (subvec r (- (count r) HISTORY-MAX)) r)]
+        {:roots r :at (dec (count r))}))))
+
+(defn- go-root [view delta note]
+  (let [{:keys [roots at]} @view
+        i (+ (or at 0) delta)]
+    (if (and roots (<= 0 i (dec (count roots))))
+      (do (swap! view assoc :at i :page 0
+                 :stack [{:label "*1" :value (datafy (nth roots i))}])
+          (respond view))
+      (respond view {:note note}))))
+
+(defn earlier
+  "The view restarted on the previous root, at its top; at the oldest, the
+  view as it is plus a note."
+  [view]
+  (go-root view -1 "No earlier object."))
+
+(defn later
+  "The view restarted on the next root, at its top; at the newest, the
+  view as it is plus a note."
+  [view]
+  (go-root view 1 "No later object."))
+
+(defn- with-history
+  "answer plus :history {:at n :count m} (1-based :at) when view has
+  roots."
+  [view answer]
+  (let [{:keys [roots at]} @view]
+    (cond-> answer
+      (and (map? answer) (seq roots)) (assoc :history {:at (inc at) :count (count roots)}))))
+
 (defn run-op
   "Jonquil's dispatch over the lifted ops, in place of upstream's op-fns
   and middleware: a throw becomes the current view plus :note, the way
   the server's middleware answers."
   [view op args]
   (try
-    (case op
+    (with-history
+     view
+     (case op
       :start (start view (:value args) (:rows args) (:cols args))
+      :earlier (earlier view)
+      :later (later view)
       :in (in view (:idx args))
       :out (out view)
       :page (page view (:delta args))
       :meta (toggle-meta view (:cursor args))
       :table (toggle-table view)
-      :def (def-as view (:target-ns args) (:name args)))
+      :def (def-as view (:target-ns args) (:name args))))
     (catch Throwable e
       (let [msg (or (ex-message e) (str (class e)))]
         (try (assoc (render view) :note msg)

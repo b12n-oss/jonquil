@@ -82,3 +82,58 @@
       (is (= {:path "" :info "nil" :header "" :note "boom"}
              (select-keys (view/run-op (atom nil) :start {:value boom :rows 10 :cols 40})
                           [:path :info :header :note]))))))
+
+;; --- the history of inspected objects (Jonquil's own) ----------------------
+
+(defn- start! [a v] (view/run-op a :start {:value v :rows 10 :cols 40}))
+
+(deftest history-steps-between-roots-test
+  (let [a (fresh)]
+    (start! a [1])
+    (start! a [1 2])
+    (is (= {:at 3 :count 3} (:history (start! a [1 2 3]))))
+    (let [r (view/run-op a :earlier {})]
+      (is (= 2 (:total r)))
+      (is (= {:at 2 :count 3} (:history r))))
+    (is (= 1 (:total (view/run-op a :earlier {}))))
+    (testing "the oldest stays put and says so"
+      (let [r (view/run-op a :earlier {})]
+        (is (= 1 (:total r)))
+        (is (= "No earlier object." (:note r)))
+        (is (= {:at 1 :count 3} (:history r)))))
+    (is (= 2 (:total (view/run-op a :later {}))))
+    (is (= 3 (:total (view/run-op a :later {}))))
+    (is (= "No later object." (:note (view/run-op a :later {}))))))
+
+(deftest history-new-root-drops-later-ones-test
+  (let [a (fresh)]
+    (start! a [1]) (start! a [1 2]) (start! a [1 2 3])
+    (view/run-op a :earlier {})
+    (let [r (start! a [1 2 3 4])]
+      (is (= {:at 3 :count 3} (:history r)))
+      (is (= 4 (:total r))))
+    (is (= 2 (:total (view/run-op a :earlier {}))))))
+
+(deftest history-same-object-once-test
+  (let [a (fresh) v [1 2]]
+    (start! a [1])
+    (start! a v)
+    (is (= {:at 2 :count 2} (:history (start! a v))) "identical? to the current root: not added")))
+
+(deftest history-lands-on-root-top-test
+  (let [a (fresh)]
+    (start! a [[:x :y]])
+    (start! a [1 2])
+    (view/run-op a :earlier {})
+    (is (= "*1 / 0" (:path (view/run-op a :in {:idx 0}))))
+    (view/run-op a :later {})
+    (let [r (view/run-op a :earlier {})]
+      (is (= "*1" (:path r)) "a fresh stack, not the path you left")
+      (is (= 0 (:start r))))))
+
+(deftest history-max-test
+  (let [a (fresh)]
+    (doseq [n (range 1 26)] (start! a (vec (range n))))
+    (is (= {:at view/HISTORY-MAX :count view/HISTORY-MAX} (:history (view/run-op a :page {:delta 0}))))
+    (dotimes [_ (dec view/HISTORY-MAX)] (view/run-op a :earlier {}))
+    (is (= 6 (:total (view/run-op a :page {:delta 0}))) "the oldest kept is the 6th (25 - 20 + 1)")))
