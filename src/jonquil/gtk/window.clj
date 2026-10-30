@@ -3489,7 +3489,15 @@
                                         :let [path @(:path t)
                                               ed (:ed t)]
                                         :when (and path (plugin-loader/plugin-file-or-target? dir path))
-                                        :let [disk (try (slurp path) (catch :default _ nil))]]
+                                        :let [disk (try (slurp path) (catch :default _ nil))
+                                              ;; ROADMAP Next 3: NUL-bearing disk text must never
+                                              ;; reach set-text! or rebase-saved! (either would
+                                              ;; truncate or leave the tab permanently dirty), so
+                                              ;; it gets disk-sync's "missing" case, with one line.
+                                              nul (when disk (tabs/nul-line disk))
+                                              disk (when-not nul disk)]]
+                                  (when nul
+                                    (cview/append! cv :system (str "; " path " changed on disk but now holds a NUL byte, so this tab keeps its text.\n")))
                                   (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
                                                     :buffer (editor/editor-text ed)})
                                     :reload (let [caret (g/cursor-offset (:buf ed))
@@ -3876,6 +3884,11 @@
           ;; Open button's dialog result, this is the documented normal
           ;; case, not an error to report.
           text (when file (try (slurp file) (catch :default _ nil)))
+          ;; ROADMAP Next 3: a launch file holding a NUL is refused like
+          ;; any open. Its path must NOT be remembered (Save would write
+          ;; "" over the binary), but `file` stays bound so the
+          ;; session-reopen gate below (when-not file) is untouched.
+          file-nul (when text (tabs/nul-line text))
           ;; File-tree plan P2.T2: a save (or a path change) under the root
           ;; expands to the file and highlights it when its tab is active.
           tree-saved! (fn [t]
@@ -3899,7 +3912,8 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!}
-          first-tab (add-tab! tab-ctx {:path file :text (or text "")})
+          first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
+                                       :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
           ;; Open Folder...'s result: re-roots the tree; the window's project
           ;; follows only while its one tab is an untouched Untitled one.
@@ -3978,8 +3992,13 @@
                                (callable (switch-page-fn tab-ctx) [:pointer :pointer :uint :pointer] :void)
                                ffi/null ffi/null g/CONNECT-DEFAULT)
       (load-and-apply-theme! theme-ctx @settings-path*)
+      ;; ROADMAP Next 3: same refusal as open-path!, for the launch file.
+      (when file-nul
+        (cview/append! cv :error
+                       (str "; open: " file " holds a NUL byte on line " file-nul
+                            ", which Jonquil can't edit, so it wasn't opened.\n")))
       ;; I6: same non-UTF-8 warning as open-path!.
-      (when (and text (str/includes? text "�"))
+      (when (and text (not file-nul) (str/includes? text "�"))
         (cview/append! cv :system
                        "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
       (try
