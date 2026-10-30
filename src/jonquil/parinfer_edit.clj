@@ -242,6 +242,56 @@
   300 lines is about 66 ms."
   300)
 
+(defn- reindent-only?
+  "Whether q differs from p by leading whitespace alone: the same lines,
+  each equal once left-trimmed. Paren mode on a balanced form only moves
+  indentation; paren-stable refuses any result that says otherwise."
+  [^String p ^String q]
+  (let [ps (str/split p #"\n" -1) qs (str/split q #"\n" -1)]
+    (and (= (count ps) (count qs))
+         (every? true? (map #(= (str/triml %1) (str/triml %2)) ps qs)))))
+
+(defn paren-stable
+  "text with every top-level form the character range [a b] touches
+  re-indented the way Paren mode reads it, so the first keystroke in a
+  freshly formatted form has nothing to move (the format-interplay plan).
+  Every touched form takes the pass, however long (the user accepted the
+  cost over a 300-line carve-out: the full pass measured 425 ms over the
+  4,574-line window.clj, 2026-10-30). One form at a time: a form Paren
+  mode refuses, or would change beyond leading whitespace, stays as given.
+  Text with an unmatched bracket comes back whole: Paren mode moves
+  brackets there, and a format must never change code. Top-level text
+  outside brackets (comments, bare values) stays as given. [a b] defaults
+  to all of text."
+  ([text] (paren-stable text 0 (count text)))
+  ([^String text a b]
+   (let [{:keys [bracket-tokens matches unmatched]} (syntax/compute-brackets-equal text)]
+     (if (seq unmatched)
+       text
+       (let [spans (sort (for [[o _ depth kind] bracket-tokens
+                               :when (and (zero? depth) (= kind :open))]
+                           [(line-start text o) (line-end text (get matches o))]))
+             ;; forms sharing a line merge, the way region reads them
+             spans (reduce (fn [acc [s e]]
+                             (let [[ps pend] (peek acc)]
+                               (if (and ps (<= s pend))
+                                 (conj (pop acc) [ps (max pend e)])
+                                 (conj acc [s e]))))
+                           [] spans)]
+         (loop [pieces [] pos 0 spans (seq spans)]
+           (if-not spans
+             (apply str (conj pieces (subs text pos)))
+             (let [[s e] (first spans)
+                   form (subs text s e)
+                   r (when (and (< s b) (< a e))
+                       (parinfer/paren-mode form))
+                   fixed (when (and (:success r) (string? (:text r))
+                                    (not= (:text r) form)
+                                    (reindent-only? form (:text r)))
+                           (:text r))]
+               (recur (conj pieces (subs text pos s) (or fixed form))
+                      e (next spans))))))))))
+
 (defn- adjust-region
   "adjust once the region [s e] of prev is known; p, old-end and new-end
   are diff's answer for prev and text."
