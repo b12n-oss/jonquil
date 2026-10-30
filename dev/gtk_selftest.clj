@@ -1430,6 +1430,116 @@ b" text) eq (pos? @splices))
                             {:text text :eq eq :splices @splices})))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-parinfer-undo-recovery-reads-nothing [ed]
+  (go-row :parinfer-undo-recovery-reads-nothing check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; undo replays through the buffer's own insert and delete,
+                 ;; so the armed outside-span records what changed since the
+                 ;; prime: the next keystroke rebuilds prev from the cache
+                 ;; plus one ranged read, no full copy (undo-path Task 2)
+                 (editor/set-text! ed "(a
+  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (g/gtk-text-buffer-undo (:buf ed))
+                 (let [fulls (atom 0) ranged (atom 0)
+                       real-f g/buffer-text real-r g/buffer-text-range]
+                   (with-redefs-fn {#'g/buffer-text
+                                    (fn [& a] (swap! fulls inc) (apply real-f a))
+                                    #'g/buffer-text-range
+                                    (fn [& a] (swap! ranged inc) (apply real-r a))}
+                     #(do (caret! ed 5)
+                          (delete-action! ed 3 5)))
+                   (let [text (editor/editor-text ed)
+                         eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                     (check :parinfer-undo-recovery-reads-nothing
+                            (and (= "(a)
+b" text) eq (zero? @fulls) (pos? @ranged))
+                            {:text text :eq eq :full-reads @fulls
+                             :ranged-reads @ranged})))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-undo-redo-interleaving [ed]
+  (go-row :parinfer-undo-redo-interleaving check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; type, undo, type, redo, type: every measured keystroke
+                 ;; lands on exactly the real buffer with no full read (the
+                 ;; second type clears the redo stack, so the redo is dead:
+                 ;; no signals, no gen bump, the next type stays a hit)
+                 (editor/set-text! ed "(q)
+(fn [a b]
+     (h a))")
+                 (caret! ed 22)
+                 (type-str! ed "x")
+                 (let [fulls (atom 0) real-f g/buffer-text
+                       eqs (atom [])
+                       ;; through the captured reader, so the row's own
+                       ;; equality checks don't count as the hook's reads
+                       eq! (fn [] (swap! eqs conj
+                                         (= (:text @(:parinfer-prev-cache ed))
+                                            (real-f (:buf ed)))))]
+                   (with-redefs-fn {#'g/buffer-text
+                                    (fn [& a] (swap! fulls inc) (apply real-f a))}
+                     #(do (g/gtk-text-buffer-undo (:buf ed))
+                          (caret! ed 22) (type-str! ed "y") (eq!)
+                          (g/gtk-text-buffer-redo (:buf ed))
+                          (caret! ed 22) (type-str! ed "w") (eq!)))
+                   (let [text (editor/editor-text ed)]
+                     (check :parinfer-undo-redo-interleaving
+                            (and (= "(q)
+(fn [a b]
+    (h ywa))" text)
+                                 (every? true? @eqs) (= 2 (count @eqs))
+                                 (zero? @fulls))
+                            {:text text :eqs @eqs :full-reads @fulls})))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-undo-past-a-reload [ed]
+  (go-row :parinfer-undo-past-a-reload check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; set-text! is an irreversible action: it empties the undo
+                 ;; history, so an undo straight after it must change
+                 ;; nothing, and the next keystroke lands on the real buffer
+                 ;; whatever the span says (undo-path degraded case)
+                 (editor/set-text! ed "(a
+  b)")
+                 (caret! ed 5)
+                 (delete-action! ed 3 5)
+                 (editor/set-text! ed "(zz)")
+                 (g/gtk-text-buffer-undo (:buf ed))
+                 (caret! ed 3)
+                 (type-str! ed "x")
+                 (let [text (editor/editor-text ed)
+                       eq (= (:text @(:parinfer-prev-cache ed)) text)]
+                   (check :parinfer-undo-past-a-reload
+                          (and (= "(zzx)" text) eq)
+                          {:text text :eq eq}))
+                 (finally (parinfer-off! ed))))))
+
+(defn- row-parinfer-undo-keeps-first-edit-reindent [ed]
+  (go-row :parinfer-undo-keeps-first-edit-reindent check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 ;; a recovered prev never carries :edit-at, so a form
+                 ;; reached through undo still re-indents on its first
+                 ;; edit: recovery never fakes consistency (undo-path
+                 ;; Review Focus; the probe is the user's first-edit
+                 ;; re-indent)
+                 (editor/set-text! ed "(q)
+(fn [a b]
+     (h a))")
+                 (caret! ed 2)
+                 (type-str! ed "z")
+                 (g/gtk-text-buffer-undo (:buf ed))
+                 (caret! ed 22)
+                 (type-str! ed "x")
+                 (let [text (editor/editor-text ed)]
+                   (check :parinfer-undo-keeps-first-edit-reindent
+                          (= "(q)
+(fn [a b]
+    (h xa))" text)
+                          {:text text}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-reload-primes-the-cache [ed]
   (go-row :parinfer-reload-primes-the-cache check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1626,7 +1736,11 @@ b" text) eq (pos? @splices))
    row-parinfer-plain-op-leaves-an-invalid-cache
    row-parinfer-nul-reload-clears-the-prime
    row-parinfer-nul-plain-op-clears-the-cache
-   row-parinfer-redo-splices-the-end-read])
+   row-parinfer-redo-splices-the-end-read
+   row-parinfer-undo-recovery-reads-nothing
+   row-parinfer-undo-redo-interleaving
+   row-parinfer-undo-past-a-reload
+   row-parinfer-undo-keeps-first-edit-reindent])
 
 ;; --- P2.T6: console rows -------------------------------------------------
 ;; on-submit/history-prev/history-next are stubs recording their calls in
