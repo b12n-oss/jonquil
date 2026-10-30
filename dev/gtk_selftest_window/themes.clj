@@ -219,8 +219,8 @@
 
 (defn row-theme-cycle
   "Five :cycle-theme!* calls with no program running walk theme/choice-names
-  in order, starting from :light (this harness's own isolated settings
-  path has no file yet, so activate!'s startup load defaults to :light).
+  in order, starting from :light (the row sets it first: every row starts
+  on support/BASE-THEME, navy by default).
   :theme-choice* reads :dark :solarized :navy :auto :light. :theme-name*
   reads :dark :solarized :navy for the first three; the fake system is
   light, so the :auto step resolves to :light whatever the Mac is showing.
@@ -236,6 +236,7 @@
   [ui]
   (go-row :theme-cycle support/check
     (on-gtk ((:system-dark-fn!* ui) (constantly false))
+            ((:set-theme!* ui) :light)
             ((:cycle-theme!* ui)))
     (let [status1-ok? (await-until 500 20 #(= "Theme: dark" (g/label-text (:status-label ui))))]
       (on-gtk (let [choice1 ((:theme-choice* ui))

@@ -11,9 +11,17 @@
             [jonquil.eval :as eval]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.theme :as theme]
             [temp-dirs]))
 
 (defonce results (atom []))
+
+(def BASE-THEME
+  "The theme every row starts in: navy, easier on the eyes while a run's
+  windows flash past. JONQUIL_SELFTEST_THEME=light (or any theme name)
+  picks another; an unknown name falls back to navy."
+  (let [k (some-> (System/getenv "JONQUIL_SELFTEST_THEME") keyword)]
+    (if (some #{k} theme/theme-names) k :navy)))
 
 (defn check [row ok detail]
   (swap! results conj [row (boolean ok) detail])

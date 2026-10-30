@@ -82,7 +82,11 @@ Five harnesses drive the real GTK front end.
 
 **`bb gtk:selftest`** opens ten real GTK windows in turn and runs the rows
 against them, calling the same button and key handlers a person would use.
-The full application window alone has 399 rows.
+The full application window alone has over 400 rows. The windows run in the
+navy theme, easier on the eyes while they flash past; set
+`JONQUIL_SELFTEST_THEME=light` (or another theme name) for a run in a
+different one. Each row starts on that theme, and the theme rows set the
+themes they check themselves.
 
 <details>
 <summary><strong>The ten groups, and what each one covers</strong></summary>
