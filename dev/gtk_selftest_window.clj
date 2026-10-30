@@ -329,6 +329,7 @@
    inspector/row-pane-d-respects-disabled
    inspector/row-pane-leaf
    inspector/row-pane-measure
+   inspector/row-pane-ready-wait-survives-measure-throw
    inspector/row-pane-note-clears
    inspector/row-inspect-focus-after-open
    inspector/row-inspect-last-after-repl
@@ -341,6 +342,7 @@
    inspector/row-inspect-form
    inspector/row-inspect-escape
    inspector/row-inspect-cols-match
+   inspector/row-inspect-reopen-reuses-callback
    inspector/row-inspect-def-prompt-escape-safe
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained

@@ -295,25 +295,37 @@
   back to measure's own floors once the cap is reached, so f is always
   called exactly once either way (the caller's in-flight flag
   is released through f's own request, on every path, including this
-  fallback)."
+  fallback). The poll is the pane's one ready-cb (built in make-pane):
+  a wait queues f, and only the first queued wait arms the timer, whose
+  cap counts from then."
   [pane f]
   (if (allocated? pane)
     (f (measure pane))
-    (let [start (System/nanoTime)]
-      (g/g-timeout-add
-       ALLOCATE-POLL-MS
-       (callable (fn [_data]
-                   (try
-                     (if (or (allocated? pane)
-                             (>= (/ (- (System/nanoTime) start) 1e6) ALLOCATE-WAIT-MS))
-                       (do (f (measure pane)) 0) ;; G_SOURCE_REMOVE
-                       1) ;; G_SOURCE_CONTINUE
-                     (catch :default e
-                       (report-error! pane (ex-message e))
-                       0)))
-                 [:pointer] :int)
-       ffi/null)))
+    (do (swap! (:ready-waiters pane) conj f)
+        (when (compare-and-set! (:ready-armed? pane) false true)
+          (reset! (:ready-start pane) (System/nanoTime))
+          (g/g-timeout-add ALLOCATE-POLL-MS (:ready-cb pane) ffi/null))))
   nil)
+
+(defn- ready-tick
+  "One poll of measure-when-ready!'s wait: once the pane is allocated or
+  the cap has passed, measures once and calls every queued f with it,
+  then answers 0 (G_SOURCE_REMOVE); else 1 (G_SOURCE_CONTINUE). A throw
+  from one f is reported and doesn't skip the rest; a throw from measure
+  is reported and every f gets measure's own floors, so none is dropped."
+  [pane]
+  (if (or (allocated? pane)
+          (>= (/ (- (System/nanoTime) @(:ready-start pane)) 1e6) ALLOCATE-WAIT-MS))
+    (let [m (try (measure pane)
+                 (catch :default e
+                   (report-error! pane (ex-message e))
+                   {:cols 20 :rows 5}))
+          fs (first (reset-vals! (:ready-waiters pane) []))]
+      (reset! (:ready-armed? pane) false)
+      (doseq [f fs]
+        (try (f m) (catch :default e (report-error! pane (ex-message e)))))
+      0)
+    1))
 
 (defn focus!
   [pane]
@@ -398,6 +410,22 @@
                         (g/gtk-label-set-text footer (str "; " (ex-message e)))
                         0)))
                   [:pointer] :int)
+        ;; measure-when-ready!'s wait, one callable for the pane's
+        ;; lifetime as note-clear-cb is; it reads the pane through pane*,
+        ;; set once the map below exists
+        pane* (atom nil)
+        ready-waiters (atom [])
+        ready-armed? (atom false)
+        ready-cb
+        (callable (fn [_data]
+                    (try
+                      (ready-tick @pane*)
+                      (catch :default e
+                        (reset! ready-waiters [])
+                        (reset! ready-armed? false)
+                        (report-error! @pane* (ex-message e))
+                        0)))
+                  [:pointer] :int)
         pane {:root root :view view :buf buf :header header :info info
               :table-header table-header :footer footer
               :def-popover (assoc def-popover :entry def-entry)
@@ -405,10 +433,13 @@
               :note-clear-cb note-clear-cb
               :note-clear-deadline note-clear-deadline
               :note-clear-armed? note-clear-armed?
+              :ready-cb ready-cb :ready-waiters ready-waiters
+              :ready-armed? ready-armed? :ready-start (atom 0)
               :selected-tag selected-tag
               :back-btn back-btn :meta-btn meta-btn :table-btn table-btn
               :def-btn def-btn :close-btn close-btn
               :on-request on-request :on-close on-close :on-def on-def}]
+    (reset! pane* pane)
     ;; labels
     (g/gtk-label-set-xalign header 0.0)
     (g/gtk-label-set-ellipsize header g/PANGO-ELLIPSIZE-START)
