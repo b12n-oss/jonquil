@@ -170,7 +170,7 @@ History and review still open. To keep one off persistently, add its id to
 
 ## The plugin list
 
-**Plugins…** in the palette lists every plugin in the right-hand panel: id,
+The palette's **Show the plugins** entry lists every plugin in the right-hand panel: id,
 live version, loaded/disabled/not loaded, effects, pending proposal and doc
 (the same as `jonquil_plugins_list`). A plugin that fails its checks shows as
 not loaded, and one whose file was deleted keeps its row ("file deleted").
