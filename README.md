@@ -152,6 +152,13 @@ only when triggered by hand from the Actions tab. Jonquil is a private repo
 for now, so neither workflow carries a push, pull request or schedule
 trigger.
 
+## Contributing
+
+[Contributing](docs/guide/contributing.md) covers the setup a change needs
+and the gates it must pass. Changes written with an LLM's help are welcome
+on the same terms as any other: the person who submits a change owns its
+quality and correctness. [AI_POLICY.md](AI_POLICY.md) is the full stance.
+
 ## The name
 
 A jonquil (*Narcissus jonquilla*) is a small, scented narcissus with several yellow flowers to a stem.
