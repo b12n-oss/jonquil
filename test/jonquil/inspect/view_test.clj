@@ -136,4 +136,4 @@
     (doseq [n (range 1 26)] (start! a (vec (range n))))
     (is (= {:at view/HISTORY-MAX :count view/HISTORY-MAX} (:history (view/run-op a :page {:delta 0}))))
     (dotimes [_ (dec view/HISTORY-MAX)] (view/run-op a :earlier {}))
-    (is (= 6 (:total (view/run-op a :page {:delta 0}))) "the oldest kept is the 6th (25 - 20 + 1)")))
+    (is (= 16 (:total (view/run-op a :page {:delta 0}))) "the oldest kept is the 16th (25 - 10 + 1)")))

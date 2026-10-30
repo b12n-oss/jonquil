@@ -36,6 +36,10 @@
 (def ^:private KEY-PAGE-DOWN 0xff56)
 (def ^:private KEY-D 0x064)
 (def ^:private KEY-M 0x06d)
+;; [ and ]: the history of inspected objects (window chords on them all
+;; need Cmd/Ctrl, so the plain keys are the rows view's)
+(def ^:private KEY-BRACKETLEFT 0x05b)
+(def ^:private KEY-BRACKETRIGHT 0x05d)
 (def ^:private KEY-V 0x076)
 
 (def ^:private WIDTH-REQUEST
@@ -132,7 +136,7 @@
     (g/gtk-text-buffer-set-text (:buf pane) (if leaf? (or (:leaf v) "") (str/join "\n" lines)) -1)
     (mark-selected! pane lines (:selected state) leaf?)
     (set-footer-text! pane state)
-    (doseq [button [(:back-btn pane) (:meta-btn pane) (:table-btn pane) (:def-btn pane)]]
+    (doseq [button [(:back-btn pane) (:earlier-btn pane) (:later-btn pane) (:meta-btn pane) (:table-btn pane) (:def-btn pane)]]
       (g/gtk-widget-set-sensitive button (if (:disabled? state) 0 1)))))
 
 (defn show-state!
@@ -184,7 +188,7 @@
 (defn handle-key!
   "The rows view's own key dispatch (bubble phase, attached to the
   rows view itself, not the window). Up/Down/Return/Right/Left/BackSpace/
-  Page_Up/Page_Down/m/v all go through jonquil.inspect/key-step via step!;
+  Page_Up/Page_Down/m/v/[/] all go through jonquil.inspect/key-step via step!;
   d opens the def prompt; Escape calls on-close. Returns 1 when handled, 0
   otherwise (a self-test row can call this directly with a synthetic
   keyval, exactly as jonquil.gtk.editor/handle-key! is called elsewhere)."
@@ -199,6 +203,8 @@
     (= keyval KEY-PAGE-DOWN) (do (step! pane :page-down) 1)
     (= keyval KEY-M) (do (step! pane :meta) 1)
     (= keyval KEY-V) (do (step! pane :table) 1)
+    (= keyval KEY-BRACKETLEFT) (do (step! pane :earlier) 1)
+    (= keyval KEY-BRACKETRIGHT) (do (step! pane :later) 1)
     (= keyval KEY-D) (do (open-def-prompt! pane) 1)
     :else 0))
 
@@ -372,6 +378,8 @@
         info (g/gtk-label-new "")
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         back-btn (g/gtk-button-new-with-label "Back")
+        earlier-btn (g/gtk-button-new-with-label "Earlier")
+        later-btn (g/gtk-button-new-with-label "Later")
         meta-btn (g/gtk-button-new-with-label "Meta")
         table-btn (g/gtk-button-new-with-label "Table")
         def-btn (g/gtk-button-new-with-label "Def")
@@ -443,7 +451,7 @@
               :ready-cb ready-cb :ready-waiters ready-waiters
               :ready-armed? ready-armed? :ready-start (atom 0)
               :selected-tag selected-tag
-              :back-btn back-btn :meta-btn meta-btn :table-btn table-btn
+              :back-btn back-btn :earlier-btn earlier-btn :later-btn later-btn :meta-btn meta-btn :table-btn table-btn
               :def-btn def-btn :close-btn close-btn
               :on-request on-request :on-close on-close :on-def on-def}]
     (reset! pane* pane)
@@ -468,6 +476,8 @@
     (popover/set-child! def-popover def-entry)
     ;; layout
     (g/gtk-box-append toolbar back-btn)
+    (g/gtk-box-append toolbar earlier-btn)
+    (g/gtk-box-append toolbar later-btn)
     (g/gtk-box-append toolbar meta-btn)
     (g/gtk-box-append toolbar table-btn)
     (g/gtk-box-append toolbar def-btn)
@@ -482,6 +492,12 @@
     ;; buttons
     (g/g-signal-connect-data back-btn "clicked"
                              (callable (guarded-click pane #(step! pane :out)) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data earlier-btn "clicked"
+                             (callable (guarded-click pane #(step! pane :earlier)) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data later-btn "clicked"
+                             (callable (guarded-click pane #(step! pane :later)) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data meta-btn "clicked"
                              (callable (guarded-click pane #(step! pane :meta)) [:pointer :pointer] :void)

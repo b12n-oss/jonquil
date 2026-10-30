@@ -72,6 +72,9 @@
         :out {:state (assoc state :pending :cursor) :request [:out]}
         :meta {:state (assoc state :pending :cursor) :request [:meta {:cursor selected}]}
         :table {:state (assoc state :pending :keep) :request [:table]}
+        ;; the history of inspected objects: another root, its first row
+        :earlier {:state (assoc state :pending :first) :request [:earlier]}
+        :later {:state (assoc state :pending :first) :request [:later]}
         ;; Row keys: nothing to move over on a leaf or an empty collection.
         (if (or (leaf? view) (zero? n-entries))
           none
@@ -135,9 +138,12 @@
    has nothing to report yet: \"\"."
   [state]
   (let [{:keys [view]} state
-        {:keys [start total entries]} view]
+        {:keys [start total entries history]} view
+        ;; more than one object inspected: where you are among them
+        objects (when (and history (> (:count history) 1))
+                  (str " · object " (:at history) " of " (:count history) " · [ ] earlier/later"))]
     (cond
-      (contains? view :leaf) "← out · d def · m meta · v table"
+      (contains? view :leaf) (str "← out · d def · m meta · v table" objects)
       (contains? view :start) (str (position-text start total (count entries))
-                                   " · ↑↓ move · ⏎ in · ← out · d def · m meta · v table")
+                                   " · ↑↓ move · ⏎ in · ← out · d def · m meta · v table" objects)
       :else "")))

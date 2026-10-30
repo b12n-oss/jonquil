@@ -182,8 +182,9 @@
 ;; --- Jonquil's own addition ---
 
 (def HISTORY-MAX
-  ;; a choice: the objects you were just looking at, not a session log
-  20)
+  ;; a choice (the user's, 2026-10-30): the history holds the real objects,
+  ;; so a big result stays in memory until this many newer ones push it out
+  10)
 
 (defn push-root
   "{:roots :at} once value is the newest root: the roots after :at are
