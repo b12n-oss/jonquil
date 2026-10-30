@@ -61,6 +61,9 @@ Keys by purpose; click a group to open it.
 | Cmd/Ctrl+Shift+M | anywhere in the window | Cycle the theme (light, dark, solarized, navy, auto) |
 | Cmd/Ctrl+Shift+P | anywhere in the window | Open the command palette |
 
+To check a key from inside Jonquil, plugins' keys included, run **Describe
+the next key you press** from the palette ([Describing keys](help-and-inspector.md#describing-keys)).
+
 </details>
 
 <details>
