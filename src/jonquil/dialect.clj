@@ -215,6 +215,16 @@
   (jonquil.settings reuses this set). :off is everywhere the default."
   #{:off :smart :indent :paren})
 
+(def format-styles
+  "The values :format-style may hold in .jonquil.edn, pinning what Format
+  All and Format Selection produce for the project's tabs whatever the
+  Parinfer mode: :paren-stable always runs the Paren pass over the
+  formatter's output, :plain never does. Absent, a format follows the
+  tab's Parinfer mode (the format-interplay arc's rule), so the pin
+  exists to keep one repo in one style when its people differ on the
+  mode (the user's call, 2026-10-30)."
+  #{:paren-stable :plain})
+
 (defn- marker-names [profiles]
   (into #{config-name} (mapcat :project-markers) profiles))
 
@@ -314,12 +324,17 @@
                 pi (get m :parinfer)
                 piw (when-not (or (nil? pi) (contains? parinfer-modes pi))
                       (str ".jonquil.edn :parinfer should be one of :off :smart :indent :paren, not "
-                           (pr-str pi) ", so it is ignored"))]
-            (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw])) nrw)}
+                           (pr-str pi) ", so it is ignored"))
+                fs (get m :format-style)
+                fsw (when-not (or (nil? fs) (contains? format-styles fs))
+                      (str ".jonquil.edn :format-style should be :paren-stable or :plain, not "
+                           (pr-str fs) ", so it is ignored"))]
+            (cond-> {:dialect d :runtime r :warnings (into (vec (remove nil? [dw rw arw clw piw fsw])) nrw)}
               ar (assoc :auto-require ar)
               (map? cl) (assoc :cljs cl)
               nr (assoc :nrepl nr)
-              (contains? parinfer-modes pi) (assoc :parinfer pi))))))))
+              (contains? parinfer-modes pi) (assoc :parinfer pi)
+              (contains? format-styles fs) (assoc :format-style fs))))))))
 
 (defn extension
   "The file's extension, lower case, without the dot; nil for none."

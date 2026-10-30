@@ -97,6 +97,15 @@
     (is (str/includes? (first (:warnings r)) ":parinfer")))
   (is (not (contains? (dialect/parse-config "{:dialect :jolt}" nil) :parinfer))))
 
+(deftest parse-config-format-style-test
+  (is (= :paren-stable (:format-style (dialect/parse-config "{:format-style :paren-stable}" nil))))
+  (is (= :plain (:format-style (dialect/parse-config "{:format-style :plain}" nil)))
+      "a project can pin the plain formatter even with Parinfer on")
+  (let [r (dialect/parse-config "{:format-style :fancy}" nil)]
+    (is (not (contains? r :format-style)))
+    (is (str/includes? (first (:warnings r)) ":format-style")))
+  (is (not (contains? (dialect/parse-config "{:dialect :jolt}" nil) :format-style))))
+
 (defn- proj [markers config]
   {:dir "/p" :markers markers :config config :config-error nil})
 
