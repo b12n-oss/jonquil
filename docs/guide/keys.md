@@ -55,6 +55,8 @@ Keys by purpose; click a group to open it.
 | Cmd/Ctrl+Shift+Z | anywhere in the window | Redo (GTK's own binding) |
 | Cmd/Ctrl+Y | Definitions editor | Redo |
 | F6 | anywhere in the window | Move focus between the editor and the console |
+| F8 | anywhere in the window | Go to the next place in the locations list |
+| Shift+F8 | anywhere in the window | Go to the previous place in the locations list |
 | Cmd/Ctrl+= (or +) | anywhere in the window | Zoom in |
 | Cmd/Ctrl+- | anywhere in the window | Zoom out |
 | Cmd/Ctrl+0 | anywhere in the window | Reset zoom |
