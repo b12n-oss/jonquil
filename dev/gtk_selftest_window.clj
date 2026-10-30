@@ -344,6 +344,7 @@
    inspector/row-inspect-escape
    inspector/row-inspect-cols-match
    inspector/row-inspect-reopen-reuses-callback
+   inspector/row-inspect-form-queues-behind-request
    inspector/row-inspect-def-prompt-escape-safe
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained

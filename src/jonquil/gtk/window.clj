@@ -1311,7 +1311,8 @@
   that eventually flips inspecting? back to false) only when no request
   is already pending, atomically flipping inspecting? true first -- a key
   or button press while one is pending is dropped here, with nothing
-  queued for after it. A throw from f before its request goes out (the
+  queued for after it (only inspect-form!'s own open, not a press, waits
+  in inspect-queued). A throw from f before its request goes out (the
   panel's show or measure, say) resets the flag before rethrowing, so one
   failure can't leave the inspector dead for the rest of the session."
   [inspecting? f]
@@ -1329,8 +1330,10 @@
   :defd also prints \"; Defined <defd>\" on the console as a system line.
   inspecting? is cleared FIRST, so the pane's own next key/click (or
   another inspect-last!/inspect-form!) is never dropped on account of a
-  request that has, in fact, already finished."
-  [pane inspector-state inspecting? cv status-label reply]
+  request that has, in fact, already finished. Then an open inspect-form!
+  queued behind this request (inspect-queued's thunk) runs, after this
+  reply is shown, so the panel ends on the form's value."
+  [pane inspector-state inspecting? inspect-queued cv status-label reply]
   (try
     (reset! inspecting? false)
     (let [state (swap! inspector-state
@@ -1339,7 +1342,11 @@
       (when-let [defd (:defd reply)]
         (cview/append! cv :system (str "; Defined " defd "\n"))))
     (catch :default e
-      (set-status! status-label (str "; inspect: " (ex-message e))))))
+      (set-status! status-label (str "; inspect: " (ex-message e)))))
+  (when-let [queued (first (reset-vals! inspect-queued nil))]
+    (try (queued)
+         (catch :default e
+           (set-status! status-label (str "; inspect: " (ex-message e)))))))
 
 (defn- inspect-last!
   "Cmd/Ctrl+I and the menu's \"Inspect Last Result\": an availability check
@@ -1385,13 +1392,16 @@
   passing a second :on-complete through do-repl-eval!'s extra-opts, which
   would just replace the window's own): after make-eval-opts' own
   completion handling runs, an :ok result calls inspect-last! through
-  on-gui! -- :on-complete runs on the eval worker thread (the lock-caller
+  on-gui!, or queues it in inspect-queued while another request is in
+  flight -- :on-complete runs on the eval worker thread (the lock-caller
   rule: must only enqueue), and inspect-last! reaches GTK.
 
   A press while an inspect! request is already pending does
   nothing at all, not even the eval -- the same drop inspect-last!/
-  on-request/on-def give a key or button in that window."
-  [{:keys [tab cv ev* status-label inspecting? inspect-last-fn] :as ctx}]
+  on-request/on-def give a key or button in that window. But a request
+  sent while the form evaluates (the person browsing the panel) doesn't
+  drop the form's open: it waits in inspect-queued for that reply."
+  [{:keys [tab cv ev* status-label inspecting? inspect-queued inspect-last-fn] :as ctx}]
   (let [{:keys [ed flash-fns]} tab]
     (cond
     ;; A foreign tab can't evaluate this way either.
@@ -1411,7 +1421,10 @@
                             (fn [result]
                               ((:on-complete base-opts) result)
                               (when (= :ok (:status result))
-                                (on-gui! inspect-last-fn))))]
+                                (on-gui! (fn []
+                                           (if @inspecting?
+                                             (reset! inspect-queued inspect-last-fn)
+                                             (inspect-last-fn)))))))]
             ((:flash! flash-fns) start end (:caret snap))
             (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
             (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
@@ -3282,13 +3295,16 @@
         h-paned (g/gtk-paned-new g/ORIENTATION-HORIZONTAL)
         inspector-state (atom nil)
         inspecting? (atom false)
+        ;; An Inspect Form open that arrived while another request was in
+        ;; flight: the thunk on-inspect-view! runs once that reply lands.
+        inspect-queued (atom nil)
         ;; Self-test hook only (:inspector-last-args*): the args of the
         ;; last inspect! request this window actually sent, so a row can
         ;; compare a :start's own :cols against the pane's own measure.
         inspector-last-args (atom nil)
         *pane (atom nil)
         on-view (fn [reply]
-                  (on-gui! (fn [] (on-inspect-view! @*pane inspector-state inspecting? cv status-label reply))))
+                  (on-gui! (fn [] (on-inspect-view! @*pane inspector-state inspecting? inspect-queued cv status-label reply))))
         on-inspector-request
         (fn [[op args]]
           ;; Returns true only when the request was actually sent, so the
@@ -3467,7 +3483,8 @@
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                               :inspecting? inspecting? :inspect-last-fn inspect-last-fn}))
+                                               :inspecting? inspecting? :inspect-queued inspect-queued
+                                               :inspect-last-fn inspect-last-fn}))
         source-jump-fn (fn [] (do-source-jump! (source-ctx (active-tab))))
         source-close-fn (fn [] (close-source-panel! right (:ed (active-tab))))
         source-back-fn (fn [] (source-pane/back! sp))
