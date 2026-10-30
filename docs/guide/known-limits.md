@@ -16,7 +16,9 @@ Known rough edges, parked for later:
   not adjusted". With Parinfer on, a keystroke in a 4,500-line file costs
   about 4 ms while typing in one form, about 13 ms for the first
   keystroke after a reload, an agent edit or an undo, and about 5 ms
-  after a redo (each measured 2026-10-29).
+  after a redo (each measured 2026-10-29). Format All in the same file
+  adds a Paren pass over every form, about 0.4 s on top of the format's
+  own 1.5 s (measured 2026-10-30).
 - Parinfer normalises what it touches: in an edited form, tabs become two
   spaces and every line ending follows the form's first.
 

@@ -220,3 +220,76 @@
             with-bounds (pe/adjust {:mode :smart :prev-text prev :prev-caret b
                                     :text after :caret caret :bounds spanb})]
         (is (= no-bounds with-bounds) (pr-str [prev a b rep]))))))
+
+;; --- paren-stable (the format-interplay arc) --------------------------------
+
+(deftest paren-stable-shifts-a-wrapped-line-test
+  (is (= "(def a\n  [{:x 1}\n   {:y 2}])"
+         (pe/paren-stable "(def a\n  [{:x 1}\n    {:y 2}])"))
+      "the wrapped vector line takes Paren mode's one-space shift"))
+
+(deftest paren-stable-is-a-fixpoint-test
+  (let [t "(def a\n  [{:x 1}\n   {:y 2}])"]
+    (is (= t (pe/paren-stable t)) "already-stable text comes back as given")))
+
+(deftest paren-stable-leaves-unbalanced-text-test
+  (let [t "(def a\n  [{:x 1}\n    {:y 2}]"]
+    (is (= t (pe/paren-stable t))
+        "Paren mode would move brackets there, so unbalanced text stays whole")))
+
+(deftest paren-stable-covers-a-long-form-test
+  (let [big (str "(def big\n  [{:x 1}\n"
+                 (apply str (repeat pe/default-max-lines "    {:y 2}\n"))
+                 "    {:y 3}])")
+        big-stable (str "(def big\n  [{:x 1}\n"
+                        (apply str (repeat pe/default-max-lines "   {:y 2}\n"))
+                        "   {:y 3}])")
+        small "(def a\n  [{:x 1}\n    {:y 2}])"
+        out (pe/paren-stable (str big "\n\n" small))]
+    (is (str/starts-with? out big-stable)
+        "a form over the keystroke limit is stabilized too: the user
+        accepted the format's cost, so the guarantee has no carve-out")
+    (is (str/ends-with? out "(def a\n  [{:x 1}\n   {:y 2}])")
+        "the small sibling is stabilized as well")))
+
+(deftest paren-stable-range-touches-only-its-forms-test
+  (let [a "(def a\n  [{:x 1}\n    {:y 2}])"
+        b "(def b\n  [{:x 3}\n    {:y 4}])"]
+    (is (= (str "(def a\n  [{:x 1}\n   {:y 2}])" "\n\n" b)
+           (pe/paren-stable (str a "\n\n" b) 0 3))
+        "a range inside form a leaves form b as given")))
+
+(deftest paren-stable-crlf-test
+  (is (= "(def a\r\n  [{:x 1}\r\n   {:y 2}])"
+         (pe/paren-stable "(def a\r\n  [{:x 1}\r\n    {:y 2}])"))))
+
+(deftest paren-stable-comments-untouched-test
+  (is (= ";; a comment\n(def a\n  [{:x 1}\n   {:y 2}])\n;; after"
+         (pe/paren-stable ";; a comment\n(def a\n  [{:x 1}\n    {:y 2}])\n;; after"))
+      "comment lines around a form stay as given"))
+
+(deftest paren-stable-accepts-a-paren-trail-tidy-test
+  (is (= "(def a\n  [{:x 1}\n   {:y 2}])"
+         (pe/paren-stable "(def a\n  [{:x 1 }\n    {:y 2}])"))
+      "a space tidied out of a paren trail must not reject the reindent
+      (review I1: the formatter keeps mid-line spaces, so its output can
+      carry one; rejecting the form recreates the first-keystroke fight)"))
+
+(deftest paren-stable-accepts-a-tab-rewrite-test
+  (is (= "(def a\n  [{:x  1}\n   {:y 2}])"
+         (pe/paren-stable "(def a\n  [{:x\t1}\n    {:y 2}])"))
+      "a tab in code becoming two spaces must not reject the reindent
+      (review I1: the formatter only touches leading and trailing
+      whitespace, so a mid-line tab survives into its output)"))
+
+(deftest whitespace-only-keeps-tokens-test
+  (testing "whitespace may move freely beside a bracket, never between two
+           atom characters: a space vanishing there merges two tokens (or
+           rewrites a string literal), which a format must never do"
+    (is (true? (#'pe/whitespace-only? "{:x 1 }" "{:x 1}")) "paren-trail tidy")
+    (is (true? (#'pe/whitespace-only? "(f a\tb)" "(f a  b)")) "tab in code")
+    (is (true? (#'pe/whitespace-only? "  (f a)" " (f a)")) "indentation")
+    (is (false? (#'pe/whitespace-only? "(f a b)" "(f ab)")) "token merge")
+    (is (false? (#'pe/whitespace-only? "(f ab)" "(f a b)")) "token split")
+    (is (false? (#'pe/whitespace-only? "(f \"a b\")" "(f \"ab\")"))
+        "a space inside a string is the string's own text")))

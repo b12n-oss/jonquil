@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [jonquil.commands :as c]
-            [jonquil.edit :as edit]))
+            [jonquil.edit :as edit]
+            [jonquil.parinfer-edit :as pe]))
 
 (defn- snap
   ([text caret] {:text text :caret caret :sel-start caret :sel-end caret})
@@ -219,3 +220,29 @@
       "pinned off under a non-off global says why it's quiet")
   (is (nil? (c/parinfer-status-text :off true :off))
       "pinned off under an off global differs from nothing, so it hides (review I2)"))
+
+;; --- the Paren-stable format pass (the format-interplay arc) ----------------
+
+(deftest format-all-op-paren-stable-test
+  (let [text "(def a\n  [{:x 1}\n    {:y 2}])"]
+    (testing "with :paren-stable? the result takes Paren mode's indentation"
+      (is (= "(def a\n  [{:x 1}\n   {:y 2}])"
+             (edit/apply-edits text (:edits (c/format-all-op (snap text 0)
+                                                             {:stabilize pe/paren-stable}))))))
+    (testing "without the flag, formatter-clean text is a no-op as today"
+      (is (nil? (c/format-all-op (snap text 0)))))
+    (testing "a second Paren-stable format is a no-op"
+      (is (nil? (c/format-all-op (snap "(def a\n  [{:x 1}\n   {:y 2}])" 0)
+                                 {:stabilize pe/paren-stable}))))))
+
+(deftest format-selection-op-paren-stable-test
+  (let [a "(def a\n  [{:x 1}\n    {:y 2}])"
+        b "(def b\n  [{:x 3}\n    {:y 4}])"
+        text (str a "\n\n" b)]
+    (testing "only the selection's forms are stabilized"
+      (is (= (str "(def a\n  [{:x 1}\n   {:y 2}])" "\n\n" b)
+             (edit/apply-edits text (:edits (c/format-selection-op
+                                             (snap text 2 10)
+                                             {:stabilize pe/paren-stable}))))))
+    (testing "without the flag, a formatter-clean selection is a no-op as today"
+      (is (nil? (c/format-selection-op (snap text 2 10)))))))

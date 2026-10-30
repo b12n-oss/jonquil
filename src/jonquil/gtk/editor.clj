@@ -927,18 +927,30 @@
     (on-gui! scroll!)))
 
 (defn- formatted!
-  "apply-edit! for a format op, then the caret scrolled into view when the
-  op changed anything."
+  "A format op through the plain path, then the caret scrolled into view
+  when the op changed anything. Plain, not the hook path: the op's text is
+  already Paren-stable while Parinfer is on (the builder's pass), so the
+  hook has nothing to add, and the too-long note would only mislead after
+  a deliberate format (the format-interplay plan). A nil op never reaches
+  apply-op-plain!, which would clear a cache the no-op left valid."
   [ed op]
-  (let [r (apply-edit! ed op)]
+  (let [r (if (and op (apply-op-plain! ed op)) 1 0)]
     (when (= 1 r) (scroll-to-caret! ed))
     r))
 
+(defn- format-opts
+  "The format op builders' opts: Paren-stable output whenever the Parinfer
+  hook would run on an ordinary keystroke. Passed as a function because the
+  plugin checker embeds jonquil.commands' closure, which must not grow by
+  the Parinfer engine."
+  [ed]
+  {:stabilize (when (parinfer-mode ed) pe/paren-stable)})
+
 (defn do-format-all! [ed]
-  (formatted! ed (commands/format-all-op (snapshot ed))))
+  (formatted! ed (commands/format-all-op (snapshot ed) (format-opts ed))))
 
 (defn do-format-selection! [ed]
-  (formatted! ed (commands/format-selection-op (snapshot ed))))
+  (formatted! ed (commands/format-selection-op (snapshot ed) (format-opts ed))))
 
 (defn do-indent! [ed]
   (apply-edit! ed (edit/indent (snapshot ed))))

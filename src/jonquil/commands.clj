@@ -178,22 +178,45 @@
 
 (defn format-all-op
   "Re-indents the whole buffer as one edit (one undo step). nil when the
-  text is already formatted."
-  [{:keys [text caret]}]
-  (let [out (syntax/format-code text)]
-    (when (not= out text)
-      {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil})))
+  text is already formatted. :stabilize, a (fn [text a b] text') or nil,
+  runs over the formatter's output as a last step: the editor passes
+  parinfer-edit/paren-stable while Parinfer is on, so format output takes
+  Paren mode's indentation and nothing ping-pongs on the next edit. A
+  function, not a require: the plugin checker embeds this namespace's
+  closure, which must not grow by the Parinfer engine."
+  ([snap] (format-all-op snap {}))
+  ([{:keys [text caret]} {:keys [stabilize]}]
+   (let [fmt (syntax/format-code text)
+         out (if stabilize (stabilize fmt 0 (count fmt)) fmt)]
+     (when (not= out text)
+       {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil}))))
+
+(defn- line-span
+  "[start end] character offsets of lines l1..l2 (both inclusive) in text."
+  [^String text l1 l2]
+  (let [lines (str/split text #"\n" -1)
+        starts (vec (reductions (fn [o l] (+ o (count l) 1)) 0 lines))]
+    [(nth starts l1) (+ (nth starts l2) (count (nth lines l2)))]))
 
 (defn format-selection-op
   "Re-indents the lines the selection spans, or the caret's line when there
-  is no selection, as one edit. nil when nothing changes."
-  [{:keys [text caret sel-start sel-end]}]
-  (let [[s e] (if (and sel-start sel-end (< sel-start sel-end))
-                [sel-start sel-end]
-                (line-bounds text caret))
-        out (if (< s e) (syntax/format-selection-text text s e) text)]
-    (when (not= out text)
-      {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil})))
+  is no selection, as one edit. nil when nothing changes. :stabilize runs
+  over the top-level forms those lines touch, as format-all-op's doc says;
+  the formatter keeps line counts, so the touched lines are found again by
+  line number."
+  ([snap] (format-selection-op snap {}))
+  ([{:keys [text caret sel-start sel-end]} {:keys [stabilize]}]
+   (let [[s e] (if (and sel-start sel-end (< sel-start sel-end))
+                 [sel-start sel-end]
+                 (line-bounds text caret))
+         fmt (if (< s e) (syntax/format-selection-text text s e) text)
+         out (if (and stabilize (< s e))
+               (let [line-of (fn [pos] (count (filter #(= \newline %) (subs text 0 pos))))
+                     [a b] (line-span fmt (line-of s) (line-of (max s (dec e))))]
+                 (stabilize fmt a b))
+               fmt)]
+     (when (not= out text)
+       {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil}))))
 
 (defn pre-run-problem
   "A sentence naming the first bracket problem in `text`, checked before Run
