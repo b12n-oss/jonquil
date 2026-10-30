@@ -76,6 +76,19 @@ Cmd/Ctrl+Shift+P lists Jonquil's commands, with their keys and source
 (built-in or plugin). Type words to narrow by description or id, Up and
 Down to move, Return or a click to run, Escape to close.
 
+### Describing keys
+
+Three palette commands explain the keys, from the live keymap, plugins
+included. **Describe the next key you press** prints what the next key
+does: the command it runs, its source, and any condition it needs, or that
+it goes to GTK. That key is only described, never run. **List every key
+binding** prints the window's keys, then the editor's, each with its
+command's description. **Show the keys you pressed last** lists the last
+50 chords with the command that ran for each, or that the window passed it
+on to the editor or GTK. Typing, including Return, Tab and Backspace, shows
+only as a count, never as the characters typed. A command's own keys are in the
+palette's row for it.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System

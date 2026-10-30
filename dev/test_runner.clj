@@ -41,6 +41,7 @@
     jonquil.command-registry-test
     jonquil.keymap-shipped-test
     jonquil.palette-test
+    jonquil.describe-test
     jonquil.plugin-test
     jonquil.plugin-check-test
     jonquil.plugin-protocol-test

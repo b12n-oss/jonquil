@@ -22,6 +22,7 @@
             [jonquil.command-registry :as cmd-registry]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
+            [jonquil.describe :as describe]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.edit :as edit]
@@ -2218,20 +2219,44 @@
       (let [keyval (g/gdk-keyval-to-lower keyval0)
             kctx (window-key-ctx ctx keyval0 state)
             ;; one read per key: the bindings and commands agree
-            plugins @plugin-registry/live]
-        ;; The live plugins' :window bindings ahead of the shipped ones
-        ;; (a plugin may bind a built-in window command)
-        (cmd-registry/window-answer
-         (plugin-registry/window-bindings plugins) keyval state
-         {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
-          ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
-          ;; keyval, and the keycode names the key (editor/physical-key)
-          :physical (editor/physical-key os keyval0 keycode state)
-          ;; plugins' window-scope commands run too, so a :run one bound
-          ;; to a key runs
-          :run! #(cmd-registry/run-command! (merge cmd-registry/window-commands
-                                                   (plugin-registry/commands plugins))
-                                            % kctx)}))
+            plugins @plugin-registry/live
+            physical (editor/physical-key os keyval0 keycode state)
+            kname (g/keyval-name keyval)
+            key? (and kname (not (describe/modifier-key? kname)))
+            ;; the command that took the key, for recent keys
+            ran (volatile! nil)]
+        (if (and key? (compare-and-set! (:describe-pending ctx) true false))
+          ;; it answers a pending Describe Key: described, never run
+          (let [matches (describe/key-matches (assoc ((:live-keys ctx)) :keyval keyval
+                                                     :state state :physical physical))]
+            ((:print-lines! ctx) (describe/describe-lines (describe/chord-text kname state os) matches))
+            1)
+          ;; The live plugins' :window bindings ahead of the shipped ones
+          ;; (a plugin may bind a built-in window command)
+          (let [answer (cmd-registry/window-answer
+                        (plugin-registry/window-bindings plugins) keyval state
+                        {:holds? (cmd-registry/holds-fn cmd-registry/window-conditions kctx)
+                         ;; Parinfer's Cmd/Ctrl+Alt+P: on macOS Option remaps P's
+                         ;; keyval, and the keycode names the key (editor/physical-key)
+                         :physical physical
+                         ;; plugins' window-scope commands run too, so a :run one bound
+                         ;; to a key runs
+                         :run! (fn [b]
+                                 (let [o (cmd-registry/run-command! (merge cmd-registry/window-commands
+                                                                           (plugin-registry/commands plugins))
+                                                                    b kctx)]
+                                   (when (= :handled o) (vreset! ran (:command b)))
+                                   o))})]
+            ;; Every key but a lone modifier goes into recent keys, after
+            ;; the fact and on its own, so recording never blocks a key
+            (when key?
+              (try
+                (swap! (:recent-keys ctx) describe/remember
+                       (describe/recent-entry kname state os
+                                              (describe/typing? kname state (g/printable-key? keyval))
+                                              @ran))
+                (catch :default _ nil)))
+            answer)))
       (catch :default e
         (set-status! status-label (str "; key: " (ex-message e)))
         1)))))
@@ -3612,7 +3637,23 @@
                                                   :os (System/getProperty "os.name")}))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
-        window-key-args {:run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
+        ;; Describe Key's pending flag and the recent keys (jonquil.describe's
+        ;; ring), both read and written on the GTK thread only
+        describe-pending (atom false)
+        recent-keys (atom [])
+        live-keys (fn [] (let [plugins @plugin-registry/live]
+                           {:keymap {:window (plugin-registry/window-bindings plugins)
+                                     :editor (plugin-registry/editor-bindings plugins)}
+                            :commands (plugin-registry/all-commands plugins)}))
+        print-lines! (fn [lines] (doseq [l lines] (cview/append! cv :system (str l "\n"))))
+        window-key-args {:describe-pending describe-pending :recent-keys recent-keys
+                         :live-keys live-keys :print-lines! print-lines!
+                         :describe-key-fn (fn [] (reset! describe-pending true)
+                                            (print-lines! ["; Press the key to describe."]))
+                         :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
+                                                                (assoc (live-keys) :os (System/getProperty "os.name")))))
+                         :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
+                         :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
                                       :clear-console-fn clear-console-fn :clear-last-fn clear-last-fn
