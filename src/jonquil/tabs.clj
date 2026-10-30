@@ -131,3 +131,13 @@
     (cond (not dirty?) :reload
           (= buffer disk) :rebase
           :else :warn)))
+
+(defn nul-line
+  "The 1-based line of the first NUL byte in text, or nil when it has
+  none. Lines are counted by \\n alone, so a CRLF file reports the line a
+  person sees. The open paths refuse a NUL-bearing file on it: GTK text
+  is C strings, so a NUL would silently cut everything after it and Save
+  would write the shortened text back (found 2026-10-29)."
+  [text]
+  (when-let [i (str/index-of text "\u0000")]
+    (inc (count (filter #(= \newline %) (subs text 0 i))))))

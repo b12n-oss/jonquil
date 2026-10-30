@@ -86,3 +86,12 @@
   (is (nil? (tabs/disk-sync {:saved "a" :disk nil :dirty? false})))
   ;; final review I2: edits that already equal the new disk text lose nothing
   (is (= :rebase (tabs/disk-sync {:saved "a" :disk "b" :dirty? true :buffer "b"}))))
+
+(deftest nul-line-test
+  (is (nil? (tabs/nul-line "")))
+  (is (nil? (tabs/nul-line "(def a 1)\n")))
+  (is (= 1 (tabs/nul-line "\u0000binary")))
+  (is (= 3 (tabs/nul-line "a\nb\nc\u0000d")))
+  ;; CRLF counts by \n, so the line a person sees
+  (is (= 2 (tabs/nul-line "a\r\nb\u0000")))
+  (is (= 1 (tabs/nul-line "\u0000\u0000\u0000\u0000"))))
