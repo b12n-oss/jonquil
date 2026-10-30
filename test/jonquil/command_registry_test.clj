@@ -36,7 +36,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the S1-S4 commands, S8's palette, P4's reload, P9b's review, P11's list and Parinfer's five")
+      "exactly the shipped window commands, the palette, plugin reload, review and list, and Parinfer's five")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))
@@ -149,7 +149,7 @@
     (is (= 0 (ans 0xff1b 0 false :next)) "the fixed :to-gtk is 0")
     (is (= 0 (ans 0x61 0 false :handled)) ":unmatched is 0")))
 
-;; --- step S5: the editor's commands ---------------------------------------
+;; --- the editor's commands -------- ---------------------------------------
 
 (deftest editor-commands-answer-outcomes-test
   (let [calls (atom [])
@@ -186,7 +186,7 @@
     (is (true? (holds true)))
     (is (false? (holds false)))))
 
-;; --- step S6: Run Form and the editor's fixed stages ----------------------
+;; --- Run Form and the editor's fixed stages ----------------------
 
 (deftest editor-preedit-condition-test
   (let [holds (fn [v] ((registry/holds-fn registry/editor-conditions {:preedit-active? (constantly v)})
@@ -222,7 +222,7 @@
       (is (= [:popup :typing] @ran))
       (is (= 0 (ans 0x61 {:popup 0 :typing 0}))))))
 
-;; --- step S7: the context menus -------------------------------------------
+;; --- the context menus -------- -------------------------------------------
 
 (deftest console-commands-test
   (let [calls (atom [])
@@ -253,7 +253,7 @@
   (is (= #{:popover/close-all :source/jump-back :find/bar-key}
          (set (keep (fn [[id c]] (when (:passes? c) id)) registry/commands)))))
 
-;; --- step S8: the palette -------------------------------------------------
+;; --- the palette -------- -------------------------------------------------
 
 (deftest palette-hidden-commands-test
   (is (= #{:find/bar-key :popover/close-all :source/open-here :source/close :source/back

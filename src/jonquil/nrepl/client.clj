@@ -1,8 +1,8 @@
 (ns jonquil.nrepl.client
   "One nREPL connection, used for every op for the life of a child: eval,
   load-file, interrupt, completions, lookup. Never a second socket (jank's
-  server serves exactly one connection per process, measured; the cljd
-  attach dialect reuses this client).
+  server serves exactly one connection per process, measured; the jank and
+  ClojureDart dialects reuse this client).
 
   A reader future decodes every message and hands it to the handler
   registered for its :id, so an interrupt and the eval it stops share the

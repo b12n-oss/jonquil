@@ -95,8 +95,7 @@
 (defn- classpath-name?
   "True for a bare source name such as demo/util.clj: not a URL, not a path
   (absolute or ./), ending in a source extension. Leaves out
-  get-symbol-doc's \"unknown\" and v0.8.23's ./src/... spelling (review
-  finding 2)."
+  get-symbol-doc's \"unknown\" and v0.8.23's ./src/... spelling."
   [f]
   (and (string? f)
        (re-find #"\.(clj|cljc|jolt)$" f)

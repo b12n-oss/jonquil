@@ -70,7 +70,7 @@
       (let [m (meta v)
             file (file-of (:file m))]
         ;; :name falls back to sym, and a missing :ns is left out rather
-        ;; than thrown on, as jolt-lang/nrepl's lookup does (findings 2, 3).
+        ;; than thrown on, as jolt-lang/nrepl's lookup does.
         (cond-> {"name" (str (or (:name m) sym))}
           (:ns m) (assoc "ns" (str (ns-name (:ns m))))
           (:doc m) (assoc "doc" (:doc m))

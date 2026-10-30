@@ -1,5 +1,5 @@
 (ns jonquil.tabs
-  "Pure helpers for a window's tabs (tabs spec): the tab strip's labels,
+  "Pure helpers for a window's tabs: the tab strip's labels,
   finding a file that's already open, whether a tab may run in the
   window's evaluator, and the text of the refusal, the unsaved-changes
   alert and the Run banner. A tab here is a plain map with :path (a string

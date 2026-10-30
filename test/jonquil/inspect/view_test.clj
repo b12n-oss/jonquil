@@ -18,7 +18,7 @@
     (is (nil? (:alt-view v)))))
 
 (deftest in-out-keeps-page-test
-  ;; Review focus 3: out comes back on the page you left, cursor relative.
+  ;; out comes back on the page you left, cursor relative.
   (let [a (fresh)]
     (view/start a (vec (range 25)) 10 40)
     (view/page a 1)
@@ -66,7 +66,7 @@
     (remove-ns 'jonquil.inspect.view-test.target)))
 
 (deftest run-op-catches-test
-  ;; Review focus 4: a throwing value leaves the current view plus :note.
+  ;; a throwing value leaves the current view plus :note.
   (let [boom (reify clojure.core.protocols/Datafiable
                (datafy [_] (throw (ex-info "boom" {}))))]
     (testing "with a view showing, the throw keeps it and adds the message"

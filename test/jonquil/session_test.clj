@@ -142,7 +142,7 @@
     (is (= 42 @(ns-resolve 'scratch.inspect 'answer)))))
 
 (deftest inspect-throw-test
-  ;; Review focus 4: a value whose datafy throws answers with a :note, and
+  ;; a value whose datafy throws answers with a :note, and
   ;; on-view still fires exactly once.
   (let [s (session/make-session) calls (atom 0) p (promise)]
     (repl-sync s "(reify clojure.core.protocols/Datafiable (datafy [_] (throw (ex-info \"boom\" {}))))")

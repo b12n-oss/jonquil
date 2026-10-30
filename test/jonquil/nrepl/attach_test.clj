@@ -68,7 +68,7 @@
     (is (nil? (ev/start! e)))
     (is (= 'cljd.user (ev/prompt-ns e)))
     (is (= 5 (count (ev/limitations e))))
-    (testing "M1: println output comes back (fork 8aaa4628); it's lost only when the form throws"
+    (testing "println output comes back (fork 8aaa4628); it's lost only when the form throws"
       (is (some #(str/includes? % "println") (ev/limitations e)))
       (is (not-any? #(str/includes? % "doesn't come back") (ev/limitations e))))))
 
@@ -110,7 +110,7 @@
     (with-app {:mute? true}
       (fn [srv dir _]
         (is (= {:status :notice :text (cljd/not-cljd-message (:port srv))} (first (run (make dir) "1" {:run? false})))))))
-  (testing "M2: the app quits mid-connect (describe answers disconnected): the refused sentence, not not-cljd"
+  (testing "the app quits mid-connect (describe answers disconnected): the refused sentence, not not-cljd"
     (with-app {:slow-ops {"describe" 300}}
       (fn [srv dir _]
         (let [e (make dir)]
@@ -373,7 +373,7 @@
           (is (= :ok (:status (first (run e "(+ 1 2)" {:run? false})))) "the next Run reconnects for real")
           (is (= (inc clones-before) (clone-count))
               "a fresh clone: the interrupted attempt left no stale connection to reuse")))))
-  (testing "M4: Stop closes the in-progress connection at once, not after describe's own (slow) reply"
+  (testing "Stop closes the in-progress connection at once, not after describe's own (slow) reply"
     ;; describe-timeout-ms is deliberately large here (10000, well past the
     ;; server's own 3000ms slow-ops delay), so client/request-sync's own
     ;; internal bound can't be what ends this -- only connect! publishing

@@ -349,7 +349,7 @@
 (deftest browser-listeners-are-loopback-only-live
   ;; No browser opens and no evaluator is involved: the browser launcher is
   ;; started through cljs-child/start! (the evaluator's own first Run can't
-  ;; get past the setup form without a page, see the task 5 report). The
+  ;; get past the setup form without a page). The
   ;; prepl and the HTTP server must listen on 127.0.0.1 only, and the page
   ;; URL must answer HTML.
   (let [port (free-port)

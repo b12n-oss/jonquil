@@ -174,7 +174,7 @@
   ;; Jonquil's delta, not upstream's test: upstream's line-col->offset adds
   ;; 1 per crossed line, so on CRLF text it lands one char short per line
   ;; (UPSTREAM.md). offset->line-col and line-col->offset must agree.
-  (testing "the #141 review's measured case"
+  (testing "the measured CRLF case"
     (is (= 5 (parinfer/line-col->offset "ab\r\ncd" 1 1))))
   (testing "every offset round-trips, and agrees with the LF twin plus its \\r s"
     (let [crlf "(a\r\nbb\r\n  c)"

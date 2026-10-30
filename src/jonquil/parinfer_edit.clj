@@ -10,7 +10,7 @@
   each edit: when Paren mode would change it, this edit fixes its
   indentation first, and later edits usually find it stable (one that
   unbalances the form can leave Paren mode refusing). Opening a file
-  changes nothing, and forms nobody edits stay as they are. Pure: no GTK."
+  changes nothing, and forms nobody edits stay as they are, by design. Pure: no GTK."
   (:require [clojure.string :as str]
             [jonquil.parinfer :as parinfer]
             [jonquil.syntax :as syntax]))

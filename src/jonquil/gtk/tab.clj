@@ -1,11 +1,11 @@
 (ns jonquil.gtk.tab
-  "One tab's widgets (tabs spec): an editor with its find bar above it,
+  "One tab's widgets: an editor with its find bar above it,
   the four popovers parented on its view (quick doc, full doc, rename,
   completion), and the label box the window's notebook shows for it. The
   window owns the notebook, the wiring and the tab list; this namespace
   never touches a notebook.
 
-  Spike (FINDINGS §3): removing a page while a popover is still parented on
+  Removing a page while a popover is still parented on
   its view spins GTK in a warning loop, so the window calls
   dispose-popovers! before it removes a tab's page."
   (:require [jolt.ffi :as ffi]

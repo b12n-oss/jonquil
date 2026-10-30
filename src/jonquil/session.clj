@@ -4,7 +4,7 @@
   evaluation creates, except libraries, belongs to that evaluation's
   :owner (a tab id, :run or :repl), and a reset-mode Run removes only its
   own owner's namespaces, the REPL's, and `user`, then evaluates into a
-  fresh `user`. Other owners' namespaces stay (tabs spec).
+  fresh `user`. Other owners' namespaces stay.
 
   A session is the InProcess record, the in-process implementation of
   jonquil.evaluator/Evaluator. It keeps the :ctx and :state keys a plain

@@ -93,7 +93,7 @@
 
 (deftest selected-row-is-visible-test
   ;; The completion list's selected row against the popover background, and
-  ;; its text on it. Solarized's :selection was 1.14:1 (P4 parked item), so
+  ;; its text on it. Solarized's :selection was 1.14:1, so
   ;; it has its own :row-selected; floors are the measured minimum of the
   ;; others (navy 1.36) and the text floor readable-test uses.
   (doseq [k theme/theme-names

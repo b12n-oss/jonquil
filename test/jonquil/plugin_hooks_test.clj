@@ -177,7 +177,7 @@
         (is (re-find #"^the :on-error hooks didn't start: " (first @reports)))
         (is (re-find #"^the :after-run hooks didn't start: " (second @reports)))))))
 
-;; --- :before-run (P6b) -------------------------------------------------------
+;; --- :before-run ------------------------------------------------------------
 
 (deftest refused-ctx-test
   (let [ctx {::p/effects #{:console} ::p/impl {:print! identity} ::p/refused "no effects here"}]

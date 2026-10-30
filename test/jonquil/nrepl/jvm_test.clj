@@ -888,7 +888,7 @@
      @calls)))
 
 (deftest registration-test
-  ;; Review focus 1: after a Run on a fresh connection, the fake saw an eval of "nil"
+  ;; after a Run on a fresh connection, the fake saw an eval of "nil"
   ;; before the load-file, and inspect! :start shows the Run's value, not nil.
   (with-project {}
     (fn [srv dir file]

@@ -188,7 +188,7 @@
       (finally (ffi/free v)))))
 
 ;; --- an EDITABLE text view -------------------------------------------------
-;; Signatures checked against /opt/homebrew/include/gtk-4.0 (gtk4 4.22.4).
+;; Signatures checked against gtk-4.0 (gtk4 4.22.4).
 (def G-TYPE-INT (* 6 4))           ; fundamental GType: 6 << 2
 (def PANGO-WEIGHT-BOLD 700)
 
@@ -297,7 +297,7 @@
 (defn finish-file
   "Completes an open/save. Returns {:path s} or {:error msg :code n :domain q}.
   GError is {GQuark domain; gint code; gchar *message}
-  (/opt/homebrew/include/glib-2.0/glib/gerror.h:45-50): domain at byte 0,
+  (glib-2.0/glib/gerror.h:45-50): domain at byte 0,
   code at byte 4, message pointer at byte 8. :domain lets a caller tell
   apart error codes that collide across domains
   (GTK_DIALOG_ERROR_DISMISSED and G_IO_ERROR_EXISTS are both 2)."
@@ -351,7 +351,7 @@
 (ffi/defcfn gtk-text-view-scroll-to-mark "gtk_text_view_scroll_to_mark" [:pointer :pointer :double :int :double :double] :void)
 
 ;; --- reading a tag's style back ---
-;; Signatures checked against /opt/homebrew/include/glib-2.0/gobject
+;; Signatures checked against glib-2.0/gobject
 ;; (glib 2.0, gobject-2.0 installed via homebrew).
 ;; g_value_get_enum: gobject/genums.h:248 -- gint g_value_get_enum (const GValue *value)
 (ffi/defcfn g-value-get-enum "g_value_get_enum" [:pointer] :int)
@@ -408,7 +408,7 @@
 (ffi/defcfn g-signal-emit-by-name "g_signal_emit_by_name" [:pointer :string] :void)
 
 ;; --- status/title read-back and a self-test-driven close.
-;; Signatures checked against /opt/homebrew/include/gtk-4.0/gtk/{gtklabel,
+;; Signatures checked against gtk-4.0/gtk/{gtklabel,
 ;; gtkwindow}.h -- gtk_label_get_text (gtklabel.h:51), gtk_window_get_title
 ;; (gtkwindow.h:99) and gtk_window_close (gtkwindow.h:209). The self-tests
 ;; read the status label and the title back, and gtk_window_close ends a
@@ -433,44 +433,44 @@
     (when-not (ffi/null? p) (ffi/ptr->string p))))
 
 ;; --- dialog error codes, keyvals, application flags ---
-;; GTK_DIALOG_ERROR_DISMISSED: /opt/homebrew/include/gtk-4.0/gtk/gtkdialogerror.h:54-56
+;; GTK_DIALOG_ERROR_DISMISSED: gtk-4.0/gtk/gtkdialogerror.h:54-56
 ;; (enum GtkDialogError { GTK_DIALOG_ERROR_FAILED, GTK_DIALOG_ERROR_CANCELLED,
 ;; GTK_DIALOG_ERROR_DISMISSED } -- DISMISSED is the third value, 2). The
 ;; file-dialog result handlers ignore this one code silently.
 (def GTK-DIALOG-ERROR-DISMISSED 2)
 
-;; gdk_keyval_to_lower: /opt/homebrew/include/gtk-4.0/gdk/gdkkeys.h:47
+;; gdk_keyval_to_lower: gtk-4.0/gdk/gdkkeys.h:47
 ;; (guint gdk_keyval_to_lower (guint keyval)). Normalises a keyval before
 ;; comparing it to a shortcut's letter, so Caps Lock (which reports the
 ;; uppercase keyval with no Shift bit set) doesn't break Ctrl+R/O/S.
 (ffi/defcfn gdk-keyval-to-lower "gdk_keyval_to_lower" [:uint] :uint)
 
-;; G_APPLICATION_NON_UNIQUE: /opt/homebrew/include/glib-2.0/gio/gioenums.h:1572
+;; G_APPLICATION_NON_UNIQUE: glib-2.0/gio/gioenums.h:1572
 ;; (GApplicationFlags enum, G_APPLICATION_NON_UNIQUE = 1 << 5 = 32). Passed
 ;; to gtk_application_new so a second launch doesn't just forward its
 ;; "activate" into an already-running instance over D-Bus.
 (def G-APPLICATION-NON-UNIQUE (bit-shift-left 1 5))
 
-;; G_APPLICATION_HANDLES_OPEN: /opt/homebrew/include/glib-2.0/gio/gioenums.h:1578
+;; G_APPLICATION_HANDLES_OPEN: glib-2.0/gio/gioenums.h:1578
 ;; (GApplicationFlags enum, G_APPLICATION_HANDLES_OPEN = 1 << 2 = 4). Lets
 ;; the app emit "open" for files from Finder's Open With and Dock drops.
 (def G-APPLICATION-HANDLES-OPEN (bit-shift-left 1 2))
 
-;; g_application_open: /opt/homebrew/include/glib-2.0/gio/gapplication.h:218-221
+;; g_application_open: glib-2.0/gio/gapplication.h:218-221
 ;; (void g_application_open (GApplication*, GFile **files, gint n_files, const gchar *hint)).
 (ffi/defcfn g-application-open "g_application_open" [:pointer :pointer :int :string] :void)
 
-;; g_application_get_flags: /opt/homebrew/include/glib-2.0/gio/gapplication.h:159-160
+;; g_application_get_flags: glib-2.0/gio/gapplication.h:159-160
 ;; (GApplicationFlags g_application_get_flags (GApplication *application)).
 ;; Round-trip readback for G-APPLICATION-NON-UNIQUE's own unit test -- doesn't
 ;; need a display, only a constructed GApplication object.
 (ffi/defcfn g-application-get-flags "g_application_get_flags" [:pointer] :uint)
 
-;; gtk_dialog_error_quark: /opt/homebrew/include/gtk-4.0/gtk/gtkdialogerror.h:60
+;; gtk_dialog_error_quark: gtk-4.0/gtk/gtkdialogerror.h:60
 ;; (GQuark gtk_dialog_error_quark (void)). GQuark is guint32
-;; (/opt/homebrew/include/glib-2.0/glib/gquark.h:38). The code alone
+;; (glib-2.0/glib/gquark.h:38). The code alone
 ;; isn't enough to identify GTK_DIALOG_ERROR_DISMISSED, since G_IO_ERROR_EXISTS
-;; is ALSO 2 (/opt/homebrew/include/glib-2.0/gio/gioenums.h:543-544, third
+;; is ALSO 2 (glib-2.0/gio/gioenums.h:543-544, third
 ;; enumerator after G_IO_ERROR_FAILED/NOT_FOUND) -- a GError's domain quark
 ;; (finish-file's :domain) must match too.
 (ffi/defcfn gtk-dialog-error-quark "gtk_dialog_error_quark" [] :uint)
@@ -834,7 +834,7 @@
 (ffi/defcfn gtk-text-tag-set-priority "gtk_text_tag_set_priority" [:pointer :int] :void)
 
 ;; --- popovers and coordinates ---
-;; Header lines checked against /opt/homebrew/include/gtk-4.0/gtk (gtk4
+;; Header lines checked against gtk-4.0/gtk (gtk4
 ;; 4.22.4).
 ;; gtk_widget_set_parent: gtkwidget.h:457 -- void gtk_widget_set_parent
 ;; (GtkWidget*, GtkWidget *parent). Fixed arity.
@@ -998,7 +998,7 @@
 (def SELECTION-MODE-BROWSE 2)
 
 ;; --- context menus (GMenu/GSimpleActionGroup) and rename --------------------
-;; Header citations checked against /opt/homebrew/include
+;; Header citations checked against the installed headers
 ;; (gtk4 4.22.4, glib as installed by homebrew, 2026-09-26).
 ;;
 ;; glib-2.0/gio/gmenu.h:47 GMenu *g_menu_new (void); gmenu.h:79-81 void
@@ -1063,7 +1063,7 @@
 (ffi/defcfn gtk-adjustment-set-value "gtk_adjustment_set_value" [:pointer :double] :void)
 
 ;; --- the inspector pane --------------------------------------------------
-;; Header lines checked against /opt/homebrew/include (gtk4
+;; Header lines checked against the installed headers (gtk4
 ;; 4.22.4, pango as installed by homebrew).
 ;;
 ;; gtkwidget.h:648-649 -- PangoLayout *gtk_widget_create_pango_layout
@@ -1114,7 +1114,7 @@
 (ffi/defcfn gtk-window-new "gtk_window_new" [] :pointer)
 
 ;; --- tabs --------------------------------------------------------------------
-;; Header citations are under /opt/homebrew/include/gtk-4.0/gtk (gtk4 4.22.4).
+;; Header citations are under gtk-4.0/gtk (gtk4 4.22.4).
 ;; The switch-page and page-removed signal callbacks are
 ;; [:pointer :pointer :uint :pointer] :void.
 
@@ -1159,7 +1159,7 @@
 (ffi/defcfn g-object-ref "g_object_ref" [:pointer] :pointer)
 
 ;; --- file tree ---------------------------------------------------------------
-;; Header citations under /opt/homebrew/include/gtk-4.0/gtk and glib-2.0/gio
+;; Header citations under gtk-4.0/gtk and glib-2.0/gio
 ;; (gtk4 4.22.4).
 
 ;; gtklistbox.h:148 int gtk_list_box_row_get_index (GtkListBoxRow*)

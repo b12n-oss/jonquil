@@ -1,5 +1,5 @@
 (ns gtk-selftest-window.no-plugins
-  "Plugins F1's rows: in a window running without plugins (as --no-plugins
+  "In a window running without plugins (as --no-plugins
   starts one, set here through :plugins-on!*), Reload Plugins, Disable,
   Revert and Accept refuse with one line and change nothing; and a
   plugin whose file is gone after it went live says \"file deleted\" in

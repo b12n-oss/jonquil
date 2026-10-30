@@ -602,7 +602,7 @@
   ;; :running out of nil, and eval! would then refuse every later Run as busy
   ;; for good. A presser future hammers interrupt! against no
   ;; child (so :running never gets an :id) while this thread repeatedly
-  ;; sets and clears :running, the shape finish! uses. The probe found 921
+  ;; sets and clears :running, the shape finish! uses. This loop found 921
   ;; stuck states in 200000 cycles on the pre-fix code.
   (let [e (make (temp-project))
         state (:state e)

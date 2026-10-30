@@ -251,8 +251,8 @@
   ;; jonquil.inspect.view/def-as interns (:value (peek stack)), the
   ;; CURRENT top-of-stack value, so :def has to run before :out or it
   ;; would intern the whole map instead of [1 2] and the closing eval
-  ;; below would fail. (Verified against def-as's own body, not the
-  ;; brief's plain comma order, which lists :out ahead of :def.)
+  ;; below would fail. (Verified against def-as's own body, not a
+  ;; plain comma order, which lists :out ahead of :def.)
   (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir (:dir *srv*)}
                         {:inspect-timeout-ms 20000})
         {:keys [result]} (run e "{:a [1 2]}" {:run? false})]

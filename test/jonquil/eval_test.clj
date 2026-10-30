@@ -1,5 +1,5 @@
 (ns jonquil.eval-test
-  "Upstream eval_test.clj (41c56b8) ported to jonquil.eval, plus the P0 S1 rows.
+  "Upstream eval_test.clj (41c56b8) ported to jonquil.eval, plus Jonquil's own rows.
    Deviations from upstream are marked DEVIATION."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]

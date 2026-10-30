@@ -14,7 +14,7 @@
          (cljd/ns-form (str ";; header (ns not.this)\n" drive-ns-form "\n\n(defn where [] 1)\n"))))
   (testing "metadata before the name is skipped"
     (is (= "a.b" (:name (cljd/ns-form "(ns ^:no-doc a.b)")))))
-  (testing "I1: ^{...} metadata before the name is skipped too, and it can stack"
+  (testing "^{...} metadata before the name is skipped too, and it can stack"
     (is (= "my.app" (:name (cljd/ns-form "(ns ^{:doc \"x\"} my.app (:require [a :as b]))"))))
     (is (= "my.app" (:name (cljd/ns-form "(ns ^:a ^{:doc \"x\"} my.app)")))))
   (testing "only a top-level ns form counts"
@@ -30,7 +30,7 @@
     (is (= "real.ns" (:name (cljd/ns-form "#_(ns old.ns)\n(ns real.ns)"))))
     (is (= "real.ns" (:name (cljd/ns-form "`(ns fake.ns)\n(ns real.ns)"))))
     (is (= "real.ns" (:name (cljd/ns-form "'(ns fake.ns)\n(ns real.ns)")))))
-  (testing "I6: a header comment ending in a prefix character isn't a prefix"
+  (testing "a header comment ending in a prefix character isn't a prefix"
     (is (= "foo.bar" (:name (cljd/ns-form ";; see 'README'\n(ns foo.bar)\n"))))
     (is (= "foo.bar" (:name (cljd/ns-form ";; count @\n(ns foo.bar)"))))))
 
@@ -63,7 +63,7 @@
   (is (= "Error: Unhandled exception:"
          (:error-text (cljd/eval-result [{:err "Unhandled exception:\nException: boom\n#0      Eval ()\n"}
                                          {:ns "cljd.user"} {:status ["done" "eval-error"]}] false))))
-  (testing "I5: a cljd Stop never interrupts, so an eval-error is always the app's own"
+  (testing "a cljd Stop never interrupts, so an eval-error is always the app's own"
     (is (= :error (:status (cljd/eval-result [{:err "boom"} {:status ["done" "eval-error"]}] true))))))
 
 (def ^:private drive-load
