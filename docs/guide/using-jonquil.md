@@ -194,6 +194,13 @@ disagreed on 80 of 2,421 forms before this pass, each a one-space shift
 on a wrapped line (measured 2026-10-29). With Parinfer off, a format is
 the formatter's output alone, unchanged.
 
+Since the output depends on the mode, a repo whose people differ on it
+would see those lines flip between formats. A project can pin one style
+for everyone with `.jonquil.edn {:format-style :paren-stable}` (or
+`:plain`), which decides every format in that project's tabs whatever
+the mode. Pinning `:plain` while typing with Parinfer on re-accepts the
+first-edit re-indent the Paren-stable output exists to remove.
+
 ## Find and replace
 
 ![The find bar open over a query, with matches highlighted and a count](../images/find.png)
