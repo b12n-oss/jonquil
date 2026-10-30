@@ -29,6 +29,9 @@
   {:key "g" :mods #{:cmd} :when [:find-bar-navigable] :command :find/next}
   ;; plain F6; Shift+F6 is rename, which the editor gets
   {:key "F6" :not #{:shift} :command :focus/toggle}
+  ;; the locations list: F8 steps forward, Shift+F8 back
+  {:key "F8" :exact #{} :command :locations/next}
+  {:key "F8" :exact #{:shift} :command :locations/previous}
   {:key "o" :mods #{:cmd :shift} :when [:source-focused] :command :source/open-here}
   ;; Parinfer: Cmd/Ctrl+Alt+P cycles the mode (upstream's Ctrl+Alt+P). On
   ;; macOS Option remaps P's keyval; :physical? matches the keycode, as the

@@ -254,6 +254,12 @@
    palette-rows/row-key-bindings-lists
    palette-rows/row-recent-keys-hides-typing
    locations-rows/row-locations-pane-shows
+   locations-rows/row-locations-uses-step
+   locations-rows/row-locations-survive-edit
+   locations-rows/row-locations-gone
+   locations-rows/row-locations-ends
+   locations-rows/row-locations-definitions
+   locations-rows/row-locations-tab-close-clears
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named

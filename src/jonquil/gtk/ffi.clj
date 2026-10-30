@@ -348,6 +348,16 @@
 ;; --- the console prompt marks ---
 (ffi/defcfn gtk-text-buffer-create-mark "gtk_text_buffer_create_mark" [:pointer :string :pointer :int] :pointer)
 (ffi/defcfn gtk-text-buffer-move-mark "gtk_text_buffer_move_mark" [:pointer :pointer :pointer] :void)
+;; gtk_text_buffer_delete_mark: gtk-4.0/gtk/gtktextbuffer.h:327
+(ffi/defcfn gtk-text-buffer-delete-mark "gtk_text_buffer_delete_mark" [:pointer :pointer] :void)
+
+(defn mark-offset
+  "The character offset of mark in buf."
+  [buf mark]
+  (let [it (ffi/alloc ITER-BYTES)]
+    (try (gtk-text-buffer-get-iter-at-mark buf it mark)
+         (gtk-text-iter-get-offset it)
+         (finally (ffi/free it)))))
 (ffi/defcfn gtk-text-view-scroll-to-mark "gtk_text_view_scroll_to_mark" [:pointer :pointer :double :int :double :double] :void)
 
 ;; --- reading a tag's style back ---

@@ -48,6 +48,17 @@
                        :run (call :describe-key-fn)}
    :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
+   ;; the locations list: three ways to fill it, F8 and Shift+F8 to step
+   :locations/uses {:doc "List the uses of the symbol at the caret." :scope :window
+                    :run (call :locations-uses-fn)}
+   :locations/definitions {:doc "List the definitions of the symbol at the caret." :scope :window
+                           :run (call :locations-definitions-fn)}
+   :locations/matches {:doc "List every match of the find query, or of the selection." :scope :window
+                       :run (call :locations-matches-fn)}
+   :locations/next {:doc "Go to the next place in the list." :scope :window
+                    :run (call :locations-step-fn 1)}
+   :locations/previous {:doc "Go to the previous place in the list." :scope :window
+                        :run (call :locations-step-fn -1)}
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
    :source/open-here {:doc "Open the source panel's file in the window." :scope :window :palette? false

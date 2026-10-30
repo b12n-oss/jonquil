@@ -40,6 +40,15 @@
       (g/gtk-list-box-select-row lb (g/gtk-list-box-get-row-at-index lb i)))
     (report! pane (loc/position-text lst))))
 
+(defn select!
+  "Moves the selection to lst's current entry and its position to the
+  footer, without rebuilding the rows: safe inside a row's own
+  row-activated signal, which a rebuild would pull the row out of."
+  [pane lst]
+  (when-let [i (:index lst)]
+    (g/gtk-list-box-select-row (:list pane) (g/gtk-list-box-get-row-at-index (:list pane) i)))
+  (report! pane (loc/position-text lst)))
+
 (defn row-texts
   "The shown rows, in order."
   [pane]

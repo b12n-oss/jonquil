@@ -2,11 +2,17 @@
   "The locations list: the panel on its own in a transient window, then
   the real window's commands that fill it and F8 / Shift+F8 stepping
   through it."
-  (:require [gtk-async :refer [await-until go-row on-gtk]]
+  (:require [clojure.string :as str]
+            [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jolt.ffi :as ffi]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.locations-pane :as lpane]
-            [jonquil.locations :as loc]))
+            [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.popover :as popover]
+            [jonquil.locations :as loc]
+            [jonquil.syntax :as syntax]))
 
 (def ^:private fixture
   (str "(defmulti area :shape)\n"
@@ -41,3 +47,142 @@
                                (= 1 selected) (= "2 of 3" footer) (= "Definitions of area" title))
                           {:rows rows :selected selected :footer footer :title title})))
         (finally (on-gtk (g/gtk-window-close win)))))))
+
+;; --- the real window: making a list, F8 and Shift+F8 ----------------------
+
+(def ^:private KEY-F8 0xffc5)
+
+(defn- run-palette!
+  "Opens the palette, filters it to query and runs the first entry, then
+  closes it. GTK-thread only."
+  [ui query]
+  (let [p (:palette ui)]
+    ((:open-palette!* ui))
+    (palette/set-query! p query)
+    (palette/run-selected! p)
+    (when (popover/open? p) (popover/hide! p))))
+
+(defn- f8! [ui shift?]
+  ((:handle-window-key! ui) ffi/null KEY-F8 0 (if shift? g/SHIFT-MASK 0) ffi/null))
+
+(defn- sel [ed]
+  (let [s (editor/snapshot ed)] [(:sel-start s) (:sel-end s)]))
+
+(defn- status [ui] (g/label-text (:status-label ui)))
+
+(defn- await-status
+  "Waits for the status bar to read want: set-status! updates it on a
+  later GTK turn (on-gui!), so it can't be read in the same one. Returns
+  what it read last."
+  [ui want]
+  (await-until 2000 20 #(= want (status ui)))
+  (on-gtk (status ui)))
+
+(defn- start-on-area!
+  "The fixture in ed with the caret on the last line's area."
+  [ed]
+  (editor/set-text! ed fixture)
+  (support/place-cursor! (:buf ed) (inc (str/last-index-of fixture "(area"))))
+
+(defn- close-panel! [ui]
+  (when-let [f (:on-close @(:handlers (:locations-pane ui)))] (f)))
+
+(def ^:private uses-ranges (syntax/find-symbol-occurrences fixture "area"))
+
+(defn row-locations-uses-step
+  "List the uses fills the panel with all four; F8 twice selects the
+  second, Shift+F8 the first."
+  [ui]
+  (go-row :locations-uses-step support/check
+    (on-gtk
+     (let [ed (:editor ui)]
+       (start-on-area! ed)
+       (run-palette! ui "list the uses")
+       (let [rows (count (lpane/row-texts (:locations-pane ui)))
+             _ (f8! ui false)
+             _ (f8! ui false)
+             second-sel (sel ed)
+             _ (f8! ui true)
+             first-sel (sel ed)]
+         (close-panel! ui)
+         (support/check :locations-uses-step
+                        (and (= 4 rows) (= (nth uses-ranges 1) second-sel) (= (first uses-ranges) first-sel))
+                        {:rows rows :second second-sel :first first-sel :expected (take 2 uses-ranges)}))))))
+
+(defn row-locations-survive-edit
+  "An edit above a listed place doesn't strand it: after inserting a line
+  at the start, the third place still selects area."
+  [ui]
+  (go-row :locations-survive-edit support/check
+    (on-gtk
+     (let [ed (:editor ui) buf (:buf ed) added ";; note\n"]
+       (start-on-area! ed)
+       (run-palette! ui "list the uses")
+       (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a added -1)))
+       (dotimes [_ 3] (f8! ui false))
+       (let [[s e] (sel ed)
+             text (editor/editor-text ed)
+             picked (subs text s e)
+             want (+ (count added) (first (nth uses-ranges 2)))]
+         (close-panel! ui)
+         (support/check :locations-survive-edit (and (= "area" picked) (= want s))
+                        {:picked picked :start s :want want}))))))
+
+(defn row-locations-gone
+  "A place whose text was deleted is reported gone, and nothing throws."
+  [ui]
+  (go-row :locations-gone support/check
+    (let [ed (:editor ui) [s e] (nth uses-ranges 1)]
+      (on-gtk (let [buf (:buf ed)]
+                (start-on-area! ed)
+                (run-palette! ui "list the uses")
+                (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+                (f8! ui false)
+                (f8! ui false)))
+      (let [st (await-status ui "; That place is gone.")]
+        (on-gtk (close-panel! ui)
+                (support/check :locations-gone (= "; That place is gone." st) {:status st}))))))
+
+(defn row-locations-ends
+  "F8 past the last place says so and leaves the selection on it."
+  [ui]
+  (go-row :locations-ends support/check
+    (let [ed (:editor ui)
+          last-def (let [d (last (syntax/find-definitions fixture "area"))] [(:start d) (:end d)])]
+      (on-gtk (start-on-area! ed)
+              (run-palette! ui "list the definitions")
+              (dotimes [_ 4] (f8! ui false)))
+      (let [st (await-status ui "; End of the list.")
+            s (on-gtk (sel ed))]
+        (on-gtk (close-panel! ui)
+                (support/check :locations-ends (and (= "; End of the list." st) (= last-def s))
+                               {:status st :sel s :want last-def}))))))
+
+(defn row-locations-definitions
+  "List the definitions gives the defmulti and both defmethods, in order."
+  [ui]
+  (go-row :locations-definitions support/check
+    (on-gtk
+     (start-on-area! (:editor ui))
+     (run-palette! ui "list the definitions")
+     (let [rows (lpane/row-texts (:locations-pane ui))]
+       (close-panel! ui)
+       (support/check :locations-definitions
+                      (and (= 3 (count rows)) (str/starts-with? (first rows) "1: (defmulti area"))
+                      {:rows rows})))))
+
+(defn row-locations-tab-close-clears
+  "Closing the tab a list came from clears it: F8 then says there's no
+  list."
+  [ui]
+  (go-row :locations-tab-close-clears support/check
+    (on-gtk (let [_ ((:new-tab!* ui))
+                  t ((:active-tab* ui))
+                  ed (:ed t)]
+              (start-on-area! ed)
+              (run-palette! ui "list the uses")
+              (editor/mark-saved! ed)
+              ((:close-tab! ui) (:id t))
+              (f8! ui false)))
+    (let [st (await-status ui "; No locations list.")]
+      (on-gtk (support/check :locations-tab-close-clears (= "; No locations list." st) {:status st})))))

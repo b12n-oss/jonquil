@@ -146,6 +146,14 @@
     (is (= expected (window-command kv st holds))
         (str (format "0x%x" kv) " state " st " " holds))))
 
+(deftest locations-chords-test
+  ;; F8 steps forward through the locations list, Shift+F8 back; nothing
+  ;; else on F8
+  (is (= [:locations/next {}] (window-command 0xffc5 0 #{})))
+  (is (= [:locations/previous {}] (window-command 0xffc5 (:shift M) #{})))
+  (is (nil? (window-command 0xffc5 (:meta M) #{})))
+  (is (nil? (window-command 0xffc5 (:ctrl M) #{}))))
+
 (deftest f5-runs-whatever-the-modifiers-test
   (doseq [st states]
     (is (= [:run/run {}] (window-command 0xffc2 st #{})) (str "state " st))))

@@ -52,6 +52,7 @@
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
+            [jonquil.locations :as loc]
             [jonquil.login-path :as login-path]
             [jonquil.mcp.window :as mcp-window]
             [jonquil.nrepl.attach]
@@ -2264,6 +2265,24 @@
         (set-status! status-label (str "; key: " (ex-message e)))
         1)))))
 
+;; --- the locations list ----------------------------------------------------
+
+(defn- create-location-marks
+  "Two anonymous marks per entry in buf, so the place follows edits: the
+  start's mark has right gravity and the end's left, so text typed at
+  either edge stays outside the place."
+  [buf entries]
+  (mapv (fn [{:keys [start end]}]
+          (g/with-iters* buf start end
+            (fn [a b] [(g/gtk-text-buffer-create-mark buf nil a 0)
+                       (g/gtk-text-buffer-create-mark buf nil b 1)])))
+        entries))
+
+(defn- delete-location-marks! [buf marks]
+  (doseq [[a b] marks]
+    (g/gtk-text-buffer-delete-mark buf a)
+    (g/gtk-text-buffer-delete-mark buf b)))
+
 ;; --- context menus -------------------------------------------------------
 
 (defn- install-context-menu!
@@ -2384,6 +2403,8 @@
           neighbour (or (get ts (inc i)) (get ts (dec i)))
           was-active? (= id @active-id)
           gone (set (tab/popovers t))]
+      ;; while the buffer is alive, so the list's marks can be deleted
+      (when-let [f (:locations-tab-closed! ctx)] (f id))
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
       (swap! popovers (fn [ps] (vec (remove gone ps))))
@@ -3641,6 +3662,74 @@
                                                   :os (System/getProperty "os.name")}))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
+        ;; The locations list: {:tab-id :list :marks}, or nil. The marks live
+        ;; in that tab's buffer; a new list or the tab closing deletes them.
+        ;; GTK thread only.
+        locations-state (atom nil)
+        clear-locations! (fn []
+                           (when-let [{:keys [tab-id marks]} @locations-state]
+                             (when-let [t (tab-by-id tabs tab-id)]
+                               (delete-location-marks! (:buf (:ed t)) marks)))
+                           (reset! locations-state nil))
+        make-locations! (fn [lst]
+                          (clear-locations!)
+                          (let [t (active-tab)]
+                            (reset! locations-state {:tab-id (:id t) :list lst
+                                                     :marks (create-location-marks (:buf (:ed t)) (:entries lst))})
+                            (locations-pane/show! locp lst)
+                            (show-right-panel! right :locations)
+                            (set-status! status-label (str "; " (:title lst) ": " (loc/position-text lst)))))
+        goto-location! (fn [lst]
+                         (let [{:keys [tab-id marks]} @locations-state
+                               t (tab-by-id tabs tab-id)
+                               ed (:ed t)
+                               buf (:buf ed)
+                               [ma mb] (nth marks (:index lst))
+                               s (g/mark-offset buf ma)
+                               e (g/mark-offset buf mb)]
+                           (swap! locations-state assoc :list lst)
+                           (locations-pane/select! locp lst)
+                           (if (>= s e)
+                             (set-status! status-label "; That place is gone.")
+                             (do (select-tab! @*tab-ctx tab-id)
+                                 (place-caret-and-scroll! ed s)
+                                 (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+                                 (set-status! status-label (str "; " (loc/position-text lst)))))))
+        locations-step-fn (fn [delta]
+                            (if-let [lst (:list @locations-state)]
+                              (let [{l :list moved? :moved?} (loc/step lst delta)]
+                                (if moved?
+                                  (goto-location! l)
+                                  (set-status! status-label (if (pos? delta) "; End of the list." "; Start of the list."))))
+                              (set-status! status-label "; No locations list.")))
+        symbol-at-caret (fn []
+                          (let [snap (editor/snapshot (:ed (active-tab)))]
+                            [(:text snap) (:symbol (help/target snap))]))
+        locations-uses-fn (fn [] (let [[text sym] (symbol-at-caret)]
+                                   (if sym
+                                     (make-locations! (loc/uses text sym))
+                                     (set-status! status-label "; No symbol at the caret."))))
+        locations-definitions-fn (fn [] (let [[text sym] (symbol-at-caret)]
+                                          (if sym
+                                            (make-locations! (loc/definitions text sym))
+                                            (set-status! status-label "; No symbol at the caret."))))
+        locations-matches-fn (fn []
+                               (let [{:keys [ed fb]} (active-tab)
+                                     snap (editor/snapshot ed)
+                                     q (if (pos? (g/gtk-widget-get-visible (:box fb)))
+                                         (g/editable-text (:query fb))
+                                         (subs (:text snap) (:sel-start snap) (:sel-end snap)))]
+                                 (if (str/blank? q)
+                                   (set-status! status-label "; Nothing to list: open Find, or select some text.")
+                                   (make-locations! (loc/matches (:text snap) q)))))
+        _ (locations-pane/set-handlers!
+           locp {:on-activate (fn [i] (when-let [lst (:list @locations-state)]
+                                        (goto-location! (assoc lst :index i))))
+                 :on-close (fn [] (hide-right-panel! right :locations))})
+        locations-tab-closed! (fn [id]
+                                (when (= id (:tab-id @locations-state))
+                                  (clear-locations!)
+                                  (hide-right-panel! right :locations)))
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -3657,6 +3746,8 @@
                          :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
                                                                 (assoc (live-keys) :os (System/getProperty "os.name")))))
                          :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
+                         :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
+                         :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
@@ -3912,7 +4003,8 @@
                    :window-key-args window-key-args :repl-complete-fn repl-complete-fn
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
-                   :parinfer-label-update! update-parinfer-label!}
+                   :parinfer-label-update! update-parinfer-label!
+                   :locations-tab-closed! locations-tab-closed!}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
@@ -4448,6 +4540,7 @@
                  ;; for), Enable, Disable and Open on an id's row as the
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
+                   :locations-pane locp
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})
                                      nil)
