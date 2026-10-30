@@ -4132,7 +4132,13 @@
                :buffer-text (fn [id] (turn #(editor/editor-text (:ed (tab-of id)))))
                :replace-text! (fn [id text]
                                 ;; A plugin's text lands exactly as sent,
-                                ;; like an MCP edit (review I3).
+                                ;; like an MCP edit (review I3). A NUL in it
+                                ;; would truncate at the insert (apply-op!
+                                ;; refuses the op), so the throw names it
+                                ;; rather than claiming read-only.
+                                (when-let [n (when (string? text) (tabs/nul-line text))]
+                                  (throw (ex-info (str "the new text holds a NUL byte on line " n
+                                                       ", which Jonquil's editor can't keep, so nothing was changed") {})))
                                 (turn #(let [ed (:ed (tab-of id))]
                                          (when-not (editor/apply-op-plain! ed (mcp-window/replace-op (editor/editor-text ed) text))
                                            (throw (ex-info "that tab is read-only" {}))))))

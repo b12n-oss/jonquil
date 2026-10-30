@@ -27,7 +27,8 @@
   g_timeout_add callbacks are both delivered by GTK's own main loop, so
   nothing in this namespace needs jonquil.gtk.callbacks/on-gui! to get
   there."
-  (:require [jolt.ffi :as ffi]
+  (:require [clojure.string :as str]
+            [jolt.ffi :as ffi]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.commands :as commands]
             [jonquil.edit :as edit]
@@ -368,9 +369,14 @@
   2 = a). So the iter that matches :caret goes first, whichever end that
   is, not always b. Returns true when the op applied, nil when result was
   nil. A read-only editor (set-read-only!) applies nothing and returns
-  nil."
+  nil. An op whose edit text holds a NUL byte is refused the same way
+  (ROADMAP Next 3): GTK text is C strings, so the insert would silently
+  cut everything after it. Every op path funnels through here, so a
+  plugin's :edit command or an MCP replace can't truncate a buffer."
   [ed result]
-  (when (and result (not @(:read-only? ed)))
+  (when (and result
+             (not @(:read-only? ed))
+             (not-any? (fn [[_ _ r]] (str/includes? r "\u0000")) (:edits result)))
     (let [buf (:buf ed)
           [sel-a sel-b] (:sel result)
           caret (:caret result)]
