@@ -82,6 +82,8 @@
    close-prerun/row-repl-eof-no-editor-hint
    files/row-open-refuses-dirty
    files/row-open-invalid-utf8
+   files/row-open-refuses-nul
+   files/row-open-nul-new-tab
    files/row-save-atomic
    files/row-save-follows-symlink
    files/row-save-dangling-symlink

@@ -244,16 +244,25 @@
   I6: Jolt's slurp maps bad bytes to U+FFFD without throwing, so a
   non-UTF-8 file loads silently and Save would then write EF BF BD in
   place of whatever the original bytes were. When the loaded text
-  contains U+FFFD, appends a :system warning naming the risk."
+  contains U+FFFD, appends a :system warning naming the risk. A file
+  holding a NUL byte is refused outright (ROADMAP Next 3): GTK text is C
+  strings, so the buffer would keep only the text before it and Save
+  would write that shortened text back; the console names the line."
   [ed cv path-atom path]
   (try
     (let [text (slurp path)]
-      (editor/set-text! ed text)
-      (reset! path-atom path)
-      (when (str/includes? text "�")
-        (cview/append! cv :system
-                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
-      nil)
+      (if-let [n (tabs/nul-line text)]
+        (let [msg (str path " holds a NUL byte on line " n
+                       ", which Jonquil can't edit, so it wasn't opened.")]
+          (cview/append! cv :error (str "; open: " msg "\n"))
+          {:error msg})
+        (do
+          (editor/set-text! ed text)
+          (reset! path-atom path)
+          (when (str/includes? text "�")
+            (cview/append! cv :system
+                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
+          nil)))
     (catch :default e
       (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
       {:error (ex-message e)})))
@@ -2647,14 +2656,22 @@
 
 (defn- read-for-tab
   "{:text t} for path, warning on the console when it isn't UTF-8 (as
-  open-path! does), or {:error msg} after appending it."
+  open-path! does), or {:error msg} after appending it. A file holding a
+  NUL byte is refused, as open-path! refuses it, before the U+FFFD
+  warning can print."
   [cv path]
   (try
     (let [text (slurp path)]
-      (when (str/includes? text "�")
-        (cview/append! cv :system
-                       "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
-      {:text text})
+      (if-let [n (tabs/nul-line text)]
+        (let [msg (str path " holds a NUL byte on line " n
+                       ", which Jonquil can't edit, so it wasn't opened.")]
+          (cview/append! cv :error (str "; open: " msg "\n"))
+          {:error msg})
+        (do
+          (when (str/includes? text "�")
+            (cview/append! cv :system
+                           "This file isn't valid UTF-8; unreadable bytes show as � and saving will replace them.\n"))
+          {:text text})))
     (catch :default e
       (cview/append! cv :error (str "; open: " (ex-message e) "\n"))
       {:error (ex-message e)})))
