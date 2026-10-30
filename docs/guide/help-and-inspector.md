@@ -84,8 +84,9 @@ does: the command it runs, its source, and any condition it needs, or that
 it goes to GTK. That key is only described, never run. **List every key
 binding** prints the window's keys, then the editor's, each with its
 command's description. **Show the keys you pressed last** lists the last
-50 chords with the command each one names; plain typing shows only as a
-count, never as the characters typed. A command's own keys are in the
+50 chords with the command that ran for each, or that the window passed it
+on to the editor or GTK. Typing, including Return, Tab and Backspace, shows
+only as a count, never as the characters typed. A command's own keys are in the
 palette's row for it.
 
 ### Freeing Ctrl+Space on macOS
