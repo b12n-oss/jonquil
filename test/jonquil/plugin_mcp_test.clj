@@ -32,6 +32,17 @@
   (doseq [x ["Fmt" "../x" "" nil :fmt]]
     (is (not (loader/plugin-id? x)) (pr-str x))))
 
+(deftest propose-refusal-nul-test
+  ;; NUL arc review I2: the review pane shows source through GTK, which cuts
+  ;; at a NUL, while Jolt's reader reads past one inside a string, so a
+  ;; proposal could hide code from the person reviewing it. Refused at the
+  ;; gate, naming the line.
+  (let [ok {:id "fmt" :source "(ns x)" :reason "faster" :plugins? true}]
+    (is (= "the source holds a NUL byte on line 2, which the review pane can't show"
+           (pm/propose-refusal (assoc ok :source "(ns x)\n(def a \"y\u0000\")"))))
+    (is (= "the source holds a NUL byte on line 1, which the review pane can't show"
+           (pm/propose-refusal (assoc ok :source "\u0000"))))))
+
 (deftest propose-refusal-test
   (let [ok {:id "fmt" :source "(ns x)" :reason "faster" :plugins? true}]
     (is (nil? (pm/propose-refusal ok)))

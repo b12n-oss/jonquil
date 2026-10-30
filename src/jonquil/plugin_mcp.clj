@@ -9,7 +9,8 @@
             [clojure.string :as str]
             [jonquil.plugin-history :as history]
             [jonquil.plugin-list :as plugin-list]
-            [jonquil.plugin-loader :as loader]))
+            [jonquil.plugin-loader :as loader]
+            [jonquil.tabs :as tabs]))
 
 (def MAX-SOURCE-CHARS
   ;; estimate, not measured: bigger than any plugin file seen so far, and
@@ -48,6 +49,12 @@
     (false? plugins?) "plugins are off in this window (--no-plugins), so it takes no proposals"
     (not (loader/plugin-id? id)) (bad-id id)
     (not (string? source)) "a proposal needs its source as text"
+    ;; NUL arc review I2: the review pane shows source through GTK, which
+    ;; cuts at a NUL, while the reader reads past one inside a string, so a
+    ;; proposal could hide code from the person reviewing it.
+    (tabs/nul-line source)
+    (str "the source holds a NUL byte on line " (tabs/nul-line source)
+         ", which the review pane can't show")
     (or (not (string? reason)) (str/blank? reason)) "a proposal needs a reason"
     (> (count source) MAX-SOURCE-CHARS)
     (str "the source is " (count source) " characters, more than the " MAX-SOURCE-CHARS " a proposal may have")

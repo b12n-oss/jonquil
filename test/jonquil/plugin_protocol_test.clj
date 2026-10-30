@@ -81,6 +81,15 @@
                {:edits [] :caret 0 :sel [0 99]}]]
       (is (string? (protocol/edit-result-problem s r)) (pr-str r)))))
 
+(deftest edit-result-nul-test
+  ;; NUL arc review I1: apply-op! refuses an op whose text holds a NUL
+  ;; (GTK C strings would truncate the insert), silently. The validator
+  ;; names it instead, reaching the author as "plugin <id>: <why>".
+  (let [s {:text text :caret 0 :sel-start 0 :sel-end 0}]
+    (is (= "an edit's text holds a NUL byte, which Jonquil's editor can't keep"
+           (protocol/edit-result-problem s {:edits [[0 1 "x\u0000y"]] :caret 0})))
+    (is (nil? (protocol/edit-result-problem s {:edits [[0 1 "xy"]] :caret 0})))))
+
 (deftest soak-good-test
   (let [r (protocol/soak {:definition (definition (fn [s] (p/wrap-form s "(when " ")")))})]
     (is (= [] (:problems r)))
