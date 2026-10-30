@@ -77,12 +77,17 @@
         n (count r)]
     (if (> n RECENT-MAX) (subvec r (- n RECENT-MAX)) r)))
 
+(defn typing?
+  "True for a printable key held with nothing but Shift: plain typing."
+  [key-name state]
+  (and (= 1 (count key-name)) (empty? (disj (held state) :shift))))
+
 (defn recent-entry
-  "One recent key: {:typing 1} for a printable key without Cmd, Ctrl, Alt,
-  Meta or Super, so what was typed is never kept; otherwise the chord and
-  the command its first match runs (nil when none)."
+  "One recent key: {:typing 1} for plain typing (typing?), so what was
+  typed is never kept; otherwise the chord and the command its first
+  match runs (nil when none)."
   [key-name state os matches]
-  (if (and (= 1 (count key-name)) (empty? (disj (held state) :shift)))
+  (if (typing? key-name state)
     {:typing 1}
     {:chord (chord-text key-name state os) :command (:command (first matches))}))
 

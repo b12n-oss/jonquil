@@ -260,3 +260,85 @@
                 (finally
                   (reset! (:preedit-active? p) false)
                   (close! ui)))))))
+
+;; --- describing keys --------------------------------------------------------
+
+(def ^:private KEY-L 0x06c)
+(def ^:private KEY-A 0x061)
+(def ^:private KEY-B 0x062)
+(def ^:private KEY-SHIFT-L 0xffe1)
+
+(defn- run-palette!
+  "Opens the palette, filters it to query and runs the first entry.
+  GTK-thread only."
+  [ui query]
+  (let [p (:palette ui)]
+    ((:open-palette!* ui))
+    (palette/set-query! p query)
+    (palette/run-selected! p)))
+
+(defn- window-key! [ui keyval state]
+  ((:handle-window-key! ui) ffi/null keyval 0 state ffi/null))
+
+(defn row-describe-key-consumes
+  "Describe Key's next key is described, never run: Cmd/Ctrl+L leaves the
+  console uncleared and the description names :console/clear."
+  [ui]
+  (go-row :describe-key-consumes support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          handled (on-gtk (run-palette! ui "describe the next key")
+                          (window-key! ui KEY-L g/META-MASK))
+          out (on-gtk (support/since ui mark))]
+      (on-gtk (close! ui)
+              (support/check :describe-key-consumes
+                             (and (= 1 handled) (str/includes? out ":console/clear"))
+                             {:handled handled :out out})))))
+
+(defn row-describe-key-skips-modifier
+  "A modifier pressed alone neither answers a pending Describe Key nor is
+  described; the next real key (F6) is."
+  [ui]
+  (go-row :describe-key-skips-modifier support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (run-palette! ui "describe the next key")
+                    (window-key! ui KEY-SHIFT-L 0)
+                    (window-key! ui support/KEY-F6 0))
+          out (on-gtk (support/since ui mark))]
+      (on-gtk (close! ui)
+              (support/check :describe-key-skips-modifier
+                             (and (str/includes? out "; F6 runs") (str/includes? out ":focus/toggle")
+                                  (not (str/includes? out "Shift_L")))
+                             {:out out})))))
+
+(defn row-key-bindings-lists
+  "List Every Key Binding prints both scopes and the palette command under
+  its own doc."
+  [ui]
+  (go-row :key-bindings-lists support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (run-palette! ui "list every key binding"))
+          out (on-gtk (support/since ui mark))]
+      (on-gtk (close! ui)
+              (support/check :key-bindings-lists
+                             (and (str/includes? out "; Window keys") (str/includes? out "; Editor keys")
+                                  (str/includes? out "Shift+P  Show the command palette."))
+                             {:start (subs out 0 (min 200 (count out)))})))))
+
+(defn row-recent-keys-hides-typing
+  "Recent keys counts plain typing without keeping it, and names F6's
+  command. F6 goes first, so the typing can't merge into an earlier row's,
+  and twice, so focus ends where it started."
+  [ui]
+  (go-row :recent-keys-hides-typing support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (window-key! ui support/KEY-F6 0)
+                    (window-key! ui KEY-A 0)
+                    (window-key! ui KEY-B 0)
+                    (window-key! ui support/KEY-F6 0)
+                    (run-palette! ui "show the keys you pressed last"))
+          out (on-gtk (support/since ui mark))]
+      (on-gtk (close! ui)
+              (support/check :recent-keys-hides-typing
+                             (and (str/includes? out "; typing (2 keys)") (str/includes? out "; F6  :focus/toggle")
+                                  (not (re-find #"(?m)^; [ab]  " out)))
+                             {:out out})))))

@@ -43,6 +43,11 @@
    ;; find and focus
    :find/next {:doc "Go to the next find match." :scope :window :run (call :find-next!)}
    :find/previous {:doc "Go to the previous find match." :scope :window :run (call :find-prev!)}
+   ;; describing keys: palette-only, no chords
+   :help/describe-key {:doc "Describe the next key you press." :scope :window
+                       :run (call :describe-key-fn)}
+   :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
+   :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
    :source/open-here {:doc "Open the source panel's file in the window." :scope :window :palette? false

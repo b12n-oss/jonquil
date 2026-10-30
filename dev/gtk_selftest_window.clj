@@ -248,6 +248,10 @@
    palette-rows/row-palette-arrow-keys
    palette-rows/row-palette-closes-its-own-tab
    palette-rows/row-palette-entry-keeps-window-keys
+   palette-rows/row-describe-key-consumes
+   palette-rows/row-describe-key-skips-modifier
+   palette-rows/row-key-bindings-lists
+   palette-rows/row-recent-keys-hides-typing
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named

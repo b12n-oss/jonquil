@@ -445,6 +445,17 @@
 ;; uppercase keyval with no Shift bit set) doesn't break Ctrl+R/O/S.
 (ffi/defcfn gdk-keyval-to-lower "gdk_keyval_to_lower" [:uint] :uint)
 
+;; gdk_keyval_name: gtk-4.0/gdk/gdkkeys.h:36
+;; (const char *gdk_keyval_name (guint keyval)). A static string, never freed.
+(ffi/defcfn gdk-keyval-name* "gdk_keyval_name" [:uint] :pointer)
+
+(defn keyval-name
+  "keyval's GDK name (\"s\", \"F6\", \"Shift_L\"), or nil for a keyval with
+  none."
+  [keyval]
+  (let [p (gdk-keyval-name* keyval)]
+    (when-not (ffi/null? p) (ffi/ptr->string p))))
+
 ;; G_APPLICATION_NON_UNIQUE: glib-2.0/gio/gioenums.h:1572
 ;; (GApplicationFlags enum, G_APPLICATION_NON_UNIQUE = 1 << 5 = 32). Passed
 ;; to gtk_application_new so a second launch doesn't just forward its
