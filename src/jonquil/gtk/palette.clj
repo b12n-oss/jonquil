@@ -1,5 +1,5 @@
 (ns jonquil.gtk.palette
-  "The command palette's popover (plugins design, Part 1, step S8): an
+  "The command palette's popover: an
   entry over a list of jonquil.palette entries, one per tab, built on the
   tab's editor view like the rename popover. Autohide is on, so it's modal
   for typing and GTK closes it on a click outside; the window's

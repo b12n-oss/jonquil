@@ -6,7 +6,7 @@
   The shape follows jonquil.nrepl.jvm, minus what jank doesn't have: no
   interrupt op (Stop kills the child instead, so earlier definitions are
   gone afterwards), no stdin, no inspector, and no lookup op (it wedges the
-  connection, jank issue 998; jank re-check spike, 2026-10-12). Run is
+  connection, jank issue 998, measured 2026-10-12). Run is
   load-file; a REPL line, Run Selection and Run Form are eval with an
   explicit :ns. jank has no namespace-not-found status, so a selection
   first asks whether its namespace is loaded and says so, sending nothing
@@ -205,7 +205,7 @@
 (defn- meta-lookup
   "Docs for sym from an eval of its metadata, bounded by timeout-ms. The
   namespace comes from the text, and jank falls back to user for one it
-  hasn't loaded (jank re-check spike, 2026-10-12). Never the lookup op."
+  hasn't loaded (measured 2026-10-12). Never the lookup op."
   [ev sym text timeout-ms]
   (let [{:keys [state timings]} ev
         {:keys [running conn session prompt-ns]} @state]

@@ -1,5 +1,5 @@
 (ns jonquil.plugin-list
-  "The plugin list's rows (plugins P11): one per plugin, loaded, a file in
+  "The plugin list's rows: one per plugin, loaded, a file in
   the plugins folder or a history, over a plugin state {:plugins-dir
   :registry :disabled}. jonquil_plugins_list prints their lines, so the
   panel and the MCP tool say the same thing. Pure apart from reading the
@@ -33,7 +33,7 @@
         state (cond (contains? (set disabled) (keyword id)) "disabled"
                     loaded "loaded"
                     :else "not loaded")
-        ;; plugins F1: went live once, and its file is gone now
+        ;; went live once, and its file is gone now
         deleted (when (and (not error) (history/latest-accepted entries)
                            (not (.isFile (io/file plugins-dir (str id ".clj")))))
                   ", file deleted")

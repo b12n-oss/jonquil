@@ -1,10 +1,10 @@
 (ns jonquil.gtk.plugin-list-pane
-  "The plugin list (plugins P11): every plugin's row (jonquil.plugin-list)
+  "The plugin list: every plugin's row (jonquil.plugin-list)
   in the right-hand slot the source panel uses, one wrapped label per row
   in a list, a disabled plugin's dimmed, then the Enable, Disable, Open,
   Review Proposals and Close buttons and a footer for what the last step
-  said, and (P11b) a History button. jonquil.gtk.window decides where it shows and what the buttons do;
-  this namespace owns what it shows."
+  said, and a History button. jonquil.gtk.window decides where it shows
+  and what the buttons do; this namespace owns what it shows."
   (:require [jolt.ffi :as ffi]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]

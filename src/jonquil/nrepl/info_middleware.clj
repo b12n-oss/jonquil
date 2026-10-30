@@ -44,8 +44,8 @@
   child's directory, the project), as its canonical path when it names a
   file; a bare name such as demo/util.clj through classpath-file; else nil.
   A bare name is a classpath name, not a path: resolving it against the
-  project directory could open an unrelated file of the same name there
-  (review finding 1). Jolt from jolt-lang/jolt f714b0ed (2026-10-19)
+  project directory could open an unrelated file of the same name there.
+  Jolt from jolt-lang/jolt f714b0ed (2026-10-19)
   records a required namespace's :file as that bare name, as JVM Clojure
   does; v0.8.23 recorded ./src/demo/util.clj."
   [f]

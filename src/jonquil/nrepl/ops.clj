@@ -3,7 +3,7 @@
 
   Replies are jonquil.nrepl.client messages: top-level keys keywords,
   nested maps as decoded (string keys). Three completion shapes exist
-  (dialects spike): vanilla jolt {candidate ns}, jolt with
+  (measured): vanilla jolt {candidate ns}, jolt with
   nrepl.middleware {candidate type}, jank {candidate type ns}; fields are
   read by keyword or string. jolt-lang/nrepl's lookup carries no file or
   line; a JVM server's does."
@@ -191,9 +191,8 @@
   The server shifts *3 <- *2, *2 <- *1, *1 <- value after every successful
   eval (jolt.nrepl, alter-var-root on the global vars). So this pre-shifts
   *2 <- *3 and *1 <- *2 and returns the old *1: after the server's own
-  shift the user's *1, *2 and *3 are exactly what they were (final review
-  finding 1). The cost is printing the old *1 as this eval's value.
-  Fully qualified, since it runs in whatever namespace the session is in."
+  shift the user's *1, *2 and *3 are exactly what they were. The cost is printing the old *1 as this eval's
+  value. Fully qualified, since it runs in whatever namespace the session is in."
   [body]
   (str "(clojure.core/let [o1 clojure.core/*1 o2 clojure.core/*2 o3 clojure.core/*3]"
        " " body
@@ -255,7 +254,7 @@
   "Code for the child that removes each namespace in names that exists,
   then `user`, and recreates `user`: the in-process Reset on Run's rule
   (jonquil.session/reset-namespaces!) run where the program lives. names
-  is the running owner's namespaces plus the REPL's (tabs spec). Leaves
+  is the running owner's namespaces plus the REPL's. Leaves
   the user's *1, *2 and *3 alone (see keeping-history)."
   [names]
   (keeping-history

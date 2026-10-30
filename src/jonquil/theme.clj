@@ -108,18 +108,17 @@
     (get (:console t) kind (:text t))))
 
 (defn code-css
-  "The CSS for both code views, and for every P4 caret-anchored popover, at
+  "The CSS for both code views, and for every caret-anchored popover, at
   font size px. Measured on GTK 4.22.4 (2026-09-25): background-color,
   color and caret-color apply on the view's own node (.jonquil-code); color
   on the text subnode does not recolour the text; the selection rule
   applies on 'text selection'.
 
-  The popover.jonquil-popover rules are P4 probe 7's measured selector: a
+  The popover.jonquil-popover rules are a measured selector: a
   popover follows the GtkSettings colour scheme but not the theme palette
   or the code font without them. font-size on the list/row and
-  label.jonquil-doc rules is this task's own addition (probe 7 didn't set
-  it), so a zoom reaches the completion/doc popovers the same way it
-  already reaches the code views. The entry rule (fix wave item 5, M8) is
+  label.jonquil-doc rules lets a zoom reach the completion/doc popovers
+  the same way it reaches the code views. The entry rule is
   the rename popover's own GtkEntry: background/text like the popover's
   own contents, plus a selection rule so the prefilled, selected symbol
   name reads against the theme's own selection colour rather than GTK's

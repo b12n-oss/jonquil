@@ -16,15 +16,15 @@
   advertises interrupt, sends it and gives the server up to
   :interrupt-timeout-ms to actually stop before detaching; without the op,
   or if it doesn't take, Jonquil detaches and says so. An idle Stop is a
-  no-op (ruling 5): there's nothing to interrupt, and the connection is
+  no-op: there's nothing to interrupt, and the connection is
   cheap to keep, unlike cljd's Stop which always detaches. stdin sends a
   line through the live session. send-eof! sends an empty stdin, the
   end-of-input signal, on nREPL 1.8.0 or later while a read waits; an older
-  server fails an empty stdin (P0.1), so it gets a one-time note instead and
+  server fails an empty stdin, so it gets a one-time note instead and
   the read keeps waiting.
 
   The prompt namespace moves on a successful Run (to the buffer's own
-  namespace, ruling 4) and on a REPL entry's reply :ns; a selection or a
+  namespace) and on a REPL entry's reply :ns; a selection or a
   form leaves it alone.
 
   The connection lifecycle itself (connect!, detach!, request!, and the
@@ -34,12 +34,12 @@
   and the record). complete merges the server's own completions into the
   offline candidates; lookup is backed by the server's own lookup op,
   with a Defined in <file>:<line> line (jonquil.help/location-line) for a
-  definition outside the buffer (ruling 13). Neither ever connects on its
+  definition outside the buffer. Neither ever connects on its
   own: both run on the GTK thread and simply fall back to offline
   candidates or a no-docs result when there's no live connection.
-  full-doc (P3.T2, the jonquil.evaluator/FullDoc protocol) is backed by
+  full-doc (the jonquil.evaluator/FullDoc protocol) is backed by
   the server's own doc op instead, for the window's second quick-doc
-  press (ruling 11): unlike lookup/complete it runs in a future, since
+  press: unlike lookup/complete it runs in a future, since
   it's asked for on demand rather than on every keystroke.
 
   Both lookup and full-doc resolve their own :ns through the shared
@@ -63,12 +63,12 @@
 (def default-timings
   {;; estimate: attach's own describe/clone timeouts, measured against a
    ;; listening socket that never speaks nREPL (describe) or session
-   ;; bookkeeping that answers at once in every spike probe (clone).
+   ;; bookkeeping that answers at once in every probe (clone).
    :describe-timeout-ms 5000
    :clone-timeout-ms 10000
    ;; attach's own still-waiting-ms: how long jonquil.nrepl.connection/request!
    ;; waits before saying so once. JVM never passes a sentence through it
-   ;; (ruling 7, ns-not-found: Stop can interrupt here), so this bounds
+   ;; (ns-not-found: Stop can interrupt here), so this bounds
    ;; nothing on its own but keeps the shape the same as attach's timings.
    :still-waiting-ms 30000
    ;; jonquil.nrepl.evaluator's own interrupt-timeout-ms: how long Stop gives
@@ -108,7 +108,7 @@
   (connection/stop-requested? ev))
 
 (def ^:private connect-policy
-  ;; clj/connect-policy plus a :stop-requested? override (ruling: connect!
+  ;; clj/connect-policy plus a :stop-requested? override (connect!
   ;; defaults to its own connection/stop-requested? otherwise), so a
   ;; test's with-redefs on this namespace's stop-requested? var reaches
   ;; every guard connect! checks, not only the calls run-worker! makes
@@ -149,7 +149,7 @@
   (done, interrupted) while state is still marked waiting clears it and
   says so. Output doesn't: a future printing while the read waits would
   otherwise take the console out of input mode with the read still
-  blocked (found reviewing the Jolt stdin middleware, 2026-10-18).
+  blocked.
   send-input!/send-eof! clear it on a send. A second need-input (the
   measured double reply after the stdin op's own done) re-marks it the
   same way, harmlessly."
@@ -164,10 +164,10 @@
           (call-wait-input! on-wait-input false)))))
 
 (defn- register-inspect!
-  "Ruling 4: right after a successful connect!, once the server has
+  "Right after a successful connect!, once the server has
   advertised inspect-start and this connection hasn't registered yet,
   sends one eval of nil on the session so a first Cmd/Ctrl+I after a Run
-  doesn't show nil (spec probe 1: inspect-start only sees a session's *1
+  doesn't show nil (inspect-start only sees a session's *1
   once an eval, not merely a load-file, has run on it). Sent straight
   through client/request-sync on the conn, never connection/request!, so
   this streams nothing to the console and never moves :prompt-ns or
@@ -229,7 +229,7 @@
               (if run?
               ;; Run: load-file, never told an :ns (the fixture's own ns form
               ;; decides what the server evaluates it in). A successful Run
-              ;; moves the prompt namespace to the buffer's own (ruling 4).
+              ;; moves the prompt namespace to the buffer's own.
                 (let [f (when path (io/file path))
                       msgs (do-request! {:op "load-file" :file code
                                          :file-path (if f (.getAbsolutePath f) "untitled.clj")
@@ -242,7 +242,7 @@
               ;; successful reply's own :ns moves the prompt. Selection/Form
               ;; (ns-source present): eval in the buffer's own namespace, or
               ;; the prompt namespace when the buffer has none; the prompt
-              ;; never moves for these (rule 3: never the buffer's ns form
+              ;; never moves for these (never the buffer's ns form
               ;; itself, only named as :ns).
                 (let [ns (or (when ns-source (clj/buffer-ns ns-source)) (str (:prompt-ns @state)))
                       msgs (do-request! {:op "eval" :code code :ns ns})]
@@ -332,9 +332,9 @@
   (start! [_] nil)
   (stop! [this]
     ;; apply-selection! calls interrupt! then stop! back to back when
-    ;; switching away from a busy window. The old stop! detached at once,
-    ;; on the calling thread, before interrupt!'s own send future had a
-    ;; chance to run, so the interrupt never reached the server. This
+    ;; switching away from a busy window. Detaching at once, on the
+    ;; calling thread, would beat interrupt!'s own send future to it, so
+    ;; the interrupt would never reach the server. This
     ;; keys the decision on :running and an open conn, not on
     ;; :stop-requested? being newly set here, so it still sends even when
     ;; interrupt! already marked the stop -- a duplicate interrupt op for
@@ -446,7 +446,7 @@
         (call-wait-input! (:on-wait-input (:opts running)) false)))
     nil)
   ;; Only while a read waits. On nREPL 1.8.0 or later an empty stdin is EOF
-  ;; (P0.1: 1.7.0 fails it): :waiting? clears and the write goes out. Older
+  ;; (1.7.0 fails it): :waiting? clears and the write goes out. Older
   ;; or unknown servers get the note once per connection and keep waiting.
   ;; One swap-vals! decides both, so quick presses can't double up.
   ;; A narrow race is accepted: a read that finishes between the swap and
@@ -494,8 +494,8 @@
         ;; "completions" (nREPL's own), else "complete" (cider's), same
         ;; reply shape. For the nREPL dialect only names with the prefix are
         ;; merged: babashka's answers are fuzzy from either op, and it
-        ;; doesn't always offer the same ones (measured, both v1.13.220: the
-        ;; spike's describe listed only complete, bb test:bb's connection
+        ;; doesn't always offer the same ones (measured, both v1.13.220: one
+        ;; describe listed only complete, bb test:bb's connection
         ;; also lists completions; why isn't known). JVM
         ;; Clojure keeps every name, compliment's c.s/jo ->
         ;; clojure.string/join among them.
@@ -515,7 +515,7 @@
         (catch Throwable _ offline))))
   ;; Backed by the server's own lookup op (or info, lookup-op), never
   ;; connecting on its own.
-  ;; :file is turned into a Defined in ... line (ruling 13); help/doc-text
+  ;; :file is turned into a Defined in ... line; help/doc-text
   ;; never reads :file, only :location. A buffer namespace the server
   ;; hasn't loaded yet errors instead of answering info (resolve-lookup!'s
   ;; own ns1), so this falls back to the prompt namespace once before
@@ -537,7 +537,7 @@
               :not-loaded (cljd/no-docs sym (clj/not-loaded-doc (:ns1 res)))
               ;; :ok or :retried: resolve-lookup! already confirmed a
               ;; retry's own reply names sym, so found only ever returns
-              ;; nil here for :ok's plain not-found (as today).
+              ;; nil here for :ok's plain not-found.
               (found (:reply res))))))
       (catch Throwable _ nil)))
   (limitations [this]
@@ -551,8 +551,8 @@
          (catch Throwable _ [])))
 
   ev/FullDoc
-  ;; P3.T2: backed by the server's own "doc" op, in a future (never on the
-  ;; GTK thread, unlike lookup/complete above -- ruling: full doc is asked
+  ;; Backed by the server's own "doc" op, in a future (never on the
+  ;; GTK thread, unlike lookup/complete above -- full doc is asked
   ;; for on demand, not on every keystroke, so it can afford to wait
   ;; longer, per :full-doc-timeout-ms's own estimate). Not connected or no
   ;; "doc" op answer at once, on the calling thread; on-result is called
@@ -606,7 +606,7 @@
     nil)
 
   ev/Inspector
-  ;; P3.T1: backed by the server's own inspect-* ops (inspect/request's own
+  ;; Backed by the server's own inspect-* ops (inspect/request's own
   ;; mapping), off the GTK thread in a future, on-view called exactly once
   ;; and everything caught -- the same pattern jonquil.session's InProcess
   ;; uses. Every request carries :session.
@@ -616,7 +616,7 @@
         (let [result
               (let [{:keys [conn session ops]} @state]
                 (cond
-                  ;; I2: a nil :conn is "never attached" (inspect-not-
+                  ;; A nil :conn is "never attached" (inspect-not-
                   ;; attached, "Run something first"); a non-nil :conn
                   ;; that's no longer open was attached and dropped (the
                   ;; connection's own reader thread flips client/open? to
@@ -640,7 +640,7 @@
           (try (on-view {:error (or (ex-message e) (str (class e)))})
                (catch Throwable _)))))
     nil)
-  ;; Ruling 5: true before connecting at all (:ops still empty -- inspect!
+  ;; True before connecting at all (:ops still empty -- inspect!
   ;; then answers not-attached, not unavailable), or once the server has
   ;; advertised inspect-start.
   (inspectable? [_]

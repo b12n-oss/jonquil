@@ -1,13 +1,12 @@
 (ns jonquil.plugin-loader
-  "Finds the user's plugin files and loads them one by one (plugins design,
-  Part 2, \"Startup is per plugin\"): <settings-dir>/plugins/<id>.clj, in
+  "Finds the user's plugin files and loads them one by one (startup is per plugin): <settings-dir>/plugins/<id>.clj, in
   id order, each through jonquil.plugin-protocol/run-protocol, so one
   broken file is skipped and named while the others load. reload answers
   the next registry and console lines; load-step! applies one to the live
   registry, on the window's load-agent, and records each plugin it made
   live in jonquil.plugin-history; revert-step! checks an old version the
   same way and, on a pass, writes it back as a new version. An agent's
-  proposal (step P9) is checked in isolation by propose-check, off the
+  proposal is checked in isolation by propose-check, off the
   agent, and recorded by propose-step!; accept-step! and reject-step! end
   it. reload only reads files; nothing here touches GTK or throws."
   (:require [clojure.java.io :as io]
@@ -59,9 +58,9 @@
                   (= (.getCanonicalPath (io/file dir)) (.getCanonicalPath parent))))))
 
 (defn plugin-file-or-target?
-  "plugin-file?, or path is what a plugin file in dir links to (plugins F2
-  final review I1: a dotfiles setup links <dir>/<id>.clj to a file kept
-  elsewhere, and a tab may be open at that target)."
+  "plugin-file?, or path is what a plugin file in dir links to (a dotfiles
+  setup links <dir>/<id>.clj to a file kept elsewhere, and a tab may be
+  open at that target)."
   [dir path]
   (or (plugin-file? dir path)
       (boolean (try (let [c (.getCanonicalPath (io/file path))]
@@ -260,7 +259,7 @@
 
 (defn- plugins-off
   "The one line a step answers in a window started with --no-plugins
-  (plugins F1): it loads nothing and writes nothing."
+  it loads nothing and writes nothing."
   [what]
   [(str "plugins are off in this window (--no-plugins), so " what)])
 
@@ -273,7 +272,7 @@
   the console lines. Run on the window's plugin agent, one step at a time,
   so a step always starts from what the previous one left. Never throws:
   a failure is one line, and live is left as it was. With :plugins?
-  false (--no-plugins), it refuses (plugins F1), as the other steps do."
+  false (--no-plugins), it refuses, as the other steps do."
   [live opts]
   (if (false? (:plugins? opts))
     (plugins-off "nothing was reloaded")
@@ -287,21 +286,21 @@
         [(str "loading plugins failed: " (or (ex-message e) (str e)))]))))
 
 (defn set-enabled-step!
-  "Enables or disables plugin id (a string) for the plugin list (plugins
-  P11), on the plugin agent like load-step! (opts as load-step!'s, which
+  "Enables or disables plugin id (a string) for the plugin list, on the plugin
+  agent like load-step! (opts as load-step!'s, which
   need :settings-path, plus :id and :enabled?): writes the id into or out
   of the settings file's :plugins :disabled
   (jonquil.settings/save-plugin-disabled!), then reloads, so a disabled
   plugin leaves the registry and an enabled one goes through the checks.
   The console lines, the first saying what changed; a refused write is
   one line and reloads nothing, and so is an id the settings already have
-  that way (two quick clicks queue two steps: final review I1). Never
+  that way (two quick clicks queue two steps). Never
   throws."
   [live {:keys [settings-path id enabled?] :as opts}]
   (let [what (if enabled? "enabled" "disabled")]
     (try
       (cond
-        ;; final review: Disable's refusal names the way to turn it off
+        ;; Disable's refusal names the way to turn it off
         ;; by hand, since the button can't here
         (false? (:plugins? opts))
         (plugins-off (str "plugin " id " wasn't " what
@@ -321,8 +320,8 @@
 (defn- disk-changed
   "The line saying id's file differs from its live version, when id is
   live in reg and <dir>/<id>.clj holds other text: writing over it would
-  lose an edit no Reload has seen (P9 review I4), or one a Reload refused,
-  which leaves the previous version live (P11b). nil otherwise."
+  lose an edit no Reload has seen, or one a Reload refused, which leaves
+  the previous version live. nil otherwise."
   [dir reg id]
   (let [live-src (get-in reg [:plugins (keyword id) :source])
         f (io/file dir (str id ".clj"))]
@@ -331,7 +330,7 @@
 
 (defn- was-live?
   "Whether version n was ever accepted: a proposal that never went live
-  isn't a revert target (P9 review I3)."
+  isn't a revert target."
   [hdir n]
   (boolean (some #(and (= n (:n %)) (= :accepted (:status %))) (:entries (history/read-entries hdir)))))
 
@@ -357,7 +356,6 @@
           (disk-changed dir @live id) (conj warn (str "plugin " id " wasn't reverted: " (disk-changed dir @live id)))
           ;; the file's there (disk-changed says it holds the live text), so
           ;; there's nothing to put back; a deleted one is written back
-          ;; (final review I2)
           (and (= src (get-in @live [:plugins k :source])) (.isFile (io/file dir (str id ".clj"))))
           (conj warn (str "plugin " id ": v" n " is already live, so it wasn't reverted"))
           :else
@@ -368,7 +366,7 @@
               (-> warn (into lines) (conj (str "plugin " id " wasn't reverted to v" n)))
               (if-let [why (history/write-atomic! path src)]
                 ;; the check loaded src into the plugin's namespace: put the
-                ;; live version back, as reload-one does on a fail (review I3)
+                ;; live version back, as reload-one does on a fail
                 (let [restored (when-let [live-src (get-in old [:plugins k :source])]
                                  (:problems (protocol/load-candidate {:source live-src :file-id id})))]
                   (-> warn
@@ -401,7 +399,8 @@
 (defn propose-step!
   "Records an agent's proposal of source for id, with reason, given its
   check's result (propose-check's), on the plugin agent: {:status :n
-  :problems :lines}, plus :log when the check kept its log (plugins F3). A pass, or an unchecked result when there's no jolt,
+  :problems :lines}, plus :log when the check kept its log. A pass, or an
+  unchecked result when there's no jolt,
   is :pending, keeping what the check reported, superseding an older
   pending one, and announced in the lines; a fail is :rejected-by-checks
   with no line, recording the kept log's path. Both record the live version as :based-on. A bad id, a
@@ -476,7 +475,7 @@
         (cond
           (not (and proposal (= n (:n proposal)))) (conj warn (str "plugin " id " has no pending v" n))
           (contains? (set (:disabled opts)) k) (conj warn (str "plugin " id " is disabled, so v" n " wasn't accepted"))
-          ;; review I1: with no source, reload would check the file on disk
+          ;; with no source, reload would check the file on disk
           (nil? (history/version-source hdir n))
           (conj warn (str "plugin " id ": v" n " wasn't accepted: its source is missing from its history"))
           (disk-changed dir @live id) (conj warn (str "plugin " id ": v" n " wasn't accepted: " (disk-changed dir @live id)))

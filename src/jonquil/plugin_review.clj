@@ -1,7 +1,6 @@
 (ns jonquil.plugin-review
-  "What the review panel shows for an agent's pending proposal (plugins
-  P9b): summary lines (where it stands against live, the effects with new
-  ones marked, the check's warnings and soak timings, all as the check
+  "What the review panel shows for an agent's pending proposal: summary lines
+  (where it stands against live, the effects with new ones marked, the check's warnings and soak timings, all as the check
   reported them) and a line diff against live. Pure except
   pending-reviews, which reads the history; no GTK."
   (:require [clojure.string :as str]
@@ -96,7 +95,7 @@
                                "none"
                                (str/join ", " (for [e (sort-by str (:effects plugin))]
                                                 (str e (when-not (contains? live-effects e) " (new)"))))))))
-                ;; plugins P10b: the tools an agent could call once it's live
+                ;; the tools an agent could call once it's live
                 (cond-> (and (not unchecked?) (seq (:mcp-tools plugin)))
                   (conj (str "MCP tools, as its check reported: "
                              (str/join ", " (for [{:keys [name]} (:mcp-tools plugin)]

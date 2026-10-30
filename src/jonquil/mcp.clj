@@ -4,10 +4,10 @@
   Transport-free: `serve!` takes its line reader and writer as functions, so
   this namespace never touches stdin or stdout itself. The tool table is
   `{:defs [tool-def ...] :call (fn [name args] {:text s :error? b})}`, or
-  (plugins P10b) a no-argument fn answering one, read once per message, so
+  a no-argument fn answering one, read once per message, so
   the tools a window serves can change between calls. A table with
   :list-changed? true declares the capability, and serve!'s :subscribe
-  (plugins P10c) is how the server learns when to send
+  is how the server learns when to send
   notifications/tools/list_changed."
   (:require [clojure.string :as str]
             [jonquil.mcp.json :as json]))
@@ -102,7 +102,7 @@
   (json/encode {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"}))
 
 (defn- notifier
-  "notify! for one session (plugins P10c): safe from any thread, and returns
+  "notify! for one session: safe from any thread, and returns
   at once. Nothing is sent until ready? holds (the client's
   notifications/initialized). The send runs on a future, so a swap on the
   GTK thread never waits on a slow client, and a burst makes one send in
@@ -130,7 +130,7 @@
   request never ends the loop. A :write-line failure (a broken pipe) is not
   caught: nobody is listening, so the loop ends with it.
 
-  :subscribe (plugins P10c, optional) is (fn [notify!] -> unsubscribe fn),
+  :subscribe (optional) is (fn [notify!] -> unsubscribe fn),
   called once before the loop; its unsubscribe runs when the loop ends,
   however it ends. notify! sends notifications/tools/list_changed (see
   notifier). Every write, response or notification, holds one lock, so

@@ -1,6 +1,5 @@
 (ns jonquil.plugin-isolated
-  "The parent's half of an isolated check (plugins design, Part 2, \"The
-  isolated check\"; steps P8 and P8b): the request.edn text the child
+  "The parent's half of an isolated check: the request.edn text the child
   reads, the environment it gets, parse-result, which turns what the child
   printed into run-protocol's result, and check!, which runs the child.
   check! is the protocol's :isolated seam: the child runs run-protocol
@@ -63,15 +62,15 @@
 
 (defn- tool-summary?
   "One :mcp-tools row of checker/summary: a string :name and :doc, and
-  :args, when present, a map keyed by strings (plugins P10b)."
+  :args, when present, a map keyed by strings."
   [t]
   (and (map? t) (string? (:name t)) (string? (:doc t))
        (or (nil? (:args t)) (and (map? (:args t)) (every? string? (keys (:args t)))))))
 
 (defn- summary?
   "checker/summary's shape, every key present, and :mcp-tools when the
-  plugin has them (P10b review C1: a fixed key set refused every proposal
-  with tools)."
+  plugin has them (a fixed key set would refuse every
+  proposal with tools)."
   [p]
   (and (map? p)
        (= #{:id :doc :effects :commands :bindings :hooks} (disj (set (keys p)) :mcp-tools))
@@ -82,7 +81,7 @@
        (vector? (:hooks p)) (every? keyword? (:hooks p))))
 
 (defn- result?
-  "A whole result (review I2): a pass carries no problems and a full
+  "A whole result: a pass carries no problems and a full
   :plugin summary, a fail no :plugin, and :problems, :warnings and
   :timings have their shapes when present."
   [v]
@@ -95,7 +94,7 @@
          (nil? (:plugin v)))))
 
 (def OUTPUT-MAX-BYTES
-  ;; estimate: P8's request measured 6209 chars and a result is smaller, so
+  ;; estimate: a request measured 6209 chars and a result is smaller, so
   ;; this is room for about 150; a candidate printing in a loop until the
   ;; deadline can write far more, and only the last marker pair matters
   (* 1024 1024))
@@ -126,11 +125,11 @@
   printed before the checker's own loses. Every other outcome is a failed
   check with one sentence. Never throws.
 
-  The result is advisory (review I1): the candidate runs in the same
+  The result is advisory: the candidate runs in the same
   process as the checker, so it can print a pair of its own and exit, or
   rebind the checker's vars, and a forged pass parses like a real one. It
   keeps agent code out of Jonquil until Accept; it can't vouch for what
-  the code is. Accept runs the check again in process (P9), and that's
+  the code is. Accept runs the check again in process, and that's
   the result that counts."
   [{:keys [out exit timed-out? deadline-ms]}]
   (if timed-out?
@@ -163,8 +162,8 @@
   "Ends proc and what it started, with SIGKILL and no SIGTERM first: a
   throwaway checker has nothing to shut down, and SIGTERM would run a
   candidate's shutdown hooks, which can start a process after the
-  descendants were taken (review I2, probed). The descendants are taken
-  first, since after the child dies they're reparented (probed: a sleep it
+  descendants were taken. The descendants are taken
+  first, since after the child dies they're reparented (a sleep it
   started outlived it). Returns the exit code, or nil."
   [proc]
   (let [kids (try (vec (iterator-seq (.iterator (.descendants (.toHandle ^java.lang.Process (:proc proc))))))
@@ -218,7 +217,7 @@
                   out (read-output log)
                   result (parse-result {:out out :exit exit :timed-out? timed-out? :deadline-ms deadline-ms})]
               (if (or timed-out? (not (reported? out exit)))
-                ;; review I3: the kept log is cut to the tail that was
+                ;; The kept log is cut to the tail that was
                 ;; read, all a post-mortem shows anyway
                 (do (reset! keep? true) (spit log out) (assoc result :log log))
                 result)))))

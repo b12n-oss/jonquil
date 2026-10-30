@@ -1,5 +1,5 @@
 (ns jonquil.plugin-registry
-  "The live plugin registry (plugins design, Part 2): one atom, live, of
+  "The live plugin registry: one atom, live, of
   {:plugins {id {:definition :source :file :layer}}}, and the tables the key
   handlers and the palette read from a registry value: the plugins' :edit
   commands as registry commands, their bindings per scope in plugin-id
@@ -242,12 +242,12 @@
               {:text (str label served " is still running") :error? true}
               (let [f (try
                         (let [fx @effects
-                              ;; review I3: only a :buffer tool needs the
+                              ;; only a :buffer tool needs the
                               ;; tab, so only it waits on the GTK thread
                               tab (when (contains? declared :buffer)
                                     (when-let [t (:active-tab-turn fx)] (t)))
                               ctx (effect-ctx fx declared tab)]
-                          ;; review I1: the answer is turned into a result
+                          ;; the answer is turned into a result
                           ;; here too, since realizing a lazy one runs
                           ;; plugin code, so it's under the deadline
                           (future (try (tool-answer label served ((:run row) ctx args))
@@ -266,7 +266,7 @@
           {:text (str label (or (ex-message e) (str e))) :error? true})))))
 
 (defn mcp-tools
-  "Every installed plugin's MCP tools (plugins P10b), in plugin-id then row
+  "Every installed plugin's MCP tools, in plugin-id then row
   order: {:name served :plugin id :def mcp-tool-def :call (fn [args]
   {:text :error?})}, served as plugin_<id>_<name>. opts :deadline-ms
   (default PLUGIN-TOOL-DEADLINE-MS) is a test knob."
@@ -283,7 +283,7 @@
 
 (defn watch-tools!
   "Watches registry atom a and calls (notify!) on the swapping thread when
-  a swap changes the served plugin tools' definitions (plugins P10c): a
+  a swap changes the served plugin tools' definitions: a
   tool added, removed or renamed, or a changed doc or argument. A throw
   from the comparison or from notify! is dropped, so the swap stands.
   Returns a fn that removes the watch."

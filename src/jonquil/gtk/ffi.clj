@@ -1,18 +1,17 @@
 (ns jonquil.gtk.ffi
   "Raw GTK4/GLib/GObject/pango bindings for Jonquil, lifted from a sibling
-  Jolt project's GTK FFI and extended by the P0 S2/S4 spikes and the P2
-  plan probe. The layer keeps that sibling's idioms: pointers are jolt
+  Jolt project's GTK FFI. The layer keeps that sibling's idioms: pointers are jolt
   numbers, signal handlers are :collect-safe foreign-callables because GTK
   invokes them from inside the :blocking g_application_run loop.
 
   ABI rule: no variadic C functions (the FFI layer is fixed-arity
   only). That excludes
-  g_object_set and gtk_text_buffer_create_tag — properties go through the
+  g_object_set and gtk_text_buffer_create_tag: properties go through the
   fixed-arity GValue path (g_value_init/set_string +
   g_object_set_property), fonts/colors through a CSS provider.
 
   GtkTextIter is an opaque struct the CALLER allocates and GTK fills by
-  pointer (~80 bytes on 64-bit; we allocate 128 for headroom) — no
+  pointer (~80 bytes on 64-bit; we allocate 128 for headroom), no
   by-value passing anywhere, so no C shim."
   (:require [jolt.ffi :as ffi]))
 
@@ -20,11 +19,10 @@
 (def APPLICATION-DEFAULT-FLAGS 0)
 (def CONNECT-DEFAULT 0)
 (def GTK-PHASE-CAPTURE 1)          ; GtkPropagationPhase
-;; P2.T1: gtkenums.h:1036-1039 (GTK 4.22.4, installed headers) -- the rows
-;; view's own key controller runs in the BUBBLE phase (unlike every
-;; window/editor/console key controller so far, all CAPTURE), since the
-;; brief wants it to see keys only after nothing upstream already claimed
-;; them.
+;; gtkenums.h:1036-1039 (GTK 4.22.4): the rows view's own key controller
+;; runs in the BUBBLE phase (unlike every window/editor/console key
+;; controller, all CAPTURE), so it sees keys only after nothing upstream
+;; claimed them.
 (def GTK-PHASE-BUBBLE 2)           ; GtkPropagationPhase
 (def G-TYPE-STRING (* 16 4))       ; fundamental GType: 16 << 2
 (def STYLE-PROVIDER-PRIORITY-APPLICATION 600)
@@ -91,7 +89,7 @@
 (ffi/defcfn gtk-label-new "gtk_label_new" [:string] :pointer)
 (ffi/defcfn gtk-label-set-text "gtk_label_set_text" [:pointer :string] :void)
 (ffi/defcfn gtk-label-set-xalign "gtk_label_set_xalign" [:pointer :float] :void)
-;; gtklabel.h (GTK 4.22.4, installed headers, /opt/homebrew/Cellar/gtk4):
+;; gtklabel.h (GTK 4.22.4, installed headers):
 ;; set_wrap:115-116, set_wrap_mode:120-121. Both fixed arity.
 (ffi/defcfn gtk-label-set-wrap "gtk_label_set_wrap" [:pointer :int] :void)
 (ffi/defcfn gtk-label-set-wrap-mode "gtk_label_set_wrap_mode" [:pointer :int] :void)
@@ -105,7 +103,7 @@
 ;; GtkAlign: gtkenums.h (FILL=0, START=1, END=2, CENTER=3).
 (def ALIGN-START 1)
 
-;; P2.T1: gtklabel.h:95 -- void gtk_label_set_ellipsize (GtkLabel*,
+;; gtklabel.h:95 -- void gtk_label_set_ellipsize (GtkLabel*,
 ;; PangoEllipsizeMode). Fixed arity. The inspector pane's header label
 ;; ellipsizes a long :path at its own START, per PangoEllipsizeMode
 ;; (pango/pango-layout.h:99-116: NONE=0, START=1, MIDDLE=2, END=3).
@@ -143,17 +141,16 @@
 (ffi/defcfn gtk-event-controller-set-propagation-phase "gtk_event_controller_set_propagation_phase" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-add-controller "gtk_widget_add_controller" [:pointer :pointer] :void)
 
-;; P4.T4: GtkEventControllerFocus -- gtkeventcontrollerfocus.h:46. Its own
+;; GtkEventControllerFocus -- gtkeventcontrollerfocus.h:46. Its own
 ;; "leave" signal (Gtk-4.0.gir: class EventControllerFocus, glib:signal
-;; leave -- no signal args beyond instance/user_data, confirmed against
-;; the installed gir) closes the quick-doc popover when focus moves off
-;; the editor's view. Tracks focus-within at the GtkRoot level (like
-;; gtk_root_get_focus, window.clj's do-toggle-focus!), not
-;; gtk_widget_has_focus's OS-window-active dependency (P4.T3's own probe 1
-;; finding).
+;; leave -- no signal args beyond instance/user_data) closes the
+;; quick-doc popover when focus moves off the editor's view. Tracks
+;; focus-within at the GtkRoot level (like gtk_root_get_focus,
+;; window.clj's do-toggle-focus!), not gtk_widget_has_focus's
+;; OS-window-active dependency.
 (ffi/defcfn gtk-event-controller-focus-new "gtk_event_controller_focus_new" [] :pointer)
 
-;; P3.T1 fix round 2: GtkEventControllerScroll --
+;; GtkEventControllerScroll --
 ;; gtkeventcontrollerscroll.h:61-69 (GtkEventControllerScrollFlags;
 ;; BOTH_AXES, line 68, is VERTICAL (1 << 0) | HORIZONTAL (1 << 1) = 3)
 ;; and :75 (the constructor, gtk_event_controller_scroll_new (flags)).
@@ -190,7 +187,7 @@
       (g-value-unset v)
       (finally (ffi/free v)))))
 
-;; --- S2 additions: an EDITABLE text view -----------------------------------
+;; --- an EDITABLE text view -------------------------------------------------
 ;; Signatures checked against /opt/homebrew/include/gtk-4.0 (gtk4 4.22.4).
 (def G-TYPE-INT (* 6 4))           ; fundamental GType: 6 << 2
 (def PANGO-WEIGHT-BOLD 700)
@@ -285,7 +282,7 @@
          (not (zero? (bit-and 1 (gtk-text-iter-has-tag it tag))))
          (finally (ffi/free it)))))
 
-;; --- S4: async file dialogs (GTK 4.10+) --------------------------------------
+;; --- async file dialogs (GTK 4.10+) ------------------------------------------
 (ffi/defcfn gtk-file-dialog-new "gtk_file_dialog_new" [] :pointer)
 (ffi/defcfn gtk-file-dialog-open "gtk_file_dialog_open" [:pointer :pointer :pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-file-dialog-open-finish "gtk_file_dialog_open_finish" [:pointer :pointer :pointer] :pointer)
@@ -302,8 +299,8 @@
   GError is {GQuark domain; gint code; gchar *message}
   (/opt/homebrew/include/glib-2.0/glib/gerror.h:45-50): domain at byte 0,
   code at byte 4, message pointer at byte 8. :domain lets a caller tell
-  apart error codes that collide across domains (M2 follow-up:
-  GTK_DIALOG_ERROR_DISMISSED and G_IO_ERROR_EXISTS are both 2)."
+  apart error codes that collide across domains
+  (GTK_DIALOG_ERROR_DISMISSED and G_IO_ERROR_EXISTS are both 2)."
   [finish-fn dialog result]
   (let [slot (ffi/alloc 8)]
     (try
@@ -322,7 +319,7 @@
                (finally (g-object-unref file)))))
       (finally (ffi/free slot)))))
 
-;; --- P2 probe additions ---
+;; --- GValue scalars, pango style, margins ---
 (def G-TYPE-BOOLEAN (* 5 4))
 (def PANGO-STYLE-ITALIC 2)
 (ffi/defcfn g-value-set-boolean "g_value_set_boolean" [:pointer :int] :void)
@@ -348,12 +345,12 @@
 (defn set-italic! [tag]
   (set-gvalue! tag "style" (pango-style-get-type) (fn [v] (g-value-set-enum v PANGO-STYLE-ITALIC))))
 
-;; --- P2: the console prompt marks ---
+;; --- the console prompt marks ---
 (ffi/defcfn gtk-text-buffer-create-mark "gtk_text_buffer_create_mark" [:pointer :string :pointer :int] :pointer)
 (ffi/defcfn gtk-text-buffer-move-mark "gtk_text_buffer_move_mark" [:pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-view-scroll-to-mark "gtk_text_view_scroll_to_mark" [:pointer :pointer :double :int :double :double] :void)
 
-;; --- P2.T5: reading a tag's style back ---
+;; --- reading a tag's style back ---
 ;; Signatures checked against /opt/homebrew/include/glib-2.0/gobject
 ;; (glib 2.0, gobject-2.0 installed via homebrew).
 ;; g_value_get_enum: gobject/genums.h:248 -- gint g_value_get_enum (const GValue *value)
@@ -382,9 +379,9 @@
   [tag]
   (= PANGO-STYLE-ITALIC (get-gvalue! tag "style" (pango-style-get-type) g-value-get-enum)))
 
-;; --- P2.T6 ---
+;; --- interactive insert/delete with an explicit iter ---
 ;; gtk_text_buffer_insert_interactive: gtk/gtktextbuffer.h:221-225 (gtk4
-;; 4.22.4, /opt/homebrew/Cellar/gtk4/4.22.4/include/gtk-4.0/gtk/gtktextbuffer.h).
+;; 4.22.4 headers).
 ;; Unlike gtk-text-buffer-insert-interactive-at-cursor above, this one takes
 ;; an explicit iter, so a self-test row can target a specific offset instead
 ;; of wherever the cursor happens to be.
@@ -397,7 +394,7 @@
 (ffi/defcfn gtk-text-buffer-delete-interactive "gtk_text_buffer_delete_interactive"
   [:pointer :pointer :pointer :int] :int)
 
-;; --- P2.T7: the Reset-on-Run toggle ---
+;; --- the Reset-on-Run toggle ---
 (ffi/defcfn gtk-check-button-new-with-label "gtk_check_button_new_with_label" [:string] :pointer)
 (ffi/defcfn gtk-check-button-get-active "gtk_check_button_get_active" [:pointer] :int)
 (ffi/defcfn gtk-check-button-set-active "gtk_check_button_set_active" [:pointer :int] :void)
@@ -410,17 +407,14 @@
 ;; variadic-aware declaration, and this one has fixed arguments only.
 (ffi/defcfn g-signal-emit-by-name "g_signal_emit_by_name" [:pointer :string] :void)
 
-;; --- P2.T7: status/title read-back and a self-test-driven close.
+;; --- status/title read-back and a self-test-driven close.
 ;; Signatures checked against /opt/homebrew/include/gtk-4.0/gtk/{gtklabel,
 ;; gtkwindow}.h -- gtk_label_get_text (gtklabel.h:51), gtk_window_get_title
-;; (gtkwindow.h:99) and gtk_window_close (gtkwindow.h:209). None of the
-;; three is in the brief's prescribed check-button list; they're added here
-;; because the run-output row needs to read the status label back, the
-;; save-and-open row needs to read the title back, and the window self-test
-;; needs a way to end its own run cleanly (gtk_window_close triggers the
-;; SAME close-request path a real user's close-button click would, so
-;; ending the self-test this way is also a live check that closing the
-;; window quits the app).
+;; (gtkwindow.h:99) and gtk_window_close (gtkwindow.h:209). The self-tests
+;; read the status label and the title back, and gtk_window_close ends a
+;; self-test run cleanly: it triggers the SAME close-request path a real
+;; close-button click would, so it is also a live check that closing the
+;; window quits the app.
 (ffi/defcfn gtk-label-get-text "gtk_label_get_text" [:pointer] :pointer)
 (ffi/defcfn gtk-window-get-title "gtk_window_get_title" [:pointer] :pointer)
 (ffi/defcfn gtk-window-close "gtk_window_close" [:pointer] :void)
@@ -438,27 +432,27 @@
   (let [p (gtk-window-get-title window)]
     (when-not (ffi/null? p) (ffi/ptr->string p))))
 
-;; --- P2 close ---
+;; --- dialog error codes, keyvals, application flags ---
 ;; GTK_DIALOG_ERROR_DISMISSED: /opt/homebrew/include/gtk-4.0/gtk/gtkdialogerror.h:54-56
 ;; (enum GtkDialogError { GTK_DIALOG_ERROR_FAILED, GTK_DIALOG_ERROR_CANCELLED,
-;; GTK_DIALOG_ERROR_DISMISSED } -- DISMISSED is the third value, 2). M2: the
+;; GTK_DIALOG_ERROR_DISMISSED } -- DISMISSED is the third value, 2). The
 ;; file-dialog result handlers ignore this one code silently.
 (def GTK-DIALOG-ERROR-DISMISSED 2)
 
 ;; gdk_keyval_to_lower: /opt/homebrew/include/gtk-4.0/gdk/gdkkeys.h:47
-;; (guint gdk_keyval_to_lower (guint keyval)). M4: normalises a keyval before
+;; (guint gdk_keyval_to_lower (guint keyval)). Normalises a keyval before
 ;; comparing it to a shortcut's letter, so Caps Lock (which reports the
 ;; uppercase keyval with no Shift bit set) doesn't break Ctrl+R/O/S.
 (ffi/defcfn gdk-keyval-to-lower "gdk_keyval_to_lower" [:uint] :uint)
 
 ;; G_APPLICATION_NON_UNIQUE: /opt/homebrew/include/glib-2.0/gio/gioenums.h:1572
-;; (GApplicationFlags enum, G_APPLICATION_NON_UNIQUE = 1 << 5 = 32). M6: passed
+;; (GApplicationFlags enum, G_APPLICATION_NON_UNIQUE = 1 << 5 = 32). Passed
 ;; to gtk_application_new so a second launch doesn't just forward its
 ;; "activate" into an already-running instance over D-Bus.
 (def G-APPLICATION-NON-UNIQUE (bit-shift-left 1 5))
 
 ;; G_APPLICATION_HANDLES_OPEN: /opt/homebrew/include/glib-2.0/gio/gioenums.h:1578
-;; (GApplicationFlags enum, G_APPLICATION_HANDLES_OPEN = 1 << 2 = 4). P5a: lets
+;; (GApplicationFlags enum, G_APPLICATION_HANDLES_OPEN = 1 << 2 = 4). Lets
 ;; the app emit "open" for files from Finder's Open With and Dock drops.
 (def G-APPLICATION-HANDLES-OPEN (bit-shift-left 1 2))
 
@@ -472,19 +466,17 @@
 ;; need a display, only a constructed GApplication object.
 (ffi/defcfn g-application-get-flags "g_application_get_flags" [:pointer] :uint)
 
-;; --- P2 close follow-up ---
 ;; gtk_dialog_error_quark: /opt/homebrew/include/gtk-4.0/gtk/gtkdialogerror.h:60
 ;; (GQuark gtk_dialog_error_quark (void)). GQuark is guint32
-;; (/opt/homebrew/include/glib-2.0/glib/gquark.h:38). M2 follow-up: code alone
+;; (/opt/homebrew/include/glib-2.0/glib/gquark.h:38). The code alone
 ;; isn't enough to identify GTK_DIALOG_ERROR_DISMISSED, since G_IO_ERROR_EXISTS
 ;; is ALSO 2 (/opt/homebrew/include/glib-2.0/gio/gioenums.h:543-544, third
 ;; enumerator after G_IO_ERROR_FAILED/NOT_FOUND) -- a GError's domain quark
 ;; (finish-file's :domain) must match too.
 (ffi/defcfn gtk-dialog-error-quark "gtk_dialog_error_quark" [] :uint)
 
-;; --- P3.T2 ---
-;; gtk_text_buffer_redo / gtk_text_buffer_get_can_redo: probe 5 (P3 probe
-;; findings #5), copied from the store's spike.p3-ffi. redo is undo's
+;; --- redo ---
+;; gtk_text_buffer_redo / gtk_text_buffer_get_can_redo: redo is undo's
 ;; counterpart (jonquil.gtk.ffi already binds gtk-text-buffer-undo and
 ;; gtk-text-buffer-get-can-undo); get-can-redo gates handle-key!'s
 ;; command-chord+y dispatch so redo is only invoked when there is
@@ -492,20 +484,16 @@
 (ffi/defcfn gtk-text-buffer-redo "gtk_text_buffer_redo" [:pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-can-redo "gtk_text_buffer_get_can_redo" [:pointer] :int)
 
-;; --- P3.T3 ---
-;; gtk_root_get_focus: gtk/gtkroot.h:43 (gtk4 4.22.4, checked against both
-;; /opt/homebrew/include/gtk-4.0 and /opt/homebrew/Cellar/gtk4/4.22.4's own
-;; copy). Returns the widget that currently holds keyboard focus within the
+;; --- focus, CSS classes, measuring ---
+;; gtk_root_get_focus: gtk/gtkroot.h:43 (gtk4 4.22.4). Returns the widget that currently holds keyboard focus within the
 ;; root, or NULL. F6 (jonquil.gtk.window/do-toggle-focus!) compares against
-;; THIS pointer rather than gtk_widget_has_focus -- the P3 probe (findings
-;; #1) measured has_focus reading false on a window that never became the
+;; THIS pointer rather than gtk_widget_has_focus -- probing measured has_focus reading false on a window that never became the
 ;; OS key window, which a self-test window usually isn't; grab_focus still
 ;; moves the root's own focus-widget bookkeeping regardless.
 (ffi/defcfn gtk-root-get-focus "gtk_root_get_focus" [:pointer] :pointer)
 
-;; gtk_css_provider_load_from_string / gtk_widget_add_css_class: copied
-;; from the P3 probe 4 spike (store 5ff5b70:b12n-oss/jonquil/spikes/p3/src/
-;; spike/p3_ffi.clj) -- gtkcssprovider.h:53 (GDK_AVAILABLE_IN_4_12,
+;; gtk_css_provider_load_from_string / gtk_widget_add_css_class:
+;; gtkcssprovider.h:53 (GDK_AVAILABLE_IN_4_12,
 ;; satisfied by gtk4 4.22.4; the non-deprecated alternative to the
 ;; already-bound gtk-css-provider-load-from-data) and gtkwidget.h:922. The
 ;; display getter (gdk-display-get-default) and
@@ -514,9 +502,8 @@
 (ffi/defcfn gtk-css-provider-load-from-string "gtk_css_provider_load_from_string" [:pointer :string] :void)
 (ffi/defcfn gtk-widget-add-css-class "gtk_widget_add_css_class" [:pointer :string] :void)
 
-;; gtk_widget_measure: gtkwidget.h:310-316, copied from the same probe file
-;; (p3_ffi.clj's natural-height helper below, GTK_ORIENTATION_VERTICAL = 1,
-;; for_size -1). The zoom-in-out self-test row needs a numeric proxy for
+;; gtk_widget_measure: gtkwidget.h:310-316 (natural-height helper below,
+;; GTK_ORIENTATION_VERTICAL = 1, for_size -1). The zoom-in-out self-test row needs a numeric proxy for
 ;; "did the CSS font-size actually change the layout";
 ;; gtk_widget_get_height reads the widget's last ALLOCATED size instead of
 ;; its natural size and isn't guaranteed to track a CSS-only reload the
@@ -525,8 +512,8 @@
 
 (defn natural-height
   "widget's natural height via gtk_widget_measure (GTK_ORIENTATION_VERTICAL
-  = 1, for_size -1: no cross-axis constraint) -- probe 4's numeric proxy for
-  \"did the CSS font-size actually apply\". Probe 4 measured 0 for a widget
+  = 1, for_size -1: no cross-axis constraint) -- a numeric proxy for
+  \"did the CSS font-size actually apply\". Measured 0 for a widget
   that hadn't been through a real main-loop layout pass since the CSS
   reload; callers must re-measure on a LATER tick (a poll-until, not a
   fixed sleep), never the same tick as the reload."
@@ -537,19 +524,18 @@
       (ffi/read out :int 4)
       (finally (ffi/free out)))))
 
-;; --- P3.T4 ---
+;; --- find bar entries ---
 ;; gtk_search_entry_new / gtk_entry_new: gtksearchentry.h:48, gtkentry.h:102
-;; (gtk4 4.22.4). Copied from the store's spike.p3-ffi (probe 1): the query
-;; entry is a GtkSearchEntry, the replacement entry a plain GtkEntry.
+;; (gtk4 4.22.4). The query entry is a GtkSearchEntry, the replacement
+;; entry a plain GtkEntry.
 (ffi/defcfn gtk-search-entry-new "gtk_search_entry_new" [] :pointer)
 (ffi/defcfn gtk-entry-new "gtk_entry_new" [] :pointer)
-;; gtk_entry_set_placeholder_text: gtkentry.h; the review panel's note
-;; (plugins P9b).
+;; gtk_entry_set_placeholder_text: gtkentry.h; the review panel's note.
 (ffi/defcfn gtk-entry-set-placeholder-text "gtk_entry_set_placeholder_text" [:pointer :string] :void)
 ;; gtk_editable_get_text / gtk_editable_set_text: gtkeditable.h:82, 84-85.
 ;; get_text returns a borrowed const char* (no transfer-full annotation) --
 ;; no g_free, unlike gtk_text_buffer_get_text's caller-owned copy
-;; buffer-text already frees (probe 1). Both GtkSearchEntry and GtkEntry
+;; buffer-text already frees. Both GtkSearchEntry and GtkEntry
 ;; implement GtkEditable directly.
 (ffi/defcfn gtk-editable-get-text "gtk_editable_get_text" [:pointer] :pointer)
 (ffi/defcfn gtk-editable-set-text "gtk_editable_set_text" [:pointer :string] :void)
@@ -562,7 +548,7 @@
 ;; gtk_widget_set_sensitive / get_sensitive and set_tooltip_text /
 ;; get_tooltip_text: gtkwidget.h:434-437 and 685-688 (GTK 4.22.4). The
 ;; Reset on Run checkbox is insensitive, with a tooltip saying why, for an
-;; attach runtime (cljd plan P2.T4). Measured on jolt v0.8.13: a nil :string
+;; attach runtime. Measured on jolt v0.8.13: a nil :string
 ;; argument reaches GTK as NULL, which clears the tooltip (get_tooltip_text
 ;; then answers NULL and has-tooltip reads 0).
 (ffi/defcfn gtk-widget-set-sensitive "gtk_widget_set_sensitive" [:pointer :int] :void)
@@ -576,41 +562,36 @@
   [widget]
   (let [p (gtk-widget-get-tooltip-text* widget)]
     (when-not (ffi/null? p) (ffi/ptr->string p))))
-;; gtk_text_view_scroll_to_iter: gtktextview.h:197-202. Copied from the
-;; store's spike.p3-ffi (probe 2): scrolls the current match into view.
+
+;; gtk_text_view_scroll_to_iter: gtktextview.h:197-202. Scrolls the
+;; current match into view.
 (ffi/defcfn gtk-text-view-scroll-to-iter "gtk_text_view_scroll_to_iter"
   [:pointer :pointer :double :int :double :double] :int)
 
 (defn editable-text
   "editable's text (a GtkSearchEntry or GtkEntry). nil-safe borrowed-string
   read, editable-get-text's counterpart to buffer-text/label-text/
-  window-title above -- no g_free (probe 1)."
+  window-title above -- no g_free."
   [editable]
   (let [p (gtk-editable-get-text editable)]
     (when-not (ffi/null? p) (ffi/ptr->string p))))
 
 ;; gtk_text_buffer_remove_tag: gtktextbuffer.h:363-366 (same signature shape
-;; as the already-bound gtk_text_buffer_apply_tag above). Not in the
-;; brief's enumerated P3.T4 list or in spike.p3-ffi -- added here (this
-;; file's convention: any binding you add yourself cites its header line)
-;; because
-;; gtk_text_buffer_remove_all_tags would strip the editor's own syntax tags
+;; as the already-bound gtk_text_buffer_apply_tag above). Added because gtk_text_buffer_remove_all_tags would strip the editor's own syntax tags
 ;; too wherever a match happens to overlap them; this removes only the
 ;; search-match tag, so recomputing/closing never touches paint/syntax
 ;; highlighting.
 (ffi/defcfn gtk-text-buffer-remove-tag "gtk_text_buffer_remove_tag"
   [:pointer :pointer :pointer :pointer] :void)
 
-;; gtk_widget_get_root: gtkwidget.h:463. Also not in the brief's enumerated
-;; list; added so the find bar's own handle-key! can read gtk_root_get_focus
-;; (already bound, P3.T3) from a widget it owns, without needing the
-;; window handle make-find-bar's single-arg interface doesn't take -- the
-;; only way to tell "Return in the query" apart from "Return in the
-;; replacement entry" (probe 1: neither entry's own \"activate\" signal is
+;; gtk_widget_get_root: gtkwidget.h:463. Lets the find bar's own handle-key!
+;; read gtk_root_get_focus (bound above) from a widget it owns, without
+;; needing the window handle make-find-bar's single-arg interface doesn't
+;; take -- the only way to tell "Return in the query" apart from "Return in
+;; the replacement entry" (neither entry's own \"activate\" signal is
 ;; relied on).
 (ffi/defcfn gtk-widget-get-root "gtk_widget_get_root" [:pointer] :pointer)
 
-;; --- P3.T4 fix round 1 ---
 ;; gtk_editable_get_selection_bounds: gtkeditable.h:101-103. The ENTRY's own
 ;; selection (distinct from gtk_text_buffer_get_selection_bounds above,
 ;; which reads the EDITOR's buffer selection) -- both out-params come back
@@ -634,8 +615,7 @@
 
 ;; gtk_editable_get_delegate: gtkeditable.h:181. GtkSearchEntry and GtkEntry
 ;; both delegate their GtkEditable implementation to an internal GtkText --
-;; confirmed empirically against this gtk4 build with a throwaway probe (not
-;; committed): gtk_editable_get_delegate returned a non-null pointer for
+;; confirmed empirically against this gtk4 build: gtk_editable_get_delegate returned a non-null pointer for
 ;; both a fresh GtkSearchEntry and a fresh GtkEntry, and connecting
 ;; "preedit-changed" on each returned delegate (GtkText's own signal --
 ;; Gtk-4.0.gir, gtk/gtktext.c:1257, same (instance, gchar* preedit,
@@ -644,10 +624,9 @@
 ;; critical warning.
 (ffi/defcfn gtk-editable-get-delegate "gtk_editable_get_delegate" [:pointer] :pointer)
 
-;; --- P3.T5 ---
+;; --- line/column ---
 ;; gtk_text_iter_get_line / gtk_text_iter_get_line_offset: gtktextiter.h:119,
-;; 121 (gtk4 4.22.4). Both 0-based; the status bar adds 1 for display
-;; (probe 6, spike.p3-ffi's own line-col).
+;; 121 (gtk4 4.22.4). Both 0-based; the status bar adds 1 for display.
 (ffi/defcfn gtk-text-iter-get-line "gtk_text_iter_get_line" [:pointer] :int)
 (ffi/defcfn gtk-text-iter-get-line-offset "gtk_text_iter_get_line_offset" [:pointer] :int)
 
@@ -661,17 +640,16 @@
       [(gtk-text-iter-get-line it) (gtk-text-iter-get-line-offset it)]
       (finally (ffi/free it)))))
 
-;; gtk_widget_set_hexpand: gtkwidget.h:556. Not in the brief's enumerated
-;; binding list; added so the status bar's P2 label can claim the box's
-;; extra horizontal space, pushing the new Ln/Col label to the right edge
+;; gtk_widget_set_hexpand: gtkwidget.h:556. Lets the status bar's message
+;; label claim the box's extra horizontal space, pushing the Ln/Col label to
+;; the right edge
 ;; -- GTK4's GtkBox has no per-child "expand" packing option of its own, a
 ;; child's own hexpand is what it honours.
 (ffi/defcfn gtk-widget-set-hexpand "gtk_widget_set_hexpand" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-set-margin-start "gtk_widget_set_margin_start" [:pointer :int] :void)
 (ffi/defcfn gtk-widget-set-margin-end "gtk_widget_set_margin_end" [:pointer :int] :void)
 
-;; g_object_new_with_properties: gobject/gobject.h:436-439 (probe 3;
-;; jonquil.gtk.ffi didn't have this yet, spike.p3-ffi did). The fixed-arity
+;; g_object_new_with_properties: gobject/gobject.h:436-439. The fixed-arity
 ;; GtkAlertDialog constructor -- gtk_alert_dialog_new is variadic (printf-
 ;; style) and is never bound (the no-variadic ABI rule in the ns
 ;; docstring).
@@ -712,21 +690,18 @@
           {:index idx}))
       (finally (ffi/free slot)))))
 
-;; --- P3.T4 fix round 3 ---
 ;; gtk_widget_is_ancestor: gtkwidget.h:609-610 (gtk4 4.22.4, GDK_AVAILABLE_IN_ALL,
 ;; not deprecated -- gtk_widget_translate_coordinates right after it is the
 ;; deprecated one). True when widget is somewhere inside ancestor, through
 ;; any number of intermediate containers. Used to test whether the current
 ;; focus widget is anywhere inside the find bar's own box, WITHOUT needing
 ;; to know that gtk_root_get_focus actually returns an entry's internal
-;; GtkText delegate rather than the entry itself (fix round 2's own
-;; finding) -- measured with a throwaway probe (not committed):
+;; GtkText delegate rather than the entry itself -- measured:
 ;; gtk_widget_is_ancestor(gtk_root_get_focus(win), box) read true with
 ;; focus grabbed on the query entry and on the replacement entry, false
 ;; with focus grabbed on the editor and on the console.
 (ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)
 
-;; --- P3 fix wave ---
 ;; gtk_text_buffer_delete_selection: gtktextbuffer.h:476-479 (gtk4 4.22.4,
 ;; GDK_AVAILABLE_IN_ALL). Fixed arity: (buffer, interactive, default_editable)
 ;; -> gboolean. GtkTextView's own gtk_text_view_commit_text calls exactly this
@@ -736,14 +711,12 @@
 (ffi/defcfn gtk-text-buffer-delete-selection "gtk_text_buffer_delete_selection"
   [:pointer :int :int] :int)
 
-;; --- TH.T4 ---
-;; gtk_settings_get_default: gtksettings.h:39 (gtk4 4.22.4). Probe: store
-;; 808973e:b12n-oss/jonquil/spikes/themes/probes/probe.clj (prefer-dark
-;; read/write).
+;; --- theme: settings and colour read-back ---
+;; gtk_settings_get_default: gtksettings.h:39 (gtk4 4.22.4); prefer-dark
+;; read/write.
 (ffi/defcfn gtk-settings-get-default "gtk_settings_get_default" [] :pointer)
 
-;; gdk_rgba_get_type: gdkrgba.h:46. Probe: rgba.clj (reading a tag's
-;; colour back).
+;; gdk_rgba_get_type: gdkrgba.h:46 (reading a tag's colour back).
 (ffi/defcfn gdk-rgba-get-type "gdk_rgba_get_type" [] :size_t)
 
 ;; g_value_get_boxed: gboxed.h:90.
@@ -754,9 +727,8 @@
 
 (defn rgba-property-hex
   "obj's prop (a *-rgba GdkRGBA property, e.g. \"foreground-rgba\") read
-  back as \"#rrggbb\", or nil when the property comes back unset (probe
-  rgba.clj): a GdkRGBA of four floats at byte offsets 0, 4, 8 (and 12 for
-  alpha), each channel (Math/round (* 255.0 f)). Reuses get-gvalue! (P2.T5)
+  back as \"#rrggbb\", or nil when the property comes back unset: a GdkRGBA of four floats at byte offsets 0, 4, 8 (and 12 for
+  alpha), each channel (Math/round (* 255.0 f)). Reuses get-gvalue!
   and the already-bound g-object-get-property -- the getter itself reads
   the boxed pointer's floats and formats the hex string before
   get-gvalue!'s own g-value-unset runs, since unset can free the boxed
@@ -770,12 +742,12 @@
                        (format "#%02x%02x%02x" (ch 0) (ch 4) (ch 8))))))))
 
 (defn get-bool-property
-  "obj's boolean prop read back as a Clojure boolean (probe probe.clj's
-  read-bool), reusing get-gvalue! the same way rgba-property-hex does."
+  "obj's boolean prop read back as a Clojure boolean, reusing get-gvalue!
+  the same way rgba-property-hex does."
   [obj prop]
   (not (zero? (get-gvalue! obj prop G-TYPE-BOOLEAN g-value-get-boolean))))
 
-;; C3: an application "quit" action. GTK's macOS delegate
+;; An application "quit" action. GTK's macOS delegate
 ;; (gtk/gtkapplication-quartz.c:80-95 at the 4.22.4 tag) answers
 ;; applicationShouldTerminate: -- Dock Quit, logout, shutdown, the Quit
 ;; AppleEvent -- with NSTerminateNow unless the app has a "quit" action, in
@@ -792,7 +764,7 @@
 (ffi/defcfn g-action-group-activate-action "g_action_group_activate_action"
   [:pointer :string :pointer] :void)
 
-;; --- fix wave item 2: gtk-interface-color-scheme replaces the deprecated
+;; --- gtk-interface-color-scheme replaces the deprecated
 ;; gtk-application-prefer-dark-theme boolean. Deprecated since GTK 4.20;
 ;; from 4.23.1 each set logs a g_warning ("Use GtkSettings:gtk-interface-
 ;; color-scheme instead"). gtk_interface_color_scheme_get_type:
@@ -801,15 +773,13 @@
 ;; GtkInterfaceColorScheme (gtkenums.h:1998-2020, "Since: 4.20"):
 ;; UNSUPPORTED=0, DEFAULT=1, DARK=2, LIGHT=3.
 ;;
-;; Probe (2026-09-26, throwaway, not committed): gtk_init then GValue
-;; set/get through this GType round-tripped DARK(2) and LIGHT(3) exactly.
-;; A real window's toolbar (unthemed Adwaita default CSS, per the spec's
-;; "no per-theme CSS for buttons/toolbar") sampled identically under both
+;; Probe (2026-09-26): gtk_init then GValue set/get through this GType
+;; round-tripped DARK(2) and LIGHT(3) exactly. A real window's toolbar
+;; (unthemed Adwaita default CSS) sampled identically under both
 ;; mechanisms: rgb(53,53,53) under gtk-application-prefer-dark-theme=true
 ;; AND under gtk-interface-color-scheme=DARK(2); rgb(246,245,244) under
 ;; prefer-dark-theme=false/DEFAULT-baseline AND under explicit LIGHT(3).
-;; All three checks the brief asked for came back yes, so apply-window-
-;; theme! switches to the new property.
+;; So apply-window-theme! uses the new property.
 (ffi/defcfn gtk-interface-color-scheme-get-type "gtk_interface_color_scheme_get_type" [] :size_t)
 (def GTK-INTERFACE-COLOR-SCHEME-DARK 2)
 (def GTK-INTERFACE-COLOR-SCHEME-LIGHT 3)
@@ -817,8 +787,7 @@
 (defn set-color-scheme!
   "Sets GtkSettings' gtk-interface-color-scheme to DARK when dark? is
   truthy, else explicit LIGHT (never DEFAULT, which would track the OS
-  appearance instead of Jonquil's own per-theme choice -- the same
-  explicit-either-way behaviour the old boolean had)."
+  appearance instead of Jonquil's own per-theme choice)."
   [settings dark?]
   (set-gvalue! settings "gtk-interface-color-scheme" (gtk-interface-color-scheme-get-type)
                (fn [v] (g-value-set-enum v (if dark?
@@ -826,23 +795,21 @@
                                              GTK-INTERFACE-COLOR-SCHEME-LIGHT)))))
 
 (defn color-scheme-dark?
-  "True when gtk-interface-color-scheme reads back DARK -- the self-test
-  row's replacement for get-bool-property on the deprecated boolean."
+  "True when gtk-interface-color-scheme reads back DARK."
   [settings]
   (= GTK-INTERFACE-COLOR-SCHEME-DARK
      (get-gvalue! settings "gtk-interface-color-scheme" (gtk-interface-color-scheme-get-type)
                   g-value-get-enum)))
 
-;; --- fix wave item 7: the CSS rows read the provider's own serialisation.
+;; --- the provider's own serialisation, for the CSS self-test rows.
 ;; gtk_css_provider_to_string:
 ;; gtkcssprovider.h:46 (gtk4 4.22.4, GDK_AVAILABLE_IN_ALL), fixed arity
 ;; (provider) -> a newly allocated char* the caller frees -- buffer-text's
 ;; own pattern (:pointer, then ptr->string, then g_free).
 (ffi/defcfn gtk-css-provider-to-string "gtk_css_provider_to_string" [:pointer] :pointer)
 
-
 (defn css-provider-string
-  "provider's current stylesheet as a Clojure string. Probe (2026-09-26):
+  "provider's current stylesheet as a Clojure string. Measured 2026-09-26:
   GTK's own serialisation normalises colours (#000000 -> rgb(0,0,0)) and
   re-orders/re-indents the declarations, but keeps \"font-size: <n>px;\"
   verbatim."
@@ -850,7 +817,7 @@
   (let [p (gtk-css-provider-to-string provider)]
     (try (ffi/ptr->string p) (finally (g-free p)))))
 
-;; --- fix wave item 1: verify (never assume) that the find bar's
+;; --- tag priority: verify (never assume) that the find bar's
 ;; search-match tag wins tag-table priority over a syntax tag on the same
 ;; range. gtk_text_tag_set_priority: gtktexttag.h:100-101 (gtk4 4.22.4,
 ;; GDK_AVAILABLE_IN_ALL), fixed arity (tag, priority) -> void. Its getter
@@ -860,24 +827,22 @@
 ;; conflicting property, e.g. two tags both setting foreground, is decided
 ;; by whichever overlapping tag has the higher priority), so comparing the
 ;; two tags' priorities is a direct, non-visual way to confirm which one's
-;; foreground actually renders. Bound so the fix has a fallback ready;
-;; whether set-priority is actually called is decided by the measurement
-;; (see find_bar.clj and the theme-keeps-find-highlight self-test row).
+;; foreground actually renders. See find_bar.clj and the
+;; theme-keeps-find-highlight self-test row for whether set-priority is
+;; called.
 (ffi/defcfn gtk-text-tag-get-priority "gtk_text_tag_get_priority" [:pointer] :int)
 (ffi/defcfn gtk-text-tag-set-priority "gtk_text_tag_set_priority" [:pointer :int] :void)
 
-;; --- P4.T3 ---
+;; --- popovers and coordinates ---
 ;; Header lines checked against /opt/homebrew/include/gtk-4.0/gtk (gtk4
-;; 4.22.4), same copy the P4 probes cite (spikes/p4/p4_ffi.clj) -- re-verified
-;; directly against the header files on this machine, not just copied.
+;; 4.22.4).
 ;; gtk_widget_set_parent: gtkwidget.h:457 -- void gtk_widget_set_parent
 ;; (GtkWidget*, GtkWidget *parent). Fixed arity.
 (ffi/defcfn gtk-widget-set-parent "gtk_widget_set_parent" [:pointer :pointer] :void)
 ;; gtk_widget_get_parent: gtkwidget.h:460 -- GtkWidget* (GtkWidget*).
 ;; gtk_widget_unparent: gtkwidget.h:272 -- void (GtkWidget*). Both fixed
-;; arity. Live measurement (2026-09-26, this task, not in any P4 probe):
-;; parenting a popover DIRECTLY to a GtkTextView (the probes' own pattern,
-;; never exercised past a hard System/exit) hangs the whole process the
+;; arity. Measured 2026-09-26:
+;; parenting a popover DIRECTLY to a GtkTextView hangs the whole process the
 ;; first time the window is actually destroyed -- sample'd main-thread
 ;; stack sits at 100% CPU in gtk_text_view_dispose -> gtk_text_view_remove
 ;; -> g_log_structured_standard, an infinite loop: GtkTextView's own
@@ -941,7 +906,7 @@
 ;; GtkTextWindowType: gtktextview.h:57-58 (WIDGET=1, TEXT=2, per the enum's
 ;; leading comment block at line 45).
 (def TEXT-WINDOW-TEXT 2)
-;; P2.T1: the inspector pane's double-click handler goes the OTHER
+;; The inspector pane's double-click handler goes the OTHER
 ;; direction from caret-window-rect above -- a GtkGestureClick's own event
 ;; coordinates are in the rows view's WIDGET window (gtkgestureclick.c's
 ;; own doc comment: "in widget allocation coordinates"), translated to
@@ -949,11 +914,11 @@
 (def TEXT-WINDOW-WIDGET 1)
 
 (defn caret-window-rect
-  "The insert mark's rectangle in view's TEXT-window coordinates (P4 probe
-  2): gtk_text_view_get_iter_location on the buffer's insert-mark iter
+  "The insert mark's rectangle in view's TEXT-window coordinates:
+  gtk_text_view_get_iter_location on the buffer's insert-mark iter
   (buffer coords), then gtk_text_view_buffer_to_window_coords with
   GTK_TEXT_WINDOW_TEXT. Returns [x y w h]. GdkRectangle is four ints (x y w
-  h) -- the same 16-byte layout the P4 probe's rect-alloc/rect-read use."
+  h), 16 bytes."
   [view]
   (let [buf (gtk-text-view-get-buffer view)
         it (ffi/alloc ITER-BYTES)
@@ -1001,8 +966,8 @@
       (finally (ffi/free it) (ffi/free loc)))))
 
 (defn popover-pointing-to
-  "Reads back popover's own pointing-to rectangle (P4 probe 2:
-  gtk_popover_get_pointing_to) as [x y w h]."
+  "Reads back popover's own pointing-to rectangle
+  (gtk_popover_get_pointing_to) as [x y w h]."
   [popover]
   (let [r (ffi/alloc 16)]
     (try
@@ -1010,10 +975,8 @@
       [(ffi/read r :int 0) (ffi/read r :int 4) (ffi/read r :int 8) (ffi/read r :int 12)]
       (finally (ffi/free r)))))
 
-;; --- GtkListBox (P4.T5: completion's candidate list) -------------------------
-;; gtklistbox.h (GTK 4.22.4, installed headers -- same citation style as the
-;; popover section above, re-verified directly against the header files on
-;; this machine): new:261, append:174 ("Append a widget to the list", per
+;; --- GtkListBox (completion's candidate list) --------------------------------
+;; gtklistbox.h (GTK 4.22.4, installed headers): new:261, append:174 ("Append a widget to the list", per
 ;; the Gtk-4.0.gir doc on gtklistbox.c:3028 -- GTK4 wraps a plain GtkWidget
 ;; child in its own GtkListBoxRow automatically, so nothing here ever binds
 ;; gtk_list_box_row_new/gtk_list_box_prepend/insert), remove_all:184
@@ -1034,10 +997,9 @@
 ;; nothing here ever selects by click, only gtk-list-box-select-row.
 (def SELECTION-MODE-BROWSE 2)
 
-;; --- P4.T7: context menus (GMenu/GSimpleActionGroup) and rename -------------
-;; Header citations re-verified directly against /opt/homebrew/include
-;; (gtk4 4.22.4, glib as installed by homebrew, 2026-09-26) -- the same
-;; lines the P4 probe (spikes/p4/p4_ffi.clj) cites.
+;; --- context menus (GMenu/GSimpleActionGroup) and rename --------------------
+;; Header citations checked against /opt/homebrew/include
+;; (gtk4 4.22.4, glib as installed by homebrew, 2026-09-26).
 ;;
 ;; glib-2.0/gio/gmenu.h:47 GMenu *g_menu_new (void); gmenu.h:79-81 void
 ;; g_menu_append (GMenu*, const gchar *label, const gchar
@@ -1047,8 +1009,8 @@
 ;; glib-2.0/gio/gsimpleactiongroup.h:70 GSimpleActionGroup *
 ;; g_simple_action_group_new (void). Fixed arity. GSimpleActionGroup
 ;; implements both GActionMap and GActionGroup, so the existing
-;; g-action-map-add-action/g-action-group-activate-action bindings (C3's
-;; own citation, above) already work on it unchanged -- no new binding
+;; g-action-map-add-action/g-action-group-activate-action bindings (the
+;; quit-action citation above) already work on it unchanged -- no new binding
 ;; needed for either.
 (ffi/defcfn g-simple-action-group-new "g_simple_action_group_new" [] :pointer)
 ;; gtk-4.0/gtk/gtktextview.h:429-430 void gtk_text_view_set_extra_menu
@@ -1060,20 +1022,19 @@
 ;; gtk_widget_activate_action (gtkwidget.h:869-872) is variadic (a
 ;; trailing `...` format-string argument) and is never bound here --
 ;; every activation goes through g_action_group_activate_action instead
-;; (already bound above, C3's own citation), called directly on the
-;; GSimpleActionGroup with its own unprefixed action name, which probe 3
-;; measured equivalent to gtk_widget_activate_action_variant on the
+;; (already bound above), called directly on the
+;; GSimpleActionGroup with its own unprefixed action name, which measured
+;; equivalent to gtk_widget_activate_action_variant on the
 ;; prefixed "p4.<name>" (gtkwidget.h:874-876, also fixed arity, but not
 ;; needed here since the direct GActionGroup call already covers it).
 (ffi/defcfn gtk-widget-insert-action-group "gtk_widget_insert_action_group" [:pointer :string :pointer] :void)
 
-;; --- fix wave item 3 (I5): the console TextView switches from
-;; GTK_WRAP_NONE to GTK_WRAP_WORD_CHAR (phase-review-report.md's own
-;; diagnosis) so a wide line never opens a horizontal scroll range for
+;; --- the console TextView uses GTK_WRAP_WORD_CHAR rather than
+;; GTK_WRAP_NONE, so a wide line never opens a horizontal scroll range for
 ;; scroll-to-end!'s xalign 0.0 to shift right into.
 ;;
 ;; gtk_text_view_set_wrap_mode: gtktextview.h:340-341 (gtk4 4.22.4,
-;; installed headers, /opt/homebrew/Cellar/gtk4/4.22.4/include/gtk-4.0) --
+;; installed headers):
 ;; void gtk_text_view_set_wrap_mode (GtkTextView*, GtkWrapMode). Fixed
 ;; arity.
 (ffi/defcfn gtk-text-view-set-wrap-mode "gtk_text_view_set_wrap_mode" [:pointer :int] :void)
@@ -1087,7 +1048,7 @@
 ;; *gtk_scrollable_get_hadjustment (GtkScrollable*). GtkTextView implements
 ;; GtkScrollable directly, so the view itself is a valid argument.
 ;; gtk_adjustment_get_value: gtkadjustment.h:82 -- double
-;; gtk_adjustment_get_value (GtkAdjustment*). Both fixed arity. Added for
+;; gtk_adjustment_get_value (GtkAdjustment*). Both fixed arity. Used by
 ;; the console-wraps-long-lines self-test row: with wrapping on, the
 ;; view's horizontal adjustment value must stay 0 even after a line wider
 ;; than the view is appended.
@@ -1095,16 +1056,15 @@
 (ffi/defcfn gtk-scrollable-get-vadjustment "gtk_scrollable_get_vadjustment" [:pointer] :pointer)
 (ffi/defcfn gtk-adjustment-get-value "gtk_adjustment_get_value" [:pointer] :double)
 ;; gtk_adjustment_set_value: gtkadjustment.h:84-85 -- void
-;; gtk_adjustment_set_value (GtkAdjustment*, double). Fixed arity. Added
-;; for the source panel's user-scroll-wins self-test row (P3.T1 fix round
-;; 2): it sets the vadjustment directly, the same effect a real scroll
-;; has, without driving an actual GdkScroll event.
+;; gtk_adjustment_set_value (GtkAdjustment*, double). Fixed arity. Used
+;; by the source panel's user-scroll-wins self-test row: it sets the
+;; vadjustment directly, the same effect a real scroll has, without
+;; driving an actual GdkScroll event.
 (ffi/defcfn gtk-adjustment-set-value "gtk_adjustment_set_value" [:pointer :double] :void)
 
-;; --- P2.T1: the inspector pane -------------------------------------------
-;; Header lines re-verified directly against /opt/homebrew/include (gtk4
-;; 4.22.4, pango as installed by homebrew), the same citation style as the
-;; P4 section above.
+;; --- the inspector pane --------------------------------------------------
+;; Header lines checked against /opt/homebrew/include (gtk4
+;; 4.22.4, pango as installed by homebrew).
 ;;
 ;; gtkwidget.h:648-649 -- PangoLayout *gtk_widget_create_pango_layout
 ;; (GtkWidget*, const char *text). Fixed arity. measure (below) uses this
@@ -1117,8 +1077,8 @@
 (ffi/defcfn pango-layout-get-pixel-size "pango_layout_get_pixel_size" [:pointer :pointer :pointer] :void)
 
 ;; gtkgestureclick.h:44 -- GtkGesture *gtk_gesture_click_new (void). Fixed
-;; arity. Its own "pressed" signal (gtkgestureclick.c's g_signal_new, this
-;; task's own live read of the source: (GtkGestureClick*, gint n_press,
+;; arity. Its own "pressed" signal (gtkgestureclick.c's g_signal_new:
+;; (GtkGestureClick*, gint n_press,
 ;; gdouble x, gdouble y, gpointer) -> void) is wired directly by
 ;; jonquil.gtk.inspector-pane, no binding needed for a signal.
 (ffi/defcfn gtk-gesture-click-new "gtk_gesture_click_new" [] :pointer)
@@ -1140,10 +1100,9 @@
 ;; (GtkPaned*, gboolean) / void gtk_paned_set_shrink_end_child (GtkPaned*,
 ;; gboolean). Both fixed arity; jonquil.gtk.ffi already binds
 ;; gtk-paned-new/set-start-child/set-end-child/set-position but not
-;; these -- for whichever caller wants the inspector pane's own end of a
+;; these -- for a caller that wants the inspector pane's own end of a
 ;; paned split to keep a fixed width instead of growing/shrinking with the
-;; window (P2.T1's brief lists both explicitly; neither is called from
-;; this file itself).
+;; window.
 (ffi/defcfn gtk-paned-set-resize-end-child "gtk_paned_set_resize_end_child" [:pointer :int] :void)
 (ffi/defcfn gtk-paned-set-shrink-end-child "gtk_paned_set_shrink_end_child" [:pointer :int] :void)
 
@@ -1154,10 +1113,10 @@
 ;; outside the main Jonquil window.
 (ffi/defcfn gtk-window-new "gtk_window_new" [] :pointer)
 
-;; --- tabs (tabs plan P2.T1) ---------------------------------------------------
-;; Header citations are under /opt/homebrew/include/gtk-4.0/gtk (gtk4 4.22.4);
-;; every call here was exercised in the tabs spike (switch-page and
-;; page-removed are [:pointer :pointer :uint :pointer] :void).
+;; --- tabs --------------------------------------------------------------------
+;; Header citations are under /opt/homebrew/include/gtk-4.0/gtk (gtk4 4.22.4).
+;; The switch-page and page-removed signal callbacks are
+;; [:pointer :pointer :uint :pointer] :void.
 
 ;; gtknotebook.h:70 GtkWidget * gtk_notebook_new (void)
 (ffi/defcfn gtk-notebook-new "gtk_notebook_new" [] :pointer)
@@ -1199,10 +1158,9 @@
 ;; popover alive across dispose-popovers!, whose unparent drops the last ref.
 (ffi/defcfn g-object-ref "g_object_ref" [:pointer] :pointer)
 
-;; --- file tree (file-tree plan P2.T1) ------------------------------------------
+;; --- file tree ---------------------------------------------------------------
 ;; Header citations under /opt/homebrew/include/gtk-4.0/gtk and glib-2.0/gio
-;; (gtk4 4.22.4); the toggle button, folder dialog and paned position were
-;; exercised in the file-tree spike (spikes/file-tree/ft_probe.clj).
+;; (gtk4 4.22.4).
 
 ;; gtklistbox.h:148 int gtk_list_box_row_get_index (GtkListBoxRow*)
 (ffi/defcfn gtk-list-box-row-get-index "gtk_list_box_row_get_index" [:pointer] :int)
@@ -1243,7 +1201,7 @@
 ;; gtk/gtklistbox.h:192 GtkListBoxRow* gtk_list_box_get_row_at_y (GtkListBox*, gint)
 (ffi/defcfn gtk-list-box-get-row-at-y "gtk_list_box_get_row_at_y" [:pointer :int] :pointer)
 
-;; --- SESSION: reopen after the first frame ---
+;; --- reopen after the first frame ---
 ;; gtk_widget_get_frame_clock is NULL until the widget is realized, so it's
 ;; read after gtk_window_present. Its "after-paint" signal is how startup
 ;; tells the window's first frame has been drawn.

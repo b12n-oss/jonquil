@@ -1,12 +1,12 @@
 (ns jonquil.plugin-hooks
-  "Plugin hooks (plugins design, Part 2, step P6): :after-save, :after-run
+  "Plugin hooks: :after-save, :after-run
   and :on-error. A hook is (fn [ctx event] -> event'); the hooks at a point
   run in plugin-id order on one worker, each getting the event the last
   returned (a non-map return leaves it as it was), so none can change the
   save or Run it watches. One chain per point at a time: an event arriving
   while the last chain at its point is still running waits its turn on
   that chain's worker, up to a bound past which it's skipped, with a line
-  saying so. :before-run (step P6b) is different: the window waits for
+  saying so. :before-run is different: the window waits for
   it before a Run, up to a budget, and it may stop the Run, so its ctx has
   no effects. Pure apart from run-hooks! and before-run!, which read the
   live registry and its effects."
@@ -143,11 +143,11 @@
       (try-point :after-run #(run-event source result)))
     nil))
 
-;; --- :before-run (P6b) -------------------------------------------------------
+;; --- :before-run -------------------------------------------------------
 
 (def ^:private BEFORE-RUN-MS
   ;; estimate: about where a delay after a key press starts to show;
-  ;; ROADMAP D2 measured a REPL line at 8 ms out of process, 0.3 ms in
+  ;; a REPL line measured 8 ms out of process, 0.3 ms in
   100)
 
 (def ^:private NO-EFFECTS
@@ -163,7 +163,7 @@
   (reduce (fn [e {:keys [plugin f]}]
             (reset! current plugin)
             ;; the answer's shape is checked inside the try too: an odd map
-            ;; (a sorted one with string keys) throws on contains? (review I1)
+            ;; (a sorted one with string keys) throws on contains?
             (let [answer (try (let [e' (f ctx e)]
                                 (cond
                                   (not (and (map? e') (contains? e' :abort))) [:next (if (map? e') e' e)]
@@ -211,7 +211,7 @@
                       (reset! before-busy false)
                       (throw e)))
                 ;; a chain that failed outright is reported, never thrown
-                ;; onto the GTK thread (review I1)
+                ;; onto the GTK thread
                 r (try (deref f BEFORE-RUN-MS ::timeout)
                        (catch Throwable e
                          (let [c (or (ex-cause e) e)]

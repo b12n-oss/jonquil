@@ -27,7 +27,7 @@
   30)
 
 (def ^:private SCROLL-SETTLE-DEADLINE-MS
-  ;; MEASURED (P3.T1 fix round 1, dev/demo_shots.clj's clj-source scene):
+  ;; MEASURED (dev/demo_shots.clj's clj-source scene):
   ;; place-caret!'s first gtk_text_view_scroll_to_mark, right after a
   ;; fresh set-text!, can settle on a stale vadjustment well short of its
   ;; target and never correct itself -- jumping to clojure.string/join in
@@ -87,7 +87,7 @@
   "Stops any re-scroll settling in flight from touching the view again:
   the shared scroll-settle-cb (make-pane) checks cancelled?-atom before
   every re-scroll and, once true, stops at once (G_SOURCE_REMOVE) without
-  re-scrolling again. Public (final review finding #1): jonquil.gtk.
+  re-scrolling again. Public: jonquil.gtk.
   window's hide-right-panel! calls this too, when it hides the :source
   root, so a hidden panel's settle timer stops touching the view behind
   it -- close-source-panel! reaches the same cancellation by calling
@@ -129,8 +129,7 @@
   the way down, then keeps re-scrolling on a shared timeout (arm-scroll-
   settle!) until the caret is actually visible or SCROLL-SETTLE-DEADLINE-MS
   passes. scroll_to_mark, not scroll_to_iter: the text was usually just
-  loaded, and GTK computes line heights later -- MEASURED (P3.T1 fix round
-  1): the very first call, right after a fresh set-text!, can settle on a
+  loaded, and GTK computes line heights later -- MEASURED: the very first call, right after a fresh set-text!, can settle on a
   stale vadjustment well short of its target and never self-correct, so a
   single call isn't enough; see SCROLL-SETTLE-DEADLINE-MS's own comment."
   [pane offset]
@@ -247,7 +246,7 @@
   editor is read-only and carries the jonquil-code CSS class, so the
   window's zoom reaches it.
 
-  Final review finding #1: the panel editor view's own \"destroy\" signal
+  The panel editor view's own \"destroy\" signal
   is connected ONCE, here, to a callable that cancels scroll-settle (sets
   scroll-cancelled? true) so scroll-settle-cb's next tick sees it and
   removes itself (G_SOURCE_REMOVE) before touching the now-gone view --
@@ -327,9 +326,9 @@
     (g/gtk-widget-set-size-request root WIDTH-REQUEST -1)
     ;; A person's own scroll or caret move over the panel cancels any
     ;; re-scroll settling in flight (cancel-scroll-settle!), so arm-
-    ;; scroll-settle! never fights them -- the "old single-call behaviour
-    ;; never fought the user" rule the re-scroll timeout would otherwise
-    ;; break. on-cursor-moved! is editor/make-editor's own existing hook
+    ;; scroll-settle! never fights them (a single call never did, so the
+    ;; re-scroll timeout must not break that). on-cursor-moved! is
+    ;; editor/make-editor's own existing hook
     ;; (fires on the buffer's notify::cursor-position, which a key press
     ;; or a click in a read-only view both still trigger): the smallest
     ;; way to cover "the person moves the caret themselves" without a
@@ -339,7 +338,7 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/gtk-widget-add-controller (:view ed) scroll-ctl)
     (editor/on-cursor-moved! ed (fn [_line-col] (cancel-scroll-settle! scroll-cancelled?)))
-    ;; Final review finding #1: a backstop for when the view is destroyed
+    ;; A backstop for when the view is destroyed
     ;; without the panel having been hidden first (hide-right-panel!/
     ;; close-source-panel! already cancel on every ordinary hide, well
     ;; before the view ever goes away) -- a transient window closing out

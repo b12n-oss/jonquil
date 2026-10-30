@@ -1,14 +1,14 @@
 (ns jonquil.gtk.inspector-pane
-  "The inspector panel widget (P2.T1): a header, an info line, a toolbar
+  "The inspector panel widget: a header, an info line, a toolbar
   (Back/Meta/Table/Def/Close), a monospace table-header line, a read-only
   monospace rows view in a scrolled window, and a footer -- the console's
-  own widget kind (ruling 7), not a GtkListBox.
+  own widget kind, not a GtkListBox.
 
   make-pane never calls jonquil.inspect or talks to any runtime itself: it
   only renders whatever state show-state! is given and turns a key or
   button press into either a local repaint (jonquil.inspect/key-step's
   :state, shown at once) or a request handed to on-request. The window
-  (P2.T2) owns the actual inspect! round trip and jonquil.inspect/on-reply.
+  owns the actual inspect! round trip and jonquil.inspect/on-reply.
 
   Every signal handler body below (key, click, timeout) is wrapped in
   try/catch that reports the message into the pane's own footer -- the
@@ -39,7 +39,7 @@
 (def ^:private KEY-V 0x076)
 
 (def ^:private WIDTH-REQUEST
-  ;; estimate: about 40 monospace columns at the default zoom (brief).
+  ;; estimate: about 40 monospace columns at the default zoom.
   360)
 
 (def ^:private NOTE-CLEAR-MS
@@ -175,7 +175,7 @@
 ;; --- keys ---------------------------------------------------------------
 
 (defn handle-key!
-  "The rows view's own key dispatch (bubble phase, ruling: attached to the
+  "The rows view's own key dispatch (bubble phase, attached to the
   rows view itself, not the window). Up/Down/Return/Right/Left/BackSpace/
   Page_Up/Page_Down/m/v all go through jonquil.inspect/key-step via step!;
   d opens the def prompt; Escape calls on-close. Returns 1 when handled, 0
@@ -258,7 +258,7 @@
       (finally (ffi/free out) (g/g-object-unref layout)))))
 
 (def ^:private ALLOCATE-WAIT-MS
-  ;; I4's own cap: long enough for GTK's own layout pass to run, short
+  ;; The cap: long enough for GTK's own layout pass to run, short
   ;; enough that a stuck layout doesn't leave the first open waiting
   ;; forever.
   1000)
@@ -283,7 +283,7 @@
 
 (defn measure-when-ready!
   "Calls (f (measure pane)) once the rows view is allocated, or after
-  ALLOCATE-WAIT-MS, whichever comes first (I4): the first open in a
+  ALLOCATE-WAIT-MS, whichever comes first: the first open in a
   window makes the root visible and would otherwise measure in that
   SAME callback, before GTK's own layout pass has ever run over it, so
   gtk-widget-get-width/height read 0 and measure's own floors
@@ -293,7 +293,7 @@
   showing): calls f at once, synchronously. Otherwise polls with a
   repeating g_timeout_add -- GTK-thread only, never parks -- and falls
   back to measure's own floors once the cap is reached, so f is always
-  called exactly once either way (ruling 9: the caller's in-flight flag
+  called exactly once either way (the caller's in-flight flag
   is released through f's own request, on every path, including this
   fallback)."
   [pane f]
@@ -417,7 +417,7 @@
     (g/gtk-widget-add-css-class table-header "monospace")
     (g/gtk-widget-set-visible table-header 0)
     (g/gtk-label-set-xalign footer 0.0)
-    ;; rows view: read-only monospace, no visible cursor (ruling 7)
+    ;; rows view: read-only monospace, no visible cursor
     (g/gtk-text-view-set-editable view 0)
     (g/gtk-text-view-set-monospace view 1)
     (g/gtk-text-view-set-cursor-visible view 0)
@@ -477,7 +477,7 @@
                                          nil)
                                        [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; keys: bubble phase, attached to the rows view itself (ruling above).
+    ;; keys: bubble phase, attached to the rows view itself.
     (g/gtk-event-controller-set-propagation-phase keyctl g/GTK-PHASE-BUBBLE)
     (g/g-signal-connect-data keyctl "key-pressed"
                              (callable (on-key pane) [:pointer :uint :uint :uint :pointer] :int)

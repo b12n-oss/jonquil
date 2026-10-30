@@ -1,13 +1,13 @@
 (ns jonquil.gtk.file-tree-pane
-  "The file tree's widget (file-tree spec): a header (the root's name, a
+  "The file tree's widget: a header (the root's name, a
   refresh button and Open Folder...), a scrolled GtkListBox with one row per
   entry of jonquil.file-tree/rows, and a body label for a root that's
   missing or can't be read. Every change rebuilds the list from the model
-  (plan ruling 4; the spike measured 61 ms at 1,000 rows). A click (single
+  (measured 61 ms at 1,000 rows). A click (single
   click activates) or Return on a folder toggles it; on a file it calls
   :on-open. Left collapses and Right expands the selected folder.
 
-  File operations (file-ops plan T3): a right click (or Shift+F10 / Menu) on a
+  File operations: a right click (or Shift+F10 / Menu) on a
   row, or on the empty list for the root, opens a popover with New File...,
   New Folder..., Rename... and Move to Trash (the root gets the first two).
   The first three swap the popover to a name entry; Return submits it. F2
@@ -20,7 +20,7 @@
   when the menu opens, so a refresh in between can't redirect an action.
   Rename and Move to Trash act on the entry as listed (a symlink itself, not
   its target, like Finder): they pass the row's :listed path, and Rename's
-  name and folder come from it too (file-ops fix round 1, Critical 1).
+  name and folder come from it too.
 
   The list and header carry the jonquil-code CSS class, so the window's
   shared provider gives the tree the theme's colours and the zoomed font."
@@ -107,7 +107,7 @@
 (defn- index-of
   "path's row index. Rows hold canonical paths and tabs keep what they were
   given (a relative argument, a /var path on macOS), so path is
-  canonicalised first (final review finding 3)."
+  canonicalised first."
   [pane path]
   (let [c (canonical path)]
     (first (keep-indexed (fn [i r] (when (= c (:path r)) i)) (visible-rows pane)))))
@@ -175,7 +175,7 @@
   "The row listed as path (an error row, which has no :listed, by its own
   :path), else the first whose canonical path is path's (a symlink and its
   target share one). nil for an error row: its \"dir/\" path canonicalises
-  to its parent folder's row (final review Important 1)."
+  to its parent folder's row."
   [pane path]
   (when path
     (let [c (canonical path)
@@ -430,7 +430,7 @@
                              (callable (guard "tree" (fn [_box row _data]
                                                                                                               ;; The row's path is read now, so a rebuild landing
                                                        ;; before the deferred run can't redirect it to
-                                                       ;; another row (final review finding 7).
+                                                       ;; another row.
                                                        (when-let [{:keys [path]} (get (visible-rows pane) (g/gtk-list-box-row-get-index row))]
                                                          (on-gui! (guard "tree" (fn [] (activate-path! pane path)))))
                                                        nil))

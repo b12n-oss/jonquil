@@ -585,7 +585,7 @@
                         ;; the analyzer may know new names now; the next
                         ;; completion's backstop fetches them. Marked
                         ;; before finish!, so a completion racing
-                        ;; on-complete can't miss the mark (review M2)
+                        ;; on-complete can't miss the mark
                         (swap! state assoc :analyzer-stale? true)
                         (finish! ev opts result))
                 (if (stopping? ev)
@@ -685,7 +685,7 @@
   (evaluating? [_] (some? (:running @state)))
   (waiting-for-input? [_] (boolean (:waiting-input? @state)))
   (send-input! [this text]
-    ;; one line only, cut at the first newline (review I2): a Shift+Return
+    ;; one line only, cut at the first newline: a Shift+Return
     ;; multi-line send must not leave lines in the FIFO to answer a LATER
     ;; evaluation's read, and a trailing newline must not become a phantom
     ;; empty answer
@@ -702,7 +702,7 @@
         (try
           ;; stale alone arms the fetch: an empty cache must not, or a
           ;; failed fetch (a gone page, say) would retry on every
-          ;; completion and hold :helping ~2 s each time (review I1)
+          ;; completion and hold :helping ~2 s each time
           (when (and (:analyzer-stale? @state)
                      (live? this) (nil? (:running @state)))
             ;; the fetch runs here, on ask-help!'s worker, never after an

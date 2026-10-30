@@ -5,7 +5,7 @@
   Like jonquil.nrepl.inspect-middleware, nothing in Jonquil requires this
   namespace: jonquil.nrepl.middleware-files embeds it, and the child loads
   it first in :nrepl/middleware, outside jolt-lang/nrepl's own. That's what
-  makes it work (spike, 2026-10-18): the session middleware starts each
+  makes it work (measured 2026-10-18): the session middleware starts each
   session's worker thread with bound-fn while it handles clone, and
   jolt.nrepl/evaluate rebinds *out* and *err* but not *in*, so binding *in*
   here, around the clone, gives every eval in that session this reader.
@@ -37,8 +37,8 @@
   "Hands text to the read waiting in this session; \"\" is end of input for
   that read. true when a read was waiting. Text that arrives with no read
   waiting is dropped, as the in-process engine starts each run with an
-  empty queue: kept, it would answer some later, unrelated read (review:
-  a Return racing a Stop could leave the typed line for the next eval)."
+  empty queue: kept, it would answer some later, unrelated read (a Return
+  racing a Stop could leave the typed line for the next eval)."
   [e text]
   (boolean (when (waiting? e)
              (.offer ^LinkedBlockingQueue (:queue e) (if (= "" text) ::eof text)))))

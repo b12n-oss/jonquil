@@ -1,5 +1,5 @@
 (ns jonquil.plugin-mcp
-  "The text of the plugin MCP tools (plugins P10): jonquil_plugins_list,
+  "The text of the plugin MCP tools: jonquil_plugins_list,
   jonquil_plugin_read, jonquil_plugin_status and jonquil_plugin_propose's
   answer, over a plugin state {:plugins? :plugins-dir :registry :disabled}.
   Each answers a tool result {:text :error?} and never throws. Pure apart
@@ -19,7 +19,7 @@
   262144)
 
 (def MAX-REASON-CHARS
-  ;; estimate, as MAX-SOURCE-CHARS: a few paragraphs; review I1, since the
+  ;; estimate, as MAX-SOURCE-CHARS: a few paragraphs, since the
   ;; reason reaches the history, the console and the review panel too
   4000)
 
@@ -50,7 +50,7 @@
     (false? plugins?) "plugins are off in this window (--no-plugins), so it takes no proposals"
     (not (loader/plugin-id? id)) (bad-id id)
     (not (string? source)) "a proposal needs its source as text"
-    ;; NUL arc review I2: the review pane shows source through GTK, which
+    ;; The review pane shows source through GTK, which
     ;; cuts at a NUL, while the reader reads past one inside a string, so a
     ;; proposal could hide code from the person reviewing it.
     (tabs/nul-line source)
@@ -144,7 +144,7 @@
                           :rejected (str (if (:note e1) (str " The user's note: " (:note e1)) " The user left no note.")
                                          " Call jonquil_plugin_propose with a new version to try again.")
                           :rejected-by-checks (str " Problems: " (str/join "; " (:problems (first es))) "."
-                                                   ;; plugins F3: the kept log, while it's there
+                                                   ;; the kept log, while it's there
                                                    (when-let [log (:check-log (first es))]
                                                      (when (.isFile (io/file log)) (str " The check's log: " log ".")))
                                                    " Fix them and call jonquil_plugin_propose again.")

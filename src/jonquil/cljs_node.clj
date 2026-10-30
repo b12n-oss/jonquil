@@ -120,7 +120,7 @@
 (def setup-form
   "(require 'cljs.repl)")
 
-;; --- read-line over the launcher's FIFO (stdin design, 2026-10-23) --------
+;; --- read-line over the launcher's FIFO ------------------------------------
 
 (def need-input-marker
   "Printed via *print-err-fn* just before read-line blocks; dispatch!
@@ -151,7 +151,7 @@
   "The forms (newline-joined, ending with sentinel-form) that define
   cljs.core/read-line as a blocking FIFO read bracketed by the markers.
   The in-ns/declare pair makes plain (read-line) compile everywhere with
-  no warning (spike finding 3)."
+  no warning."
   [fifo-path sentinel-form]
   (str/join "\n"
             ["(in-ns 'cljs.core)"
@@ -167,7 +167,7 @@
                   " _ (.closeSync fs fd)"
                   ;; cut at indexOf, never split-lines: cljs split-lines
                   ;; pops the trailing "" of "\n", so an empty line would
-                  ;; answer nil, as Cmd/Ctrl+D does (review I1, measured
+                  ;; answer nil, as Cmd/Ctrl+D does (measured
                   ;; against ClojureScript 1.12.42 and live node)
                   " s (.toString buf \"utf8\" 0 n)"
                   " i (.indexOf s \"\\n\")"

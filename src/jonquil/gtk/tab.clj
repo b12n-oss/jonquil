@@ -21,7 +21,7 @@
   "Builds one tab. opts is {:id :path :text :theme :profile
   :completion-opts}: :text (default \"\") is what the editor starts with,
   read by the window; :theme and :profile are the window's current theme
-  and the tab's own dialect profile (both are per editor, spike §5);
+  and the tab's own dialect profile (both are per editor);
   :completion-opts is the map jonquil.gtk.completion/make-completion
   takes, minus :ed. GTK-thread only."
   [{:keys [id path text theme profile completion-opts]}]

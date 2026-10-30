@@ -25,7 +25,7 @@
    ;; both select, #?(:cljs ..) falls to :default.
    :reader-features #{:jolt :clj}
    ;; Moved verbatim from jonquil.syntax (upstream DrClojure 41c56b8), which
-   ;; now reads them from here.
+   ;; reads them from here.
    :special-forms
    #{"def" "defn" "defn-" "defmacro" "defmulti" "defmethod" "defprotocol"
      "defrecord" "deftype" "definterface" "defonce"
@@ -188,7 +188,7 @@
    :evaluator :attach
    :runtimes #{:attach}
    ;; Where the port is found when .jonquil.edn's :nrepl names none.
-   ;; babashka writes no port file (spike, 2026-10-18), so a project
+   ;; babashka writes no port file (measured 2026-10-18), so a project
    ;; usually gives {:nrepl {:port N}}.
    :port-file ".nrepl-port"
    :reset-tooltip "This is a server you started, so Jonquil doesn't unload namespaces in it."})
@@ -198,9 +198,7 @@
   Jolt first, so a file neither profile's extension claims (bb.edn in a
   ClojureDart app) stays Jolt's.
 
-  clj joined this list in P2.T4, once the window required jonquil.nrepl.jvm
-  and could reach make-attached :clj (ruling 3). cljs goes last: nothing
-  else claims .cljs."
+  cljs goes last: nothing else claims .cljs."
   [jolt cljd clj jank cljs nrepl])
 
 (defn profile
@@ -220,9 +218,8 @@
   All and Format Selection produce for the project's tabs whatever the
   Parinfer mode: :paren-stable always runs the Paren pass over the
   formatter's output, :plain never does. Absent, a format follows the
-  tab's Parinfer mode (the format-interplay arc's rule), so the pin
-  exists to keep one repo in one style when its people differ on the
-  mode (the user's call, 2026-10-30)."
+  tab's Parinfer mode, so the pin exists to keep one repo in one style
+  when its people differ on the mode."
   #{:paren-stable :plain})
 
 (defn- marker-names [profiles]
@@ -233,7 +230,7 @@
   .jonquil.edn or any profile's marker, as {:dir abs-path :markers #{name}
   :config text-or-nil :config-error msg-or-nil}. nil for a nil path or when
   no directory up to the root has one. :dir is canonical and absolute
-  (a relative spawn :dir fails silently, measured in the dialects spike)."
+  (a relative spawn :dir fails silently, measured)."
   ([path] (find-project profiles path))
   ([profiles path]
    (when path
@@ -361,7 +358,7 @@
   cljs selection that launches its own process), :source one of :config
   :marker :extension :settings :fallback. A settings default naming a marker-less profile (in practice
   :clj) only wins when there's no project; inside one, it's skipped and
-  selection falls through to :fallback (I2)."
+  selection falls through to :fallback."
   [profiles project path default]
   (let [{:keys [dialect runtime auto-require cljs nrepl parinfer format-style warnings]} (if project
                                                                      (parse-config (:config project) (:config-error project))
@@ -383,9 +380,9 @@
                    marker-decides? hits
                    :else profiles)
         by-ext (first (filter (fn [p] (contains? (:extensions p) ext)) pool))
-        ;; I2: a settings default naming a marker-less profile (:clj is the
+        ;; A settings default naming a marker-less profile (:clj is the
         ;; only one today) is a real hit only for a file with no project (in
-        ;; practice an untitled buffer, spec section 1). Inside a project, a
+        ;; practice an untitled buffer). Inside a project, a
         ;; marker-less default is ignored and selection falls through to
         ;; :fallback, same as if no default were set at all.
         by-default (when-let [d (when default (some (fn [p] (when (= default (:id p)) p)) pool))]

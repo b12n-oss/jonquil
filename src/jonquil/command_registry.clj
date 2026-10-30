@@ -1,15 +1,14 @@
 (ns jonquil.command-registry
-  "Commands as data (plugins design, Part 1): an id, one doc line, a scope
+  "Commands as data: an id, one doc line, a scope
   and a (fn [ctx args]) that does the work and answers an outcome
   (:handled, :to-gtk or :next, as jonquil.keymap/dispatch reads it). ctx
   is the map the key handler builds (the window's run-fn, save-fn and the
   rest; the editor's thunks), so a command is a plain function a test can
   call with a fake ctx. No GTK here.
 
-  Steps S1-S4 register the window's chords and S5-S6 the editor's; S7's
-  context menus read the same table (editor-menu, console-menu,
-  menu-items), S8's command palette lists it (run-command-in), and Part 2's
-  plugins add their own."
+  The window's and the editor's chords are registered here; the context
+  menus read the same table (editor-menu, console-menu, menu-items), the
+  command palette lists it (run-command-in), and plugins add their own."
   (:require [jonquil.keymap :as km]))
 
 (defn- call [k & args]
@@ -41,14 +40,14 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
    :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
-   ;; step S2: the clauses that sat above S1's block
+   ;; find and focus
    :find/next {:doc "Go to the next find match." :scope :window :run (call :find-next!)}
    :find/previous {:doc "Go to the previous find match." :scope :window :run (call :find-prev!)}
    :focus/toggle {:doc "Move focus between the editor and the console." :scope :window
                   :run (call :toggle-focus-fn)}
    :source/open-here {:doc "Open the source panel's file in the window." :scope :window :palette? false
                       :run (fn [ctx _args] ((:open! (:source-keys ctx))) :handled)}
-   ;; step S3: the Escape chain, each command answering an outcome. The
+   ;; The Escape chain, each command answering an outcome. The
    ;; find bar's own answer is final: its 0 (an IME composing) is GTK's.
    :find/bar-key {:doc "Hand Escape to the focused find bar." :scope :window :palette? false :passes? true
                   :run (fn [ctx _args] (if (= 1 ((:find-bar-key! ctx))) :handled :to-gtk))}
@@ -69,7 +68,7 @@
    :tree/leave {:doc "Leave the file tree for the editor." :scope :window :palette? false
                 :run (fn [ctx _args] ((:leave! (:tree-keys ctx))) :handled)}
    :run/stop {:doc "Stop the running evaluation." :scope :window :run (call :stop-fn)}
-   ;; step S4: the source panel's Cmd/Ctrl+[ back chord, and anywhere
+   ;; The source panel's Cmd/Ctrl+[ back chord, and anywhere
    ;; else the jump back into the tab a jump left (open-in-tab!), passing
    ;; the key on when there's nothing to go back from
    :source/back {:doc "Step the source panel's history back." :scope :window :palette? false
@@ -78,23 +77,23 @@
                       :passes? true
                       :run (fn [ctx _args]
                              (if (some-> (:source-keys ctx) :jump-back! (#(%))) :handled :next))}
-   ;; :passes? true (plugins P1) marks a command that can answer :next or
+   ;; :passes? true marks a command that can answer :next or
    ;; :to-gtk, so the key may reach the editor after it; the plugin
    ;; validator reads it to tell an unreachable plugin binding from one the
    ;; window only sometimes takes.
-   ;; step S8. :palette? false marks a command that only works inside the
+   ;; The palette. :palette? false marks a command that only works inside the
    ;; key chain guarding it (a focus, an Escape step, a tab number), so the
    ;; palette leaves it out
    :palette/open {:doc "Show the command palette." :scope :window :palette? false
                   :run (call :open-palette-fn)}
-   ;; plugins P4: reload the plugin files that changed, appeared or went
+   ;; reload the plugin files that changed, appeared or went
    ;; away; no chord, the palette reaches it
    :plugins/reload {:doc "Reload the plugin files that changed." :scope :window
                     :run (call :reload-plugins-fn)}
-   ;; plugins P9b: open the review of the agents' pending proposals
+   ;; open the review of the agents' pending proposals
    :plugins/review {:doc "Review the plugin proposals agents made." :scope :window
                     :run (call :review-proposals-fn)}
-   ;; plugins P11: the plugin list, to enable, disable or open one
+   ;; the plugin list, to enable, disable or open one
    :plugins/list {:doc "Show the plugins: enable, disable or open one." :scope :window
                   :run (call :plugins-list-fn)}})
 
@@ -120,8 +119,8 @@
   (fn [ctx _args] ((get ctx k)) :handled))
 
 (def editor-commands
-  "The editor's chords (steps S5, S6), plus the context menu's unbound
-  Indent and Unindent (S7). ctx is the per-key map
+  "The editor's chords, plus the context menu's unbound
+  Indent and Unindent. ctx is the per-key map
   jonquil.gtk.editor/handle-key! builds, each entry a thunk that reads the
   editor's state when it runs. An edit answers what the old clause did: its
   1 is :handled and its 0 (nothing changed, or nothing to redo) is GTK's.
@@ -137,9 +136,8 @@
    :help/quick-doc {:doc "Show the docs for the symbol at the caret." :scope :editor :run (act :quick-doc!)}
    :help/jump {:doc "Jump to the definition of the symbol at the caret." :scope :editor :run (act :jump!)}
    :edit/rename {:doc "Rename the symbol at the caret." :scope :editor :run (act :rename!)}
-   ;; step S6
    :run/form {:doc "Run the form at the caret." :scope :editor :run (act :run-form!)}
-   ;; step S7: the context menu's, with no binding, since Tab is a typing
+   ;; The context menu's, with no binding, since Tab is a typing
    ;; stage
    :edit/indent {:doc "Indent the lines." :scope :editor :run (act :indent!)}
    :edit/unindent {:doc "Unindent the lines." :scope :editor :run (act :unindent!)}})
@@ -151,10 +149,10 @@
    :preedit-active (fn [ctx] ((:preedit-active? ctx)))})
 
 (def console-commands
-  "The console's context-menu commands (step S7). The console's keys stay
-  in jonquil.gtk.console-view, outside Part 1's two key chains."
+  "The console's context-menu commands. The console's keys stay
+  in jonquil.gtk.console-view, outside the window and editor key chains."
   ;; :palette? false: its popup takes keys only while the console has focus,
-  ;; and a palette run hands focus back to the editor (review fix I3)
+  ;; and a palette run hands focus back to the editor
   {:console/complete {:doc "Complete the symbol at the console's caret." :scope :console
                       :palette? false :run (act :complete!)}})
 
@@ -164,7 +162,7 @@
   (merge window-commands editor-commands console-commands))
 
 (def editor-menu
-  "The editor's context menu (step S7), in its order: each item's label,
+  "The editor's context menu, in its order: each item's label,
   the action name it's installed under (\"p4.<action>\") and the command
   it runs."
   [{:label "Run Form" :action "run-form" :command :run/form}
@@ -183,7 +181,7 @@
    {:label "Replace" :action "replace" :command :find/open-replace}])
 
 (def console-menu
-  "The console's context menu (step S7)."
+  "The console's context menu."
   [{:label "Complete" :action "complete" :command :console/complete}
    {:label "Clear Last Output" :action "clear-last-output" :command :console/clear-last-output}])
 
@@ -232,7 +230,7 @@
   rename popover's entry or the command palette's has focus every key but
   Escape is the entry's, so Run, close and switch can't fire mid-typing;
   Escape goes on to the keymap, whose popover binding closes the entry. It covers a class of keys, so it
-  stays a fixed stage ahead of the keymap, as the plugins design keeps the
+  stays a fixed stage ahead of the keymap, like the
   editor's preedit yield, and asks the named condition :entry-focused.
 
   Then jonquil.keymap/dispatch over bindings with holds? and run!: :handled
@@ -245,8 +243,8 @@
 
 (defn editor-answer
   "jonquil.gtk.editor/handle-key!'s whole answer for a lowered keyval and a
-  modifier state, 1 (used up) or 0 (GTK's), as the plugins design orders
-  it: preedit yield, completion popup, editor keymap, typing stages.
+  modifier state, 1 (used up) or 0 (GTK's), in this order:
+  preedit yield, completion popup, editor keymap, typing stages.
 
   Three of those stages stay code, not bindings, because each covers a
   class of keys. While a preedit is composing every key is the input

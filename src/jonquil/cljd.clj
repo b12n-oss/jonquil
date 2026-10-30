@@ -5,7 +5,7 @@
   jonquil.nrepl.attach hands in text and reply vectors (jonquil.nrepl.client
   messages, top-level keys keywords).
 
-  Reply shapes are the C0 spike's, measured against the ClojureDart
+  Reply shapes were measured against the ClojureDart
   nREPL fork on
   2026-09-28: a load-file answers one :value per top-level form, an :ns
   message after each, and stops at the first form that fails with :err and
@@ -15,10 +15,10 @@
             [jonquil.syntax :as syntax]))
 
 (def default-ns
-  ;; A fresh session starts here: every spike probe's first reply named it.
+  ;; A fresh session starts here: every probe's first reply named it.
   "cljd.user")
 
-;; --- the console's sentences (spec sections 2 and 3) -------------------------
+;; --- the console's sentences -------------------------------------------------
 
 (def not-running-message
   "; ClojureDart app isn't running here. Start it with `bb dev:macos` (or `clj -M:cljd flutter`).")
@@ -95,7 +95,7 @@
 
 (defn- skip-ns-metadata
   "toks index start-i advanced past every :metatag token and ^{...}
-  metadata map (I1: a bare ^ right before { isn't tokenized at all, so a
+  metadata map (a bare ^ right before { isn't tokenized at all, so a
   map's own :bracket token only counts as metadata when caret-before?
   finds the ^ that introduces it) -- the prefix can stack, as in
   ^:a ^{:doc ...} name. Returns the ns form's name token index, or an
@@ -113,7 +113,7 @@
   "The buffer's first top-level (ns ...) form as {:name str :text str}, or
   nil when there's none, or it's never closed. Brackets inside strings and
   comments don't count, and metadata before the name is skipped, including
-  a ^{...} metadata map (I1), which can stack with ^:keyword tags. A
+  a ^{...} metadata map, which can stack with ^:keyword tags. A
   discarded (#_) or quoted/reader-prefixed ('/`/~/@) top-level form is
   skipped, since it isn't the buffer's real ns form."
   [text]
@@ -200,7 +200,7 @@
       :else {:status :notice
              :text (str "; Loaded " ns-name " (" n (if (= 1 n) " form)" " forms)"))})))
 
-;; --- quick doc (spec section 4) ---------------------------------------------
+;; --- quick doc ---------------------------------------------------------------
 
 (def no-lookup-doc
   "No docs for ClojureDart symbols yet (the app's ClojureDart fork doesn't answer lookup)")
@@ -231,7 +231,7 @@
               (cond-> d (= "true" (or (get info "macro") (get info :macro))) (assoc :macro? true))
               (no-docs sym no-lookup-doc)))))
 
-;; --- offline completion (spec section 4) -------------------------------------
+;; --- offline completion ------------------------------------------------------
 
 (defn buffer-aliases
   "The aliases the buffer's ns form declares with :as or :as-alias, in

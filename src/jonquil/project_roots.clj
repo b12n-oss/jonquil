@@ -8,7 +8,7 @@
   source roots\" (measured 2026-10-18, Jolt v0.8.23). use-project! puts
   the project's :paths after those roots, through jolt.host's
   set-source-roots!, the seam jolt.main and jolt.deps use to set up a
-  project. After, not before (review finding 4): Jolt and Jonquil run in
+  project. After, not before: Jolt and Jonquil run in
   this same process, and a project's src/clojure/... or src/jonquil/...
   must not shadow the IDE's own namespaces. use-project! sets :paths only,
   which needs no network; use-project-deps! also resolves :deps through
@@ -50,7 +50,7 @@
   ;; The roots Jolt started with, kept so switching to another project
   ;; replaces the old project's roots rather than piling them up. Read when
   ;; this namespace loads, before any project is used, and again later only
-  ;; while it's still unknown (review finding 3: a nil is never kept).
+  ;; while it's still unknown (a nil is never kept).
   (atom (when-let [f (host-fn 'jolt.host/source-roots)] (vec (f)))))
 
 (defonce ^:private warned? (atom false))
@@ -58,8 +58,8 @@
 (defn use-project!
   "Makes dir's source folders (paths) roots Jolt searches, after the roots
   it started with; nil dir leaves only those. true when the roots were set.
-  Without jolt.host's seam it says so once on stderr and returns false
-  (review finding 2), since a project kept in process then can't require
+  Without jolt.host's seam it says so once on stderr and returns false,
+  since a project kept in process then can't require
   its own namespaces."
   [dir]
   (let [set-roots! (host-fn 'jolt.host/set-source-roots!)
@@ -77,7 +77,7 @@
   ;; {key {:roots [...]}}, or {:roots [...] :problem msg :at ms} for a
   ;; failure. key is the project dir with its deps.edn's and the user
   ;; deps.edn's modification times, so an edit to either resolves again. A
-  ;; failure is kept only failure-retry-ms (review finding 2): long enough
+  ;; failure is kept only failure-retry-ms: long enough
   ;; that a project whose dependency can't be fetched isn't fetched again
   ;; on every keystroke-paced Run, short enough that a network blip heals.
   (atom {}))
@@ -98,7 +98,7 @@
   "{:roots [...]} for dir's whole deps.edn (:paths, then each dependency's
   root, in classpath order), or {:roots (paths dir) :problem msg :at ms}
   when it can't be resolved. A Stop during the resolve is rethrown, never
-  taken for a failure (review finding 1)."
+  taken for a failure."
   [dir]
   (try
     (let [resolve-project (requiring-resolve 'jolt.deps/resolve-project)]

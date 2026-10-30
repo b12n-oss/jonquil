@@ -1,6 +1,6 @@
 (ns jonquil.session
   "One window's evaluation session: Run and the REPL prompt over one eval
-  context. Run resets by default (spec decision O1). Every namespace an
+  context. Run resets by default. Every namespace an
   evaluation creates, except libraries, belongs to that evaluation's
   :owner (a tab id, :run or :repl), and a reset-mode Run removes only its
   own owner's namespaces, the REPL's, and `user`, then evaluates into a
@@ -148,7 +148,6 @@
         (apply require nss)
         (catch Throwable e
           ;; Stopped: not loaded, so the next evaluation tries again
-          ;; (review finding 2).
           (when (stopped? e)
             (swap! state assoc :auto-required? false)
             (throw e))
@@ -202,7 +201,7 @@
 (defn- saved-file
   "path's canonical path when it names a file on disk holding exactly code,
   else nil. A buffer with unsaved edits doesn't match its file, and its
-  vars' lines would point into the wrong text there (review finding 2)."
+  vars' lines would point into the wrong text there."
   [path code]
   (when path
     (try (let [f (io/file path)]
@@ -219,8 +218,7 @@
   metadata, so it isn't marked; one a require loaded already has a :file.
   What else changes a var's metadata during the Run is marked too: an
   alter-meta! the program does, a load-file of another file, a future the
-  program started (review finding 3, accepted: all are the Run's own
-  doing)."
+  program started (all are the Run's own doing)."
   [file before]
   (doseq [[v m] (program-vars)
           :when (and (:line m) (nil? (:file m)) (not= m (get before v)))]
@@ -240,8 +238,7 @@
      ;; dependencies (evaluate!'s :before-eval), and so do the REPL entries
      ;; after it: a window keeps one in-process evaluator when it opens a
      ;; file from another in-process project (selection-key leaves the
-     ;; project out), so make's own project isn't enough (review finding
-     ;; 1). A loose file leaves them as they are.
+     ;; project out), so make's own project isn't enough. A loose file leaves them as they are.
      (when-let [dir (and (not (eval/evaluating? ctx))
                          (some-> (:path opts) dialect/find-project :dir))]
        (swap! state assoc :project-dir dir))
@@ -250,7 +247,7 @@
      (create-ns 'user)
      ;; Marked in before-idle, on the Run's own worker before the context
      ;; goes idle, so a REPL entry or another Run can't define a var in
-     ;; between and get this file (review finding 1).
+     ;; between and get this file.
      (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
            before (when file (program-vars))
            opts (cond-> (assoc opts :owner owner)
@@ -259,7 +256,7 @@
        (evaluate! session code 'user opts)))))
 
 (defn quiet-eval!
-  "eval!'s :quiet path (plugins P5b): code in the namespace of :ns-source's
+  "eval!'s :quiet path: code in the namespace of :ns-source's
   ns form when that exists, else the prompt's, with no history entry and
   the prompt namespace, *1 *2 *3 and *e left as they were."
   [{:keys [state] :as session} code opts]

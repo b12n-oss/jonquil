@@ -103,7 +103,7 @@
   answered in time; else [:later], and (on-later r) runs on a worker
   thread once it does. Exactly one of the two gets r. When f throws, r is
   {::error message}, which help-error reads, so a caller can say so
-  rather than show nothing (review finding 1)."
+  rather than show nothing."
   [grace-ms f on-later]
   ;; st: ::waiting until one side settles it. The worker stores its answer
   ;; only while the caller still waits; once the caller has given up
@@ -127,9 +127,8 @@
   (when (map? r) (::error r)))
 
 (defprotocol Owners
-  "Tabs plan, final review finding 2: evaluators that track which owner
-  (tab) created which namespaces (jonquil.session's InProcess, jonquil.
-  nrepl.evaluator's NRepl). Attach evaluators never reset, so they don't
+  "Evaluators that track which owner (tab) created which namespaces
+  (jonquil.session's InProcess, jonquil.nrepl.evaluator's NRepl). Attach evaluators never reset, so they don't
   implement it; callers check (satisfies? Owners ev) first."
   (release-owner! [ev owner]
     "Hands owner's namespaces to :repl, so the next reset-mode Run, from
@@ -138,9 +137,9 @@
     otherwise never reset them."))
 
 (defprotocol FullDoc
-  "P3.T2: full documentation beyond quick doc's own summary, for a second
-  quick-doc press on the same target (jonquil.gtk.window's do-quick-doc!,
-  ruling 11). Only jonquil.nrepl.jvm's evaluator implements this today
+  "Full documentation beyond quick doc's own summary, for a second
+  quick-doc press on the same target (jonquil.gtk.window's do-quick-doc!).
+  Only jonquil.nrepl.jvm's evaluator implements this today
   (backed by the server's own \"doc\" op); every caller checks (satisfies?
   FullDoc ev) first, and an evaluator that doesn't implement it never sees
   a second-press request at all."

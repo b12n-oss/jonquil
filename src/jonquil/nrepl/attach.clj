@@ -37,10 +37,10 @@
             [jonquil.nrepl.connection :as connection]))
 
 (def default-timings
-  {;; estimate: describe answered in 3 ms in the C0 spike; this bounds a
+  {;; estimate: describe answered in 3 ms in a probe; this bounds a
    ;; listener on the port that accepts but never speaks nREPL.
    :describe-timeout-ms 5000
-   ;; estimate: clone answered at once in every spike probe (not timed on
+   ;; estimate: clone answered at once in every probe (not timed on
    ;; its own); it's session bookkeeping, not an eval, so it doesn't queue
    ;; behind abandoned work.
    :clone-timeout-ms 10000
@@ -81,7 +81,7 @@
   (connection/stop-requested? ev))
 
 (def ^:private cljd-policy
-  ;; Passed to connection/connect!: the cljd sentences (ruling 6: a
+  ;; Passed to connection/connect!: the cljd sentences (a
   ;; message is a string or a fn of the port or project dir), the
   ;; session state a successful connect starts with, and stop-requested?
   ;; wrapped in a fn so it's read through attach.clj's own var at call
@@ -113,7 +113,7 @@
   retries again nor falls through to not-awake-message -- the same way
   a disconnected or eval-error status does for an eval or a load
   (jonquil.nrepl.ops/eval-result, jonquil.cljd/load-result): finish!
-  no longer squashes every non-:interrupted result on Stop, so each
+  doesn't squash every non-:interrupted result on Stop, so each
   failure path decides for itself."
   [{:keys [state] :as ev} on-output]
   (when (:fresh? @state)
@@ -171,7 +171,7 @@
 (defrecord Attach [selection state history listeners timings]
   ev/Evaluator
   ;; Connecting happens on demand, when an evaluation finds no live
-  ;; connection (the spec's "reconnect on demand"): nothing to start.
+  ;; connection ("reconnect on demand"): nothing to start.
   (start! [_] nil)
   (stop! [this]
     ;; Window close, app quit, or a switch to another evaluator: close this
@@ -188,11 +188,11 @@
             nil))))
   (interrupt! [this]
     ;; Stop detaches. It never sends interrupt: the app keeps whatever it
-    ;; already has, and the next evaluation reconnects. Spec §3 has no
+    ;; already has, and the next evaluation reconnects. There is no
     ;; "while running" qualifier, so an idle Stop on a still-connected
     ;; session detaches too -- there's no evaluation and so no on-output
     ;; to print the notice through, and the window doesn't show
-    ;; on-connection! anywhere yet (that's P2.T4's job), so this closes
+    ;; on-connection! anywhere yet, so this closes
     ;; the socket and lets the connection watch notify listeners, without
     ;; printing anything.
     (let [[old _] (swap-vals! state (fn [s] (cond-> s (:running s) (assoc-in [:running :stop-requested?] true))))]

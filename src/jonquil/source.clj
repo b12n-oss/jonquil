@@ -1,14 +1,13 @@
 (ns jonquil.source
   "Where a definition outside the buffer lives, and its text: the pure half
   of the source panel. A lookup result's :file is either an absolute path
-  or a jar:file:<jar>!/<entry> URL; the clj-servers spike measured that
-  shape identical on clojure-cli.repl, plain nREPL 1.7.0 and cider-nrepl
-  0.62.2. Nothing here touches GTK."
+  or a jar:file:<jar>!/<entry> URL; that shape measured identical on
+  clojure-cli.repl, plain nREPL 1.7.0 and cider-nrepl 0.62.2. Nothing here touches GTK."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 
 (def history-limit
-  ;; The spec's bound on the panel's own back history.
+  ;; The bound on the panel's own back history.
   50)
 
 (def moved-note

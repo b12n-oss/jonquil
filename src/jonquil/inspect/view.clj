@@ -2,7 +2,7 @@
   "The inspector's view code, lifted from clojure-cli.repl
   (server/src/clojure_cli/repl/inspect.clj at 775e858, EPL-1.0), with the
   nREPL glue removed and the global `view` atom turned into a parameter
-  every function now takes and passes on."
+  every function takes and passes on."
   (:require
    [clojure.datafy :refer [datafy nav]]
    [clojure.pprint :as pprint]

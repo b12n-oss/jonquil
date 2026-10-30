@@ -5,25 +5,25 @@
   mode, and a match-count label.
 
   Every match gets a \"search-match\" GtkTextTag (background from the
-  active theme's :find-highlight, probe 2, and foreground from the
-  theme's :text so matched text stays readable, fix wave item 1; starts
+  active theme's :find-highlight, and foreground from the
+  theme's :text so matched text stays readable; starts
   with theme/default-theme's colours and apply-theme! retints it in
-  place, TH.T4). Matches are
+  place). Matches are
   recomputed over the editor text on every query change and
   on every editor buffer change while the bar is open (both wired as GTK
   \"changed\" signals here), but only a query change, open!, next/prev and
-  a replace move the editor's selection (P3 fix wave C1); the tag is stripped on every recompute and on
-  close, using gtk_text_buffer_remove_tag (not remove_all_tags, which would
+  a replace move the editor's selection; the tag is stripped on every
+  recompute and on close, using gtk_text_buffer_remove_tag (not remove_all_tags, which would
   also strip the editor's own syntax-highlighting tags wherever they
   overlap a match).
 
   Return/F3/command+g move to the next match, Shift+Return/Shift+F3/
-  command+shift+g to the previous one; probe 1 found gtk_widget_activate
-  does not fire GtkSearchEntry's \"activate\", so all of this goes through
+  command+shift+g to the previous one; gtk_widget_activate
+  does not fire GtkSearchEntry's \"activate\" (measured), so all of this goes through
   handle-key!, wired to the bar's own capture-phase key controller (never
   the GTK signal) -- rows call handle-key! directly.
 
-  P3.T4 fix round 1: handle-key! yields (0) while either entry has an IME
+  handle-key! yields (0) while either entry has an IME
   preedit composition active, the same global constraint editor.clj and
   console_view.clj already follow. Both the query and replacement entries
   delegate their GtkEditable implementation to an internal GtkText
@@ -85,7 +85,7 @@
      :else (str "0 of " (count matches)))))
 
 (defn- select-match!
-  "Selects [s e] in the editor and scrolls it into view (probe 2)."
+  "Selects [s e] in the editor and scrolls it into view."
   [fb [s e]]
   (let [ed (:ed fb) buf (:buf ed)]
     (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
@@ -100,10 +100,10 @@
   it is exactly one. Returns the new matches, or nil while the bar is
   closed (a no-op then).
 
-  P3 fix wave C1: this is all the editor buffer's own \"changed\" signal
-  runs. It used to run recompute-matches!, which selected the next match
-  after the caret on every keystroke, so the NEXT keystroke's commit
-  deleted that selection and replaced a match the user never chose."
+  This is all the editor buffer's own \"changed\" signal runs.
+  recompute-matches! would select the next match after the caret on every
+  keystroke, so the NEXT keystroke's commit would delete that selection
+  and replace a match the user never chose."
   [fb]
   (when (open? fb)
     (let [ed (:ed fb)
@@ -122,7 +122,7 @@
   "refresh-matches!, then selects and scrolls to the nearest match from
   the editor's current caret (wrapping to the first) and labels it as the
   current one. Runs only on a query change and open!, never on a plain
-  edit (C1). A no-op while the bar is closed."
+  edit. A no-op while the bar is closed."
   [fb]
   (when-let [matches (seq (refresh-matches! fb))]
     (let [m (commands/next-match (vec matches) (:caret (editor/snapshot (:ed fb))))]
@@ -130,10 +130,10 @@
       (update-count-label! fb matches m))))
 
 (defn- on-buffer-changed
-  "The editor buffer's \"changed\" handler: refresh only (C1), and nothing
+  "The editor buffer's \"changed\" handler: refresh only, and nothing
   at all while a replace is applying its edits, since replace-one!/
   replace-all! recompute once themselves when the whole edit has landed
-  (a replace-all used to recompute once per delete and once per insert)."
+  (not once per delete and once per insert)."
   [fb]
   (when-not @(:replacing? fb)
     (refresh-matches! fb)))
@@ -169,13 +169,12 @@
   its two buttons only in :replace mode, prefills the query with the
   editor's selection when it's exactly one line, recomputes matches (which
   selects/scrolls to the nearest one IN THE EDITOR), then selects the WHOLE
-  query text (fix round 1, per the brief -- so typing immediately overtypes
+  query text (so typing immediately overtypes
   it, whether it was just prefilled or is leftover from a previous open!)
   and focuses the query entry.
 
-  Fix round 2: recompute-matches! must run BEFORE the query's own
-  select_region/grab_focus, not after. Measured (throwaway probe, not
-  committed): once this find bar has been through one earlier open! cycle,
+  recompute-matches! must run BEFORE the query's own
+  select_region/grab_focus, not after. Measured: once this find bar has been through one earlier open! cycle,
   recompute-matches!'s own select-match! -- which calls
   gtk_text_buffer_select_range on the EDITOR's buffer to highlight the
   nearest match -- silently clears whatever selection the QUERY entry was
@@ -184,7 +183,7 @@
   whichever other widget held it). The reorder makes the query's own
   select_region the LAST thing to touch selection at all, so nothing after
   it can revoke it -- independent of grab_focus order or window/OS focus
-  timing, which a probe confirmed is not itself the deciding factor here.
+  timing, which measurement showed is not the deciding factor here.
 
   The preedit flag starts false. If focus left the bar mid-composition and
   the input method never reported the composition's end, the flag stays
@@ -215,7 +214,7 @@
 
 (defn apply-theme!
   "Sets the search-match tag's background to theme t's :find-highlight and
-  its foreground to t's :text (TH.T4; fix wave item 1 -- a comment or a
+  its foreground to t's :text (a comment or a
   keyword inside a match otherwise kept its own syntax colour on top of
   the highlight, which measured unreadable in every theme, 1.82-2.68).
   Only ever touches the tag's colour -- never the editor's matches, its
@@ -260,7 +259,7 @@
   matches (commands/replace-current), applied through editor/apply-op! as
   one undo step, which also selects the next match; matches are then
   recomputed over the new text once (apply-replace!). When the selection
-  isn't a match, finds the next match instead, per the brief."
+  isn't a match, finds the next match instead."
   [fb]
   (let [ed (:ed fb)
         matches @(:matches fb)
@@ -295,9 +294,9 @@
   (g/gtk-root-get-focus (g/gtk-widget-get-root (:box fb))))
 
 (defn- replacement-focused?
-  "True when keyboard focus is in the replacement entry. P3 fix wave I1:
+  "True when keyboard focus is in the replacement entry.
   gtk_root_get_focus returns the entry's internal GtkText delegate, never
-  the GtkEntry itself (measured in P3.T4 fix round 2), so this asks
+  the GtkEntry itself (measured), so this asks
   gtk_widget_is_ancestor(focus, replacement), the same test window.clj's
   find-bar-focused? uses against the whole bar."
   [fb]
@@ -317,7 +316,7 @@
 (defn nav-ready?
   "True when find-next/previous can act: the bar is open and neither entry
   has an IME preedit composing. The window's keymap asks this before F3 and
-  command+g (plugins PL1 S2); handle-nav-key! below uses the same guard."
+  command+g; handle-nav-key! below uses the same guard."
   [fb]
   (and (not @(:preedit-active? fb)) (open? fb)))
 
@@ -326,7 +325,7 @@
   the bar is open: 1 when handled, 0 otherwise, and always 0 while either
   entry has an IME preedit active. handle-key! (below) delegates to it
   for keys inside the bar. With focus in the editor or the console the
-  window's keymap does the same work (plugins PL1 S2), through nav-ready?,
+  window's keymap does the same work, through nav-ready?,
   find-next! and find-prev!."
   [fb keyval0 state]
   (let [keyval (g/gdk-keyval-to-lower keyval0)]
@@ -341,8 +340,7 @@
 (defn handle-key!
   "Keys inside the bar, wired to its own capture-phase key controller: 1
   when handled, 0 otherwise -- always 0 while the bar is closed, and
-  always 0 while either entry has an IME preedit composition active (fix
-  round 1), so a composing Hangul/CJK syllable's own Return/Escape reaches
+  always 0 while either entry has an IME preedit composition active, so a composing Hangul/CJK syllable's own Return/Escape reaches
   the entry's IM context instead of being reinterpreted as find-next!/
   close!. Escape closes the bar. Return on a focused Replace or Replace
   All button is left to GTK, which presses that button; Return in the
@@ -419,7 +417,7 @@
       (g/set-string-property! tag "background" (:find-highlight default-t))
       (g/set-string-property! tag "foreground" (:text default-t)))
     (g/gtk-text-tag-table-add table tag)
-    ;; Fix wave item 1: measured, not assumed -- the editor's own syntax
+    ;; Measured, not assumed: the editor's own syntax
     ;; tags are added to this SAME tag table before make-find-bar ever
     ;; runs (activate! builds ed, then fb), and GTK's priority is add
     ;; order, so search-match already outranks them. theme-keeps-find-
@@ -447,7 +445,7 @@
     (g/g-signal-connect-data replace-all-btn "clicked"
                              (callable (fn [_ _] (contained {:fb fb :where "replace all" :fallback nil} #(replace-all! fb))) [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
-    ;; P3.T4 fix round 1: both entries delegate their GtkEditable
+    ;; Both entries delegate their GtkEditable
     ;; implementation to an internal GtkText (gtk_editable_get_delegate),
     ;; and it's THAT delegate, not the entry itself, that carries the real
     ;; "preedit-changed" signal -- verified empirically, see the binding's

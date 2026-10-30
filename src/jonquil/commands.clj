@@ -24,7 +24,7 @@
               (subs text start end)))]
     (when-not (str/blank? s) s)))
 
-;; --- Run Form (cljd plan P3.T1) ---------------------------------------------
+;; --- Run Form ---------------------------------------------------------------
 
 (def ^:private prefix-chars
   ;; Reader prefixes that belong to the form right after them: quote,
@@ -335,8 +335,8 @@
 (defn parinfer-status-text
   "The label for the active tab: its effective mode, with \" (project)\"
   when the tab's .jonquil.edn decided. nil hides the label: a plain :off,
-  and a pinned :off while the global is off too, since nothing differs
-  (review I2). A pinned :off under a non-off global stays visible, so the
+  and a pinned :off while the global is off too, since nothing differs.
+  A pinned :off under a non-off global stays visible, so the
   tab that ignores the global says why it's quiet."
   [effective override? global]
   (cond

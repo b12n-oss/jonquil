@@ -31,7 +31,7 @@
 
 (defn open
   "Create initial pane state from a view. A first reply shaped {:error s}
-   (I1: the server never attached, or the first :start timed out or
+   (the server never attached, or the first :start timed out or
    dropped) would otherwise make the error map itself the view, and
    footer's own :start lookup would have nothing to read. Opens onto an
    empty view instead, with the message in :note so it still reaches the
@@ -49,7 +49,7 @@
 
 (defn key-step
   "Handle a key press. Returns {:state s :request r} where r is nil when there's no request.
-   Every key is a no-op while :disabled? is set (a lost connection, I2):
+   Every key is a no-op while :disabled? is set (a lost connection):
    otherwise Return/m/v/Left/paging would keep sending requests the
    connection can't answer (spec: \"disables the actions\")."
   [state key]
@@ -122,7 +122,7 @@
    of total and the key hints\"), e.g. \"11-20 of 25 · ↑↓ move · ⏎ in · ← out · d def · m meta · v table\".
    A leaf has nothing to move over or go into, so it shows only the
    hints after ← (out, def, meta, table). A view with neither :start
-   nor :leaf -- a fresh {:error s} reply's own empty view (I1, open), or
+   nor :leaf -- a fresh {:error s} reply's own empty view, or
    an unreadable/fallback map (parse-view, run-op's own throw catch) --
    has nothing to report yet: \"\"."
   [state]

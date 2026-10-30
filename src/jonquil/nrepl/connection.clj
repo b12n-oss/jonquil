@@ -84,7 +84,7 @@
 
 (defn- message-text
   "The value at (get messages k), calling it with arg when it's a fn
-  (ruling 6: a message is a string or a fn of its argument)."
+  (a message is a string or a fn of its argument)."
   [messages k arg]
   (let [v (get messages k)]
     (if (fn? v) (v arg) v)))
@@ -108,7 +108,7 @@
   while waiting, the local socket is closed and nothing is published as
   the LIVE :conn in state, so the connection this attempt was building is
   never mistaken for one that's fully attached, never notified as
-  connected, and never probed. M4: the raw conn is published early, as
+  connected, and never probed. The raw conn is published early, as
   :connecting, the moment it opens -- before describe or clone can block
   -- guarded the same conditional way, so a Stop landing mid-handshake
   has something live for detach!/interrupt! to close at once instead of
@@ -183,7 +183,7 @@
 (defn detach!
   "Forgets the session and closes the socket: pending requests fail with
   jonquil.nrepl.client's disconnected status. Sends nothing to the app.
-  Also closes and clears :connecting (M4): connect! publishes the raw
+  Also closes and clears :connecting: connect! publishes the raw
   socket there before describe or clone can block on it, so a Stop
   landing mid-handshake has something live to close instead of waiting
   out describe's or clone's own timeout. client/close! is safe to call
@@ -199,10 +199,10 @@
   timeout. Streams :out and :err to (:on-output opts) as they arrive,
   tracks the session's namespace from every :ns, and says once when it
   has waited (:still-waiting-ms timings), through (:still-waiting opts)
-  when it's set (ruling 7: cljd passes its sentence, JVM passes nil since
+  when it's set (cljd passes its sentence, JVM passes nil since
   Stop can interrupt there). Calls (:on-message opts) with every reply
   after request!'s own side effects. While (:running @state) is set,
-  records the request id at [:running :id] (ruling 8). Returns every
+  records the request id at [:running :id]. Returns every
   reply, in order. Never resends anything.
 
   Guards against a reply that arrives after this connection is no longer

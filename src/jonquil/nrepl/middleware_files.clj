@@ -24,7 +24,7 @@
 
 (def ^:private ^:dynamic *files*
   ;; the file set the folder helpers write and check: sources, or another
-  ;; set ensure-root!'s two-argument form binds (the plugin checker's, P8)
+  ;; set ensure-root!'s two-argument form binds (the plugin checker's)
   sources)
 
 (def inspect-middleware
@@ -123,7 +123,7 @@
   unused for a day are pruned (prune-old!). Throws when it can't be
   written; the evaluator then starts the child without Jonquil's
   middleware and says why. With files (classpath path -> text), that file
-  set is written instead, under its own hash (the plugin checker's, P8)."
+  set is written instead, under its own hash (the plugin checker's)."
   ([] (ensure-root! (cache-base (System/getenv) (System/getProperty "user.home"))))
   ([base] (ensure-root! base sources))
   ([base files]

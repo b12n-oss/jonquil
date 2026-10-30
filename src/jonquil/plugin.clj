@@ -1,5 +1,5 @@
 (ns jonquil.plugin
-  "The plugin API (plugins design, Part 2): the one namespace a plugin may
+  "The plugin API: the one namespace a plugin may
   assume exists. Everything else in jonquil.* is reachable from a plugin
   but carries no stability promise. A plugin file calls defplugin once.
   The helpers below are pure, over a snapshot {:text :caret :sel-start
@@ -51,7 +51,7 @@
 ;; only the declared ones') and the tab that was active when it started
 ;; (::tab). Each function checks its effect first, so an undeclared one
 ;; throws before anything is reached. A ctx with ::refused (a :before-run
-;; hook's, P6b) refuses every effect with that sentence.
+;; hook's) refuses every effect with that sentence.
 
 (defn- effect!
   "The ctx's implementation named k, after checking that effect is declared."

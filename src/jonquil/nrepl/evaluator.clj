@@ -7,7 +7,7 @@
 
   Stop falls back to killing and restarting the child when the server has
   no interrupt op or doesn't answer one within interrupt-timeout-ms. That
-  fallback is jank's only Stop (D3), so it is exercised here too.
+  fallback is jank's only Stop, so it is exercised here too.
 
   Every callback rule in jonquil.evaluator applies: on-output fires from
   the connection's reader thread, on-status-change and on-complete from
@@ -25,8 +25,8 @@
   (:import (java.util.concurrent.locks ReentrantLock)))
 
 (def request-timeout-ms
-  ;; estimate: describe, clone and the reset form answered in 1-6 ms in the
-  ;; plan's live probe; this bounds a wedged child during start and Run.
+  ;; estimate: describe, clone and the reset form answered in 1-6 ms in a
+  ;; live probe; this bounds a wedged child during start and Run.
   10000)
 
 (def help-timeout-ms
@@ -113,14 +113,14 @@
 (defn- ns-snapshot
   "[namespace-names loaded-libs] in the child, or nil when asking failed:
   the evaluation's own result never depends on this bookkeeping, so a
-  throw here only leaves that evaluation's namespaces unowned (spike: about
+  throw here only leaves that evaluation's namespaces unowned (about
   1 ms per call)."
   [conn sid]
     ;; No :ns, unlike eval-sync!: an eval with :ns "user" would leave the
   ;; session in user and the next REPL entry would lose the Run's namespace.
   ;; The data comes back on :out; the value is the old *1 (see
   ;; ops/ns-snapshot-code), so the server's own *1/*2/*3 shift puts the
-  ;; user's history back where it was (final review finding 1). The same
+  ;; user's history back where it was. The same
   ;; eval refers the REPL helpers into the session's namespace.
   (try
     (let [r (client/request-sync conn {:op "eval" :code ops/ns-snapshot-code :session sid} request-timeout-ms)
@@ -253,7 +253,7 @@
   lock while this is spawning, connecting or cloning -- it just leaves
   the teardown to the check below instead.
 
-  I2 (phase-close review): checks :stopped? first, before touching
+  Checks :stopped? first, before touching
   live?/shutdown-runtime! or spawning anything -- a restart-for-stop!
   already off the GTK thread, a queued run-worker!, or start-and-report!'s
   own future can each still reach this after stop! ran, and without this
@@ -267,7 +267,7 @@
           (try
             (let [rt (spawn-with-fallback! ev)]
               ;; A new child has none of the old one's namespaces, so the
-              ;; owner map starts empty with it (tabs plan, ruling 9).
+              ;; owner map starts empty with it.
               (swap! (:state ev) assoc :runtime rt :created {})
               ;; stop! may have run while this was spawning/connecting/cloning:
               ;; it can't have torn this down (try-shutdown-runtime! only wins
@@ -305,7 +305,7 @@
   a reply that ends it (done, interrupted) while still marked waiting
   clears it. Output doesn't: a future printing while the read waits would
   otherwise take the console out of input mode with the read still
-  blocked (review). send-stdin! clears it on a send, and the flag lives on
+  blocked. send-stdin! clears it on a send, and the flag lives on
   :running, so finish! clears it too."
   [ev m]
   (let [state (:state ev)
@@ -338,12 +338,12 @@
   "Sends the Run's load-file or the REPL entry's eval, feeding :out and
   :err to on-output as they arrive. A promise of all its replies.
 
-  I4 (phase-close review): a Stop pressed after run-worker!'s last
-  stop-requested? check but before this records the request's :id used to
-  have nothing to act on and was never looked at again. Re-checks the flag
+  A Stop pressed after run-worker!'s last stop-requested? check but
+  before this records the request's :id would have nothing to act on and
+  never be looked at again. So this re-checks the flag
   right after recording the id and, if it's already set, goes through
   interrupt!'s id path once. That's safe even if a real Stop lands at the
-  same moment: interrupt!'s own CAS (see I1) only lets one caller trigger
+  same moment: interrupt!'s own CAS only lets one caller trigger
   the restart future per id."
   [ev code {:keys [run? path on-output]}]
   (let [{:keys [conn session]} (runtime ev)
@@ -390,11 +390,10 @@
             req-id (get-in @state [:running :id])
             msgs @done]
         ;; The require is over, so a Stop from here on must find no id and
-        ;; skip the user's request, as before (review finding 1).
+        ;; skip the user's request.
         (swap! state update :running (fn [r] (if (= req-id (:id r)) (dissoc r :id) r)))
         (cond
           ;; Stopped: not loaded, so the next evaluation tries again
-          ;; (finding 2).
           (stop-requested? ev) (swap! state assoc-in [:runtime :auto-required?] false)
           (and (not= :ok (:status (ops/eval-result msgs false))) on-output)
           (on-output :system (str (clj/auto-require-failed auto-require-retry) "\n")))))))
@@ -436,7 +435,7 @@
               (let [before (ns-snapshot conn session)
                     quiet-out (atom [])
                     msgs (if-let [token (:quiet opts)]
-                           ;; plugins P5b: keep :out back, so the token line
+                           ;; keep :out back, so the token line
                            ;; quiet-code prints never reaches on-output
                            @(send-main! ev (ops/quiet-code code token (some-> (:ns-source opts) clj/buffer-ns))
                                         (assoc opts :on-output (fn [k text]
@@ -459,7 +458,7 @@
   "Stop's fallback: kill the child (the running eval then completes as
   :interrupted) and start a fresh one, saying so on the console.
 
-  I3 (phase-close review): only claims success once start-runtime! has
+  Only claims success once start-runtime! has
   actually returned nil. A failed restart says so instead, and the next
   evaluation still starts the runtime lazily, as it does today."
   [ev on-output]
@@ -495,13 +494,12 @@
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
-    ;; I1 (phase-close review): both updates below used to be their own
-    ;; swap!/swap-vals! against a separately-read :running. A finish!
-    ;; landing between the read and either write recreated {:running
-    ;; {...}} out of nil, and eval! then refused every later Run as busy
-    ;; forever. One swap now, keyed by identity of the exact :running map
-    ;; read here: if finish! (or a new eval!) has already cleared or
-    ;; replaced it by the time this runs, the swap is a no-op instead of
+    ;; One swap, keyed by identity of the exact :running map read here
+    ;; (separate swaps against a separately-read :running let a finish!
+    ;; landing between the read and a write recreate {:running {...}} out
+    ;; of nil, and eval! then refused every later Run as busy forever): if
+    ;; finish! (or a new eval!) has already cleared or replaced it by the
+    ;; time this runs, the swap is a no-op instead of
     ;; rebuilding it. The same swap does the once-per-id restart CAS, so
     ;; repeated Stop presses for one id still trigger only one future.
     (when-let [{:keys [id opts] :as running} (:running @state)]
@@ -513,7 +511,7 @@
                                     s)))]
         ;; No :id yet means the request hasn't gone out: run-worker! sees
         ;; the flag and finishes as :interrupted without sending it, and
-        ;; send-main! re-checks it once the id lands (I4).
+        ;; send-main! re-checks it once the id lands.
         (when (and id (identical? running (:running old)) (not (:restart-triggered? running)))
           (future
             (try
@@ -527,9 +525,9 @@
                                         (>= (* n 20) interrupt-timeout-ms) false
                                         :else (do (Thread/sleep 20) (recur (inc n))))))]
                 (when-not ended? (restart-for-stop! this (:on-output opts))))
-              ;; M5 (phase-close review): a throw here used to be stored in
-              ;; the future and lost. Report it the same way a failed
-              ;; restart is, and never let it escape.
+              ;; A throw here would be stored in the future and lost.
+              ;; Report it the same way a failed restart is, and never let
+              ;; it escape.
               (catch Throwable e
                 (when-let [on-output (:on-output opts)]
                   (try (on-output :error (str "; Stop failed: " (ex-message e) "\n"))
@@ -608,7 +606,7 @@
               result
               (cond
                 (nil? rt) {:error inspect-not-running}
-                ;; I2's shape, as jvm.clj answers it: a runtime that was
+                ;; The shape jvm.clj answers with: a runtime that was
                 ;; live and dropped (child gone or socket closed) is lost,
                 ;; which disables the panel; never-started is not-running.
                 (not (live? this)) {:error inspect-lost :lost? true}
