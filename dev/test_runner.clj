@@ -41,6 +41,7 @@
     jonquil.command-registry-test
     jonquil.keymap-shipped-test
     jonquil.palette-test
+    jonquil.debugger-test
     jonquil.describe-test
     jonquil.locations-test
     jonquil.timing-test

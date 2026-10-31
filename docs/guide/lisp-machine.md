@@ -38,6 +38,7 @@ Emacs took first:
 | The locations list and F8 / Shift+F8 | `next-error`, xref |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Time the form at the caret | `benchmark-run` |
+| Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
 | Plugins written in Clojure, in the settings folder | Emacs Lisp packages |
 
 Three things set it apart:
@@ -49,12 +50,14 @@ Three things set it apart:
   child process for a project (see [Dialects and runtimes](dialects/index.md)).
   The inspector, its history and Time the form look at your program's real
   values, not the editor's.
-- **The debugger is planned to reach into that runtime.** With its debug
-  profile on, Jolt's `jolt.debug` keeps the frames and locals of a throw,
-  and the planned
-  debugger (`ROADMAP.md`, LM5) shows them for your own code, with a jump to
-  each frame's line. Emacs debugs Emacs Lisp well, but debugging Clojure
-  there goes through CIDER and nREPL, a separate layer.
+- **The debugger reads that runtime.** Jolt's `jolt.debug` keeps the frames
+  and locals of a throw, and the Frames panel (Show the last error's frames
+  and locals, see [Help and the inspector](help-and-inspector.md)) lists them
+  for your own code: a frame opens at its line, and a local opens in the
+  inspector. It needs a Jolt release with `jolt.debug`, and pausing before
+  the stack unwinds comes later (`ROADMAP.md`, LM5). Emacs debugs Emacs Lisp
+  well, but debugging Clojure there goes through CIDER and nREPL, a separate
+  layer.
 - **It stays a Clojure IDE.** Emacs turns everything into a buffer: mail, a
   shell, a file manager. Jonquil takes Lisp Machine ideas only where they
   help you write and understand Clojure code, and leaves the rest.

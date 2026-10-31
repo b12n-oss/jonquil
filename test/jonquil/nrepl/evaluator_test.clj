@@ -812,3 +812,16 @@
         (is (= prompt (ev/prompt-ns e)) "the prompt namespace didn't move")
         (is (= "[3 2 1 \"e1\"]" (:printed (first (run e "[*1 *2 *3 (ex-message *e)]" false))))))
       (finally (ev/stop! e)))))
+
+(deftest frames-reply-test
+  (is (= {:note "No error yet."} (nrepl/frames-reply [{:data "{:note \"No error yet.\"}"} {:status ["done"]}])))
+  (is (= {:error "frames broke"} (nrepl/frames-reply [{:error "frames broke" :status ["done"]}])))
+  (is (= {:error "The Jolt child answered without its frames."}
+         (nrepl/frames-reply [{:status ["done" "error"] :view "{}"}]))))
+
+(deftest toggle-reply-test
+  (is (= {:on? true} (nrepl/toggle-reply [{:on "true" :status ["done"]}])))
+  (is (= {:on? false} (nrepl/toggle-reply [{:on "false"}])))
+  (is (= {:error "no profile"} (nrepl/toggle-reply [{:error "no profile"}])))
+  (is (= {:error "The Jolt child didn't say whether debug mode is on."}
+         (nrepl/toggle-reply [{:status ["done" "error"] :view "{}"}]))))

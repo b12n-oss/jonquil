@@ -13,13 +13,17 @@
   evals on purpose: jolt.nrepl/evaluate shifts the global *1 *2 *3 after
   every successful eval, and an op leaves the user's history alone
   (measured 2026-10-18). inspect-start reads that global *1."
-  (:require [jolt.nrepl :as server]
+  (:require [clojure.java.io :as io]
+            [jolt.nrepl :as server]
+            [jonquil.debugger :as debugger]
             [jonquil.inspect.view :as view]))
 
 (def ops
   ["inspect-start" "inspect-in" "inspect-out" "inspect-page"
    "inspect-toggle-meta" "inspect-toggle-table" "inspect-def"
-   "inspect-earlier" "inspect-later"])
+   "inspect-earlier" "inspect-later"
+   ;; the Frames panel (jonquil.debugger), over the session's global *e
+   "jonquil-frames" "inspect-local" "jonquil-debug-mode"])
 
 (defn- as-long
   "A bencode integer, or the same number sent as a string."
@@ -31,8 +35,8 @@
   [ns-name]
   (or (when ns-name (find-ns (symbol ns-name))) (the-ns 'user)))
 
-(defn handle
-  "The response map for an inspect-* request, or nil for any other op.
+(defn- view-reply
+  "The response map for an inspect-* view op, or nil for any other op.
   state is an atom holding the view (jonquil.inspect.view's own state)."
   [state request]
   (let [g (fn [k] (get request k))
@@ -49,6 +53,44 @@
                nil)]
     (when-let [[op op-args] args]
       {"status" ["done"] "view" (pr-str (view/run-op state op op-args))})))
+
+(defn- resource-url
+  "A frame's classpath name as the URL this child loads it from, so the
+  window can open it; a path, a URL or a name the classpath lacks stays."
+  [f]
+  (if (re-find #"^(jar:|file:|/)" f) f (or (some-> (io/resource f) str) f)))
+
+(defn handle
+  "The response map for one of ops, or nil for any other op. The frames
+  ops read jolt.nrepl's global *e, the last error, as inspect-start reads
+  *1. state is an atom holding the view."
+  [state request]
+  (let [g (fn [k] (get request k))]
+    (case (g "op")
+      "jonquil-frames"
+      ;; a throw is an "error", never a reply without its data
+      (try
+        {"status" ["done"]
+         "data" (binding [*print-length* nil *print-level* nil]
+                  (pr-str (if-let [e *e]
+                            (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file resource-url})
+                            {:note "No error yet."})))}
+        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
+      "jonquil-debug-mode"
+      (let [r (try (debugger/toggle-debug-mode!)
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (if-let [err (:error r)]
+          {"status" ["done"] "error" err}
+          {"status" ["done"] "on" (str (:on? r))}))
+      "inspect-local"
+      (let [v (if-let [e *e]
+                (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)})
+                ::debugger/missing)]
+        {"status" ["done"]
+         "view" (pr-str (if (= v ::debugger/missing)
+                            {:error "That local is gone."}
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+      (view-reply state request))))
 
 (defonce ^:private state (atom nil))
 
