@@ -33,6 +33,10 @@ Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, who
 
 ![The completion popup open over a partial word, with a candidate list and its doc preview](docs/images/completion.png)
 
+## Lisp Machine ideas, and Emacs
+
+Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where the whole system was live Lisp that you could inspect and change while it ran. Emacs keeps that idea as an application, and Jonquil heads the same way, so Describe Key, Recent Keys, the command palette, the locations list, switching to a recent tab and timing a form all have an Emacs counterpart. The difference is that your Jolt code runs on the editor's own runtime, which lets the inspector, timing and the planned debugger work on your program's real values. [Lisp Machine ideas, and Emacs](docs/guide/lisp-machine.md) explains where each idea comes from.
+
 ## Requirements
 
 - [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`
