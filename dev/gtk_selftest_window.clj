@@ -257,6 +257,8 @@
    palette-rows/row-key-bindings-lists
    palette-rows/row-recent-keys-hides-typing
    palette-rows/row-time-form
+   palette-rows/row-time-form-cancel
+   palette-rows/row-time-form-dont-ask
    locations-rows/row-locations-pane-shows
    locations-rows/row-locations-uses-step
    locations-rows/row-locations-survive-edit

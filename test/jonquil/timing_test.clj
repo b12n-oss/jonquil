@@ -59,3 +59,13 @@
     (let [[r out] (run "nil")]
       (is (>= (:ns-per-call r) 0) (str r))
       (is (str/includes? out "too fast to tell") out))))
+
+(deftest confirm-alert-test
+  (let [{:keys [message detail buttons]} (timing/confirm-alert "(swap! a inc)")]
+    (is (= "Time (swap! a inc)?" message))
+    (is (str/includes? detail "side effect") detail)
+    (is (str/includes? detail "millions of times") detail)
+    (is (= ["Time It" "Time It, Don't Ask Again" "Cancel"] buttons)))
+  (testing "a long form is cut to 60 characters"
+    (let [long-form (str "(do " (apply str (repeat 40 "x ")) ")")]
+      (is (= (str "Time " (subs long-form 0 60) "…?") (:message (timing/confirm-alert long-form)))))))

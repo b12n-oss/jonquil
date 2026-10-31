@@ -501,11 +501,12 @@
   between attempts after a Save As), but reuses the ONE retained
   alert-choose-cb across every attempt. cancel and default are button
   indexes: the close alerts pass 2 and 0, the tree's trash alert 1 and 1."
-  [win {:keys [message buttons]} {:keys [cancel default]} on-choice]
+  [win {:keys [message detail buttons]} {:keys [cancel default]} on-choice]
   (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)]
     (swap! alert-dialog-count inc)
     (register-alert-choice! d on-choice)
     (g/gtk-alert-dialog-set-message d message)
+    (when detail (g/gtk-alert-dialog-set-detail d detail))
     (ffi/with-c-string-array [labels 4] (conj (vec buttons) nil)
       (g/gtk-alert-dialog-set-buttons d labels))
     (g/gtk-alert-dialog-set-cancel-button d cancel)
@@ -514,6 +515,7 @@
 
 (def ^:private CLOSE-ALERT {:cancel 2 :default 0})
 (def ^:private TRASH-ALERT {:cancel 1 :default 1})
+(def ^:private TIME-ALERT {:cancel 2 :default 0})
 
 (defn- finish-close!
   "Confirms and re-triggers the window's own close-request:
@@ -1438,13 +1440,39 @@
               (when warning (cview/append! cv :system warning))))
           (set-status! status-label "No form at the caret."))))))
 
+(defn- start-timing!
+  "Evaluates the timing harness around text (the form snap had at the
+  caret) in the window's runtime as Inspect Form evaluates, so the console
+  gets its ; Time: line and the map it answers. A tab that closed while
+  its alert was up times nothing."
+  [{:keys [tab tabs cv ev* status-label]} snap text]
+  (when (some #(= (:id tab) (:id %)) @tabs)
+    (let [{:keys [ed]} tab
+          opts (make-eval-opts ed cv ev* status-label false)]
+      (cview/append! cv :system (str "; Timing " (timing/form-label text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
+      (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+            warning (ev/eval! @ev* (timing/code text 1000)
+                              (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+        (when warning (cview/append! cv :system warning))))))
+
+(defn- time-choice!
+  "The timing alert's decision: index 0 Time It, 1 Time It and stop asking
+  in this window (time-confirmed?), 2 Cancel; an :error means the alert
+  was dismissed. Cancel and a dismissal time nothing."
+  [{:keys [time-confirmed?] :as ctx} snap text {:keys [index error]}]
+  (cond
+    error nil
+    (= index 0) (start-timing! ctx snap text)
+    (= index 1) (do (reset! time-confirmed? true) (start-timing! ctx snap text))
+    :else nil))
+
 (defn- time-form!
   "Time the form at the caret: Run Form's form, wrapped in
-  jonquil.timing/code and evaluated in the window's runtime as Inspect Form
-  evaluates, so the console gets its ; Time: line and the map it answers.
-  Dialects without the harness's System/nanoTime say so and evaluate
-  nothing."
-  [{:keys [tab cv ev* status-label sel*] :as ctx}]
+  jonquil.timing/code. The form runs many times, side effects and all, so
+  an alert asks first (ask-time!, which rows can replace) until
+  Don't Ask Again sets time-confirmed? for this window. Dialects without
+  the harness's System/nanoTime say so and evaluate nothing."
+  [{:keys [tab status-label sel* ask-time! time-confirmed?] :as ctx}]
   (let [{:keys [ed]} tab]
     (cond
       (refuse-foreign! ctx) nil
@@ -1453,12 +1481,9 @@
       :else
       (let [snap (editor/snapshot ed)]
         (if-let [{:keys [text]} (commands/run-form snap)]
-          (let [opts (make-eval-opts ed cv ev* status-label false)]
-            (cview/append! cv :system (str "; Timing " (if (> (count text) 60) (str (subs text 0 60) "…") text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
-            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-                  warning (ev/eval! @ev* (timing/code text 1000)
-                                    (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
-              (when warning (cview/append! cv :system warning))))
+          (if @time-confirmed?
+            (start-timing! ctx snap text)
+            (ask-time! (timing/confirm-alert text) (fn [result] (time-choice! ctx snap text result))))
           (set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
@@ -3232,6 +3257,15 @@
         ;; front, remove-tab! drops it): Genera's Select order
         recent-tabs (atom [])
         win (g/gtk-application-window-new app)
+        ;; Time the form's alert: once Don't Ask Again is chosen, this
+        ;; window times without asking. ask-time* shows the real alert;
+        ;; the self-test swaps it for a stand-in (nil puts the real one back).
+        time-confirmed? (atom false)
+        ask-time* (atom nil)
+        ask-time! (fn [alert on-choice]
+                    (if-let [f @ask-time*]
+                      (f alert on-choice)
+                      (show-alert! win alert TIME-ALERT on-choice)))
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
         parinfer-label (g/gtk-label-new "")
@@ -3566,7 +3600,8 @@
                            (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
-        time-form-fn (fn [] (time-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
+        time-form-fn (fn [] (time-form! {:tab (active-tab) :tabs tabs :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                          :ask-time! ask-time! :time-confirmed? time-confirmed?}))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
@@ -4376,6 +4411,7 @@
                    :tree-submit!* (fn [text] (file-tree-pane/submit-name! tree-pane text))
                    :tree-menu-state* (fn [] (file-tree-pane/menu-state tree-pane))
                    :trash-choice! (fn [path result] (trash-choice! @*tab-ctx path result))
+                   :time-ask* ask-time* :time-confirmed? time-confirmed?
                    :open-paths! (fn [paths] (@current-open-paths paths))
                    :app app
                    :active-tab* active-tab
@@ -4740,7 +4776,7 @@
   never touches the user's real settings file. ui is {:file-tree
   :files-btn :tree-paned :toggle-file-tree!* :file-tree-visible?*
   :simulate-folder-result! :tree-menu!* :tree-press!* :tree-submit!*
-  :tree-menu-state* :trash-choice! :notebook
+  :tree-menu-state* :trash-choice! :time-ask* :time-confirmed? :notebook
   :tabs* :active-tab* :editor
   :console :session :status-label :line-col-label :evaluator* :selection*
   :dialect-label :reset-check :window :find-bar :run!*

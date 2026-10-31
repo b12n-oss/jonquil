@@ -688,6 +688,7 @@
 ;; set_default_button:78-79, choose:82-86, choose_finish:89-91.
 (ffi/defcfn gtk-alert-dialog-get-type "gtk_alert_dialog_get_type" [] :size_t)
 (ffi/defcfn gtk-alert-dialog-set-message "gtk_alert_dialog_set_message" [:pointer :string] :void)
+(ffi/defcfn gtk-alert-dialog-set-detail "gtk_alert_dialog_set_detail" [:pointer :string] :void)
 (ffi/defcfn gtk-alert-dialog-set-buttons "gtk_alert_dialog_set_buttons" [:pointer :pointer] :void)
 (ffi/defcfn gtk-alert-dialog-set-cancel-button "gtk_alert_dialog_set_cancel_button" [:pointer :int] :void)
 (ffi/defcfn gtk-alert-dialog-set-default-button "gtk_alert_dialog_set_default_button" [:pointer :int] :void)
