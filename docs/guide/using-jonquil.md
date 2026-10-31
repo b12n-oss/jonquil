@@ -68,6 +68,10 @@ form too fast to tell apart from an empty call says so instead. A lazy form
 is timed as building the sequence, not walking it, so wrap it in `doall` to
 time the work.
 
+The form runs thousands of times, often millions, so time only code without
+side effects. A form that writes a file, swaps an atom, prints or calls a
+server does that on every run. The console says so as timing starts.
+
 It runs in the window's own runtime, so it times the code where it really
 runs: Jolt, JVM Clojure, or another nREPL server that has
 `System/nanoTime`, such as babashka's (a Basilisp server answers with an

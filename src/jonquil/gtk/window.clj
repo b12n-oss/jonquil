@@ -1454,7 +1454,7 @@
       (let [snap (editor/snapshot ed)]
         (if-let [{:keys [text]} (commands/run-form snap)]
           (let [opts (make-eval-opts ed cv ev* status-label false)]
-            (cview/append! cv :system (str "; Timing " (if (> (count text) 60) (str (subs text 0 60) "…") text) " for about a second\n"))
+            (cview/append! cv :system (str "; Timing " (if (> (count text) 60) (str (subs text 0 60) "…") text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
             (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                   warning (ev/eval! @ev* (timing/code text 1000)
                                     (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
