@@ -470,6 +470,27 @@
     (when on-output
       (on-output :system "; Stop restarted the Jolt runtime, so its definitions are gone.\n"))))
 
+(defn frames-reply
+  "The child's jonquil-frames responses as the Frames panel's data, or
+  {:error s}: its own error, or a reply without data (the middleware
+  failed some other way)."
+  [responses]
+  (if-let [err (some :error responses)]
+    {:error err}
+    (if-let [d (some :data responses)]
+      (edn/read-string d)
+      {:error "The Jolt child answered without its frames."})))
+
+(defn toggle-reply
+  "The child's jonquil-debug-mode responses as {:on? b} or {:error s},
+  never a guess when the reply says neither."
+  [responses]
+  (if-let [err (some :error responses)]
+    {:error err}
+    (if-let [on (some :on responses)]
+      {:on? (= "true" on)}
+      {:error "The Jolt child didn't say whether debug mode is on."})))
+
 (defrecord NRepl [selection state history start-lock]
   ev/Evaluator
   (start! [this] (start-runtime! this))
@@ -644,26 +665,21 @@
                     (not (contains? ops "jonquil-frames")) {:error "The debugger needs Jolt."}
                     :else
                     (let [r (client/request-sync conn {:op "jonquil-frames" :session session} request-timeout-ms)]
-                      (if (vector? r)
-                        (edn/read-string (some :data r))
-                        {:error inspect/timeout-message}))))
+                      (if (vector? r) (frames-reply r) {:error inspect/timeout-message}))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-data d) (catch Throwable _))))
     nil)
-  (debug-mode! [this on? on-done]
+  (toggle-debug-mode! [this on-done]
     (future
       (let [r (try
                 (let [{:keys [conn session ops] :as rt} (runtime this)]
                   (cond
-                    (nil? rt) {:error inspect-not-running}
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
                     (not (live? this)) {:error inspect-lost}
                     (not (contains? ops "jonquil-debug-mode")) {:error "The debugger needs Jolt."}
                     :else
-                    (let [r (client/request-sync conn {:op "jonquil-debug-mode" :on (str (boolean on?)) :session session}
-                                                 request-timeout-ms)]
-                      (cond (not (vector? r)) {:error inspect/timeout-message}
-                            (some :error r) {:error (some :error r)}
-                            :else {:on? (boolean on?)}))))
+                    (let [r (client/request-sync conn {:op "jonquil-debug-mode" :session session} request-timeout-ms)]
+                      (if (vector? r) (toggle-reply r) {:error inspect/timeout-message}))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil))

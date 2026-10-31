@@ -111,7 +111,17 @@
   (is (some #{"jonquil-debug-mode"} mw/ops)))
 
 (deftest debug-mode-op
-  (let [r (mw/handle (atom nil) {"op" "jonquil-debug-mode" "on" "false"})]
-    (if (debugger/available?)
-      (is (= "false" (get r "on")))
-      (is (= "Frames need a Jolt with jolt.debug (newer than this one)." (get r "error"))))))
+  (if (debugger/available?)
+    (try
+      (is (= "true" (get (mw/handle (atom nil) {"op" "jonquil-debug-mode"}) "on")))
+      (is (= "false" (get (mw/handle (atom nil) {"op" "jonquil-debug-mode"}) "on")))
+      (finally (debugger/set-debug-mode! false)))
+    (is (= "Frames need a Jolt with jolt.debug (newer than this one)."
+           (get (mw/handle (atom nil) {"op" "jonquil-debug-mode"}) "error")))))
+
+(deftest frames-op-throw-is-an-error
+  (binding [debugger/*frames-fn* (fn [_] (throw (Exception. "frames broke")))
+            *e (try (/ 1 0) (catch Throwable e e))]
+    (let [r (mw/handle (atom nil) {"op" "jonquil-frames"})]
+      (is (= "frames broke" (get r "error")))
+      (is (nil? (get r "data"))))))

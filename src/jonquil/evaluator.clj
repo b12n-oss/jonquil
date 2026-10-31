@@ -163,9 +163,10 @@
     "Off the caller's thread, calls on-data once with
     jonquil.debugger/frames-data's map, {:note \"No error yet.\"} or
     {:error s}.")
-  (debug-mode! [ev on? on-done]
-    "Turns Jolt's debug mode (code compiled from then on keeps its locals)
-    on or off, off the caller's thread; on-done gets {:on? b} or {:error s}."))
+  (toggle-debug-mode! [ev on-done]
+    "Flips Jolt's debug mode (code compiled from then on keeps its locals),
+    reading the runtime's own mode, off the caller's thread; on-done gets
+    {:on? b}, the mode it's in now, or {:error s}."))
 
 (defprotocol Inspector
   "Inspecting the value an evaluator's last :ok result produced,

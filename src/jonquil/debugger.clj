@@ -31,12 +31,38 @@
   []
   (some? (real-frames-fn)))
 
+(def ^:private UNREALIZED "<lazy seq, not realized>")
+
+(defn- unrealized?
+  "True for a lazy seq nothing has realized yet: printing it would run the
+  program's own code (a (map save! rows) saving rows again), off the eval
+  thread, as slowly as that code is."
+  [x]
+  (and (instance? clojure.lang.LazySeq x) (not (realized? x))))
+
+(defn- guard-lazy
+  "v with an unrealized lazy seq inside it, one level down in a vector, map
+  or set, shown as UNREALIZED (a symbol prints as its name). Only the first
+  9 entries are kept, which is all *print-length* 8 shows; a record is left
+  as it is."
+  [v]
+  (let [mark (fn [x] (if (unrealized? x) (symbol UNREALIZED) x))]
+    (cond
+      (record? v) v
+      (map? v) (into (empty v) (map (fn [[k x]] [k (mark x)])) (take 9 v))
+      (vector? v) (mapv mark (take 9 v))
+      (set? v) (into (empty v) (map mark) (take 9 v))
+      :else v)))
+
 (defn value-text
   "v as one short line: pr-str with *print-length* 8 and *print-level* 3,
   cut to TEXT-MAX characters, or <unprintable: Class> when printing it
-  throws."
+  throws. An unrealized lazy seq is never realized here (UNREALIZED): the
+  inspector realizes it when asked."
   [v]
-  (let [s (try (binding [*print-length* 8 *print-level* 3] (pr-str v))
+  (let [s (try (if (unrealized? v)
+                 UNREALIZED
+                 (binding [*print-length* 8 *print-level* 3] (pr-str (guard-lazy v))))
                (catch Throwable _ (str "<unprintable: " (.getSimpleName (class v)) ">")))]
     (if (> (count s) TEXT-MAX) (str (subs s 0 TEXT-MAX) "…") s)))
 
@@ -81,15 +107,29 @@
                                    vec)})
                    (user-frames (frames-fn e)))}))
 
+(defn- jolt-error [e] {:error (str "Debug mode: " (or (ex-message e) (str (class e))))})
+
 (defn set-debug-mode!
   "Turns Jolt's debug mode on or off: code compiled from then on keeps
   every local. {:on? b}, or {:error s} on a Jolt without jolt.debug, where
   jolt.profile/instrument! is never called (it would read :debug as true
-  and turn line counting on)."
+  and turn line counting on), or when it throws."
   [on?]
   (if (available?)
-    (do ((requiring-resolve 'jolt.profile/instrument!) (if on? :debug false))
-        {:on? (boolean on?)})
+    (try ((requiring-resolve 'jolt.profile/instrument!) (if on? :debug false))
+         {:on? (boolean on?)}
+         (catch Throwable e (jolt-error e)))
+    {:error NO-API}))
+
+(defn toggle-debug-mode!
+  "Flips the runtime's own debug mode, read from jolt.profile/instrument-mode
+  (on any Jolt with jolt.debug), so a restarted runtime or another window
+  that changed it is never contradicted: on unless it is :debug now, off
+  when it is. {:on? b} or {:error s}, as set-debug-mode!."
+  []
+  (if (available?)
+    (try (set-debug-mode! (not= :debug ((requiring-resolve 'jolt.profile/instrument-mode))))
+         (catch Throwable e (jolt-error e)))
     {:error NO-API}))
 
 (defn- file-name [f] (last (str/split f #"/")))

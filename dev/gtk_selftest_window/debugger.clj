@@ -92,11 +92,14 @@
                            (do (on-gtk (dpane/activate! dp (first (keep-indexed (fn [i r] (when (= r LOCAL-ROW) i)) rows))))
                                (await-until 3000 20 #(str/includes? (g/label-text (:info (:inspector ui))) "3 items")))
                            true)
-              _ (when (on-gtk @(:debug-mode-on? ui)) (on-gtk (run-palette! ui "keep every local")))
-              off? (await-until 3000 20 #(not @(:debug-mode-on? ui)))]
+              _ (when avail? (on-gtk (run-palette! ui "keep every local")))
+              off? (or (not avail?) (await-until 3000 20 #(= (status ui) "; Debug mode off.")))]
           (on-gtk (support/check :frames-after-error (and mode? ran? shown? rows-ok? inspected? off?)
                                  {:available avail? :mode mode? :ran ran? :shown shown? :rows rows
                                   :inspected inspected? :off off? :status (status ui)})))
         (finally
+          ;; the in-process runtime is this process: never leave later rows
+          ;; compiling in debug mode, whatever failed above
+          (when avail? (debugger/set-debug-mode! false))
           (on-gtk (when-let [f (:on-close @(:handlers dp))] (f))
                   ((:close-inspector!* ui))))))))

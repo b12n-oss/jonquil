@@ -277,11 +277,13 @@
 
 (deftest debug-mode-test
   (let [s (session/make-session)
-        mode (fn [on?] (let [p (promise)] (ev/debug-mode! s on? (fn [r] (deliver p r))) (deref p 2000 :timeout)))]
+        toggle (fn [] (let [p (promise)] (ev/toggle-debug-mode! s (fn [r] (deliver p r))) (deref p 2000 :timeout)))]
     (if (debugger/available?)
-      (do (is (= {:on? true} (mode true)))
-          (is (= {:on? false} (mode false))))
-      (do (is (= {:error "Frames need a Jolt with jolt.debug (newer than this one)."} (mode true)))
+      (try
+        (is (= {:on? true} (toggle)))
+        (is (= {:on? false} (toggle)) "a second toggle reads the runtime's mode and turns it off")
+        (finally (debugger/set-debug-mode! false)))
+      (do (is (= {:error "Frames need a Jolt with jolt.debug (newer than this one)."} (toggle)))
           ;; a Jolt with jolt.profile (some builds have none): line counting stays off
           (when-let [instrumenting? (try (requiring-resolve 'jolt.profile/instrumenting?) (catch Throwable _ nil))]
             (is (false? (instrumenting?)) "line counting stays off"))))))

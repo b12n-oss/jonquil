@@ -68,12 +68,17 @@
   (let [g (fn [k] (get request k))]
     (case (g "op")
       "jonquil-frames"
-      {"status" ["done"]
-       "data" (pr-str (if-let [e *e]
-                          (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file resource-url})
-                          {:note "No error yet."}))}
+      ;; a throw is an "error", never a reply without its data
+      (try
+        {"status" ["done"]
+         "data" (binding [*print-length* nil *print-level* nil]
+                  (pr-str (if-let [e *e]
+                            (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file resource-url})
+                            {:note "No error yet."})))}
+        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
       "jonquil-debug-mode"
-      (let [r (debugger/set-debug-mode! (= "true" (g "on")))]
+      (let [r (try (debugger/toggle-debug-mode!)
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (if-let [err (:error r)]
           {"status" ["done"] "error" err}
           {"status" ["done"] "on" (str (:on? r))}))

@@ -93,9 +93,9 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-data d) (catch Throwable _))))
     nil)
-  (debug-mode! [_ on? on-done]
+  (toggle-debug-mode! [_ on-done]
     (future
-      (let [r (try (debugger/set-debug-mode! on?)
+      (let [r (try (debugger/toggle-debug-mode!)
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)

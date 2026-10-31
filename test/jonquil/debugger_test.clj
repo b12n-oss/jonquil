@@ -104,3 +104,21 @@
               d (debugger/frames-data e {:frames-fn (debugger/frames-fn)})]
           (is (some (fn [fr] (some #(= "q" (:name %)) (:locals fr))) (:frames d)) (pr-str d)))
         (finally (instrument! false))))))
+
+(deftest lazy-locals-stay-unrealized-test
+  (let [calls (atom 0)
+        lazy (map (fn [x] (swap! calls inc) x) [1 2 3])]
+    (is (= "<lazy seq, not realized>" (debugger/value-text lazy)))
+    (is (= "[1 <lazy seq, not realized>]" (debugger/value-text [1 lazy])))
+    (is (= "{:xs <lazy seq, not realized>}" (debugger/value-text {:xs lazy})))
+    (is (= 0 @calls) "opening the panel ran none of the program's code")
+    (doall lazy)
+    (is (= "(1 2 3)" (debugger/value-text lazy)) "a realized one prints")))
+
+(deftest toggle-debug-mode-test
+  (if (debugger/available?)
+    (try
+      (is (= {:on? true} (debugger/toggle-debug-mode!)))
+      (is (= {:on? false} (debugger/toggle-debug-mode!)))
+      (finally (debugger/set-debug-mode! false)))
+    (is (= {:error "Frames need a Jolt with jolt.debug (newer than this one)."} (debugger/toggle-debug-mode!)))))

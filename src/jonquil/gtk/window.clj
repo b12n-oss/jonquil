@@ -3836,10 +3836,9 @@
                                 (when (= id (:tab-id @locations-state))
                                   (clear-locations!)
                                   (hide-right-panel! right :locations)))
-        ;; The Frames panel (jonquil.debugger): the data it shows, and whether
-        ;; this window turned Jolt's debug mode on. GTK thread only.
+        ;; The Frames panel's data (jonquil.debugger). GTK thread only. Debug
+        ;; mode has no flag here: the toggle reads the runtime's own mode.
         frames-state (atom nil)
-        debug-mode-on? (atom false)
         frames-ev (fn [] (let [e @ev*] (when (satisfies? ev/Frames e) e)))
         show-frames-fn (fn []
                          (if-let [e (frames-ev)]
@@ -3854,16 +3853,12 @@
                            (set-status! status-label "; The debugger needs Jolt.")))
         locals-mode-fn (fn []
                          (if-let [e (frames-ev)]
-                           (let [on? (not @debug-mode-on?)]
-                             (ev/debug-mode! e on? (fn [r]
-                                                     (on-gui! (fn []
-                                                                (if-let [err (:error r)]
-                                                                  (set-status! status-label (str "; " err))
-                                                                  (do (reset! debug-mode-on? (:on? r))
-                                                                      (set-status! status-label
-                                                                                   (if (:on? r)
-                                                                                     "; Debug mode on: code you load from now on keeps its locals."
-                                                                                     "; Debug mode off.")))))))))
+                           (ev/toggle-debug-mode! e (fn [r]
+                                                      (on-gui! (fn []
+                                                                 (set-status! status-label
+                                                                              (cond (:error r) (str "; " (:error r))
+                                                                                    (:on? r) "; Debug mode on: code you load from now on keeps its locals."
+                                                                                    :else "; Debug mode off."))))))
                            (set-status! status-label "; The debugger needs Jolt.")))
         _ (debugger-pane/set-handlers!
            dbgp {:on-frame (fn [i]
@@ -4702,9 +4697,8 @@
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
                    :locations-pane locp
-                   ;; the Frames panel, this window's debug-mode flag, and
-                   ;; the inspector's own Close
-                   :debugger-pane dbgp :debug-mode-on? debug-mode-on?
+                   ;; the Frames panel and the inspector's own Close
+                   :debugger-pane dbgp
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})
