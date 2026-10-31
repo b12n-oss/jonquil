@@ -1474,7 +1474,7 @@
   the other alerts' alert-pending? guard, as the tree's trash alert does,
   so it never opens over a close alert. Dialects without the harness's
   System/nanoTime say so and evaluate nothing."
-  [{:keys [tab cv status-label sel* ask-time! time-confirmed?] :as ctx}]
+  [{:keys [tab cv ev* status-label sel* ask-time! time-confirmed?] :as ctx}]
   (let [{:keys [ed]} tab]
     (cond
       (refuse-foreign! ctx) nil
@@ -1488,6 +1488,9 @@
             @alert-pending? (set-status! status-label "Another alert is open.")
             :else
             (do (reset! alert-pending? true)
+                ;; an older message (a No form at the caret. from a miss, say)
+                ;; shouldn't sit under the alert; a running eval keeps its own
+                (when-not (ev/evaluating? @ev*) (set-status! status-label "Ready"))
                 ;; complete-alert! releases the guard for the real alert; this
                 ;; also releases it for a stand-in, and a throw while building
                 ;; the alert releases it too
