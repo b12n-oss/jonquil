@@ -156,14 +156,27 @@
     {:status :not-found} (the namespace answered but doesn't know sym,
     so doc was never sent)."))
 
+(defprotocol Frames
+  "The last error's frames and locals (jonquil.debugger), for the two Jolt
+  runtimes. Callers check (satisfies? Frames ev) first."
+  (error-frames! [ev on-data]
+    "Off the caller's thread, calls on-data once with
+    jonquil.debugger/frames-data's map, {:note \"No error yet.\"} or
+    {:error s}.")
+  (toggle-debug-mode! [ev on-done]
+    "Flips Jolt's debug mode (code compiled from then on keeps its locals),
+    reading the runtime's own mode, off the caller's thread; on-done gets
+    {:on? b}, the mode it's in now, or {:error s}."))
+
 (defprotocol Inspector
   "Inspecting the value an evaluator's last :ok result produced,
   through jonquil.inspect.view's lifted ops. op and args are
   jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
   :def :earlier :later; a JVM server's inspector has no history, so its
   evaluator answers :earlier and :later with {:error s}), except :start takes {:rows :cols} (the evaluator supplies the
-  value) and :def takes {:name} (the evaluator supplies the target
-  namespace). on-view is called exactly once, from any thread, with a
+  value), :start-local takes {:frame :local :rows :cols} (a local of the
+  last error's frame i, jonquil.debugger) and :def takes {:name} (the
+  evaluator supplies the target namespace). on-view is called exactly once, from any thread, with a
   view map (jonquil.inspect.view/run-op's shape) or {:error s} (plus
   :lost? true when the connection that would have answered it is gone),
   and never throws out."

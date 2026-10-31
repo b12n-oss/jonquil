@@ -163,3 +163,41 @@ at 1000 entries (`1000+ items`). Runtime support is in
 ![The inspector panel against a real JVM Clojure server, after Run and a REPL entry](../images/clj-inspector.png)
 
 </details>
+
+## The last error's frames
+
+After an error in Jolt, **Show the last error's frames and locals**, in the
+palette, opens the Frames panel on the right. Its title is the error, such as
+`ArithmeticException: Divide by zero`. Below it is one row per frame of the
+call stack, innermost first, and under each frame its locals:
+
+```
+user/dbg-inner  line 2 (no file)
+    n = 3
+    xs = [1 2 3]
+```
+
+Frames stop where Jonquil's own evaluation code starts, so the list shows your
+code. Return or a click on a frame opens its file at that line, in a tab
+for a file of your project and in the source panel for anything else. Code you
+ran from the editor or typed at the prompt has no file, so its frame shows the
+line within that text and says so instead. Return or a click on a local opens its value in
+the inspector, where it lives, so even a huge or lazy value is never copied out.
+A local's row prints at most 8 items, 3 levels deep, and 100 characters. A lazy seq nothing has realized yet reads `<lazy seq, not realized>`, because printing it would run your code again (a `(map save! rows)` would save the rows again); opening it in the inspector realizes it.
+
+Jolt keeps a frame's locals only when the code was compiled with them.
+**Keep every local for the debugger** turns Jolt's debug mode on (run it again
+to turn it off). Code you load or run afterwards keeps all its locals, so Run
+again, or reload a namespace, after turning it on. Debug mode keeps tail calls
+only for `recur`, so very deep recursion that isn't `recur` can run out of
+stack while it's on: Jolt then runs out of memory, keeps no frames, and the
+panel says so. Turn debug mode off and run it again. Without debug mode, a
+frame shows the locals Jolt happened to keep, and code typed at the prompt
+shows none.
+
+The panel reads the frames after the error was caught, from the evaluator that
+ran the code, in process or in the Jolt child. It needs a Jolt with
+`jolt.debug` (`jolt-lang/jolt` #1465); on an older Jolt the panel says
+"Frames need a Jolt with jolt.debug (newer than this one)." and debug mode
+stays off. JVM Clojure and the other dialects say "The debugger needs Jolt."
+for now.

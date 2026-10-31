@@ -37,6 +37,7 @@
             [gtk-selftest-window.parinfer :as parinfer-rows]
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.locations :as locations-rows]
+            [gtk-selftest-window.debugger :as debugger-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
@@ -370,6 +371,11 @@
    inspector/row-inspect-form-queues-behind-request
    inspector/row-inspect-def-prompt-escape-safe
    inspector/row-inspect-history-steps
+   ;; after the inspector's rows: on a Jolt with jolt.debug this opens the
+   ;; inspector on a local, and row-inspect-focus-after-open needs the
+   ;; window's first open
+   debugger-rows/row-debugger-pane-shows
+   debugger-rows/row-frames-after-error
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained
    contained/row-find-replace-all-throw-contained

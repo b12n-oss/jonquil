@@ -19,6 +19,9 @@
   [op args]
   (case op
     :start {:op "inspect-start" :rows (:rows args) :cols (:cols args)}
+    ;; a local of the last error's frame: only Jonquil's Jolt middleware
+    :start-local {:op "inspect-local" :frame (:frame args) :local (:local args)
+                  :rows (:rows args) :cols (:cols args)}
     :in {:op "inspect-in" :idx (:idx args)}
     :out {:op "inspect-out"}
     :page {:op "inspect-page" :delta (:delta args)}

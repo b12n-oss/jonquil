@@ -57,10 +57,12 @@
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
+    jonquil.debugger
     jonquil.describe
     jonquil.locations
     jonquil.timing
     jonquil.gtk.locations-pane
+    jonquil.gtk.debugger-pane
     jonquil.plugin
     jonquil.plugin-check
     jonquil.plugin-protocol
