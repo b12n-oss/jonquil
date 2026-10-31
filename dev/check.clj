@@ -62,6 +62,7 @@
     jonquil.locations
     jonquil.timing
     jonquil.gtk.locations-pane
+    jonquil.gtk.debugger-pane
     jonquil.plugin
     jonquil.plugin-check
     jonquil.plugin-protocol

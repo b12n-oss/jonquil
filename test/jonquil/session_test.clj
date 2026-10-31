@@ -282,7 +282,9 @@
       (do (is (= {:on? true} (mode true)))
           (is (= {:on? false} (mode false))))
       (do (is (= {:error "Frames need a Jolt with jolt.debug (newer than this one)."} (mode true)))
-          (is (false? ((requiring-resolve 'jolt.profile/instrumenting?))) "line counting stays off")))))
+          ;; a Jolt with jolt.profile (some builds have none): line counting stays off
+          (when-let [instrumenting? (try (requiring-resolve 'jolt.profile/instrumenting?) (catch Throwable _ nil))]
+            (is (false? (instrumenting?)) "line counting stays off"))))))
 
 (deftest start-local-test
   (let [s (session/make-session)]

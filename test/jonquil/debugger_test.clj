@@ -43,7 +43,7 @@
            (mapv :fn (:frames (debugger/frames-data
                                div-zero
                                {:frames-fn (constantly [{:fn 'user/dbg-inner :locals {}} {:fn 'user/fn--3 :locals {}}
-                                                        {:fn 'jonquil.eval/eval-async/fn--7 :locals {}}
+                                                        {:fn "jonquil.eval/eval-async/fn--7" :locals {}}
                                                         {:fn 'user/after :locals {}}])})))))
     (is (= ["user/x"]
            (mapv :fn (:frames (debugger/frames-data
@@ -54,7 +54,7 @@
     (is (= ["jonquil.eval/eval-async/fn--7" "user/y"]
            (mapv :fn (:frames (debugger/frames-data
                                div-zero
-                               {:frames-fn (constantly [{:fn 'jonquil.eval/eval-async/fn--7 :locals {}}
+                               {:frames-fn (constantly [{:fn "jonquil.eval/eval-async/fn--7" :locals {}}
                                                         {:fn 'user/y :locals {}}])})))))))
 
 (deftest resolve-file-test
