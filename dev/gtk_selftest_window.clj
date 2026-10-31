@@ -64,7 +64,10 @@
             [temp-dirs]))
 
 (def ^:private row-fns
-  [prompt/row-prompt-starts-user
+  ;; first, before any row switches tabs, which would put the launch tab in
+  ;; the recent list by another way
+  [tabs/row-tab-launch-tab-is-recent
+   prompt/row-prompt-starts-user
    run-repl/row-run-output
    run-repl/row-run-while-running
    run-repl/row-stdin-roundtrip
@@ -253,6 +256,7 @@
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists
    palette-rows/row-recent-keys-hides-typing
+   palette-rows/row-time-form
    locations-rows/row-locations-pane-shows
    locations-rows/row-locations-uses-step
    locations-rows/row-locations-survive-edit
@@ -430,6 +434,7 @@
    tabs/row-tab-close-cancels-flash
    tabs/row-tab-close-while-running-eof
    tabs/row-tab-foreign-refuses-inspect-form
+   tabs/row-tab-switch-recent
    file-tree/row-tree-toggle-chord
    file-tree/row-tree-chord-not-run-selection
    file-tree/row-tree-button-toggles

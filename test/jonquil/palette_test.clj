@@ -78,3 +78,11 @@
   ;; the guide's "Plugins…" finds the list's command
   (let [es (palette/entries {:commands registry/window-commands :keymap {} :os "Linux"})]
     (is (some #(= :plugins/list (:id %)) (palette/filter-entries es "Plugins")))))
+
+(deftest tab-entries-test
+  ;; every other open tab, most recently used first; never the current one
+  (let [recent [{:id 3 :label "c.clj"} {:id 1 :label "a.clj"} {:id 2 :label "b.clj"}]]
+    (is (= [{:id [:tab/switch 1] :doc "Switch to tab: a.clj" :chords [] :source "tab"}
+            {:id [:tab/switch 2] :doc "Switch to tab: b.clj" :chords [] :source "tab"}]
+           (palette/tab-entries recent 3)))
+    (is (= [] (palette/tab-entries [{:id 1 :label "a.clj"}] 1)) "one tab: nothing to switch to")))

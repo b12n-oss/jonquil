@@ -59,6 +59,7 @@
     jonquil.palette
     jonquil.describe
     jonquil.locations
+    jonquil.timing
     jonquil.gtk.locations-pane
     jonquil.plugin
     jonquil.plugin-check

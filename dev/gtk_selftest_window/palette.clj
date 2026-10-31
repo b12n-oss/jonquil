@@ -354,3 +354,23 @@
                                   (not (re-find #"(?m)^; [ab]  " out))
                                   (not-any? #(str/includes? out %) ["parenleft" "space" "Cyrillic"]))
                              {:out out})))))
+
+(defn row-time-form
+  "Time the form at the caret warns that the form's side effects repeat,
+  prints its ; Time: line and leaves the REPL idle (in-process Jolt; about
+  a second)."
+  [ui]
+  (go-row :time-form support/check
+    (let [ed (:editor ui)
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! ed "(+ 1 2)")
+                         (support/place-cursor! (:buf ed) 1)
+                         (run-palette! ui "time the form")
+                         m))
+          timed? (await-until 6000 50 #(str/includes? (support/since ui mark) "; Time: "))
+          idle? (await-until 3000 50 #(support/idle? ui))]
+      (on-gtk (close! ui)
+              (let [out (support/since ui mark)
+                    warned? (str/includes? out "any side effect repeats too")]
+                (support/check :time-form (and timed? idle? warned?)
+                               {:timed timed? :idle idle? :warned warned? :out out}))))))

@@ -43,6 +43,7 @@
     jonquil.palette-test
     jonquil.describe-test
     jonquil.locations-test
+    jonquil.timing-test
     jonquil.plugin-test
     jonquil.plugin-check-test
     jonquil.plugin-protocol-test

@@ -74,6 +74,7 @@
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
+            [jonquil.timing :as timing]
             [jonquil.theme :as theme]))
 
 ;; --- title -------------------------------------------------------------
@@ -1437,6 +1438,29 @@
               (when warning (cview/append! cv :system warning))))
           (set-status! status-label "No form at the caret."))))))
 
+(defn- time-form!
+  "Time the form at the caret: Run Form's form, wrapped in
+  jonquil.timing/code and evaluated in the window's runtime as Inspect Form
+  evaluates, so the console gets its ; Time: line and the map it answers.
+  Dialects without the harness's System/nanoTime say so and evaluate
+  nothing."
+  [{:keys [tab cv ev* status-label sel*] :as ctx}]
+  (let [{:keys [ed]} tab]
+    (cond
+      (refuse-foreign! ctx) nil
+      (not (timing/supported? (:id (:profile @sel*))))
+      (set-status! status-label "; Timing needs Jolt or JVM Clojure.")
+      :else
+      (let [snap (editor/snapshot ed)]
+        (if-let [{:keys [text]} (commands/run-form snap)]
+          (let [opts (make-eval-opts ed cv ev* status-label false)]
+            (cview/append! cv :system (str "; Timing " (if (> (count text) 60) (str (subs text 0 60) "…") text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
+            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                  warning (ev/eval! @ev* (timing/code text 1000)
+                                    (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+              (when warning (cview/append! cv :system warning))))
+          (set-status! status-label "No form at the caret."))))))
+
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
 
 (defn- do-toggle-focus!
@@ -2358,6 +2382,8 @@
   saved tab list records the new active tab (session-changed!)."
   [{:keys [active-id win line-col-label close-popovers-fn tree-pane] :as ctx} t]
   (reset! active-id (:id t))
+  (when-let [r (:recent-tabs ctx)]
+    (swap! r (fn [v] (into [(:id t)] (remove #{(:id t)}) v))))
   (close-popovers-fn)
   ;; The tree selects the active tab's file (never expanding folders for
   ;; it).
@@ -2405,6 +2431,7 @@
           gone (set (tab/popovers t))]
       ;; while the buffer is alive, so the list's marks can be deleted
       (when-let [f (:locations-tab-closed! ctx)] (f id))
+      (when-let [r (:recent-tabs ctx)] (swap! r (fn [v] (vec (remove #{id} v)))))
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
       (swap! popovers (fn [ps] (vec (remove gone ps))))
@@ -2575,10 +2602,14 @@
      palette
      {:on-run (fn [id]
                 (try
-                  (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
+                  ;; a tab entry ([:tab/switch id]) is the window's own,
+                  ;; not a registry command
+                  (if (and (vector? id) (= :tab/switch (first id)))
+                    ((:switch-tab-fn window-key-args) (second id))
+                    (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
                                                id {:window (window-key-ctx window-key-args 0 0)
                                                    :editor (editor/key-ctx ed)
-                                                   :console {:complete! repl-complete-fn}})
+                                                   :console {:complete! repl-complete-fn}}))
                   (catch :default e
                     (set-status! status-label (str "; palette: " (ex-message e))))))
       :on-error (fn [msg] (set-status! status-label msg))})
@@ -3197,6 +3228,9 @@
         ;; context exists in the body below -- the same forward-reference
         ;; idiom *cv and *right use.
         *tab-ctx (atom nil)
+        ;; Tab ids, most recently shown first (on-switch! moves one to the
+        ;; front, remove-tab! drops it): Genera's Select order
+        recent-tabs (atom [])
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
@@ -3532,6 +3566,7 @@
                            (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
+        time-form-fn (fn [] (time-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
@@ -3655,11 +3690,17 @@
         ;; the active tab, whose palette runs the picked one
         open-palette-fn (fn [] (let [plugins @plugin-registry/live]
                                  (palette/open! (:palette (active-tab))
-                                                (pal-data/entries
+                                                (into
+                                                 (pal-data/tab-entries
+                                                  (keep (fn [id] (when-let [t (tab-by-id tabs id)]
+                                                                   {:id id :label (g/label-text (:label t))}))
+                                                        @recent-tabs)
+                                                  (:id (active-tab)))
+                                                 (pal-data/entries
                                                  {:commands (plugin-registry/all-commands plugins)
                                                   :keymap {:window (plugin-registry/window-bindings plugins)
                                                            :editor (plugin-registry/editor-bindings plugins)}
-                                                  :os (System/getProperty "os.name")}))))
+                                                  :os (System/getProperty "os.name")})))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         ;; The locations list: {:tab-id :list :marks}, or nil. The marks live
@@ -3757,6 +3798,12 @@
                          :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
+                         :time-form-fn time-form-fn
+                         ;; switching tabs: a palette tab entry, and Go back
+                         :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
+                         :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
+                                               (select-tab! @*tab-ctx id)
+                                               (set-status! status-label "; Only one tab is open.")))
                          :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
@@ -4013,7 +4060,7 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed!}
+                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
@@ -4031,8 +4078,9 @@
                              (dialog-dismissed? r) nil
                              :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
       ;; switch-page fired inside that first append, before the tab was in
-      ;; tabs, so the tab is made active here.
+      ;; tabs, so the tab is made active here, and starts the recent list.
       (reset! active-id (:id first-tab))
+      (reset! recent-tabs [(:id first-tab)])
       ;; A launch on a project file: the first tab never goes through
       ;; on-switch!, so its override reaches the label here.
       (update-parinfer-label!)
