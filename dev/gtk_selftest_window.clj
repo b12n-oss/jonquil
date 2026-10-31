@@ -271,8 +271,6 @@
    locations-rows/row-locations-buffer-replaced
    locations-rows/row-locations-matches-empty-find
    locations-rows/row-locations-empty-says-no-places
-   debugger-rows/row-debugger-pane-shows
-   debugger-rows/row-frames-after-error
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named
@@ -372,6 +370,11 @@
    inspector/row-inspect-form-queues-behind-request
    inspector/row-inspect-def-prompt-escape-safe
    inspector/row-inspect-history-steps
+   ;; after the inspector's rows: on a Jolt with jolt.debug this opens the
+   ;; inspector on a local, and row-inspect-focus-after-open needs the
+   ;; window's first open
+   debugger-rows/row-debugger-pane-shows
+   debugger-rows/row-frames-after-error
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained
    contained/row-find-replace-all-throw-contained
