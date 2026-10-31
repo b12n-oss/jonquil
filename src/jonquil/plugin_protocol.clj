@@ -6,6 +6,7 @@
   :definition}. No GTK; nothing here goes live, and a caller (the user's
   reload, Accept, a revert) swaps the registry on a pass."
   (:require [clojure.string :as str]
+            [jonquil.eval :as eval]
             [jonquil.plugin :as p]
             [jonquil.plugin-check :as plugin-check]))
 
@@ -32,7 +33,9 @@
   (let [wanted (str "jonquil.plugins." file-id)
         f (future
             (binding [*ns* *ns* p/*definitions* (atom [])]
-              (let [threw (try (load-string source) nil (catch Throwable e e))
+              ;; eval-string, not load-string: a Jolt with jolt-lang/jolt #1460
+              ;; binds *ns* around load-string, and ns-now is read after it
+              (let [threw (try (eval/eval-string source) nil (catch Throwable e e))
                     defs @p/*definitions*
                     ns-now (str (ns-name *ns*))]
                 {:definitions defs
