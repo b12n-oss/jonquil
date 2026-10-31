@@ -63,6 +63,22 @@
   {:ns-per-call jonquil-time-per-call :spread-ns jonquil-time-spread :baseline-ns jonquil-time-base
    :batches jonquil-time-k :batch-size jonquil-time-n})")
 
+(defn form-label
+  "form-text cut to 60 characters, for a line that names it."
+  [form-text]
+  (if (> (count form-text) 60) (str (subs form-text 0 60) "…") form-text))
+
+(defn confirm-alert
+  "The alert before timing form-text, because every side effect it has
+  runs on every call: {:message :detail :buttons}, buttons Time It, Time
+  It and don't ask again in this window, and Cancel."
+  [form-text]
+  {:message (str "Time " (form-label form-text) "?")
+   :detail (str "It runs over and over for about a second, often millions of times, "
+                "so any side effect, such as writing a file, swapping an atom, printing "
+                "or calling a server, happens every time.")
+   :buttons ["Time It" "Time It, Don't Ask Again" "Cancel"]})
+
 (defn code
   "The harness around form-text for a budget of budget-ms, as text to
   evaluate. It prints one ; Time: line and answers {:ns-per-call

@@ -355,22 +355,103 @@
                                   (not-any? #(str/includes? out %) ["parenleft" "space" "Cyrillic"]))
                              {:out out})))))
 
+(defn- answering-asker
+  "Stands in for the timing alert: records each alert in asked and answers
+  it with result at once, so no native dialog opens."
+  [asked result]
+  (fn [alert on-choice] (swap! asked conj alert) (on-choice result)))
+
+(defn- time-palette!
+  "Puts form in the editor, caret inside it, and runs Time the form from
+  the palette with the timing alert answered by result. The console offset
+  before it, and the alerts asked."
+  [ui form result]
+  (let [ed (:editor ui) asked (atom [])]
+    (on-gtk (reset! (:time-ask* ui) (answering-asker asked result))
+            (let [m (support/out-end-offset ui)]
+              (editor/set-text! ed form)
+              (support/place-cursor! (:buf ed) 1)
+              (run-palette! ui "time the form")
+              {:mark m :asked asked}))))
+
+(defn- reset-timing-alert! [ui]
+  (on-gtk (reset! (:time-ask* ui) nil) (reset! (:time-confirmed? ui) false)))
+
 (defn row-time-form
-  "Time the form at the caret warns that the form's side effects repeat,
-  prints its ; Time: line and leaves the REPL idle (in-process Jolt; about
-  a second)."
+  "Time the form at the caret asks first, naming side effects; Time It
+  warns again in the console, prints its ; Time: line and leaves the REPL
+  idle (in-process Jolt; about a second)."
   [ui]
   (go-row :time-form support/check
-    (let [ed (:editor ui)
-          mark (on-gtk (let [m (support/out-end-offset ui)]
-                         (editor/set-text! ed "(+ 1 2)")
-                         (support/place-cursor! (:buf ed) 1)
-                         (run-palette! ui "time the form")
-                         m))
-          timed? (await-until 6000 50 #(str/includes? (support/since ui mark) "; Time: "))
-          idle? (await-until 3000 50 #(support/idle? ui))]
-      (on-gtk (close! ui)
-              (let [out (support/since ui mark)
-                    warned? (str/includes? out "any side effect repeats too")]
-                (support/check :time-form (and timed? idle? warned?)
-                               {:timed timed? :idle idle? :warned warned? :out out}))))))
+    (try
+      (let [{:keys [mark asked]} (time-palette! ui "(+ 1 2)" {:index 0})
+            timed? (await-until 6000 50 #(str/includes? (support/since ui mark) "; Time: "))
+            idle? (await-until 3000 50 #(support/idle? ui))]
+        (on-gtk (close! ui)
+                (let [out (support/since ui mark)
+                      warned? (str/includes? out "any side effect repeats too")
+                      alert (first @asked)
+                      asked? (and (= 1 (count @asked)) (str/includes? (:detail alert) "side effect"))]
+                  (support/check :time-form (and timed? idle? warned? asked?)
+                                 {:timed timed? :idle idle? :warned warned? :asked @asked :out out}))))
+      (finally (reset-timing-alert! ui)))))
+
+(defn row-time-form-cancel
+  "Cancel (or dismissing the alert) times nothing: no ; Timing line and
+  the REPL stays idle."
+  [ui]
+  (go-row :time-form-cancel support/check
+    (try
+      (let [a (time-palette! ui "(+ 1 2)" {:index 2})
+            b (time-palette! ui "(+ 1 2)" {:error "dismissed"})
+            idle? (await-until 3000 50 #(support/idle? ui))]
+        (on-gtk (close! ui)
+                (let [out (support/since ui (:mark a))]
+                  (support/check :time-form-cancel
+                                 (and idle? (not (str/includes? out "; Timing"))
+                                      (= 1 (count @(:asked a))) (= 1 (count @(:asked b))))
+                                 {:idle idle? :out out}))))
+      (finally (reset-timing-alert! ui)))))
+
+(defn row-time-form-alert-pending
+  "While another alert is pending (a close alert, say), timing doesn't
+  open a second one over it: the status bar says so, nothing is timed, and
+  the other alert's guard stays taken. Each answer releases the guard
+  timing took."
+  [ui]
+  (go-row :time-form-alert-pending support/check
+    (try
+      (let [_ (on-gtk (reset! (:alert-pending? ui) true))
+            a (time-palette! ui "(+ 1 2)" {:index 2})
+            said? (await-until 3000 50 #(= "Another alert is open." (g/label-text (:status-label ui))))
+            still? (on-gtk @(:alert-pending? ui))
+            _ (on-gtk (reset! (:alert-pending? ui) false))
+            b (time-palette! ui "(+ 1 2)" {:index 2})
+            released? (on-gtk (not @(:alert-pending? ui)))]
+        (on-gtk (close! ui)
+                (let [out (support/since ui (:mark a))]
+                  (support/check :time-form-alert-pending
+                                 (and said? still? released? (empty? @(:asked a)) (= 1 (count @(:asked b)))
+                                      (not (str/includes? out "; Timing")))
+                                 {:said said? :still still? :released released?
+                                  :asked-a (count @(:asked a)) :asked-b (count @(:asked b)) :out out}))))
+      (finally (on-gtk (reset! (:alert-pending? ui) false)) (reset-timing-alert! ui)))))
+
+(defn row-time-form-dont-ask
+  "Time It, Don't Ask Again times the form, and the next timing in this
+  window starts without asking."
+  [ui]
+  (go-row :time-form-dont-ask support/check
+    (try
+      (let [a (time-palette! ui "(+ 1 2)" {:index 1})
+            first? (await-until 6000 50 #(str/includes? (support/since ui (:mark a)) "; Time: "))
+            _ (await-until 3000 50 #(support/idle? ui))
+            b (time-palette! ui "(+ 2 3)" {:index 2})
+            second? (await-until 6000 50 #(str/includes? (support/since ui (:mark b)) "; Time: "))
+            idle? (await-until 3000 50 #(support/idle? ui))]
+        (on-gtk (close! ui)
+                (support/check :time-form-dont-ask
+                               (and first? second? idle? (= 1 (count @(:asked a))) (empty? @(:asked b)))
+                               {:first first? :second second? :idle idle?
+                                :asked-a (count @(:asked a)) :asked-b (count @(:asked b))})))
+      (finally (reset-timing-alert! ui)))))
