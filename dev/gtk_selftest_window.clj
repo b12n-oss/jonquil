@@ -514,7 +514,11 @@
   [ui row]
   (go-row :row-reset support/check
     (on-gtk (editor/set-text! (:editor ui) "")
-            (cview/clear-input! (:console ui)))
+            (cview/clear-input! (:console ui))
+            ;; theme rows end on whatever they last checked; every row
+            ;; starts on the run's base theme
+            (when (not= support/BASE-THEME ((:theme-name* ui)))
+              ((:set-theme!* ui) support/BASE-THEME)))
     ;; The window's live evaluator, not support/idle?'s starting :session:
     ;; the tabs rows switch the window to ClojureDart and back, which leaves
     ;; a new in-process evaluator, and Stop acts on the live one.

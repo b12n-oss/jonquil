@@ -17,6 +17,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.commands :as commands]
+            [jonquil.theme :as theme]
             [jonquil.edit :as jonquil.edit]
             [jonquil.paint :as paint]
             [jonquil.parinfer-edit :as pe]))
@@ -2311,6 +2313,19 @@ b" text) eq (pos? @splices))
     (g/gtk-paned-set-start-child paned (:scroll ed))
     (g/gtk-paned-set-end-child paned (:scroll cv))
     (g/gtk-paned-set-position paned 300)
+    ;; the navy theme, easier on the eyes; JONQUIL_SELFTEST_THEME picks
+    ;; another (an unknown name falls back to navy)
+    (let [k (some-> (System/getenv "JONQUIL_SELFTEST_THEME") keyword)
+          t (theme/theme (if (some #{k} theme/theme-names) k :navy))
+          provider (g/gtk-css-provider-new)]
+      (editor/apply-theme! ed t)
+      (cview/apply-theme! cv t)
+      (g/gtk-widget-add-css-class (:view ed) "jonquil-code")
+      (g/gtk-widget-add-css-class (:view cv) "jonquil-code")
+      (g/gtk-css-provider-load-from-string provider (theme/code-css t commands/DEFAULT-FONT-PX))
+      (g/gtk-style-context-add-provider-for-display
+       (g/gdk-display-get-default) provider g/STYLE-PROVIDER-PRIORITY-APPLICATION)
+      (g/set-color-scheme! (g/gtk-settings-get-default) (:dark? t)))
     (g/gtk-window-set-title win "Jonquil editor self-test")
     (g/gtk-window-set-default-size win 700 700)
     (g/gtk-window-set-child win paned)
