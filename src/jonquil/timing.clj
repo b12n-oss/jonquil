@@ -1,13 +1,15 @@
 (ns jonquil.timing
   "Time the form at the caret, Genera's WITH-FORM-MEASURED: the form runs
-  in batches for about the budget, against the same batches of an empty
-  call, and the difference per call is the time it takes. code builds the
+  in batches for about the budget, each against a batch of an empty call,
+  and the difference per call is the time it takes. A form slower than
+  the whole budget is timed once. code builds the
   harness as text, so it runs in the window's own runtime, where the form
   really runs. No GTK here."
   (:require [clojure.string :as str]))
 
 (def ^:private dialects
-  ;; where the harness's System/nanoTime exists
+  ;; where the harness's System/nanoTime exists; a general nREPL server
+  ;; without it (Basilisp, ClojureScript) answers with its own eval error
   #{:jolt :clj :nrepl})
 
 (defn supported?
@@ -17,19 +19,30 @@
 
 (def ^:private template
   ;; Every name starts with jonquil-time- so the form can't capture one.
-  ;; Batches double until one takes a twentieth of the budget, then 10 of
-  ;; them run for the form and 10 for an empty call.
-  "(let [jonquil-time-f (fn [] FORM)
+  ;; Batches double until one takes a twentieth of the budget. Then a batch
+  ;; of the form and one of an empty call take turns until the budget is
+  ;; spent: at least 3 of each, at most 10. A first call slower than the
+  ;; whole budget is the answer, timed once.
+  "(let [jonquil-time-t0 (System/nanoTime)
+      jonquil-time-f (fn [] FORM)
       jonquil-time-g (fn [] nil)
-      jonquil-time-slice (quot (* BUDGET 1000000) 20)
+      jonquil-time-budget (* BUDGET 1000000)
+      jonquil-time-slice (quot jonquil-time-budget 20)
       jonquil-time-batch (fn [h n] (let [t0 (System/nanoTime)] (dotimes [_ n] (h)) (- (System/nanoTime) t0)))
-      jonquil-time-n (loop [n 1]
-                       (if (or (>= (jonquil-time-batch jonquil-time-f n) jonquil-time-slice) (>= n 1073741824))
-                         n
-                         (recur (* 2 n))))
-      jonquil-time-per (fn [h] (vec (for [_ (range 10)] (/ (double (jonquil-time-batch h jonquil-time-n)) jonquil-time-n))))
-      jonquil-time-xs (jonquil-time-per jonquil-time-f)
-      jonquil-time-bs (jonquil-time-per jonquil-time-g)
+      [jonquil-time-n jonquil-time-once] (loop [n 1]
+                                           (let [t (jonquil-time-batch jonquil-time-f n)]
+                                             (cond (and (= n 1) (>= t jonquil-time-budget)) [1 t]
+                                                   (or (>= t jonquil-time-slice) (>= n 1073741824)) [n nil]
+                                                   :else (recur (* 2 n)))))
+      [jonquil-time-xs jonquil-time-bs] (if jonquil-time-once
+                                          [[(double jonquil-time-once)] [0.0]]
+                                          (loop [xs [] bs []]
+                                            (if (or (= 10 (count xs))
+                                                    (and (>= (count xs) 3) (>= (- (System/nanoTime) jonquil-time-t0) jonquil-time-budget)))
+                                              [xs bs]
+                                              (recur (conj xs (/ (double (jonquil-time-batch jonquil-time-f jonquil-time-n)) jonquil-time-n))
+                                                     (conj bs (/ (double (jonquil-time-batch jonquil-time-g jonquil-time-n)) jonquil-time-n))))))
+      jonquil-time-k (count jonquil-time-xs)
       jonquil-time-mean (fn [xs] (/ (reduce + xs) (count xs)))
       jonquil-time-m (jonquil-time-mean jonquil-time-xs)
       jonquil-time-base (jonquil-time-mean jonquil-time-bs)
@@ -38,13 +51,17 @@
       jonquil-time-show (fn [ns] (let [[v u] (cond (< ns 1e3) [ns \"ns\"] (< ns 1e6) [(/ ns 1e3) \"µs\"]
                                                    (< ns 1e9) [(/ ns 1e6) \"ms\"] :else [(/ ns 1e9) \"s\"])]
                                    (str (/ (Math/round (* v 10.0)) 10.0) \" \" u)))]
-  (println (if (> jonquil-time-per-call jonquil-time-spread)
+  (println (cond
+             jonquil-time-once
+             (str \"; Time: \" (jonquil-time-show jonquil-time-once) \" for one call (slower than the budget, so timed once)\")
+             (and (> jonquil-time-per-call jonquil-time-spread) (>= jonquil-time-per-call 0.05))
              (str \"; Time: \" (jonquil-time-show jonquil-time-per-call) \" per call (± \"
-                  (jonquil-time-show jonquil-time-spread) \" over 10 batches of \" jonquil-time-n
+                  (jonquil-time-show jonquil-time-spread) \" over \" jonquil-time-k \" batches of \" jonquil-time-n
                   \"; an empty call's \" (jonquil-time-show jonquil-time-base) \" taken off)\")
+             :else
              (str \"; Time: too fast to tell apart from an empty call (\" (jonquil-time-show jonquil-time-base) \")\")))
   {:ns-per-call jonquil-time-per-call :spread-ns jonquil-time-spread :baseline-ns jonquil-time-base
-   :batches 10 :batch-size jonquil-time-n})")
+   :batches jonquil-time-k :batch-size jonquil-time-n})")
 
 (defn code
   "The harness around form-text for a budget of budget-ms, as text to
