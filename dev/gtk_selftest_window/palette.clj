@@ -413,6 +413,30 @@
                                  {:idle idle? :out out}))))
       (finally (reset-timing-alert! ui)))))
 
+(defn row-time-form-alert-pending
+  "While another alert is pending (a close alert, say), timing doesn't
+  open a second one over it: the status bar says so, nothing is timed, and
+  the other alert's guard stays taken. Each answer releases the guard
+  timing took."
+  [ui]
+  (go-row :time-form-alert-pending support/check
+    (try
+      (let [_ (on-gtk (reset! (:alert-pending? ui) true))
+            a (time-palette! ui "(+ 1 2)" {:index 2})
+            said? (await-until 3000 50 #(= "Another alert is open." (g/label-text (:status-label ui))))
+            still? (on-gtk @(:alert-pending? ui))
+            _ (on-gtk (reset! (:alert-pending? ui) false))
+            b (time-palette! ui "(+ 1 2)" {:index 2})
+            released? (on-gtk (not @(:alert-pending? ui)))]
+        (on-gtk (close! ui)
+                (let [out (support/since ui (:mark a))]
+                  (support/check :time-form-alert-pending
+                                 (and said? still? released? (empty? @(:asked a)) (= 1 (count @(:asked b)))
+                                      (not (str/includes? out "; Timing")))
+                                 {:said said? :still still? :released released?
+                                  :asked-a (count @(:asked a)) :asked-b (count @(:asked b)) :out out}))))
+      (finally (on-gtk (reset! (:alert-pending? ui) false)) (reset-timing-alert! ui)))))
+
 (defn row-time-form-dont-ask
   "Time It, Don't Ask Again times the form, and the next timing in this
   window starts without asking."

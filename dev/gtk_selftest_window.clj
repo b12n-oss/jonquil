@@ -259,6 +259,7 @@
    palette-rows/row-time-form
    palette-rows/row-time-form-cancel
    palette-rows/row-time-form-dont-ask
+   palette-rows/row-time-form-alert-pending
    locations-rows/row-locations-pane-shows
    locations-rows/row-locations-uses-step
    locations-rows/row-locations-survive-edit

@@ -1470,9 +1470,11 @@
   "Time the form at the caret: Run Form's form, wrapped in
   jonquil.timing/code. The form runs many times, side effects and all, so
   an alert asks first (ask-time!, which rows can replace) until
-  Don't Ask Again sets time-confirmed? for this window. Dialects without
-  the harness's System/nanoTime say so and evaluate nothing."
-  [{:keys [tab status-label sel* ask-time! time-confirmed?] :as ctx}]
+  Don't Ask Again sets time-confirmed? for this window. The alert shares
+  the other alerts' alert-pending? guard, as the tree's trash alert does,
+  so it never opens over a close alert. Dialects without the harness's
+  System/nanoTime say so and evaluate nothing."
+  [{:keys [tab cv status-label sel* ask-time! time-confirmed?] :as ctx}]
   (let [{:keys [ed]} tab]
     (cond
       (refuse-foreign! ctx) nil
@@ -1481,9 +1483,20 @@
       :else
       (let [snap (editor/snapshot ed)]
         (if-let [{:keys [text]} (commands/run-form snap)]
-          (if @time-confirmed?
-            (start-timing! ctx snap text)
-            (ask-time! (timing/confirm-alert text) (fn [result] (time-choice! ctx snap text result))))
+          (cond
+            @time-confirmed? (start-timing! ctx snap text)
+            @alert-pending? (set-status! status-label "Another alert is open.")
+            :else
+            (do (reset! alert-pending? true)
+                ;; complete-alert! releases the guard for the real alert; this
+                ;; also releases it for a stand-in, and a throw while building
+                ;; the alert releases it too
+                (try
+                  (ask-time! (timing/confirm-alert text)
+                             (fn [result] (reset! alert-pending? false) (time-choice! ctx snap text result)))
+                  (catch :default e
+                    (reset! alert-pending? false)
+                    (cview/append! cv :error (str "; time: " (ex-message e) "\n"))))))
           (set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
