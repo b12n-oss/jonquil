@@ -37,6 +37,9 @@ their folder (`core.clj · talk`).
 - Cmd/Ctrl+T: new Untitled tab. Cmd/Ctrl+W or a tab's ×: close it.
 - Cmd/Ctrl+Shift+] and Cmd/Ctrl+Shift+[: next and previous tab, wrapping.
 - Cmd/Ctrl+1 to 8: jump to that tab; Cmd/Ctrl+9: the last.
+- The command palette lists every other open tab as **Switch to tab: name**,
+  the one you used last first; **Go back to the tab used before** flips
+  between the last two.
 
 All tabs share one evaluator and console, like a project REPL in CIDER or
 Calva, so `demo.clj` can call what `core.clj` defined.
