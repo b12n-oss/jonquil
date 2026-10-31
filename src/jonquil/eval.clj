@@ -1,6 +1,6 @@
 (ns jonquil.eval
   "Run, stdin, output and Stop for Jonquil. Reworks DrClojure.eval (41c56b8).
-   Output writers bound directly, load-string under run-interruptible, *ns*
+   Output writers bound directly, eval-string under run-interruptible, *ns*
    always bound, and Stop that lets the worker's own exit path go idle."
   (:require [clojure.string :as str])
   (:import (clojure.lang LineNumberingPushbackReader)
