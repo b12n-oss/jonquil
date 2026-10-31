@@ -41,6 +41,10 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :run/time-form {:doc "Time the form at the caret (about a second)." :scope :window
                    :run (call :time-form-fn)}
+   :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window
+                       :run (call :show-frames-fn)}
+   :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
+                       :scope :window :run (call :locals-mode-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
    :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
    ;; find and focus

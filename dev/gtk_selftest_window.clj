@@ -37,6 +37,7 @@
             [gtk-selftest-window.parinfer :as parinfer-rows]
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.locations :as locations-rows]
+            [gtk-selftest-window.debugger :as debugger-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
@@ -270,6 +271,8 @@
    locations-rows/row-locations-buffer-replaced
    locations-rows/row-locations-matches-empty-find
    locations-rows/row-locations-empty-says-no-places
+   debugger-rows/row-debugger-pane-shows
+   debugger-rows/row-frames-after-error
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named

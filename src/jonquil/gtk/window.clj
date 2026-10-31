@@ -34,6 +34,7 @@
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.debugger-pane :as debugger-pane]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
@@ -792,16 +793,17 @@
 (defn- right-roots
   "{which root} for the panels right's slot holds; a right without
   :review-root, :plugins-root or :history-root (a test's) has fewer."
-  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root]}]
+  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root]}]
   (cond-> {:inspector inspector-root :source source-root}
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)
-    locations-root (assoc :locations locations-root)))
+    locations-root (assoc :locations locations-root)
+    debugger-root (assoc :debugger debugger-root)))
 
 (defn- show-right-panel!
-  "Shows which (:inspector, :source, :review, :plugins, :history or
-  :locations) in
+  "Shows which (:inspector, :source, :review, :plugins, :history,
+  :locations or :debugger) in
   the slot and hides the others; any but :history clears
   plugin-history-shown. When the slot was hidden, also sizes h-paned so
   the panel claims about PANEL-WIDTH; while
@@ -1366,8 +1368,12 @@
   measured size once its rows view is actually allocated (the first open
   in a window would otherwise measure before GTK's layout pass ever ran)
   -- guarded by try-inspect!, so a second press while the first :start is
-  still in flight does nothing."
-  [ev* right pane inspector-state inspecting? inspector-last-args on-view status-label]
+  still in flight does nothing. The last argument, [op extra-args], starts
+  it another way: the Frames panel opens a local with [:start-local
+  {:frame i :local name}]."
+  ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label]
+   (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [:start {}]))
+  ([ev* right pane inspector-state inspecting? inspector-last-args on-view status-label [op extra]]
   (if-not (and (satisfies? ev/Inspector @ev*) (ev/inspectable? @ev*))
     (set-status! status-label inspect/unavailable-message)
     (try-inspect!
@@ -1386,10 +1392,10 @@
           (fn [measured]
             (try
               (reset! inspector-last-args measured)
-              (ev/inspect! e :start measured on-view)
+              (ev/inspect! e op (merge measured extra) on-view)
               (catch :default ex
                 (reset! inspecting? false)
-                (throw ex))))))))))
+                (throw ex)))))))))))
 
 (defn- inspect-form!
   "Cmd/Ctrl+Shift+I and the menu's \"Inspect Form\": the same
@@ -3336,6 +3342,7 @@
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
         locp (locations-pane/make-pane)
+        dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
@@ -3464,6 +3471,7 @@
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
+               :debugger-root (:root dbgp)
                :history-root (:root hp) :source-pane sp}
         _ (reset! *right right)
         ;; The plugin-step! opts for Accept or Reject of the
@@ -3828,6 +3836,49 @@
                                 (when (= id (:tab-id @locations-state))
                                   (clear-locations!)
                                   (hide-right-panel! right :locations)))
+        ;; The Frames panel (jonquil.debugger): the data it shows, and whether
+        ;; this window turned Jolt's debug mode on. GTK thread only.
+        frames-state (atom nil)
+        debug-mode-on? (atom false)
+        frames-ev (fn [] (let [e @ev*] (when (satisfies? ev/Frames e) e)))
+        show-frames-fn (fn []
+                         (if-let [e (frames-ev)]
+                           (ev/error-frames! e (fn [d]
+                                                 (on-gui! (fn []
+                                                            (if-let [err (:error d)]
+                                                              (set-status! status-label (str "; " err))
+                                                              (do (reset! frames-state d)
+                                                                  (debugger-pane/show! dbgp d)
+                                                                  (show-right-panel! right :debugger)
+                                                                  (debugger-pane/focus! dbgp)))))))
+                           (set-status! status-label "; The debugger needs Jolt.")))
+        locals-mode-fn (fn []
+                         (if-let [e (frames-ev)]
+                           (let [on? (not @debug-mode-on?)]
+                             (ev/debug-mode! e on? (fn [r]
+                                                     (on-gui! (fn []
+                                                                (if-let [err (:error r)]
+                                                                  (set-status! status-label (str "; " err))
+                                                                  (do (reset! debug-mode-on? (:on? r))
+                                                                      (set-status! status-label
+                                                                                   (if (:on? r)
+                                                                                     "; Debug mode on: code you load from now on keeps its locals."
+                                                                                     "; Debug mode off.")))))))))
+                           (set-status! status-label "; The debugger needs Jolt.")))
+        _ (debugger-pane/set-handlers!
+           dbgp {:on-frame (fn [i]
+                             (let [{f :fn :keys [file line]} (get (:frames @frames-state) i)
+                                   loc (when file (source/location {:file file :line line}
+                                                                   {:project-dir (:project-dir @sel*)}))]
+                               (cond
+                                 (nil? file) (set-status! status-label "; This frame has no file.")
+                                 (nil? loc) (set-status! status-label (str "; Can't open " file "."))
+                                 (:editable? loc) (open-in-tab! (source-ctx (active-tab)) f loc)
+                                 :else (show-source! (source-ctx (active-tab)) loc))))
+                 :on-local (fn [i local-name]
+                             (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
+                                            on-view status-label [:start-local {:frame i :local local-name}]))
+                 :on-close (fn [] (hide-right-panel! right :debugger))})
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -3847,6 +3898,7 @@
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :time-form-fn time-form-fn
+                         :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
@@ -3933,6 +3985,8 @@
     (g/gtk-box-append slot (:root hp))
     (g/gtk-widget-set-vexpand (:root locp) 1)
     (g/gtk-box-append slot (:root locp))
+    (g/gtk-widget-set-vexpand (:root dbgp) 1)
+    (g/gtk-box-append slot (:root dbgp))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -3941,6 +3995,7 @@
     (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible (:root lp) 0)
     (g/gtk-widget-set-visible (:root locp) 0)
+    (g/gtk-widget-set-visible (:root dbgp) 0)
     (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
@@ -4647,6 +4702,10 @@
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
                    :locations-pane locp
+                   ;; the Frames panel, this window's debug-mode flag, and
+                   ;; the inspector's own Close
+                   :debugger-pane dbgp :debug-mode-on? debug-mode-on?
+                   :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})
                                      nil)

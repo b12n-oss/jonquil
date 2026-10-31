@@ -26,12 +26,36 @@
     (is (= [nil 1] [(:file (second (:frames d))) (:line (second (:frames d)))]))))
 
 (deftest rows-test
-  (is (= ["demo.core/inner  core.clj:2" "    x = 21" "    y = 42" "user/fn--2  (typed at the prompt)"]
+  (is (= ["demo.core/inner  core.clj:2" "    x = 21" "    y = 42" "user/fn--2  line 1 (no file)"]
          (mapv :text (debugger/rows (debugger/frames-data div-zero {:frames-fn fake})))))
   (is (= [:frame :local :local :frame]
          (mapv :kind (debugger/rows (debugger/frames-data div-zero {:frames-fn fake})))))
   (is (= {:kind :local :frame 0 :name "y" :text "    y = 42"}
          (nth (debugger/rows (debugger/frames-data div-zero {:frames-fn fake})) 2))))
+
+(deftest no-file-no-line-test
+  (is (= "f  (no file)"
+         (:text (first (debugger/rows {:title "t" :frames [{:fn "f" :file nil :line nil :locals []}]}))))))
+
+(deftest harness-frames-cut-test
+  (testing "the list stops at the evaluator's own frames"
+    (is (= ["user/dbg-inner" "user/fn--3"]
+           (mapv :fn (:frames (debugger/frames-data
+                               div-zero
+                               {:frames-fn (constantly [{:fn 'user/dbg-inner :locals {}} {:fn 'user/fn--3 :locals {}}
+                                                        {:fn 'jonquil.eval/eval-async/fn--7 :locals {}}
+                                                        {:fn 'user/after :locals {}}])})))))
+    (is (= ["user/x"]
+           (mapv :fn (:frames (debugger/frames-data
+                               div-zero
+                               {:frames-fn (constantly [{:fn 'user/x :locals {}} {:fn 'nrepl.middleware.session/run-eval :locals {}}
+                                                        {:fn 'jolt.nrepl/evaluate :locals {}}])}))))))
+  (testing "a fault inside the harness itself keeps every frame"
+    (is (= ["jonquil.eval/eval-async/fn--7" "user/y"]
+           (mapv :fn (:frames (debugger/frames-data
+                               div-zero
+                               {:frames-fn (constantly [{:fn 'jonquil.eval/eval-async/fn--7 :locals {}}
+                                                        {:fn 'user/y :locals {}}])})))))))
 
 (deftest resolve-file-test
   (let [d (debugger/frames-data div-zero {:frames-fn fake :resolve-file #(str "/abs/" %)})]

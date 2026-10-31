@@ -44,11 +44,27 @@
   (str (.getSimpleName (class e)) ": " (ex-message e)
        (when-let [d (ex-data e)] (str " " (value-text d)))))
 
+(def ^:private HARNESS
+  ;; where the evaluator's own frames start, under the user's code: the
+  ;; in-process engine, and the Jolt child's nREPL server
+  ["jonquil.eval/" "jonquil.session/" "jonquil.nrepl." "nrepl." "cider." "jolt.nrepl" "jolt.host/"])
+
+(defn- harness? [frame]
+  (let [f (str (:fn frame))] (some #(str/starts-with? f %) HARNESS)))
+
+(defn- user-frames
+  "frames up to the first of the evaluator's own; all of them when the
+  first frame already is one (a fault inside the harness)."
+  [frames]
+  (let [kept (take-while (complement harness?) frames)]
+    (if (seq kept) kept frames)))
+
 (def ^:private NO-API "Frames need a Jolt with jolt.debug (newer than this one).")
 
 (defn frames-data
   "e's frames as {:title :frames [{:fn :file :line :locals [{:name :text}]}]},
-  locals sorted by name. opts: :frames-fn (jolt.debug/frames, or nil for
+  locals sorted by name, the list stopping where the evaluator's own frames
+  start. opts: :frames-fn (jolt.debug/frames, or nil for
   no frames API, which gives a :note instead) and :resolve-file, applied to
   each frame's :file when there is one."
   [e {:keys [frames-fn resolve-file]}]
@@ -63,7 +79,7 @@
                                    (map (fn [[k v]] {:name (str k) :text (value-text v)}))
                                    (sort-by :name)
                                    vec)})
-                   (frames-fn e))}))
+                   (user-frames (frames-fn e)))}))
 
 (defn set-debug-mode!
   "Turns Jolt's debug mode on or off: code compiled from then on keeps
@@ -79,8 +95,9 @@
 (defn- file-name [f] (last (str/split f #"/")))
 
 (defn rows
-  "The panel's rows for data: a :frame row per frame (its fn and file:line,
-  or typed at the prompt), then a :local row per local; a :note row when
+  "The panel's rows for data: a :frame row per frame (its fn and file:line;
+  code run from the editor or typed at the prompt has no file, so its line,
+  counted in that text), then a :local row per local; a :note row when
   there is a note or no frames."
   [{:keys [frames note]}]
   (cond
@@ -91,7 +108,7 @@
                    (cons {:kind :frame :frame i
                           :text (str f "  " (if file
                                               (str (file-name file) (when line (str ":" line)))
-                                              "(typed at the prompt)"))}
+                                              (str (when line (str "line " line " ")) "(no file)")))}
                          (for [{:keys [name text]} locals]
                            {:kind :local :frame i :name name :text (str "    " name " = " text)})))
                  (range) frames))))
