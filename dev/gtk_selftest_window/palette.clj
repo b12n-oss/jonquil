@@ -437,6 +437,20 @@
                                   :asked-a (count @(:asked a)) :asked-b (count @(:asked b)) :out out}))))
       (finally (on-gtk (reset! (:alert-pending? ui) false)) (reset-timing-alert! ui)))))
 
+(defn row-time-form-clears-status
+  "Asking to time a form clears an older status message (here a stale
+  No form at the caret.), so it doesn't sit under the alert."
+  [ui]
+  (go-row :time-form-clears-status support/check
+    (try
+      (let [_ (on-gtk (g/gtk-label-set-text (:status-label ui) "No form at the caret."))
+            a (time-palette! ui "(+ 1 2)" {:index 2})
+            ready? (await-until 3000 50 #(= "Ready" (g/label-text (:status-label ui))))]
+        (on-gtk (close! ui)
+                (support/check :time-form-clears-status (and ready? (= 1 (count @(:asked a))))
+                               {:ready ready? :status (g/label-text (:status-label ui))})))
+      (finally (reset-timing-alert! ui)))))
+
 (defn row-time-form-dont-ask
   "Time It, Don't Ask Again times the form, and the next timing in this
   window starts without asking."
