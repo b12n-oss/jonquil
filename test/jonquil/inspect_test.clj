@@ -1,5 +1,6 @@
 (ns jonquil.inspect-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.inspect :as inspect]))
 
 (defn- page-view [start n total]
@@ -108,3 +109,37 @@
       (is (= "The server's view couldn't be read." (:note (inspect/parse-view ""))))
       (is (= "The server's view couldn't be read." (:note (inspect/parse-view nil))))
       (is (= "The server's view couldn't be read." (:note (inspect/parse-view "42")))))))
+
+(deftest history-requests-test
+  (is (= {:op "inspect-earlier"} (inspect/request :earlier {})))
+  (is (= {:op "inspect-later"} (inspect/request :later {}))))
+
+(deftest history-keys-and-footer-test
+  (let [s (inspect/open (assoc (page-view 0 3 3) :history {:at 2 :count 3}))]
+    (is (= [:earlier] (:request (inspect/key-step s :earlier))))
+    (is (= [:later] (:request (inspect/key-step s :later))))
+    (is (= :first (:pending (:state (inspect/key-step s :earlier)))))
+    (is (= "1-3 of 3 · ↑↓ move · ⏎ in · ← out · d def · m meta · v table · object 2 of 3 · [ ] earlier/later"
+           (inspect/footer s))))
+  (testing "one object: no history in the footer"
+    (is (not (str/includes? (inspect/footer (inspect/open (assoc (page-view 0 3 3) :history {:at 1 :count 1})))
+                            "object"))))
+  (testing "a leaf keeps the history hint too"
+    (is (= "← out · d def · m meta · v table · object 1 of 2 · [ ] earlier/later"
+           (inspect/footer (inspect/open {:path "*1" :info "String" :header "" :leaf "\"x\""
+                                          :history {:at 1 :count 2}}))))))
+
+(deftest history-ends-answered-locally-test
+  ;; at the oldest or newest object, [ and ] send nothing and keep the
+  ;; selection; the note says why
+  (let [oldest (assoc (inspect/open (assoc (page-view 0 3 3) :history {:at 1 :count 3})) :selected 2)
+        newest (assoc (inspect/open (assoc (page-view 0 3 3) :history {:at 3 :count 3})) :selected 2)]
+    (let [{:keys [state request]} (inspect/key-step oldest :earlier)]
+      (is (nil? request))
+      (is (= 2 (:selected state)))
+      (is (= "No earlier object." (:note state))))
+    (let [{:keys [state request]} (inspect/key-step newest :later)]
+      (is (nil? request))
+      (is (= "No later object." (:note state))))
+    (testing "away from the ends it still asks"
+      (is (= [:later] (:request (inspect/key-step oldest :later)))))))

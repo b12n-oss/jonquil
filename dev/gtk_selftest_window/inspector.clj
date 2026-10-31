@@ -735,3 +735,39 @@
 ;; later. The fix itself (window.clj's apply-selection!, two lines: hide
 ;; the root, reset inspector-state to nil) is verified by reading, not by
 ;; a row in this shared harness.
+
+;; --- the history of inspected objects -------------------------------------
+
+(def ^:private KEY-BRACKETLEFT 0x05b)
+(def ^:private KEY-BRACKETRIGHT 0x05d)
+
+(defn row-inspect-history-steps
+  "Two inspections, then [ goes back to the first and ] forward again; the
+  Later button at the newest object says so and keeps the view. Earlier
+  rows have already inspected objects in this session, so the counts are
+  read, not assumed."
+  [ui]
+  (go-row :row-inspect-history-steps support/check
+    (let [pane (:inspector ui)
+          info #(g/label-text (:info pane))
+          footer #(g/label-text (:footer pane))
+          inspect! (fn [src n]
+                     (submit-repl! ui src 3000)
+                     (on-gtk ((:inspect-last!* ui)))
+                     (await-until 3000 20 #(str/includes? (info) (str n " items"))))
+          first? (inspect! "[1]" 1)
+          second? (inspect! "[1 2]" 2)
+          back? (do (on-gtk (inspector-pane/handle-key! pane KEY-BRACKETLEFT))
+                    (await-until 2000 20 #(str/includes? (info) "1 items")))
+          back-footer (on-gtk (footer))
+          fwd? (do (on-gtk (inspector-pane/handle-key! pane KEY-BRACKETRIGHT))
+                   (await-until 2000 20 #(str/includes? (info) "2 items")))
+          at-end? (do (on-gtk (g/g-signal-emit-by-name (:later-btn pane) "clicked"))
+                      (await-until 2000 20 #(str/includes? (footer) "No later object.")))
+          still-2? (on-gtk (str/includes? (info) "2 items"))]
+      (on-gtk
+       (support/check :row-inspect-history-steps
+                      (and first? second? back? fwd? at-end? still-2?
+                           (boolean (re-find #"object (\d+) of \1" (or (re-find #"object \d+ of \d+" (footer)) ""))))
+                      {:first first? :second second? :back back? :back-footer back-footer
+                       :fwd fwd? :at-end at-end? :still-2 still-2? :footer (footer)})))))

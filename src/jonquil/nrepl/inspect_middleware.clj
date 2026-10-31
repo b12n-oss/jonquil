@@ -18,7 +18,8 @@
 
 (def ops
   ["inspect-start" "inspect-in" "inspect-out" "inspect-page"
-   "inspect-toggle-meta" "inspect-toggle-table" "inspect-def"])
+   "inspect-toggle-meta" "inspect-toggle-table" "inspect-def"
+   "inspect-earlier" "inspect-later"])
 
 (defn- as-long
   "A bencode integer, or the same number sent as a string."
@@ -43,6 +44,8 @@
                "inspect-toggle-meta" [:meta {:cursor (as-long (g "cursor"))}]
                "inspect-toggle-table" [:table {}]
                "inspect-def" [:def {:name (g "name") :target-ns (target-ns (g "ns"))}]
+               "inspect-earlier" [:earlier {}]
+               "inspect-later" [:later {}]
                nil)]
     (when-let [[op op-args] args]
       {"status" ["done"] "view" (pr-str (view/run-op state op op-args))})))

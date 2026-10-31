@@ -133,6 +133,7 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 | Page Up/Page Down | inspector panel | Page |
 | m | inspector panel | Toggle metadata |
 | v | inspector panel | Toggle between the table and the list |
+| [ or ] | inspector panel | Earlier or later object in the inspector's history (Jolt only) |
 | d | inspector panel | Open the def prompt (nothing while the panel's actions are disabled, after a lost connection) |
 | Escape | inspector panel | Close the panel and focus the editor |
 | Cmd/Ctrl+[ | Source panel | Back to where the panel was |

@@ -77,3 +77,14 @@
     (is (= "#'user/jonquil-mw-test-picked"
            (:defd (view state {"op" "inspect-def" "name" "jonquil-mw-test-picked" "ns" "no.such.ns"}))))
     (ns-unmap 'user 'jonquil-mw-test-picked)))
+
+(deftest earlier-and-later-step-the-history
+  (let [state (atom nil)]
+    (binding [*1 [1]] (view state {"op" "inspect-start" "rows" 10 "cols" 40}))
+    (binding [*1 [1 2]] (view state {"op" "inspect-start" "rows" 10 "cols" 40}))
+    (let [v (view state {"op" "inspect-earlier"})]
+      (is (= 1 (:total v)))
+      (is (= {:at 1 :count 2} (:history v))))
+    (is (= 2 (:total (view state {"op" "inspect-later"}))))
+    (is (some #{"inspect-earlier"} mw/ops))
+    (is (some #{"inspect-later"} mw/ops))))
