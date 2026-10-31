@@ -59,13 +59,20 @@ cancels it, so it never types over your code.
 ### Timing a form
 
 **Time the form at the caret (about a second)**, in the palette, runs that
-form over and over for about a second, and the same number of times an
-empty call, then prints one line in the console:
+form over and over in batches for about a second, each batch against the
+same number of empty calls, then prints one line in the console:
 `; Time: 12.3 ns per call (± 0.4 ns over 10 batches of 1048576; an empty
-call's 1.1 ns taken off)`. A form too fast to tell apart from an empty call
-says so instead. It runs in the window's own runtime, so it times the code
-where it really runs: Jolt, JVM Clojure or another nREPL server. ClojureScript,
-ClojureDart and jank say timing needs Jolt or JVM Clojure.
+call's 1.1 ns taken off)`. A slow form still stops near the second, after
+at least 3 batches, and one slower than the whole second is timed once. A
+form too fast to tell apart from an empty call says so instead. A lazy form
+is timed as building the sequence, not walking it, so wrap it in `doall` to
+time the work.
+
+It runs in the window's own runtime, so it times the code where it really
+runs: Jolt, JVM Clojure, or another nREPL server that has
+`System/nanoTime`, such as babashka's (a Basilisp server answers with an
+error). ClojureScript, ClojureDart and jank say timing needs Jolt or JVM
+Clojure.
 
 ## The REPL prompt, and how it differs from Run
 
