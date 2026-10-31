@@ -57,6 +57,7 @@
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
+    jonquil.debugger
     jonquil.describe
     jonquil.locations
     jonquil.timing
