@@ -68,6 +68,18 @@
           (:jolt/interrupted (ex-data c)) true
           :else (recur (.getCause ^Throwable c)))))
 
+(defn eval-string
+  "Evaluates the forms in s like load-string and answers the last one's
+  value, leaving *ns* where the code put it: an (ns ...) or in-ns in s
+  switches the caller. Jolt from jolt-lang/jolt #1460 (929e06f5) binds *ns*
+  around load-string, as JVM Clojure's Compiler.load does, and adds
+  jolt.host/eval-string, the same loop without the binding, for a REPL that
+  should switch; a Jolt without it still leaks the switch from load-string."
+  [s]
+  (if-let [f (resolve 'jolt.host/eval-string)]
+    (f s)
+    (load-string s)))
+
 (defn format-error [t]
   (let [root (find-root-cause t)
         data (or (ex-data t) (ex-data root))
@@ -321,7 +333,7 @@
                                                  ;; during that realization
                                                  ;; yields :interrupted like
                                                  ;; any other Stop.
-                                                 (let [v (load-string (str code "\n"))]
+                                                 (let [v (eval-string (str code "\n"))]
                                                    {:value v
                                                     :printed (binding [*print-length* 1000]
                                                                (pr-str v))})))]
