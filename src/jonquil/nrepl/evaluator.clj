@@ -12,7 +12,8 @@
   Every callback rule in jonquil.evaluator applies: on-output fires from
   the connection's reader thread, on-status-change and on-complete from
   this evaluation's own worker future."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [jonquil.clj :as clj]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -629,7 +630,43 @@
   ;; one still did: inspect! then answers lost, which disables the panel).
   (inspectable? [this]
     (let [rt (runtime this)]
-      (or (nil? rt) (contains? (:ops rt) "inspect-start")))))
+      (or (nil? rt) (contains? (:ops rt) "inspect-start"))))
+  ;; Backed by jonquil.nrepl.inspect-middleware's jonquil-frames and
+  ;; jonquil-debug-mode ops, which read the child's own *e and Jolt.
+  ev/Frames
+  (error-frames! [this on-data]
+    (future
+      (let [d (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:note "No error yet."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-frames")) {:error "The debugger needs Jolt."}
+                    :else
+                    (let [r (client/request-sync conn {:op "jonquil-frames" :session session} request-timeout-ms)]
+                      (if (vector? r)
+                        (edn/read-string (some :data r))
+                        {:error inspect/timeout-message}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-data d) (catch Throwable _))))
+    nil)
+  (debug-mode! [this on? on-done]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error inspect-not-running}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-debug-mode")) {:error "The debugger needs Jolt."}
+                    :else
+                    (let [r (client/request-sync conn {:op "jonquil-debug-mode" :on (str (boolean on?)) :session session}
+                                                 request-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (some :error r) {:error (some :error r)}
+                            :else {:on? (boolean on?)}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-done r) (catch Throwable _))))
+    nil))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

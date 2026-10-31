@@ -3,6 +3,7 @@
   child the same code answers the inspect-* ops (jonquil.nrepl.evaluator)."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
+            [jonquil.debugger :as debugger]
             [jonquil.nrepl.inspect-middleware :as mw]))
 
 (defn- view [state request]
@@ -88,3 +89,29 @@
     (is (= 2 (:total (view state {"op" "inspect-later"}))))
     (is (some #{"inspect-earlier"} mw/ops))
     (is (some #{"inspect-later"} mw/ops))))
+
+(defn- frames-reply [request]
+  (let [r (mw/handle (atom nil) request)]
+    (cond-> r (get r "data") (update "data" edn/read-string))))
+
+(deftest frames-of-the-last-error
+  (binding [debugger/*frames-fn* (fn [_] [{:fn 'demo.core/inner :file "no/such/file.clj" :line 2 :locals {'x 21 'xs [1 2]}}])]
+    (binding [*e nil]
+      (is (= {:note "No error yet."} (get (frames-reply {"op" "jonquil-frames"}) "data"))))
+    (binding [*e (try (/ 1 0) (catch Throwable e e))]
+      (let [d (get (frames-reply {"op" "jonquil-frames"}) "data")]
+        (is (= "ArithmeticException: Divide by zero" (:title d)))
+        (is (= {:name "x" :text "21"} (first (:locals (first (:frames d))))))
+        (is (= "no/such/file.clj" (:file (first (:frames d)))) "a name the classpath lacks stays as it is"))
+      (is (= 2 (:total (view (atom nil) {"op" "inspect-local" "frame" 0 "local" "xs" "rows" 10 "cols" 40}))))
+      (is (= {:error "That local is gone."}
+             (edn/read-string (get (mw/handle (atom nil) {"op" "inspect-local" "frame" 0 "local" "zz" "rows" 10 "cols" 40}) "view"))))))
+  (is (some #{"jonquil-frames"} mw/ops))
+  (is (some #{"inspect-local"} mw/ops))
+  (is (some #{"jonquil-debug-mode"} mw/ops)))
+
+(deftest debug-mode-op
+  (let [r (mw/handle (atom nil) {"op" "jonquil-debug-mode" "on" "false"})]
+    (if (debugger/available?)
+      (is (= "false" (get r "on")))
+      (is (= "Frames need a Jolt with jolt.debug (newer than this one)." (get r "error"))))))

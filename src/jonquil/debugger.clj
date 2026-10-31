@@ -12,15 +12,24 @@
   ;; a choice: one readable panel row
   100)
 
-(defn frames-fn
-  "jolt.debug/frames, or nil on a Jolt without it."
-  []
+(def ^:dynamic *frames-fn*
+  "When bound, what frames-fn answers in place of jolt.debug/frames: the
+  tests' fake frames. It never makes available? true."
+  nil)
+
+(defn- real-frames-fn []
   (try (requiring-resolve 'jolt.debug/frames) (catch Throwable _ nil)))
+
+(defn frames-fn
+  "*frames-fn* when bound, else jolt.debug/frames, or nil on a Jolt
+  without it."
+  []
+  (or *frames-fn* (real-frames-fn)))
 
 (defn available?
   "True when this Jolt has jolt.debug."
   []
-  (some? (frames-fn)))
+  (some? (real-frames-fn)))
 
 (defn value-text
   "v as one short line: pr-str with *print-length* 8 and *print-level* 3,
@@ -55,6 +64,17 @@
                                    (sort-by :name)
                                    vec)})
                    (frames-fn e))}))
+
+(defn set-debug-mode!
+  "Turns Jolt's debug mode on or off: code compiled from then on keeps
+  every local. {:on? b}, or {:error s} on a Jolt without jolt.debug, where
+  jolt.profile/instrument! is never called (it would read :debug as true
+  and turn line counting on)."
+  [on?]
+  (if (available?)
+    (do ((requiring-resolve 'jolt.profile/instrument!) (if on? :debug false))
+        {:on? (boolean on?)})
+    {:error NO-API}))
 
 (defn- file-name [f] (last (str/split f #"/")))
 

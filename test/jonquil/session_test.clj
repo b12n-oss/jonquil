@@ -1,6 +1,7 @@
 (ns jonquil.session-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jonquil.debugger :as debugger]
             [jonquil.evaluator :as ev]
             [jonquil.session :as session]
             [jonquil.source :as source]
@@ -257,3 +258,35 @@
     (is (= :ok (:status (run ev/eval! s "1" {:quiet "T" :on-output (fn [k t] (swap! out conj [k t]))}))))
     (is (some (fn [[k t]] (and (= :system k) (re-find #"auto-require: clojure.set" t))) @out) (pr-str @out))
     (is (not-any? (fn [[k t]] (and (= :out k) (re-find #"auto-require" t))) @out))))
+
+(defn- frames-sync [s]
+  (let [p (promise)]
+    (ev/error-frames! s (fn [d] (deliver p d)))
+    (deref p 2000 :timeout)))
+
+(deftest error-frames-test
+  (let [s (session/make-session)]
+    (testing "no error yet"
+      (is (= {:note "No error yet."} (frames-sync s))))
+    (testing "a REPL throw is the last error"
+      (repl-sync s "(/ 1 0)")
+      (is (= "ArithmeticException: Divide by zero" (:title (frames-sync s)))))
+    (testing "a quiet throw leaves it"
+      (run ev/eval! s "(throw (ex-info \"quiet\" {}))" {:quiet true})
+      (is (= "ArithmeticException: Divide by zero" (:title (frames-sync s)))))))
+
+(deftest debug-mode-test
+  (let [s (session/make-session)
+        mode (fn [on?] (let [p (promise)] (ev/debug-mode! s on? (fn [r] (deliver p r))) (deref p 2000 :timeout)))]
+    (if (debugger/available?)
+      (do (is (= {:on? true} (mode true)))
+          (is (= {:on? false} (mode false))))
+      (do (is (= {:error "Frames need a Jolt with jolt.debug (newer than this one)."} (mode true)))
+          (is (false? ((requiring-resolve 'jolt.profile/instrumenting?))) "line counting stays off")))))
+
+(deftest start-local-test
+  (let [s (session/make-session)]
+    (repl-sync s "(/ 1 0)")
+    (binding [debugger/*frames-fn* (fn [_] [{:fn 'f :file nil :line 1 :locals {'xs [1 2]}}])]
+      (is (= 2 (:total (inspect-sync s :start-local {:frame 0 :local "xs" :rows 10 :cols 40}))))
+      (is (= {:error "That local is gone."} (inspect-sync s :start-local {:frame 0 :local "zz" :rows 10 :cols 40}))))))

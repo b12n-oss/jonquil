@@ -12,6 +12,7 @@
   (:require [clojure.java.io :as io]
             [clojure.set :as set]
             [jonquil.clj :as clj]
+            [jonquil.debugger :as debugger]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -64,17 +65,40 @@
   (inspect! [_ op args on-view]
     (future
       (try
-        (let [args' (case op
-                      :start (assoc args :value (:last-value @state))
-                      :def (assoc args :target-ns (the-ns (:prompt-ns @state)))
-                      args)]
-          (try (on-view (view/run-op (:inspect-view @state) op args'))
+        (let [local (when (= op :start-local)
+                      (if-let [e (:last-error @state)]
+                        (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)})
+                        ::debugger/missing))
+              [op' args'] (case op
+                            :start [:start (assoc args :value (:last-value @state))]
+                            :start-local [:start (assoc args :value local)]
+                            :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
+                            [op args])]
+          (try (on-view (if (= local ::debugger/missing)
+                          {:error "That local is gone."}
+                          (view/run-op (:inspect-view @state) op' args')))
                (catch Throwable _)))
         (catch Throwable e
           (try (on-view {:error (or (ex-message e) (str (class e)))})
                (catch Throwable _)))))
     nil)
   (inspectable? [_] true)
+  ev/Frames
+  (error-frames! [_ on-data]
+    (future
+      (let [d (try (if-let [e (:last-error @state)]
+                     (debugger/frames-data e {:frames-fn (debugger/frames-fn)
+                                              :resolve-file (fn [f] (:file (source/resolve-file {:file f})))})
+                     {:note "No error yet."})
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-data d) (catch Throwable _))))
+    nil)
+  (debug-mode! [_ on? on-done]
+    (future
+      (let [r (try (debugger/set-debug-mode! on?)
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-done r) (catch Throwable _))))
+    nil)
   ev/Owners
   (release-owner! [_ owner] (release-owner-in! state owner) nil))
 
@@ -184,7 +208,11 @@
                                                               (namespaces-created before (ns-names) (loaded-libs)))
                                                    (cond-> (not (:quiet opts)) (assoc :prompt-ns (:ns result))))
                                          (and (= :ok (:status result)) (not (:quiet opts)))
-                                         (assoc :last-value (:value result)))))
+                                         (assoc :last-value (:value result))
+                                         ;; the Frames panel's error; a quiet eval's
+                                         ;; (completion, help) never replaces it
+                                         (and (= :error (:status result)) (not (:quiet opts)))
+                                         (assoc :last-error (:error result)))))
                               (when user-complete (user-complete result)))))))
 
 (defn- program-vars
