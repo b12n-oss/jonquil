@@ -70,7 +70,10 @@ time the work.
 
 The form runs thousands of times, often millions, so time only code without
 side effects. A form that writes a file, swaps an atom, prints or calls a
-server does that on every run. The console says so as timing starts.
+server does that on every run. So Jonquil asks before it starts, and the
+alert says why. **Time It, Don't Ask Again** stops the question until the
+window closes, and the console still repeats the warning each time timing
+starts.
 
 It runs in the window's own runtime, so it times the code where it really
 runs: Jolt, JVM Clojure, or another nREPL server that has
