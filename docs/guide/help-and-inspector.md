@@ -183,7 +183,7 @@ for a file of your project and in the source panel for anything else. Code you
 ran from the editor or typed at the prompt has no file, so its frame shows the
 line within that text and says so instead. Return or a click on a local opens its value in
 the inspector, where it lives, so even a huge or lazy value is never copied out.
-A local's row prints at most 8 items, 3 levels deep, and 100 characters.
+A local's row prints at most 8 items, 3 levels deep, and 100 characters. A lazy seq nothing has realized yet reads `<lazy seq, not realized>`, because printing it would run your code again (a `(map save! rows)` would save the rows again); opening it in the inspector realizes it.
 
 Jolt keeps a frame's locals only when the code was compiled with them.
 **Keep every local for the debugger** turns Jolt's debug mode on (run it again
