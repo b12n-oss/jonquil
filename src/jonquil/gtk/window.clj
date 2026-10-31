@@ -4078,8 +4078,9 @@
                              (dialog-dismissed? r) nil
                              :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
       ;; switch-page fired inside that first append, before the tab was in
-      ;; tabs, so the tab is made active here.
+      ;; tabs, so the tab is made active here, and starts the recent list.
       (reset! active-id (:id first-tab))
+      (reset! recent-tabs [(:id first-tab)])
       ;; A launch on a project file: the first tab never goes through
       ;; on-switch!, so its override reaches the label here.
       (update-parinfer-label!)

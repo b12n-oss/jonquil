@@ -64,7 +64,10 @@
             [temp-dirs]))
 
 (def ^:private row-fns
-  [prompt/row-prompt-starts-user
+  ;; first, before any row switches tabs, which would put the launch tab in
+  ;; the recent list by another way
+  [tabs/row-tab-launch-tab-is-recent
+   prompt/row-prompt-starts-user
    run-repl/row-run-output
    run-repl/row-run-while-running
    run-repl/row-stdin-roundtrip

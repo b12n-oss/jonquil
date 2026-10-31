@@ -557,6 +557,25 @@
   (palette-docs! ui query)
   (palette/run-selected! (:palette (active ui))))
 
+(defn row-tab-launch-tab-is-recent
+  "The tab the window opened with is in the recent list from the start:
+  after Cmd/Ctrl+T the palette offers it, and Go back returns to it."
+  [ui]
+  (go-row :tab-launch-tab-is-recent support/check
+    (on-gtk
+     (try
+       (let [launch (:id (active ui))
+             label (g/label-text (:label (active ui)))
+             _ ((:new-tab!* ui))
+             docs (palette-docs! ui "switch to tab")
+             _ (when (popover/open? (:palette (active ui))) (popover/hide! (:palette (active ui))))
+             _ (run-first! ui "go back to the tab used before")
+             back (:id (active ui))]
+         (support/check :tab-launch-tab-is-recent
+                        (and (= [(str "Switch to tab: " label)] docs) (= launch back))
+                        {:docs docs :label label :launch launch :back back}))
+       (finally (close-extra-tabs! ui))))))
+
 (defn row-tab-switch-recent
   "The palette lists every other tab, most recently used first, never the
   current one; running an entry shows it; Go back flips to the tab before;
