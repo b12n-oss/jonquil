@@ -431,6 +431,7 @@
    tabs/row-tab-close-cancels-flash
    tabs/row-tab-close-while-running-eof
    tabs/row-tab-foreign-refuses-inspect-form
+   tabs/row-tab-switch-recent
    file-tree/row-tree-toggle-chord
    file-tree/row-tree-chord-not-run-selection
    file-tree/row-tree-button-toggles

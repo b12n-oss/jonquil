@@ -2382,6 +2382,8 @@
   saved tab list records the new active tab (session-changed!)."
   [{:keys [active-id win line-col-label close-popovers-fn tree-pane] :as ctx} t]
   (reset! active-id (:id t))
+  (when-let [r (:recent-tabs ctx)]
+    (swap! r (fn [v] (into [(:id t)] (remove #{(:id t)}) v))))
   (close-popovers-fn)
   ;; The tree selects the active tab's file (never expanding folders for
   ;; it).
@@ -2429,6 +2431,7 @@
           gone (set (tab/popovers t))]
       ;; while the buffer is alive, so the list's marks can be deleted
       (when-let [f (:locations-tab-closed! ctx)] (f id))
+      (when-let [r (:recent-tabs ctx)] (swap! r (fn [v] (vec (remove #{id} v)))))
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
       (swap! popovers (fn [ps] (vec (remove gone ps))))
@@ -2599,10 +2602,14 @@
      palette
      {:on-run (fn [id]
                 (try
-                  (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
+                  ;; a tab entry ([:tab/switch id]) is the window's own,
+                  ;; not a registry command
+                  (if (and (vector? id) (= :tab/switch (first id)))
+                    ((:switch-tab-fn window-key-args) (second id))
+                    (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
                                                id {:window (window-key-ctx window-key-args 0 0)
                                                    :editor (editor/key-ctx ed)
-                                                   :console {:complete! repl-complete-fn}})
+                                                   :console {:complete! repl-complete-fn}}))
                   (catch :default e
                     (set-status! status-label (str "; palette: " (ex-message e))))))
       :on-error (fn [msg] (set-status! status-label msg))})
@@ -3221,6 +3228,9 @@
         ;; context exists in the body below -- the same forward-reference
         ;; idiom *cv and *right use.
         *tab-ctx (atom nil)
+        ;; Tab ids, most recently shown first (on-switch! moves one to the
+        ;; front, remove-tab! drops it): Genera's Select order
+        recent-tabs (atom [])
         win (g/gtk-application-window-new app)
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
@@ -3680,11 +3690,17 @@
         ;; the active tab, whose palette runs the picked one
         open-palette-fn (fn [] (let [plugins @plugin-registry/live]
                                  (palette/open! (:palette (active-tab))
-                                                (pal-data/entries
+                                                (into
+                                                 (pal-data/tab-entries
+                                                  (keep (fn [id] (when-let [t (tab-by-id tabs id)]
+                                                                   {:id id :label (g/label-text (:label t))}))
+                                                        @recent-tabs)
+                                                  (:id (active-tab)))
+                                                 (pal-data/entries
                                                  {:commands (plugin-registry/all-commands plugins)
                                                   :keymap {:window (plugin-registry/window-bindings plugins)
                                                            :editor (plugin-registry/editor-bindings plugins)}
-                                                  :os (System/getProperty "os.name")}))))
+                                                  :os (System/getProperty "os.name")})))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         ;; The locations list: {:tab-id :list :marks}, or nil. The marks live
@@ -3783,6 +3799,11 @@
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :time-form-fn time-form-fn
+                         ;; switching tabs: a palette tab entry, and Go back
+                         :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
+                         :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
+                                               (select-tab! @*tab-ctx id)
+                                               (set-status! status-label "; Only one tab is open.")))
                          :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn
@@ -4039,7 +4060,7 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed!}
+                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))

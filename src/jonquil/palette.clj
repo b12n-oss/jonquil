@@ -53,6 +53,16 @@
          (sort-by :doc)
          vec)))
 
+(defn tab-entries
+  "The palette's tab entries, Genera's Select order: every open tab but
+  current-id, most recently used first, as {:id [:tab/switch id] :doc
+  \"Switch to tab: label\" :chords [] :source \"tab\"}. recent is
+  [{:id :label}] most recent first. The window runs these itself; they are
+  not registry commands."
+  [recent current-id]
+  (vec (for [{:keys [id label]} recent :when (not= id current-id)]
+         {:id [:tab/switch id] :doc (str "Switch to tab: " label) :chords [] :source "tab"})))
+
 (defn filter-entries
   "The entries every word of query (split on whitespace, case ignored)
   appears in, read from each entry's doc and id; order kept. A blank query

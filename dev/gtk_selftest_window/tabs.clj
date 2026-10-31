@@ -15,6 +15,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
             [jonquil.gtk.source-pane :as source-pane]
             [jonquil.gtk.tab :as tab]
@@ -541,3 +542,46 @@
                                  (and refused (= 3 n) (not (str/includes? out "=> 3")))
                                  {:out out}))
                 (finally (close-extra-tabs! ui)))))))
+
+;; --- switching to a recent tab -------------------------------------------
+
+(defn- palette-docs!
+  "Opens the active tab's palette filtered to query; its shown docs."
+  [ui query]
+  ((:open-palette!* ui))
+  (let [p (:palette (active ui))]
+    (palette/set-query! p query)
+    (palette/shown-docs p)))
+
+(defn- run-first! [ui query]
+  (palette-docs! ui query)
+  (palette/run-selected! (:palette (active ui))))
+
+(defn row-tab-switch-recent
+  "The palette lists every other tab, most recently used first, never the
+  current one; running an entry shows it; Go back flips to the tab before;
+  a closed tab leaves the list."
+  [ui]
+  (go-row :tab-switch-recent support/check
+    (on-gtk
+     (try
+       (let [ids (mapv (fn [n] ((:open-file! ui) (temp-file! n "(def x 1)\n")) (:id (active ui)))
+                       ["sw-a.clj" "sw-b.clj" "sw-c.clj"])
+             [a b c] ids
+             _ ((:select-tab! ui) a)
+             docs (palette-docs! ui "switch to tab")
+             _ (palette/run-selected! (:palette (active ui)))
+             after-run (:id (active ui))
+             _ (run-first! ui "go back to the tab used before")
+             after-back (:id (active ui))
+             _ (editor/mark-saved! (:ed (some #(when (= b (:id %)) %) (tabs ui))))
+             _ ((:close-tab! ui) b)
+             docs2 (palette-docs! ui "switch to tab")]
+         (when (popover/open? (:palette (active ui))) (popover/hide! (:palette (active ui))))
+         (support/check :tab-switch-recent
+                        (and (= ["Switch to tab: sw-c.clj" "Switch to tab: sw-b.clj"] (take 2 docs))
+                             (not-any? #(str/includes? % "sw-a.clj") docs)
+                             (= c after-run) (= a after-back)
+                             (not-any? #(str/includes? % "sw-b.clj") docs2))
+                        {:docs docs :after-run after-run :after-back after-back :docs2 docs2 :ids ids}))
+       (finally (close-extra-tabs! ui))))))
