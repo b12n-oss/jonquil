@@ -87,25 +87,43 @@
 
 (def ^:private NO-API "Frames need a Jolt with jolt.debug (newer than this one).")
 
+(def ^:private OUT-OF-STACK
+  ;; measured 2026-10-31 on jolt v0.8.23-230: in debug mode, recursion
+  ;; without recur ends as an OutOfMemoryError (GC overhead) with no frames;
+  ;; without debug mode the same code's StackOverflowError keeps 398
+  (str "No frames: Jolt ran out of stack or memory and kept none. "
+       "With debug mode on, deep recursion that doesn't use recur ends this way."))
+
+(defn- out-of-stack? [e]
+  (contains? #{"OutOfMemoryError" "StackOverflowError"} (.getSimpleName (class e))))
+
+(defn- frames-data* [e frames-fn resolve-file]
+  {:title (title e)
+   :frames (mapv (fn [{f :fn :keys [file line locals]}]
+                   {:fn (str f)
+                    :file (if (and file resolve-file) (resolve-file file) file)
+                    :line line
+                    :locals (->> locals
+                                 (map (fn [[k v]] {:name (str k) :text (value-text v)}))
+                                 (sort-by :name)
+                                 vec)})
+                 (user-frames (frames-fn e)))})
+
 (defn frames-data
   "e's frames as {:title :frames [{:fn :file :line :locals [{:name :text}]}]},
   locals sorted by name, the list stopping where the evaluator's own frames
   start. opts: :frames-fn (jolt.debug/frames, or nil for
   no frames API, which gives a :note instead) and :resolve-file, applied to
-  each frame's :file when there is one."
+  each frame's :file when there is one. Running out of stack or memory with
+  no frames kept gets a :note saying so."
   [e {:keys [frames-fn resolve-file]}]
   (if-not frames-fn
     {:title (title e) :frames [] :note NO-API}
-    {:title (title e)
-     :frames (mapv (fn [{f :fn :keys [file line locals]}]
-                     {:fn (str f)
-                      :file (if (and file resolve-file) (resolve-file file) file)
-                      :line line
-                      :locals (->> locals
-                                   (map (fn [[k v]] {:name (str k) :text (value-text v)}))
-                                   (sort-by :name)
-                                   vec)})
-                   (user-frames (frames-fn e)))}))
+    (let [d (frames-data* e frames-fn resolve-file)]
+      (cond-> d
+        (and (empty? (:frames d)) (out-of-stack? e)) (assoc :note OUT-OF-STACK)))))
+
+
 
 (defn- jolt-error [e] {:error (str "Debug mode: " (or (ex-message e) (str (class e))))})
 

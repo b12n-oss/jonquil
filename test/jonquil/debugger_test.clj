@@ -122,3 +122,13 @@
       (is (= {:on? false} (debugger/toggle-debug-mode!)))
       (finally (debugger/set-debug-mode! false)))
     (is (= {:error "Frames need a Jolt with jolt.debug (newer than this one)."} (debugger/toggle-debug-mode!)))))
+
+(deftest out-of-stack-note-test
+  (testing "no frames from running out of stack or memory says why, not 'compiled without them'"
+    (doseq [e [(java.lang.OutOfMemoryError. "jolt: out of memory") (java.lang.StackOverflowError. "stack limit")]]
+      (is (= [{:kind :note :text "No frames: Jolt ran out of stack or memory and kept none. With debug mode on, deep recursion that doesn't use recur ends this way."}]
+             (debugger/rows (debugger/frames-data e {:frames-fn (constantly [])})))
+          (str (class e)))))
+  (testing "a stack overflow that kept its frames lists them"
+    (is (= :frame (:kind (first (debugger/rows (debugger/frames-data (java.lang.StackOverflowError. "s")
+                                                                     {:frames-fn (constantly [{:fn 'user/f :line 1 :locals {}}])}))))))))

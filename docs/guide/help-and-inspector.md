@@ -190,8 +190,10 @@ Jolt keeps a frame's locals only when the code was compiled with them.
 to turn it off). Code you load or run afterwards keeps all its locals, so Run
 again, or reload a namespace, after turning it on. Debug mode keeps tail calls
 only for `recur`, so very deep recursion that isn't `recur` can run out of
-stack while it's on. Without debug mode, a frame shows the locals Jolt happened
-to keep, and code typed at the prompt shows none.
+stack while it's on: Jolt then runs out of memory, keeps no frames, and the
+panel says so. Turn debug mode off and run it again. Without debug mode, a
+frame shows the locals Jolt happened to keep, and code typed at the prompt
+shows none.
 
 The panel reads the frames after the error was caught, from the evaluator that
 ran the code, in process or in the Jolt child. It needs a Jolt with
