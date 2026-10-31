@@ -253,6 +253,7 @@
    palette-rows/row-describe-key-skips-modifier
    palette-rows/row-key-bindings-lists
    palette-rows/row-recent-keys-hides-typing
+   palette-rows/row-time-form
    locations-rows/row-locations-pane-shows
    locations-rows/row-locations-uses-step
    locations-rows/row-locations-survive-edit

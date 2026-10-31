@@ -74,6 +74,7 @@
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
+            [jonquil.timing :as timing]
             [jonquil.theme :as theme]))
 
 ;; --- title -------------------------------------------------------------
@@ -1434,6 +1435,29 @@
             (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
             (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                   warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
+              (when warning (cview/append! cv :system warning))))
+          (set-status! status-label "No form at the caret."))))))
+
+(defn- time-form!
+  "Time the form at the caret: Run Form's form, wrapped in
+  jonquil.timing/code and evaluated in the window's runtime as Inspect Form
+  evaluates, so the console gets its ; Time: line and the map it answers.
+  Dialects without the harness's System/nanoTime say so and evaluate
+  nothing."
+  [{:keys [tab cv ev* status-label sel*] :as ctx}]
+  (let [{:keys [ed]} tab]
+    (cond
+      (refuse-foreign! ctx) nil
+      (not (timing/supported? (:id (:profile @sel*))))
+      (set-status! status-label "; Timing needs Jolt or JVM Clojure.")
+      :else
+      (let [snap (editor/snapshot ed)]
+        (if-let [{:keys [text]} (commands/run-form snap)]
+          (let [opts (make-eval-opts ed cv ev* status-label false)]
+            (cview/append! cv :system (str "; Timing " (if (> (count text) 60) (str (subs text 0 60) "…") text) " for about a second\n"))
+            (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
+                  warning (ev/eval! @ev* (timing/code text 1000)
+                                    (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
           (set-status! status-label "No form at the caret."))))))
 
@@ -3532,6 +3556,7 @@
                            (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
+        time-form-fn (fn [] (time-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label}))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
@@ -3757,6 +3782,7 @@
                          :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
+                         :time-form-fn time-form-fn
                          :run-fn run-fn :stop-fn stop-fn :open-fn open-fn :save-fn save-fn
                                       :save-as-fn save-as-fn :close-fn close-fn
                                       :run-selection-fn run-selection-fn :toggle-focus-fn toggle-focus-fn

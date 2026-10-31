@@ -38,6 +38,8 @@
    :inspect/form {:doc "Inspect the value of the form at the caret." :scope :window
                   :run (call :inspect-form-fn)}
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
+   :run/time-form {:doc "Time the form at the caret (about a second)." :scope :window
+                   :run (call :time-form-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
    :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
    ;; find and focus

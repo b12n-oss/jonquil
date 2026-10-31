@@ -8,7 +8,8 @@
    :digit-tab-fn :new-tab-fn :theme-cycle-fn :inspect-form-fn :inspect-last-fn :step-tab-fn
    :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn :parinfer-fn
    :describe-key-fn :key-bindings-fn :recent-keys-fn
-   :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn])
+   :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
+   :time-form-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -35,7 +36,8 @@
    :help/recent-keys [:recent-keys-fn]
    :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
    :locations/matches [:locations-matches-fn]
-   :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]})
+   :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
+   :run/time-form [:time-form-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)
