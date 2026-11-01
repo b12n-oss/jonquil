@@ -29,6 +29,7 @@
     jonquil.nrepl.inspect-middleware
     jonquil.nrepl.generic
     jonquil.nrepl.stdin-middleware
+    jonquil.nrepl.break-middleware
     jonquil.nrepl.middleware-files
     jonquil.nrepl.leftovers
     jonquil.nrepl.cljs-child

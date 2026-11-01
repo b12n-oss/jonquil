@@ -102,6 +102,7 @@
     jonquil.nrepl.inspect-middleware-test
     jonquil.nrepl.generic-test
     jonquil.nrepl.stdin-middleware-test
+    jonquil.nrepl.break-middleware-test
     jonquil.nrepl.middleware-files-test
     jonquil.nrepl.leftovers-test
     jonquil.nrepl.cljs-child-test

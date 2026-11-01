@@ -288,6 +288,12 @@
   "Ends the running evaluation: idle first, then on-complete, as
   jonquil.eval does."
   [ev {:keys [on-status-change on-complete]} result]
+  ;; a pause the child never said had ended (it was killed, or restarted
+  ;; by Stop's fallback) ends with the evaluation, as a Stop
+  (let [[old _] (swap-vals! (:state ev) dissoc :paused?)]
+    (when (:paused? old)
+      (when-let [f (:on-resume (:break-handlers old))]
+        (try (f {:continued? false}) (catch Throwable _ nil)))))
   (swap! (:state ev) (fn [s] (cond-> (assoc s :running nil)
                                (:ns result) (assoc :prompt-ns (:ns result)))))
   (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
@@ -335,6 +341,37 @@
              (catch Throwable _ nil)))
       (call-wait-input! running false))))
 
+(defn breakable?
+  "True when an eval sent with opts may pause (Break on error on): only the
+  person's own, never a quiet one or one marked :no-break."
+  [state opts]
+  (boolean (and (:break-on? state) (not (:quiet opts)) (not (:no-break opts)))))
+
+(defn paused-message
+  "The child's jonquil-paused message as frames-data's map, or nil."
+  [m]
+  (some-> (:jonquil-paused m) edn/read-string))
+
+(defn resumed-message
+  "The child's jonquil-resumed message as {:continued? b}, or nil."
+  [m]
+  (when-let [r (:jonquil-resumed m)] {:continued? (= "continued" r)}))
+
+(defn- break-watch!
+  "For each reply to the main eval: a pause or its end goes to the break
+  handlers (set-break-handlers!), and :paused? follows it. Never throws: it
+  runs on the client's reader thread."
+  [ev m]
+  (try
+    (let [{:keys [on-pause on-resume]} (:break-handlers @(:state ev))]
+      (when-let [d (paused-message m)]
+        (swap! (:state ev) assoc :paused? true)
+        (when on-pause (on-pause d)))
+      (when-let [how (resumed-message m)]
+        (let [[old _] (swap-vals! (:state ev) dissoc :paused?)]
+          (when (and (:paused? old) on-resume) (on-resume how)))))
+    (catch Throwable _ nil)))
+
 (defn- send-main!
   "Sends the Run's load-file or the REPL entry's eval, feeding :out and
   :err to on-output as they arrive. A promise of all its replies.
@@ -346,8 +383,9 @@
   interrupt!'s id path once. That's safe even if a real Stop lands at the
   same moment: interrupt!'s own CAS only lets one caller trigger
   the restart future per id."
-  [ev code {:keys [run? path on-output]}]
+  [ev code {:keys [run? path on-output] :as opts}]
   (let [{:keys [conn session]} (runtime ev)
+        break? (breakable? @(:state ev) opts)
         acc (atom [])
         done (promise)
         msg (if run?
@@ -358,10 +396,12 @@
               ;; jolt-lang/jolt #1460 keeps no ns across evals of its own
               (cond-> {:op "eval" :code code :session session}
                 (:prompt-ns @(:state ev)) (assoc :ns (str (:prompt-ns @(:state ev))))))
+        msg (cond-> msg break? (assoc :jonquil-break "1"))
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
                               (stdin-watch! ev m)
+                              (break-watch! ev m)
                               (when on-output
                                 (when-let [o (:out m)] (on-output :out o))
                                 (when-let [e (:err m)] (on-output :err e)))
@@ -391,7 +431,8 @@
     (when (and nss (not (:auto-required? (runtime ev))))
       (swap! state assoc-in [:runtime :auto-required?] true)
       (when on-output (on-output :system (str (clj/auto-require-message nss) "\n")))
-      (let [done (send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output})
+      ;; :no-break: the project's auto-require is no eval the person typed
+      (let [done (send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output :no-break true})
             req-id (get-in @state [:running :id])
             msgs @done]
         ;; The require is over, so a Stop from here on must find no id and
@@ -727,7 +768,51 @@
                       (if (vector? r) (frame-eval-reply r) {:error inspect/timeout-message}))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-result r) (catch Throwable _))))
-    nil))
+    nil)
+  ;; Break on error: jonquil.nrepl.break-middleware in the child
+  ev/Break
+  (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)
+  (toggle-break! [this on-done]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    ;; turning it off needs no child
+                    (:break-on? @state) {:on? (:break-on? (swap! state assoc :break-on? false))}
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-break-check"))
+                    {:error "This Jolt child can't break: it runs without jolt-lang/nrepl's session middleware."}
+                    :else
+                    (let [r (client/request-sync conn {:op "jonquil-break-check" :session session} request-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (= "true" (some :available r)) {:on? (:break-on? (swap! state assoc :break-on? true))}
+                            :else {:error (or (some :reason r) "Frames need a Jolt with jolt.debug (newer than this one).")}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-done r) (catch Throwable _))))
+    nil)
+  (break-eval! [this i code on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session] :as rt} (runtime this)]
+                  (cond
+                    (or (nil? rt) (not (:paused? @state))) {:error "Not paused any more."}
+                    (not (live? this)) {:error inspect-lost}
+                    :else
+                    (let [r (client/request-sync conn {:op "jonquil-break-eval" :frame i :code code :session session}
+                                                 request-timeout-ms)]
+                      (if (vector? r) (frame-eval-reply r) {:error inspect/timeout-message}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
+  (continue-break! [this]
+    ;; answered from :paused? (the child's own messages), never a round
+    ;; trip on the caller's thread; the op goes out on a future
+    (if-let [{:keys [conn session]} (when (:paused? @state) (runtime this))]
+      (do (future (try (client/request-sync conn {:op "jonquil-break-continue" :session session} request-timeout-ms)
+                       (catch Throwable _ nil)))
+          true)
+      false)))
 
 (defn make-nrepl
   "A not yet started nREPL evaluator for a jonquil.dialect/select result

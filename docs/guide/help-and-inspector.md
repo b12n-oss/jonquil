@@ -233,7 +233,12 @@ doesn't, and neither do Jonquil's quiet evaluations (completion, help,
 timing). A top-level expression typed at the prompt keeps no frame of its
 own, so its locals show only inside a function it called; when no frame is
 your code's, the panel says so instead of listing Jonquil's own. Break on error
-works for Jolt in process for now; the other runtimes say so.
+works for Jolt, in process and in a project's Jolt child, where it needs the
+child's Jolt to have `jolt.debug` and the jolt-lang/nrepl middleware Jonquil
+starts it with; the other runtimes say so. In the child it works by wrapping
+`jolt.host/eval-string` and `load-string`, which Jolt's nREPL server calls;
+the child checks that when it starts, and turning it on says so if a Jolt
+ever evaluates another way.
 
 ### Restarts
 

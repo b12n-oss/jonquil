@@ -4028,7 +4028,7 @@
                                                                      (cond (:error r) (str "; " (:error r))
                                                                            (:on? r) "; Break on error on: an error pauses where it was thrown."
                                                                            :else "; Break on error off."))))))
-                       (set-status! status-label "; Break on error needs Jolt in process."))))
+                       (set-status! status-label "; Break on error needs Jolt."))))
         continue-fn (fn []
                       (let [e @ev*]
                         (when-not (and e (satisfies? ev/Break e) (ev/continue-break! e))
