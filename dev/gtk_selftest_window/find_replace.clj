@@ -438,7 +438,7 @@
   "A caret the user puts at a match's start in the editor stays a caret:
   Return in the replacement entry then finds the match, never replaces
   it (only a collapse from focus moving into the bar reads as the match
-  the bar selected)."
+  the bar selected), in an active window or not; the detail says which."
   [ui]
   (go-row :find-user-caret-at-match-edge support/check
     (let [fb (:find-bar ui)
@@ -452,9 +452,13 @@
                       (g/gtk-editable-set-text (:replacement fb) "X")
                       (editor/focus! ed)))
           in-editor? (await-until 2000 20 #(focus-in? (:view (:editor ui))))
-          _ (on-gtk (let [buf (:buf (:editor ui))]
-                      (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
-                      (g/gtk-widget-grab-focus (:replacement fb))))
+          probe (on-gtk (let [buf (:buf (:editor ui)) view (:view (:editor ui))]
+                          (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                          (let [p {:active (g/gtk-window-is-active (:window ui))
+                                   :has-focus (g/gtk-widget-has-focus view)
+                                   :is-focus (g/gtk-widget-is-focus view)}]
+                            (g/gtk-widget-grab-focus (:replacement fb))
+                            p)))
           in-replacement? (await-until 2000 20 #(focus-in? (:replacement fb)))]
       (on-gtk (let [ed (:editor ui) buf (:buf ed)
                     handled (find-bar/handle-key! fb support/KEY-RETURN 0)
@@ -463,7 +467,7 @@
                 (find-bar/close! fb)
                 (support/check :find-user-caret-at-match-edge
                                (and in-editor? in-replacement? (= 1 handled) (= "foo bar foo baz foo" text) (= [0 3] sel))
-                               {:in-editor in-editor? :in-replacement in-replacement? :handled handled :text text :sel sel}))))))
+                               (merge probe {:in-editor in-editor? :in-replacement in-replacement? :handled handled :text text :sel sel})))))))
 
 (defn row-find-editor-next-then-replace
   "F3 with focus in the editor selects the next match; moving focus to the

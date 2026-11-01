@@ -743,6 +743,8 @@
 ;; with focus grabbed on the editor and on the console.
 (ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)
 (ffi/defcfn gtk-widget-has-focus "gtk_widget_has_focus" [:pointer] :int)
+(ffi/defcfn gtk-widget-is-focus "gtk_widget_is_focus" [:pointer] :int)
+(ffi/defcfn gtk-window-is-active "gtk_window_is_active" [:pointer] :int)
 
 ;; gtk_text_buffer_delete_selection: gtktextbuffer.h:476-479 (gtk4 4.22.4,
 ;; GDK_AVAILABLE_IN_ALL). Fixed arity: (buffer, interactive, default_editable)
