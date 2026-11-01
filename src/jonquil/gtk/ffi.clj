@@ -293,6 +293,17 @@
 (ffi/defcfn g-error-free "g_error_free" [:pointer] :void)
 (ffi/defcfn g-cancellable-new "g_cancellable_new" [] :pointer)
 (ffi/defcfn g-cancellable-cancel "g_cancellable_cancel" [:pointer] :void)
+;; gtk_window_get_toplevels (gtkwindow.h): a GListModel of every toplevel,
+;; owned by GTK; g_list_model_get_n_items counts it (the self-test counts
+;; alert dialogs with these)
+(ffi/defcfn gtk-window-get-toplevels "gtk_window_get_toplevels" [] :pointer)
+(ffi/defcfn gtk-window-maximize "gtk_window_maximize" [:pointer] :void)
+(ffi/defcfn g-list-model-get-n-items "g_list_model_get_n_items" [:pointer] :uint)
+
+(defn toplevel-count
+  "How many toplevel windows GTK has: the app's windows and any open dialog."
+  []
+  (g-list-model-get-n-items (gtk-window-get-toplevels)))
 
 (defn finish-file
   "Completes an open/save. Returns {:path s} or {:error msg :code n :domain q}.

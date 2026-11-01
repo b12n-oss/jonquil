@@ -2331,6 +2331,8 @@ b" text) eq (pos? @splices))
     (g/gtk-window-set-child win paned)
     (editor/on-dirty-changed! ed (fn [dirty] (when dirty (swap! true-fire-count inc))))
     (g/gtk-window-present win)
+    ;; recording a demo: JONQUIL_SELFTEST_MAXIMIZE fills the screen
+    (when (System/getenv "JONQUIL_SELFTEST_MAXIMIZE") (g/gtk-window-maximize win))
     (editor/focus! ed)
     (go (<! (timeout 300))
         (<! (run-all app (into (mapv (fn [row] (fn [] (row ed))) row-fns)

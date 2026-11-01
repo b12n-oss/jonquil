@@ -168,6 +168,25 @@
     (type-into! (active ui) "z")
     (active ui)))
 
+(defn row-tab-close-alert-dismissed
+  "An alert a row answers in code (close-tab-choice!) is still a real
+  dialog on screen; dismissing the pending alerts closes it, as the driver
+  does after every row."
+  [ui]
+  (go-row :tab-close-alert-dismissed support/check
+    (let [before (on-gtk (g/toplevel-count))
+          t (on-gtk (dirty-second-tab! ui))
+          _ (on-gtk ((:close-tab! ui) (:id t))
+                    ((:close-tab-choice! ui) (:id t) {:index 2}))
+          opened? (await-until 2000 20 #(> (g/toplevel-count) before))
+          _ (on-gtk ((:dismiss-alerts!* ui)))
+          closed? (await-until 3000 20 #(= (g/toplevel-count) before))
+          pending (on-gtk ((:pending-alerts* ui)))]
+      (on-gtk (close-extra-tabs! ui)
+              (support/check :tab-close-alert-dismissed (and opened? closed? (zero? pending))
+                             {:before before :opened opened? :closed closed? :pending pending
+                              :now (g/toplevel-count)})))))
+
 (defn row-tab-close-dirty-cancel
   "Closing a dirty tab asks first; Cancel keeps the tab, its text and its
   dirty mark."

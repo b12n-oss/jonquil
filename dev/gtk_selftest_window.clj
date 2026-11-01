@@ -427,6 +427,7 @@
    tabs/row-tab-open-focuses-existing
    tabs/row-tab-switch-keys
    tabs/row-tab-dirty-label
+   tabs/row-tab-close-alert-dismissed
    tabs/row-tab-close-dirty-cancel
    tabs/row-tab-close-dirty-discard
    tabs/row-tab-close-with-open-popover
@@ -528,6 +529,11 @@
   gtk-async/ready-for-row?), then runs row and parks until its channel delivers."
   [ui row]
   (go-row :row-reset support/check
+    ;; an alert the last row answered in code is still a dialog on screen:
+    ;; dismiss it, and wait for GTK to complete it, so its late completion
+    ;; can't clear the next row's alert-pending? guard
+    (on-gtk ((:dismiss-alerts!* ui)))
+    (ga/await-until 3000 20 #(zero? ((:pending-alerts* ui))))
     (on-gtk (editor/set-text! (:editor ui) "")
             (cview/clear-input! (:console ui))
             ;; theme rows end on whatever they last checked; every row
@@ -622,6 +628,8 @@
                                            (cb/callable (fn [_win _data] (reset! window-destroyed? true) nil)
                                                         [:pointer :pointer] :void)
                                            ffi/null ffi/null g/CONNECT-DEFAULT)
+                  ;; recording a demo: JONQUIL_SELFTEST_MAXIMIZE fills the screen
+                  (when (System/getenv "JONQUIL_SELFTEST_MAXIMIZE") (g/gtk-window-maximize (:window ui)))
                   (go (<! (timeout 300))
                       (<! (ga/run-rows (map (fn [row] (fn [] (run-row ui row))) row-fns)
                                        PER-ROW-MS support/check))
