@@ -660,7 +660,11 @@
 (defn- row-paint-async-superseded
   "A paint still in flight never lands on newer text: paint text A (all
   strings), then at once set-text! B (all keywords) and paint again. When
-  the second paint is done, B carries keyword tags and no string tag."
+  the second paint is done, B carries keyword tags and no string tag.
+  Failed once in about 20 runs (2026-11-02: done at the right gen, yet no
+  keyword tag at offset 1); the detail also counts the keyword tags over
+  B, lists every tag at offset 1 and shows (:paint ed), so a repeat says
+  whether the tags never landed or were removed."
   [_ed]
   (go-row :paint-async-superseded check
     (with-fresh-editor
@@ -680,7 +684,11 @@
               r (on-gtk {:gen-now (:gen @(:paint ed))
                          :kw (g/has-tag-at? (:buf ed) 1 keyword-tag)
                          :str-anywhere (some (fn [o] (g/has-tag-at? (:buf ed) o string-tag))
-                                             (range 0 (count b-text) 97))})]
+                                             (range 0 (count b-text) 97))
+                         :kw-n (count (filter (fn [o] (g/has-tag-at? (:buf ed) o keyword-tag)) (range 1 (count b-text) 6)))
+                         :paint (dissoc @(:paint ed) :profile)
+                         :len (g/gtk-text-buffer-get-char-count (:buf ed))
+                         :tags-at-1 (vec (keep (fn [[k t]] (when (g/has-tag-at? (:buf ed) 1 t) k)) (:tags ed)))})]
           (on-gtk (check :paint-async-superseded
                          (and done? (= gen (:gen-now r)) (:kw r) (not (:str-anywhere r)))
                          (assoc r :done done? :gen gen))))))))
