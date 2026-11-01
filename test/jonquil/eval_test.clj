@@ -447,3 +447,13 @@
           [r] (binding [*err* (java.io.StringWriter.)]
                 (run-sync ctx "(+ 1 2)" {:before-idle (fn [_] (throw (ex-info "boom" {})))} 3000))]
       (is (= 3 (:value r))))))
+
+(deftest eval-string-keeps-the-switch-test
+  ;; Jolt from jolt-lang/jolt #1460 binds *ns* around load-string, as JVM
+  ;; Clojure does; eval-string must leave the code's own switch in place
+  (binding [*ns* (the-ns 'user)]
+    (is (= 1 (sut/eval-string "(ns jonquil.eval-test.switched) (def v 1) v")))
+    (is (= 'jonquil.eval-test.switched (ns-name *ns*))))
+  (binding [*ns* (the-ns 'user)]
+    (sut/eval-string "(ns jonquil.eval-test.switched) (in-ns 'user)")
+    (is (= 'user (ns-name *ns*)))))

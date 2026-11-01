@@ -14,6 +14,7 @@
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.evaluator :as nrepl]
             [jonquil.nrepl.middleware-files :as middleware-files]
+            [jonquil.tool-path :as tool-path]
             [temp-dirs]))
 
 (use-fixtures :once temp-dirs/fixture)
@@ -239,6 +240,33 @@
         (is (some #(str/includes? % "no interrupt op") (ev/limitations e)))
         (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
         (finally (ev/stop! e))))))
+
+(def ^:private newer-jolt
+  ;; a Jolt with jolt-lang/jolt #1460 when one is installed beside the
+  ;; release (its load-file and a REPL eval without :ns don't switch), else nil
+  (let [f (io/file (System/getProperty "user.home") ".local/bin/jolt-debug")]
+    (when (.isFile f) (.getPath f))))
+
+(deftest plain-server-prompt-follows-ns-test
+  ;; the plain server (no jolt-lang/nrepl middleware) answers with Jolt's
+  ;; built-in handler, which on #1460 neither switches on load-file nor keeps
+  ;; a REPL ns across evals sent without :ns
+  (doseq [program (cond-> [nil] newer-jolt (conj newer-jolt))]
+    (with-redefs [child/middleware-source
+                  (constantly {:git {:git/url "file:///nonexistent/jonquil-nrepl.git"
+                                     :git/tag "v0.4.0" :git/sha "7efdd6c"}})
+                  tool-path/resolve-program (let [real tool-path/resolve-program]
+                                              (fn [n p ok?] (if (and program (= n "jolt")) program (real n p ok?))))]
+      (let [e (make (temp-project))]
+        (try
+          (is (nil? (ev/start! e)) (str program))
+          (run e "(ns demo.plainrun) (defn f [] 41)" true)
+          (is (= 'demo.plainrun (:prompt-ns @(:state e))) (str "after Run, " program))
+          (is (= "41" (:printed (first (run e "(f)" false)))) (str "a REPL entry runs in the Run's ns, " program))
+          (run e "(ns demo.plainrepl)" false)
+          (is (= "\"demo.plainrepl\"" (:printed (first (run e "(str *ns*)" false))))
+              (str "a REPL ns switch sticks, " program))
+          (finally (ev/stop! e)))))))
 
 (defn- fetch-failure
   "An ex-info shaped like child/start!'s for a child that exited, whose log

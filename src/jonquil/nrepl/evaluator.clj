@@ -353,7 +353,11 @@
         msg (if run?
               {:op "load-file" :file code :file-path (or path "untitled.clj")
                :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
-              {:op "eval" :code code :session session})
+              ;; the prompt's namespace, as the JVM evaluator sends it: a
+              ;; plain server (no jolt-lang/nrepl middleware) on a Jolt with
+              ;; jolt-lang/jolt #1460 keeps no ns across evals of its own
+              (cond-> {:op "eval" :code code :session session}
+                (:prompt-ns @(:state ev)) (assoc :ns (str (:prompt-ns @(:state ev))))))
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
@@ -448,8 +452,15 @@
                 (when (and before after)
                   (swap! (:state ev) update-in [:created owner] (fnil into #{})
                          (session/namespaces-created (first before) (first after) (second after))))
-                (finish! ev opts (cond-> (ops/eval-result msgs (stop-requested? ev))
-                                   (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output)))))))))
+                (finish! ev opts (let [r (cond-> (ops/eval-result msgs (stop-requested? ev))
+                                           (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output))]
+                                   ;; a Run's prompt is the buffer's ns, as the
+                                   ;; JVM and jank evaluators do: a plain server
+                                   ;; on a Jolt with #1460 answers load-file
+                                   ;; with the ns it started in
+                                   (if (and run? (not (:quiet opts)))
+                                     (assoc r :ns (clj/prompt-after-run code r (:ns r)))
+                                     r)))))))))
     (catch Throwable e
       (finish! ev opts (if (stop-requested? ev)
                          {:status :interrupted}
