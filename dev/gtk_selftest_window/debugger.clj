@@ -7,6 +7,8 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.debugger :as debugger]
+            [jonquil.evaluator :as ev]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.debugger-pane :as dpane]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
@@ -123,3 +125,107 @@
           (when avail? (debugger/set-debug-mode! false))
           (on-gtk (when-let [f (:on-close @(:handlers dp))] (f))
                   ((:close-inspector!* ui))))))))
+
+;; --- Break on error -----------------------------------------------------------
+
+(def ^:private BREAK-ON "; Break on error on: an error pauses where it was thrown.")
+(def ^:private BREAK-OFF "; Break on error off.")
+
+(defn- enter!
+  "Types code at the console prompt and presses Return, without waiting
+  for it to end (a paused entry doesn't); the out offset before it."
+  [ui code]
+  (on-gtk (let [cv (:console ui)
+                m (support/out-end-offset ui)]
+            (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) code -1 1)
+            (cview/handle-return! cv false)
+            m)))
+
+(defn- break-off!
+  "Never leaves a pause or Break on error behind for later rows."
+  [ui]
+  (ev/continue-break! (:session ui))
+  (await-until 3000 20 #(support/idle? ui))
+  (swap! (:state (:session ui)) assoc :break-on? false)
+  (on-gtk (when-let [f (:on-close @(:handlers (:debugger-pane ui)))] (f))))
+
+(defn row-break-pauses
+  "Break on error on: an entry that throws pauses before anything unwinds.
+  The panel says Paused and offers Continue, finally hasn't run, the field
+  sees the throw site's binding, and Continue lets the error through:
+  finally runs and the panel shows the error's frames. Without jolt.debug
+  the toggle says what's needed."
+  [ui]
+  (go-row :break-pauses support/check
+    (let [dp (:debugger-pane ui)]
+      (if-not (debugger/available?)
+        (do (on-gtk (run-palette! ui "break on error"))
+            (let [said? (await-until 3000 20 #(= (status ui) (str "; " NO-API)))]
+              (on-gtk (support/check :break-pauses said? {:available false :status (status ui)}))))
+        (try
+          ;; debug mode first, so the entry keeps its locals
+          (debugger/set-debug-mode! true)
+          (on-gtk (run-palette! ui "break on error"))
+          (let [on? (await-until 3000 20 #(= (status ui) BREAK-ON))
+                ;; a defn: a top-level expression keeps no frame of its own
+                m0 (enter! ui (str "(def brk-fin (atom false)) (def ^:dynamic *brk-d* :root) "
+                                   "(defn brk-inner [n] (try (/ n 0) (finally (reset! brk-fin true))))"))
+                defined? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m0) "#'user/brk-inner")))
+                m (enter! ui "(binding [*brk-d* :bound] (brk-inner 21))")
+                paused? (await-until 5000 20 #(str/starts-with? (dpane/title-text dp) "Paused: ArithmeticException"))
+                said? (on-gtk (str/includes? (support/since ui m) "; Paused at ArithmeticException: Divide by zero."))
+                paused-status (on-gtk (status ui))
+                labels (on-gtk (dpane/restart-labels dp))
+                rows (on-gtk (dpane/row-texts dp))
+                local? (boolean (some #{"    n = 21"} rows))
+                fin-before @@(resolve 'user/brk-fin)
+                m2 (on-gtk (support/out-end-offset ui))
+                _ (on-gtk (dpane/eval-text! dp "*brk-d*"))
+                bound? (await-until 3000 20 #(str/includes? (support/since ui m2) "=> :bound"))
+                _ (on-gtk (dpane/press-restart! dp :continue))
+                errored? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m2) "Divide by zero")))
+                fin-after @@(resolve 'user/brk-fin)
+                refreshed? (await-until 3000 20 #(= "ArithmeticException: Divide by zero" (dpane/title-text dp)))
+                _ (on-gtk (run-palette! ui "break on error"))
+                off? (await-until 3000 20 #(= (status ui) BREAK-OFF))]
+            (on-gtk (support/check :break-pauses
+                                   (and on? defined? paused? said? local? (= ["Continue"] labels)
+                                        (str/starts-with? paused-status "; Paused: ArithmeticException: Divide by zero")
+                                        (false? fin-before) bound? errored? (true? fin-after) refreshed? off?)
+                                   {:on on? :defined defined? :paused paused? :said said? :status paused-status
+                                    :labels labels :local local? :rows (take 4 rows) :fin-before fin-before :bound bound?
+                                    :field-out (subs (support/since ui m2) 0 (min 300 (count (support/since ui m2))))
+                                    :errored errored? :fin-after fin-after :refreshed refreshed? :off off?
+                                    :title (dpane/title-text dp)})))
+          (finally (debugger/set-debug-mode! false) (break-off! ui)))))))
+
+(defn row-break-stop
+  "Stop while paused ends the evaluation and the pause; the next entry
+  runs without pausing on what came before."
+  [ui]
+  (go-row :break-stop support/check
+    (if-not (debugger/available?)
+      (on-gtk (support/check :break-stop true {:available false}))
+      (let [dp (:debugger-pane ui)]
+        (try
+          (on-gtk (run-palette! ui "break on error"))
+          (let [on? (await-until 3000 20 #(= (status ui) BREAK-ON))
+                _ (enter! ui "(let [n 1] (/ n 0))")
+                paused? (await-until 5000 20 #(str/starts-with? (dpane/title-text dp) "Paused:"))
+                _ (on-gtk ((:stop!* ui)))
+                stopped? (await-until 5000 20 #(and (support/idle? ui) (not (str/starts-with? (dpane/title-text dp) "Paused:"))))
+                m (enter! ui "(+ 1 2)")
+                next? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 3")))]
+            (on-gtk (support/check :break-stop (and on? paused? stopped? next?)
+                                   {:on on? :paused paused? :stopped stopped? :next next?
+                                    :title (dpane/title-text dp)})))
+          (finally (break-off! ui)))))))
+
+(defn row-break-off-by-default
+  "With Break on error off, an entry that throws errors at once."
+  [ui]
+  (go-row :break-off-by-default support/check
+    (let [m (enter! ui "(/ 1 0)")
+          errored? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "Divide by zero")))
+          paused? (on-gtk (str/includes? (support/since ui m) "; Paused"))]
+      (on-gtk (support/check :break-off-by-default (and errored? (not paused?)) {:errored errored? :paused paused?})))))

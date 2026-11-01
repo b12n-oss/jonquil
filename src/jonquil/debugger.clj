@@ -359,7 +359,8 @@
   escaping the thunk pauses on the throwing thread before anything unwinds:
   the pause is published, (on-pause data) gets its frames-data, and the
   thread serves break-eval! until continue! (or a Stop's interrupt), then
-  (on-resume) and the throw goes on. On a Jolt without jolt.debug the thunk
+  (on-resume {:continued? b}) and the throw goes on (b false: the Stop's
+  InterruptedException goes on in its place). On a Jolt without jolt.debug the thunk
   just runs. The callbacks' own throws are dropped: they must not replace
   the error."
   [{:keys [queue paused]} {:keys [on-pause on-resume resolve-file]}]
@@ -369,13 +370,15 @@
               (let [d (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})]
                 (drain! queue)
                 (reset! paused {:error t :frames frames :data d :continued (atom false)})
-                (try
-                  (try (when on-pause (on-pause d)) (catch Throwable _ nil))
-                  (serve! queue t frames)
-                  (finally
-                    (reset! paused nil)
-                    (drain! queue)
-                    (try (when on-resume (on-resume)) (catch Throwable _ nil))))))
+                (let [continued? (volatile! false)]
+                  (try
+                    (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+                    (serve! queue t frames)
+                    (vreset! continued? true)
+                    (finally
+                      (reset! paused nil)
+                      (drain! queue)
+                      (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil)))))))
             thunk)
       (thunk))))
 

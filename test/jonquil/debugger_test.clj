@@ -209,10 +209,10 @@
   [thunk]
   (let [brk (debugger/make-break)
         paused (promise)
-        resumed (atom 0)
+        resumed (atom [])
         thread (promise)
         wrap (debugger/break-wrapper brk {:on-pause (fn [d] (deliver paused d))
-                                          :on-resume (fn [] (swap! resumed inc))})
+                                          :on-resume (fn [how] (swap! resumed conj how))})
         fut (future (binding [debugger/*break-fn* fake-break]
                       (deliver thread (Thread/currentThread))
                       (try (wrap thunk) (catch Throwable t t))))]
@@ -239,7 +239,7 @@
     (is (= ::debugger/missing (debugger/paused-local brk "other" 0 "x")))
     (is (true? (debugger/continue! brk)))
     (is (identical? boom (deref fut 3000 :blocked)))
-    (is (= 1 @resumed))
+    (is (= [{:continued? true}] @resumed))
     (is (false? (debugger/continue! brk)))
     (is (= {:error "Not paused any more."} (ask brk 0 "x")))
     (is (= ::debugger/missing (debugger/paused-local brk (:error-id d) 0 "x")))))
@@ -249,11 +249,11 @@
     (is (some? (deref paused 3000 nil)))
     (.interrupt ^Thread @thread)
     (is (instance? InterruptedException (deref fut 3000 :blocked)))
-    (is (= 1 @resumed))
+    (is (= [{:continued? false}] @resumed))
     (is (false? (debugger/continue! brk)))))
 
 (deftest break-no-throw-no-pause-test
   (let [{:keys [fut paused resumed]} (start-break (fn [] 5))]
     (is (= 5 (deref fut 3000 :blocked)))
     (is (not (realized? paused)))
-    (is (= 0 @resumed))))
+    (is (= [] @resumed))))

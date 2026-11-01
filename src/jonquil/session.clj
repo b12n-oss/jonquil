@@ -38,7 +38,9 @@
   (start! [_] nil)
   ;; The in-process engine lives and dies with Jonquil's own process, as it
   ;; did before the Evaluator protocol existed: nothing to end.
-  (stop! [_] nil)
+  ;; a paused break (Break on error) is let go, so closing the window or
+  ;; switching runtimes never leaves its worker blocked
+  (stop! [_] (debugger/continue! (:break @state)) nil)
   (eval! [this code opts]
     (cond
       (:quiet opts) (quiet-eval! this code (dissoc opts :run?))

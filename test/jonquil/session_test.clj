@@ -338,7 +338,7 @@
           paused (atom (promise))
           resumed (atom 0)]
       (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d))
-                                 :on-resume (fn [] (swap! resumed inc))})
+                                 :on-resume (fn [_] (swap! resumed inc))})
       (testing "off by default"
         (is (= :error (:status (repl-sync s "(/ 1 0)"))))
         (is (not (realized? @paused))))

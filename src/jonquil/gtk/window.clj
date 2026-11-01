@@ -3933,10 +3933,12 @@
                                 (nil? e) (set-status! status-label "; The debugger needs Jolt.")
                                 :else
                                 ;; the code at once, so a slow form shows it's running
-                                ;; (Stop stops it), then what it printed and its value
+                                ;; (Stop stops it), then what it printed and its value;
+                                ;; while paused, on the paused thread (Break on error)
                                 (do (cview/append! cv :system (str "; in " label ": " code "\n"))
-                                    (ev/eval-in-frame!
-                                     e i code (:error-id @frames-state)
+                                    ((if (and (:paused? @frames-state) (satisfies? ev/Break e))
+                                       (fn [on-result] (ev/break-eval! e i code on-result))
+                                       (fn [on-result] (ev/eval-in-frame! e i code (:error-id @frames-state) on-result)))
                                      (fn [r]
                                        (on-gui!
                                         (fn []
@@ -3983,12 +3985,61 @@
                                   (nil? n) (set-status! status-label "; The last error wasn't an unresolved name.")
                                   :else (let [{:keys [text caret]} (restarts/define-input n (:code f))]
                                           (cview/set-input! cv text caret)))))
+        ;; Break on error (jonquil.debugger's break). The pause comes from the
+        ;; worker; the panel shows it with Continue in the restart bar. After
+        ;; Continue the error is recorded as a failure, and that refreshes
+        ;; the panel with its frames (break-resumed).
+        break-resumed (atom false)
+        show-paused! (fn [d]
+                       (let [shown (assoc d :title (str "Paused: " (:title d)))]
+                         (reset! frames-state (assoc shown :paused? true))
+                         (debugger-pane/show! dbgp shown)
+                         (debugger-pane/show-restarts! dbgp [{:id :continue :label "Continue"}])
+                         (show-right-panel! right :debugger)
+                         (debugger-pane/focus! dbgp)
+                         (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
+                         (set-status! status-label (str "; Paused: " (:title d) ". Continue or Stop."))))
+        end-paused! (fn [{:keys [continued?]}]
+                      (when (:paused? @frames-state)
+                        (let [d {:note (if continued? "Continued: the error unwinds." "Stopped while paused.")}]
+                          (reset! frames-state d)
+                          (debugger-pane/show! dbgp d)
+                          (debugger-pane/show-restarts! dbgp []))))
+        register-break! (fn [e]
+                          (when (and e (satisfies? ev/Break e))
+                            (ev/set-break-handlers! e {:on-pause (fn [d] (on-gui! (fn [] (show-paused! d))))
+                                                       ;; the flag on the worker, before the error
+                                                       ;; it lets through is recorded as the failure
+                                                       :on-resume (fn [how]
+                                                                    (reset! break-resumed (boolean (:continued? how)))
+                                                                    (on-gui! (fn [] (end-paused! how))))})))
+        _ (register-break! @ev*)
+        _ (add-watch ev* ::break (fn [_ _ old new] (when-not (identical? old new) (register-break! new))))
+        _ (add-watch (:failure* cv) ::break-refresh
+                     (fn [_ _ _ new]
+                       (when (compare-and-set! break-resumed true false)
+                         (when new (on-gui! show-frames-fn)))))
+        break-fn (fn []
+                   (let [e @ev*]
+                     (if (and e (satisfies? ev/Break e))
+                       (ev/toggle-break! e (fn [r]
+                                             (on-gui! (fn []
+                                                        (set-status! status-label
+                                                                     (cond (:error r) (str "; " (:error r))
+                                                                           (:on? r) "; Break on error on: an error pauses where it was thrown."
+                                                                           :else "; Break on error off."))))))
+                       (set-status! status-label "; Break on error needs Jolt in process."))))
+        continue-fn (fn []
+                      (let [e @ev*]
+                        (when-not (and e (satisfies? ev/Break e) (ev/continue-break! e))
+                          (set-status! status-label "; Nothing is paused."))))
         _ (debugger-pane/set-restart-handler!
            dbgp (fn [id]
                   (case id
                     :retry (retry-fn)
                     :edit (edit-retry-fn)
-                    :define (define-retry-fn))))
+                    :define (define-retry-fn)
+                    :continue (continue-fn))))
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -4010,6 +4061,7 @@
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
+                         :break-fn break-fn :continue-fn continue-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
