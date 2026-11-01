@@ -58,6 +58,7 @@
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.generic :as generic]
+            [jonquil.nrepl.jvm-frames :as jvm-frames]
             [jonquil.nrepl.ops :as ops]))
 
 (def default-timings
@@ -647,6 +648,35 @@
   ;; advertised inspect-start.
   (inspectable? [_]
     (let [ops (:ops @state)] (or (empty? ops) (contains? ops "inspect-start"))))
+
+  ;; The Frames panel (jonquil.debugger's shape): one eval in the user's
+  ;; session, where *e lives, whose code builds the frames on the server
+  ;; and leaves *1 *2 *3 and *e as they were (jonquil.nrepl.jvm-frames).
+  ;; The JVM keeps no locals, so evaluating in a frame and debug mode say so.
+  ev/Frames
+  (error-frames! [_ on-data]
+    (future
+      (let [d (try
+                (let [{:keys [conn session]} @state]
+                  (cond
+                    (nil? conn) {:note "No error yet."}
+                    (not (client/open? conn)) {:error clj/lost-connection}
+                    :else
+                    (let [token (str "jonquil-frames-" (random-uuid))
+                          r (client/request-sync conn {:op "eval" :code (jvm-frames/code token) :session session}
+                                                 (:inspect-timeout-ms timings))]
+                      (if (vector? r)
+                        (jvm-frames/parse (apply str (keep :out r)) token)
+                        {:error inspect/timeout-message}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-data d) (catch Throwable _))))
+    nil)
+  (toggle-debug-mode! [_ on-done]
+    (future (try (on-done {:error "Debug mode is Jolt's: the JVM keeps no locals."}) (catch Throwable _)))
+    nil)
+  (eval-in-frame! [_ _i _code _error-id on-result]
+    (future (try (on-result {:error "Evaluating in a frame needs Jolt: the JVM keeps no locals."}) (catch Throwable _)))
+    nil)
 
   connection/Attached
   (connected? [this] (connection/live? this))

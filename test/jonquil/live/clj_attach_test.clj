@@ -300,3 +300,28 @@
   (let [srv (clj-server/start!)]
     (clj-server/stop! srv)
     (is (not (.exists (io/file (:dir srv) ".nrepl-port"))))))
+
+(deftest frames-live
+  ;; the last error's frames from a real JVM server, its source on the
+  ;; server's classpath, and the user's *1 and *e left as they were
+  (let [e (make)
+        f (io/file (:dir *srv*) "src/demo/frames_util.clj")]
+    (spit f "(ns demo.frames-util)\n(defn inner-fn? [x] (let [y (* 2 x)] (+ y x (/ y 0))))\n(defn outer [a] (let [b (inc a)] (+ a b (inner-fn? b))))\n")
+    (try
+      (is (= :ok (:status (:result (run e "(require 'demo.frames-util)" {:run? false})))))
+      (is (= "42" (:printed (:result (run e "42" {:run? false})))))
+      (is (= :error (:status (:result (run e "(demo.frames-util/outer 20)" {:run? false})))))
+      (let [p (promise)
+            _ (ev/error-frames! e (fn [d] (deliver p d)))
+            d (deref p 15000 :timeout)
+            [f1 f2] (:frames d)]
+        (is (= "ArithmeticException: Divide by zero" (:title d)) (pr-str d))
+        (is (= ["demo.frames-util/inner-fn?" 2] [(:fn f1) (:line f1)]))
+        (is (str/ends-with? (str (:file f1)) "demo/frames_util.clj") (str (:file f1)))
+        (is (= ["demo.frames-util/outer" 3] [(:fn f2) (:line f2)]))
+        (is (not-any? #(str/starts-with? (:fn %) "clojure.lang.") (:frames d)))
+        (is (every? #(= [] (:locals %)) (:frames d)) "the JVM keeps no locals")
+        (is (some? (source/location {:file (:file f1) :line 2} {:project-dir (:dir *srv*)})) "the frame opens"))
+      (is (= "42" (:printed (:result (run e "*1" {:run? false})))) "*1 is the user's")
+      (is (= "\"Divide by zero\"" (:printed (:result (run e "(.getMessage *e)" {:run? false})))) "*e is the user's")
+      (finally (ev/stop! e) (io/delete-file f true)))))
