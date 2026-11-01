@@ -195,3 +195,65 @@
     (Thread/sleep 300)
     (debugger/interrupt-token! t)
     (is (= {:error "Stopped."} (deref f 5000 :timeout)))))
+
+;; --- the break (Break on error) ---------------------------------------------
+
+(defn- fake-break
+  "jolt.debug/call-with-break-handler's contract over fake-frames: the
+  handler runs on the throwing thread, then the throw goes on."
+  [handler thunk]
+  (try (thunk) (catch Throwable t (handler t fake-frames) (throw t))))
+
+(defn- start-break
+  "thunk on a future under a break; {:brk :fut :paused :resumed :thread}."
+  [thunk]
+  (let [brk (debugger/make-break)
+        paused (promise)
+        resumed (atom 0)
+        thread (promise)
+        wrap (debugger/break-wrapper brk {:on-pause (fn [d] (deliver paused d))
+                                          :on-resume (fn [] (swap! resumed inc))})
+        fut (future (binding [debugger/*break-fn* fake-break]
+                      (deliver thread (Thread/currentThread))
+                      (try (wrap thunk) (catch Throwable t t))))]
+    {:brk brk :fut fut :paused paused :resumed resumed :thread thread}))
+
+(defn- ask [brk i code]
+  (let [p (promise)]
+    (debugger/break-eval! brk i code (fn [r] (deliver p r)))
+    (deref p 3000 :no-reply)))
+
+(deftest break-pauses-evaluates-and-continues-test
+  (let [boom (ex-info "boom" {})
+        {:keys [brk fut paused resumed thread]} (start-break (fn [] (throw boom)))
+        d (deref paused 3000 nil)]
+    (is (= "ExceptionInfo: boom {}" (:title d)))
+    (is (= [{:name "x" :text "21"} {:name "y" :text "42"}] (:locals (first (:frames d)))))
+    (is (= {:out "" :text "63"} (ask brk 0 "(+ x y)")))
+    (testing "the form runs on the paused thread"
+      (is (= (pr-str (.getName ^Thread @thread)) (:text (ask brk 0 "(.getName (Thread/currentThread))")))))
+    (testing "a form that throws is answered and the pause holds"
+      (is (= "ArithmeticException: Divide by zero" (:error (ask brk 0 "(/ x 0)"))))
+      (is (= {:out "" :text "21"} (ask brk 0 "x"))))
+    (is (= 21 (debugger/paused-local brk (:error-id d) 0 "x")))
+    (is (= ::debugger/missing (debugger/paused-local brk "other" 0 "x")))
+    (is (true? (debugger/continue! brk)))
+    (is (identical? boom (deref fut 3000 :blocked)))
+    (is (= 1 @resumed))
+    (is (false? (debugger/continue! brk)))
+    (is (= {:error "Not paused any more."} (ask brk 0 "x")))
+    (is (= ::debugger/missing (debugger/paused-local brk (:error-id d) 0 "x")))))
+
+(deftest break-interrupt-ends-the-pause-test
+  (let [{:keys [brk fut paused resumed thread]} (start-break (fn [] (/ 1 0)))]
+    (is (some? (deref paused 3000 nil)))
+    (.interrupt ^Thread @thread)
+    (is (instance? InterruptedException (deref fut 3000 :blocked)))
+    (is (= 1 @resumed))
+    (is (false? (debugger/continue! brk)))))
+
+(deftest break-no-throw-no-pause-test
+  (let [{:keys [fut paused resumed]} (start-break (fn [] 5))]
+    (is (= 5 (deref fut 3000 :blocked)))
+    (is (not (realized? paused)))
+    (is (= 0 @resumed))))

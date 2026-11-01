@@ -6,7 +6,8 @@
   called. The out-of-process Jolt child loads this namespace too, from
   Jonquil's embedded middleware files, so it requires nothing but
   clojure.string. No GTK here."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:import (java.util.concurrent LinkedBlockingQueue)))
 
 (def ^:private TEXT-MAX
   ;; a choice: one readable panel row
@@ -304,3 +305,97 @@
   (if-let [fr (when frames-fn (get (vec (frames-fn e)) i))]
     (if-let [[_ v] (find (:locals fr) (symbol local-name))] v ::missing)
     ::missing))
+
+;; --- the break: an error paused before the stack unwinds ------------------
+
+(def ^:dynamic *break-fn*
+  "When bound, what break-wrapper calls in place of
+  jolt.debug/call-with-break-handler: the tests' fake break."
+  nil)
+
+(defn- break-fn []
+  (or *break-fn*
+      (try (requiring-resolve 'jolt.debug/call-with-break-handler) (catch Throwable _ nil))))
+
+(def ^:private NOT-PAUSED "Not paused any more.")
+
+(defn make-break
+  "A break's state: the queue the paused thread serves and the pause, nil
+  when nothing is paused."
+  []
+  {:queue (LinkedBlockingQueue.) :paused (atom nil)})
+
+(defn- drain!
+  "Answers every request still queued with NOT-PAUSED: one that arrived as
+  a pause ended, or before the next began."
+  [^LinkedBlockingQueue q]
+  (loop []
+    (when-let [m (.poll q)]
+      (when-let [[_ _ reply] (:eval m)]
+        (try (reply {:error NOT-PAUSED}) (catch Throwable _ nil)))
+      (recur))))
+
+(defn- serve!
+  "The paused thread's loop: each {:eval [i code reply]} is evaluated here,
+  on the throwing thread, with frame i's locals bound, until :continue.
+  Stop interrupts this thread, and .take then throws."
+  [^LinkedBlockingQueue q t frames]
+  (loop []
+    (let [m (.take q)]
+      (when-not (= :continue m)
+        (when-let [[i code reply] (:eval m)]
+          (let [r (try (eval-in-frame t i code {:frames-fn (fn [_] frames)})
+                       (catch Throwable e {:error (title e)}))]
+            (try (reply r) (catch Throwable _ nil))))
+        (recur)))))
+
+(defn break-wrapper
+  "A fn of a thunk that runs it under jolt.debug's break handler. A throw
+  escaping the thunk pauses on the throwing thread before anything unwinds:
+  the pause is published, (on-pause data) gets its frames-data, and the
+  thread serves break-eval! until continue! (or a Stop's interrupt), then
+  (on-resume) and the throw goes on. On a Jolt without jolt.debug the thunk
+  just runs. The callbacks' own throws are dropped: they must not replace
+  the error."
+  [{:keys [queue paused]} {:keys [on-pause on-resume resolve-file]}]
+  (fn [thunk]
+    (if-let [call (break-fn)]
+      (call (fn [t frames]
+              (let [d (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})]
+                (drain! queue)
+                (reset! paused {:error t :frames frames :data d :continued (atom false)})
+                (try
+                  (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+                  (serve! queue t frames)
+                  (finally
+                    (reset! paused nil)
+                    (drain! queue)
+                    (try (when on-resume (on-resume)) (catch Throwable _ nil))))))
+            thunk)
+      (thunk))))
+
+(defn break-eval!
+  "Asks the paused thread to evaluate code in frame i; (reply r) gets
+  eval-in-frame's map, or {:error \"Not paused any more.\"}."
+  [{:keys [^LinkedBlockingQueue queue paused]} i code reply]
+  (if @paused
+    (.put queue {:eval [i code reply]})
+    (reply {:error NOT-PAUSED})))
+
+(defn continue!
+  "Lets the paused error unwind: true when a pause was waiting, false when
+  there was none or it was already continued."
+  [{:keys [^LinkedBlockingQueue queue paused]}]
+  (let [p @paused]
+    (boolean (when (and p (compare-and-set! (:continued p) false true))
+               (.put queue :continue)
+               true))))
+
+(defn paused-local
+  "The value of local-name in the paused error's frame i, or ::missing
+  when nothing is paused or error-id names another error."
+  [{:keys [paused]} error-id i local-name]
+  (let [p @paused]
+    (if (and p (= error-id (:error-id (:data p))))
+      (local-value (:error p) i local-name {:frames-fn (fn [_] (:frames p))})
+      ::missing)))
