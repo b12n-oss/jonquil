@@ -228,10 +228,14 @@
   [token]
   ((resolve 'jolt.host/interrupt!) token))
 
-(defn- interrupted? [t]
+(defn- interrupted?
+  "True when t, or a cause of it, is a Stop: the token's interrupt, or the
+  thread's (an InterruptedException from a blocking call)."
+  [t]
   (loop [c t]
     (cond (nil? c) false
           (:jolt/interrupted (ex-data c)) true
+          (instance? InterruptedException c) true
           :else (recur (.getCause ^Throwable c)))))
 
 (defn- capped-writer
@@ -343,10 +347,12 @@
 (defn- serve!
   "The paused thread's loop: each {:eval [i code reply]} is evaluated here,
   on the throwing thread, with frame i's locals bound, until :continue.
-  Stop interrupts this thread, and .take then throws."
+  Stop interrupts this thread, and .take then throws; it also queues ::stop
+  (break-stop!), since a form evaluated here can use up the interrupt."
   [^LinkedBlockingQueue q t frames]
   (loop []
     (let [m (.take q)]
+      (when (= ::stop m) (throw (InterruptedException. "Stopped while paused.")))
       (when-not (= :continue m)
         (when-let [[i code reply] (:eval m)]
           (let [r (try (eval-in-frame t i code {:frames-fn (fn [_] frames)})
@@ -367,18 +373,21 @@
   (fn [thunk]
     (if-let [call (break-fn)]
       (call (fn [t frames]
-              (let [d (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})]
-                (drain! queue)
-                (reset! paused {:error t :frames frames :data d :continued (atom false)})
-                (let [continued? (volatile! false)]
-                  (try
-                    (try (when on-pause (on-pause d)) (catch Throwable _ nil))
-                    (serve! queue t frames)
-                    (vreset! continued? true)
-                    (finally
-                      (reset! paused nil)
-                      (drain! queue)
-                      (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil)))))))
+              ;; a Stop is never an error to pause on: a body blocked in a
+              ;; sleep, a deref or a .take throws InterruptedException
+              (when-not (interrupted? t)
+                (let [d (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})]
+                  (drain! queue)
+                  (reset! paused {:error t :frames frames :data d :continued (atom false)})
+                  (let [continued? (volatile! false)]
+                    (try
+                      (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+                      (serve! queue t frames)
+                      (vreset! continued? true)
+                      (finally
+                        (reset! paused nil)
+                        (drain! queue)
+                        (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil))))))))
             thunk)
       (thunk))))
 
@@ -398,6 +407,25 @@
     (boolean (when (and p (compare-and-set! (:continued p) false true))
                (.put queue :continue)
                true))))
+
+(defn break-stop!
+  "Stop's half for a pause: the paused thread takes ::stop and throws, ending
+  the evaluation even when a form it ran used up the thread's interrupt."
+  [{:keys [^LinkedBlockingQueue queue paused]}]
+  (when @paused (.put queue ::stop))
+  nil)
+
+(defn end-stale-pause!
+  "The evaluation has ended: a pause still published there lost its own
+  cleanup (a Stop's interrupt landing inside the handler's finally), so this
+  ends it as a Stop would: cleared, requests answered, (on-resume
+  {:continued? false})."
+  [{:keys [queue paused]} {:keys [on-resume]}]
+  (when @paused
+    (reset! paused nil)
+    (drain! queue)
+    (try (when on-resume (on-resume {:continued? false})) (catch Throwable _ nil)))
+  nil)
 
 (defn paused-local
   "The value of local-name in the paused error's frame i, or ::missing

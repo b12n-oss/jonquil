@@ -257,3 +257,42 @@
     (is (= 5 (deref fut 3000 :blocked)))
     (is (not (realized? paused)))
     (is (= [] @resumed))))
+
+(deftest break-stop-on-a-blocked-evaluation-never-pauses-test
+  ;; Stop interrupts a body blocked in .take: the InterruptedException
+  ;; escapes it, and that must end the evaluation, not pause it
+  (let [q (java.util.concurrent.LinkedBlockingQueue.)
+        {:keys [fut paused resumed thread]} (start-break (fn [] (.take q)))]
+    (Thread/sleep 200)
+    (.interrupt ^Thread @thread)
+    (is (instance? InterruptedException (deref fut 3000 :blocked)))
+    (is (not (realized? paused)))
+    (is (= [] @resumed))))
+
+(deftest break-stop-message-ends-the-pause-test
+  ;; a field form can use up the thread's interrupt flag, so Stop also
+  ;; queues a stop the paused thread takes
+  (let [{:keys [brk fut paused resumed]} (start-break (fn [] (/ 1 0)))]
+    (is (some? (deref paused 3000 nil)))
+    (debugger/break-stop! brk)
+    (is (instance? InterruptedException (deref fut 3000 :blocked)))
+    (is (= [{:continued? false}] @resumed))))
+
+(deftest eval-in-frame-interrupted-exception-is-stopped-test
+  (is (= {:error "Stopped."}
+         (debugger/eval-in-frame div-zero 0 "(throw (InterruptedException. \"sleep interrupted\"))" {:frames-fn fake}))))
+
+(deftest end-stale-pause-test
+  ;; the backstop for a pause whose own cleanup was skipped
+  (let [brk (debugger/make-break)
+        resumed (atom [])
+        replies (atom [])]
+    (reset! (:paused brk) {:data {:error-id "x"} :continued (atom false)})
+    (debugger/break-eval! brk 0 "1" (fn [r] (swap! replies conj r)))
+    (debugger/end-stale-pause! brk {:on-resume (fn [how] (swap! resumed conj how))})
+    (is (nil? @(:paused brk)))
+    (is (= [{:continued? false}] @resumed))
+    (is (= [{:error "Not paused any more."}] @replies))
+    (testing "nothing paused: nothing happens"
+      (debugger/end-stale-pause! brk {:on-resume (fn [how] (swap! resumed conj how))})
+      (is (= 1 (count @resumed))))))

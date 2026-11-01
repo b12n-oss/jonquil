@@ -221,9 +221,11 @@ While it's paused, the field evaluates on the thread that threw. A form
 sees the frame's locals, as after an error, and also everything that was
 still in effect there: a `binding` the code was inside still holds, and no
 `finally` or `with-open` has run yet, so a file the code had open is still
-open. **Continue** (or **Continue from the break** in the palette) lets the
+open. (A `try` whose `catch` didn't match the error has already unwound by
+then, its `finally` included: Jolt rethrows from it.) **Continue** (or **Continue from the break** in the palette) lets the
 error unwind as it would have, and the panel then shows its frames and the
-restarts. Stop ends the evaluation instead. Nothing can resume the code or
+restarts. Stop ends the evaluation instead, and Stop on an evaluation
+blocked in a sleep or a wait stops it without pausing. Nothing can resume the code or
 change a local.
 
 Only errors that escape the evaluation pause: one your own code catches

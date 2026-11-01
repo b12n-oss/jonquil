@@ -4,6 +4,7 @@
   frames and locals and opens a local in the inspector; on one without, it
   sees the sentence that says so."
   (:require [clojure.string :as str]
+            [clojure.core.async :refer [<! timeout]]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.debugger :as debugger]
@@ -219,6 +220,28 @@
             (on-gtk (support/check :break-stop (and on? paused? stopped? next?)
                                    {:on on? :paused paused? :stopped stopped? :next next?
                                     :title (dpane/title-text dp)})))
+          (finally (break-off! ui)))))))
+
+(defn row-break-stop-blocked
+  "Stop on an evaluation blocked in a sleep, with Break on error on, stops
+  it: the InterruptedException the sleep throws is never paused on."
+  [ui]
+  (go-row :break-stop-blocked support/check
+    (if-not (debugger/available?)
+      (on-gtk (support/check :break-stop-blocked true {:available false}))
+      (let [dp (:debugger-pane ui)]
+        (try
+          (on-gtk (run-palette! ui "break on error"))
+          (let [on? (await-until 3000 20 #(= (status ui) BREAK-ON))
+                m (enter! ui "(Thread/sleep 60000)")
+                running? (await-until 3000 20 #(not (support/idle? ui)))
+                _ (<! (timeout 300))
+                _ (on-gtk ((:stop!* ui)))
+                stopped? (await-until 5000 20 #(support/idle? ui))
+                paused? (on-gtk (or (str/includes? (support/since ui m) "; Paused")
+                                    (str/starts-with? (dpane/title-text dp) "Paused:")))]
+            (on-gtk (support/check :break-stop-blocked (and on? running? stopped? (not paused?))
+                                   {:on on? :running running? :stopped stopped? :paused paused?})))
           (finally (break-off! ui)))))))
 
 (defn row-break-off-by-default

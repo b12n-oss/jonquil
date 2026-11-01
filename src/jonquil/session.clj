@@ -50,6 +50,8 @@
     (eval/stop-eval! ctx)
     ;; Stop also reaches a form evaluated in a frame (jonquil.debugger)
     (some-> (:frame-token @state) debugger/interrupt-token!)
+    ;; and a paused break (Break on error)
+    (debugger/break-stop! (:break @state))
     nil)
   (evaluating? [_] (eval/evaluating? ctx))
   (waiting-for-input? [_] (eval/waiting-for-input? ctx))
@@ -245,6 +247,8 @@
                                                  :resolve-file (fn [f] (:file (source/resolve-file {:file f}))))))
                             :on-complete
                             (fn [result]
+                              ;; the backstop for a pause whose cleanup a Stop skipped
+                              (debugger/end-stale-pause! (:break @state) (:break-handlers @state))
                               (swap! state
                                      (fn [s]
                                        (cond-> (-> s
