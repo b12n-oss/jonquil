@@ -209,6 +209,29 @@ seconds for the answer; press Stop for a form that's still running there.
 After a newer error, a panel still showing the older one refuses to inspect or
 evaluate: "The panel shows an older error: show the frames again."
 
+### Break on error
+
+**Break on error**, in the palette, makes a Jolt evaluation stop where it
+throws, before anything unwinds (run it again to turn it off; it starts off).
+The console says `; Paused at ArithmeticException: Divide by zero.`, the
+evaluation is still running, and the Frames panel opens on the live stack
+with its title starting `Paused:` and a **Continue** button in its bar.
+
+While it's paused, the field evaluates on the thread that threw. A form
+sees the frame's locals, as after an error, and also everything that was
+still in effect there: a `binding` the code was inside still holds, and no
+`finally` or `with-open` has run yet, so a file the code had open is still
+open. **Continue** (or **Continue from the break** in the palette) lets the
+error unwind as it would have, and the panel then shows its frames and the
+restarts. Stop ends the evaluation instead. Nothing can resume the code or
+change a local.
+
+Only errors that escape the evaluation pause: one your own code catches
+doesn't, and neither do Jonquil's quiet evaluations (completion, help,
+timing). A top-level expression typed at the prompt keeps no frame of its
+own, so its locals show only inside a function it called. Break on error
+works for Jolt in process for now; the other runtimes say so.
+
 ### Restarts
 
 After an evaluation fails, three restarts take it from there, in every
