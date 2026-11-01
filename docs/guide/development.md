@@ -45,6 +45,12 @@ children use it too.
 `bb test:cljs-node` has one test that opens a real browser tab; it runs
 only with `JONQUIL_BROWSER_LIVE=1 bb test:cljs-node`.
 
+`JONQUIL_JOLT`, set to an executable, is the Jolt program the Jolt child
+runs, in place of the `jolt` on the login `PATH`. The debugger's live child
+test (Break on error) needs a Jolt with `jolt.debug` and skips without one,
+so point it at such a build:
+`JONQUIL_JOLT=$HOME/.local/bin/jolt-debug jolt-debug -M:test jonquil.nrepl.evaluator-test`.
+
 </details>
 
 <details>
