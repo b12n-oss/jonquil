@@ -47,14 +47,16 @@
       jonquil-time-m (jonquil-time-mean jonquil-time-xs)
       jonquil-time-base (jonquil-time-mean jonquil-time-bs)
       jonquil-time-spread (Math/sqrt (jonquil-time-mean (map (fn [x] (let [d (- x jonquil-time-m)] (* d d))) jonquil-time-xs)))
+      jonquil-time-base-spread (Math/sqrt (jonquil-time-mean (map (fn [x] (let [d (- x jonquil-time-base)] (* d d))) jonquil-time-bs)))
       jonquil-time-per-call (max 0.0 (- jonquil-time-m jonquil-time-base))
+      jonquil-time-distinct? DISTINCT
       jonquil-time-show (fn [ns] (let [[v u] (cond (< ns 1e3) [ns \"ns\"] (< ns 1e6) [(/ ns 1e3) \"µs\"]
                                                    (< ns 1e9) [(/ ns 1e6) \"ms\"] :else [(/ ns 1e9) \"s\"])]
                                    (str (/ (Math/round (* v 10.0)) 10.0) \" \" u)))]
   (println (cond
              jonquil-time-once
              (str \"; Time: \" (jonquil-time-show jonquil-time-once) \" for one call (slower than the budget, so timed once)\")
-             (and (> jonquil-time-per-call jonquil-time-spread) (>= jonquil-time-per-call 0.05))
+             (jonquil-time-distinct? jonquil-time-per-call jonquil-time-base jonquil-time-spread jonquil-time-base-spread)
              (str \"; Time: \" (jonquil-time-show jonquil-time-per-call) \" per call (± \"
                   (jonquil-time-show jonquil-time-spread) \" over \" jonquil-time-k \" batches of \" jonquil-time-n
                   \"; an empty call's \" (jonquil-time-show jonquil-time-base) \" taken off)\")
@@ -79,6 +81,22 @@
                 "or calling a server, happens every time.")
    :buttons ["Time It" "Time It, Don't Ask Again" "Cancel"]})
 
+(def ^:private distinct-snippet
+  ;; Measured 2026-11-01: nil timed against an empty call differs by up to
+  ;; 1.2% of the empty call on a quiet machine, and by 2% in a run that
+  ;; reported "0.1 ns per call" with a 0.0 ns spread (the form's spread
+  ;; alone says nothing of the empty call's or of the gap between two
+  ;; closures). A time counts when it clears both spreads together and 5%
+  ;; of the empty call.
+  "(fn [per-call base spread base-spread]
+     (and (> per-call (+ spread base-spread)) (>= per-call (* 0.05 base)) (>= per-call 0.05)))")
+
+(defn distinct-code
+  "The harness's verdict as code: (fn [per-call base spread base-spread])
+  true when per-call is a time, not noise."
+  []
+  distinct-snippet)
+
 (defn code
   "The harness around form-text for a budget of budget-ms, as text to
   evaluate. It prints one ; Time: line and answers {:ns-per-call
@@ -86,5 +104,6 @@
   out of it, once."
   [form-text budget-ms]
   (-> template
+      (str/replace "DISTINCT" distinct-snippet)
       (str/replace "BUDGET" (str (long budget-ms)))
       (str/replace "FORM" form-text)))
