@@ -38,6 +38,7 @@
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.locations :as locations-rows]
             [gtk-selftest-window.debugger :as debugger-rows]
+            [gtk-selftest-window.restarts :as restarts-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
             [gtk-selftest-window.plugin-mcp :as plugin-mcp-rows]
@@ -376,6 +377,10 @@
    ;; window's first open
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
+   restarts-rows/row-restart-retry
+   restarts-rows/row-restart-edit
+   restarts-rows/row-restart-define
+   restarts-rows/row-restart-run-edit
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained
    contained/row-find-replace-all-throw-contained

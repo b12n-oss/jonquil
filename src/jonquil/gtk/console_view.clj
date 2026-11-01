@@ -126,6 +126,20 @@
     (when (< start end)
       (g/with-iters* buf start end (fn [a b] (g/gtk-text-buffer-delete buf a b))))))
 
+(defn set-input!
+  "Replaces the input with text, the caret at caret (an offset from the
+  input's start), and focuses the console: Edit and retry's way of handing
+  code back. GTK-thread only."
+  [cv text caret]
+  (let [buf (:buf cv)
+        start (mark-offset buf (:input-start cv))]
+    (clear-input! cv)
+    (g/with-iters* buf start start (fn [a _] (g/gtk-text-buffer-insert buf a text -1)))
+    (g/gtk-widget-grab-focus (:view cv))
+    (let [at (+ start (max 0 (min caret (count text))))]
+      (g/with-iters* buf at at (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+    nil))
+
 (defn apply-input-op!
   "Applies an edit-op result (jonquil.help/commit-op's own shape, as
   jonquil.gtk.editor/apply-op! applies it) to the input region: result's
