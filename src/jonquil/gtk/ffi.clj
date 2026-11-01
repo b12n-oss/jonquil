@@ -124,6 +124,7 @@
 (ffi/defcfn gtk-text-buffer-get-iter-at-offset "gtk_text_buffer_get_iter_at_offset" [:pointer :pointer :int] :void)
 (ffi/defcfn gtk-text-buffer-place-cursor "gtk_text_buffer_place_cursor" [:pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-insert "gtk_text_buffer_get_insert" [:pointer] :pointer)
+(ffi/defcfn gtk-text-buffer-get-selection-bound "gtk_text_buffer_get_selection_bound" [:pointer] :pointer)
 (ffi/defcfn gtk-text-buffer-apply-tag "gtk_text_buffer_apply_tag" [:pointer :pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-remove-all-tags "gtk_text_buffer_remove_all_tags" [:pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-tag-table "gtk_text_buffer_get_tag_table" [:pointer] :pointer)
@@ -741,6 +742,7 @@
 ;; focus grabbed on the query entry and on the replacement entry, false
 ;; with focus grabbed on the editor and on the console.
 (ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)
+(ffi/defcfn gtk-widget-has-focus "gtk_widget_has_focus" [:pointer] :int)
 
 ;; gtk_text_buffer_delete_selection: gtktextbuffer.h:476-479 (gtk4 4.22.4,
 ;; GDK_AVAILABLE_IN_ALL). Fixed arity: (buffer, interactive, default_editable)

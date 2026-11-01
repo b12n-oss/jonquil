@@ -148,6 +148,8 @@
    find-replace/row-window-escape-stops-when-editor-focused
    find-replace/row-find-typing-keeps-caret
    find-replace/row-find-return-in-replacement
+   find-replace/row-find-user-caret-at-match-edge
+   find-replace/row-find-editor-next-then-replace
    find-replace/row-window-find-keys-editor-focused
    find-replace/row-find-preedit-ends-at-close
    close-prerun/row-line-col-typing

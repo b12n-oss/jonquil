@@ -434,6 +434,66 @@
                                (and focused? (= 1 handled) (= "X bar foo baz foo" text) (= [6 9] sel))
                                {:focused focused? :handled handled :text text :sel sel}))))))
 
+(defn row-find-user-caret-at-match-edge
+  "A caret the user puts at a match's start in the editor stays a caret:
+  Return in the replacement entry then finds the match, never replaces
+  it (only a collapse from focus moving into the bar reads as the match
+  the bar selected)."
+  [ui]
+  (go-row :find-user-caret-at-match-edge support/check
+    (let [fb (:find-bar ui)
+          focus-in? (fn [w] (let [f (g/gtk-root-get-focus (:window ui))]
+                              (and (not (ffi/null? f))
+                                   (or (= f w) (not (zero? (g/gtk-widget-is-ancestor f w)))))))
+          _ (on-gtk (let [ed (:editor ui)]
+                      (editor/set-text! ed "foo bar foo baz foo")
+                      (find-bar/open! fb :replace)
+                      (g/gtk-editable-set-text (:query fb) "foo")
+                      (g/gtk-editable-set-text (:replacement fb) "X")
+                      (editor/focus! ed)))
+          in-editor? (await-until 2000 20 #(focus-in? (:view (:editor ui))))
+          _ (on-gtk (let [buf (:buf (:editor ui))]
+                      (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+                      (g/gtk-widget-grab-focus (:replacement fb))))
+          in-replacement? (await-until 2000 20 #(focus-in? (:replacement fb)))]
+      (on-gtk (let [ed (:editor ui) buf (:buf ed)
+                    handled (find-bar/handle-key! fb support/KEY-RETURN 0)
+                    text (editor/editor-text ed)
+                    sel (g/selection-offsets buf)]
+                (find-bar/close! fb)
+                (support/check :find-user-caret-at-match-edge
+                               (and in-editor? in-replacement? (= 1 handled) (= "foo bar foo baz foo" text) (= [0 3] sel))
+                               {:in-editor in-editor? :in-replacement in-replacement? :handled handled :text text :sel sel}))))))
+
+(defn row-find-editor-next-then-replace
+  "F3 with focus in the editor selects the next match; moving focus to the
+  replacement entry collapses that selection, and Return there still
+  replaces the match F3 selected."
+  [ui]
+  (go-row :find-editor-next-then-replace support/check
+    (let [fb (:find-bar ui)
+          focus-in? (fn [w] (let [f (g/gtk-root-get-focus (:window ui))]
+                              (and (not (ffi/null? f))
+                                   (or (= f w) (not (zero? (g/gtk-widget-is-ancestor f w)))))))
+          _ (on-gtk (let [ed (:editor ui)]
+                      (editor/set-text! ed "foo bar foo baz foo")
+                      (find-bar/open! fb :replace)
+                      (g/gtk-editable-set-text (:query fb) "foo")
+                      (g/gtk-editable-set-text (:replacement fb) "X")
+                      (editor/focus! ed)))
+          in-editor? (await-until 2000 20 #(focus-in? (:view (:editor ui))))
+          selected (on-gtk (find-bar/find-next! fb)
+                           (g/selection-offsets (:buf (:editor ui))))
+          _ (on-gtk (g/gtk-widget-grab-focus (:replacement fb)))
+          in-replacement? (await-until 2000 20 #(focus-in? (:replacement fb)))]
+      (on-gtk (let [ed (:editor ui) buf (:buf ed)
+                    handled (find-bar/handle-key! fb support/KEY-RETURN 0)
+                    text (editor/editor-text ed)]
+                (find-bar/close! fb)
+                (support/check :find-editor-next-then-replace
+                               (and in-editor? in-replacement? (= [8 11] selected) (= 1 handled) (= "foo bar X baz foo" text))
+                               {:in-editor in-editor? :in-replacement in-replacement? :selected selected :handled handled :text text}))))))
+
 (defn row-window-find-keys-editor-focused
   "With the bar open and focus back in the editor, F3, Cmd+G and
   Shift+F3 still move between matches, through the WINDOW's own key

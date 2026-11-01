@@ -90,7 +90,10 @@
   [fb [s e]]
   (reset! (:current fb) [s e])
   (let [ed (:ed fb) buf (:buf ed)]
-    (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+    (reset! (:selecting? fb) true)
+    (try
+      (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+      (finally (reset! (:selecting? fb) false)))
     (g/with-iters* buf s s
       (fn [a _] (g/gtk-text-view-scroll-to-iter (:view ed) a 0.0 0 0.0 0.0)))))
 
@@ -102,7 +105,9 @@
   [0 3] became [0 0] once a GtkEntry took focus in an active window (with
   gtk-entry-select-on-focus off it stays [0 3]). So a collapsed selection
   at an edge of the match this bar last selected, while it is still a
-  match, still means that match; a caret anywhere else is the user's own."
+  match, still means that match. Any selection change the user makes in
+  the editor forgets that match first (on-selection-set), so a caret they
+  put at its edge stays a caret."
   [fb]
   (let [snap (editor/snapshot (:ed fb))
         {:keys [sel-start sel-end]} snap
@@ -147,6 +152,23 @@
     (let [m (commands/next-match (vec matches) (:caret (editor/snapshot (:ed fb))))]
       (select-match! fb m)
       (update-count-label! fb matches m))))
+
+(defn- on-selection-set
+  "The editor buffer's \"mark-set\" handler: the insert or selection-bound
+  mark moving while the editor has focus, other than select-match!'s own
+  move, is the user's selection, so the bar forgets its current match
+  unless the selection is still exactly it. A collapse from focus moving
+  into the bar happens with the editor already unfocused, so it keeps the
+  match (snapshot)."
+  [fb mark]
+  (let [ed (:ed fb) buf (:buf ed)]
+    (when (and @(:current fb)
+               (not @(:selecting? fb))
+               (or (= mark (g/gtk-text-buffer-get-insert buf))
+                   (= mark (g/gtk-text-buffer-get-selection-bound buf)))
+               (not (zero? (g/gtk-widget-has-focus (:view ed))))
+               (not= @(:current fb) (g/selection-offsets buf)))
+      (reset! (:current fb) nil))))
 
 (defn- on-buffer-changed
   "The editor buffer's \"changed\" handler: refresh only, and nothing
@@ -227,6 +249,7 @@
   [fb]
   (clear-tags! fb)
   (reset! (:matches fb) [])
+  (reset! (:current fb) nil)
   (g/gtk-widget-set-visible (:box fb) 0)
   (editor/focus! (:ed fb))
   nil)
@@ -428,6 +451,7 @@
             :ed ed :tag tag :matches (atom [])
             ;; the match this bar last selected (select-match!)
             :current (atom nil)
+            :selecting? (atom false)
             :preedit-active? (atom false)
             :replacing? (atom false)
             :on-error-fn (atom nil)}]
@@ -456,6 +480,11 @@
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data (:buf ed) "changed"
                              (callable (fn [_ _] (contained {:fb fb :where "find" :fallback nil} #(on-buffer-changed fb))) [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data (:buf ed) "mark-set"
+                             (callable (fn [_buf _iter mark _data]
+                                         (contained {:fb fb :where "find" :fallback nil} #(on-selection-set fb mark)))
+                                       [:pointer :pointer :pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data replace-btn "clicked"
                              (callable (fn [_ _] (contained {:fb fb :where "replace" :fallback nil} #(replace-one! fb))) [:pointer :pointer] :void)
