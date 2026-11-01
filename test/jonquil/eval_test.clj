@@ -457,3 +457,10 @@
   (binding [*ns* (the-ns 'user)]
     (sut/eval-string "(ns jonquil.eval-test.switched) (in-ns 'user)")
     (is (= 'user (ns-name *ns*)))))
+
+(deftest wrap-eval-test
+  (let [ran (atom 0)
+        [r _] (run-sync (sut/make-eval-context) "(+ 1 2)"
+                        {:wrap-eval (fn [thunk] (swap! ran inc) (thunk))} 3000)]
+    (is (= [:ok "3"] [(:status r) (:printed r)]))
+    (is (= 1 @ran))))

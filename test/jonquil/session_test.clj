@@ -321,3 +321,43 @@
         (Thread/sleep 300)
         (ev/interrupt! s)
         (is (= {:error "Stopped."} (deref p 5000 :timeout)) "Stop reaches a frame evaluation")))))
+
+;; --- Break on error ----------------------------------------------------------
+
+(defn- fake-break [handler thunk]
+  (try (thunk) (catch Throwable t (handler t []) (throw t))))
+
+(defn- toggle-break-sync [s]
+  (let [p (promise)]
+    (ev/toggle-break! s (fn [r] (deliver p r)))
+    (deref p 2000 :timeout)))
+
+(deftest break-on-error-test
+  (with-redefs [debugger/*break-fn* fake-break]
+    (let [s (session/make-session)
+          paused (atom (promise))
+          resumed (atom 0)]
+      (ev/set-break-handlers! s {:on-pause (fn [d] (deliver @paused d))
+                                 :on-resume (fn [] (swap! resumed inc))})
+      (testing "off by default"
+        (is (= :error (:status (repl-sync s "(/ 1 0)"))))
+        (is (not (realized? @paused))))
+      (is (= {:on? true} (toggle-break-sync s)))
+      (testing "an error pauses until Continue, then completes as the error"
+        (let [done (promise)]
+          (session/submit-repl! s "(/ 1 0)" {:on-complete (fn [r] (deliver done r))})
+          (is (= "ArithmeticException: Divide by zero" (:title (deref @paused 3000 nil))))
+          (is (not (realized? done)))
+          (is (true? (ev/continue-break! s)))
+          (is (= :error (:status (deref done 3000 :timeout))))
+          (is (= 1 @resumed))))
+      (testing "a quiet evaluation never pauses"
+        (reset! paused (promise))
+        (is (= :error (:status (run session/submit-repl! s "(/ 1 0)" {:quiet true}))))
+        (is (not (realized? @paused))))
+      (testing "nothing paused"
+        (is (false? (ev/continue-break! s))))
+      (is (= {:on? false} (toggle-break-sync s)))
+      (testing "off again"
+        (is (= :error (:status (repl-sync s "(/ 1 0)"))))
+        (is (not (realized? @paused)))))))

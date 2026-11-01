@@ -317,6 +317,11 @@
   (or *break-fn*
       (try (requiring-resolve 'jolt.debug/call-with-break-handler) (catch Throwable _ nil))))
 
+(defn break-available?
+  "True when this Jolt can break on error (jolt.debug), or a test faked it."
+  []
+  (some? (break-fn)))
+
 (def ^:private NOT-PAUSED "Not paused any more.")
 
 (defn make-break

@@ -222,6 +222,9 @@
        :printed rather than re-deriving it from :value.
      :ns-name symbol (default 'user)
      :quiet any non-nil value: *1 *2 *3 and *e stay as they were
+     :wrap-eval (fn [thunk])  called with the evaluation's thunk (value
+       printing included), inside run-interruptible on the worker, and must
+       call it: Break on error's jolt.debug handler (jonquil.debugger)
    on-output must never print: it runs on the worker thread, where *out* is
    already bound to the capture writer, so a print inside it would feed back
    into itself.
@@ -240,7 +243,7 @@
    should enqueue that work for later and return, not invoke-and-wait."
   [{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
    code
-   {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle] :as opts}]
+   {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval] :as opts}]
   (let [ns-sym (or (:ns-name opts) 'user)]
     (locking lock
       (if (evaluating? ctx)
@@ -322,6 +325,8 @@
                                   (let [{:keys [value printed]}
                                         (jolt.host/run-interruptible
                                          token (fn []
+                                                ((or wrap-eval (fn [thunk] (thunk)))
+                                                 (fn []
                                                  ;; Printed inside the same
                                                  ;; interruptible thunk, under
                                                  ;; the same binding, as the
@@ -336,7 +341,7 @@
                                                  (let [v (eval-string (str code "\n"))]
                                                    {:value v
                                                     :printed (binding [*print-length* 1000]
-                                                               (pr-str v))})))]
+                                                               (pr-str v))})))))]
                                     {:status :ok :value value :printed printed})
                                   (catch :default e
                                     (if (interrupted? e)
