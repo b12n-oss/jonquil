@@ -787,7 +787,7 @@
                     (let [r (client/request-sync conn {:op "jonquil-break-check" :session session} request-timeout-ms)]
                       (cond (not (vector? r)) {:error inspect/timeout-message}
                             (= "true" (some :available r)) {:on? (:break-on? (swap! state assoc :break-on? true))}
-                            :else {:error "Frames need a Jolt with jolt.debug (newer than this one)."}))))
+                            :else {:error (or (some :reason r) "Frames need a Jolt with jolt.debug (newer than this one).")}))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
     nil)

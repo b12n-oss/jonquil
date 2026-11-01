@@ -111,6 +111,7 @@
         (is (= "interrupt" (last @seen)) "interrupt goes on to the session middleware")))))
 
 (deftest check-test
+  (mw/install-wrapper!)
   (with-redefs [debugger/*break-fn* fake-break]
     (let [{:keys [h]} (setup)]
       (is (= [{"status" ["done"] "available" "true"}] (ask h {"op" "jonquil-break-check" "session" "s1"}))))))
@@ -131,3 +132,15 @@
           (is (instance? ArithmeticException (deref fut 3000 :blocked)))
           (is (false? @(:armed? entry)))
           (is (nil? @(:paused (:break entry)))))))))
+
+(deftest routing-is-checked-test
+  ;; the wrappers only work while jolt.nrepl/evaluate calls eval-string and
+  ;; load-string through their vars; the check says so when it doesn't
+  (mw/install-wrapper!)
+  (is (true? (mw/routed?)) "this Jolt's evaluate reaches both wrappers")
+  (with-redefs [debugger/*break-fn* fake-break
+                mw/routed? (constantly false)]
+    (let [{:keys [h]} (setup)
+          [r] (ask h {"op" "jonquil-break-check" "session" "s1"})]
+      (is (= "false" (get r "available")))
+      (is (re-find #"doesn't evaluate through" (get r "reason"))))))

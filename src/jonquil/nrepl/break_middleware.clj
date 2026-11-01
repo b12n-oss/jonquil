@@ -33,6 +33,10 @@
   ;; true on a thread already running a wrapped eval-string or load-string
   false)
 
+(def ^:dynamic ^:private *probe*
+  ;; an atom while install-wrapper! checks that evaluate reaches the wrappers
+  nil)
+
 (defn entry
   "One session's break state: the break, whether its current eval may
   pause, and that eval's reply."
@@ -54,6 +58,7 @@
   thread's session is armed and isn't already inside a wrapped call."
   [f]
   (fn [code]
+    (when-let [p *probe*] (reset! p true))
     (let [e *session-break*]
       (if (and e @(:armed? e) (not *inside*))
         (binding [*inside* true]
@@ -77,14 +82,35 @@
 
 (defonce ^:private installed (atom false))
 
+(defonce ^:private routed
+  ;; whether jolt.nrepl/evaluate reached both wrappers (install-wrapper!)
+  (atom false))
+
+(defn routed?
+  "True when this Jolt's jolt.nrepl/evaluate reaches the wrappers, for an
+  eval and for a load. A Jolt that calls eval-string or load-string
+  directly would never pause, so the check says so instead."
+  []
+  @routed)
+
+(defn- reaches-wrapper? [opts]
+  (let [hit (atom false)]
+    (binding [*probe* hit]
+      (try (server/evaluate "nil" "user" opts) (catch Throwable _ nil)))
+    @hit))
+
 (defn install-wrapper!
-  "Wraps eval-string and load-string once per process."
+  "Wraps eval-string and load-string once per process, then checks that
+  evaluate goes through them (two evaluations of nil, when the child
+  starts: *1 is nil then anyway)."
   []
   (when (compare-and-set! installed false true)
     ;; looked up when called: jolt.host/eval-string doesn't resolve where
     ;; this namespace is compiled
     (some-> (resolve 'jolt.host/eval-string) (alter-var-root wrap))
-    (alter-var-root #'clojure.core/load-string wrap))
+    (alter-var-root #'clojure.core/load-string wrap)
+    (reset! routed (and (reaches-wrapper? {:out (fn [_])})
+                        (reaches-wrapper? {:out (fn [_]) :load true}))))
   nil)
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
@@ -110,7 +136,13 @@
               (reset! (:reply e) (:reply request)))
             (next request))
         "jonquil-break-check"
-        (server/respond request {"status" ["done"] "available" (str (debugger/break-available?))})
+        (server/respond request (cond
+                                  (not (debugger/break-available?)) {"status" ["done"] "available" "false"}
+                                  (not (routed?))
+                                  {"status" ["done"] "available" "false"
+                                   "reason" (str "This Jolt's nREPL server doesn't evaluate through "
+                                                 "jolt.host/eval-string and load-string, so its errors can't pause.")}
+                                  :else {"status" ["done"] "available" "true"}))
         "jonquil-break-eval"
         ;; answered from the paused thread, as jonquil-frame-eval is answered
         (if e
