@@ -536,6 +536,9 @@
     (ga/await-until 3000 20 #(zero? ((:pending-alerts* ui))))
     (on-gtk (editor/set-text! (:editor ui) "")
             (cview/clear-input! (:console ui))
+            ;; recording a demo: keep the window filling the screen, whatever
+            ;; the last row did to its size (a no-op when already maximized)
+            (when (System/getenv "JONQUIL_SELFTEST_MAXIMIZE") (g/gtk-window-maximize (:window ui)))
             ;; theme rows end on whatever they last checked; every row
             ;; starts on the run's base theme
             (when (not= support/BASE-THEME ((:theme-name* ui)))
