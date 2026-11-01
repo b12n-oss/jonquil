@@ -853,3 +853,9 @@
   (is (= {:error "no profile"} (nrepl/toggle-reply [{:error "no profile"}])))
   (is (= {:error "The Jolt child didn't say whether debug mode is on."}
          (nrepl/toggle-reply [{:status ["done" "error"] :view "{}"}]))))
+
+(deftest frame-eval-reply-test
+  (is (= {:out "hi\n" :text "63"} (nrepl/frame-eval-reply [{:frame-out "hi\n" :text "63" :status ["done"]}])))
+  (is (= {:out "" :text "1"} (nrepl/frame-eval-reply [{:text "1"}])))
+  (is (= {:error "boom"} (nrepl/frame-eval-reply [{:error "boom"}])))
+  (is (= {:error "The Jolt child answered without a value."} (nrepl/frame-eval-reply [{:status ["done" "error"]}]))))

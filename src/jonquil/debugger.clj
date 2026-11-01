@@ -174,6 +174,11 @@
                            {:kind :local :frame i :name name :text (str "    " name " = " text)})))
                  (range) frames))))
 
+(def STALE
+  "What a panel showing an older error gets when it asks for a local or
+  evaluates in a frame."
+  "The panel shows an older error: show the frames again.")
+
 (defn stale?
   "True when error-id (a frames-data :error-id) names an error other than e,
   the last one now; nil names none and is never stale."

@@ -67,15 +67,18 @@
       (try
         (let [local (when (= op :start-local)
                       (if-let [e (:last-error @state)]
-                        (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)})
+                        (if (debugger/stale? e (:error-id args))
+                          ::stale
+                          (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
                         ::debugger/missing))
               [op' args'] (case op
                             :start [:start (assoc args :value (:last-value @state))]
                             :start-local [:start (assoc args :value local)]
                             :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
                             [op args])]
-          (try (on-view (if (= local ::debugger/missing)
-                          {:error "That local is gone."}
+          (try (on-view (case local
+                          ::debugger/missing {:error "That local is gone."}
+                          ::stale {:error debugger/STALE}
                           (view/run-op (:inspect-view @state) op' args')))
                (catch Throwable _)))
         (catch Throwable e
@@ -98,6 +101,15 @@
       (let [r (try (debugger/toggle-debug-mode!)
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
+    nil)
+  (eval-in-frame! [_ i code error-id on-result]
+    (future
+      (let [r (try (let [e (:last-error @state)]
+                     (cond (nil? e) {:error "No error yet."}
+                           (debugger/stale? e error-id) {:error debugger/STALE}
+                           :else (debugger/eval-in-frame e i code {:frames-fn (debugger/frames-fn)})))
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
     nil)
   ev/Owners
   (release-owner! [_ owner] (release-owner-in! state owner) nil))
