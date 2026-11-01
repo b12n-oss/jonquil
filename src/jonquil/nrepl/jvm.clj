@@ -661,13 +661,20 @@
                   (cond
                     (nil? conn) {:note "No error yet."}
                     (not (client/open? conn)) {:error clj/lost-connection}
+                    ;; the session runs one eval at a time: this would only queue
+                    (:running @state) {:error "Show the frames once the evaluation finishes (or Stop it)."}
                     :else
                     (let [token (str "jonquil-frames-" (random-uuid))
-                          r (client/request-sync conn {:op "eval" :code (jvm-frames/code token) :session session}
+                          ;; print nothing for the value: it's the user's *1,
+                          ;; and printing it again could run their code and
+                          ;; replace *e (clojure.core/vector prints nothing)
+                          r (client/request-sync conn {:op "eval" :code (jvm-frames/code token) :session session
+                                                       :nrepl.middleware.print/print "clojure.core/vector"}
                                                  (:inspect-timeout-ms timings))]
-                      (if (vector? r)
-                        (jvm-frames/parse (apply str (keep :out r)) token)
-                        {:error inspect/timeout-message}))))
+                      (cond
+                        (not (vector? r)) {:error inspect/timeout-message}
+                        ((ops/statuses r) ops/disconnected) {:error clj/lost-connection}
+                        :else (jvm-frames/parse (apply str (keep :out r)) token)))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-data d) (catch Throwable _))))
     nil)

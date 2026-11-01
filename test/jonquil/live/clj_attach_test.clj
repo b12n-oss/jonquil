@@ -23,7 +23,7 @@
   (:require [clj-server :as clj-server]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.clj :as clj]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
@@ -325,3 +325,61 @@
       (is (= "42" (:printed (:result (run e "*1" {:run? false})))) "*1 is the user's")
       (is (= "\"Divide by zero\"" (:printed (:result (run e "(.getMessage *e)" {:run? false})))) "*e is the user's")
       (finally (ev/stop! e) (io/delete-file f true)))))
+
+(defn- frames-of! [e]
+  (let [p (promise)] (ev/error-frames! e (fn [d] (deliver p d))) (deref p 15000 :timeout)))
+
+(deftest frames-wrapped-errors-live
+  ;; nREPL wraps a read or print failure, and a future's deref wraps its
+  ;; cause: the frames and title come from the deepest cause; Java's own
+  ;; frames are left out and a record's method is kept
+  (let [e (make)
+        f (io/file (:dir *srv*) "src/demo/frames_more.clj")]
+    (spit f (str "(ns demo.frames-more)\n"
+                 "(defn lazy-div [] (map #(/ 1 %) [1 0]))\n"
+                 "(defprotocol P (pm [this]))\n"
+                 "(defrecord R [n] P (pm [_] (/ 1 n)))\n"
+                 "(defn in-future [] @(future (/ 1 0)))\n"))
+    (try
+      (run e "(require 'demo.frames-more)" {:run? false})
+      (testing "a lazy result that fails while printing lists the user's fn"
+        (run e "(demo.frames-more/lazy-div)" {:run? false})
+        (let [d (frames-of! e)]
+          (is (= "ArithmeticException: Divide by zero" (:title d)) (pr-str d))
+          (is (some #(str/starts-with? (:fn %) "demo.frames-more/lazy-div") (:frames d)) (pr-str (map :fn (:frames d))))
+          (is (not-any? #(str/starts-with? (:fn %) "nrepl.") (:frames d)))))
+      (testing "a record's method is a frame"
+        (run e "(demo.frames-more/pm (demo.frames-more/->R 0))" {:run? false})
+        (let [d (frames-of! e)]
+          (is (some #(= "demo.frames-more.R.pm" (:fn %)) (:frames d)) (pr-str (map :fn (:frames d))))
+          (is (some #(str/ends-with? (str (:file %)) "demo/frames_more.clj") (:frames d)))))
+      (testing "a future's cause"
+        (run e "(demo.frames-more/in-future)" {:run? false})
+        (let [d (frames-of! e)]
+          (is (= "ArithmeticException: Divide by zero" (:title d)) (pr-str d))
+          (is (some #(str/starts-with? (:fn %) "demo.frames-more/in-future") (:frames d)) (pr-str (map :fn (:frames d))))))
+      (testing "Java's own frames are left out"
+        (run e "(subs \"a\" 5)" {:run? false})
+        (let [d (frames-of! e)]
+          (is (= "clojure.core/subs" (:fn (first (:frames d)))) (pr-str (map :fn (:frames d))))))
+      (testing "a reader error: its own message, and only the reader frame"
+        (run e "(+ 1" {:run? false})
+        (let [d (frames-of! e)]
+          (is (str/includes? (str (:title d)) "EOF") (pr-str d))
+          (is (every? #(str/starts-with? (:fn %) "clojure.core/") (:frames d)) (pr-str d))))
+      (finally (ev/stop! e) (io/delete-file f true)))))
+
+(deftest frames-after-a-print-failure-live
+  ;; the last error was printing *1: showing the frames mustn't print *1
+  ;; again (running the user's code, replacing *e)
+  (let [e (make)]
+    (try
+      (run e "(def side (atom 0))" {:run? false})
+      (run e "(reify Object (toString [_] (swap! side inc) (throw (Exception. \"bad toString\"))))" {:run? false})
+      ;; *1 is the reify now (nREPL shifts before it prints): no eval between
+      ;; the failure and the frames, or *1 would be something harmless
+      (let [d (frames-of! e)]
+        (is (str/includes? (str (:title d)) "bad toString") (pr-str d))
+        (is (= "1" (:printed (:result (run e "@side" {:run? false}))))
+            "the user's toString ran once, not again for the frames"))
+      (finally (ev/stop! e)))))
