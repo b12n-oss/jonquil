@@ -225,5 +225,12 @@ The panel reads the frames after the error was caught, from the evaluator that
 ran the code, in process or in the Jolt child. It needs a Jolt with
 `jolt.debug` (`jolt-lang/jolt` #1465); on an older Jolt the panel says
 "Frames need a Jolt with jolt.debug (newer than this one)." and debug mode
-stays off. JVM Clojure and the other dialects say "The debugger needs Jolt."
-for now.
+stays off.
+
+In a JVM Clojure window the panel lists the last error's frames too, read from
+its stack trace on your server: each Clojure fn once (the REPL's own frames
+and Java's left out), and a frame opens its file from the server's classpath,
+a jar's included. The JVM keeps no locals, so frames have none, and the field
+and debug mode say they need Jolt. Showing the frames leaves `*1`, `*2`, `*3`
+and `*e` as they were. The other dialects say "The debugger needs Jolt." for
+now.
