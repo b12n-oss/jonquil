@@ -537,6 +537,12 @@
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
+    ;; Stop also stops a form evaluated in a frame: sent whether or not one
+    ;; runs (the window may have stopped waiting for it), harmless when none
+    (when-let [{:keys [conn session ops]} (runtime this)]
+      (when (contains? ops "jonquil-frame-interrupt")
+        (future (try (client/request-sync conn {:op "jonquil-frame-interrupt" :session session} 2000)
+                     (catch Throwable _ nil)))))
     ;; One swap, keyed by identity of the exact :running map read here
     ;; (separate swaps against a separately-read :running let a finish!
     ;; landing between the read and a write recreate {:running {...}} out

@@ -163,8 +163,35 @@
           "fake-frames is private to this namespace"))))
 
 (deftest error-id-test
-  (is (= (hash div-zero) (:error-id (debugger/frames-data div-zero {:frames-fn fake}))))
-  (is (= (hash div-zero) (:error-id (debugger/frames-data div-zero {:frames-fn nil}))))
-  (is (false? (debugger/stale? div-zero (hash div-zero))))
-  (is (false? (debugger/stale? div-zero nil)))
-  (is (true? (debugger/stale? div-zero (inc (hash div-zero))))))
+  ;; Jolt's identity hashes repeat in every fresh process, so the id carries
+  ;; one made per process: a restarted child's first error never matches
+  (let [id (debugger/error-id div-zero)]
+    (is (= id (:error-id (debugger/frames-data div-zero {:frames-fn fake}))))
+    (is (= id (:error-id (debugger/frames-data div-zero {:frames-fn nil}))))
+    (is (str/starts-with? id (str debugger/RUNTIME-ID ":")))
+    (is (= 36 (count debugger/RUNTIME-ID)))
+    (is (false? (debugger/stale? div-zero id)))
+    (is (false? (debugger/stale? div-zero nil)))
+    (is (true? (debugger/stale? div-zero (str "another-process:" (hash div-zero)))))))
+
+(deftest eval-in-frame-every-form-test
+  (is (= {:out "" :text "42"} (debugger/eval-in-frame div-zero 0 "x y" {:frames-fn fake})) "the last form's value")
+  (is (= {:out "1\n" :text "63"} (debugger/eval-in-frame div-zero 0 "(println 1) (+ x y)" {:frames-fn fake}))))
+
+(deftest eval-in-frame-lazy-result-output-test
+  (is (= {:out ":side 0\n:side 1\n" :text "(0 1)"}
+         (debugger/eval-in-frame div-zero 0 "(map (fn [i] (println :side i) i) (range 2))" {:frames-fn fake}))
+      "realizing the value prints into the captured output, not the process's"))
+
+(deftest eval-in-frame-output-cap-test
+  (let [{:keys [out text]} (debugger/eval-in-frame div-zero 0 "(dotimes [_ 5000] (print \"abcdefghij\"))" {:frames-fn fake})]
+    (is (= "nil" text))
+    (is (str/ends-with? out "\n; output cut at 10000 characters\n") (subs out (max 0 (- (count out) 60))))
+    (is (< (count out) 10100))))
+
+(deftest eval-in-frame-stops-test
+  (let [t (debugger/make-token)
+        f (future (debugger/eval-in-frame div-zero 0 "(loop [] (recur))" {:frames-fn fake :token t}))]
+    (Thread/sleep 300)
+    (debugger/interrupt-token! t)
+    (is (= {:error "Stopped."} (deref f 5000 :timeout)))))

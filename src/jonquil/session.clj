@@ -44,7 +44,11 @@
       (:quiet opts) (quiet-eval! this code (dissoc opts :run?))
       (:run? opts) (run-definitions! this code (dissoc opts :run?))
       :else (submit-repl! this code (dissoc opts :run?))))
-  (interrupt! [_] (eval/stop-eval! ctx) nil)
+  (interrupt! [_]
+    (eval/stop-eval! ctx)
+    ;; Stop also reaches a form evaluated in a frame (jonquil.debugger)
+    (some-> (:frame-token @state) debugger/interrupt-token!)
+    nil)
   (evaluating? [_] (eval/evaluating? ctx))
   (waiting-for-input? [_] (eval/waiting-for-input? ctx))
   (send-input! [_ text] (eval/push-stdin! ctx text))
@@ -104,11 +108,14 @@
     nil)
   (eval-in-frame! [_ i code error-id on-result]
     (future
-      (let [r (try (let [e (:last-error @state)]
+      (let [token (debugger/make-token)
+            r (try (let [e (:last-error @state)]
                      (cond (nil? e) {:error "No error yet."}
                            (debugger/stale? e error-id) {:error debugger/STALE}
-                           :else (debugger/eval-in-frame e i code {:frames-fn (debugger/frames-fn)})))
-                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+                           :else (do (swap! state assoc :frame-token token)
+                                     (debugger/eval-in-frame e i code {:frames-fn (debugger/frames-fn) :token token}))))
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))})
+                   (finally (swap! state (fn [st] (cond-> st (identical? token (:frame-token st)) (dissoc :frame-token))))))]
         (try (on-result r) (catch Throwable _))))
     nil)
   ev/Owners

@@ -197,15 +197,17 @@ that namespace works too, and Enter shows it in the console:
 => 3
 ```
 
-What the form prints comes before its value, and a form that throws shows one
-line with the error. The value prints at most 100 items, 10 levels deep.
-Nothing resumes or unwinds: you are looking at a frame that has already
-stopped, so the error stays the last error, and `*1` stays where it was. The
-form's own side effects still happen. At run time, `*ns*` is the prompt's,
-not the frame's. In the Jolt child a form gets the usual 10 seconds to answer;
-a longer one keeps running there. After a newer error, a panel still showing
-the older one refuses to inspect or evaluate: "The panel shows an older error:
-show the frames again."
+The console shows the code as soon as you press Enter, then what the forms
+printed (the first 10000 characters) and the last one's value, at most 100
+items and 10 levels deep. Several forms run in order. A form that throws
+shows one line with the error, and Stop stops one that runs too long, saying
+"Stopped.". Nothing resumes or unwinds: you are looking at a frame that has
+already stopped, so the error stays the last error, and `*1` stays where it
+was. The forms' own side effects still happen. At run time, `*ns*` is the
+prompt's, not the frame's. In the Jolt child the window waits the usual 10
+seconds for the answer; press Stop for a form that's still running there.
+After a newer error, a panel still showing the older one refuses to inspect or
+evaluate: "The panel shows an older error: show the frames again."
 
 ### Keeping every local
 

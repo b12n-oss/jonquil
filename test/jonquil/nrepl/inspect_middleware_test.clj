@@ -131,12 +131,12 @@
     (binding [debugger/*frames-fn* (fn [_] [{:fn 'demo.core/inner :file nil :line 1 :locals {'x 21 'y 42}}])
               *e e]
       (is (= {"status" ["done"] "frame-out" "" "text" "63"}
-             (mw/handle (atom nil) {"op" "jonquil-frame-eval" "frame" 0 "code" "(+ x y)" "error-id" (hash e)})))
+             (mw/handle (atom nil) {"op" "jonquil-frame-eval" "frame" 0 "code" "(+ x y)" "error-id" (debugger/error-id e)})))
       (is (= "The panel shows an older error: show the frames again."
-             (get (mw/handle (atom nil) {"op" "jonquil-frame-eval" "frame" 0 "code" "x" "error-id" (inc (hash e))}) "error")))
+             (get (mw/handle (atom nil) {"op" "jonquil-frame-eval" "frame" 0 "code" "x" "error-id" (str (debugger/error-id e) "x")}) "error")))
       (is (= {:error "The panel shows an older error: show the frames again."}
              (edn/read-string (get (mw/handle (atom nil) {"op" "inspect-local" "frame" 0 "local" "x" "rows" 10 "cols" 40
-                                                          "error-id" (inc (hash e))}) "view"))))))
+                                                          "error-id" (str (debugger/error-id e) "x")}) "view"))))))
   (is (some #{"jonquil-frame-eval"} mw/ops)))
 
 (deftest frame-eval-never-holds-the-inspector
@@ -146,7 +146,7 @@
         slow-done (promise) view-done (promise)]
     (binding [debugger/*frames-fn* (fn [_] [{:fn 'user/f :file nil :line 1 :locals {}}])
               *e e *1 [1 2]]
-      (mw/answer! state {"op" "jonquil-frame-eval" "frame" 0 "code" "(do (Thread/sleep 1500) 1)" "error-id" (hash e)
+      (mw/answer! state {"op" "jonquil-frame-eval" "frame" 0 "code" "(do (Thread/sleep 1500) 1)" "error-id" (debugger/error-id e)
                          :reply (fn [m] (swap! order conj :frame-eval) (deliver slow-done m))})
       (Thread/sleep 100)
       (mw/answer! state {"op" "inspect-start" "rows" 10 "cols" 40
@@ -154,3 +154,14 @@
       (deref view-done 5000 nil)
       (deref slow-done 5000 nil)
       (is (= [:inspect :frame-eval] @order)))))
+
+(deftest frame-interrupt-op
+  (let [e (try (/ 1 0) (catch Throwable t t)) reply (promise)]
+    (binding [debugger/*frames-fn* (fn [_] [{:fn 'user/f :file nil :line 1 :locals {}}])
+              *e e]
+      (mw/answer! (atom nil) {"op" "jonquil-frame-eval" "frame" 0 "code" "(loop [] (recur))" "error-id" (debugger/error-id e)
+                              :reply (fn [m] (deliver reply m))})
+      (Thread/sleep 300)
+      (is (= {"status" ["done"]} (mw/handle (atom nil) {"op" "jonquil-frame-interrupt"})))
+      (is (= "Stopped." (get (deref reply 5000 {}) "error")))
+      (is (some #{"jonquil-frame-interrupt"} mw/ops)))))
