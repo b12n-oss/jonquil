@@ -69,3 +69,15 @@
   (testing "a long form is cut to 60 characters"
     (let [long-form (str "(do " (apply str (repeat 40 "x ")) ")")]
       (is (= (str "Time " (subs long-form 0 60) "…?") (:message (timing/confirm-alert long-form)))))))
+
+(deftest distinct-verdict-test
+  ;; the harness's verdict, with fixed numbers: a time only when it clears
+  ;; both spreads and 5% of the empty call (measured 2026-11-01: nil against
+  ;; an empty call differed by up to 1.2% quiet and 2% in the failing run)
+  (let [distinct? (eval (read-string (timing/distinct-code)))]
+    (is (false? (distinct? 0.1 5.1 0.0 0.0)) "the flake: nil 0.1 ns over a 5.1 ns empty call, spreads 0.0")
+    (is (false? (distinct? 0.2 5.0 0.0 0.0)) "4% of the empty call")
+    (is (true? (distinct? 0.3 5.0 0.01 0.01)) "6% of the empty call, clear of the spreads")
+    (is (false? (distinct? 0.3 5.0 0.2 0.15)) "inside the two spreads together")
+    (is (true? (distinct? 29.4 4.7 0.2 0.1)) "(swap! a inc), as measured")
+    (is (false? (distinct? 0.04 0.1 0.0 0.0)) "under 0.05 ns")))
