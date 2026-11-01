@@ -39,6 +39,7 @@ Emacs took first:
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Time the form at the caret | `benchmark-run` |
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
+| Retry, Edit and retry, Define and retry | none close: the Elisp debugger resumes a live stack, which an unwound one can't |
 | Plugins written in Clojure, in the settings folder | Emacs Lisp packages |
 
 Three things set it apart:
