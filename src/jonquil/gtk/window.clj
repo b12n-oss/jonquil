@@ -3875,7 +3875,26 @@
                                  :else (show-source! (source-ctx (active-tab)) loc))))
                  :on-local (fn [i local-name]
                              (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
-                                            on-view status-label [:start-local {:frame i :local local-name}]))
+                                            on-view status-label
+                                            [:start-local {:frame i :local local-name
+                                                           :error-id (:error-id @frames-state)}]))
+                 :on-eval (fn [i code]
+                            (let [e (frames-ev)
+                                  label (:fn (get (:frames @frames-state) i))]
+                              (cond
+                                (or (nil? i) (nil? label)) (set-status! status-label "; Select a frame first.")
+                                (nil? e) (set-status! status-label "; The debugger needs Jolt.")
+                                :else
+                                (ev/eval-in-frame!
+                                 e i code (:error-id @frames-state)
+                                 (fn [r]
+                                   (on-gui!
+                                    (fn []
+                                      (if-let [err (:error r)]
+                                        (cview/append! cv :error (str "; in " label ": " err "\n"))
+                                        (do (cview/append! cv :system (str "; in " label ": " code "\n"))
+                                            (when (seq (:out r)) (cview/append! cv :out (:out r)))
+                                            (cview/append! cv :result (str "=> " (:text r) "\n")))))))))))
                  :on-close (fn [] (hide-right-panel! right :debugger))})
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only

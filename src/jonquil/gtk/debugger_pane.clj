@@ -1,9 +1,11 @@
 (ns jonquil.gtk.debugger-pane
   "The Frames panel in the right-hand slot: the last error's title, one row
-  per frame and per local (jonquil.debugger/rows), a footer, and Close.
+  per frame and per local (jonquil.debugger/rows), a field that evaluates a
+  form in the selected row's frame, a footer, and Close.
   jonquil.debugger owns the data; jonquil.gtk.window decides what a frame
   or a local row does."
-  (:require [jolt.ffi :as ffi]
+  (:require [clojure.string :as str]
+            [jolt.ffi :as ffi]
             [jonquil.debugger :as debugger]
             [jonquil.gtk.callbacks :refer [callable]]
             [jonquil.gtk.ffi :as g]
@@ -17,7 +19,8 @@
 
 (defn set-handlers!
   "Registers {:on-frame (fn [frame-index]) :on-local (fn [frame-index
-  local-name]) :on-close (fn [])}."
+  local-name]) :on-eval (fn [frame-index-or-nil code]) :on-close (fn [])}.
+  :on-eval gets nil when no frame or local row is selected."
   [pane m]
   (reset! (:handlers pane) m)
   nil)
@@ -63,6 +66,32 @@
       :local (when on-local (on-local frame name))
       nil)))
 
+(defn field-text [pane] (or (g/editable-text (:field pane)) ""))
+
+(defn- selected-frame
+  "The selected row's frame index (a frame row's own, a local row's frame),
+  or nil."
+  [pane]
+  (let [r (g/gtk-list-box-get-selected-row (:list pane))]
+    (when-not (ffi/null? r)
+      (:frame (get @(:rows pane) (g/gtk-list-box-row-get-index r))))))
+
+(defn- evaluate-field!
+  "Enter in the field: the code goes to :on-eval with the selected frame,
+  and the field clears. Blank code does nothing."
+  [pane]
+  (let [code (field-text pane)]
+    (when-not (str/blank? code)
+      (g/gtk-editable-set-text (:field pane) "")
+      (when-let [f (:on-eval @(:handlers pane))]
+        (f (selected-frame pane) code)))))
+
+(defn eval-text!
+  "Puts code in the field and evaluates it as Enter does: for rows."
+  [pane code]
+  (g/gtk-editable-set-text (:field pane) code)
+  (evaluate-field! pane))
+
 (defn focus!
   "Gives the rows keyboard focus."
   [pane]
@@ -70,7 +99,7 @@
   nil)
 
 (defn make-pane
-  "Builds the panel: {:root :title :list :scroll :close-btn :footer :rows
+  "Builds the panel: {:root :title :list :scroll :field :close-btn :footer :rows
   (atom []) :handlers (atom {})}. :root starts visible; the window hides
   it."
   []
@@ -79,16 +108,18 @@
         lb (g/gtk-list-box-new)
         scroll (g/gtk-scrolled-window-new)
         close-btn (g/gtk-button-new-with-label "Close")
+        field (g/gtk-entry-new)
         footer (g/gtk-label-new "")
         pane {:root root :title title :list lb :scroll scroll :close-btn close-btn
-              :footer footer :rows (atom []) :handlers (atom {})}]
+              :field field :footer footer :rows (atom []) :handlers (atom {})}]
+    (g/gtk-entry-set-placeholder-text field "Evaluate in the selected frame")
     (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
     (g/gtk-scrolled-window-set-child scroll lb)
     (g/gtk-widget-set-vexpand scroll 1)
     (doseq [l [title footer]]
       (g/gtk-label-set-xalign l 0.0)
       (g/gtk-label-set-wrap l 1))
-    (doseq [w [title scroll close-btn footer]] (g/gtk-box-append root w))
+    (doseq [w [title scroll field close-btn footer]] (g/gtk-box-append root w))
     (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
     (g/g-signal-connect-data lb "row-activated"
                              (callable (fn [_box row _data]
@@ -96,6 +127,13 @@
                                               (catch :default e (report! pane (str "; " (ex-message e)))))
                                          nil)
                                        [:pointer :pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/g-signal-connect-data field "activate"
+                             (callable (fn [_entry _data]
+                                         (try (evaluate-field! pane)
+                                              (catch :default e (report! pane (str "; " (ex-message e)))))
+                                         nil)
+                                       [:pointer :pointer] :void)
                              ffi/null ffi/null g/CONNECT-DEFAULT)
     (g/g-signal-connect-data close-btn "clicked"
                              (callable (fn [_button _data]
