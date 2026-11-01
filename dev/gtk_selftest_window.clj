@@ -381,6 +381,7 @@
    restarts-rows/row-restart-edit
    restarts-rows/row-restart-define
    restarts-rows/row-restart-run-edit
+   restarts-rows/row-restart-bar
    contained/row-find-change-throw-contained
    contained/row-find-replace-throw-contained
    contained/row-find-replace-all-throw-contained

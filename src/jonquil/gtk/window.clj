@@ -3869,9 +3869,17 @@
                                                               (set-status! status-label (str "; " err))
                                                               (do (reset! frames-state d)
                                                                   (debugger-pane/show! dbgp d)
+                                                                  (debugger-pane/show-restarts! dbgp (restarts/options @(:failure* cv)))
                                                                   (show-right-panel! right :debugger)
                                                                   (debugger-pane/focus! dbgp)))))))
-                           (set-status! status-label "; The debugger needs Jolt.")))
+                           ;; no frames here, but the restarts work in every dialect
+                           (if-let [f @(:failure* cv)]
+                             (let [d {:note "Frames need Jolt or JVM Clojure; the restarts above work here."}]
+                               (reset! frames-state d)
+                               (debugger-pane/show! dbgp d)
+                               (debugger-pane/show-restarts! dbgp (restarts/options f))
+                               (show-right-panel! right :debugger))
+                             (set-status! status-label "; The debugger needs Jolt."))))
         locals-mode-fn (fn []
                          (if-let [e (frames-ev)]
                            (ev/toggle-debug-mode! e (fn [r]
@@ -3945,6 +3953,12 @@
                                   (nil? n) (set-status! status-label "; The last error wasn't an unresolved name.")
                                   :else (let [{:keys [text caret]} (restarts/define-input n (:code f))]
                                           (cview/set-input! cv text caret)))))
+        _ (debugger-pane/set-restart-handler!
+           dbgp (fn [id]
+                  (case id
+                    :retry (retry-fn)
+                    :edit (edit-retry-fn)
+                    :define (define-retry-fn))))
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)

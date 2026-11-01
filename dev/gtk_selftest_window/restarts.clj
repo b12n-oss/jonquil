@@ -6,6 +6,7 @@
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.debugger-pane :as dpane]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]))
@@ -93,3 +94,21 @@
           _ (on-gtk (run-palette! ui "edit the last failed"))
           said? (await-until 3000 20 #(= "; Edit the file and Run it again." (status ui)))]
       (on-gtk (support/check :restart-run-edit (and ran? said?) {:ran ran? :said said? :status (status ui)})))))
+
+(defn row-restart-bar
+  "After an unresolved name, the Frames panel's bar offers the three
+  restarts; Retry from the bar fails again the same way and the bar stays."
+  [ui]
+  (go-row :restart-bar support/check
+    (let [dp (:debugger-pane ui)
+          [failed? _] (submit! ui "(undefined-xyz 41)" "Unable to resolve symbol")
+          _ (on-gtk (run-palette! ui "show the last error"))
+          shown? (await-until 3000 20 #(= ["Retry" "Edit and retry" "Define undefined-xyz and retry"] (dpane/restart-labels dp)))
+          mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (dpane/press-restart! dp :retry))
+          again? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "Unable to resolve symbol")))
+          labels (on-gtk (dpane/restart-labels dp))]
+      (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+      (on-gtk (support/check :restart-bar
+                             (and failed? shown? again? (= ["Retry" "Edit and retry" "Define undefined-xyz and retry"] labels))
+                             {:failed failed? :shown shown? :again again? :labels labels})))))
