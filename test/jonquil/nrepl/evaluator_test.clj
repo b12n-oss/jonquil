@@ -860,3 +860,74 @@
   (is (= {:out "" :text "1"} (nrepl/frame-eval-reply [{:text "1"}])))
   (is (= {:error "boom"} (nrepl/frame-eval-reply [{:error "boom"}])))
   (is (= {:error "The Jolt child answered without a value."} (nrepl/frame-eval-reply [{:status ["done" "error"]}]))))
+
+;; --- Break on error in the child ------------------------------------------------
+
+(deftest paused-and-resumed-message-test
+  (is (= {:title "T" :frames []} (nrepl/paused-message {:jonquil-paused "{:title \"T\" :frames []}"})))
+  (is (nil? (nrepl/paused-message {:out "x"})))
+  (is (= {:continued? true} (nrepl/resumed-message {:jonquil-resumed "continued"})))
+  (is (= {:continued? false} (nrepl/resumed-message {:jonquil-resumed "stopped"})))
+  (is (nil? (nrepl/resumed-message {:value "1"}))))
+
+(defn- toggle-break-sync [e]
+  (let [p (promise)] (ev/toggle-break! e (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
+(defn- break-eval-sync [e i code]
+  (let [p (promise)] (ev/break-eval! e i code (fn [r] (deliver p r))) (deref p 20000 :timeout)))
+
+(defn- start-run
+  "Starts an eval without waiting; a promise of its result."
+  [e code opts]
+  (let [done (promise)]
+    (ev/eval! e code (assoc opts :run? false :on-complete (fn [r] (deliver done r))))
+    done))
+
+(deftest break-in-the-child-test
+  ;; live: needs a child Jolt with jolt.debug, which JONQUIL_JOLT can name
+  ;; (JONQUIL_JOLT=~/.local/bin/jolt-debug jolt-debug -M:test ...)
+  (let [e (make (temp-project))]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [r (toggle-break-sync e)]
+        (if (:error r)
+          (is (string? (:error r)) "a child without jolt.debug says so, and the rest is skipped")
+          (let [paused (atom (promise))
+                resumed (atom [])]
+            (is (= {:on? true} r))
+            (ev/set-break-handlers! e {:on-pause (fn [d] (deliver @paused d))
+                                       :on-resume (fn [how] (swap! resumed conj how))})
+            ;; debug mode first, so bi keeps its locals
+            (let [p (promise)]
+              (ev/toggle-debug-mode! e (fn [r] (deliver p r)))
+              (is (= {:on? true} (deref p 20000 :timeout))))
+            (run e "(defn bi [n] (/ n 0))" false)
+            (testing "an error pauses, the field evaluates there, Continue lets it through"
+              (let [done (start-run e "(bi 21)" {})
+                    d (deref @paused 20000 nil)]
+                (is (= "user/bi" (:fn (first (:frames d)))))
+                (is (some #{{:name "n" :text "21"}} (:locals (first (:frames d)))))
+                (is (not (realized? done)))
+                (is (= {:out "" :text "42"} (break-eval-sync e 0 "(* n 2)")))
+                (is (true? (ev/continue-break! e)))
+                (let [r (deref done 20000 :timeout)]
+                  (is (= :error (:status r)))
+                  (is (str/includes? (str (:error-text r)) "Divide by zero")))
+                (is (= [{:continued? true}] @resumed))))
+            (testing "Stop while paused: interrupted, and the next eval runs"
+              (reset! paused (promise))
+              (let [done (start-run e "(bi 1)" {})]
+                (is (some? (deref @paused 20000 nil)))
+                (ev/interrupt! e)
+                (is (= :interrupted (:status (deref done 20000 :timeout))))
+                (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))))
+            (testing "a quiet eval never pauses"
+              (reset! paused (promise))
+              (is (= :error (:status (first (run-quiet e "(bi 2)" nil)))))
+              (is (not (realized? @paused))))
+            (is (false? (ev/continue-break! e)) "nothing paused")
+            (is (= {:on? false} (toggle-break-sync e)))
+            (testing "off: no pause"
+              (is (= :error (:status (first (run e "(bi 3)" false)))))
+              (is (not (realized? @paused)))))))
+      (finally (ev/stop! e)))))

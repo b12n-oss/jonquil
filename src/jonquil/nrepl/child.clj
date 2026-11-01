@@ -91,6 +91,12 @@
        " (System/exit 0))"
        " (jolt.host/park-until-interrupt) (stop)))"))
 
+(defn- jolt-override
+  "JONQUIL_JOLT, a development knob: the Jolt program for the child when it
+  names an executable file (a jolt-debug build, for the debugger's tests)."
+  [path]
+  (when (and path (login-path/executable-file? path)) path))
+
 (defn launch-args
   "The child's argv. With a middleware source: jolt -Sdeps '{:deps
   {nrepl/nrepl COORD}}' -e (server-form P [nrepl.middleware/default-middleware]),
@@ -110,7 +116,8 @@
   too bare), or the bare \"jolt\" when none is found."
   ([port source] (launch-args port (dissoc source :jonquil) (:jonquil source)))
   ([port {:keys [local git]} jonquil-root]
-   (let [program (or (tool-path/resolve-program "jolt" (login-path/path)
+   (let [program (or (jolt-override (System/getenv "JONQUIL_JOLT"))
+                     (tool-path/resolve-program "jolt" (login-path/path)
                                                 login-path/executable-file?)
                      "jolt")
          coord (cond local (str "{:local/root " (pr-str local) "}")
