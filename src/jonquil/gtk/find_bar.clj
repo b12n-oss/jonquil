@@ -85,12 +85,31 @@
      :else (str "0 of " (count matches)))))
 
 (defn- select-match!
-  "Selects [s e] in the editor and scrolls it into view."
+  "Selects [s e] in the editor and scrolls it into view, and remembers it
+  as the current match (snapshot, below)."
   [fb [s e]]
+  (reset! (:current fb) [s e])
   (let [ed (:ed fb) buf (:buf ed)]
     (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
     (g/with-iters* buf s s
       (fn [a _] (g/gtk-text-view-scroll-to-iter (:view ed) a 0.0 0 0.0 0.0)))))
+
+(defn- snapshot
+  "The editor's snapshot, with the selection put back on the current match
+  when focus collapsed it there. Focusing an entry (the query or the
+  replacement) selects its text, which takes the primary selection, and the
+  editor's buffer then drops its own: measured 2026-11-02, a GtkTextView's
+  [0 3] became [0 0] once a GtkEntry took focus in an active window (with
+  gtk-entry-select-on-focus off it stays [0 3]). So a collapsed selection
+  at an edge of the match this bar last selected, while it is still a
+  match, still means that match; a caret anywhere else is the user's own."
+  [fb]
+  (let [snap (editor/snapshot (:ed fb))
+        {:keys [sel-start sel-end]} snap
+        [s e :as cur] @(:current fb)]
+    (if (and cur (= sel-start sel-end) (#{s e} sel-start) (some #{cur} @(:matches fb)))
+      (assoc snap :sel-start s :sel-end e)
+      snap)))
 
 (defn- refresh-matches!
   "Recomputes matches for the current query over the editor text,
@@ -230,9 +249,8 @@
   "Selects the match after the current selection's end, wrapping to the
   first."
   [fb]
-  (let [ed (:ed fb)
-        matches @(:matches fb)
-        {:keys [sel-end]} (editor/snapshot ed)
+  (let [matches @(:matches fb)
+        {:keys [sel-end]} (snapshot fb)
         m (commands/next-match matches sel-end)]
     (when m
       (select-match! fb m)
@@ -243,9 +261,8 @@
   "Selects the match before the current selection's start, wrapping to the
   last."
   [fb]
-  (let [ed (:ed fb)
-        matches @(:matches fb)
-        {:keys [sel-start]} (editor/snapshot ed)
+  (let [matches @(:matches fb)
+        {:keys [sel-start]} (snapshot fb)
         m (commands/prev-match matches sel-start)]
     (when m
       (select-match! fb m)
@@ -261,10 +278,9 @@
   recomputed over the new text once (apply-replace!). When the selection
   isn't a match, finds the next match instead."
   [fb]
-  (let [ed (:ed fb)
-        matches @(:matches fb)
+  (let [matches @(:matches fb)
         replacement (or (g/editable-text (:replacement fb)) "")
-        result (commands/replace-current (editor/snapshot ed) matches replacement)]
+        result (commands/replace-current (snapshot fb) matches replacement)]
     (if result
       (apply-replace! fb result)
       (find-next! fb))
@@ -410,6 +426,8 @@
             :replace-widgets [replacement replace-btn replace-all-btn]
             :count-label count-label
             :ed ed :tag tag :matches (atom [])
+            ;; the match this bar last selected (select-match!)
+            :current (atom nil)
             :preedit-active? (atom false)
             :replacing? (atom false)
             :on-error-fn (atom nil)}]

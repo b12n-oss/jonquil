@@ -468,7 +468,9 @@
   open, and every key but typing yields; Cmd/Ctrl+F or H opening the bar
   again is the way out, so open! starts with none. The flag is set by hand
   here, then the bar is opened again: F3 goes to the next match, moving
-  the editor's selection from the first foo to the second."
+  from the first foo to the second. Before F3 the check is the bar's own
+  current match: in an active window, the query entry taking focus
+  collapses the editor's visible selection (jonquil.gtk.find-bar/snapshot)."
   [ui]
   (go-row :find-preedit-ends-at-close support/check
     (on-gtk (let [ed (:editor ui) fb (:find-bar ui)]
@@ -478,7 +480,7 @@
                 (g/gtk-editable-set-text (:query fb) "foo")
                 (reset! (:preedit-active? fb) true)
                 (find-bar/open! fb :find)
-                (let [before (g/selection-offsets (:buf ed))
+                (let [before @(:current fb)
                       f3 (find-bar/handle-key! fb 0xffc0 0)
                       after (g/selection-offsets (:buf ed))]
                   (support/check :find-preedit-ends-at-close
