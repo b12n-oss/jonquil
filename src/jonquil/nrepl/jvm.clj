@@ -58,6 +58,7 @@
             [jonquil.nrepl.client :as client]
             [jonquil.nrepl.connection :as connection]
             [jonquil.nrepl.generic :as generic]
+            [jonquil.nrepl.jvm-frames :as jvm-frames]
             [jonquil.nrepl.ops :as ops]))
 
 (def default-timings
@@ -647,6 +648,42 @@
   ;; advertised inspect-start.
   (inspectable? [_]
     (let [ops (:ops @state)] (or (empty? ops) (contains? ops "inspect-start"))))
+
+  ;; The Frames panel (jonquil.debugger's shape): one eval in the user's
+  ;; session, where *e lives, whose code builds the frames on the server
+  ;; and leaves *1 *2 *3 and *e as they were (jonquil.nrepl.jvm-frames).
+  ;; The JVM keeps no locals, so evaluating in a frame and debug mode say so.
+  ev/Frames
+  (error-frames! [_ on-data]
+    (future
+      (let [d (try
+                (let [{:keys [conn session]} @state]
+                  (cond
+                    (nil? conn) {:note "No error yet."}
+                    (not (client/open? conn)) {:error clj/lost-connection}
+                    ;; the session runs one eval at a time: this would only queue
+                    (:running @state) {:error "Show the frames once the evaluation finishes (or Stop it)."}
+                    :else
+                    (let [token (str "jonquil-frames-" (random-uuid))
+                          ;; print nothing for the value: it's the user's *1,
+                          ;; and printing it again could run their code and
+                          ;; replace *e (clojure.core/vector prints nothing)
+                          r (client/request-sync conn {:op "eval" :code (jvm-frames/code token) :session session
+                                                       :nrepl.middleware.print/print "clojure.core/vector"}
+                                                 (:inspect-timeout-ms timings))]
+                      (cond
+                        (not (vector? r)) {:error inspect/timeout-message}
+                        ((ops/statuses r) ops/disconnected) {:error clj/lost-connection}
+                        :else (jvm-frames/parse (apply str (keep :out r)) token)))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-data d) (catch Throwable _))))
+    nil)
+  (toggle-debug-mode! [_ on-done]
+    (future (try (on-done {:error "Debug mode is Jolt's: the JVM keeps no locals."}) (catch Throwable _)))
+    nil)
+  (eval-in-frame! [_ _i _code _error-id on-result]
+    (future (try (on-result {:error "Evaluating in a frame needs Jolt: the JVM keeps no locals."}) (catch Throwable _)))
+    nil)
 
   connection/Attached
   (connected? [this] (connection/live? this))

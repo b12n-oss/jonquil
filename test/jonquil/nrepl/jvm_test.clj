@@ -1113,3 +1113,13 @@
             "the user's request never went out")
         (is (not-any? #(= (str clj/auto-require-failed-message "\n") %) (texts @out :system))
             "a Stop isn't reported as a failed require")))))
+
+(defn- answer [f]
+  (let [p (promise)] (f (fn [r] (deliver p r))) (deref p 2000 :timeout)))
+
+(deftest frames-without-locals-test
+  (let [e (jvm/make-jvm {:profile dialect/clj :runtime :attach :project-dir nil})]
+    (is (= {:note "No error yet."} (answer #(ev/error-frames! e %))) "never attached")
+    (is (= {:error "Debug mode is Jolt's: the JVM keeps no locals."} (answer #(ev/toggle-debug-mode! e %))))
+    (is (= {:error "Evaluating in a frame needs Jolt: the JVM keeps no locals."}
+           (answer #(ev/eval-in-frame! e 0 "1" nil %))))))

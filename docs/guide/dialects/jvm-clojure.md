@@ -61,6 +61,9 @@ or it's ignored with a console note. Edits take effect in a new window.
   session.
 - **stdin**: type at the prompt while the status bar reads "Waiting for
   input". Cmd/Ctrl+D ends input on nREPL 1.8.0 or later.
+- **Show the last error's frames and locals** lists the error's stack
+  frames, each opening its file; the JVM keeps no locals (see
+  [the last error's frames](../help-and-inspector.md#the-last-errors-frames)).
 - **Completion and quick doc** ask the server. Ctrl+Space merges its
   candidates with offline ones; Ctrl+Q or Shift+F1 shows the docstring and
   a `Defined in` line, and F12 opens the source.

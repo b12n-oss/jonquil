@@ -48,6 +48,7 @@
     jonquil.nrepl.child
     jonquil.nrepl.evaluator
     jonquil.nrepl.attach
+    jonquil.nrepl.jvm-frames
     jonquil.nrepl.jvm
     jonquil.nrepl.shadow
     jonquil.nrepl.jank
