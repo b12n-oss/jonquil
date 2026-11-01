@@ -6,7 +6,8 @@
   called. The out-of-process Jolt child loads this namespace too, from
   Jonquil's embedded middleware files, so it requires nothing but
   clojure.string. No GTK here."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:import (java.util.concurrent LinkedBlockingQueue)))
 
 (def ^:private TEXT-MAX
   ;; a choice: one readable panel row
@@ -79,11 +80,16 @@
   (let [f (str (:fn frame))] (some #(str/starts-with? f %) HARNESS)))
 
 (defn- user-frames
-  "frames up to the first of the evaluator's own; all of them when the
-  first frame already is one (a fault inside the harness)."
+  "frames up to the first of the evaluator's own: none when the first
+  already is one, which is what a top-level expression gives (it keeps no
+  frame of its own), and the panel says so (NO-USER-FRAMES) rather than
+  list the evaluator's internals."
   [frames]
-  (let [kept (take-while (complement harness?) frames)]
-    (if (seq kept) kept frames)))
+  (take-while (complement harness?) frames))
+
+(def ^:private NO-USER-FRAMES
+  (str "No frames from your code: a top-level expression keeps no frame of its own, "
+       "so call a function to see its locals."))
 
 (def ^:private NO-API "Frames need a Jolt with jolt.debug (newer than this one).")
 
@@ -108,7 +114,7 @@
 (defn- out-of-stack? [e]
   (contains? #{"OutOfMemoryError" "StackOverflowError"} (.getSimpleName (class e))))
 
-(defn- frames-data* [e frames-fn resolve-file]
+(defn- frames-data** [e all resolve-file]
   {:title (title e)
    :frames (mapv (fn [{f :fn :keys [file line locals]}]
                    {:fn (str f)
@@ -118,7 +124,13 @@
                                  (map (fn [[k v]] {:name (str k) :text (value-text v)}))
                                  (sort-by :name)
                                  vec)})
-                 (user-frames (frames-fn e)))})
+                 (user-frames all))})
+
+(defn- frames-data* [e frames-fn resolve-file]
+  (let [all (frames-fn e)
+        d (frames-data** e all resolve-file)]
+    (cond-> d
+      (and (empty? (:frames d)) (seq all)) (assoc :note NO-USER-FRAMES))))
 
 (defn frames-data
   "e's frames as {:title :frames [{:fn :file :line :locals [{:name :text}]}]},
@@ -227,10 +239,14 @@
   [token]
   ((resolve 'jolt.host/interrupt!) token))
 
-(defn- interrupted? [t]
+(defn- interrupted?
+  "True when t, or a cause of it, is a Stop: the token's interrupt, or the
+  thread's (an InterruptedException from a blocking call)."
+  [t]
   (loop [c t]
     (cond (nil? c) false
           (:jolt/interrupted (ex-data c)) true
+          (instance? InterruptedException c) true
           :else (recur (.getCause ^Throwable c)))))
 
 (defn- capped-writer
@@ -304,3 +320,129 @@
   (if-let [fr (when frames-fn (get (vec (frames-fn e)) i))]
     (if-let [[_ v] (find (:locals fr) (symbol local-name))] v ::missing)
     ::missing))
+
+;; --- the break: an error paused before the stack unwinds ------------------
+
+(def ^:dynamic *break-fn*
+  "When bound, what break-wrapper calls in place of
+  jolt.debug/call-with-break-handler: the tests' fake break."
+  nil)
+
+(defn- break-fn []
+  (or *break-fn*
+      (try (requiring-resolve 'jolt.debug/call-with-break-handler) (catch Throwable _ nil))))
+
+(defn break-available?
+  "True when this Jolt can break on error (jolt.debug), or a test faked it."
+  []
+  (some? (break-fn)))
+
+(def ^:private NOT-PAUSED "Not paused any more.")
+
+(defn make-break
+  "A break's state: the queue the paused thread serves and the pause, nil
+  when nothing is paused."
+  []
+  {:queue (LinkedBlockingQueue.) :paused (atom nil)})
+
+(defn- drain!
+  "Answers every request still queued with NOT-PAUSED: one that arrived as
+  a pause ended, or before the next began."
+  [^LinkedBlockingQueue q]
+  (loop []
+    (when-let [m (.poll q)]
+      (when-let [[_ _ reply] (:eval m)]
+        (try (reply {:error NOT-PAUSED}) (catch Throwable _ nil)))
+      (recur))))
+
+(defn- serve!
+  "The paused thread's loop: each {:eval [i code reply]} is evaluated here,
+  on the throwing thread, with frame i's locals bound, until :continue.
+  Stop interrupts this thread, and .take then throws; it also queues ::stop
+  (break-stop!), since a form evaluated here can use up the interrupt."
+  [^LinkedBlockingQueue q t frames]
+  (loop []
+    (let [m (.take q)]
+      (when (= ::stop m) (throw (InterruptedException. "Stopped while paused.")))
+      (when-not (= :continue m)
+        (when-let [[i code reply] (:eval m)]
+          (let [r (try (eval-in-frame t i code {:frames-fn (fn [_] frames)})
+                       (catch Throwable e {:error (title e)}))]
+            (try (reply r) (catch Throwable _ nil))))
+        (recur)))))
+
+(defn break-wrapper
+  "A fn of a thunk that runs it under jolt.debug's break handler. A throw
+  escaping the thunk pauses on the throwing thread before anything unwinds:
+  the pause is published, (on-pause data) gets its frames-data, and the
+  thread serves break-eval! until continue! (or a Stop's interrupt), then
+  (on-resume {:continued? b}) and the throw goes on (b false: the Stop's
+  InterruptedException goes on in its place). On a Jolt without jolt.debug the thunk
+  just runs. The callbacks' own throws are dropped: they must not replace
+  the error."
+  [{:keys [queue paused]} {:keys [on-pause on-resume resolve-file]}]
+  (fn [thunk]
+    (if-let [call (break-fn)]
+      (call (fn [t frames]
+              ;; a Stop is never an error to pause on: a body blocked in a
+              ;; sleep, a deref or a .take throws InterruptedException
+              (when-not (interrupted? t)
+                (let [d (frames-data t {:frames-fn (fn [_] frames) :resolve-file resolve-file})]
+                  (drain! queue)
+                  (reset! paused {:error t :frames frames :data d :continued (atom false)})
+                  (let [continued? (volatile! false)]
+                    (try
+                      (try (when on-pause (on-pause d)) (catch Throwable _ nil))
+                      (serve! queue t frames)
+                      (vreset! continued? true)
+                      (finally
+                        (reset! paused nil)
+                        (drain! queue)
+                        (try (when on-resume (on-resume {:continued? @continued?})) (catch Throwable _ nil))))))))
+            thunk)
+      (thunk))))
+
+(defn break-eval!
+  "Asks the paused thread to evaluate code in frame i; (reply r) gets
+  eval-in-frame's map, or {:error \"Not paused any more.\"}."
+  [{:keys [^LinkedBlockingQueue queue paused]} i code reply]
+  (if @paused
+    (.put queue {:eval [i code reply]})
+    (reply {:error NOT-PAUSED})))
+
+(defn continue!
+  "Lets the paused error unwind: true when a pause was waiting, false when
+  there was none or it was already continued."
+  [{:keys [^LinkedBlockingQueue queue paused]}]
+  (let [p @paused]
+    (boolean (when (and p (compare-and-set! (:continued p) false true))
+               (.put queue :continue)
+               true))))
+
+(defn break-stop!
+  "Stop's half for a pause: the paused thread takes ::stop and throws, ending
+  the evaluation even when a form it ran used up the thread's interrupt."
+  [{:keys [^LinkedBlockingQueue queue paused]}]
+  (when @paused (.put queue ::stop))
+  nil)
+
+(defn end-stale-pause!
+  "The evaluation has ended: a pause still published there lost its own
+  cleanup (a Stop's interrupt landing inside the handler's finally), so this
+  ends it as a Stop would: cleared, requests answered, (on-resume
+  {:continued? false})."
+  [{:keys [queue paused]} {:keys [on-resume]}]
+  (when @paused
+    (reset! paused nil)
+    (drain! queue)
+    (try (when on-resume (on-resume {:continued? false})) (catch Throwable _ nil)))
+  nil)
+
+(defn paused-local
+  "The value of local-name in the paused error's frame i, or ::missing
+  when nothing is paused or error-id names another error."
+  [{:keys [paused]} error-id i local-name]
+  (let [p @paused]
+    (if (and p (= error-id (:error-id (:data p))))
+      (local-value (:error p) i local-name {:frames-fn (fn [_] (:frames p))})
+      ::missing)))

@@ -50,12 +50,14 @@
                                div-zero
                                {:frames-fn (constantly [{:fn 'user/x :locals {}} {:fn 'nrepl.middleware.session/run-eval :locals {}}
                                                         {:fn 'jolt.nrepl/evaluate :locals {}}])}))))))
-  (testing "a fault inside the harness itself keeps every frame"
-    (is (= ["jonquil.eval/eval-async/fn--7" "user/y"]
-           (mapv :fn (:frames (debugger/frames-data
-                               div-zero
-                               {:frames-fn (constantly [{:fn "jonquil.eval/eval-async/fn--7" :locals {}}
-                                                        {:fn 'user/y :locals {}}])})))))))
+  (testing "no frame of the user's own (a top-level expression keeps none): a note, never the evaluator's frames"
+    (let [d (debugger/frames-data
+             div-zero
+             {:frames-fn (constantly [{:fn "jonquil.eval/eval-async/fn--7" :locals {'code "(/ 1 0)"}}
+                                      {:fn 'user/y :locals {}}])})]
+      (is (= [] (:frames d)))
+      (is (= [{:kind :note :text "No frames from your code: a top-level expression keeps no frame of its own, so call a function to see its locals."}]
+             (debugger/rows d))))))
 
 (deftest resolve-file-test
   (let [d (debugger/frames-data div-zero {:frames-fn fake :resolve-file #(str "/abs/" %)})]
@@ -195,3 +197,104 @@
     (Thread/sleep 300)
     (debugger/interrupt-token! t)
     (is (= {:error "Stopped."} (deref f 5000 :timeout)))))
+
+;; --- the break (Break on error) ---------------------------------------------
+
+(defn- fake-break
+  "jolt.debug/call-with-break-handler's contract over fake-frames: the
+  handler runs on the throwing thread, then the throw goes on."
+  [handler thunk]
+  (try (thunk) (catch Throwable t (handler t fake-frames) (throw t))))
+
+(defn- start-break
+  "thunk on a future under a break; {:brk :fut :paused :resumed :thread}."
+  [thunk]
+  (let [brk (debugger/make-break)
+        paused (promise)
+        resumed (atom [])
+        thread (promise)
+        wrap (debugger/break-wrapper brk {:on-pause (fn [d] (deliver paused d))
+                                          :on-resume (fn [how] (swap! resumed conj how))})
+        fut (future (binding [debugger/*break-fn* fake-break]
+                      (deliver thread (Thread/currentThread))
+                      (try (wrap thunk) (catch Throwable t t))))]
+    {:brk brk :fut fut :paused paused :resumed resumed :thread thread}))
+
+(defn- ask [brk i code]
+  (let [p (promise)]
+    (debugger/break-eval! brk i code (fn [r] (deliver p r)))
+    (deref p 3000 :no-reply)))
+
+(deftest break-pauses-evaluates-and-continues-test
+  (let [boom (ex-info "boom" {})
+        {:keys [brk fut paused resumed thread]} (start-break (fn [] (throw boom)))
+        d (deref paused 3000 nil)]
+    (is (= "ExceptionInfo: boom {}" (:title d)))
+    (is (= [{:name "x" :text "21"} {:name "y" :text "42"}] (:locals (first (:frames d)))))
+    (is (= {:out "" :text "63"} (ask brk 0 "(+ x y)")))
+    (testing "the form runs on the paused thread"
+      (is (= (pr-str (.getName ^Thread @thread)) (:text (ask brk 0 "(.getName (Thread/currentThread))")))))
+    (testing "a form that throws is answered and the pause holds"
+      (is (= "ArithmeticException: Divide by zero" (:error (ask brk 0 "(/ x 0)"))))
+      (is (= {:out "" :text "21"} (ask brk 0 "x"))))
+    (is (= 21 (debugger/paused-local brk (:error-id d) 0 "x")))
+    (is (= ::debugger/missing (debugger/paused-local brk "other" 0 "x")))
+    (is (true? (debugger/continue! brk)))
+    (is (identical? boom (deref fut 3000 :blocked)))
+    (is (= [{:continued? true}] @resumed))
+    (is (false? (debugger/continue! brk)))
+    (is (= {:error "Not paused any more."} (ask brk 0 "x")))
+    (is (= ::debugger/missing (debugger/paused-local brk (:error-id d) 0 "x")))))
+
+(deftest break-interrupt-ends-the-pause-test
+  (let [{:keys [brk fut paused resumed thread]} (start-break (fn [] (/ 1 0)))]
+    (is (some? (deref paused 3000 nil)))
+    (.interrupt ^Thread @thread)
+    (is (instance? InterruptedException (deref fut 3000 :blocked)))
+    (is (= [{:continued? false}] @resumed))
+    (is (false? (debugger/continue! brk)))))
+
+(deftest break-no-throw-no-pause-test
+  (let [{:keys [fut paused resumed]} (start-break (fn [] 5))]
+    (is (= 5 (deref fut 3000 :blocked)))
+    (is (not (realized? paused)))
+    (is (= [] @resumed))))
+
+(deftest break-stop-on-a-blocked-evaluation-never-pauses-test
+  ;; Stop interrupts a body blocked in .take: the InterruptedException
+  ;; escapes it, and that must end the evaluation, not pause it
+  (let [q (java.util.concurrent.LinkedBlockingQueue.)
+        {:keys [fut paused resumed thread]} (start-break (fn [] (.take q)))]
+    (Thread/sleep 200)
+    (.interrupt ^Thread @thread)
+    (is (instance? InterruptedException (deref fut 3000 :blocked)))
+    (is (not (realized? paused)))
+    (is (= [] @resumed))))
+
+(deftest break-stop-message-ends-the-pause-test
+  ;; a field form can use up the thread's interrupt flag, so Stop also
+  ;; queues a stop the paused thread takes
+  (let [{:keys [brk fut paused resumed]} (start-break (fn [] (/ 1 0)))]
+    (is (some? (deref paused 3000 nil)))
+    (debugger/break-stop! brk)
+    (is (instance? InterruptedException (deref fut 3000 :blocked)))
+    (is (= [{:continued? false}] @resumed))))
+
+(deftest eval-in-frame-interrupted-exception-is-stopped-test
+  (is (= {:error "Stopped."}
+         (debugger/eval-in-frame div-zero 0 "(throw (InterruptedException. \"sleep interrupted\"))" {:frames-fn fake}))))
+
+(deftest end-stale-pause-test
+  ;; the backstop for a pause whose own cleanup was skipped
+  (let [brk (debugger/make-break)
+        resumed (atom [])
+        replies (atom [])]
+    (reset! (:paused brk) {:data {:error-id "x"} :continued (atom false)})
+    (debugger/break-eval! brk 0 "1" (fn [r] (swap! replies conj r)))
+    (debugger/end-stale-pause! brk {:on-resume (fn [how] (swap! resumed conj how))})
+    (is (nil? @(:paused brk)))
+    (is (= [{:continued? false}] @resumed))
+    (is (= [{:error "Not paused any more."}] @replies))
+    (testing "nothing paused: nothing happens"
+      (debugger/end-stale-pause! brk {:on-resume (fn [how] (swap! resumed conj how))})
+      (is (= 1 (count @resumed))))))

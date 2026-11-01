@@ -39,6 +39,7 @@ Emacs took first:
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Time the form at the caret | `benchmark-run` |
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
+| Break on error, Continue | `debug-on-error` while the error is live: `e` evaluates in a frame, `c` continues |
 | Retry, Edit and retry, Define and retry | none close: the Elisp debugger resumes a live stack, which an unwound one can't |
 | Plugins written in Clojure, in the settings folder | Emacs Lisp packages |
 
@@ -56,8 +57,9 @@ Three things set it apart:
   and locals, see [Help and the inspector](help-and-inspector.md)) lists them
   for your own code: a frame opens at its line, a local opens in the
   inspector, and a form typed in the panel evaluates with that frame's
-  locals bound. It needs a Jolt release with `jolt.debug`, and pausing
-  before the stack unwinds comes later (`ROADMAP.md`, LM5). Emacs debugs Emacs Lisp
+  locals bound. With Break on error the panel opens before the stack
+  unwinds, and a form runs on the thread that threw, inside its bindings. It
+  needs a Jolt release with `jolt.debug`. Emacs debugs Emacs Lisp
   well, but debugging Clojure there goes through CIDER and nREPL, a separate
   layer.
 - **It stays a Clojure IDE.** Emacs turns everything into a buffer: mail, a

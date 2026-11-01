@@ -35,7 +35,7 @@ Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, who
 
 ## Lisp Machine ideas, and Emacs
 
-Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where the whole system was live Lisp that you could inspect and change while it ran. Emacs keeps that idea as an application, and Jonquil heads the same way, so Describe Key, Recent Keys, the command palette, the locations list, switching to a recent tab and timing a form all have an Emacs counterpart. The difference is that your Jolt code runs on the editor's own runtime, which lets the inspector, timing and the planned debugger work on your program's real values. [Lisp Machine ideas, and Emacs](docs/guide/lisp-machine.md) explains where each idea comes from.
+Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where the whole system was live Lisp that you could inspect and change while it ran. Emacs keeps that idea as an application, and Jonquil heads the same way, so Describe Key, Recent Keys, the command palette, the locations list, switching to a recent tab and timing a form all have an Emacs counterpart. The difference is that your Jolt code runs on the editor's own runtime, which lets the inspector, timing and the debugger work on your program's real values. [Lisp Machine ideas, and Emacs](docs/guide/lisp-machine.md) explains where each idea comes from.
 
 ## Requirements
 

@@ -38,7 +38,9 @@
   (start! [_] nil)
   ;; The in-process engine lives and dies with Jonquil's own process, as it
   ;; did before the Evaluator protocol existed: nothing to end.
-  (stop! [_] nil)
+  ;; a paused break (Break on error) is let go, so closing the window or
+  ;; switching runtimes never leaves its worker blocked
+  (stop! [_] (debugger/continue! (:break @state)) nil)
   (eval! [this code opts]
     (cond
       (:quiet opts) (quiet-eval! this code (dissoc opts :run?))
@@ -48,6 +50,8 @@
     (eval/stop-eval! ctx)
     ;; Stop also reaches a form evaluated in a frame (jonquil.debugger)
     (some-> (:frame-token @state) debugger/interrupt-token!)
+    ;; and a paused break (Break on error)
+    (debugger/break-stop! (:break @state))
     nil)
   (evaluating? [_] (eval/evaluating? ctx))
   (waiting-for-input? [_] (eval/waiting-for-input? ctx))
@@ -69,12 +73,14 @@
   (inspect! [_ op args on-view]
     (future
       (try
-        (let [local (when (= op :start-local)
-                      (if-let [e (:last-error @state)]
+        (let [paused (when (= op :start-local)
+                       (debugger/paused-local (:break @state) (:error-id args) (:frame args) (:local args)))
+              local (when (= op :start-local)
+                      (if-let [e (when (= ::debugger/missing paused) (:last-error @state))]
                         (if (debugger/stale? e (:error-id args))
                           ::stale
                           (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
-                        ::debugger/missing))
+                        paused))
               [op' args'] (case op
                             :start [:start (assoc args :value (:last-value @state))]
                             :start-local [:start (assoc args :value local)]
@@ -118,6 +124,18 @@
                    (finally (swap! state (fn [st] (cond-> st (identical? token (:frame-token st)) (dissoc :frame-token))))))]
         (try (on-result r) (catch Throwable _))))
     nil)
+  ev/Break
+  (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)
+  (toggle-break! [_ on-done]
+    (future
+      (let [r (if (debugger/break-available?)
+                {:on? (:break-on? (swap! state update :break-on? not))}
+                {:error "Frames need a Jolt with jolt.debug (newer than this one)."})]
+        (try (on-done r) (catch Throwable _))))
+    nil)
+  (break-eval! [_ i code on-result]
+    (debugger/break-eval! (:break @state) i code (fn [r] (try (on-result r) (catch Throwable _)))))
+  (continue-break! [_] (debugger/continue! (:break @state)))
   ev/Owners
   (release-owner! [_ owner] (release-owner-in! state owner) nil))
 
@@ -126,7 +144,9 @@
   []
   (->InProcess (eval/make-eval-context)
                (atom {:mode :reset :prompt-ns 'user :created {}
-                      :inspect-view (atom nil)})))
+                      :inspect-view (atom nil)
+                      ;; Break on error: off until toggled
+                      :break (debugger/make-break) :break-on? false})))
 
 (defmethod ev/make :in-process [selection]
   ;; The project's source folders, so a project kept in process can require
@@ -218,8 +238,17 @@
                                                          (when (seq s) ((:on-output opts) :system s)))
                                                        (auto-require! ctx state dir))))
                             :ns-name ns-sym
+                            ;; Break on error; a quiet eval (completion,
+                            ;; help, a plugin's) never pauses
+                            :wrap-eval (when (and (:break-on? @state) (not (:quiet opts)))
+                                         (debugger/break-wrapper
+                                          (:break @state)
+                                          (assoc (:break-handlers @state)
+                                                 :resolve-file (fn [f] (:file (source/resolve-file {:file f}))))))
                             :on-complete
                             (fn [result]
+                              ;; the backstop for a pause whose cleanup a Stop skipped
+                              (debugger/end-stale-pause! (:break @state) (:break-handlers @state))
                               (swap! state
                                      (fn [s]
                                        (cond-> (-> s

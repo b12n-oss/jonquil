@@ -173,6 +173,24 @@
     {:out :text} or {:error s}, jonquil.debugger/STALE when error-id names
     an older error."))
 
+(defprotocol Break
+  "Break on error (jonquil.debugger's break): an evaluation that throws
+  pauses on its worker before anything unwinds. Jolt in process. Callers
+  check (satisfies? Break ev) first."
+  (set-break-handlers! [ev handlers]
+    "{:on-pause (fn [data]) :on-resume (fn [{:keys [continued?]}])}: called
+    on the paused worker, data being jonquil.debugger/frames-data's map;
+    continued? is false when a Stop ended the pause.")
+  (toggle-break! [ev on-done]
+    "Turns Break on error on or off, off the caller's thread; on-done gets
+    {:on? b} or {:error s}.")
+  (break-eval! [ev frame-i code on-result]
+    "Evaluates code in the paused error's frame frame-i, on the paused
+    thread; on-result gets jonquil.debugger/eval-in-frame's map, or
+    {:error \"Not paused any more.\"}.")
+  (continue-break! [ev]
+    "Lets the paused error unwind: true when one was paused."))
+
 (defprotocol Inspector
   "Inspecting the value an evaluator's last :ok result produced,
   through jonquil.inspect.view's lifted ops. op and args are

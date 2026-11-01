@@ -379,6 +379,10 @@
    ;; window's first open
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
+   debugger-rows/row-break-off-by-default
+   debugger-rows/row-break-pauses
+   debugger-rows/row-break-stop
+   debugger-rows/row-break-stop-blocked
    restarts-rows/row-restart-retry
    restarts-rows/row-restart-edit
    restarts-rows/row-restart-define

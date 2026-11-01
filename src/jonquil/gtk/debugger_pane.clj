@@ -46,7 +46,9 @@
                     "Enter on a frame opens its file; on a local, the inspector."
                     ""))))
 
-(def ^:private RESTART-IDS [:retry :edit :define])
+(def ^:private RESTART-IDS
+  ;; :continue is Break on error's: the bar holds it alone while paused
+  [:retry :edit :define :continue])
 
 (defn show-restarts!
   "Shows the restart buttons options names (jonquil.restarts/options), in
@@ -68,7 +70,8 @@
   @(:restarts pane))
 
 (defn set-restart-handler!
-  "Registers (fn [id]) for a restart button, id :retry, :edit or :define."
+  "Registers (fn [id]) for a restart button, id :retry, :edit, :define or
+  :continue."
   [pane f]
   (reset! (:on-restart pane) f)
   nil)
