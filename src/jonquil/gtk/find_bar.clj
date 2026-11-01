@@ -155,18 +155,20 @@
 
 (defn- on-selection-set
   "The editor buffer's \"mark-set\" handler: the insert or selection-bound
-  mark moving while the editor has focus, other than select-match!'s own
-  move, is the user's selection, so the bar forgets its current match
-  unless the selection is still exactly it. A collapse from focus moving
-  into the bar happens with the editor already unfocused, so it keeps the
-  match (snapshot)."
+  mark moving while the editor is its window's focus widget, other than
+  select-match!'s own move, is the user's selection, so the bar forgets its
+  current match unless the selection is still exactly it. A collapse from
+  focus moving into the bar happens once the entry is the focus widget, so
+  it keeps the match (snapshot). gtk_widget_is_focus, not has_focus: the
+  latter is false in an inactive window (measured 2026-11-02: is-focus 1,
+  has-focus 0), where a caret the user placed was then read as the match."
   [fb mark]
   (let [ed (:ed fb) buf (:buf ed)]
     (when (and @(:current fb)
                (not @(:selecting? fb))
                (or (= mark (g/gtk-text-buffer-get-insert buf))
                    (= mark (g/gtk-text-buffer-get-selection-bound buf)))
-               (not (zero? (g/gtk-widget-has-focus (:view ed))))
+               (not (zero? (g/gtk-widget-is-focus (:view ed))))
                (not= @(:current fb) (g/selection-offsets buf)))
       (reset! (:current fb) nil))))
 
