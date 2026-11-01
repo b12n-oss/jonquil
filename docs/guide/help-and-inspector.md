@@ -231,7 +231,8 @@ change a local.
 Only errors that escape the evaluation pause: one your own code catches
 doesn't, and neither do Jonquil's quiet evaluations (completion, help,
 timing). A top-level expression typed at the prompt keeps no frame of its
-own, so its locals show only inside a function it called. Break on error
+own, so its locals show only inside a function it called; when no frame is
+your code's, the panel says so instead of listing Jonquil's own. Break on error
 works for Jolt in process for now; the other runtimes say so.
 
 ### Restarts

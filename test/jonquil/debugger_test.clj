@@ -50,12 +50,14 @@
                                div-zero
                                {:frames-fn (constantly [{:fn 'user/x :locals {}} {:fn 'nrepl.middleware.session/run-eval :locals {}}
                                                         {:fn 'jolt.nrepl/evaluate :locals {}}])}))))))
-  (testing "a fault inside the harness itself keeps every frame"
-    (is (= ["jonquil.eval/eval-async/fn--7" "user/y"]
-           (mapv :fn (:frames (debugger/frames-data
-                               div-zero
-                               {:frames-fn (constantly [{:fn "jonquil.eval/eval-async/fn--7" :locals {}}
-                                                        {:fn 'user/y :locals {}}])})))))))
+  (testing "no frame of the user's own (a top-level expression keeps none): a note, never the evaluator's frames"
+    (let [d (debugger/frames-data
+             div-zero
+             {:frames-fn (constantly [{:fn "jonquil.eval/eval-async/fn--7" :locals {'code "(/ 1 0)"}}
+                                      {:fn 'user/y :locals {}}])})]
+      (is (= [] (:frames d)))
+      (is (= [{:kind :note :text "No frames from your code: a top-level expression keeps no frame of its own, so call a function to see its locals."}]
+             (debugger/rows d))))))
 
 (deftest resolve-file-test
   (let [d (debugger/frames-data div-zero {:frames-fn fake :resolve-file #(str "/abs/" %)})]

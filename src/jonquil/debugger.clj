@@ -80,11 +80,16 @@
   (let [f (str (:fn frame))] (some #(str/starts-with? f %) HARNESS)))
 
 (defn- user-frames
-  "frames up to the first of the evaluator's own; all of them when the
-  first frame already is one (a fault inside the harness)."
+  "frames up to the first of the evaluator's own: none when the first
+  already is one, which is what a top-level expression gives (it keeps no
+  frame of its own), and the panel says so (NO-USER-FRAMES) rather than
+  list the evaluator's internals."
   [frames]
-  (let [kept (take-while (complement harness?) frames)]
-    (if (seq kept) kept frames)))
+  (take-while (complement harness?) frames))
+
+(def ^:private NO-USER-FRAMES
+  (str "No frames from your code: a top-level expression keeps no frame of its own, "
+       "so call a function to see its locals."))
 
 (def ^:private NO-API "Frames need a Jolt with jolt.debug (newer than this one).")
 
@@ -109,7 +114,7 @@
 (defn- out-of-stack? [e]
   (contains? #{"OutOfMemoryError" "StackOverflowError"} (.getSimpleName (class e))))
 
-(defn- frames-data* [e frames-fn resolve-file]
+(defn- frames-data** [e all resolve-file]
   {:title (title e)
    :frames (mapv (fn [{f :fn :keys [file line locals]}]
                    {:fn (str f)
@@ -119,7 +124,13 @@
                                  (map (fn [[k v]] {:name (str k) :text (value-text v)}))
                                  (sort-by :name)
                                  vec)})
-                 (user-frames (frames-fn e)))})
+                 (user-frames all))})
+
+(defn- frames-data* [e frames-fn resolve-file]
+  (let [all (frames-fn e)
+        d (frames-data** e all resolve-file)]
+    (cond-> d
+      (and (empty? (:frames d)) (seq all)) (assoc :note NO-USER-FRAMES))))
 
 (defn frames-data
   "e's frames as {:title :frames [{:fn :file :line :locals [{:name :text}]}]},
