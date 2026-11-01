@@ -21,7 +21,8 @@
    "jonquil/debugger.clj" (embedded-text "jonquil/debugger.clj")
    "jonquil/nrepl/inspect_middleware.clj" (embedded-text "jonquil/nrepl/inspect_middleware.clj")
    "jonquil/nrepl/info_middleware.clj" (embedded-text "jonquil/nrepl/info_middleware.clj")
-   "jonquil/nrepl/stdin_middleware.clj" (embedded-text "jonquil/nrepl/stdin_middleware.clj")})
+   "jonquil/nrepl/stdin_middleware.clj" (embedded-text "jonquil/nrepl/stdin_middleware.clj")
+   "jonquil/nrepl/break_middleware.clj" (embedded-text "jonquil/nrepl/break_middleware.clj")})
 
 (def ^:private ^:dynamic *files*
   ;; the file set the folder helpers write and check: sources, or another
@@ -41,6 +42,11 @@
   "stdin's :nrepl/middleware symbol: first, outside jolt-lang/nrepl's
   session middleware, whose clone it has to wrap."
   'jonquil.nrepl.stdin-middleware/stdin)
+
+(def break-middleware
+  "Break on error's :nrepl/middleware symbol: first, beside stdin's,
+  outside jolt-lang/nrepl's session middleware, whose clone it has to wrap."
+  'jonquil.nrepl.break-middleware/break)
 
 (def lib
   "The dep name the root is added under in the child's -Sdeps."

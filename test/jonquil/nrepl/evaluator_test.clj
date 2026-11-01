@@ -411,10 +411,11 @@
         real-start child/start!]
     (.mkdirs (io/file broken "src/jonquil/nrepl"))
     (spit (io/file broken "deps.edn") "{:paths [\"src\"]}")
-    ;; stdin's file is the real one, so the failure jolt reports is the
-    ;; inspector's planted throw.
-    (spit (io/file broken "src/jonquil/nrepl/stdin_middleware.clj")
-          (get middleware-files/sources "jonquil/nrepl/stdin_middleware.clj"))
+    ;; the files loaded before the inspector (stdin's, Break on error's and
+    ;; the debugger it requires) are the real ones, so the failure jolt
+    ;; reports is the inspector's planted throw.
+    (doseq [f ["jonquil/nrepl/stdin_middleware.clj" "jonquil/nrepl/break_middleware.clj" "jonquil/debugger.clj"]]
+      (spit (io/file broken "src" f) (get middleware-files/sources f)))
     (spit (io/file broken "src/jonquil/nrepl/inspect_middleware.clj")
           "(ns jonquil.nrepl.inspect-middleware) (throw (ex-info \"broken on purpose\" {}))")
     (with-redefs [child/jonquil-root (constantly (.getCanonicalPath broken))

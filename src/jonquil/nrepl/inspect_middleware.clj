@@ -13,10 +13,10 @@
   evals on purpose: jolt.nrepl/evaluate shifts the global *1 *2 *3 after
   every successful eval, and an op leaves the user's history alone
   (measured 2026-10-18). inspect-start reads that global *1."
-  (:require [clojure.java.io :as io]
-            [jolt.nrepl :as server]
+  (:require [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]
-            [jonquil.inspect.view :as view]))
+            [jonquil.inspect.view :as view]
+            [jonquil.nrepl.break-middleware :as break-middleware]))
 
 (def ops
   ["inspect-start" "inspect-in" "inspect-out" "inspect-page"
@@ -59,12 +59,6 @@
     (when-let [[op op-args] args]
       {"status" ["done"] "view" (pr-str (view/run-op state op op-args))})))
 
-(defn- resource-url
-  "A frame's classpath name as the URL this child loads it from, so the
-  window can open it; a path, a URL or a name the classpath lacks stays."
-  [f]
-  (if (re-find #"^(jar:|file:|/)" f) f (or (some-> (io/resource f) str) f)))
-
 (defn handle
   "The response map for one of ops, or nil for any other op. The frames
   ops read jolt.nrepl's global *e, the last error, as inspect-start reads
@@ -78,7 +72,7 @@
         {"status" ["done"]
          "data" (binding [*print-length* nil *print-level* nil]
                   (pr-str (if-let [e *e]
-                            (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file resource-url})
+                            (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file break-middleware/resource-url})
                             {:note "No error yet."})))}
         (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
       "jonquil-debug-mode"
@@ -88,11 +82,13 @@
           {"status" ["done"] "error" err}
           {"status" ["done"] "on" (str (:on? r))}))
       "inspect-local"
-      (let [v (if-let [e *e]
+      ;; a paused break's local first (Break on error), then the last error's
+      (let [paused (break-middleware/paused-local-for (g "session") (g "error-id") (as-long (g "frame")) (g "local"))
+            v (if-let [e (when (= ::debugger/missing paused) *e)]
                 (if (debugger/stale? e (g "error-id"))
                   ::stale
                   (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)}))
-                ::debugger/missing)]
+                paused)]
         {"status" ["done"]
          "view" (pr-str (case v
                             ::debugger/missing {:error "That local is gone."}

@@ -99,8 +99,9 @@
   source's :jonquil (or jonquil-root, in the three-argument form), when set,
   is jonquil.nrepl.middleware-files' folder: it joins the deps as
   jonquil/nrepl-middleware. The inspector's middleware and jonquil-info's go
-  last, so even a plain server answers their ops; stdin's goes first, around
-  jolt-lang/nrepl's session middleware, and only with it: a plain server
+  last, so even a plain server answers their ops; stdin's and Break on
+  error's go first, around jolt-lang/nrepl's session middleware, and only
+  with it: a plain server
   runs evals on the reader thread, where a waiting read would starve the
   stdin op. A source of just {:jonquil root} is a plain server with the
   inspector.
@@ -118,7 +119,8 @@
                 coord (conj (str "nrepl/nrepl " coord))
                 jonquil-root (conj (str middleware-files/lib " {:local/root " (pr-str jonquil-root) "}")))
          middleware (cond-> []
-                      (and coord jonquil-root) (conj (str middleware-files/stdin-middleware))
+                      (and coord jonquil-root) (conj (str middleware-files/stdin-middleware)
+                                                     (str middleware-files/break-middleware))
                       coord (conj "nrepl.middleware/default-middleware")
                       jonquil-root (conj (str middleware-files/inspect-middleware)
                                          (str middleware-files/info-middleware)))]

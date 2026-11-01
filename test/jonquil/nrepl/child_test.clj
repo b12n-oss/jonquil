@@ -111,7 +111,7 @@
     (fn []
       (is (= ["jolt" "-Sdeps"
               "{:deps {nrepl/nrepl {:local/root \"/r/nrepl\"} jonquil/nrepl-middleware {:local/root \"/c/ins\"}}}"
-              "-e" (child/server-form 7950 ["jonquil.nrepl.stdin-middleware/stdin" "nrepl.middleware/default-middleware"
+              "-e" (child/server-form 7950 ["jonquil.nrepl.stdin-middleware/stdin" "jonquil.nrepl.break-middleware/break" "nrepl.middleware/default-middleware"
                                             "jonquil.nrepl.inspect-middleware/inspect" "jonquil.nrepl.info-middleware/jonquil-info"])]
              (child/launch-args 7950 {:local "/r/nrepl"} "/c/ins")))
       (is (= ["jolt" "-Sdeps"
