@@ -117,11 +117,14 @@
   each frame's :file when there is one. Running out of stack or memory with
   no frames kept gets a :note saying so."
   [e {:keys [frames-fn resolve-file]}]
-  (if-not frames-fn
-    {:title (title e) :frames [] :note NO-API}
-    (let [d (frames-data* e frames-fn resolve-file)]
-      (cond-> d
-        (and (empty? (:frames d)) (out-of-stack? e)) (assoc :note OUT-OF-STACK)))))
+  (assoc (if-not frames-fn
+           {:title (title e) :frames [] :note NO-API}
+           (let [d (frames-data* e frames-fn resolve-file)]
+             (cond-> d
+               (and (empty? (:frames d)) (out-of-stack? e)) (assoc :note OUT-OF-STACK))))
+         ;; which error this is: a panel showing an older one is refused
+         ;; when it asks for a local or evaluates (stale?)
+         :error-id (hash e)))
 
 
 
@@ -170,6 +173,47 @@
                          (for [{:keys [name text]} locals]
                            {:kind :local :frame i :name name :text (str "    " name " = " text)})))
                  (range) frames))))
+
+(defn stale?
+  "True when error-id (a frames-data :error-id) names an error other than e,
+  the last one now; nil names none and is never stale."
+  [e error-id]
+  (boolean (and error-id (not= error-id (hash e)))))
+
+(defn label-ns
+  "A frame label's namespace as a symbol: the text before the first /
+  (demo.core/inner, demo.shapes/area[:sq], demo.core/inner/fn--3), or user
+  when there is none."
+  [label]
+  (let [i (str/index-of label "/")]
+    (symbol (if (and i (pos? i)) (subs label 0 i) "user"))))
+
+(defn- param?
+  "True for a local that can be a fn parameter: unqualified, no dot, not a
+  special form (if, &, ...)."
+  [sym]
+  (and (symbol? sym) (nil? (namespace sym))
+       (not (str/includes? (name sym) "."))
+       (not (special-symbol? sym))))
+
+(defn eval-in-frame
+  "Evaluates the form in code with frame i's locals bound, compiled in the
+  frame's namespace (user when that isn't loaded): {:out printed :text
+  value}, {:error \"Class: message\"} for a throw or a form that doesn't
+  read, or {:error \"That frame is gone.\"}. Locals that can't be
+  parameters are left out. Nothing unwinds or resumes; the form's own side
+  effects happen."
+  [e i code {:keys [frames-fn]}]
+  (if-let [fr (when frames-fn (get (vec (frames-fn e)) i))]
+    (let [syms (->> (keys (:locals fr)) (filter param?) sort vec)
+          target (or (find-ns (label-ns (str (:fn fr)))) (the-ns 'user))
+          out (java.io.StringWriter.)]
+      (try
+        (let [f (binding [*ns* target] (eval (list 'fn syms (read-string code))))
+              v (binding [*out* out] (apply f (map (:locals fr) syms)))]
+          {:out (str out) :text (binding [*print-length* 100 *print-level* 10] (pr-str v))})
+        (catch Throwable t {:error (title t)})))
+    {:error "That frame is gone."}))
 
 (defn local-value
   "The live value of the local named local-name in e's frame i, or

@@ -132,3 +132,39 @@
   (testing "a stack overflow that kept its frames lists them"
     (is (= :frame (:kind (first (debugger/rows (debugger/frames-data (java.lang.StackOverflowError. "s")
                                                                      {:frames-fn (constantly [{:fn 'user/f :line 1 :locals {}}])}))))))))
+
+;; --- evaluate in a frame ---------------------------------------------------
+
+(deftest label-ns-test
+  (is (= 'demo.core (debugger/label-ns "demo.core/inner")))
+  (is (= 'demo.shapes (debugger/label-ns "demo.shapes/area[:sq]")))
+  (is (= 'demo.core (debugger/label-ns "demo.core/inner/fn--3")))
+  (is (= 'user (debugger/label-ns "fn--2"))))
+
+(deftest eval-in-frame-test
+  (testing "the frame's locals are bound; an unloaded frame namespace falls back to user"
+    (is (= {:out "" :text "63"} (debugger/eval-in-frame div-zero 0 "(+ x y)" {:frames-fn fake}))))
+  (testing "what the form prints comes back beside its value"
+    (is (= {:out ":hi\n" :text "21"} (debugger/eval-in-frame div-zero 0 "(do (println :hi) x)" {:frames-fn fake}))))
+  (testing "a throw from the form"
+    (is (= {:error "ArithmeticException: Divide by zero"} (debugger/eval-in-frame div-zero 0 "(/ x 0)" {:frames-fn fake}))))
+  (testing "a form that doesn't read"
+    (let [{:keys [error]} (debugger/eval-in-frame div-zero 0 "(+ x" {:frames-fn fake})]
+      (is (some #(str/starts-with? (str error) %) ["RuntimeException" "ExceptionInfo" "EOFException"]) (pr-str error))))
+  (testing "no such frame"
+    (is (= {:error "That frame is gone."} (debugger/eval-in-frame div-zero 9 "x" {:frames-fn fake}))))
+  (testing "locals that can't be parameters are left out, the rest still bind"
+    (let [odd (fn [_] [{:fn 'demo.core/inner :file nil :line 1 :locals {'x 21 'if 1 '& 2 'a.b 3 'fn 4}}])]
+      (is (= {:out "" :text "21"} (debugger/eval-in-frame div-zero 0 "x" {:frames-fn odd})))
+      (is (= {:out "" :text "4"} (debugger/eval-in-frame div-zero 0 "fn" {:frames-fn odd})) "fn is a macro, a local can shadow it")))
+  (testing "a loaded frame namespace resolves its own names"
+    (let [here (fn [_] [{:fn 'jonquil.debugger-test/f :file nil :line 1 :locals {}}])]
+      (is (= {:out "" :text "2"} (debugger/eval-in-frame div-zero 0 "(:line (first fake-frames))" {:frames-fn here}))
+          "fake-frames is private to this namespace"))))
+
+(deftest error-id-test
+  (is (= (hash div-zero) (:error-id (debugger/frames-data div-zero {:frames-fn fake}))))
+  (is (= (hash div-zero) (:error-id (debugger/frames-data div-zero {:frames-fn nil}))))
+  (is (false? (debugger/stale? div-zero (hash div-zero))))
+  (is (false? (debugger/stale? div-zero nil)))
+  (is (true? (debugger/stale? div-zero (inc (hash div-zero))))))
