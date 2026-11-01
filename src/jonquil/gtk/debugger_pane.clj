@@ -46,6 +46,38 @@
                     "Enter on a frame opens its file; on a local, the inspector."
                     ""))))
 
+(def ^:private RESTART-IDS [:retry :edit :define])
+
+(defn show-restarts!
+  "Shows the restart buttons options names (jonquil.restarts/options), in
+  order, with their labels; none hides the bar."
+  [pane options]
+  (let [by-id (into {} (map (juxt :id identity) options))]
+    (doseq [id RESTART-IDS]
+      (let [btn (get (:restart-btns pane) id)]
+        (if-let [{:keys [label]} (by-id id)]
+          (do (g/gtk-button-set-label btn label) (g/gtk-widget-set-visible btn 1))
+          (g/gtk-widget-set-visible btn 0))))
+    (reset! (:restarts pane) (vec (keep (fn [id] (:label (by-id id))) RESTART-IDS)))
+    (g/gtk-widget-set-visible (:restart-box pane) (if (seq options) 1 0))
+    nil))
+
+(defn restart-labels
+  "The restart buttons shown, by label, in order."
+  [pane]
+  @(:restarts pane))
+
+(defn set-restart-handler!
+  "Registers (fn [id]) for a restart button, id :retry, :edit or :define."
+  [pane f]
+  (reset! (:on-restart pane) f)
+  nil)
+
+(defn press-restart!
+  "Runs restart id as its button does: for rows."
+  [pane id]
+  (when-let [f @(:on-restart pane)] (f id)))
+
 (defn row-texts
   "The shown rows' texts, in order."
   [pane]
@@ -99,7 +131,8 @@
   nil)
 
 (defn make-pane
-  "Builds the panel: {:root :title :list :scroll :field :close-btn :footer :rows
+  "Builds the panel: {:root :title :restart-box :restart-btns :list :scroll
+  :field :close-btn :footer :rows
   (atom []) :handlers (atom {})}. :root starts visible; the window hides
   it."
   []
@@ -110,8 +143,24 @@
         close-btn (g/gtk-button-new-with-label "Close")
         field (g/gtk-entry-new)
         footer (g/gtk-label-new "")
+        ;; made once and shown or hidden: no new signal callbacks per error
+        restart-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 4)
+        restart-btns (into {} (for [id RESTART-IDS] [id (g/gtk-button-new-with-label (name id))]))
         pane {:root root :title title :list lb :scroll scroll :close-btn close-btn
-              :field field :footer footer :rows (atom []) :handlers (atom {})}]
+              :field field :footer footer :rows (atom []) :handlers (atom {})
+              :restart-box restart-box :restart-btns restart-btns :restarts (atom [])
+              :on-restart (atom nil)}]
+    (doseq [id RESTART-IDS]
+      (let [btn (get restart-btns id)]
+        (g/gtk-box-append restart-box btn)
+        (g/g-signal-connect-data btn "clicked"
+                                 (callable (fn [_button _data]
+                                             (try (press-restart! pane id)
+                                                  (catch :default e (report! pane (str "; " (ex-message e)))))
+                                             nil)
+                                           [:pointer :pointer] :void)
+                                 ffi/null ffi/null g/CONNECT-DEFAULT)))
+    (g/gtk-widget-set-visible restart-box 0)
     (g/gtk-entry-set-placeholder-text field "Evaluate in the selected frame")
     (g/gtk-list-box-set-selection-mode lb g/SELECTION-MODE-BROWSE)
     (g/gtk-scrolled-window-set-child scroll lb)
@@ -119,7 +168,7 @@
     (doseq [l [title footer]]
       (g/gtk-label-set-xalign l 0.0)
       (g/gtk-label-set-wrap l 1))
-    (doseq [w [title scroll field close-btn footer]] (g/gtk-box-append root w))
+    (doseq [w [title restart-box scroll field close-btn footer]] (g/gtk-box-append root w))
     (g/gtk-widget-set-size-request root source-pane/WIDTH-REQUEST -1)
     (g/g-signal-connect-data lb "row-activated"
                              (callable (fn [_box row _data]

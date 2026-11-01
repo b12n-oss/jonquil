@@ -209,6 +209,29 @@ seconds for the answer; press Stop for a form that's still running there.
 After a newer error, a panel still showing the older one refuses to inspect or
 evaluate: "The panel shows an older error: show the frames again."
 
+### Restarts
+
+After an evaluation fails, three restarts take it from there, in every
+dialect, from the palette or from the bar of buttons at the top of the Frames
+panel:
+
+- **Retry the last failed evaluation** runs it again the same way: a REPL
+  entry, Run Form or Run Selection sends the same code again, and a Run runs
+  its tab again (its current text, as Run does).
+- **Edit the last failed evaluation at the prompt** puts its code at the
+  console prompt to change before Enter. For a Run it says to edit the file.
+- **Define the name the last error couldn't resolve, then retry** is there
+  when the error was `Unable to resolve symbol: foo`. It puts `(def foo )`
+  and the code at the prompt, with the caret where the value goes; type the
+  value and Enter defines the name and runs the code again, as one entry.
+
+Code you edit or define at the prompt runs in the prompt's namespace, like
+any REPL entry, which can differ from the buffer namespace a failed Run Form
+used. A success clears the failure, so a restart always belongs to the error
+you just saw. Nothing resumes the failed evaluation itself: by the time the
+console shows the error, the stack has unwound, so there is nothing to abort
+either.
+
 ### Keeping every local
 
 Jolt keeps a frame's locals only when the code was compiled with them.

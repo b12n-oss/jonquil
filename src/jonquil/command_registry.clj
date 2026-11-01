@@ -45,6 +45,10 @@
                        :run (call :show-frames-fn)}
    :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
                        :scope :window :run (call :locals-mode-fn)}
+   :restart/retry {:doc "Retry the last failed evaluation." :scope :window :run (call :retry-fn)}
+   :restart/edit {:doc "Edit the last failed evaluation at the prompt." :scope :window :run (call :edit-retry-fn)}
+   :restart/define {:doc "Define the name the last error couldn't resolve, then retry." :scope :window
+                    :run (call :define-retry-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
    :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
    ;; find and focus

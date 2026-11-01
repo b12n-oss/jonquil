@@ -60,6 +60,7 @@
     jonquil.palette
     jonquil.debugger
     jonquil.describe
+    jonquil.restarts
     jonquil.locations
     jonquil.timing
     jonquil.gtk.locations-pane
