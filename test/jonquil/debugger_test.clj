@@ -132,3 +132,66 @@
   (testing "a stack overflow that kept its frames lists them"
     (is (= :frame (:kind (first (debugger/rows (debugger/frames-data (java.lang.StackOverflowError. "s")
                                                                      {:frames-fn (constantly [{:fn 'user/f :line 1 :locals {}}])}))))))))
+
+;; --- evaluate in a frame ---------------------------------------------------
+
+(deftest label-ns-test
+  (is (= 'demo.core (debugger/label-ns "demo.core/inner")))
+  (is (= 'demo.shapes (debugger/label-ns "demo.shapes/area[:sq]")))
+  (is (= 'demo.core (debugger/label-ns "demo.core/inner/fn--3")))
+  (is (= 'user (debugger/label-ns "fn--2"))))
+
+(deftest eval-in-frame-test
+  (testing "the frame's locals are bound; an unloaded frame namespace falls back to user"
+    (is (= {:out "" :text "63"} (debugger/eval-in-frame div-zero 0 "(+ x y)" {:frames-fn fake}))))
+  (testing "what the form prints comes back beside its value"
+    (is (= {:out ":hi\n" :text "21"} (debugger/eval-in-frame div-zero 0 "(do (println :hi) x)" {:frames-fn fake}))))
+  (testing "a throw from the form"
+    (is (= {:error "ArithmeticException: Divide by zero"} (debugger/eval-in-frame div-zero 0 "(/ x 0)" {:frames-fn fake}))))
+  (testing "a form that doesn't read"
+    (let [{:keys [error]} (debugger/eval-in-frame div-zero 0 "(+ x" {:frames-fn fake})]
+      (is (some #(str/starts-with? (str error) %) ["RuntimeException" "ExceptionInfo" "EOFException"]) (pr-str error))))
+  (testing "no such frame"
+    (is (= {:error "That frame is gone."} (debugger/eval-in-frame div-zero 9 "x" {:frames-fn fake}))))
+  (testing "locals that can't be parameters are left out, the rest still bind"
+    (let [odd (fn [_] [{:fn 'demo.core/inner :file nil :line 1 :locals {'x 21 'if 1 '& 2 'a.b 3 'fn 4}}])]
+      (is (= {:out "" :text "21"} (debugger/eval-in-frame div-zero 0 "x" {:frames-fn odd})))
+      (is (= {:out "" :text "4"} (debugger/eval-in-frame div-zero 0 "fn" {:frames-fn odd})) "fn is a macro, a local can shadow it")))
+  (testing "a loaded frame namespace resolves its own names"
+    (let [here (fn [_] [{:fn 'jonquil.debugger-test/f :file nil :line 1 :locals {}}])]
+      (is (= {:out "" :text "2"} (debugger/eval-in-frame div-zero 0 "(:line (first fake-frames))" {:frames-fn here}))
+          "fake-frames is private to this namespace"))))
+
+(deftest error-id-test
+  ;; Jolt's identity hashes repeat in every fresh process, so the id carries
+  ;; one made per process: a restarted child's first error never matches
+  (let [id (debugger/error-id div-zero)]
+    (is (= id (:error-id (debugger/frames-data div-zero {:frames-fn fake}))))
+    (is (= id (:error-id (debugger/frames-data div-zero {:frames-fn nil}))))
+    (is (str/starts-with? id (str debugger/RUNTIME-ID ":")))
+    (is (= 36 (count debugger/RUNTIME-ID)))
+    (is (false? (debugger/stale? div-zero id)))
+    (is (false? (debugger/stale? div-zero nil)))
+    (is (true? (debugger/stale? div-zero (str "another-process:" (hash div-zero)))))))
+
+(deftest eval-in-frame-every-form-test
+  (is (= {:out "" :text "42"} (debugger/eval-in-frame div-zero 0 "x y" {:frames-fn fake})) "the last form's value")
+  (is (= {:out "1\n" :text "63"} (debugger/eval-in-frame div-zero 0 "(println 1) (+ x y)" {:frames-fn fake}))))
+
+(deftest eval-in-frame-lazy-result-output-test
+  (is (= {:out ":side 0\n:side 1\n" :text "(0 1)"}
+         (debugger/eval-in-frame div-zero 0 "(map (fn [i] (println :side i) i) (range 2))" {:frames-fn fake}))
+      "realizing the value prints into the captured output, not the process's"))
+
+(deftest eval-in-frame-output-cap-test
+  (let [{:keys [out text]} (debugger/eval-in-frame div-zero 0 "(dotimes [_ 5000] (print \"abcdefghij\"))" {:frames-fn fake})]
+    (is (= "nil" text))
+    (is (str/ends-with? out "\n; output cut at 10000 characters\n") (subs out (max 0 (- (count out) 60))))
+    (is (< (count out) 10100))))
+
+(deftest eval-in-frame-stops-test
+  (let [t (debugger/make-token)
+        f (future (debugger/eval-in-frame div-zero 0 "(loop [] (recur))" {:frames-fn fake :token t}))]
+    (Thread/sleep 300)
+    (debugger/interrupt-token! t)
+    (is (= {:error "Stopped."} (deref f 5000 :timeout)))))

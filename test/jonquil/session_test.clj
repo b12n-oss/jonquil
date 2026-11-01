@@ -294,3 +294,30 @@
     (binding [debugger/*frames-fn* (fn [_] [{:fn 'f :file nil :line 1 :locals {'xs [1 2]}}])]
       (is (= 2 (:total (inspect-sync s :start-local {:frame 0 :local "xs" :rows 10 :cols 40}))))
       (is (= {:error "That local is gone."} (inspect-sync s :start-local {:frame 0 :local "zz" :rows 10 :cols 40}))))))
+
+(defn- frame-eval-sync [s i code error-id]
+  (let [p (promise)]
+    (ev/eval-in-frame! s i code error-id (fn [r] (deliver p r)))
+    (deref p 3000 :timeout)))
+
+(deftest eval-in-frame-test
+  (let [s (session/make-session)]
+    (is (= {:error "No error yet."} (frame-eval-sync s 0 "1" nil)))
+    (repl-sync s "(/ 1 0)")
+    (binding [debugger/*frames-fn* (fn [_] [{:fn 'demo.core/inner :file nil :line 1 :locals {'x 21 'y 42}}])]
+      (let [id (:error-id (frames-sync s))]
+        (is (= {:out "" :text "63"} (frame-eval-sync s 0 "(+ x y)" id)))
+        (is (= {:error "The panel shows an older error: show the frames again."} (frame-eval-sync s 0 "(+ x y)" (str id "x"))) "a stale panel is refused")
+        (is (= {:error "The panel shows an older error: show the frames again."} (inspect-sync s :start-local {:frame 0 :local "x" :rows 10 :cols 40 :error-id (str id "x")})))
+        (is (= {:error "ArithmeticException: Divide by zero"} (frame-eval-sync s 0 "(/ x 0)" id)))
+        (is (= "ArithmeticException: Divide by zero" (:title (frames-sync s))) "the form's own throw isn't the last error")))))
+
+(deftest eval-in-frame-stop-test
+  (let [s (session/make-session)]
+    (repl-sync s "(/ 1 0)")
+    (binding [debugger/*frames-fn* (fn [_] [{:fn 'user/f :file nil :line 1 :locals {}}])]
+      (let [p (promise)]
+        (ev/eval-in-frame! s 0 "(loop [] (recur))" nil (fn [r] (deliver p r)))
+        (Thread/sleep 300)
+        (ev/interrupt! s)
+        (is (= {:error "Stopped."} (deref p 5000 :timeout)) "Stop reaches a frame evaluation")))))

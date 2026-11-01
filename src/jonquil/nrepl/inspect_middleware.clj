@@ -23,7 +23,12 @@
    "inspect-toggle-meta" "inspect-toggle-table" "inspect-def"
    "inspect-earlier" "inspect-later"
    ;; the Frames panel (jonquil.debugger), over the session's global *e
-   "jonquil-frames" "inspect-local" "jonquil-debug-mode"])
+   "jonquil-frames" "inspect-local" "jonquil-debug-mode" "jonquil-frame-eval"
+   "jonquil-frame-interrupt"])
+
+(defonce ^:private frame-token
+  ;; the token of the frame evaluation running now, for jonquil-frame-interrupt
+  (atom nil))
 
 (defn- as-long
   "A bencode integer, or the same number sent as a string."
@@ -84,12 +89,33 @@
           {"status" ["done"] "on" (str (:on? r))}))
       "inspect-local"
       (let [v (if-let [e *e]
-                (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)})
+                (if (debugger/stale? e (g "error-id"))
+                  ::stale
+                  (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)}))
                 ::debugger/missing)]
         {"status" ["done"]
-         "view" (pr-str (if (= v ::debugger/missing)
-                            {:error "That local is gone."}
+         "view" (pr-str (case v
+                            ::debugger/missing {:error "That local is gone."}
+                            ::stale {:error debugger/STALE}
                             (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+      "jonquil-frame-eval"
+      ;; "frame-out", not "out": a client streams any "out" it sees
+      (let [token (debugger/make-token)]
+        (try
+          (let [e *e
+                r (cond (nil? e) {:error "No error yet."}
+                        (debugger/stale? e (g "error-id")) {:error debugger/STALE}
+                        :else (do (reset! frame-token token)
+                                  (debugger/eval-in-frame e (as-long (g "frame")) (g "code")
+                                                          {:frames-fn (debugger/frames-fn) :token token})))]
+            (if-let [err (:error r)]
+              {"status" ["done"] "error" err}
+              {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))
+          (catch Throwable t {"status" ["done"] "error" (or (ex-message t) (str (class t)))})
+          (finally (compare-and-set! frame-token token nil))))
+      "jonquil-frame-interrupt"
+      (do (some-> @frame-token debugger/interrupt-token!)
+          {"status" ["done"]})
       (view-reply state request))))
 
 (defonce ^:private state (atom nil))
@@ -106,7 +132,11 @@
   [state request]
   (future
     (try
-      (server/respond request (locking state (handle state request)))
+      (server/respond request (if (#{"jonquil-frame-eval" "jonquil-frame-interrupt"} (get request "op"))
+                                ;; the user's form, as slow as it is: never
+                                ;; under the lock every inspector op takes
+                                (handle state request)
+                                (locking state (handle state request))))
       (catch Throwable e
         (try (server/respond request {"status" ["done" "error"]
                                       "view" (pr-str {:path "" :info "" :header ""

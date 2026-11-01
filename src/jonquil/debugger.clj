@@ -87,6 +87,17 @@
 
 (def ^:private NO-API "Frames need a Jolt with jolt.debug (newer than this one).")
 
+(defonce RUNTIME-ID
+  ;; Jolt's identity hashes come from a fixed-seed sequence, the same in
+  ;; every fresh process (measured: the first throwable hashed is 1392991556
+  ;; each time), so an error id also names the process it was made in
+  (str (random-uuid)))
+
+(defn error-id
+  "e's identity for the panel: this process's RUNTIME-ID and e's hash."
+  [e]
+  (str RUNTIME-ID ":" (hash e)))
+
 (def ^:private OUT-OF-STACK
   ;; measured 2026-10-31 on jolt v0.8.23-230: in debug mode, recursion
   ;; without recur ends as an OutOfMemoryError (GC overhead) with no frames;
@@ -117,11 +128,14 @@
   each frame's :file when there is one. Running out of stack or memory with
   no frames kept gets a :note saying so."
   [e {:keys [frames-fn resolve-file]}]
-  (if-not frames-fn
-    {:title (title e) :frames [] :note NO-API}
-    (let [d (frames-data* e frames-fn resolve-file)]
-      (cond-> d
-        (and (empty? (:frames d)) (out-of-stack? e)) (assoc :note OUT-OF-STACK)))))
+  (assoc (if-not frames-fn
+           {:title (title e) :frames [] :note NO-API}
+           (let [d (frames-data* e frames-fn resolve-file)]
+             (cond-> d
+               (and (empty? (:frames d)) (out-of-stack? e)) (assoc :note OUT-OF-STACK))))
+         ;; which error this is: a panel showing an older one is refused
+         ;; when it asks for a local or evaluates (stale?)
+         :error-id (error-id e)))
 
 
 
@@ -170,6 +184,118 @@
                          (for [{:keys [name text]} locals]
                            {:kind :local :frame i :name name :text (str "    " name " = " text)})))
                  (range) frames))))
+
+(def STALE
+  "What a panel showing an older error gets when it asks for a local or
+  evaluates in a frame."
+  "The panel shows an older error: show the frames again.")
+
+(defn stale?
+  "True when id (a frames-data :error-id) names an error other than e, the
+  last one now, in this process or another; nil names none and is never
+  stale."
+  [e id]
+  (boolean (and id (not= id (error-id e)))))
+
+(defn label-ns
+  "A frame label's namespace as a symbol: the text before the first /
+  (demo.core/inner, demo.shapes/area[:sq], demo.core/inner/fn--3), or user
+  when there is none."
+  [label]
+  (let [i (str/index-of label "/")]
+    (symbol (if (and i (pos? i)) (subs label 0 i) "user"))))
+
+(defn- param?
+  "True for a local that can be a fn parameter: unqualified, no dot, not a
+  special form (if, &, ...)."
+  [sym]
+  (and (symbol? sym) (nil? (namespace sym))
+       (not (str/includes? (name sym) "."))
+       (not (special-symbol? sym))))
+
+(def ^:private OUT-MAX
+  ;; a choice: what a frame form prints is kept in memory until it returns
+  10000)
+
+(defn make-token
+  "A fresh interrupt token for eval-in-frame's :token."
+  []
+  ((resolve 'jolt.host/make-interrupt)))
+
+(defn interrupt-token!
+  "Stops the eval-in-frame running under token."
+  [token]
+  ((resolve 'jolt.host/interrupt!) token))
+
+(defn- interrupted? [t]
+  (loop [c t]
+    (cond (nil? c) false
+          (:jolt/interrupted (ex-data c)) true
+          :else (recur (.getCause ^Throwable c)))))
+
+(defn- capped-writer
+  "A Writer appending to sb up to OUT-MAX characters, then noting the cut
+  once and dropping the rest."
+  [^StringBuilder sb]
+  (let [cut? (atom false)
+        add! (fn [^String s]
+               (let [room (- OUT-MAX (.length sb))]
+                 (cond
+                   (<= (count s) room) (.append sb s)
+                   (not @cut?) (do (reset! cut? true)
+                                   (.append sb (subs s 0 (max 0 room)))
+                                   (.append sb (str "\n; output cut at " OUT-MAX " characters\n"))))))]
+    (proxy [java.io.Writer] []
+      (close [] nil)
+      (flush [] nil)
+      (write
+        ([x]
+         (cond (string? x) (add! x)
+               (instance? (Class/forName "[C") x) (add! (String. ^chars x))
+               (integer? x) (add! (str (char x)))
+               :else (add! (str x))))
+        ([x off len]
+         (if (instance? (Class/forName "[C") x)
+           (add! (String. ^chars x (int off) (int len)))
+           (add! (subs (str x) (int off) (+ (int off) (int len))))))))))
+
+(defn- read-all
+  "Every form in code, in order; a read error throws."
+  [code]
+  (let [r (java.io.PushbackReader. (java.io.StringReader. code))]
+    (loop [acc []]
+      (let [f (read {:eof ::eof} r)]
+        (if (= ::eof f) acc (recur (conj acc f)))))))
+
+(defn eval-in-frame
+  "Evaluates the forms in code, in order, with frame i's locals bound,
+  compiled in the frame's namespace (user when that isn't loaded): {:out
+  printed :text last-value}, {:error \"Class: message\"} for a throw or
+  code that doesn't read, {:error \"Stopped.\"} when :token was
+  interrupted (interrupt-token!), or {:error \"That frame is gone.\"}.
+  Locals that can't be parameters are left out. What the forms print,
+  realizing the value included, is captured up to OUT-MAX characters.
+  Nothing unwinds or resumes; the forms' own side effects happen."
+  [e i code {:keys [frames-fn token]}]
+  (if-let [fr (when frames-fn (get (vec (frames-fn e)) i))]
+    (let [syms (->> (keys (:locals fr)) (filter param?) sort vec)
+          target (or (find-ns (label-ns (str (:fn fr)))) (the-ns 'user))
+          sb (StringBuilder.)
+          run (if token
+                (let [ri (resolve 'jolt.host/run-interruptible)] (fn [thunk] (ri token thunk)))
+                (fn [thunk] (thunk)))]
+      (try
+        (let [f (binding [*ns* target]
+                  ;; clojure.core/fn, not fn: the frame's namespace may exclude it
+                  (eval (list* 'clojure.core/fn syms (read-all code))))
+              text (binding [*out* (capped-writer sb)]
+                     (run (fn []
+                            (let [v (apply f (map (:locals fr) syms))]
+                              ;; inside the capture: printing a lazy value runs it
+                              (binding [*print-length* 100 *print-level* 10] (pr-str v))))))]
+          {:out (str sb) :text text})
+        (catch Throwable t (if (interrupted? t) {:error "Stopped."} {:error (title t)}))))
+    {:error "That frame is gone."}))
 
 (defn local-value
   "The live value of the local named local-name in e's frame i, or

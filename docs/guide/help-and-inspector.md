@@ -185,6 +185,32 @@ line within that text and says so instead. Return or a click on a local opens it
 the inspector, where it lives, so even a huge or lazy value is never copied out.
 A local's row prints at most 8 items, 3 levels deep, and 100 characters. A lazy seq nothing has realized yet reads `<lazy seq, not realized>`, because printing it would run your code again (a `(map save! rows)` would save the rows again); opening it in the inspector realizes it.
 
+### Evaluating in a frame
+
+The field under the list evaluates a form in the selected row's frame (a
+frame row, or one of its locals). The form sees that frame's locals by name
+and resolves other names in the frame's namespace, so a private function of
+that namespace works too, and Enter shows it in the console:
+
+```
+; in user/dbg-inner: (count xs)
+=> 3
+```
+
+The console shows the code as soon as you press Enter, then what the forms
+printed (the first 10000 characters) and the last one's value, at most 100
+items and 10 levels deep. Several forms run in order. A form that throws
+shows one line with the error, and Stop stops one that runs too long, saying
+"Stopped.". Nothing resumes or unwinds: you are looking at a frame that has
+already stopped, so the error stays the last error, and `*1` stays where it
+was. The forms' own side effects still happen. At run time, `*ns*` is the
+prompt's, not the frame's. In the Jolt child the window waits the usual 10
+seconds for the answer; press Stop for a form that's still running there.
+After a newer error, a panel still showing the older one refuses to inspect or
+evaluate: "The panel shows an older error: show the frames again."
+
+### Keeping every local
+
 Jolt keeps a frame's locals only when the code was compiled with them.
 **Keep every local for the debugger** turns Jolt's debug mode on (run it again
 to turn it off). Code you load or run afterwards keeps all its locals, so Run

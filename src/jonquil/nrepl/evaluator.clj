@@ -492,6 +492,16 @@
       (edn/read-string d)
       {:error "The Jolt child answered without its frames."})))
 
+(defn frame-eval-reply
+  "The child's jonquil-frame-eval responses as {:out :text} or {:error s},
+  never a guess when the reply carries neither."
+  [responses]
+  (if-let [err (some :error responses)]
+    {:error err}
+    (if-let [t (some :text responses)]
+      {:out (or (some :frame-out responses) "") :text t}
+      {:error "The Jolt child answered without a value."})))
+
 (defn toggle-reply
   "The child's jonquil-debug-mode responses as {:on? b} or {:error s},
   never a guess when the reply says neither."
@@ -527,6 +537,12 @@
         (do (future (run-worker! this code opts))
             nil))))
   (interrupt! [this]
+    ;; Stop also stops a form evaluated in a frame: sent whether or not one
+    ;; runs (the window may have stopped waiting for it), harmless when none
+    (when-let [{:keys [conn session ops]} (runtime this)]
+      (when (contains? ops "jonquil-frame-interrupt")
+        (future (try (client/request-sync conn {:op "jonquil-frame-interrupt" :session session} 2000)
+                     (catch Throwable _ nil)))))
     ;; One swap, keyed by identity of the exact :running map read here
     ;; (separate swaps against a separately-read :running let a finish!
     ;; landing between the read and a write recreate {:running {...}} out
@@ -693,6 +709,24 @@
                       (if (vector? r) (toggle-reply r) {:error inspect/timeout-message}))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
+    nil)
+  (eval-in-frame! [this i code error-id on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error "No error yet."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-frame-eval")) {:error "The debugger needs Jolt."}
+                    :else
+                    ;; the evaluator's usual bound: a longer form keeps
+                    ;; running in the child, and this says it didn't answer
+                    (let [r (client/request-sync conn (cond-> {:op "jonquil-frame-eval" :frame i :code code :session session}
+                                                        error-id (assoc :error-id error-id))
+                                                 request-timeout-ms)]
+                      (if (vector? r) (frame-eval-reply r) {:error inspect/timeout-message}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
     nil))
 
 (defn make-nrepl

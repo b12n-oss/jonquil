@@ -44,7 +44,11 @@
       (:quiet opts) (quiet-eval! this code (dissoc opts :run?))
       (:run? opts) (run-definitions! this code (dissoc opts :run?))
       :else (submit-repl! this code (dissoc opts :run?))))
-  (interrupt! [_] (eval/stop-eval! ctx) nil)
+  (interrupt! [_]
+    (eval/stop-eval! ctx)
+    ;; Stop also reaches a form evaluated in a frame (jonquil.debugger)
+    (some-> (:frame-token @state) debugger/interrupt-token!)
+    nil)
   (evaluating? [_] (eval/evaluating? ctx))
   (waiting-for-input? [_] (eval/waiting-for-input? ctx))
   (send-input! [_ text] (eval/push-stdin! ctx text))
@@ -67,15 +71,18 @@
       (try
         (let [local (when (= op :start-local)
                       (if-let [e (:last-error @state)]
-                        (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)})
+                        (if (debugger/stale? e (:error-id args))
+                          ::stale
+                          (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
                         ::debugger/missing))
               [op' args'] (case op
                             :start [:start (assoc args :value (:last-value @state))]
                             :start-local [:start (assoc args :value local)]
                             :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
                             [op args])]
-          (try (on-view (if (= local ::debugger/missing)
-                          {:error "That local is gone."}
+          (try (on-view (case local
+                          ::debugger/missing {:error "That local is gone."}
+                          ::stale {:error debugger/STALE}
                           (view/run-op (:inspect-view @state) op' args')))
                (catch Throwable _)))
         (catch Throwable e
@@ -98,6 +105,18 @@
       (let [r (try (debugger/toggle-debug-mode!)
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-done r) (catch Throwable _))))
+    nil)
+  (eval-in-frame! [_ i code error-id on-result]
+    (future
+      (let [token (debugger/make-token)
+            r (try (let [e (:last-error @state)]
+                     (cond (nil? e) {:error "No error yet."}
+                           (debugger/stale? e error-id) {:error debugger/STALE}
+                           :else (do (swap! state assoc :frame-token token)
+                                     (debugger/eval-in-frame e i code {:frames-fn (debugger/frames-fn) :token token}))))
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))})
+                   (finally (swap! state (fn [st] (cond-> st (identical? token (:frame-token st)) (dissoc :frame-token))))))]
+        (try (on-result r) (catch Throwable _))))
     nil)
   ev/Owners
   (release-owner! [_ owner] (release-owner-in! state owner) nil))

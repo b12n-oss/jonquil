@@ -30,21 +30,27 @@
         (await-until 2000 20 #(pos? (g/gtk-widget-get-width (:root pane))))
         (on-gtk
          (dpane/set-handlers! pane {:on-frame (fn [i] (swap! calls conj [:frame i]))
-                                    :on-local (fn [i n] (swap! calls conj [:local i n]))})
+                                    :on-local (fn [i n] (swap! calls conj [:local i n]))
+                                    :on-eval (fn [i code] (swap! calls conj [:eval i code]))})
          (dpane/show! pane data)
          (dpane/activate! pane 0)
          (dpane/activate! pane 1)
+         ;; show! selected the first row, the frame: its index goes with the code
+         (dpane/eval-text! pane "(inc x)")
          (let [rows (dpane/row-texts pane)
                title (dpane/title-text pane)
+               cleared? (= "" (dpane/field-text pane))
                _ (dpane/show! pane {:note "No error yet."})
                rows2 (dpane/row-texts pane)
-               _ (dpane/activate! pane 0)]
+               _ (dpane/activate! pane 0)
+               _ (dpane/eval-text! pane "1")]
            (support/check :debugger-pane-shows
                           (and (= ["demo.core/inner  core.clj:2" "    x = 21"] rows)
                                (= "ArithmeticException: Divide by zero" title)
                                (= ["No error yet."] rows2)
-                               (= [[:frame 0] [:local 0 "x"]] @calls))
-                          {:rows rows :title title :rows2 rows2 :calls @calls})))
+                               cleared?
+                               (= [[:frame 0] [:local 0 "x"] [:eval 0 "(inc x)"] [:eval nil "1"]] @calls))
+                          {:rows rows :title title :rows2 rows2 :calls @calls :cleared cleared?})))
         (finally (on-gtk (g/gtk-window-close win)))))))
 
 ;; --- the real window -----------------------------------------------------
@@ -88,14 +94,28 @@
                          (boolean (and (some #{LOCAL-ROW} rows)
                                        (some #(str/starts-with? % "user/dbg-inner  line 2 (no file)") rows)))
                          (= [NO-API] rows))
+              evaluated? (if avail?
+                           (let [m (on-gtk (support/out-end-offset ui))]
+                             (on-gtk (dpane/eval-text! dp "(count xs)"))
+                             (and (await-until 3000 20 #(str/includes? (support/since ui m) "; in user/dbg-inner: (count xs)\n=> 3"))
+                                  (let [m2 (on-gtk (support/out-end-offset ui))]
+                                    (on-gtk (dpane/eval-text! dp "(/ n 0)"))
+                                    (await-until 3000 20 #(str/includes? (support/since ui m2)
+                                                                         "; in user/dbg-inner: ArithmeticException: Divide by zero")))))
+                           true)
+              still-last? (if avail?
+                            (do (on-gtk (run-palette! ui "show the last error"))
+                                (await-until 3000 20 #(= "ArithmeticException: Divide by zero" (dpane/title-text dp))))
+                            true)
               inspected? (if avail?
                            (do (on-gtk (dpane/activate! dp (first (keep-indexed (fn [i r] (when (= r LOCAL-ROW) i)) rows))))
                                (await-until 3000 20 #(str/includes? (g/label-text (:info (:inspector ui))) "3 items")))
                            true)
               _ (when avail? (on-gtk (run-palette! ui "keep every local")))
               off? (or (not avail?) (await-until 3000 20 #(= (status ui) "; Debug mode off.")))]
-          (on-gtk (support/check :frames-after-error (and mode? ran? shown? rows-ok? inspected? off?)
+          (on-gtk (support/check :frames-after-error (and mode? ran? shown? rows-ok? evaluated? still-last? inspected? off?)
                                  {:available avail? :mode mode? :ran ran? :shown shown? :rows rows
+                                  :evaluated evaluated? :still-last still-last?
                                   :inspected inspected? :off off? :status (status ui)})))
         (finally
           ;; the in-process runtime is this process: never leave later rows

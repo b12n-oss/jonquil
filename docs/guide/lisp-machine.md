@@ -53,9 +53,10 @@ Three things set it apart:
 - **The debugger reads that runtime.** Jolt's `jolt.debug` keeps the frames
   and locals of a throw, and the Frames panel (Show the last error's frames
   and locals, see [Help and the inspector](help-and-inspector.md)) lists them
-  for your own code: a frame opens at its line, and a local opens in the
-  inspector. It needs a Jolt release with `jolt.debug`, and pausing before
-  the stack unwinds comes later (`ROADMAP.md`, LM5). Emacs debugs Emacs Lisp
+  for your own code: a frame opens at its line, a local opens in the
+  inspector, and a form typed in the panel evaluates with that frame's
+  locals bound. It needs a Jolt release with `jolt.debug`, and pausing
+  before the stack unwinds comes later (`ROADMAP.md`, LM5). Emacs debugs Emacs Lisp
   well, but debugging Clojure there goes through CIDER and nREPL, a separate
   layer.
 - **It stays a Clojure IDE.** Emacs turns everything into a buffer: mail, a

@@ -166,7 +166,12 @@
   (toggle-debug-mode! [ev on-done]
     "Flips Jolt's debug mode (code compiled from then on keeps its locals),
     reading the runtime's own mode, off the caller's thread; on-done gets
-    {:on? b}, the mode it's in now, or {:error s}."))
+    {:on? b}, the mode it's in now, or {:error s}.")
+  (eval-in-frame! [ev frame-i code error-id on-result]
+    "Evaluates code with the last error's frame frame-i's locals bound
+    (jonquil.debugger/eval-in-frame), off the caller's thread; on-result gets
+    {:out :text} or {:error s}, jonquil.debugger/STALE when error-id names
+    an older error."))
 
 (defprotocol Inspector
   "Inspecting the value an evaluator's last :ok result produced,
@@ -174,8 +179,9 @@
   jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
   :def :earlier :later; a JVM server's inspector has no history, so its
   evaluator answers :earlier and :later with {:error s}), except :start takes {:rows :cols} (the evaluator supplies the
-  value), :start-local takes {:frame :local :rows :cols} (a local of the
-  last error's frame i, jonquil.debugger) and :def takes {:name} (the
+  value), :start-local takes {:frame :local :rows :cols :error-id} (a
+  local of the last error's frame i, jonquil.debugger; a stale :error-id
+  answers {:error jonquil.debugger/STALE}) and :def takes {:name} (the
   evaluator supplies the target namespace). on-view is called exactly once, from any thread, with a
   view map (jonquil.inspect.view/run-op's shape) or {:error s} (plus
   :lost? true when the connection that would have answered it is gone),
