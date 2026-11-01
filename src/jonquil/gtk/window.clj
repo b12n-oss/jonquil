@@ -471,6 +471,19 @@
 ;; (success, Cancel, or dismissal all clear it, via complete-alert!).
 (defonce ^:private alert-pending? (atom false))
 
+;; Each real alert's GCancellable, by its dialog: cancelling one closes the
+;; dialog, and GTK completes it as a dismissal (complete-alert! below, with
+;; {:error ...}, which every alert's choice handler treats as Cancel). The
+;; self-test answers alerts in code, so it dismisses what's left after each
+;; row (dismiss-pending-alerts!); nothing else cancels them.
+(defonce ^:private alert-cancellables (atom {}))
+
+(defn- dismiss-pending-alerts!
+  "Cancels every alert dialog still open, so GTK closes them."
+  []
+  (doseq [c (vals @alert-cancellables)] (g/g-cancellable-cancel c))
+  nil)
+
 (defn- register-alert-choice!
   "Tracks on-choice under dialog's own identity: a raw pointer for a real
   GtkAlertDialog (show-alert!, below), or any comparable value in
@@ -487,6 +500,9 @@
   against a stray re-invocation, so calling this twice with the SAME src
   never double-releases."
   [src result]
+  (when-let [c (get @alert-cancellables src)]
+    (swap! alert-cancellables dissoc src)
+    (g/g-object-unref c))
   (when-let [on-choice (get @alert-on-choice-by-dialog src)]
     (swap! alert-on-choice-by-dialog dissoc src)
     (try (on-choice result)
@@ -504,16 +520,18 @@
   alert-choose-cb across every attempt. cancel and default are button
   indexes: the close alerts pass 2 and 0, the tree's trash alert 1 and 1."
   [win {:keys [message detail buttons]} {:keys [cancel default]} on-choice]
-  (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)]
+  (let [d (g/g-object-new-with-properties (g/gtk-alert-dialog-get-type) 0 ffi/null ffi/null)
+        cancellable (g/g-cancellable-new)]
     (swap! alert-dialog-count inc)
     (register-alert-choice! d on-choice)
+    (swap! alert-cancellables assoc d cancellable)
     (g/gtk-alert-dialog-set-message d message)
     (when detail (g/gtk-alert-dialog-set-detail d detail))
     (ffi/with-c-string-array [labels 4] (conj (vec buttons) nil)
       (g/gtk-alert-dialog-set-buttons d labels))
     (g/gtk-alert-dialog-set-cancel-button d cancel)
     (g/gtk-alert-dialog-set-default-button d default)
-    (g/gtk-alert-dialog-choose d win ffi/null alert-choose-cb ffi/null)))
+    (g/gtk-alert-dialog-choose d win cancellable alert-choose-cb ffi/null)))
 
 (def ^:private CLOSE-ALERT {:cancel 2 :default 0})
 (def ^:private TRASH-ALERT {:cancel 1 :default 1})
@@ -4900,6 +4918,9 @@
                  ;; "dialog" identities.
                    :alert-dialog-count alert-dialog-count
                    :alert-pending? alert-pending?
+                   ;; the self-test closes the alerts it answered in code
+                   :dismiss-alerts!* dismiss-pending-alerts!
+                   :pending-alerts* (fn [] (count @alert-cancellables))
                    :alert-release! alert-release!
                    :register-alert-choice-for-test! register-alert-choice!
                    :complete-alert-for-test! complete-alert!})))))

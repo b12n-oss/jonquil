@@ -124,6 +124,7 @@
 (ffi/defcfn gtk-text-buffer-get-iter-at-offset "gtk_text_buffer_get_iter_at_offset" [:pointer :pointer :int] :void)
 (ffi/defcfn gtk-text-buffer-place-cursor "gtk_text_buffer_place_cursor" [:pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-insert "gtk_text_buffer_get_insert" [:pointer] :pointer)
+(ffi/defcfn gtk-text-buffer-get-selection-bound "gtk_text_buffer_get_selection_bound" [:pointer] :pointer)
 (ffi/defcfn gtk-text-buffer-apply-tag "gtk_text_buffer_apply_tag" [:pointer :pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-remove-all-tags "gtk_text_buffer_remove_all_tags" [:pointer :pointer :pointer] :void)
 (ffi/defcfn gtk-text-buffer-get-tag-table "gtk_text_buffer_get_tag_table" [:pointer] :pointer)
@@ -294,6 +295,17 @@
 (ffi/defcfn g-error-free "g_error_free" [:pointer] :void)
 (ffi/defcfn g-cancellable-new "g_cancellable_new" [] :pointer)
 (ffi/defcfn g-cancellable-cancel "g_cancellable_cancel" [:pointer] :void)
+;; gtk_window_get_toplevels (gtkwindow.h): a GListModel of every toplevel,
+;; owned by GTK; g_list_model_get_n_items counts it (the self-test counts
+;; alert dialogs with these)
+(ffi/defcfn gtk-window-get-toplevels "gtk_window_get_toplevels" [] :pointer)
+(ffi/defcfn gtk-window-maximize "gtk_window_maximize" [:pointer] :void)
+(ffi/defcfn g-list-model-get-n-items "g_list_model_get_n_items" [:pointer] :uint)
+
+(defn toplevel-count
+  "How many toplevel windows GTK has: the app's windows and any open dialog."
+  []
+  (g-list-model-get-n-items (gtk-window-get-toplevels)))
 
 (defn finish-file
   "Completes an open/save. Returns {:path s} or {:error msg :code n :domain q}.
@@ -730,6 +742,7 @@
 ;; focus grabbed on the query entry and on the replacement entry, false
 ;; with focus grabbed on the editor and on the console.
 (ffi/defcfn gtk-widget-is-ancestor "gtk_widget_is_ancestor" [:pointer :pointer] :int)
+(ffi/defcfn gtk-widget-has-focus "gtk_widget_has_focus" [:pointer] :int)
 
 ;; gtk_text_buffer_delete_selection: gtktextbuffer.h:476-479 (gtk4 4.22.4,
 ;; GDK_AVAILABLE_IN_ALL). Fixed arity: (buffer, interactive, default_editable)
