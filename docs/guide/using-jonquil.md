@@ -64,9 +64,10 @@ same number of empty calls, then prints one line in the console:
 `; Time: 12.3 ns per call (± 0.4 ns over 10 batches of 1048576; an empty
 call's 1.1 ns taken off)`. A slow form still stops near the second, after
 at least 3 batches, and one slower than the whole second is timed once. A
-form too fast to tell apart from an empty call says so instead. A lazy form
-is timed as building the sequence, not walking it, so wrap it in `doall` to
-time the work.
+form too fast to tell apart from an empty call says so instead: a time counts
+only when it is larger than both spreads added together and at least 5% of
+an empty call. A lazy form is timed as building the sequence, not walking it, so
+wrap it in `doall` to time the work.
 
 The form runs thousands of times, often millions, so time only code without
 side effects. A form that writes a file, swaps an atom, prints or calls a

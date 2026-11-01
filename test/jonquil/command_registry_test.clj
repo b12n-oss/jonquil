@@ -9,7 +9,8 @@
    :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn :parinfer-fn
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
-   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn])
+   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn
+   :retry-fn :edit-retry-fn :define-retry-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -38,7 +39,8 @@
    :locations/matches [:locations-matches-fn]
    :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
    :run/time-form [:time-form-fn] :tab/back [:tab-back-fn]
-   :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]})
+   :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]
+   :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn] :restart/define [:define-retry-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)

@@ -28,6 +28,7 @@
     jonquil.docs-test
     jonquil.edit-test
     jonquil.eval-test
+    jonquil.restarts-test
     jonquil.registry-test
     jonquil.console-test
     jonquil.mcp-test

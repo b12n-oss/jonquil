@@ -217,6 +217,7 @@
 (ffi/defcfn gtk-paned-set-end-child "gtk_paned_set_end_child" [:pointer :pointer] :void)
 (ffi/defcfn gtk-paned-set-position "gtk_paned_set_position" [:pointer :int] :void)
 (ffi/defcfn gtk-button-new-with-label "gtk_button_new_with_label" [:string] :pointer)
+(ffi/defcfn gtk-button-set-label "gtk_button_set_label" [:pointer :string] :void)
 
 (defn set-int-property!
   "Set an int GObject property via the fixed-arity GValue path."

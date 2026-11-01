@@ -54,6 +54,7 @@
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.locations :as loc]
+            [jonquil.restarts :as restarts]
             [jonquil.login-path :as login-path]
             [jonquil.mcp.window :as mcp-window]
             [jonquil.nrepl.attach]
@@ -1025,19 +1026,26 @@
                                (notify {:done {:result result :output (apply str @out)}}))))))
 
 (defn- hooked-opts
-  "opts without :hook-source (:run :selection :form :repl) and
-  :hook-tab, and, when it had a source, its :on-complete chained so the
-  plugins' :after-run and :on-error hooks hear how the eval ended. Only
+  "opts without :hook-source (:run :selection :form :repl), :hook-tab,
+  :hook-code and :failure*, and, when it had a source, its :on-complete
+  chained so the plugins' :after-run and :on-error hooks hear how the eval
+  ended, and the window's failure* atom records an error (or clears on
+  success) for the restarts. Only
   opts handed to ev/eval! come here, so an eval that never started fires
   nothing. after-eval! only starts futures and reports its own throws, so
   the eval's own completion is never lost to it."
-  [{:keys [hook-source hook-tab on-complete] :as opts}]
-  (let [opts (dissoc opts :hook-source :hook-tab)]
+  [{:keys [hook-source hook-tab hook-code failure* on-complete] :as opts}]
+  (let [opts (dissoc opts :hook-source :hook-tab :hook-code :failure*)]
     (if-not hook-source
       opts
       (assoc opts :on-complete
              (fn [result]
                (when on-complete (on-complete result))
+               ;; after the eval's own completion, and never throwing: the
+               ;; window's last failure, for the restarts (jonquil.restarts)
+               (when failure*
+                 (restarts/record-failure! failure* {:kind hook-source :code hook-code :tab-id hook-tab}
+                                           result console/error-text))
                (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
 (defn- before-run-stopped
@@ -1093,7 +1101,8 @@
          opts (fn [] (let [base (assoc (make-eval-opts ed cv ev* status-label true)
                                        :run? true :path @path-atom :owner id)]
                        (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
-                                           :hook-source :run :hook-tab id))))]
+                                           :hook-source :run :hook-tab id
+                                           :hook-code (editor/editor-text ed) :failure* (:failure* cv)))))]
      (cond
        refused (when notify (notify {:refused refused}))
        (ev/evaluating? @ev*)
@@ -1160,7 +1169,8 @@
   ([ed cv ev* status-label text] (do-repl-eval! ed cv ev* status-label text nil))
   ([ed cv ev* status-label text extra-opts]
    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-         warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+         warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false
+                                                                :hook-code text :failure* (:failure* cv))
                                                          extra-opts)))]
      (when warning (cview/append! cv :system warning)))))
 
@@ -1201,7 +1211,8 @@
   [{:keys [tab cv ev* status-label]} text extra-opts notify]
   (let [ed (:ed tab)
         out (atom [])
-        opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false)
+        opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false
+                                                        :hook-code text :failure* (:failure* cv))
                                                  out notify)
                                  extra-opts))]
     (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
@@ -3319,13 +3330,16 @@
         suppress-close? (atom false)
         closing? (atom false)
         *cv (atom nil)
-        cv (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label)
+        ;; :failure*, the last failed evaluation, for the restarts
+        cv (assoc
+            (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label)
                                      :history-prev (history-prev-fn ev*)
                                      :history-next (history-next-fn ev*)
                                      ;; The console reads busy/waiting state
                                      ;; straight from the engine, never a mirror.
                                      :evaluating? evaluating-fn
                                      :waiting? (fn [] (ev/waiting-for-input? @ev*))})
+            :failure* (atom nil))
         _ (reset! *cv cv)
         provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
@@ -3866,12 +3880,27 @@
                            (ev/error-frames! e (fn [d]
                                                  (on-gui! (fn []
                                                             (if-let [err (:error d)]
-                                                              (set-status! status-label (str "; " err))
+                                                              (if-let [f @(:failure* cv)]
+                                                                ;; no frames, but the restarts still apply
+                                                                (let [d {:note err}]
+                                                                  (reset! frames-state d)
+                                                                  (debugger-pane/show! dbgp d)
+                                                                  (debugger-pane/show-restarts! dbgp (restarts/options f))
+                                                                  (show-right-panel! right :debugger))
+                                                                (set-status! status-label (str "; " err)))
                                                               (do (reset! frames-state d)
                                                                   (debugger-pane/show! dbgp d)
+                                                                  (debugger-pane/show-restarts! dbgp (restarts/options @(:failure* cv)))
                                                                   (show-right-panel! right :debugger)
                                                                   (debugger-pane/focus! dbgp)))))))
-                           (set-status! status-label "; The debugger needs Jolt.")))
+                           ;; no frames here, but the restarts work in every dialect
+                           (if-let [f @(:failure* cv)]
+                             (let [d {:note "Frames need Jolt or JVM Clojure; the restarts above work here."}]
+                               (reset! frames-state d)
+                               (debugger-pane/show! dbgp d)
+                               (debugger-pane/show-restarts! dbgp (restarts/options f))
+                               (show-right-panel! right :debugger))
+                             (set-status! status-label "; The debugger needs Jolt."))))
         locals-mode-fn (fn []
                          (if-let [e (frames-ev)]
                            (ev/toggle-debug-mode! e (fn [r]
@@ -3916,6 +3945,50 @@
                                             (do (when (seq (:out r)) (cview/append! cv :out (:out r)))
                                                 (cview/append! cv :result (str "=> " (:text r) "\n"))))))))))))
                  :on-close (fn [] (hide-right-panel! right :debugger))})
+        ;; The restarts (jonquil.restarts) for cv's last failure
+        nothing-failed "; Nothing has failed since the last success."
+        edit-the-file "; Edit the file and Run it again."
+        retry-fn (fn []
+                   (if-let [f @(:failure* cv)]
+                     ;; a REPL entry doesn't belong to its tab: any tab will do
+                     (if-let [t (or (tab-by-id tabs (:tab-id f)) (when (= :repl (:kind f)) (active-tab)))]
+                       (let [ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
+                             code (:code f)
+                             buffer? (#{:selection :form} (:kind f))]
+                         (cond
+                           (= :run (:kind f)) (do-run! ctx)
+                           ;; the checks Run Selection and Run Form make first
+                           (and buffer? (or (refuse-foreign! ctx)
+                                            (and (not (ev/evaluating? @ev*))
+                                                 (before-run-stopped ctx (:kind f) t code))))
+                           nil
+                           :else
+                           (do (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
+                               (do-repl-eval! (:ed t) cv ev* status-label code
+                                              (cond-> {:hook-source (:kind f) :hook-tab (:id t)}
+                                                ;; as Run Selection and Run Form send them
+                                                buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t)))))))
+                       (set-status! status-label "; The tab that failed is closed."))
+                     (set-status! status-label nothing-failed)))
+        edit-retry-fn (fn []
+                        (let [f @(:failure* cv)]
+                          (cond (nil? f) (set-status! status-label nothing-failed)
+                                (= :run (:kind f)) (set-status! status-label edit-the-file)
+                                :else (cview/set-input! cv (:code f) (count (:code f))))))
+        define-retry-fn (fn []
+                          (let [f @(:failure* cv)
+                                n (some-> f :error-text restarts/missing-name)]
+                            (cond (nil? f) (set-status! status-label nothing-failed)
+                                  (= :run (:kind f)) (set-status! status-label edit-the-file)
+                                  (nil? n) (set-status! status-label "; The last error wasn't an unresolved name.")
+                                  :else (let [{:keys [text caret]} (restarts/define-input n (:code f))]
+                                          (cview/set-input! cv text caret)))))
+        _ (debugger-pane/set-restart-handler!
+           dbgp (fn [id]
+                  (case id
+                    :retry (retry-fn)
+                    :edit (edit-retry-fn)
+                    :define (define-retry-fn))))
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -3936,6 +4009,7 @@
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
+                         :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
