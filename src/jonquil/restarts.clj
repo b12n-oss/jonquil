@@ -3,17 +3,20 @@
   scoped to what a stack that already unwound allows: Retry it, Edit it at
   the prompt, or Define the name it couldn't resolve and retry. A failure
   is {:kind :run|:repl|:selection|:form :code :tab-id :error-text}, which
-  jonquil.gtk.window records. No GTK here.")
+  jonquil.gtk.window records. No GTK here."
+  (:require [clojure.string :as str]))
 
 (defn missing-name
   "The unqualified name in an \"Unable to resolve symbol: NAME in this
   context\" error (in process, the Jolt child and JVM Clojure all say it
   this way), or nil, also for a qualified name or one that isn't a symbol."
   [error-text]
-  (when-let [[_ n] (and error-text (re-find #"Unable to resolve symbol: (\S+) in this context" error-text))]
-    (let [sym (try (read-string n) (catch Throwable _ nil))]
-      (when (and (symbol? sym) (nil? (namespace sym)) (= n (str sym)))
-        n))))
+  ;; never the reader: read-string honours #=, so text in an error message
+  ;; (a server's, an agent's, a program's) could run code in Jonquil itself
+  (when-let [[_ n] (and error-text
+                        (re-find #"Unable to resolve symbol: ([^\s,;()\[\]{}\"'`~^@\\]+) in this context" error-text))]
+    (when-not (or (str/includes? n "/") (re-find #"^[0-9#:']" n))
+      n)))
 
 (def ^:private at-the-prompt
   ;; the kinds whose code can be edited at the console prompt: a Run is a
@@ -39,3 +42,17 @@
   [n code]
   (let [head (str "(def " n " ")]
     {:text (str head ")\n" code) :caret (count head)}))
+
+(defn record-failure!
+  "The failure atom's bookkeeping after an evaluation ends: an :error
+  records where (with :error-text from (error-text-fn result)), an :ok
+  clears it, anything else (a Stop) leaves it. Never throws: the
+  evaluation's own completion must not be lost to it."
+  [failure* where result error-text-fn]
+  (try
+    (case (:status result)
+      :error (reset! failure* (assoc where :error-text (try (error-text-fn result) (catch Throwable _ nil))))
+      :ok (reset! failure* nil)
+      nil)
+    (catch Throwable _ nil))
+  nil)

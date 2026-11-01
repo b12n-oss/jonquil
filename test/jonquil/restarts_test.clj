@@ -33,3 +33,28 @@
 
 (deftest define-input-test
   (is (= {:text "(def greet )\n(greet 1)" :caret 11} (restarts/define-input "greet" "(greet 1)"))))
+
+(def ran
+  ;; public on purpose: a #= payload must be able to reach it for the test to mean anything
+  (atom 0))
+
+(deftest missing-name-never-evaluates-test
+  ;; #= in error text must not run in the IDE (the reader's read-eval); the
+  ;; commas make the whole call one \S+ token for the regex
+  (is (nil? (restarts/missing-name "Unable to resolve symbol: #=(swap!,jonquil.restarts-test/ran,inc) in this context")))
+  (is (zero? @ran) "nothing in the error text ran")
+  (is (nil? (restarts/missing-name "Unable to resolve symbol: foo(bar) in this context")))
+  (is (= "foo-bar?" (restarts/missing-name "Unable to resolve symbol: foo-bar? in this context"))))
+
+(deftest record-failure-test
+  (let [a (atom nil)
+        where {:kind :repl :code "(f)" :tab-id 3}]
+    (restarts/record-failure! a where {:status :error} (constantly "boom"))
+    (is (= {:kind :repl :code "(f)" :tab-id 3 :error-text "boom"} @a))
+    (restarts/record-failure! a where {:status :interrupted} (constantly "x"))
+    (is (some? @a) "a Stop leaves the failure as it was")
+    (restarts/record-failure! a where {:status :ok} (constantly "x"))
+    (is (nil? @a) "a success clears it")
+    (testing "a throwing error-text never escapes: the failure is still recorded"
+      (is (nil? (restarts/record-failure! a where {:status :error} (fn [_] (throw (Exception. "bad result"))))))
+      (is (= {:kind :repl :code "(f)" :tab-id 3 :error-text nil} @a)))))

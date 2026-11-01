@@ -1022,16 +1022,12 @@
       opts
       (assoc opts :on-complete
              (fn [result]
-               ;; the window's last failure, for the restarts
-               ;; (jonquil.restarts): an error records it, a success clears
-               ;; it, since a restart belongs to the error just seen
-               (when failure*
-                 (case (:status result)
-                   :error (reset! failure* {:kind hook-source :code hook-code :tab-id hook-tab
-                                            :error-text (console/error-text result)})
-                   :ok (reset! failure* nil)
-                   nil))
                (when on-complete (on-complete result))
+               ;; after the eval's own completion, and never throwing: the
+               ;; window's last failure, for the restarts (jonquil.restarts)
+               (when failure*
+                 (restarts/record-failure! failure* {:kind hook-source :code hook-code :tab-id hook-tab}
+                                           result console/error-text))
                (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
 (defn- before-run-stopped
@@ -3866,7 +3862,14 @@
                            (ev/error-frames! e (fn [d]
                                                  (on-gui! (fn []
                                                             (if-let [err (:error d)]
-                                                              (set-status! status-label (str "; " err))
+                                                              (if-let [f @(:failure* cv)]
+                                                                ;; no frames, but the restarts still apply
+                                                                (let [d {:note err}]
+                                                                  (reset! frames-state d)
+                                                                  (debugger-pane/show! dbgp d)
+                                                                  (debugger-pane/show-restarts! dbgp (restarts/options f))
+                                                                  (show-right-panel! right :debugger))
+                                                                (set-status! status-label (str "; " err)))
                                                               (do (reset! frames-state d)
                                                                   (debugger-pane/show! dbgp d)
                                                                   (debugger-pane/show-restarts! dbgp (restarts/options @(:failure* cv)))
@@ -3929,15 +3932,24 @@
         edit-the-file "; Edit the file and Run it again."
         retry-fn (fn []
                    (if-let [f @(:failure* cv)]
-                     (if-let [t (tab-by-id tabs (:tab-id f))]
-                       (if (= :run (:kind f))
-                         (do-run! {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label})
-                         (do (cview/echo-entry! cv (:code f) (not (ev/evaluating? @ev*)))
-                             (do-repl-eval! (:ed t) cv ev* status-label (:code f)
-                                            (cond-> {:hook-source (:kind f) :hook-tab (:id t)}
-                                              ;; as Run Selection and Run Form send them
-                                              (#{:selection :form} (:kind f))
-                                              (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t))))))
+                     ;; a REPL entry doesn't belong to its tab: any tab will do
+                     (if-let [t (or (tab-by-id tabs (:tab-id f)) (when (= :repl (:kind f)) (active-tab)))]
+                       (let [ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
+                             code (:code f)
+                             buffer? (#{:selection :form} (:kind f))]
+                         (cond
+                           (= :run (:kind f)) (do-run! ctx)
+                           ;; the checks Run Selection and Run Form make first
+                           (and buffer? (or (refuse-foreign! ctx)
+                                            (and (not (ev/evaluating? @ev*))
+                                                 (before-run-stopped ctx (:kind f) t code))))
+                           nil
+                           :else
+                           (do (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
+                               (do-repl-eval! (:ed t) cv ev* status-label code
+                                              (cond-> {:hook-source (:kind f) :hook-tab (:id t)}
+                                                ;; as Run Selection and Run Form send them
+                                                buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t)))))))
                        (set-status! status-label "; The tab that failed is closed."))
                      (set-status! status-label nothing-failed)))
         edit-retry-fn (fn []
