@@ -341,6 +341,12 @@
              (catch Throwable _ nil)))
       (call-wait-input! running false))))
 
+(defn breakable?
+  "True when an eval sent with opts may pause (Break on error on): only the
+  person's own, never a quiet one or one marked :no-break."
+  [state opts]
+  (boolean (and (:break-on? state) (not (:quiet opts)) (not (:no-break opts)))))
+
 (defn paused-message
   "The child's jonquil-paused message as frames-data's map, or nil."
   [m]
@@ -377,10 +383,9 @@
   interrupt!'s id path once. That's safe even if a real Stop lands at the
   same moment: interrupt!'s own CAS only lets one caller trigger
   the restart future per id."
-  [ev code {:keys [run? path on-output quiet]}]
+  [ev code {:keys [run? path on-output] :as opts}]
   (let [{:keys [conn session]} (runtime ev)
-        ;; Break on error: only the person's own evaluations may pause
-        breakable? (and (:break-on? @(:state ev)) (not quiet))
+        break? (breakable? @(:state ev) opts)
         acc (atom [])
         done (promise)
         msg (if run?
@@ -391,7 +396,7 @@
               ;; jolt-lang/jolt #1460 keeps no ns across evals of its own
               (cond-> {:op "eval" :code code :session session}
                 (:prompt-ns @(:state ev)) (assoc :ns (str (:prompt-ns @(:state ev))))))
-        msg (cond-> msg breakable? (assoc :jonquil-break "1"))
+        msg (cond-> msg break? (assoc :jonquil-break "1"))
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
@@ -426,7 +431,8 @@
     (when (and nss (not (:auto-required? (runtime ev))))
       (swap! state assoc-in [:runtime :auto-required?] true)
       (when on-output (on-output :system (str (clj/auto-require-message nss) "\n")))
-      (let [done (send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output})
+      ;; :no-break: the project's auto-require is no eval the person typed
+      (let [done (send-main! ev (clj/auto-require-code nss) {:run? false :on-output on-output :no-break true})
             req-id (get-in @state [:running :id])
             msgs @done]
         ;; The require is over, so a Stop from here on must find no id and

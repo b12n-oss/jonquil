@@ -870,6 +870,12 @@
   (is (= {:continued? false} (nrepl/resumed-message {:jonquil-resumed "stopped"})))
   (is (nil? (nrepl/resumed-message {:value "1"}))))
 
+(deftest breakable-test
+  (is (true? (nrepl/breakable? {:break-on? true} {})))
+  (is (false? (nrepl/breakable? {:break-on? true} {:quiet "token:"})) "a quiet eval")
+  (is (false? (nrepl/breakable? {:break-on? true} {:no-break true})) "auto-require's")
+  (is (false? (nrepl/breakable? {:break-on? false} {}))))
+
 (defn- toggle-break-sync [e]
   (let [p (promise)] (ev/toggle-break! e (fn [r] (deliver p r))) (deref p 20000 :timeout)))
 
@@ -890,8 +896,9 @@
     (try
       (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
       (let [r (toggle-break-sync e)]
-        (if (:error r)
-          (is (string? (:error r)) "a child without jolt.debug says so, and the rest is skipped")
+        (if (and (:error r) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP break-in-the-child-test: this child can't break:" (:error r))
+              (is (string? (:error r)) "a child without jolt.debug says so"))
           (let [paused (atom (promise))
                 resumed (atom [])]
             (is (= {:on? true} r))
@@ -920,6 +927,7 @@
                 (is (some? (deref @paused 20000 nil)))
                 (ev/interrupt! e)
                 (is (= :interrupted (:status (deref done 20000 :timeout))))
+                (is (= {:continued? false} (last @resumed)) "the pause is dropped")
                 (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))))
             (testing "a quiet eval never pauses"
               (reset! paused (promise))

@@ -15,7 +15,9 @@
   (measured 2026-11-02, AOT-loaded and in debug mode). Only an eval the
   client sent with \"jonquil-break\" \"1\" arms its session, and a call
   nested inside a wrapped one (the program's own load-string) passes
-  straight through. The pause and its end go to the client on the eval's
+  straight through. The client sends one eval at a time per session, so the
+  arming set when an eval arrives is the one that runs (and it ends with
+  that eval). The pause and its end go to the client on the eval's
   own reply, as \"jonquil-paused\" (frames-data, printed) and
   \"jonquil-resumed\" (\"continued\" or \"stopped\"), with no status."
   (:require [clojure.java.io :as io]
@@ -55,14 +57,22 @@
     (let [e *session-break*]
       (if (and e @(:armed? e) (not *inside*))
         (binding [*inside* true]
-          ((debugger/break-wrapper
-            (:break e)
-            {:on-pause (fn [d]
-                         (send! e {"jonquil-paused" (binding [*print-length* nil *print-level* nil] (pr-str d))}))
-             :on-resume (fn [{:keys [continued?]}]
-                          (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
-             :resolve-file resource-url})
-           (fn [] (f code))))
+          (try
+            ((debugger/break-wrapper
+              (:break e)
+              {:on-pause (fn [d]
+                           (send! e {"jonquil-paused" (binding [*print-length* nil *print-level* nil] (pr-str d))}))
+               :on-resume (fn [{:keys [continued?]}]
+                            (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
+               :resolve-file resource-url})
+             (fn [] (f code)))
+            (finally
+              ;; the arming was this eval's: nothing else the worker runs
+              ;; after it counts as the person's. A pause a Stop's interrupt
+              ;; left published (its cleanup skipped) ends here too; the
+              ;; client drops its own when the eval finishes.
+              (reset! (:armed? e) false)
+              (debugger/end-stale-pause! (:break e) {}))))
         (f code)))))
 
 (defonce ^:private installed (atom false))

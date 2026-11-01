@@ -114,3 +114,20 @@
   (with-redefs [debugger/*break-fn* fake-break]
     (let [{:keys [h]} (setup)]
       (is (= [{"status" ["done"] "available" "true"}] (ask h {"op" "jonquil-break-check" "session" "s1"}))))))
+
+(deftest arming-ends-with-the-eval-test
+  ;; an armed eval disarms its session when it ends, so nothing else that
+  ;; runs on the worker afterwards counts as the person's eval
+  (with-redefs [debugger/*break-fn* fake-break]
+    (let [{:keys [h entry]} (setup)]
+      (h {"op" "eval" "session" "s1" "jonquil-break" "1" :reply (fn [_])})
+      (is (= 3 (deref (eval-under entry (fn [_] 3)) 3000 :blocked)))
+      (is (false? @(:armed? entry)))
+      (testing "and when it ends in a continued pause"
+        (h {"op" "eval" "session" "s1" "jonquil-break" "1" :reply (fn [_])})
+        (let [fut (eval-under entry (fn [_] (/ 1 0)))]
+          (is (wait-for #(some? @(:paused (:break entry)))))
+          (debugger/continue! (:break entry))
+          (is (instance? ArithmeticException (deref fut 3000 :blocked)))
+          (is (false? @(:armed? entry)))
+          (is (nil? @(:paused (:break entry)))))))))
