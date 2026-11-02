@@ -78,11 +78,11 @@
         (let [paused (when (= op :start-local)
                        (debugger/paused-local (:break @state) (:error-id args) (:frame args) (:local args)))
               local (when (= op :start-local)
-                      (if-let [e (when (= ::debugger/missing paused) (:last-error @state))]
+                      (if-let [e (when (= ::debugger/not-paused paused) (:last-error @state))]
                         (if (debugger/stale? e (:error-id args))
                           ::stale
                           (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
-                        paused))
+                        (if (= ::debugger/not-paused paused) ::debugger/missing paused)))
               traced (case op
                        :start-trace (trace-rt/value (:id args) (:part args))
                        :start-result (let [v (results-rt/value (:id args) (:epoch args))]

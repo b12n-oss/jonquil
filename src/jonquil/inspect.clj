@@ -1,5 +1,6 @@
 (ns jonquil.inspect
-  (:require [clojure.edn :as edn]))
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]))
 
 (def unavailable-message
   "Inspect needs a runtime Jonquil can inspect: in-process Jolt, or a JVM server with clojure-cli.repl's inspector.")
@@ -21,14 +22,15 @@
     :start {:op "inspect-start" :rows (:rows args) :cols (:cols args)}
     ;; a local of the last error's frame: only Jonquil's Jolt middleware
     :start-local {:op "inspect-local" :frame (:frame args) :local (:local args)
-                  :rows (:rows args) :cols (:cols args) :error-id (:error-id args)}
+                  :rows (:rows args) :cols (:cols args) :error-id (:error-id args)
+                  :label (:label args)}
     ;; a traced call's value (jonquil.trace-rt): only Jonquil's Jolt middleware.
     ;; trace-id, never id, which is the nREPL message's own
     :start-trace {:op "inspect-trace" :trace-id (:id args) :part (name (:part args))
-                  :rows (:rows args) :cols (:cols args)}
+                  :rows (:rows args) :cols (:cols args) :label (:label args)}
     ;; a console result's value (jonquil.results-rt): only Jonquil's Jolt middleware
     :start-result {:op "inspect-result" :result-id (:id args) :result-epoch (:epoch args)
-                   :rows (:rows args) :cols (:cols args)}
+                   :rows (:rows args) :cols (:cols args) :label (:label args)}
     :in {:op "inspect-in" :idx (:idx args)}
     :out {:op "inspect-out"}
     :page {:op "inspect-page" :delta (:delta args)}
@@ -38,6 +40,18 @@
     ;; Jonquil's own history ops: only its Jolt middleware answers them
     :earlier {:op "inspect-earlier"}
     :later {:op "inspect-later"}))
+
+(def ^:private LABEL-MAX 40)
+
+(defn root-label
+  "The inspector's name for a value opened from text (a console line, a
+  traced call): its first line, cut at LABEL-MAX characters; *1 when
+  there's nothing to show."
+  [s]
+  (let [line (first (str/split-lines (str/trim (str s))))]
+    (cond (str/blank? line) "*1"
+          (> (count line) LABEL-MAX) (str (subs line 0 LABEL-MAX) "…")
+          :else line)))
 
 (defn parse-view
   "Parse a server view string to a map. A blank or unreadable string gives

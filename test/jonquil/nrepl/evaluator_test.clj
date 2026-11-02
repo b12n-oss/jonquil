@@ -957,8 +957,9 @@
       (let [{:keys [entries]} (trace-sync e :log {:since -1})
             id (:id (first entries))]
         (is (= ["(user/ttf 2)"] (mapv :args entries)))
-        (let [v (inspect e :start-trace {:id id :part :ret :rows 10 :cols 40})]
-          (is (re-find #"\b20\b" (pr-str v)) (pr-str v))))
+        (let [v (inspect e :start-trace {:id id :part :ret :label "(user/ttf 2)" :rows 10 :cols 40})]
+          (is (re-find #"\b20\b" (pr-str v)) (pr-str v))
+          (is (= "(user/ttf 2)" (:path v)) "a traced call is labelled by the call")))
       (is (= "20" (:printed (first (run e "*1" false)))) "the trace ops left *1 alone")
       (is (= {:count 1} (trace-sync e :untrace-all {})))
       (finally (ev/stop! e)))))
@@ -974,6 +975,7 @@
         (is (= :exception (:kind (:ref err))))
         (is (= "3" (:printed (first (run e "*1" false)))) "the keep op left *1 alone")
         (run e "(+ 10 10)" false)
-        (let [v (inspect e :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :rows 10 :cols 40})]
-          (is (re-find #"\b3\b" (pr-str v)) (pr-str v))))
+        (let [v (inspect e :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :label "3" :rows 10 :cols 40})]
+          (is (re-find #"\b3\b" (pr-str v)) (pr-str v))
+          (is (= "3" (:path v)) "a clicked result is labelled by its line")))
       (finally (ev/stop! e)))))

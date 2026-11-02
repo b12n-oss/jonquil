@@ -130,7 +130,9 @@
           marked? (await-until 3000 20 #(= 1 (count (ranges ui))))
           mark (on-gtk (support/out-end-offset ui))
           _ (on-gtk (run-palette! ui "run the forms changed"))
-          said? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "; Running 1 changed form")))
+          said? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "; Running 1 changed form")
+                                           ;; echoed as an entry, so Clear Last Output finds it
+                                           (str/includes? (support/since ui mark) "(defn cc [] 10)")))
           redefined? (= 10 ((resolve 'user/cc)))
           kept? (= 1 @@(resolve 'user/hits))
           cleared? (await-until 3000 20 #(empty? (ranges ui)))

@@ -293,6 +293,8 @@
     (repl-sync s "(/ 1 0)")
     (binding [debugger/*frames-fn* (fn [_] [{:fn 'f :file nil :line 1 :locals {'xs [1 2]}}])]
       (is (= 2 (:total (inspect-sync s :start-local {:frame 0 :local "xs" :rows 10 :cols 40}))))
+      (is (= "xs" (:path (inspect-sync s :start-local {:frame 0 :local "xs" :label "xs" :rows 10 :cols 40})))
+          "a local is labelled by its name")
       (is (= {:error "That local is gone."} (inspect-sync s :start-local {:frame 0 :local "zz" :rows 10 :cols 40}))))))
 
 (defn- frame-eval-sync [s i code error-id]
@@ -395,4 +397,6 @@
     (is (nil? (:ref quiet)) "a quiet evaluation keeps nothing")
     (repl-sync s "(+ 10 10)")
     (is (re-find #"\b3\b" (pr-str (inspect-sync s :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :rows 10 :cols 40})))
-        "the first result, by its ref, after later ones")))
+        "the first result, by its ref, after later ones")
+    (is (= "3" (:path (inspect-sync s :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :label "3" :rows 10 :cols 40})))
+        "a clicked result is labelled by its line, not *1")))

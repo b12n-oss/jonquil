@@ -439,10 +439,11 @@
   nil)
 
 (defn paused-local
-  "The value of local-name in the paused error's frame i, or ::missing
-  when nothing is paused or error-id names another error."
+  "The value of local-name in the paused error's frame i: ::missing when
+  that frame has no such local, ::not-paused when nothing is paused or
+  error-id names another error (the caller then asks the last error)."
   [{:keys [paused]} error-id i local-name]
   (let [p @paused]
     (if (and p (= error-id (:error-id (:data p))))
       (local-value (:error p) i local-name {:frames-fn (fn [_] (:frames p))})
-      ::missing)))
+      ::not-paused)))

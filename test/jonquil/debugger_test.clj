@@ -238,13 +238,15 @@
       (is (= "ArithmeticException: Divide by zero" (:error (ask brk 0 "(/ x 0)"))))
       (is (= {:out "" :text "21"} (ask brk 0 "x"))))
     (is (= 21 (debugger/paused-local brk (:error-id d) 0 "x")))
-    (is (= ::debugger/missing (debugger/paused-local brk "other" 0 "x")))
+    (is (= ::debugger/not-paused (debugger/paused-local brk "other" 0 "x")) "another error")
+    (is (= ::debugger/missing (debugger/paused-local brk (:error-id d) 0 "nope"))
+        "paused, but the frame has no such local: gone, not another error's")
     (is (true? (debugger/continue! brk)))
     (is (identical? boom (deref fut 3000 :blocked)))
     (is (= [{:continued? true}] @resumed))
     (is (false? (debugger/continue! brk)))
     (is (= {:error "Not paused any more."} (ask brk 0 "x")))
-    (is (= ::debugger/missing (debugger/paused-local brk (:error-id d) 0 "x")))))
+    (is (= ::debugger/not-paused (debugger/paused-local brk (:error-id d) 0 "x")))))
 
 (deftest break-interrupt-ends-the-pause-test
   (let [{:keys [brk fut paused resumed thread]} (start-break (fn [] (/ 1 0)))]

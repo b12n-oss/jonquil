@@ -1230,7 +1230,8 @@
   (let [ed (:ed tab)
         out (atom [])
         opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false
-                                                        :hook-code text :failure* (:failure* cv))
+                                                        :hook-code text :failure* (:failure* cv)
+                                                        :changed (:changed ed))
                                                  out notify)
                                  extra-opts))]
     (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
@@ -1359,6 +1360,9 @@
           (let [code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))]
             (when-not (or (refuse-foreign! ctx)
                           (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
+              ;; echoed as an entry, as Run Form's is, so Clear Last Output
+              ;; finds it and its Running line
+              (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
               (cview/append! cv :system (str "; Running " (count forms) " changed form"
                                              (when (> (count forms) 1) "s") "\n"))
               (do-repl-eval! ed cv ev* status-label code {:ns-source text :owner (:id tab)
@@ -4048,7 +4052,7 @@
                  :on-local (fn [i local-name]
                              (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
                                             on-view status-label
-                                            [:start-local {:frame i :local local-name
+                                            [:start-local {:frame i :local local-name :label local-name
                                                            :error-id (:error-id @frames-state)}]))
                  :on-eval (fn [i code]
                             (let [e (frames-ev)
@@ -4078,16 +4082,20 @@
            tracep {:on-activate (fn [entry]
                                   (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
                                                  on-view status-label
-                                                 [:start-trace {:id (:id entry) :part (if (:threw entry) :args :ret)}]))
+                                                 [:start-trace {:id (:id entry) :part (if (:threw entry) :args :ret)
+                                                                :label (inspect/root-label (:args entry))}]))
                    :on-close (fn [] (hide-right-panel! right :trace))})
         ;; Live console results (LM1): a click on a result line inspects
         ;; its value; the verbs act on the result at the console's caret
         ;; (a right-click moves the caret there first)
         result-at-caret (fn [] (let [off (g/cursor-offset (:buf cv))]
                                  [(cview/result-at cv off) (cview/result-text-at cv off)]))
-        inspect-result! (fn [ref]
+        ;; labelled by its line, since *1 names only the latest result
+        inspect-result! (fn [ref text]
                           (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
-                                         on-view status-label [:start-result {:id (:id ref) :epoch (:epoch ref)}]))
+                                         on-view status-label
+                                         [:start-result {:id (:id ref) :epoch (:epoch ref)
+                                                         :label (inspect/root-label (results/copy-text (or text "")))}]))
         no-result "; No result here."
         ;; each verb asks the kind's table (jonquil.results) before acting
         with-result (fn [verb not-offered f]
@@ -4095,7 +4103,7 @@
                         (cond (nil? ref) (set-status! status-label no-result)
                               (not (results/offered? verb (:kind ref))) (set-status! status-label not-offered)
                               :else (f ref text))))
-        result-inspect-fn (fn [] (with-result :inspect no-result (fn [ref _] (inspect-result! ref))))
+        result-inspect-fn (fn [] (with-result :inspect no-result (fn [ref text] (inspect-result! ref text))))
         result-copy-fn (fn [] (with-result :copy no-result
                                 (fn [_ text]
                                   (g/gdk-clipboard-set-text (g/gtk-widget-get-clipboard (:view cv)) (results/copy-text text))
@@ -4137,14 +4145,40 @@
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
             (g/gtk-widget-add-controller (:view cv) rclick))
-        result-click! (fn [offset] (when-let [ref (cview/result-at cv offset)] (inspect-result! ref)))
-        ;; a single primary click, with no text selected by it, on a result line
+        result-click! (fn [offset] (when-let [ref (cview/result-at cv offset)]
+                                     (inspect-result! ref (cview/result-text-at cv offset))))
+        ;; a single primary click, with no text selected by it, on a result
+        ;; line. It waits out GTK's double-click time (400 ms, its default
+        ;; gtk-double-click-time) and a second press cancels it, so a
+        ;; double-click that selects a word never opens the inspector first.
+        click-gen (atom 0)
         _ (let [click (g/gtk-gesture-click-new)]
+            (g/g-signal-connect-data click "pressed"
+                                     (callable (fn [_gesture n-press _x _y _data]
+                                                 (when (> n-press 1) (swap! click-gen inc))
+                                                 nil)
+                                               [:pointer :int :double :double :pointer] :void)
+                                     ffi/null ffi/null g/CONNECT-DEFAULT)
             (g/g-signal-connect-data click "released"
                                      (callable (fn [_gesture n-press _x _y _data]
                                                  (when (= 1 n-press)
-                                                   (let [[a b] (g/selection-offsets (:buf cv))]
-                                                     (when (= a b) (result-click! (g/cursor-offset (:buf cv))))))
+                                                   (let [[a b] (g/selection-offsets (:buf cv))
+                                                         ;; the result clicked, resolved now: output
+                                                         ;; trimmed while the click waits moves every span
+                                                         off (g/cursor-offset (:buf cv))
+                                                         ref (cview/result-at cv off)
+                                                         text (cview/result-text-at cv off)
+                                                         n (swap! click-gen inc)]
+                                                     (when (and ref (= a b))
+                                                       (future
+                                                         (Thread/sleep 400)
+                                                         (on-gui! (fn []
+                                                                    (let [[a2 b2] (g/selection-offsets (:buf cv))]
+                                                                      ;; still the last click, nothing selected
+                                                                      ;; since, and its line still on screen
+                                                                      (when (and (= n @click-gen) (= a2 b2)
+                                                                                 (some #(= ref (:ref %)) @(:results cv)))
+                                                                        (inspect-result! ref text)))))))))
                                                  nil)
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)

@@ -90,16 +90,16 @@
       "inspect-local"
       ;; a paused break's local first (Break on error), then the last error's
       (let [paused (break-middleware/paused-local-for (g "session") (g "error-id") (as-long (g "frame")) (g "local"))
-            v (if-let [e (when (= ::debugger/missing paused) *e)]
+            v (if-let [e (when (= ::debugger/not-paused paused) *e)]
                 (if (debugger/stale? e (g "error-id"))
                   ::stale
                   (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)}))
-                paused)]
+                (if (= ::debugger/not-paused paused) ::debugger/missing paused))]
         {"status" ["done"]
          "view" (pr-str (case v
                             ::debugger/missing {:error "That local is gone."}
                             ::stale {:error debugger/STALE}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
       "jonquil-frame-eval"
       ;; "frame-out", not "out": a client streams any "out" it sees
       (let [token (debugger/make-token)]
@@ -132,14 +132,14 @@
         {"status" ["done"]
          "view" (pr-str (if (= v ::results-rt/gone)
                             {:error "That result is gone."}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
       "inspect-trace"
       (let [v (trace-rt/value (as-long (g "trace-id")) (keyword (g "part")))]
         {"status" ["done"]
          "view" (pr-str (cond
                           (= v ::trace-rt/gone) {:error "That call is gone."}
                           (= v ::trace-rt/lazy) {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
-                          :else (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+                          :else (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
       "jonquil-frame-interrupt"
       (do (some-> @frame-token debugger/interrupt-token!)
           {"status" ["done"]})

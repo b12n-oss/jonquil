@@ -166,12 +166,12 @@
 (defonce ^:private sessions (atom {}))
 
 (defn paused-local-for
-  "The value of local-name in session sid's paused error's frame i, or
-  :jonquil.debugger/missing."
+  "The value of local-name in session sid's paused error's frame i, as
+  jonquil.debugger/paused-local answers (::not-paused without a session)."
   [sid error-id i local-name]
   (if-let [e (get @sessions sid)]
     (debugger/paused-local (:break e) error-id i local-name)
-    ::debugger/missing))
+    ::debugger/not-paused))
 
 (defn break
   "The middleware: Break on error for every session cloned through it."

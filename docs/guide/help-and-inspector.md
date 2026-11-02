@@ -125,7 +125,9 @@ panel takes focus until you close it.
 The panel on the right shows a path, the value's type and size, a toolbar
 (Back, Earlier, Later, Meta, Table, Def, Close), the rows, and a footer of keys. A
 collection's rows read `label · preview`; maps sharing the same keys
-become a table.
+become a table. The path starts with where the value came from: `*1` for the
+last result, the printed line for a console result you clicked (its first 40
+characters), a local's name, or a traced call such as `(demo.core/area 3)`.
 
 - Up and Down move. Return or Right goes in; Left or Backspace comes out.
 - Page Up and Page Down page through long collections.
@@ -168,8 +170,9 @@ at 1000 entries (`1000+ items`). Runtime support is in
 
 Every result and error line the console prints keeps hold of its value, so
 an older one stays inspectable after later entries. Click a result line and
-the inspector opens on that value; a drag that selects text doesn't count as
-a click. Right-click a line (which puts the caret there) or put the caret in
+the inspector opens on that value a moment later, once a double-click would
+have come; a double-click selects a word instead, and a drag that selects
+text doesn't count as a click either. Right-click a line (which puts the caret there) or put the caret in
 it, and the console's menu and the palette act on that result:
 
 - **Inspect This Result** opens it in the inspector.

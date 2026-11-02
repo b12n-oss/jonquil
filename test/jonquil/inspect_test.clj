@@ -143,3 +143,14 @@
       (is (= "No later object." (:note state))))
     (testing "away from the ends it still asks"
       (is (= [:later] (:request (inspect/key-step oldest :later)))))))
+
+(deftest start-requests-carry-label-test
+  (is (= "x" (:label (inspect/request :start-result {:id 1 :epoch "e" :label "x" :rows 1 :cols 2}))))
+  (is (= "xs" (:label (inspect/request :start-local {:frame 0 :local "xs" :label "xs" :rows 1 :cols 2}))))
+  (is (= "(f 1)" (:label (inspect/request :start-trace {:id 1 :part :ret :label "(f 1)" :rows 1 :cols 2})))))
+
+(deftest root-label-test
+  (is (= "[1 2 3]" (inspect/root-label "[1 2 3]")))
+  (is (= "{:a 1" (inspect/root-label "{:a 1\n :b 2}")) "the first line only")
+  (is (= (str (apply str (repeat 40 "x")) "…") (inspect/root-label (apply str (repeat 50 "x")))))
+  (is (= "*1" (inspect/root-label "")) "nothing to show: the last value's name"))

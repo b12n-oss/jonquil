@@ -65,16 +65,18 @@
                              {:r1 r1 :r2 r2 :at-prompt at-prompt :r1-after r1-after :r2-gone r2-gone?})))))
 
 (defn row-result-click-inspects
-  "A click on a result line opens that value in the inspector."
+  "A click on a result line opens that value in the inspector, headed by
+  its own line rather than *1."
   [ui]
   (go-row :result-click-inspects support/check
     (try
       (let [m (enter! ui "[1 2 3]")
             _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> [1 2 3]")))
             _ (on-gtk ((:result-click!* ui) (offset-in ui "=> [1 2 3]")))
-            inspected? (await-until 3000 20 #(str/includes? (g/label-text (:info (:inspector ui))) "3 items"))]
-        (on-gtk (support/check :result-click-inspects inspected?
-                               {:inspected inspected? :info (g/label-text (:info (:inspector ui)))})))
+            inspected? (await-until 3000 20 #(str/includes? (g/label-text (:info (:inspector ui))) "3 items"))
+            header (on-gtk (g/label-text (:header (:inspector ui))))]
+        (on-gtk (support/check :result-click-inspects (and inspected? (= "[1 2 3]" header))
+                               {:inspected inspected? :header header :info (g/label-text (:info (:inspector ui)))})))
       (finally (on-gtk ((:close-inspector!* ui)))))))
 
 (defn row-result-verbs
