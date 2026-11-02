@@ -164,6 +164,29 @@ at 1000 entries (`1000+ items`). Runtime support is in
 
 </details>
 
+### Live results
+
+Every result and error line the console prints keeps hold of its value, so
+an older one stays inspectable after later entries. Click a result line and
+the inspector opens on that value; a drag that selects text doesn't count as
+a click. Right-click a line (or put the caret in it) for what that kind of
+value offers, in the console's menu and the palette:
+
+- **Inspect This Result** opens it in the inspector.
+- **Copy This Result** copies the printed value, without the `=> `.
+- **Define a Var for This Result** puts `(def  (jonquil.results-rt/value! 7))`
+  at the prompt with the caret where the name goes, so the live value gets a
+  name; Enter defines it.
+- **Jump to This Var**, for a var such as `#'demo.core/area`, opens its
+  definition as F12 does.
+
+The kinds are a value, a var, a namespace and an exception, and the menu's
+verbs come from a table of them. The last 100 results are kept; an older one
+says it's gone, and Define's form throws "That result is gone." for it rather
+than defining a placeholder. Live results come from Jolt, in process or in a
+project's Jolt child, and quiet evaluations (completion, help) keep nothing;
+other runtimes print results as plain text.
+
 ## Tracing a function
 
 **Trace the function at the caret**, in the palette, wraps that function so

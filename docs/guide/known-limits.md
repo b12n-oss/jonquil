@@ -47,10 +47,11 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>The debugger and tracing</strong> (6)</summary>
+<summary><strong>The debugger, tracing and live results</strong> (7)</summary>
 
 - Tracing is for Jolt only, and doesn't record a traced function's call to
   itself.
+- Live console results are for Jolt only; the last 100 are kept.
 - Frames, their locals and Break on error need a Jolt with `jolt.debug`,
   which is on Jolt's main branch and not yet in a release.
 - A top-level expression typed at the prompt keeps no frame of its own: its
