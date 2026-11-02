@@ -19,8 +19,8 @@ works, the languages Jonquil runs, and how it's put together.
    - [Files and tabs](files-and-tabs.md): Open and Save, tabs, Finder and
      the Dock, the file tree.
    - [Help and the inspector](help-and-inspector.md): completion, quick
-     doc, jump, rename, the palette, inspecting values, and the last
-     error's frames.
+     doc, jump, rename, the palette, inspecting values, the last
+     error's frames, the restarts, and Break on error.
    - [Dialects and runtimes](dialects/index.md): choosing a dialect and
      running Jolt out of process, then a page each for
      [ClojureDart](dialects/clojuredart.md),

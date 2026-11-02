@@ -159,11 +159,16 @@ flowchart LR
 
 ### Middleware in the out-of-process Jolt child
 
-Three nREPL middleware namespaces run in the child. Jonquil embeds their text at compile time (the installed binary has no source tree) and writes them to a hash-named folder under `$XDG_CACHE_HOME/jonquil/nrepl-middleware` (or `~/.cache`), which `jonquil.nrepl.child` adds as a `:local/root` dep. If the child can't load them, it restarts without them and the start lines name jolt's error.
+Four nREPL middleware namespaces run in the child. Jonquil embeds their text at compile time (the installed binary has no source tree) and writes them to a hash-named folder under `$XDG_CACHE_HOME/jonquil/nrepl-middleware` (or `~/.cache`), which `jonquil.nrepl.child` adds as a `:local/root` dep. If the child can't load them, it restarts without them and the start lines name jolt's error.
 
 - `inspect-middleware` (last): middleware ops rather than evals, because `jolt.nrepl/evaluate` shifts `*1 *2 *3` after every eval. Ops are answered one at a time on their own future, and view state is one atom per child, shared by its clients.
 - `stdin-middleware` (first): binds `*in*` around `clone` so every eval in the session reads Jonquil's stdin reader, which sends `need-input` and blocks on a queue the `stdin` op feeds. It also wakes a blocked read on `interrupt`. A plain server gets the inspector alone.
+- `break-middleware` (first, beside stdin's): Break on error. It binds a per-session break around `clone` and wraps `jolt.host/eval-string` and `load-string` once, because `jolt.nrepl/evaluate` catches every throw inside its own `try`; only an eval the client marks with `jonquil-break` can pause, and the pause goes out on that eval's reply. At start it checks that `evaluate` reaches the wrappers. `inspect-middleware` also answers the Frames panel's ops (`jonquil-frames`, `jonquil-frame-eval`, `inspect-local`, `jonquil-debug-mode`) over the child's `*e`.
 - `info-middleware` (last): the `jonquil-info` op reads a var's metadata (file and line), which jolt-lang/nrepl's `lookup` lacks, so jump to definition can leave the buffer. A bare file name is never resolved against the directory. The "Jump to definition stays in this buffer" limit shows only when a live child doesn't offer the op.
+
+## The debugger
+
+`jonquil.debugger` holds the Frames panel's data and has no GTK, so the Jolt child loads it too. `frames-data` reads a throwable's frames through `jolt.debug/frames`, cut where the evaluator's own frames start, and says so when none is the user's; `eval-in-frame` compiles a form as a fn of the frame's locals in the frame's namespace. Its break (`break-wrapper`) runs an evaluation under `jolt.debug/call-with-break-handler`: on a throw, the handler publishes the pause and serves a queue on the throwing thread (evaluate in a frame, Continue, Stop) until it ends. The in-process session passes it to the engine as `:wrap-eval`; in the child, `break-middleware` does. `jonquil.restarts` decides which restarts a failure offers, and the window records failures from `hooked-opts`. A JVM server gets frames from `jonquil.nrepl.jvm-frames`, a template evaluated there that prints the stack trace's Clojure frames.
 
 ## The eval engine
 
