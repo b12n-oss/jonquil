@@ -28,6 +28,7 @@ when their tool is missing.
 |---|---|---|
 | `bb test:nrepl` | a real Jolt child per test, over `jonquil.nrepl.child` | the jolt-lang/nrepl checkout ([where it comes from](dialects/index.md#where-the-nrepl-middleware-comes-from)) |
 | `bb test:nightly` | the same suite on Jolt's `vnightly` build | `curl`; macOS (arm64, x86_64) or Linux x86_64 |
+| `bb test:debugger` | the debugger's unit tests, the live Jolt-child break test and the window self-test, on a Jolt with `jolt.debug` | `JONQUIL_JOLT_DEBUG`, else `jolt-debug` on `PATH`, else `jolt` once it has `jolt.debug`; skips without one |
 | `bb test:clj` | a real `clojure -M:serve`, started by `dev/clj_server.clj` | Java 17+, `clojure` CLI, network on a first run |
 | `bb test:jank` | a real `jank repl` via the app's launcher | `JONQUIL_JANK`, else `jank` found as the app does; skips without |
 | `bb test:bb` | a real `bb nrepl-server` in a temp project | `bb` on `PATH`; skips without |
@@ -46,10 +47,17 @@ children use it too.
 only with `JONQUIL_BROWSER_LIVE=1 bb test:cljs-node`.
 
 `JONQUIL_JOLT`, set to an executable, is the Jolt program the Jolt child
-runs, in place of the `jolt` on the login `PATH`. The debugger's live child
-test (Break on error) needs a Jolt with `jolt.debug` and skips without one,
-so point it at such a build:
-`JONQUIL_JOLT=$HOME/.local/bin/jolt-debug jolt-debug -M:test jonquil.nrepl.evaluator-test`.
+runs, in place of the `jolt` on the login `PATH`.
+
+The released Jolt (v0.8.23) has no `jolt.debug`, so on it the debugger's
+tests (frames, Break on error, evaluating in a frame) take their "not
+available" path and pass without testing anything: a window self-test row
+reads `break-pauses PASS {:available false}`. `bb test:debugger` runs them on
+a Jolt that has it, sets `JONQUIL_JOLT` for the live child test, and fails
+when one of them skipped or a debugger row took that path. Run it before
+merging a change that touches the debugger, the evaluators or the child's
+middleware, until a Jolt release carries `jolt.debug`. `--no-window` leaves
+out the window self-test for a quicker pass.
 
 </details>
 
