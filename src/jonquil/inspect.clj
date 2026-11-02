@@ -22,6 +22,10 @@
     ;; a local of the last error's frame: only Jonquil's Jolt middleware
     :start-local {:op "inspect-local" :frame (:frame args) :local (:local args)
                   :rows (:rows args) :cols (:cols args) :error-id (:error-id args)}
+    ;; a traced call's value (jonquil.trace-rt): only Jonquil's Jolt middleware.
+    ;; trace-id, never id, which is the nREPL message's own
+    :start-trace {:op "inspect-trace" :trace-id (:id args) :part (name (:part args))
+                  :rows (:rows args) :cols (:cols args)}
     :in {:op "inspect-in" :idx (:idx args)}
     :out {:op "inspect-out"}
     :page {:op "inspect-page" :delta (:delta args)}

@@ -13,6 +13,7 @@
             [clojure.set :as set]
             [jonquil.clj :as clj]
             [jonquil.debugger :as debugger]
+            [jonquil.trace-rt :as trace-rt]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -81,14 +82,21 @@
                           ::stale
                           (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
                         paused))
+              traced (when (= op :start-trace) (trace-rt/value (:id args) (:part args)))
+              local (cond (= traced ::trace-rt/gone) ::gone
+                          (= traced ::trace-rt/lazy) ::lazy
+                          :else local)
               [op' args'] (case op
                             :start [:start (assoc args :value (:last-value @state))]
                             :start-local [:start (assoc args :value local)]
+                            :start-trace [:start (assoc args :value traced)]
                             :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
                             [op args])]
           (try (on-view (case local
                           ::debugger/missing {:error "That local is gone."}
                           ::stale {:error debugger/STALE}
+                          ::gone {:error "That call is gone."}
+                          ::lazy {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
                           (view/run-op (:inspect-view @state) op' args')))
                (catch Throwable _)))
         (catch Throwable e
@@ -136,6 +144,13 @@
   (break-eval! [_ i code on-result]
     (debugger/break-eval! (:break @state) i code (fn [r] (try (on-result r) (catch Throwable _)))))
   (continue-break! [_] (debugger/continue! (:break @state)))
+  ev/Trace
+  (trace-op! [_ op args on-result]
+    (future
+      (let [r (try (trace-rt/op op args)
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
   ev/Owners
   (release-owner! [_ owner] (release-owner-in! state owner) nil))
 

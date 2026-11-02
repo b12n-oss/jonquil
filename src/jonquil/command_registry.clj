@@ -41,6 +41,11 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :run/changed {:doc "Run the forms changed since they last ran." :scope :window
                  :run (call :run-changed-fn)}
+   :trace/toggle {:doc "Trace the function at the caret, or stop tracing it." :scope :window
+                  :run (call :trace-toggle-fn)}
+   :trace/show {:doc "Show the calls of the traced functions." :scope :window :run (call :trace-show-fn)}
+   :trace/clear {:doc "Clear the recorded calls." :scope :window :run (call :trace-clear-fn)}
+   :trace/untrace-all {:doc "Stop tracing every function." :scope :window :run (call :trace-untrace-all-fn)}
    :run/time-form {:doc "Time the form at the caret (about a second)." :scope :window
                    :run (call :time-form-fn)}
    :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window

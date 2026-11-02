@@ -164,6 +164,38 @@ at 1000 entries (`1000+ items`). Runtime support is in
 
 </details>
 
+## Tracing a function
+
+**Trace the function at the caret**, in the palette, wraps that function so
+every call to it is recorded; run it again on the same name to stop.
+**Show the calls of the traced functions** opens the Trace panel on the
+right, one row per call, oldest first and indented by how deep it was
+called from another traced function:
+
+```
+(user/tall 2) => [[0 0] [1 1]]
+  (user/tpair 0) => [0 0]
+  (user/tpair 1) => [1 1]
+```
+
+A call that threw reads `threw` and the error, and one still running reads
+`(running)`. Enter on a row opens what that call returned in the inspector,
+or its arguments when it threw. The panel refreshes after every evaluation
+while it's open. Values print as the Frames panel's locals do, and a lazy
+seq nothing has realized is never realized for the row, nor kept, so a
+traced function can still hand out a seq too big to hold. Calls made while
+a lazy result is realized happen after the call that returned it has
+finished, so they show at the top level, not under it. The last 500 calls
+are kept; **Clear the recorded calls** forgets them, and **Stop tracing every
+function** unwraps everything.
+
+Calls from functions compiled before the trace still go through it. Jolt
+doesn't record a traced function's call to itself, only the outer call, and
+redefining a traced function (Run again) replaces the wrapper, so the new
+definition isn't traced. Tracing runs where your code runs, in process or in
+a project's Jolt child, and doesn't touch `*1`; other runtimes say it needs
+Jolt for now.
+
 ## The last error's frames
 
 After an error in Jolt, **Show the last error's frames and locals**, in the

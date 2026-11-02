@@ -21,6 +21,7 @@
             [jonquil.cljs :as cljs]
             [jonquil.command-registry :as cmd-registry]
             [jonquil.changed :as changed]
+            [jonquil.clj :as clj]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.describe :as describe]
@@ -44,6 +45,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
+            [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -814,17 +816,18 @@
 (defn- right-roots
   "{which root} for the panels right's slot holds; a right without
   :review-root, :plugins-root or :history-root (a test's) has fewer."
-  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root]}]
+  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root]}]
   (cond-> {:inspector inspector-root :source source-root}
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)
     locations-root (assoc :locations locations-root)
-    debugger-root (assoc :debugger debugger-root)))
+    debugger-root (assoc :debugger debugger-root)
+    trace-root (assoc :trace trace-root)))
 
 (defn- show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
-  :locations or :debugger) in
+  :locations, :debugger or :trace) in
   the slot and hides the others; any but :history clears
   plugin-history-shown. When the slot was hidden, also sizes h-paned so
   the panel claims about PANEL-WIDTH; while
@@ -973,6 +976,8 @@
                   ;; call from this worker thread with no on-gui! (unlike
                   ;; everything else here).
                   (docs/clear-doc-cache!)
+                  (when-let [f (some-> (:after-eval* cv) deref)]
+                    (try (f) (catch :default _ nil)))
                   (set-status! status-label (if (= :interrupted (:status result)) "Stopped" "Ready"))
                   (cview/reset-busy-hint! cv)
                   (on-gui! (fn [] (cview/note-run-end! cv)))
@@ -3400,7 +3405,9 @@
                                      ;; straight from the engine, never a mirror.
                                      :evaluating? evaluating-fn
                                      :waiting? (fn [] (ev/waiting-for-input? @ev*))})
-            :failure* (atom nil))
+            :failure* (atom nil)
+            ;; a fn the window runs after every evaluation (the Trace panel's refresh)
+            :after-eval* (atom nil))
         _ (reset! *cv cv)
         provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
@@ -3438,6 +3445,7 @@
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
         locp (locations-pane/make-pane)
+        tracep (trace-pane/make-pane)
         dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
@@ -3569,7 +3577,7 @@
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
-               :debugger-root (:root dbgp)
+               :debugger-root (:root dbgp) :trace-root (:root tracep)
                :history-root (:root hp) :source-pane sp}
         _ (reset! *right right)
         ;; The plugin-step! opts for Accept or Reject of the
@@ -3930,6 +3938,56 @@
            locp {:on-activate (fn [i] (when-let [lst (:list @locations-state)]
                                         (goto-location! (assoc lst :index i))))
                  :on-close (fn [] (hide-right-panel! right :locations))})
+        ;; Tracing (LM4, jonquil.trace-rt through ev/Trace): the panel's
+        ;; rows are the whole log, fetched again when shown and after every
+        ;; evaluation while it's showing
+        trace-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/Trace e)) e)))
+        trace-refresh! (fn [show?]
+                         (if-let [e (trace-ev)]
+                           (ev/trace-op! e :log {:since -1}
+                                         (fn [r]
+                                           (on-gui! (fn []
+                                                      (if-let [err (:error r)]
+                                                        (when show? (set-status! status-label (str "; " err)))
+                                                        (do (trace-pane/show! tracep (:entries r))
+                                                            (when show? (show-right-panel! right :trace))))))))
+                           (when show? (set-status! status-label "; Trace needs Jolt."))))
+        trace-said (fn [msg] (on-gui! (fn [] (set-status! status-label msg))))
+        trace-toggle-fn (fn []
+                          (if-let [e (trace-ev)]
+                            (let [snap (editor/snapshot (:ed (active-tab)))
+                                  sym (:symbol (help/target snap))]
+                              (if (or (nil? sym) (str/starts-with? (str sym) ":"))
+                                (set-status! status-label "; No function at the caret.")
+                                (let [n (str (or (clj/buffer-ns (:text snap)) (ev/prompt-ns e)))]
+                                  (ev/trace-op! e :trace {:sym sym :ns n}
+                                                (fn [r]
+                                                  (cond
+                                                    (:already r)
+                                                    (ev/trace-op! e :untrace {:sym sym :ns n}
+                                                                  (fn [u] (trace-said (if (:untraced u)
+                                                                                        (str "; Stopped tracing " (:untraced u) ".")
+                                                                                        (str "; " (:error u))))))
+                                                    (:traced r) (trace-said (str "; Tracing " (:traced r) "."))
+                                                    :else (trace-said (str "; " (:error r)))))))))
+                            (set-status! status-label "; Trace needs Jolt.")))
+        trace-show-fn (fn [] (trace-refresh! true))
+        trace-clear-fn (fn []
+                         (if-let [e (trace-ev)]
+                           (ev/trace-op! e :clear {} (fn [_] (trace-said "; Cleared the recorded calls.")
+                                                       (trace-refresh! false)))
+                           (set-status! status-label "; Trace needs Jolt.")))
+        trace-untrace-all-fn (fn []
+                               (if-let [e (trace-ev)]
+                                 (ev/trace-op! e :untrace-all {}
+                                               (fn [r] (trace-said (if-let [n (:count r)]
+                                                                     (str "; Stopped tracing " n " function" (when (not= 1 n) "s") ".")
+                                                                     (str "; " (:error r))))))
+                                 (set-status! status-label "; Trace needs Jolt.")))
+        _ (reset! (:after-eval* cv)
+                  (fn [] (on-gui! (fn [] (when (and (pos? (g/gtk-widget-get-visible (:root tracep)))
+                                                    (pos? (g/gtk-widget-get-visible slot)))
+                                           (trace-refresh! false))))))
         locations-tab-closed! (fn [id]
                                 (when (= id (:tab-id @locations-state))
                                   (clear-locations!)
@@ -4010,6 +4068,14 @@
                                             (do (when (seq (:out r)) (cview/append! cv :out (:out r)))
                                                 (cview/append! cv :result (str "=> " (:text r) "\n"))))))))))))
                  :on-close (fn [] (hide-right-panel! right :debugger))})
+        ;; The Trace panel's rows: Enter inspects that call's value (its
+        ;; arguments, for a call that threw)
+        _ (trace-pane/set-handlers!
+           tracep {:on-activate (fn [entry]
+                                  (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
+                                                 on-view status-label
+                                                 [:start-trace {:id (:id entry) :part (if (:threw entry) :args :ret)}]))
+                   :on-close (fn [] (hide-right-panel! right :trace))})
         ;; The restarts (jonquil.restarts) for cv's last failure
         nothing-failed "; Nothing has failed since the last success."
         edit-the-file "; Edit the file and Run it again."
@@ -4125,6 +4191,8 @@
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
+                         :trace-toggle-fn trace-toggle-fn :trace-show-fn trace-show-fn
+                         :trace-clear-fn trace-clear-fn :trace-untrace-all-fn trace-untrace-all-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
@@ -4213,6 +4281,8 @@
     (g/gtk-box-append slot (:root locp))
     (g/gtk-widget-set-vexpand (:root dbgp) 1)
     (g/gtk-box-append slot (:root dbgp))
+    (g/gtk-widget-set-vexpand (:root tracep) 1)
+    (g/gtk-box-append slot (:root tracep))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -4222,6 +4292,7 @@
     (g/gtk-widget-set-visible (:root lp) 0)
     (g/gtk-widget-set-visible (:root locp) 0)
     (g/gtk-widget-set-visible (:root dbgp) 0)
+    (g/gtk-widget-set-visible (:root tracep) 0)
     (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
@@ -4930,6 +5001,7 @@
                    :locations-pane locp
                    ;; the Frames panel and the inspector's own Close
                    :debugger-pane dbgp
+                   :trace-pane tracep
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})
