@@ -400,3 +400,18 @@
         "the first result, by its ref, after later ones")
     (is (= "3" (:path (inspect-sync s :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :label "3" :rows 10 :cols 40})))
         "a clicked result is labelled by its line, not *1")))
+
+;; --- the break handlers hear each evaluation start --------------------------------
+
+(deftest eval-start-handler-test
+  (let [s (session/make-session)
+        starts (atom 0)]
+    (ev/set-break-handlers! s {:on-eval-start #(swap! starts inc)})
+    (repl-sync s "(+ 1 2)")
+    (is (= 1 @starts) "a person's evaluation starts once")
+    (run session/submit-repl! s "(+ 4 5)" {:quiet true})
+    (is (= 1 @starts) "a quiet evaluation never calls it")
+    (repl-sync s "(+ 1 2)")
+    (is (= 2 @starts))
+    (ev/set-break-handlers! s {:on-eval-start #(throw (ex-info "boom" {}))})
+    (is (= "3" (:printed (repl-sync s "(+ 1 2)"))) "a throwing handler doesn't stop the evaluation")))

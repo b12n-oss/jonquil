@@ -397,6 +397,10 @@
               (cond-> {:op "eval" :code code :session session}
                 (:prompt-ns @(:state ev)) (assoc :ns (str (:prompt-ns @(:state ev))))))
         msg (cond-> msg break? (assoc :jonquil-break "1"))
+        ;; the break handlers hear a person's evaluation start
+        _ (when-not (:quiet opts)
+            (when-let [f (:on-eval-start (:break-handlers @(:state ev)))]
+              (try (f) (catch Throwable _ nil))))
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)

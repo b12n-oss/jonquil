@@ -979,3 +979,18 @@
           (is (re-find #"\b3\b" (pr-str v)) (pr-str v))
           (is (= "3" (:path v)) "a clicked result is labelled by its line")))
       (finally (ev/stop! e)))))
+
+;; --- the break handlers hear each evaluation start in the child -------------------
+
+(deftest eval-start-handler-in-the-child-test
+  (let [e (make (temp-project))
+        starts (atom 0)]
+    (try
+      (ev/set-break-handlers! e {:on-eval-start #(swap! starts inc)})
+      ;; the first run may add the project's auto-require, so count a delta
+      (run e "(+ 1 2)" false)
+      (let [before @starts]
+        (is (pos? before))
+        (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
+        (is (= (inc before) @starts) "one start per evaluation"))
+      (finally (ev/stop! e)))))

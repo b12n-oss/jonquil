@@ -246,18 +246,24 @@
         dir (:project-dir @state)]
     (eval/eval-async ctx code
                      (assoc opts
-                            ;; The project's :paths and :deps as Jolt's roots,
-                            ;; resolved on the worker: a first resolve can fetch
-                            ;; dependencies, which mustn't freeze the window.
-                            :before-eval (when dir (fn []
-                                                     (roots/use-project-deps! dir)
-                                                     (if (and (:quiet opts) (:on-output opts))
-                                                       ;; a quiet eval's *out* is the plugin's:
-                                                       ;; the auto-require lines are the person's
-                                                       (let [s (with-out-str (binding [*err* *out*]
-                                                                               (auto-require! ctx state dir)))]
-                                                         (when (seq s) ((:on-output opts) :system s)))
-                                                       (auto-require! ctx state dir))))
+                            ;; The break handlers hear a person's evaluation
+                            ;; start. Then the project's :paths and :deps as
+                            ;; Jolt's roots, resolved on the worker: a first
+                            ;; resolve can fetch dependencies, which mustn't
+                            ;; freeze the window.
+                            :before-eval (fn []
+                                           (when-not (:quiet opts)
+                                             (when-let [f (:on-eval-start (:break-handlers @state))]
+                                               (try (f) (catch Throwable _ nil))))
+                                           (when dir
+                                             (roots/use-project-deps! dir)
+                                             (if (and (:quiet opts) (:on-output opts))
+                                               ;; a quiet eval's *out* is the plugin's:
+                                               ;; the auto-require lines are the person's
+                                               (let [s (with-out-str (binding [*err* *out*]
+                                                                       (auto-require! ctx state dir)))]
+                                                 (when (seq s) ((:on-output opts) :system s)))
+                                               (auto-require! ctx state dir))))
                             :ns-name ns-sym
                             ;; Break on error; a quiet eval (completion,
                             ;; help, a plugin's) never pauses
