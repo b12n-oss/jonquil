@@ -939,3 +939,25 @@
               (is (= :error (:status (first (run e "(bi 3)" false)))))
               (is (not (realized? @paused)))))))
       (finally (ev/stop! e)))))
+
+;; --- trace in the child (LM4) ----------------------------------------------------
+
+(defn- trace-sync [e op args]
+  (let [p (promise)]
+    (ev/trace-op! e op args (fn [r] (deliver p r)))
+    (deref p 20000 :timeout)))
+
+(deftest trace-in-the-child-test
+  (let [e (make (temp-project))]
+    (try
+      (run e "(defn ttf [x] (* 10 x))" false)
+      (is (= {:traced "user/ttf"} (trace-sync e :trace {:sym "ttf" :ns "user"})))
+      (is (= "20" (:printed (first (run e "(ttf 2)" false)))))
+      (let [{:keys [entries]} (trace-sync e :log {:since -1})
+            id (:id (first entries))]
+        (is (= ["(user/ttf 2)"] (mapv :args entries)))
+        (let [v (inspect e :start-trace {:id id :part :ret :rows 10 :cols 40})]
+          (is (re-find #"\b20\b" (pr-str v)) (pr-str v))))
+      (is (= "20" (:printed (first (run e "*1" false)))) "the trace ops left *1 alone")
+      (is (= {:count 1} (trace-sync e :untrace-all {})))
+      (finally (ev/stop! e)))))

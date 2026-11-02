@@ -16,7 +16,8 @@
   (:require [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]
             [jonquil.inspect.view :as view]
-            [jonquil.nrepl.break-middleware :as break-middleware]))
+            [jonquil.nrepl.break-middleware :as break-middleware]
+            [jonquil.trace-rt :as trace-rt]))
 
 (def ops
   ["inspect-start" "inspect-in" "inspect-out" "inspect-page"
@@ -24,7 +25,9 @@
    "inspect-earlier" "inspect-later"
    ;; the Frames panel (jonquil.debugger), over the session's global *e
    "jonquil-frames" "inspect-local" "jonquil-debug-mode" "jonquil-frame-eval"
-   "jonquil-frame-interrupt"])
+   "jonquil-frame-interrupt"
+   ;; tracing (jonquil.trace-rt): middleware ops, so *1 stays put
+   "jonquil-trace" "inspect-trace"])
 
 (defonce ^:private frame-token
   ;; the token of the frame evaluation running now, for jonquil-frame-interrupt
@@ -109,6 +112,19 @@
               {"status" ["done"] "frame-out" (:out r) "text" (:text r)}))
           (catch Throwable t {"status" ["done"] "error" (or (ex-message t) (str (class t)))})
           (finally (compare-and-set! frame-token token nil))))
+      "jonquil-trace"
+      (try
+        {"status" ["done"]
+         "data" (binding [*print-length* nil *print-level* nil]
+                  (pr-str (trace-rt/op (keyword (g "action"))
+                                       {:sym (g "sym") :ns (g "ns") :since (some-> (g "since") as-long)})))}
+        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
+      "inspect-trace"
+      (let [v (trace-rt/value (as-long (g "trace-id")) (keyword (g "part")))]
+        {"status" ["done"]
+         "view" (pr-str (if (= v ::trace-rt/gone)
+                            {:error "That call is gone."}
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
       "jonquil-frame-interrupt"
       (do (some-> @frame-token debugger/interrupt-token!)
           {"status" ["done"]})

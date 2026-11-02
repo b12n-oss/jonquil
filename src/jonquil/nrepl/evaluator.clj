@@ -769,6 +769,30 @@
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-result r) (catch Throwable _))))
     nil)
+  ;; Tracing: jonquil.nrepl.inspect-middleware's jonquil-trace op, over
+  ;; jonquil.trace-rt in the child
+  ev/Trace
+  (trace-op! [this op args on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-trace")) {:error "Trace needs Jolt."}
+                    :else
+                    (let [r (client/request-sync conn (cond-> {:op "jonquil-trace" :action (name op) :session session}
+                                                        (:sym args) (assoc :sym (str (:sym args)))
+                                                        (:ns args) (assoc :ns (str (:ns args)))
+                                                        (:since args) (assoc :since (:since args)))
+                                                 request-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (some :error r) {:error (some :error r)}
+                            (some :data r) (edn/read-string (some :data r))
+                            :else {:error "The Jolt child answered without the trace."}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
   ;; Break on error: jonquil.nrepl.break-middleware in the child
   ev/Break
   (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)

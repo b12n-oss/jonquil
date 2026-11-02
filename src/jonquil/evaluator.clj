@@ -191,13 +191,23 @@
   (continue-break! [ev]
     "Lets the paused error unwind: true when one was paused."))
 
+(defprotocol Trace
+  "Tracing functions where the code runs (jonquil.trace-rt): the two Jolt
+  runtimes. Callers check (satisfies? Trace ev) first."
+  (trace-op! [ev op args on-result]
+    "Runs a trace op off the caller's thread: :trace and :untrace take
+    {:sym :ns} (the name and the namespace to resolve it in), :untrace-all
+    and :clear take {}, :log takes {:since id}. on-result gets
+    jonquil.trace-rt's answer, or {:error s}."))
+
 (defprotocol Inspector
   "Inspecting the value an evaluator's last :ok result produced,
   through jonquil.inspect.view's lifted ops. op and args are
   jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
   :def :earlier :later; a JVM server's inspector has no history, so its
   evaluator answers :earlier and :later with {:error s}), except :start takes {:rows :cols} (the evaluator supplies the
-  value), :start-local takes {:frame :local :rows :cols :error-id} (a
+  value), :start-trace takes {:id :part :rows :cols} (a traced call's
+  :ret or :args, jonquil.trace-rt), :start-local takes {:frame :local :rows :cols :error-id} (a
   local of the last error's frame i, jonquil.debugger; a stale :error-id
   answers {:error jonquil.debugger/STALE}) and :def takes {:name} (the
   evaluator supplies the target namespace). on-view is called exactly once, from any thread, with a

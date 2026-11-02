@@ -19,6 +19,7 @@
   "Classpath-relative path -> text, for every file the child loads."
   {"jonquil/inspect/view.clj" (embedded-text "jonquil/inspect/view.clj")
    "jonquil/debugger.clj" (embedded-text "jonquil/debugger.clj")
+   "jonquil/trace_rt.clj" (embedded-text "jonquil/trace_rt.clj")
    "jonquil/nrepl/inspect_middleware.clj" (embedded-text "jonquil/nrepl/inspect_middleware.clj")
    "jonquil/nrepl/info_middleware.clj" (embedded-text "jonquil/nrepl/info_middleware.clj")
    "jonquil/nrepl/stdin_middleware.clj" (embedded-text "jonquil/nrepl/stdin_middleware.clj")

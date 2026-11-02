@@ -361,3 +361,24 @@
       (testing "off again"
         (is (= :error (:status (repl-sync s "(/ 1 0)"))))
         (is (not (realized? @paused)))))))
+
+;; --- trace (LM4) -------------------------------------------------------------
+
+(defn- trace-sync [s op args]
+  (let [p (promise)]
+    (ev/trace-op! s op args (fn [r] (deliver p r)))
+    (deref p 2000 :timeout)))
+
+(deftest trace-in-process-test
+  (let [s (session/make-session)]
+    (try
+      (repl-sync s "(defn ttf [x] (* 10 x))")
+      (is (= {:traced "user/ttf"} (trace-sync s :trace {:sym "ttf" :ns "user"})))
+      (is (= "20" (:printed (repl-sync s "(ttf 2)"))))
+      (let [{:keys [entries]} (trace-sync s :log {:since -1})
+            id (:id (first entries))]
+        (is (= ["(user/ttf 2)"] (mapv :args entries)))
+        (is (= ["20"] (mapv :ret entries)))
+        (is (re-find #"\b20\b" (pr-str (inspect-sync s :start-trace {:id id :part :ret :rows 10 :cols 40})))))
+      (is (= {:count 1} (trace-sync s :untrace-all {})))
+      (finally (trace-sync s :untrace-all {}) (trace-sync s :clear {})))))

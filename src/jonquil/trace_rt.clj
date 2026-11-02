@@ -128,6 +128,17 @@
   (let [es (for [[k e] (:log @state) :when (> k id)] (dissoc e :args-v :ret-v))]
     {:entries (vec es) :last (if (seq es) (:id (last es)) id)}))
 
+(defn op
+  "An evaluator's trace op (jonquil.evaluator/Trace): op :trace, :untrace,
+  :untrace-all, :clear or :log, args as that protocol says."
+  [op {:keys [sym ns since]}]
+  (case op
+    :trace (trace! sym ns)
+    :untrace (untrace! sym ns)
+    :untrace-all (untrace-all!)
+    :clear (do (clear!) {:cleared true})
+    :log (log-since (or since -1))))
+
 (defn value
   "Entry id's live :ret or :args, or ::gone once it left the log."
   [id part]
