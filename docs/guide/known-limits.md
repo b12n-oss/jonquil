@@ -47,6 +47,22 @@ Known rough edges, parked for later:
 </details>
 
 <details>
+<summary><strong>The debugger</strong> (5)</summary>
+
+- Frames, their locals and Break on error need a Jolt with `jolt.debug`,
+  which is on Jolt's main branch and not yet in a release.
+- A top-level expression typed at the prompt keeps no frame of its own: its
+  error shows frames only inside a function it called.
+- Debug mode (Keep every local) keeps tail calls only for `recur`, so deep
+  recursion that isn't `recur` can run out of stack while it's on.
+- Nothing resumes a paused error or changes a local: Continue lets it
+  unwind, and the restarts run the evaluation again.
+- JVM Clojure frames come from the stack trace and keep no locals, and a
+  JVM evaluation can't pause before it unwinds.
+
+</details>
+
+<details>
 <summary><strong>ClojureDart</strong> (7)</summary>
 
 - Stop detaches instead of interrupting, and there is no stdin.
