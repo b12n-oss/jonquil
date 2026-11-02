@@ -125,7 +125,9 @@ panel takes focus until you close it.
 The panel on the right shows a path, the value's type and size, a toolbar
 (Back, Earlier, Later, Meta, Table, Def, Close), the rows, and a footer of keys. A
 collection's rows read `label · preview`; maps sharing the same keys
-become a table.
+become a table. The path starts with where the value came from: `*1` for the
+last result, the printed line for a console result you clicked (its first 40
+characters), a local's name, or a traced call such as `(demo.core/area 3)`.
 
 - Up and Down move. Return or Right goes in; Left or Backspace comes out.
 - Page Up and Page Down page through long collections.
