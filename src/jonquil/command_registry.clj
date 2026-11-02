@@ -39,6 +39,8 @@
    :inspect/form {:doc "Inspect the value of the form at the caret." :scope :window
                   :run (call :inspect-form-fn)}
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
+   :run/changed {:doc "Run the forms changed since they last ran." :scope :window
+                 :run (call :run-changed-fn)}
    :run/time-form {:doc "Time the form at the caret (about a second)." :scope :window
                    :run (call :time-form-fn)}
    :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window

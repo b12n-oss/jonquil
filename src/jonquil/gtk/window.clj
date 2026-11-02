@@ -20,6 +20,7 @@
             [jonquil.cljd :as cljd]
             [jonquil.cljs :as cljs]
             [jonquil.command-registry :as cmd-registry]
+            [jonquil.changed :as changed]
             [jonquil.commands :as commands]
             [jonquil.console :as console]
             [jonquil.describe :as describe]
@@ -39,6 +40,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.gutter :as gutter]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
@@ -1027,15 +1029,15 @@
 
 (defn- hooked-opts
   "opts without :hook-source (:run :selection :form :repl), :hook-tab,
-  :hook-code and :failure*, and, when it had a source, its :on-complete
+  :hook-code, :failure* and :changed, and, when it had a source, its :on-complete
   chained so the plugins' :after-run and :on-error hooks hear how the eval
   ended, and the window's failure* atom records an error (or clears on
   success) for the restarts. Only
   opts handed to ev/eval! come here, so an eval that never started fires
   nothing. after-eval! only starts futures and reports its own throws, so
   the eval's own completion is never lost to it."
-  [{:keys [hook-source hook-tab hook-code failure* on-complete] :as opts}]
-  (let [opts (dissoc opts :hook-source :hook-tab :hook-code :failure*)]
+  [{:keys [hook-source hook-tab hook-code failure* changed on-complete] :as opts}]
+  (let [opts (dissoc opts :hook-source :hook-tab :hook-code :failure* :changed)]
     (if-not hook-source
       opts
       (assoc opts :on-complete
@@ -1046,6 +1048,11 @@
                (when failure*
                  (restarts/record-failure! failure* {:kind hook-source :code hook-code :tab-id hook-tab}
                                            result console/error-text))
+               ;; LM3: what ran :ok is no longer changed (jonquil.changed)
+               (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
+                 (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
+                      ((deref (:refresh changed)))
+                      (catch :default _ nil)))
                (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
 (defn- before-run-stopped
@@ -1102,7 +1109,8 @@
                                        :run? true :path @path-atom :owner id)]
                        (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
                                            :hook-source :run :hook-tab id
-                                           :hook-code (editor/editor-text ed) :failure* (:failure* cv)))))]
+                                           :hook-code (editor/editor-text ed) :failure* (:failure* cv)
+                                           :changed (:changed ed)))))]
      (cond
        refused (when notify (notify {:refused refused}))
        (ev/evaluating? @ev*)
@@ -1170,7 +1178,8 @@
   ([ed cv ev* status-label text extra-opts]
    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
          warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false
-                                                                :hook-code text :failure* (:failure* cv))
+                                                                :hook-code text :failure* (:failure* cv)
+                                                                :changed (:changed ed))
                                                          extra-opts)))]
      (when warning (cview/append! cv :system warning)))))
 
@@ -1323,6 +1332,28 @@
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
                                                     :hook-source :form :hook-tab (:id tab)}))
       (set-status! status-label "No form at the caret."))))
+
+(defn- do-run-changed!
+  "Run the forms changed since they last ran (LM3): the tab's changed
+  top-level forms, in buffer order and joined by newlines, sent once the
+  way Run Selection sends code. Says so instead when the tab never ran or
+  nothing changed."
+  [{:keys [tab cv ev* status-label] :as ctx}]
+  (let [ed (:ed tab)
+        ran (some-> (:changed ed) :ran deref)]
+    (if (nil? ran)
+      (set-status! status-label "; Run the tab once first.")
+      (let [text (editor/editor-text ed)
+            forms (changed/changed text ran)]
+        (if (empty? forms)
+          (set-status! status-label "; Nothing has changed since the last run.")
+          (let [code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))]
+            (when-not (or (refuse-foreign! ctx)
+                          (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
+              (cview/append! cv :system (str "; Running " (count forms) " changed form"
+                                             (when (> (count forms) 1) "s") "\n"))
+              (do-repl-eval! ed cv ev* status-label code {:ns-source text :owner (:id tab)
+                                                          :hook-source :selection :hook-tab (:id tab)}))))))))
 
 ;; --- inspector panel -----------------------------------------------------
 
@@ -2125,7 +2156,8 @@
     ;; Every tab's editor and find bar, not just one.
     (doseq [{:keys [ed fb]} @tabs]
       (editor/apply-theme! ed t)
-      (find-bar/apply-theme! fb t))
+      (find-bar/apply-theme! fb t)
+      (some-> (get-in ed [:changed :gutter]) (gutter/apply-theme! t)))
     (cview/apply-theme! cv t)
     (reload-code-css! provider t @zoom-px)
     (g/set-color-scheme! (g/gtk-settings-get-default) (:dark? t))
@@ -2589,6 +2621,30 @@
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
            open-find-fn open-replace-fn window-key-args repl-complete-fn] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
+  ;; LM3: the gutter's marks follow edits, 150 ms after the last change,
+  ;; computed off the GTK thread and drawn only if the text is still the same
+  (when-let [{:keys [ran refresh gutter]} (:changed ed)]
+    (let [pending (atom 0)
+          refresh! (fn []
+                     (on-gui! (fn []
+                                (if-let [r @ran]
+                                  (let [text (editor/editor-text ed)]
+                                    (future
+                                      (when-let [rs (try (mapv (juxt :start :end) (changed/changed text r))
+                                                         (catch Throwable _ nil))]
+                                        (on-gui! (fn [] (when (= text (editor/editor-text ed))
+                                                          (gutter/set-ranges! gutter rs)))))))
+                                  (gutter/set-ranges! gutter [])))))]
+      (reset! refresh refresh!)
+      (g/g-signal-connect-data (:buf ed) "changed"
+                               (callable (fn [_buf _data]
+                                           (when @ran
+                                             (let [n (swap! pending inc)]
+                                               (future (Thread/sleep 150)
+                                                       (when (= n @pending) (refresh!)))))
+                                           nil)
+                                         [:pointer :pointer] :void)
+                               ffi/null ffi/null g/CONNECT-DEFAULT)))
   (let [flash-fns (make-flash-fn ed)
         quick-doc-fn (fn [] (do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
                                             :full-doc-pop full-doc-pop :last-shown last-shown
@@ -3458,6 +3514,8 @@
                            (select-tab! @*tab-ctx (:id (nth ts i))))))
         run-selection-fn (fn [] (do-run-selection! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
                                                     :status-label status-label}))
+        run-changed-fn (fn [] (do-run-changed! {:tab (active-tab) :cv cv :ev* ev* :sel* sel*
+                                                :status-label status-label}))
         ;; The inspector panel. h-paned is the horizontal split (editor+
         ;; console keep their vertical paned as its start child; the
         ;; pane's own :root becomes its end child, wired below once both
@@ -4061,7 +4119,7 @@
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
-                         :break-fn break-fn :continue-fn continue-fn
+                         :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
