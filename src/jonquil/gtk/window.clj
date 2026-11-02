@@ -1360,10 +1360,11 @@
           (let [code (str/join "\n" (map (fn [{:keys [start end]}] (subs text start end)) forms))]
             (when-not (or (refuse-foreign! ctx)
                           (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
+              ;; echoed as an entry, as Run Form's is, so Clear Last Output
+              ;; finds it and its Running line
+              (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
               (cview/append! cv :system (str "; Running " (count forms) " changed form"
                                              (when (> (count forms) 1) "s") "\n"))
-              ;; echoed as an entry, as Run Form's is, so Clear Last Output finds it
-              (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
               (do-repl-eval! ed cv ev* status-label code {:ns-source text :owner (:id tab)
                                                           :hook-source :selection :hook-tab (:id tab)}))))))))
 
@@ -4157,15 +4158,20 @@
                                      (callable (fn [_gesture n-press _x _y _data]
                                                  (when (= 1 n-press)
                                                    (let [[a b] (g/selection-offsets (:buf cv))
-                                                         offset (g/cursor-offset (:buf cv))
+                                                         ;; the result clicked, resolved now: output
+                                                         ;; trimmed while the click waits moves every span
+                                                         ref (cview/result-at cv (g/cursor-offset (:buf cv)))
                                                          n (swap! click-gen inc)]
-                                                     (when (= a b)
+                                                     (when (and ref (= a b))
                                                        (future
                                                          (Thread/sleep 400)
                                                          (on-gui! (fn []
                                                                     (let [[a2 b2] (g/selection-offsets (:buf cv))]
-                                                                      (when (and (= n @click-gen) (= a2 b2))
-                                                                        (result-click! offset)))))))))
+                                                                      ;; still the last click, nothing selected
+                                                                      ;; since, and its line still on screen
+                                                                      (when (and (= n @click-gen) (= a2 b2)
+                                                                                 (some #(= ref (:ref %)) @(:results cv)))
+                                                                        (inspect-result! ref)))))))))
                                                  nil)
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
