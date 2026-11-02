@@ -6,36 +6,33 @@
   namespace: jonquil.nrepl.middleware-files embeds it, and the child loads it
   first in :nrepl/middleware, outside jolt-lang/nrepl's session middleware.
   That middleware runs each eval on the session's worker, which it starts
-  with bound-fn during clone, so *session-break*, bound here around the
-  clone, is that worker's (stdin's *in* works the same way).
+  with bound-fn during clone, so jolt.nrepl/*eval-wrapper*, bound here
+  around the clone, is that worker's (stdin's *in* works the same way).
 
-  jolt.nrepl/evaluate catches every throw inside its own try, so the break
-  sits inside it: install-wrapper! wraps jolt.host/eval-string (an eval) and
-  clojure.core/load-string (a load-file), both reached through their vars
-  (measured 2026-11-02, AOT-loaded and in debug mode). Only an eval the
-  client sent with \"jonquil-break\" \"1\" arms its session, and a call
-  nested inside a wrapped one (the program's own load-string) passes
-  straight through. The client sends one eval at a time per session, so the
-  arming set when an eval arrives is the one that runs (and it ends with
-  that eval). The pause and its end go to the client on the eval's
+  jolt.nrepl/evaluate catches every throw inside its own try, and calls the
+  wrapper inside it with the evaluation's thunk (an eval or a load-file), so
+  the break sees the throw first. A Jolt without the hook (before
+  jolt-lang/jolt#1474) can't pause, and the check says so. Only an eval the
+  client sent with \"jonquil-break\" \"1\" arms its session; the program's
+  own eval-string or load-string isn't wrapped. The client sends one eval
+  at a time per session, so the arming set when an eval arrives is the one
+  that runs (and it ends with that eval). The pause and its end go to the client on the eval's
   own reply, as \"jonquil-paused\" (frames-data, printed) and
   \"jonquil-resumed\" (\"continued\" or \"stopped\"), with no status."
   (:require [clojure.java.io :as io]
             [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]))
 
-(def ^:dynamic *session-break*
-  "The session's break entry (entry), bound around clone so the session's
-  worker has it; nil elsewhere."
-  nil)
+(defn hook-var
+  "jolt.nrepl/*eval-wrapper*, or nil on a Jolt without it. Looked up when
+  called: it doesn't resolve on such a Jolt where this namespace compiles."
+  []
+  (resolve 'jolt.nrepl/*eval-wrapper*))
 
-(def ^:dynamic ^:private *inside*
-  ;; true on a thread already running a wrapped eval-string or load-string
-  false)
-
-(def ^:dynamic ^:private *probe*
-  ;; an atom while install-wrapper! checks that evaluate reaches the wrappers
-  nil)
+(defn hooked?
+  "True when this Jolt's nREPL evaluate takes a wrapper around each eval."
+  []
+  (some? (hook-var)))
 
 (defn entry
   "One session's break state: the break, whether its current eval may
@@ -53,65 +50,29 @@
   (when-let [r @(:reply e)]
     (try (r m) (catch Throwable _ nil))))
 
-(defn wrap
-  "f (eval-string or load-string) under the session's break, when this
-  thread's session is armed and isn't already inside a wrapped call."
-  [f]
-  (fn [code]
-    (when-let [p *probe*] (reset! p true))
-    (let [e *session-break*]
-      (if (and e @(:armed? e) (not *inside*))
-        (binding [*inside* true]
-          (try
-            ((debugger/break-wrapper
-              (:break e)
-              {:on-pause (fn [d]
-                           (send! e {"jonquil-paused" (binding [*print-length* nil *print-level* nil] (pr-str d))}))
-               :on-resume (fn [{:keys [continued?]}]
-                            (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
-               :resolve-file resource-url})
-             (fn [] (f code)))
-            (finally
-              ;; the arming was this eval's: nothing else the worker runs
-              ;; after it counts as the person's. A pause a Stop's interrupt
-              ;; left published (its cleanup skipped) ends here too; the
-              ;; client drops its own when the eval finishes.
-              (reset! (:armed? e) false)
-              (debugger/end-stale-pause! (:break e) {}))))
-        (f code)))))
-
-(defonce ^:private installed (atom false))
-
-(defonce ^:private routed
-  ;; whether jolt.nrepl/evaluate reached both wrappers (install-wrapper!)
-  (atom false))
-
-(defn routed?
-  "True when this Jolt's jolt.nrepl/evaluate reaches the wrappers, for an
-  eval and for a load. A Jolt that calls eval-string or load-string
-  directly would never pause, so the check says so instead."
-  []
-  @routed)
-
-(defn- reaches-wrapper? [opts]
-  (let [hit (atom false)]
-    (binding [*probe* hit]
-      (try (server/evaluate "nil" "user" opts) (catch Throwable _ nil)))
-    @hit))
-
-(defn install-wrapper!
-  "Wraps eval-string and load-string once per process, then checks that
-  evaluate goes through them (two evaluations of nil, when the child
-  starts: *1 is nil then anyway)."
-  []
-  (when (compare-and-set! installed false true)
-    ;; looked up when called: jolt.host/eval-string doesn't resolve where
-    ;; this namespace is compiled
-    (some-> (resolve 'jolt.host/eval-string) (alter-var-root wrap))
-    (alter-var-root #'clojure.core/load-string wrap)
-    (reset! routed (and (reaches-wrapper? {:out (fn [_])})
-                        (reaches-wrapper? {:out (fn [_]) :load true}))))
-  nil)
+(defn session-wrapper
+  "Session e's jolt.nrepl/*eval-wrapper*: runs the evaluation's thunk under
+  the session's break when the eval was armed, else just runs it."
+  [e]
+  (fn [ev]
+    (if @(:armed? e)
+      (try
+        ((debugger/break-wrapper
+          (:break e)
+          {:on-pause (fn [d]
+                       (send! e {"jonquil-paused" (binding [*print-length* nil *print-level* nil] (pr-str d))}))
+           :on-resume (fn [{:keys [continued?]}]
+                        (send! e {"jonquil-resumed" (if continued? "continued" "stopped")}))
+           :resolve-file resource-url})
+         ev)
+        (finally
+          ;; the arming was this eval's: nothing else the worker runs
+          ;; after it counts as the person's. A pause a Stop's interrupt
+          ;; left published (its cleanup skipped) ends here too; the
+          ;; client drops its own when the eval finishes.
+          (reset! (:armed? e) false)
+          (debugger/end-stale-pause! (:break e) {})))
+      (ev))))
 
 (defn- as-long [x] (if (string? x) (parse-long x) x))
 
@@ -125,7 +86,7 @@
       (case (get request "op")
         "clone"
         (let [e (entry)]
-          (binding [*session-break* e]
+          (with-bindings (if-let [v (hook-var)] {v (session-wrapper e)} {})
             (next (assoc request :reply (fn [m]
                                           (when-let [new-sid (get m "new-session")]
                                             (swap! sessions assoc new-sid e))
@@ -138,10 +99,10 @@
         "jonquil-break-check"
         (server/respond request (cond
                                   (not (debugger/break-available?)) {"status" ["done"] "available" "false"}
-                                  (not (routed?))
+                                  (not (hooked?))
                                   {"status" ["done"] "available" "false"
-                                   "reason" (str "This Jolt's nREPL server doesn't evaluate through "
-                                                 "jolt.host/eval-string and load-string, so its errors can't pause.")}
+                                   "reason" (str "This Jolt's nREPL server has no jolt.nrepl/*eval-wrapper*, "
+                                                 "so its errors can't pause.")}
                                   :else {"status" ["done"] "available" "true"}))
         "jonquil-break-eval"
         ;; answered from the paused thread, as jonquil-frame-eval is answered
@@ -176,6 +137,5 @@
 (defn break
   "The middleware: Break on error for every session cloned through it."
   [next]
-  (install-wrapper!)
   (server/register-ops! "jonquil-break-check" "jonquil-break-eval" "jonquil-break-continue")
   (handler sessions next))
