@@ -4224,8 +4224,14 @@
         ;; Break on error (jonquil.debugger's break). The pause comes from the
         ;; worker; the panel shows it with Continue in the restart bar. After
         ;; Continue the error is recorded as a failure, and that refreshes
-        ;; the panel with its frames (break-resumed).
-        break-resumed (atom false)
+        ;; the panel with its frames. break-resumed holds the id of the
+        ;; evaluation that was continued, and ends with that evaluation
+        ;; (:on-eval-end): Inspect Form and Time Form record no failure, and
+        ;; a later, unrelated one mustn't open the panel. An id, not a flag,
+        ;; because the evaluators go idle before on-complete, so the next
+        ;; evaluation can start before this one's failure is recorded.
+        current-eval (atom nil)
+        break-resumed (atom nil)
         show-paused! (fn [d]
                        (let [shown (assoc d :title (str "Paused: " (:title d)))]
                          (reset! frames-state (assoc shown :paused? true))
@@ -4247,14 +4253,17 @@
                                                        ;; the flag on the worker, before the error
                                                        ;; it lets through is recorded as the failure
                                                        :on-resume (fn [how]
-                                                                    (reset! break-resumed (boolean (:continued? how)))
-                                                                    (on-gui! (fn [] (end-paused! how))))})))
+                                                                    (reset! break-resumed (when (:continued? how) @current-eval))
+                                                                    (on-gui! (fn [] (end-paused! how))))
+                                                       :on-eval-start (fn [id] (reset! current-eval id))
+                                                       :on-eval-end (fn [id] (compare-and-set! break-resumed id nil))})))
         _ (register-break! @ev*)
         _ (add-watch ev* ::break (fn [_ _ old new] (when-not (identical? old new) (register-break! new))))
         _ (add-watch (:failure* cv) ::break-refresh
                      (fn [_ _ _ new]
-                       (when (compare-and-set! break-resumed true false)
-                         (when new (on-gui! show-frames-fn)))))
+                       (let [r @break-resumed]
+                         (when (and r (compare-and-set! break-resumed r nil))
+                           (when new (on-gui! show-frames-fn))))))
         break-fn (fn []
                    (let [e @ev*]
                      (if (and e (satisfies? ev/Break e))

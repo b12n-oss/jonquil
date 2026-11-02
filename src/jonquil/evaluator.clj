@@ -178,9 +178,15 @@
   pauses on its worker before anything unwinds. Jolt in process. Callers
   check (satisfies? Break ev) first."
   (set-break-handlers! [ev handlers]
-    "{:on-pause (fn [data]) :on-resume (fn [{:keys [continued?]}])}: called
-    on the paused worker, data being jonquil.debugger/frames-data's map;
-    continued? is false when a Stop ended the pause.")
+    "{:on-pause (fn [data]) :on-resume (fn [{:keys [continued?]}])
+    :on-eval-start (fn [id]) :on-eval-end (fn [id])}: on-pause and
+    on-resume are called on the paused worker, data being
+    jonquil.debugger/frames-data's map, and continued? is false when a Stop
+    ended the pause. For each evaluation that isn't quiet, Break on error on
+    or off, on-eval-start is called before it runs and on-eval-end after its
+    on-complete, both with the same id, an object of its own; their throws
+    are dropped. The evaluator goes idle before on-complete, so the next
+    evaluation can start before on-eval-end.")
   (toggle-break! [ev on-done]
     "Turns Break on error on or off, off the caller's thread; on-done gets
     {:on? b} or {:error s}.")

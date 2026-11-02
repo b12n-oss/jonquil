@@ -400,3 +400,41 @@
         "the first result, by its ref, after later ones")
     (is (= "3" (:path (inspect-sync s :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :label "3" :rows 10 :cols 40})))
         "a clicked result is labelled by its line, not *1")))
+
+;; --- the break handlers hear each evaluation start and end -----------------------
+
+(defn- handler-events
+  "Break handlers that log [:start id] and [:end id completed?] to events,
+  completed? being whether the evaluation's own on-complete ran first."
+  [events completed]
+  {:on-eval-start (fn [id] (swap! events conj [:start id]))
+   :on-eval-end (fn [id] (swap! events conj [:end id @completed]))})
+
+(deftest eval-start-and-end-handlers-test
+  (let [s (session/make-session)
+        events (atom [])
+        completed (atom false)
+        repl! (fn [code opts]
+                (reset! completed false)
+                (let [done (promise)]
+                  (session/submit-repl! s code (assoc opts :on-complete (fn [r] (reset! completed true) (deliver done r))))
+                  (let [r (deref done 5000 :timeout)]
+                    ;; the end handler runs just after on-complete
+                    (loop [n 0] (when (and (< n 100) (not= :end (first (peek @events)))) (Thread/sleep 20) (recur (inc n))))
+                    r)))]
+    (ev/set-break-handlers! s (handler-events events completed))
+    (repl! "(+ 1 2)" {})
+    (let [[[k1 id1] [k2 id2 done?]] @events]
+      (is (= [:start :end] [k1 k2]))
+      (is (and (some? id1) (identical? id1 id2)) "the same evaluation's id")
+      (is (true? done?) "the end comes after the evaluation's own on-complete"))
+    (let [first-id (second (first @events))]
+      (reset! events [])
+      (session/submit-repl! s "(+ 4 5)" {:quiet true :on-complete (fn [_])})
+      (Thread/sleep 300)
+      (is (= [] @events) "a quiet evaluation calls neither")
+      (repl! "(+ 1 2)" {})
+      (is (not (identical? first-id (second (first @events)))) "each evaluation has its own id"))
+    (ev/set-break-handlers! s {:on-eval-start (fn [_] (throw (ex-info "boom" {})))
+                               :on-eval-end (fn [_] (throw (ex-info "boom" {})))})
+    (is (= "3" (:printed (repl! "(+ 1 2)" {}))) "throwing handlers don't stop the evaluation")))

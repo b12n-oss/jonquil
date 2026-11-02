@@ -243,21 +243,31 @@
   [{:keys [ctx state]} code ns-sym opts]
   (let [before (ns-names)
         user-complete (:on-complete opts)
-        dir (:project-dir @state)]
+        dir (:project-dir @state)
+        ;; this evaluation, for the break handlers' :on-eval-start and
+        ;; :on-eval-end; a quiet one calls neither
+        eval-id (when-not (:quiet opts) (Object.))
+        tell (fn [k] (when eval-id
+                       (when-let [f (k (:break-handlers @state))]
+                         (try (f eval-id) (catch Throwable _ nil)))))]
     (eval/eval-async ctx code
                      (assoc opts
-                            ;; The project's :paths and :deps as Jolt's roots,
-                            ;; resolved on the worker: a first resolve can fetch
-                            ;; dependencies, which mustn't freeze the window.
-                            :before-eval (when dir (fn []
-                                                     (roots/use-project-deps! dir)
-                                                     (if (and (:quiet opts) (:on-output opts))
-                                                       ;; a quiet eval's *out* is the plugin's:
-                                                       ;; the auto-require lines are the person's
-                                                       (let [s (with-out-str (binding [*err* *out*]
-                                                                               (auto-require! ctx state dir)))]
-                                                         (when (seq s) ((:on-output opts) :system s)))
-                                                       (auto-require! ctx state dir))))
+                            ;; The break handlers hear a person's evaluation
+                            ;; start. Then the project's :paths and :deps as
+                            ;; Jolt's roots, resolved on the worker: a first
+                            ;; resolve can fetch dependencies, which mustn't
+                            ;; freeze the window.
+                            :before-eval (fn []
+                                           (tell :on-eval-start)
+                                           (when dir
+                                             (roots/use-project-deps! dir)
+                                             (if (and (:quiet opts) (:on-output opts))
+                                               ;; a quiet eval's *out* is the plugin's:
+                                               ;; the auto-require lines are the person's
+                                               (let [s (with-out-str (binding [*err* *out*]
+                                                                       (auto-require! ctx state dir)))]
+                                                 (when (seq s) ((:on-output opts) :system s)))
+                                               (auto-require! ctx state dir))))
                             :ns-name ns-sym
                             ;; Break on error; a quiet eval (completion,
                             ;; help, a plugin's) never pauses
@@ -287,7 +297,9 @@
                                          ;; (completion, help) never replaces it
                                          (and (= :error (:status result)) (not (:quiet opts)))
                                          (assoc :last-error (:error result)))))
-                              (when user-complete (user-complete result))))))))
+                              ;; the end after on-complete, which records the failure
+                              (try (when user-complete (user-complete result))
+                                   (finally (tell :on-eval-end)))))))))
 
 (defn- program-vars
   "{var meta} for every var interned in a namespace that isn't a loaded

@@ -11,6 +11,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.debugger-pane :as dpane]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]))
@@ -243,6 +244,72 @@
             (on-gtk (support/check :break-stop-blocked (and on? running? stopped? (not paused?))
                                    {:on on? :running running? :stopped stopped? :paused paused?})))
           (finally (break-off! ui)))))))
+
+(defn row-break-flag-ends-with-its-eval
+  "Continue at a break in Inspect Form, which records no failure, then a
+  later error with Break on error off: the Frames panel stays closed, since
+  Continue's refresh belonged to the evaluation that paused."
+  [ui]
+  (go-row :break-flag-ends-with-its-eval support/check
+    (if-not (debugger/available?)
+      (on-gtk (support/check :break-flag-ends-with-its-eval true {:available false}))
+      (let [dp (:debugger-pane ui)
+            ed (:editor ui)]
+        (try
+          (on-gtk (run-palette! ui "break on error"))
+          (let [on? (await-until 3000 20 #(= (status ui) BREAK-ON))
+                _ (on-gtk (editor/set-text! ed "(/ 1 0)")
+                          (support/place-cursor! (:buf ed) 2)
+                          ((:inspect-form!* ui)))
+                paused? (await-until 5000 20 #(str/starts-with? (dpane/title-text dp) "Paused:"))
+                _ (on-gtk (dpane/press-restart! dp :continue))
+                continued? (await-until 5000 20 #(support/idle? ui))
+                _ (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+                closed? (await-until 3000 20 #(zero? (g/gtk-widget-get-visible (:root dp))))
+                _ (on-gtk (run-palette! ui "break on error"))
+                off? (await-until 3000 20 #(= (status ui) BREAK-OFF))
+                m (enter! ui "(/ 1 0)")
+                errored? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "Divide by zero")))
+                _ (<! (timeout 500))
+                shown? (on-gtk (pos? (g/gtk-widget-get-visible (:root dp))))]
+            (on-gtk (support/check :break-flag-ends-with-its-eval
+                                   (and on? paused? continued? closed? off? errored? (not shown?))
+                                   {:on on? :paused paused? :continued continued? :closed closed?
+                                    :off off? :errored errored? :panel-shown shown? :title (dpane/title-text dp)})))
+          (finally (break-off! ui)))))))
+
+(defn row-break-flag-survives-next-start
+  "The evaluators go idle before on-complete, so the next evaluation can
+  start before the paused one's failure is recorded. Driven through the
+  window's own break handlers in that order: Continue's refresh still
+  happens, and the next evaluation's end leaves it alone."
+  [ui]
+  (go-row :break-flag-survives-next-start support/check
+    (let [dp (:debugger-pane ui)
+          failure* (:failure* (:console ui))
+          saved @failure*
+          h (:break-handlers @(:state (:session ui)))
+          a (Object.) b (Object.)]
+      (try
+        ((:on-eval-start h) a)
+        ((:on-resume h) {:continued? true})
+        ;; the next evaluation starts in the gap, before a's failure lands
+        ((:on-eval-start h) b)
+        (reset! failure* {:kind :repl :code "(/ 1 0)" :error-text "ArithmeticException: Divide by zero"})
+        ((:on-eval-end h) a)
+        (let [shown? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root dp))))]
+          (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+          ;; b's own Continue, then a's end arriving late: b's refresh stays
+          ((:on-resume h) {:continued? true})
+          ((:on-eval-end h) a)
+          (reset! failure* {:kind :repl :code "(/ 2 0)" :error-text "ArithmeticException: Divide by zero"})
+          (let [shown-b? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root dp))))]
+            (on-gtk (support/check :break-flag-survives-next-start (and shown? shown-b?)
+                                   {:shown shown? :shown-b shown-b?}))))
+        (finally
+          ((:on-eval-end h) b)
+          (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+          (reset! failure* saved))))))
 
 (defn row-break-off-by-default
   "With Break on error off, an entry that throws errors at once."
