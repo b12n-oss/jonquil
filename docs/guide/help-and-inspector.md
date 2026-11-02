@@ -295,11 +295,11 @@ timing). A top-level expression typed at the prompt keeps no frame of its
 own, so its locals show only inside a function it called; when no frame is
 your code's, the panel says so instead of listing Jonquil's own. Break on error
 works for Jolt, in process and in a project's Jolt child, where it needs the
-child's Jolt to have `jolt.debug` and the jolt-lang/nrepl middleware Jonquil
-starts it with; the other runtimes say so. In the child it works by wrapping
-`jolt.host/eval-string` and `load-string`, which Jolt's nREPL server calls;
-the child checks that when it starts, and turning it on says so if a Jolt
-ever evaluates another way.
+child's Jolt to have `jolt.debug`, the jolt-lang/nrepl middleware Jonquil
+starts it with, and `jolt.nrepl/*eval-wrapper*`, the hook Jolt's nREPL
+server calls around each evaluation (Jolt main since 2026-11-02, not yet in
+a release). Turning it on says so when one of them is missing, and the other
+runtimes say so too.
 
 ### Restarts
 
