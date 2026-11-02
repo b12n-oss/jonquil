@@ -122,9 +122,10 @@
       "inspect-trace"
       (let [v (trace-rt/value (as-long (g "trace-id")) (keyword (g "part")))]
         {"status" ["done"]
-         "view" (pr-str (if (= v ::trace-rt/gone)
-                            {:error "That call is gone."}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+         "view" (pr-str (cond
+                          (= v ::trace-rt/gone) {:error "That call is gone."}
+                          (= v ::trace-rt/lazy) {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
+                          :else (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
       "jonquil-frame-interrupt"
       (do (some-> @frame-token debugger/interrupt-token!)
           {"status" ["done"]})
@@ -144,9 +145,10 @@
   [state request]
   (future
     (try
-      (server/respond request (if (#{"jonquil-frame-eval" "jonquil-frame-interrupt"} (get request "op"))
-                                ;; the user's form, as slow as it is: never
-                                ;; under the lock every inspector op takes
+      (server/respond request (if (#{"jonquil-frame-eval" "jonquil-frame-interrupt" "jonquil-trace"} (get request "op"))
+                                ;; the user's form, as slow as it is, and the
+                                ;; trace ops (their own atom): never under the
+                                ;; lock every inspector op takes
                                 (handle state request)
                                 (locking state (handle state request))))
       (catch Throwable e

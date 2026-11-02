@@ -1,6 +1,6 @@
 (ns jonquil.trace-rt-test
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.trace-rt :as trace]))
 
 (defn- fresh [f]
@@ -106,4 +106,13 @@
   (reset! lazy-hits 0)
   (tlazy)
   (is (= "<lazy seq, not realized>" (:ret (first (entries)))))
-  (is (= 0 @lazy-hits)))
+  (is (= 0 @lazy-hits))
+  (testing "nor kept: a traced producer must not hold the head of a seq its caller streams"
+    (is (= ::trace/lazy (trace/value (:id (first (entries))) :ret)))))
+
+(defn tconsume [xs] (count xs))
+
+(deftest a-lazy-argument-is-not-kept-test
+  (trace/trace! 'tconsume here)
+  (tconsume (map inc [1 2]))
+  (is (= ::trace/lazy (trace/value (:id (first (entries))) :args))))

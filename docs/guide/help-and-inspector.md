@@ -182,7 +182,10 @@ A call that threw reads `threw` and the error, and one still running reads
 `(running)`. Enter on a row opens what that call returned in the inspector,
 or its arguments when it threw. The panel refreshes after every evaluation
 while it's open. Values print as the Frames panel's locals do, and a lazy
-seq nothing has realized is never realized for the row. The last 500 calls
+seq nothing has realized is never realized for the row, nor kept, so a
+traced function can still hand out a seq too big to hold. Calls made while
+a lazy result is realized happen after the call that returned it has
+finished, so they show at the top level, not under it. The last 500 calls
 are kept; **Clear the recorded calls** forgets them, and **Stop tracing every
 function** unwraps everything.
 

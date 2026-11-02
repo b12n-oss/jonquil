@@ -83,7 +83,9 @@
                           (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
                         paused))
               traced (when (= op :start-trace) (trace-rt/value (:id args) (:part args)))
-              local (if (= traced ::trace-rt/gone) ::gone local)
+              local (cond (= traced ::trace-rt/gone) ::gone
+                          (= traced ::trace-rt/lazy) ::lazy
+                          :else local)
               [op' args'] (case op
                             :start [:start (assoc args :value (:last-value @state))]
                             :start-local [:start (assoc args :value local)]
@@ -94,6 +96,7 @@
                           ::debugger/missing {:error "That local is gone."}
                           ::stale {:error debugger/STALE}
                           ::gone {:error "That call is gone."}
+                          ::lazy {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
                           (view/run-op (:inspect-view @state) op' args')))
                (catch Throwable _)))
         (catch Throwable e

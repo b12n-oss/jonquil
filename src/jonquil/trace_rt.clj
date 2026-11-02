@@ -23,13 +23,26 @@
 (defn- var-name [v]
   (let [m (meta v)] (str (ns-name (:ns m)) "/" (:name m))))
 
+(defn- unrealized?
+  "An unrealized lazy seq: printed as debugger/value-text prints it, and
+  never kept, since keeping its head would hold every element a caller
+  streams through it for as long as the entry stays in the log."
+  [x]
+  (and (instance? clojure.lang.LazySeq x) (not (realized? x))))
+
+(defn- keepable
+  "v when it may be kept for the inspector, else ::lazy."
+  [v]
+  (if (unrealized? v) ::lazy v))
+
 (defn- call-text [fname args]
   (str "(" fname (when (seq args) " ") (str/join " " (map debugger/value-text args)) ")"))
 
 (defn- begin! [fname args depth]
   (let [s (swap! state (fn [{:keys [next log] :as s}]
                          (let [log (assoc log next {:id next :depth depth :fn fname
-                                                    :args (call-text fname args) :args-v (vec args)
+                                                    :args (call-text fname args)
+                                                    :args-v (if (some unrealized? args) ::lazy (vec args))
                                                     :pending true})
                                log (if (> (count log) CAP) (dissoc log (first (keys log))) log)]
                            (assoc s :next (inc next) :log log))))]
@@ -40,7 +53,7 @@
          (fn [log]
            (if-let [e (get log id)]
              (assoc log id (cond-> (dissoc e :pending)
-                             (= k :ret) (assoc :ret (debugger/value-text v) :ret-v v)
+                             (= k :ret) (assoc :ret (debugger/value-text v) :ret-v (keepable v))
                              (= k :threw) (assoc :threw (str (.getSimpleName (class v)) ": " (ex-message v)))))
              log))))
 
@@ -140,7 +153,8 @@
     :log (log-since (or since -1))))
 
 (defn value
-  "Entry id's live :ret or :args, or ::gone once it left the log."
+  "Entry id's live :ret or :args, ::gone once it left the log, or ::lazy
+  when it was an unrealized lazy seq, which isn't kept."
   [id part]
   (if-let [e (get (:log @state) id)]
     (case part :ret (:ret-v e) :args (:args-v e))
