@@ -1230,7 +1230,8 @@
   (let [ed (:ed tab)
         out (atom [])
         opts (hooked-opts (merge (notifying-opts (assoc (make-eval-opts ed cv ev* status-label false) :run? false
-                                                        :hook-code text :failure* (:failure* cv))
+                                                        :hook-code text :failure* (:failure* cv)
+                                                        :changed (:changed ed))
                                                  out notify)
                                  extra-opts))]
     (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
@@ -1361,6 +1362,8 @@
                           (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab code)))
               (cview/append! cv :system (str "; Running " (count forms) " changed form"
                                              (when (> (count forms) 1) "s") "\n"))
+              ;; echoed as an entry, as Run Form's is, so Clear Last Output finds it
+              (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
               (do-repl-eval! ed cv ev* status-label code {:ns-source text :owner (:id tab)
                                                           :hook-source :selection :hook-tab (:id tab)}))))))))
 
@@ -4138,13 +4141,31 @@
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
             (g/gtk-widget-add-controller (:view cv) rclick))
         result-click! (fn [offset] (when-let [ref (cview/result-at cv offset)] (inspect-result! ref)))
-        ;; a single primary click, with no text selected by it, on a result line
+        ;; a single primary click, with no text selected by it, on a result
+        ;; line. It waits out GTK's double-click time (400 ms, its default
+        ;; gtk-double-click-time) and a second press cancels it, so a
+        ;; double-click that selects a word never opens the inspector first.
+        click-gen (atom 0)
         _ (let [click (g/gtk-gesture-click-new)]
+            (g/g-signal-connect-data click "pressed"
+                                     (callable (fn [_gesture n-press _x _y _data]
+                                                 (when (> n-press 1) (swap! click-gen inc))
+                                                 nil)
+                                               [:pointer :int :double :double :pointer] :void)
+                                     ffi/null ffi/null g/CONNECT-DEFAULT)
             (g/g-signal-connect-data click "released"
                                      (callable (fn [_gesture n-press _x _y _data]
                                                  (when (= 1 n-press)
-                                                   (let [[a b] (g/selection-offsets (:buf cv))]
-                                                     (when (= a b) (result-click! (g/cursor-offset (:buf cv))))))
+                                                   (let [[a b] (g/selection-offsets (:buf cv))
+                                                         offset (g/cursor-offset (:buf cv))
+                                                         n (swap! click-gen inc)]
+                                                     (when (= a b)
+                                                       (future
+                                                         (Thread/sleep 400)
+                                                         (on-gui! (fn []
+                                                                    (let [[a2 b2] (g/selection-offsets (:buf cv))]
+                                                                      (when (and (= n @click-gen) (= a2 b2))
+                                                                        (result-click! offset)))))))))
                                                  nil)
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
