@@ -206,7 +206,8 @@
   jonquil.inspect.view/run-op's own (:start :in :out :page :meta :table
   :def :earlier :later; a JVM server's inspector has no history, so its
   evaluator answers :earlier and :later with {:error s}), except :start takes {:rows :cols} (the evaluator supplies the
-  value), :start-trace takes {:id :part :rows :cols} (a traced call's
+  value), :start-result takes {:id :rows :cols} (a console result's value,
+  jonquil.results-rt), :start-trace takes {:id :part :rows :cols} (a traced call's
   :ret or :args, jonquil.trace-rt), :start-local takes {:frame :local :rows :cols :error-id} (a
   local of the last error's frame i, jonquil.debugger; a stale :error-id
   answers {:error jonquil.debugger/STALE}) and :def takes {:name} (the

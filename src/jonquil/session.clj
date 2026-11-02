@@ -13,6 +13,7 @@
             [clojure.set :as set]
             [jonquil.clj :as clj]
             [jonquil.debugger :as debugger]
+            [jonquil.results-rt :as results-rt]
             [jonquil.trace-rt :as trace-rt]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
@@ -82,7 +83,11 @@
                           ::stale
                           (debugger/local-value e (:frame args) (:local args) {:frames-fn (debugger/frames-fn)}))
                         paused))
-              traced (when (= op :start-trace) (trace-rt/value (:id args) (:part args)))
+              traced (case op
+                       :start-trace (trace-rt/value (:id args) (:part args))
+                       :start-result (let [v (results-rt/value (:id args))]
+                                       (if (= v ::results-rt/gone) ::trace-rt/gone v))
+                       nil)
               local (cond (= traced ::trace-rt/gone) ::gone
                           (= traced ::trace-rt/lazy) ::lazy
                           :else local)
@@ -90,12 +95,13 @@
                             :start [:start (assoc args :value (:last-value @state))]
                             :start-local [:start (assoc args :value local)]
                             :start-trace [:start (assoc args :value traced)]
+                            :start-result [:start (assoc args :value traced)]
                             :def [:def (assoc args :target-ns (the-ns (:prompt-ns @state)))]
                             [op args])]
           (try (on-view (case local
                           ::debugger/missing {:error "That local is gone."}
                           ::stale {:error debugger/STALE}
-                          ::gone {:error "That call is gone."}
+                          ::gone {:error (if (= op :start-result) "That result is gone." "That call is gone.")}
                           ::lazy {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
                           (view/run-op (:inspect-view @state) op' args')))
                (catch Throwable _)))
@@ -264,6 +270,11 @@
                             (fn [result]
                               ;; the backstop for a pause whose cleanup a Stop skipped
                               (debugger/end-stale-pause! (:break @state) (:break-handlers @state))
+                              ;; LM1: the console's line keeps a handle to this value
+                              (let [ref (when (and (not (:quiet opts)) (#{:ok :error} (:status result)))
+                                          (try (results-rt/keep! (if (= :ok (:status result)) (:value result) (:error result)))
+                                               (catch Throwable _ nil)))
+                                    result (cond-> result ref (assoc :ref ref))]
                               (swap! state
                                      (fn [s]
                                        (cond-> (-> s
@@ -276,7 +287,7 @@
                                          ;; (completion, help) never replaces it
                                          (and (= :error (:status result)) (not (:quiet opts)))
                                          (assoc :last-error (:error result)))))
-                              (when user-complete (user-complete result)))))))
+                              (when user-complete (user-complete result))))))))
 
 (defn- program-vars
   "{var meta} for every var interned in a namespace that isn't a loaded
