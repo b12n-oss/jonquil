@@ -210,7 +210,8 @@
   jonquil.results-rt), :start-trace takes {:id :part :rows :cols} (a traced call's
   :ret or :args, jonquil.trace-rt), :start-local takes {:frame :local :rows :cols :error-id} (a
   local of the last error's frame i, jonquil.debugger; a stale :error-id
-  answers {:error jonquil.debugger/STALE}) and :def takes {:name} (the
+  answers {:error jonquil.debugger/STALE}); the three :start-* take an
+  optional :label, the view's name for the value in place of *1; and :def takes {:name} (the
   evaluator supplies the target namespace). on-view is called exactly once, from any thread, with a
   view map (jonquil.inspect.view/run-op's shape) or {:error s} (plus
   :lost? true when the connection that would have answered it is gone),

@@ -99,7 +99,7 @@
          "view" (pr-str (case v
                             ::debugger/missing {:error "That local is gone."}
                             ::stale {:error debugger/STALE}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
       "jonquil-frame-eval"
       ;; "frame-out", not "out": a client streams any "out" it sees
       (let [token (debugger/make-token)]
@@ -132,14 +132,14 @@
         {"status" ["done"]
          "view" (pr-str (if (= v ::results-rt/gone)
                             {:error "That result is gone."}
-                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
       "inspect-trace"
       (let [v (trace-rt/value (as-long (g "trace-id")) (keyword (g "part")))]
         {"status" ["done"]
          "view" (pr-str (cond
                           (= v ::trace-rt/gone) {:error "That call is gone."}
                           (= v ::trace-rt/lazy) {:error "That value was a lazy seq nothing had realized, so it wasn't kept."}
-                          :else (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
+                          :else (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols")) :label (g "label")})))})
       "jonquil-frame-interrupt"
       (do (some-> @frame-token debugger/interrupt-token!)
           {"status" ["done"]})

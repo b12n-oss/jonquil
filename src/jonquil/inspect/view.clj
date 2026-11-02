@@ -115,12 +115,16 @@
 
 (declare push-root)
 
-(defn start [view value rows cols]
-  ;; Jonquil: the history of roots (push-root, below) outlives the reset
-  (reset! view (merge {:stack [{:label "*1" :value (datafy value)}]
-                       :page 0 :rows rows :cols cols :table true}
-                      (push-root @view value)))
-  (respond view))
+(defn start
+  ;; Jonquil: label names where value came from (a console line, a local,
+  ;; a traced call); the history of roots (push-root, below) outlives the
+  ;; reset and keeps each root's label
+  ([view value rows cols] (start view value rows cols "*1"))
+  ([view value rows cols label]
+   (reset! view (merge {:stack [{:label label :value (datafy value)}]
+                        :page 0 :rows rows :cols cols :table true}
+                       (push-root @view value label)))
+   (respond view)))
 
 (defn toggle-table [view]
   (if (:alt-view (render view))
@@ -187,16 +191,16 @@
   10)
 
 (defn push-root
-  "{:roots :at} once value is the newest root: the roots after :at are
-  dropped first (as a browser drops its forward history), a value
-  identical? to the current root isn't added again, and only the newest
-  HISTORY-MAX are kept."
-  [{:keys [roots at]} value]
+  "{:roots :at} once value is the newest root, each root {:value :label}:
+  the roots after :at are dropped first (as a browser drops its forward
+  history), a value identical? to the current root isn't added again, and
+  only the newest HISTORY-MAX are kept."
+  [{:keys [roots at]} value label]
   (let [kept (if at (subvec roots 0 (inc at)) [])]
     ;; the root shown now, inspected again: nothing new, so nothing dropped
-    (if (and at (identical? value (nth roots at)))
+    (if (and at (identical? value (:value (nth roots at))))
       {:roots roots :at at}
-      (let [r (conj kept value)
+      (let [r (conj kept {:value value :label label})
             r (if (> (count r) HISTORY-MAX) (subvec r (- (count r) HISTORY-MAX)) r)]
         {:roots r :at (dec (count r))}))))
 
@@ -205,7 +209,7 @@
         i (+ (or at 0) delta)]
     (if (and roots (<= 0 i (dec (count roots))))
       (do (swap! view assoc :at i :page 0
-                 :stack [{:label "*1" :value (datafy (nth roots i))}])
+                 :stack [(update (nth roots i) :value datafy)])
           (respond view))
       (respond view {:note note}))))
 
@@ -238,7 +242,7 @@
     (with-history
      view
      (case op
-      :start (start view (:value args) (:rows args) (:cols args))
+      :start (start view (:value args) (:rows args) (:cols args) (or (:label args) "*1"))
       :earlier (earlier view)
       :later (later view)
       :in (in view (:idx args))

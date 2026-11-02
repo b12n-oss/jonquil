@@ -147,3 +147,14 @@
     (view/run-op a :earlier {})
     (is (= {:at 1 :count 3} (:history (start! a first-root))))
     (is (= 2 (:total (view/run-op a :later {}))))))
+
+(deftest start-label-test
+  (is (= "*1" (:path (view/run-op (fresh) :start {:value 1 :rows 10 :cols 40}))) "no :label: the last value")
+  (is (= "[1 2 3]" (:path (view/run-op (fresh) :start {:value [1 2 3] :label "[1 2 3]" :rows 10 :cols 40})))))
+
+(deftest history-keeps-labels-test
+  (let [a (fresh)]
+    (view/run-op a :start {:value [1] :label "first" :rows 10 :cols 40})
+    (view/run-op a :start {:value [2] :rows 10 :cols 40})
+    (is (= "first" (:path (view/run-op a :earlier {}))))
+    (is (= "*1" (:path (view/run-op a :later {}))))))
