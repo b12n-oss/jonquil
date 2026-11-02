@@ -38,6 +38,7 @@
     jonquil.mcp.listen-test
     jonquil.session-test
     jonquil.commands-test
+    jonquil.changed-test
     jonquil.keymap-test
     jonquil.command-registry-test
     jonquil.keymap-shipped-test

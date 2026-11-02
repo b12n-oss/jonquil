@@ -56,6 +56,7 @@
     jonquil.nrepl.cljs-node
     jonquil.runtime-registry
     jonquil.commands
+    jonquil.changed
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
