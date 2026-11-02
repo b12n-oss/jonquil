@@ -38,6 +38,7 @@
             [gtk-selftest-window.plugin-history :as plugin-history-rows]
             [gtk-selftest-window.locations :as locations-rows]
             [gtk-selftest-window.debugger :as debugger-rows]
+            [gtk-selftest-window.gutter :as gutter-rows]
             [gtk-selftest-window.restarts :as restarts-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
@@ -377,6 +378,7 @@
    ;; after the inspector's rows: on a Jolt with jolt.debug this opens the
    ;; inspector on a local, and row-inspect-focus-after-open needs the
    ;; window's first open
+   gutter-rows/row-gutter-bars-follow-lines
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default

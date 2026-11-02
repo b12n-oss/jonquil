@@ -3,7 +3,8 @@
   a sibling ClojureDart deck app's theme (palettes and
   syntax-palettes, read 2026-09-25): each Jonquil token kind takes the
   colour of the slides class its tokenizer uses for the same text. The
-  rainbow, :red, :find-highlight, :selection and :caret values are
+  rainbow, :red, :find-highlight, :changed-mark (the gutter bar on a form
+  edited since it last ran), :selection and :caret values are
   Jonquil's own, picked from each palette; :red is never in :rainbow, so
   an unmatched bracket never looks like a matched one.")
 
@@ -12,6 +13,7 @@
    {:name :light :dark? false
     :background "#ffffff" :text "#24292f" :caret "#0066cc"
     :selection "#b6d7ff" :find-highlight "#fff2a8" :red "#cf222e"
+    :changed-mark "#0969da"
     :tokens {:comment "#8c95a0" :string "#0a3069" :char "#0a3069"
              :regex "#9a6700" :keyword "#cf222e" :special-form "#cf222e"
              :number "#0550ae" :builtin "#953800" :constant "#cf222e"
@@ -22,6 +24,7 @@
    {:name :dark :dark? true
     :background "#000000" :text "#e0e0e0" :caret "#6cb4ff"
     :selection "#3e4451" :find-highlight "#5c4b00" :red "#e06c75"
+    :changed-mark "#61afef"
     :tokens {:comment "#6e7480" :string "#98c379" :char "#98c379"
              :regex "#e5c07b" :keyword "#c678dd" :special-form "#c678dd"
              :number "#d19a66" :builtin "#56b6c2" :constant "#c678dd"
@@ -32,6 +35,7 @@
    {:name :solarized :dark? false
     :background "#fdf6e3" :text "#657b83" :caret "#268bd2"
     :selection "#eee8d5" :find-highlight "#f6e3a1" :red "#dc322f"
+    :changed-mark "#268bd2"
     ;; The completion list's selected row: base2 (:selection) is 1.14:1
     ;; against base3, too faint to see; base1 under base03 text is 2.48:1
     ;; against the background and 5.61:1 for the text (WCAG ratios,
@@ -47,6 +51,7 @@
    {:name :navy :dark? true
     :background "#1a1b2e" :text "#c8cad8" :caret "#7eb8da"
     :selection "#2e3250" :find-highlight "#4d4520" :red "#f07178"
+    :changed-mark "#82aaff"
     :tokens {:comment "#6f7390" :string "#c3e88d" :char "#c3e88d"
              :regex "#ffcb6b" :keyword "#c792ea" :special-form "#c792ea"
              :number "#f78c6c" :builtin "#82aaff" :constant "#c792ea"
