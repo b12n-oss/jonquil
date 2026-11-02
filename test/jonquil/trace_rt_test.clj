@@ -116,3 +116,31 @@
   (trace/trace! 'tconsume here)
   (tconsume (map inc [1 2]))
   (is (= ::trace/lazy (trace/value (:id (first (entries))) :args))))
+
+(defn tredef [x] x)
+
+(deftest untrace-after-redefinition-says-so-test
+  (trace/trace! 'tredef here)
+  (alter-var-root #'tredef (constantly (fn [x] (inc x))))
+  (let [r (trace/untrace! 'tredef here)]
+    (is (:error r) "redefined since: nothing was traced any more")
+    (is (re-find #"redefined" (:error r))))
+  (is (= 2 (tredef 1)) "the new definition is untouched"))
+
+(defn tthrows-string [] (throw "plain"))
+
+(deftest a-non-exception-throw-reads-its-text-test
+  (trace/trace! 'tthrows-string here)
+  (is (thrown? Throwable (tthrows-string)))
+  (is (= "plain" (:threw (first (entries))))))
+
+(deftest a-removed-namespace-is-not-traced-test
+  (create-ns 'jonquil.trace-rt-test.gone)
+  (intern 'jonquil.trace-rt-test.gone 'g (fn [] 1))
+  (trace/trace! 'g "jonquil.trace-rt-test.gone")
+  (remove-ns 'jonquil.trace-rt-test.gone)
+  (create-ns 'jonquil.trace-rt-test.gone)
+  (intern 'jonquil.trace-rt-test.gone 'g (fn [] 2))
+  (is (= [] (trace/traced)) "the old var is orphaned: its trace is gone")
+  (is (= {:count 0} (trace/untrace-all!)) "and isn't counted")
+  (remove-ns 'jonquil.trace-rt-test.gone))

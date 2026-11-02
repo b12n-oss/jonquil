@@ -48,13 +48,21 @@
                            (assoc s :next (inc next) :log log))))]
     (dec (:next s))))
 
+(defn- threw-text
+  "What a call threw, as a row reads it: Class: message for a throwable,
+  the value's own text for anything else thrown (Jolt lets a string be)."
+  [v]
+  (if (instance? Throwable v)
+    (str (.getSimpleName (class v)) (when-let [m (ex-message v)] (str ": " m)))
+    (str v)))
+
 (defn- finish! [id k v]
   (swap! state update :log
          (fn [log]
            (if-let [e (get log id)]
              (assoc log id (cond-> (dissoc e :pending)
                              (= k :ret) (assoc :ret (debugger/value-text v) :ret-v (keepable v))
-                             (= k :threw) (assoc :threw (str (.getSimpleName (class v)) ": " (ex-message v)))))
+                             (= k :threw) (assoc :threw (threw-text v))))
              log))))
 
 (defn- wrap [fname orig]
@@ -72,12 +80,21 @@
   (let [n (or (find-ns (symbol (str ns-name))) (the-ns 'user))]
     (try (ns-resolve n (symbol (str sym))) (catch Throwable _ nil))))
 
+(defn- current?
+  "True while trace record e still traces fname: its var holds the wrapper
+  and is still the var fname names (a namespace removed and made again,
+  as Reset on Run does, orphans the old one)."
+  [fname {:keys [var wrapper]}]
+  (and (identical? @var wrapper)
+       (identical? var (try (find-var (symbol fname)) (catch Throwable _ nil)))))
+
 (defn- traced-entry
-  "The trace record for v when v still holds its wrapper; a var redefined
-  since it was traced isn't traced any more."
+  "The trace record for v when it still traces v; a var redefined since it
+  was traced isn't traced any more."
   [v]
-  (let [e (get (:traced @state) (var-name v))]
-    (when (and e (identical? @v (:wrapper e))) e)))
+  (let [fname (var-name v)
+        e (get (:traced @state) fname)]
+    (when (and e (current? fname e)) e)))
 
 (defn trace!
   "Wraps the fn sym names in namespace ns-name: {:traced name}, {:already
@@ -98,10 +115,11 @@
         {:traced fname}))))
 
 (defn- drop-trace!
-  "Restores e's original when its var still holds the wrapper (never over a
-  newer definition), and forgets it. true when it was restored."
-  [fname {:keys [var orig wrapper]}]
-  (let [restored? (identical? @var wrapper)]
+  "Restores e's original while it still traces fname (never over a newer
+  definition, nor on an orphaned var), and forgets it. true when it was
+  restored."
+  [fname {:keys [var orig] :as e}]
+  (let [restored? (current? fname e)]
     (when restored? (alter-var-root var (constantly orig)))
     (swap! state update :traced dissoc fname)
     restored?))
@@ -112,9 +130,10 @@
   (let [v (resolve-in sym ns-name)
         fname (when (var? v) (var-name v))
         e (when fname (get (:traced @state) fname))]
-    (if e
-      (do (drop-trace! fname e) {:untraced fname})
-      {:error (str (or fname sym) " isn't traced.")})))
+    (cond
+      (nil? e) {:error (str (or fname sym) " isn't traced.")}
+      (drop-trace! fname e) {:untraced fname}
+      :else {:error (str fname " was redefined since it was traced, so it isn't traced any more.")})))
 
 (defn untrace-all!
   "Stops tracing everything: {:count n}, the functions still traced."
@@ -124,8 +143,8 @@
 (defn traced
   "The traced functions' names, sorted, leaving out any redefined since."
   []
-  (vec (sort (for [[fname {:keys [var wrapper]}] (:traced @state)
-                   :when (identical? @var wrapper)]
+  (vec (sort (for [[fname e] (:traced @state)
+                   :when (current? fname e)]
                fname))))
 
 (defn clear!
