@@ -15,6 +15,11 @@
     (is (= ::results-rt/gone (results-rt/value id)) "the ring keeps the last 100")
     (is (= ::results-rt/gone (results-rt/value -5)))))
 
+(deftest value!-test
+  (let [{:keys [id]} (results-rt/keep! :kept)]
+    (is (= :kept (results-rt/value! id))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"That result is gone" (results-rt/value! -9))))
+
 (def hits (atom 0))
 
 (deftest a-lazy-result-is-kept-unrealized-test

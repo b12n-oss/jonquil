@@ -1144,6 +1144,11 @@
 ;; gdouble x, gdouble y, gpointer) -> void) is wired directly by
 ;; jonquil.gtk.inspector-pane, no binding needed for a signal.
 (ffi/defcfn gtk-gesture-click-new "gtk_gesture_click_new" [] :pointer)
+;; gtk_widget_get_clipboard (GtkWidget*) -> GdkClipboard*, and
+;; gdk_clipboard_set_text (GdkClipboard*, const char*): gtkwidget.h,
+;; gdkclipboard.h, both fixed arity.
+(ffi/defcfn gtk-widget-get-clipboard "gtk_widget_get_clipboard" [:pointer] :pointer)
+(ffi/defcfn gdk-clipboard-set-text "gdk_clipboard_set_text" [:pointer :string] :void)
 
 ;; gtktextview.h:275-280 -- void gtk_text_view_window_to_buffer_coords
 ;; (GtkTextView*, GtkTextWindowType, int window_x, int window_y, int

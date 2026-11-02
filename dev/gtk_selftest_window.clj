@@ -381,6 +381,8 @@
    ;; inspector on a local, and row-inspect-focus-after-open needs the
    ;; window's first open
    results-rows/row-result-spans
+   results-rows/row-result-click-inspects
+   results-rows/row-result-verbs
    trace-rows/row-trace-toggle-and-show
    trace-rows/row-trace-throw
    trace-rows/row-trace-not-a-function

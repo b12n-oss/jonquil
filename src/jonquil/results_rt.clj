@@ -35,3 +35,13 @@
   "The value kept under id, or ::gone once it left the ring."
   [id]
   (get (:values @state) id ::gone))
+
+(defn value!
+  "The value kept under id, throwing once it left the ring: what the
+  console's Define puts at the prompt, so a gone value never quietly
+  becomes ::gone in a var."
+  [id]
+  (let [v (value id)]
+    (if (= v ::gone)
+      (throw (ex-info "That result is gone." {:id id}))
+      v)))

@@ -13,7 +13,11 @@
   (is (= "Inspect This Result" (results/label :inspect))))
 
 (deftest define-input-test
-  (is (= {:text "(def  (jonquil.results-rt/value 7))" :caret 5} (results/define-input 7))))
+  (is (= {:text "(def  (jonquil.results-rt/value! 7))" :caret 5} (results/define-input 7))))
+
+(deftest var-name-test
+  (is (= "clojure.core/map" (results/var-name "=> #'clojure.core/map\n")))
+  (is (nil? (results/var-name "=> 42\n"))))
 
 (deftest copy-text-test
   (is (= "#'clojure.core/map" (results/copy-text "=> #'clojure.core/map\n")))

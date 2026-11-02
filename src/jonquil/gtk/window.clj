@@ -59,6 +59,7 @@
             [jonquil.last-session :as last-session]
             [jonquil.locations :as loc]
             [jonquil.restarts :as restarts]
+            [jonquil.results :as results]
             [jonquil.login-path :as login-path]
             [jonquil.mcp.window :as mcp-window]
             [jonquil.nrepl.attach]
@@ -4079,6 +4080,51 @@
                                                  on-view status-label
                                                  [:start-trace {:id (:id entry) :part (if (:threw entry) :args :ret)}]))
                    :on-close (fn [] (hide-right-panel! right :trace))})
+        ;; Live console results (LM1): a click on a result line inspects
+        ;; its value; the verbs act on the result at the console's caret
+        ;; (a right-click moves the caret there first)
+        result-at-caret (fn [] (let [off (g/cursor-offset (:buf cv))]
+                                 [(cview/result-at cv off) (cview/result-text-at cv off)]))
+        inspect-result! (fn [ref]
+                          (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
+                                         on-view status-label [:start-result {:id (:id ref)}]))
+        no-result "; No result here."
+        result-inspect-fn (fn [] (if-let [ref (first (result-at-caret))]
+                                   (inspect-result! ref)
+                                   (set-status! status-label no-result)))
+        result-copy-fn (fn [] (let [[ref text] (result-at-caret)]
+                                (if ref
+                                  (do (g/gdk-clipboard-set-text (g/gtk-widget-get-clipboard (:view cv)) (results/copy-text text))
+                                      (set-status! status-label "; Copied the result."))
+                                  (set-status! status-label no-result))))
+        result-define-fn (fn [] (if-let [ref (first (result-at-caret))]
+                                  (let [{:keys [text caret]} (results/define-input (:id ref))]
+                                    (cview/set-input! cv text caret))
+                                  (set-status! status-label no-result)))
+        result-jump-fn (fn []
+                         (let [[ref text] (result-at-caret)
+                               sym (some-> text results/var-name)]
+                           (cond
+                             (nil? ref) (set-status! status-label no-result)
+                             (or (not= :var (:kind ref)) (nil? sym)) (set-status! status-label "; That result isn't a var.")
+                             :else
+                             (ask-lookup! {:ev* ev* :status-label status-label} sym "" 0 (constantly true) "jump"
+                                          (fn [doc]
+                                            (if doc
+                                              (jump-to! (source-ctx (active-tab)) sym {:kind :external :doc doc})
+                                              (set-status! status-label (str "No definition found for " sym "."))))))))
+        result-click! (fn [offset] (when-let [ref (cview/result-at cv offset)] (inspect-result! ref)))
+        ;; a single primary click, with no text selected by it, on a result line
+        _ (let [click (g/gtk-gesture-click-new)]
+            (g/g-signal-connect-data click "released"
+                                     (callable (fn [_gesture n-press _x _y _data]
+                                                 (when (= 1 n-press)
+                                                   (let [[a b] (g/selection-offsets (:buf cv))]
+                                                     (when (= a b) (result-click! (g/cursor-offset (:buf cv))))))
+                                                 nil)
+                                               [:pointer :int :double :double :pointer] :void)
+                                     ffi/null ffi/null g/CONNECT-DEFAULT)
+            (g/gtk-widget-add-controller (:view cv) click))
         ;; The restarts (jonquil.restarts) for cv's last failure
         nothing-failed "; Nothing has failed since the last success."
         edit-the-file "; Edit the file and Run it again."
@@ -4196,6 +4242,8 @@
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          :trace-toggle-fn trace-toggle-fn :trace-show-fn trace-show-fn
                          :trace-clear-fn trace-clear-fn :trace-untrace-all-fn trace-untrace-all-fn
+                         :result-inspect-fn result-inspect-fn :result-copy-fn result-copy-fn
+                         :result-define-fn result-define-fn :result-jump-fn result-jump-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
@@ -5005,6 +5053,7 @@
                    ;; the Frames panel and the inspector's own Close
                    :debugger-pane dbgp
                    :trace-pane tracep
+                   :result-click!* result-click!
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})

@@ -24,7 +24,12 @@
   "The prompt's text and caret for Define: (def  ...) holding the live
   value, the caret where the name goes."
   [id]
-  {:text (str "(def  (jonquil.results-rt/value " id "))") :caret 5})
+  {:text (str "(def  (jonquil.results-rt/value! " id "))") :caret 5})
+
+(defn var-name
+  "The qualified name a var result line prints (=> #'ns/name), or nil."
+  [line]
+  (second (re-find #"^=> #'(\S+)" line)))
 
 (defn copy-text
   "A result line as Copy copies it: without the => prefix or the newline."
