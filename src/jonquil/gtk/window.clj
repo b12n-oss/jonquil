@@ -4224,7 +4224,9 @@
         ;; Break on error (jonquil.debugger's break). The pause comes from the
         ;; worker; the panel shows it with Continue in the restart bar. After
         ;; Continue the error is recorded as a failure, and that refreshes
-        ;; the panel with its frames (break-resumed).
+        ;; the panel with its frames (break-resumed). The flag ends when the
+        ;; next evaluation starts: Inspect Form and Time Form record no
+        ;; failure, and a later, unrelated one mustn't open the panel.
         break-resumed (atom false)
         show-paused! (fn [d]
                        (let [shown (assoc d :title (str "Paused: " (:title d)))]
@@ -4248,7 +4250,8 @@
                                                        ;; it lets through is recorded as the failure
                                                        :on-resume (fn [how]
                                                                     (reset! break-resumed (boolean (:continued? how)))
-                                                                    (on-gui! (fn [] (end-paused! how))))})))
+                                                                    (on-gui! (fn [] (end-paused! how))))
+                                                       :on-eval-start (fn [] (reset! break-resumed false))})))
         _ (register-break! @ev*)
         _ (add-watch ev* ::break (fn [_ _ old new] (when-not (identical? old new) (register-break! new))))
         _ (add-watch (:failure* cv) ::break-refresh

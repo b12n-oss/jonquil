@@ -11,6 +11,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.debugger-pane :as dpane]
+            [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]))
@@ -242,6 +243,39 @@
                                     (str/starts-with? (dpane/title-text dp) "Paused:")))]
             (on-gtk (support/check :break-stop-blocked (and on? running? stopped? (not paused?))
                                    {:on on? :running running? :stopped stopped? :paused paused?})))
+          (finally (break-off! ui)))))))
+
+(defn row-break-flag-ends-with-its-eval
+  "Continue at a break in Inspect Form, which records no failure, then a
+  later error with Break on error off: the Frames panel stays closed, since
+  Continue's refresh belonged to the evaluation that paused."
+  [ui]
+  (go-row :break-flag-ends-with-its-eval support/check
+    (if-not (debugger/available?)
+      (on-gtk (support/check :break-flag-ends-with-its-eval true {:available false}))
+      (let [dp (:debugger-pane ui)
+            ed (:editor ui)]
+        (try
+          (on-gtk (run-palette! ui "break on error"))
+          (let [on? (await-until 3000 20 #(= (status ui) BREAK-ON))
+                _ (on-gtk (editor/set-text! ed "(/ 1 0)")
+                          (support/place-cursor! (:buf ed) 2)
+                          ((:inspect-form!* ui)))
+                paused? (await-until 5000 20 #(str/starts-with? (dpane/title-text dp) "Paused:"))
+                _ (on-gtk (dpane/press-restart! dp :continue))
+                continued? (await-until 5000 20 #(support/idle? ui))
+                _ (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+                closed? (await-until 3000 20 #(zero? (g/gtk-widget-get-visible (:root dp))))
+                _ (on-gtk (run-palette! ui "break on error"))
+                off? (await-until 3000 20 #(= (status ui) BREAK-OFF))
+                m (enter! ui "(/ 1 0)")
+                errored? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "Divide by zero")))
+                _ (<! (timeout 500))
+                shown? (on-gtk (pos? (g/gtk-widget-get-visible (:root dp))))]
+            (on-gtk (support/check :break-flag-ends-with-its-eval
+                                   (and on? paused? continued? closed? off? errored? (not shown?))
+                                   {:on on? :paused paused? :continued continued? :closed closed?
+                                    :off off? :errored errored? :panel-shown shown? :title (dpane/title-text dp)})))
           (finally (break-off! ui)))))))
 
 (defn row-break-off-by-default
