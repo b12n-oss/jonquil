@@ -956,6 +956,24 @@
 ;; own doc comment: "in widget allocation coordinates"), translated to
 ;; buffer coordinates via gtk-text-view-window-to-buffer-coords, below.
 (def TEXT-WINDOW-WIDGET 1)
+;; GTK_TEXT_WINDOW_LEFT, the left border window a gutter widget fills
+;; (gtktextview.h:57-62: WIDGET=1, TEXT, LEFT, RIGHT, TOP, BOTTOM).
+(def TEXT-WINDOW-LEFT 3)
+;; gtk_text_view_set_gutter (GtkTextView*, GtkTextWindowType, GtkWidget*)
+;; and gtk_text_view_get_line_yrange (GtkTextView*, const GtkTextIter*,
+;; int* y, int* height), y in buffer coordinates: gtktextview.h:256, 313.
+(ffi/defcfn gtk-text-view-set-gutter "gtk_text_view_set_gutter" [:pointer :int :pointer] :void)
+(ffi/defcfn gtk-text-view-get-line-yrange "gtk_text_view_get_line_yrange" [:pointer :pointer :pointer :pointer] :void)
+;; GtkDrawingArea: gtkdrawingarea.h:62-66, 103. The draw func is
+;; (GtkDrawingArea*, cairo_t*, int width, int height, gpointer).
+(ffi/defcfn gtk-drawing-area-new "gtk_drawing_area_new" [] :pointer)
+(ffi/defcfn gtk-drawing-area-set-draw-func "gtk_drawing_area_set_draw_func" [:pointer :pointer :pointer :pointer] :void)
+(ffi/defcfn gtk-widget-queue-draw "gtk_widget_queue_draw" [:pointer] :void)
+;; cairo, which GTK links, so its symbols resolve with GTK loaded (measured
+;; 2026-11-02 on an image surface: a filled rectangle's pixels came back)
+(ffi/defcfn cairo-set-source-rgb "cairo_set_source_rgb" [:pointer :double :double :double] :void)
+(ffi/defcfn cairo-rectangle "cairo_rectangle" [:pointer :double :double :double :double] :void)
+(ffi/defcfn cairo-fill "cairo_fill" [:pointer] :void)
 
 (defn caret-window-rect
   "The insert mark's rectangle in view's TEXT-window coordinates:

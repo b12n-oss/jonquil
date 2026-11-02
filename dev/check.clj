@@ -56,6 +56,7 @@
     jonquil.nrepl.cljs-node
     jonquil.runtime-registry
     jonquil.commands
+    jonquil.changed
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
@@ -100,6 +101,7 @@
     jonquil.gtk.source-pane
     jonquil.gtk.completion
     jonquil.gtk.find-bar
+    jonquil.gtk.gutter
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane

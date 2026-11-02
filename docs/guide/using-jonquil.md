@@ -56,6 +56,23 @@ cancels it, so it never types over your code.
 
 </details>
 
+### Changed forms
+
+Once a tab has run, a thin bar in the Definitions editor's left gutter marks
+each top-level form you've edited since it last ran. **Run the forms changed
+since they last ran**, in the palette, sends just those, in order, as one
+evaluation the way Run Selection does, and the console says how many. With
+nothing marked it says so, and in a tab that hasn't run yet it asks you to run
+it once first.
+
+A form counts as changed when its code changed: reindenting, formatting and
+editing a comment don't mark it, but any change to a symbol, a number or a
+string's text does. `(comment ...)` blocks are never marked. A Run that ends
+without an error records every form as run; Run Form and Run Selection record
+the forms they sent. An evaluation that fails or is stopped records nothing,
+so its forms stay marked. A file reloaded from disk keeps its record, so
+the forms that differ from what last ran show up marked.
+
 ### Timing a form
 
 **Time the form at the caret (about a second)**, in the palette, runs that

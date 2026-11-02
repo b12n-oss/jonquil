@@ -114,6 +114,17 @@
                   head (nil? (:open head))
                   (= "comment" (subs text (:start head) (:end head)))))))
 
+(defn top-level-forms
+  "text's top-level forms, in order, as form-tree gives them: {:start :end},
+  plus :open and :kids for a bracketed one."
+  [text]
+  (if (str/blank? text) [] (form-tree text)))
+
+(defn comment-form?
+  "True when form (one of top-level-forms') is a (comment ...) block."
+  [text form]
+  (comment-block? text form))
+
 (defn run-form
   "What Run Form (Cmd/Ctrl+Enter) sends, CIDER's C-c C-c: the top-level form
   around the caret, or, when that form is a (comment ...) block, the form

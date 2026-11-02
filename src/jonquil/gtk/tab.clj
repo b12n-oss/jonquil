@@ -13,6 +13,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.find-bar :as find-bar]
+            [jonquil.gtk.gutter :as gutter]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]))
@@ -25,7 +26,13 @@
   :completion-opts is the map jonquil.gtk.completion/make-completion
   takes, minus :ed. GTK-thread only."
   [{:keys [id path text theme profile completion-opts]}]
-  (let [ed (editor/make-editor)
+  (let [ed0 (editor/make-editor)
+        gt (gutter/attach! ed0)
+        ;; LM3's changed forms: the keys of the forms as they last ran (nil
+        ;; until the tab runs), the gutter that marks the others, and the
+        ;; refresh the window installs (wire-tab!); on the editor map, which
+        ;; every run path carries
+        ed (assoc ed0 :changed {:ran (atom nil) :refresh (atom (fn [])) :gutter gt})
         fb (find-bar/make-find-bar ed)
         view (:view ed)
         root (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
@@ -43,6 +50,7 @@
     (g/gtk-widget-add-css-class view "jonquil-code")
     (editor/apply-theme! ed theme)
     (find-bar/apply-theme! fb theme)
+    (gutter/apply-theme! gt theme)
     (editor/set-profile! ed profile)
     (editor/set-text! ed (or text ""))
     {:id id :ed ed :fb fb

@@ -10,7 +10,7 @@
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn
-   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn])
+   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -41,6 +41,7 @@
    :run/time-form [:time-form-fn] :tab/back [:tab-back-fn]
    :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]
    :debug/break-on-error [:break-fn] :debug/continue [:continue-fn]
+   :run/changed [:run-changed-fn]
    :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn] :restart/define [:define-retry-fn]})
 
 (deftest each-command-calls-its-fn-test
