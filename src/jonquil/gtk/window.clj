@@ -2625,16 +2625,21 @@
   ;; computed off the GTK thread and drawn only if the text is still the same
   (when-let [{:keys [ran refresh gutter]} (:changed ed)]
     (let [pending (atom 0)
+          ;; a closed tab's buffer and gutter are gone (:destroyed?), and a
+          ;; result is drawn only for the text and ran set it was computed for
           refresh! (fn []
                      (on-gui! (fn []
-                                (if-let [r @ran]
-                                  (let [text (editor/editor-text ed)]
-                                    (future
-                                      (when-let [rs (try (mapv (juxt :start :end) (changed/changed text r))
-                                                         (catch Throwable _ nil))]
-                                        (on-gui! (fn [] (when (= text (editor/editor-text ed))
-                                                          (gutter/set-ranges! gutter rs)))))))
-                                  (gutter/set-ranges! gutter [])))))]
+                                (when-not @(:destroyed? ed)
+                                  (if-let [r @ran]
+                                    (let [text (editor/editor-text ed)]
+                                      (future
+                                        (when-let [rs (try (mapv (juxt :start :end) (changed/changed text r))
+                                                           (catch Throwable _ nil))]
+                                          (on-gui! (fn [] (when (and (not @(:destroyed? ed))
+                                                                     (identical? r @ran)
+                                                                     (= text (editor/editor-text ed)))
+                                                            (gutter/set-ranges! gutter rs)))))))
+                                    (gutter/set-ranges! gutter []))))))]
       (reset! refresh refresh!)
       (g/g-signal-connect-data (:buf ed) "changed"
                                (callable (fn [_buf _data]

@@ -33,3 +33,29 @@
         ran (changed/record nil t :run)
         t2 "(def x 1)\n(def x 2)"]
     (is (= [[10 19]] (mapv (juxt :start :end) (changed/changed t2 ran))))))
+
+(deftest reader-macros-count-test
+  ;; the tokenizer leaves ' @ ` ~ ~@ and a dispatch # out of its tokens; a
+  ;; change to any of them is a change to the code
+  (let [k (fn [t] (:key (first (changed/forms t))))]
+    (doseq [[a b] [["(def a 'x)" "(def a x)"]
+                   ["(f @a)" "(f a)"]
+                   ["(def s #{1})" "(def s {1})"]
+                   ["(def g #(inc %))" "(def g (inc %))"]
+                   ["(defmacro m [b] `(f ~b))" "(defmacro m [b] (f b))"]
+                   ["(defmacro m [b] `(f ~@b))" "(defmacro m [b] `(f ~b))"]
+                   ["(def c #?(:clj 1))" "(def c ?(:clj 1))"]]]
+      (is (not= (k a) (k b)) (str a " vs " b)))
+    (is (= (k "(def a [1 2])") (k "(def a [1,  2])")) "commas are whitespace")))
+
+(deftest a-rerun-definition-replaces-its-record-test
+  ;; Run, then Run Form an edit, then undo it: the buffer's f differs from
+  ;; the f that ran last, so it is marked
+  (let [t1 "(defn f [] 1)\n(defn g [] 2)"
+        ran (-> (changed/record nil t1 :run)
+                (changed/record "(defn f [] 2)" :form))]
+    (is (= ["(defn f [] 1)"] (texts t1 (changed/changed t1 ran))))
+    (is (= [] (changed/changed "(defn f [] 2)\n(defn g [] 2)" ran)))
+    (testing "forms that define nothing just add"
+      (let [r2 (changed/record ran "(println :hi)" :form)]
+        (is (= [] (changed/changed "(defn f [] 2)\n(defn g [] 2)" r2)))))))
