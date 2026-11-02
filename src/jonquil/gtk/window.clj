@@ -4148,10 +4148,29 @@
         result-click! (fn [offset] (when-let [ref (cview/result-at cv offset)]
                                      (inspect-result! ref (cview/result-text-at cv offset))))
         ;; a single primary click, with no text selected by it, on a result
-        ;; line. It waits out GTK's double-click time (400 ms, its default
-        ;; gtk-double-click-time) and a second press cancels it, so a
-        ;; double-click that selects a word never opens the inspector first.
+        ;; line. It waits out GTK's gtk-double-click-time, which on macOS
+        ;; follows the system's double-click speed, and a second press
+        ;; cancels it, so a double-click that selects a word never opens the
+        ;; inspector first.
         click-gen (atom 0)
+        result-release! (fn [off]
+                          (let [[a b] (g/selection-offsets (:buf cv))
+                                ;; the result clicked, resolved now: output
+                                ;; trimmed while the click waits moves every span
+                                ref (cview/result-at cv off)
+                                text (cview/result-text-at cv off)
+                                n (swap! click-gen inc)
+                                wait (g/double-click-time (g/gtk-settings-get-default))]
+                            (when (and ref (= a b))
+                              (future
+                                (Thread/sleep wait)
+                                (on-gui! (fn []
+                                           (let [[a2 b2] (g/selection-offsets (:buf cv))]
+                                             ;; still the last click, nothing selected
+                                             ;; since, and its line still on screen
+                                             (when (and (= n @click-gen) (= a2 b2)
+                                                        (some #(= ref (:ref %)) @(:results cv)))
+                                               (inspect-result! ref text)))))))))
         _ (let [click (g/gtk-gesture-click-new)]
             (g/g-signal-connect-data click "pressed"
                                      (callable (fn [_gesture n-press _x _y _data]
@@ -4162,23 +4181,7 @@
             (g/g-signal-connect-data click "released"
                                      (callable (fn [_gesture n-press _x _y _data]
                                                  (when (= 1 n-press)
-                                                   (let [[a b] (g/selection-offsets (:buf cv))
-                                                         ;; the result clicked, resolved now: output
-                                                         ;; trimmed while the click waits moves every span
-                                                         off (g/cursor-offset (:buf cv))
-                                                         ref (cview/result-at cv off)
-                                                         text (cview/result-text-at cv off)
-                                                         n (swap! click-gen inc)]
-                                                     (when (and ref (= a b))
-                                                       (future
-                                                         (Thread/sleep 400)
-                                                         (on-gui! (fn []
-                                                                    (let [[a2 b2] (g/selection-offsets (:buf cv))]
-                                                                      ;; still the last click, nothing selected
-                                                                      ;; since, and its line still on screen
-                                                                      (when (and (= n @click-gen) (= a2 b2)
-                                                                                 (some #(= ref (:ref %)) @(:results cv)))
-                                                                        (inspect-result! ref text)))))))))
+                                                   (result-release! (g/cursor-offset (:buf cv))))
                                                  nil)
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
@@ -5121,6 +5124,7 @@
                    :debugger-pane dbgp
                    :trace-pane tracep
                    :result-click!* result-click!
+                   :result-release!* result-release!
                    :console-right-press!* console-right-press!
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
