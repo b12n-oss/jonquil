@@ -38,6 +38,7 @@ Emacs took first:
 | The locations list and F8 / Shift+F8 | `next-error`, xref |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Time the form at the caret | `benchmark-run` |
+| Trace the function at the caret, the Trace panel | `trace-function` and the `*trace-output*` buffer; CIDER's `cider-toggle-trace-var` |
 | The changed-form marks, Run the forms changed since they last ran | none built in: `diff-hl` marks lines changed since the last commit, not since the last eval |
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
 | Break on error, Continue | `debug-on-error` while the error is live: `e` evaluates in a frame, `c` continues |
