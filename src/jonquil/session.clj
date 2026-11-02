@@ -334,6 +334,8 @@
   alter-meta! the program does, a load-file of another file, a future the
   program started (all are the Run's own doing)."
   [file before]
+  ;; the fallback for a Jolt whose eval-string takes no source path
+  ;; (before jolt-lang/jolt#1476): run-definitions! passes the path there
   (doseq [[v m] (program-vars)
           :when (and (:line m) (nil? (:file m)) (not= m (get before v)))]
     (try (alter-meta! v assoc :file file) (catch Throwable _ nil))))
@@ -359,12 +361,15 @@
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
      (create-ns 'user)
-     ;; Marked in before-idle, on the Run's own worker before the context
+     ;; A Jolt whose eval-string takes a source path evaluates the text as
+     ;; the file, so its vars get it from the reader. Elsewhere they're
+     ;; marked in before-idle, on the Run's own worker before the context
      ;; goes idle, so a REPL entry or another Run can't define a var in
      ;; between and get this file.
      (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
-           before (when file (program-vars))
+           before (when (and file (not (eval/source-path?))) (program-vars))
            opts (cond-> (assoc opts :owner owner)
+                  file (assoc :source-path file)
                   before (assoc :before-idle
                                 (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
        (evaluate! session code 'user opts)))))

@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jonquil.debugger :as debugger]
+            [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
             [jonquil.session :as session]
             [jonquil.source :as source]
@@ -183,6 +184,20 @@
           (is (= path (:file d)))
           (is (= {:path path :line 3} (select-keys (source/location d {}) [:path :line])))))
       (finally (remove-ns 'runfile.a)))))
+
+(deftest a-run-of-a-saved-file-is-evaluated-as-that-file-test
+  ;; on a Jolt whose eval-string takes a source path (jolt-lang/jolt#1476)
+  ;; the Run passes it, as a load of the file would: *file* is the path
+  (if (eval/source-path?)
+    (let [text "(ns runfile.c)\n\n(def seen *file*)\n"
+          path (saved! "runfile/c.clj" text)
+          s (session/make-session)]
+      (try
+        (is (= :ok (:status (run session/run-definitions! s text {:path path}))))
+        (is (= path @(resolve 'runfile.c/seen)))
+        (is (= {:file path :line 3} (var-meta 'runfile.c/seen)))
+        (finally (remove-ns 'runfile.c))))
+    (println "SKIP a-run-of-a-saved-file-is-evaluated-as-that-file-test: this Jolt's eval-string takes no source path")))
 
 (deftest no-saved-file-no-file-test
   (let [s (session/make-session)]
