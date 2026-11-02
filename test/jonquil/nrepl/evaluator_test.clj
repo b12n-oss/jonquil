@@ -980,17 +980,26 @@
           (is (= "3" (:path v)) "a clicked result is labelled by its line")))
       (finally (ev/stop! e)))))
 
-;; --- the break handlers hear each evaluation start in the child -------------------
+;; --- the break handlers hear each evaluation start and end in the child --------------
 
-(deftest eval-start-handler-in-the-child-test
+(deftest eval-start-and-end-handlers-in-the-child-test
   (let [e (make (temp-project))
-        starts (atom 0)]
+        events (atom [])
+        completed (atom false)
+        run! (fn [code]
+               (reset! completed false)
+               (let [done (promise)]
+                 (ev/eval! e code {:run? false :on-complete (fn [r] (reset! completed true) (deliver done r))})
+                 (let [r (deref done 20000 :timeout)]
+                   (Thread/sleep 200)
+                   r)))]
     (try
-      (ev/set-break-handlers! e {:on-eval-start #(swap! starts inc)})
-      ;; the first run may add the project's auto-require, so count a delta
-      (run e "(+ 1 2)" false)
-      (let [before @starts]
-        (is (pos? before))
-        (is (= "3" (:printed (first (run e "(+ 1 2)" false)))))
-        (is (= (inc before) @starts) "one start per evaluation"))
+      (ev/set-break-handlers! e {:on-eval-start (fn [id] (swap! events conj [:start id]))
+                                 :on-eval-end (fn [id] (swap! events conj [:end id @completed]))})
+      (is (= "3" (:printed (run! "(+ 1 2)"))))
+      (let [[[k1 id1] [k2 id2 done?] :as evs] @events]
+        (is (= 2 (count evs)) (str "one start and one end, the auto-require calling neither: " (pr-str evs)))
+        (is (= [:start :end] [k1 k2]))
+        (is (and (some? id1) (identical? id1 id2)))
+        (is (true? done?) "the end comes after the evaluation's own on-complete"))
       (finally (ev/stop! e)))))

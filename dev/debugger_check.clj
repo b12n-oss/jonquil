@@ -45,7 +45,7 @@
 (def ^:private debugger-rows
   ;; the window self-test's debugger rows: each must PASS on this Jolt
   ["frames-after-error" "break-pauses" "break-stop" "break-stop-blocked" "break-off-by-default"
-   "break-flag-ends-with-its-eval"])
+   "break-flag-ends-with-its-eval" "break-flag-survives-next-start"])
 
 (defn- window-ok? [text]
   (and (not (str/includes? text ":available false"))

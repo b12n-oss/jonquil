@@ -395,6 +395,7 @@
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default
    debugger-rows/row-break-flag-ends-with-its-eval
+   debugger-rows/row-break-flag-survives-next-start
    debugger-rows/row-break-pauses
    debugger-rows/row-break-stop
    debugger-rows/row-break-stop-blocked

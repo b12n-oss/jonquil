@@ -278,6 +278,39 @@
                                     :off off? :errored errored? :panel-shown shown? :title (dpane/title-text dp)})))
           (finally (break-off! ui)))))))
 
+(defn row-break-flag-survives-next-start
+  "The evaluators go idle before on-complete, so the next evaluation can
+  start before the paused one's failure is recorded. Driven through the
+  window's own break handlers in that order: Continue's refresh still
+  happens, and the next evaluation's end leaves it alone."
+  [ui]
+  (go-row :break-flag-survives-next-start support/check
+    (let [dp (:debugger-pane ui)
+          failure* (:failure* (:console ui))
+          saved @failure*
+          h (:break-handlers @(:state (:session ui)))
+          a (Object.) b (Object.)]
+      (try
+        ((:on-eval-start h) a)
+        ((:on-resume h) {:continued? true})
+        ;; the next evaluation starts in the gap, before a's failure lands
+        ((:on-eval-start h) b)
+        (reset! failure* {:kind :repl :code "(/ 1 0)" :error-text "ArithmeticException: Divide by zero"})
+        ((:on-eval-end h) a)
+        (let [shown? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root dp))))]
+          (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+          ;; b's own Continue, then a's end arriving late: b's refresh stays
+          ((:on-resume h) {:continued? true})
+          ((:on-eval-end h) a)
+          (reset! failure* {:kind :repl :code "(/ 2 0)" :error-text "ArithmeticException: Divide by zero"})
+          (let [shown-b? (await-until 3000 20 #(pos? (g/gtk-widget-get-visible (:root dp))))]
+            (on-gtk (support/check :break-flag-survives-next-start (and shown? shown-b?)
+                                   {:shown shown? :shown-b shown-b?}))))
+        (finally
+          ((:on-eval-end h) b)
+          (on-gtk (when-let [f (:on-close @(:handlers dp))] (f)))
+          (reset! failure* saved))))))
+
 (defn row-break-off-by-default
   "With Break on error off, an entry that throws errors at once."
   [ui]

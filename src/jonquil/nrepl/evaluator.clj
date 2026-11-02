@@ -284,10 +284,19 @@
                      (when (.exists (java.io.File. ^String log)) (str "\nThe child's log: " log))))))))
     (finally (.unlock start-lock))))
 
+(defn- tell-break!
+  "Calls the break handler k (:on-eval-start or :on-eval-end) with the
+  evaluation's id, which eval! gives only a person's evaluation (never a
+  quiet one, nor the project's auto-require). Never throws."
+  [ev k opts]
+  (when-let [id (::eval-id opts)]
+    (when-let [f (k (:break-handlers @(:state ev)))]
+      (try (f id) (catch Throwable _ nil)))))
+
 (defn- finish!
   "Ends the running evaluation: idle first, then on-complete, as
-  jonquil.eval does."
-  [ev {:keys [on-status-change on-complete]} result]
+  jonquil.eval does, then the break handlers' :on-eval-end."
+  [ev {:keys [on-status-change on-complete] :as opts} result]
   ;; a pause the child never said had ended (it was killed, or restarted
   ;; by Stop's fallback) ends with the evaluation, as a Stop
   (let [[old _] (swap-vals! (:state ev) dissoc :paused?)]
@@ -297,7 +306,8 @@
   (swap! (:state ev) (fn [s] (cond-> (assoc s :running nil)
                                (:ns result) (assoc :prompt-ns (:ns result)))))
   (try (when on-status-change (on-status-change :idle)) (catch Throwable _ nil))
-  (try (when on-complete (on-complete result)) (catch Throwable _ nil)))
+  (try (when on-complete (on-complete result)) (catch Throwable _ nil))
+  (tell-break! ev :on-eval-end opts))
 
 (defn- call-wait-input!
   "Calls the running evaluation's on-wait-input with waiting?; never throws
@@ -397,10 +407,7 @@
               (cond-> {:op "eval" :code code :session session}
                 (:prompt-ns @(:state ev)) (assoc :ns (str (:prompt-ns @(:state ev))))))
         msg (cond-> msg break? (assoc :jonquil-break "1"))
-        ;; the break handlers hear a person's evaluation start
-        _ (when-not (:quiet opts)
-            (when-let [f (:on-eval-start (:break-handlers @(:state ev)))]
-              (try (f) (catch Throwable _ nil))))
+        _ (tell-break! ev :on-eval-start opts)
         id (client/request! conn msg
                             (fn [m]
                               (swap! acc conj m)
@@ -594,7 +601,8 @@
     ;; submit-repl! does. Claiming is a swap, never start-lock: a Run pressed
     ;; while a child is still starting must not block the GTK thread.
     (when-not (or (:run? opts) (:quiet opts)) (swap! history eval/history-add code))
-    (let [[old _] (swap-vals! state (fn [s] (if (:running s) s (assoc s :running {:opts opts}))))]
+    (let [opts (cond-> opts (not (:quiet opts)) (assoc ::eval-id (Object.)))
+          [old _] (swap-vals! state (fn [s] (if (:running s) s (assoc s :running {:opts opts}))))]
       (if (:running old)
         busy-warning
         (do (future (run-worker! this code opts))

@@ -243,7 +243,13 @@
   [{:keys [ctx state]} code ns-sym opts]
   (let [before (ns-names)
         user-complete (:on-complete opts)
-        dir (:project-dir @state)]
+        dir (:project-dir @state)
+        ;; this evaluation, for the break handlers' :on-eval-start and
+        ;; :on-eval-end; a quiet one calls neither
+        eval-id (when-not (:quiet opts) (Object.))
+        tell (fn [k] (when eval-id
+                       (when-let [f (k (:break-handlers @state))]
+                         (try (f eval-id) (catch Throwable _ nil)))))]
     (eval/eval-async ctx code
                      (assoc opts
                             ;; The break handlers hear a person's evaluation
@@ -252,9 +258,7 @@
                             ;; resolve can fetch dependencies, which mustn't
                             ;; freeze the window.
                             :before-eval (fn []
-                                           (when-not (:quiet opts)
-                                             (when-let [f (:on-eval-start (:break-handlers @state))]
-                                               (try (f) (catch Throwable _ nil))))
+                                           (tell :on-eval-start)
                                            (when dir
                                              (roots/use-project-deps! dir)
                                              (if (and (:quiet opts) (:on-output opts))
@@ -293,7 +297,9 @@
                                          ;; (completion, help) never replaces it
                                          (and (= :error (:status result)) (not (:quiet opts)))
                                          (assoc :last-error (:error result)))))
-                              (when user-complete (user-complete result))))))))
+                              ;; the end after on-complete, which records the failure
+                              (try (when user-complete (user-complete result))
+                                   (finally (tell :on-eval-end)))))))))
 
 (defn- program-vars
   "{var meta} for every var interned in a namespace that isn't a loaded
