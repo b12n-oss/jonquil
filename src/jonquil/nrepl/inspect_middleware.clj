@@ -90,11 +90,11 @@
       "inspect-local"
       ;; a paused break's local first (Break on error), then the last error's
       (let [paused (break-middleware/paused-local-for (g "session") (g "error-id") (as-long (g "frame")) (g "local"))
-            v (if-let [e (when (= ::debugger/missing paused) *e)]
+            v (if-let [e (when (= ::debugger/not-paused paused) *e)]
                 (if (debugger/stale? e (g "error-id"))
                   ::stale
                   (debugger/local-value e (as-long (g "frame")) (g "local") {:frames-fn (debugger/frames-fn)}))
-                paused)]
+                (if (= ::debugger/not-paused paused) ::debugger/missing paused))]
         {"status" ["done"]
          "view" (pr-str (case v
                             ::debugger/missing {:error "That local is gone."}
