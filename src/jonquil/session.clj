@@ -85,7 +85,7 @@
                         paused))
               traced (case op
                        :start-trace (trace-rt/value (:id args) (:part args))
-                       :start-result (let [v (results-rt/value (:id args))]
+                       :start-result (let [v (results-rt/value (:id args) (:epoch args))]
                                        (if (= v ::results-rt/gone) ::trace-rt/gone v))
                        nil)
               local (cond (= traced ::trace-rt/gone) ::gone

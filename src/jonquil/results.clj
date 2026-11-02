@@ -12,6 +12,12 @@
   [kind]
   (get by-kind kind [:inspect :copy :define]))
 
+(defn offered?
+  "True when a result of kind offers verb: what each of the console's verb
+  commands checks before acting."
+  [verb kind]
+  (boolean (some #{verb} (verbs kind))))
+
 (def ^:private labels
   {:inspect "Inspect This Result"
    :copy "Copy This Result"
@@ -21,10 +27,10 @@
 (defn label [verb] (get labels verb))
 
 (defn define-input
-  "The prompt's text and caret for Define: (def  ...) holding the live
-  value, the caret where the name goes."
-  [id]
-  {:text (str "(def  (jonquil.results-rt/value! " id "))") :caret 5})
+  "The prompt's text and caret for Define, from a result's ref: (def  ...)
+  holding the live value, the caret where the name goes."
+  [{:keys [id epoch]}]
+  {:text (str "(def  (jonquil.results-rt/value! " id " " (pr-str epoch) "))") :caret 5})
 
 (defn var-name
   "The qualified name a var result line prints (=> #'ns/name), or nil."

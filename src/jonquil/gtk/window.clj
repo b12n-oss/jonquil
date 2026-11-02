@@ -4087,32 +4087,56 @@
                                  [(cview/result-at cv off) (cview/result-text-at cv off)]))
         inspect-result! (fn [ref]
                           (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
-                                         on-view status-label [:start-result {:id (:id ref)}]))
+                                         on-view status-label [:start-result {:id (:id ref) :epoch (:epoch ref)}]))
         no-result "; No result here."
-        result-inspect-fn (fn [] (if-let [ref (first (result-at-caret))]
-                                   (inspect-result! ref)
-                                   (set-status! status-label no-result)))
-        result-copy-fn (fn [] (let [[ref text] (result-at-caret)]
-                                (if ref
-                                  (do (g/gdk-clipboard-set-text (g/gtk-widget-get-clipboard (:view cv)) (results/copy-text text))
-                                      (set-status! status-label "; Copied the result."))
-                                  (set-status! status-label no-result))))
-        result-define-fn (fn [] (if-let [ref (first (result-at-caret))]
-                                  (let [{:keys [text caret]} (results/define-input (:id ref))]
-                                    (cview/set-input! cv text caret))
-                                  (set-status! status-label no-result)))
-        result-jump-fn (fn []
-                         (let [[ref text] (result-at-caret)
-                               sym (some-> text results/var-name)]
-                           (cond
-                             (nil? ref) (set-status! status-label no-result)
-                             (or (not= :var (:kind ref)) (nil? sym)) (set-status! status-label "; That result isn't a var.")
-                             :else
-                             (ask-lookup! {:ev* ev* :status-label status-label} sym "" 0 (constantly true) "jump"
-                                          (fn [doc]
-                                            (if doc
-                                              (jump-to! (source-ctx (active-tab)) sym {:kind :external :doc doc})
-                                              (set-status! status-label (str "No definition found for " sym "."))))))))
+        ;; each verb asks the kind's table (jonquil.results) before acting
+        with-result (fn [verb not-offered f]
+                      (let [[ref text] (result-at-caret)]
+                        (cond (nil? ref) (set-status! status-label no-result)
+                              (not (results/offered? verb (:kind ref))) (set-status! status-label not-offered)
+                              :else (f ref text))))
+        result-inspect-fn (fn [] (with-result :inspect no-result (fn [ref _] (inspect-result! ref))))
+        result-copy-fn (fn [] (with-result :copy no-result
+                                (fn [_ text]
+                                  (g/gdk-clipboard-set-text (g/gtk-widget-get-clipboard (:view cv)) (results/copy-text text))
+                                  (set-status! status-label "; Copied the result."))))
+        result-define-fn (fn [] (with-result :define no-result
+                                  (fn [ref _]
+                                    (let [{:keys [text caret]} (results/define-input ref)]
+                                      (cview/set-input! cv text caret)))))
+        result-jump-fn (fn [] (with-result :jump "; That result isn't a var."
+                                (fn [_ text]
+                                  (if-let [sym (results/var-name text)]
+                                    (ask-lookup! {:ev* ev* :status-label status-label} sym "" 0 (constantly true) "jump"
+                                                 (fn [doc]
+                                                   (if doc
+                                                     (jump-to! (source-ctx (active-tab)) sym {:kind :external :doc doc})
+                                                     (set-status! status-label (str "No definition found for " sym ".")))))
+                                    (set-status! status-label "; That result isn't a var.")))))
+        ;; GTK's own right-click opens the menu without moving the caret
+        ;; (gtk_text_view_click_gesture_pressed: a context-menu press goes
+        ;; to do_popup), so this moves it to the click first, in the capture
+        ;; phase before GTK's gesture claims the press; a right-click inside
+        ;; a selection leaves it, for GTK's own Copy
+        console-right-press! (fn [x y]
+                               (let [view (:view cv) buf (:buf cv)
+                                     out (ffi/alloc 8) it (ffi/alloc g/ITER-BYTES)]
+                                 (try
+                                   (g/gtk-text-view-window-to-buffer-coords view g/TEXT-WINDOW-WIDGET (int x) (int y) out (+ out 4))
+                                   (g/gtk-text-view-get-iter-at-location view it (ffi/read out :int 0) (ffi/read out :int 4))
+                                   (let [off (g/gtk-text-iter-get-offset it)
+                                         [a b] (g/selection-offsets buf)]
+                                     (when-not (and (< a b) (<= a off) (< off b))
+                                       (g/with-iters* buf off off (fn [i _] (g/gtk-text-buffer-place-cursor buf i)))))
+                                   (finally (ffi/free out) (ffi/free it)))))
+        _ (let [rclick (g/gtk-gesture-click-new)]
+            (g/gtk-gesture-single-set-button rclick 3)
+            (g/gtk-event-controller-set-propagation-phase rclick g/GTK-PHASE-CAPTURE)
+            (g/g-signal-connect-data rclick "pressed"
+                                     (callable (fn [_gesture _n x y _data] (console-right-press! x y) nil)
+                                               [:pointer :int :double :double :pointer] :void)
+                                     ffi/null ffi/null g/CONNECT-DEFAULT)
+            (g/gtk-widget-add-controller (:view cv) rclick))
         result-click! (fn [offset] (when-let [ref (cview/result-at cv offset)] (inspect-result! ref)))
         ;; a single primary click, with no text selected by it, on a result line
         _ (let [click (g/gtk-gesture-click-new)]
@@ -5054,6 +5078,7 @@
                    :debugger-pane dbgp
                    :trace-pane tracep
                    :result-click!* result-click!
+                   :console-right-press!* console-right-press!
                    :close-inspector!* on-inspector-close
                    :plugins-list!* (fn [] (plugin-step-now! {:settings-path @settings-path*
                                                              :step (fn [] []) :open-list? true})

@@ -5,6 +5,7 @@
   (:require [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
+            [jolt.ffi :as ffi]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
@@ -96,7 +97,7 @@
               not-var? (await-until 3000 20 #(= "; That result isn't a var." (status ui)))
               _ (on-gtk (console-caret! ui at) (run-palette! ui "define a var holding the console result"))
               input (on-gtk (cview/input-text cv))
-              defined? (= (str "(def  (jonquil.results-rt/value! " (:id ref) "))") input)
+              defined? (= (str "(def  (jonquil.results-rt/value! " (:id ref) " " (pr-str (:epoch ref)) "))") input)
               _ (on-gtk (cview/clear-input! cv)
                         (to-prompt!)
                         (run-palette! ui "inspect the console result"))
@@ -104,3 +105,36 @@
           (on-gtk (support/check :result-verbs (and ref copied? not-var? defined? none?)
                                  {:ref ref :copied copied? :not-var not-var? :input input :none none? :status (status ui)})))
         (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
+
+(defn- widget-xy
+  "The console view's widget coordinates of offset's character."
+  [ui offset]
+  (let [{:keys [view buf]} (:console ui)
+        loc (ffi/alloc 16) out (ffi/alloc 8)]
+    (try
+      (g/with-iters* buf offset offset (fn [it _] (g/gtk-text-view-get-iter-location view it loc)))
+      (g/gtk-text-view-buffer-to-window-coords view g/TEXT-WINDOW-WIDGET
+                                               (ffi/read loc :int 0) (ffi/read loc :int 4) out (+ out 4))
+      [(+ 2.0 (ffi/read out :int 0)) (+ 2.0 (ffi/read out :int 4))]
+      (finally (ffi/free loc) (ffi/free out)))))
+
+(defn row-result-right-click-moves-caret
+  "A right-click on a result line puts the caret there first, so the
+  menu's verbs act on the line clicked, not the one the caret was on."
+  [ui]
+  (go-row :result-right-click-moves-caret support/check
+    (let [cv (:console ui)]
+      (try
+        (let [m (enter! ui "(+ 100 1)")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 101")))
+              m2 (enter! ui "(+ 200 2)")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m2) "=> 202")))
+              a (offset-in ui "=> 101")
+              b (offset-in ui "=> 202")
+              want (on-gtk (cview/result-at cv b))
+              _ (on-gtk (console-caret! ui a))
+              _ (on-gtk (let [[x y] (widget-xy ui b)] ((:console-right-press!* ui) x y)))
+              got (on-gtk (cview/result-at cv (g/cursor-offset (:buf cv))))]
+          (on-gtk (support/check :result-right-click-moves-caret (and want (= want got))
+                                 {:want want :got got})))
+        (finally (on-gtk (console-caret! ui (g/gtk-text-buffer-get-char-count (:buf cv)))))))))

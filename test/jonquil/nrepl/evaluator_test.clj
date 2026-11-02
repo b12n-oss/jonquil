@@ -974,6 +974,6 @@
         (is (= :exception (:kind (:ref err))))
         (is (= "3" (:printed (first (run e "*1" false)))) "the keep op left *1 alone")
         (run e "(+ 10 10)" false)
-        (let [v (inspect e :start-result {:id (:id (:ref ok)) :rows 10 :cols 40})]
+        (let [v (inspect e :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :rows 10 :cols 40})]
           (is (re-find #"\b3\b" (pr-str v)) (pr-str v))))
       (finally (ev/stop! e)))))

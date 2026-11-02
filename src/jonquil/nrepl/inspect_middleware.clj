@@ -128,7 +128,7 @@
       {"status" ["done"]
        "data" (pr-str (results-rt/keep! (if (= "error" (g "what")) *e *1)))}
       "inspect-result"
-      (let [v (results-rt/value (as-long (g "result-id")))]
+      (let [v (results-rt/value (as-long (g "result-id")) (g "result-epoch"))]
         {"status" ["done"]
          "view" (pr-str (if (= v ::results-rt/gone)
                             {:error "That result is gone."}

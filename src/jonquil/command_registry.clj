@@ -9,7 +9,8 @@
   The window's and the editor's chords are registered here; the context
   menus read the same table (editor-menu, console-menu, menu-items), the
   command palette lists it (run-command-in), and plugins add their own."
-  (:require [jonquil.keymap :as km]))
+  (:require [jonquil.keymap :as km]
+            [jonquil.results :as results]))
 
 (defn- call [k & args]
   (fn [ctx _args] (apply (get ctx k) args) :handled))
@@ -228,11 +229,12 @@
   "The console's context menu."
   [{:label "Complete" :action "complete" :command :console/complete}
    {:label "Clear Last Output" :action "clear-last-output" :command :console/clear-last-output}
-   ;; live results (LM1), labels from jonquil.results
-   {:label "Inspect This Result" :action "result-inspect" :command :result/inspect}
-   {:label "Copy This Result" :action "result-copy" :command :result/copy}
-   {:label "Define a Var for This Result" :action "result-define" :command :result/define}
-   {:label "Jump to This Var" :action "result-jump" :command :result/jump}])
+   ;; live results (LM1): every verb, labelled from jonquil.results' table;
+   ;; each command asks the table whether the result at the caret offers it
+   {:label (results/label :inspect) :action "result-inspect" :command :result/inspect}
+   {:label (results/label :copy) :action "result-copy" :command :result/copy}
+   {:label (results/label :define) :action "result-define" :command :result/define}
+   {:label (results/label :jump) :action "result-jump" :command :result/jump}])
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named

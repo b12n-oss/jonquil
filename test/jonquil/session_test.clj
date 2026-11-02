@@ -394,5 +394,5 @@
     (is (= :exception (:kind (:ref err))))
     (is (nil? (:ref quiet)) "a quiet evaluation keeps nothing")
     (repl-sync s "(+ 10 10)")
-    (is (re-find #"\b3\b" (pr-str (inspect-sync s :start-result {:id (:id (:ref ok)) :rows 10 :cols 40})))
+    (is (re-find #"\b3\b" (pr-str (inspect-sync s :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :rows 10 :cols 40})))
         "the first result, by its ref, after later ones")))

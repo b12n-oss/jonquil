@@ -27,7 +27,8 @@
     :start-trace {:op "inspect-trace" :trace-id (:id args) :part (name (:part args))
                   :rows (:rows args) :cols (:cols args)}
     ;; a console result's value (jonquil.results-rt): only Jonquil's Jolt middleware
-    :start-result {:op "inspect-result" :result-id (:id args) :rows (:rows args) :cols (:cols args)}
+    :start-result {:op "inspect-result" :result-id (:id args) :result-epoch (:epoch args)
+                   :rows (:rows args) :cols (:cols args)}
     :in {:op "inspect-in" :idx (:idx args)}
     :out {:op "inspect-out"}
     :page {:op "inspect-page" :delta (:delta args)}
