@@ -169,6 +169,32 @@
       (g/with-iters* buf caret caret (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
     true))
 
+;; --- live results (LM1): each ref'd result line's span ---------------------
+;; Output only grows at out-end, after every recorded span, so a span moves
+;; only when text before or over it is deleted: trim! (the front),
+;; clear-last-output! (the tail) and clear-output! (all of it).
+
+(defn- shift-spans!
+  "Drops the spans that reach into [a b) and moves the ones after it back
+  by its length."
+  [cv a b]
+  (swap! (:results cv)
+         (fn [rs] (into [] (keep (fn [{:keys [start end] :as r}]
+                                   (cond (<= end a) r
+                                         (>= start b) (assoc r :start (- start (- b a)) :end (- end (- b a)))
+                                         :else nil)))
+                        rs))))
+
+(defn result-at
+  "The ref ({:id :kind}) of the result line holding offset, or nil."
+  [cv offset]
+  (some (fn [{:keys [start end ref]}] (when (and (<= start offset) (< offset end)) ref)) @(:results cv)))
+
+(defn result-text-at
+  "The text of the result line holding offset, or nil."
+  [cv offset]
+  (some (fn [{:keys [start end text]}] (when (and (<= start offset) (< offset end)) text)) @(:results cv)))
+
 (defn clear-output!
   "Deletes the output history [0, out-end), keeping the prompt and any
   typed input untouched. GTK-thread only, like clear-input!. Allowed while
@@ -191,6 +217,7 @@
         end (mark-offset buf (:out-end cv))]
     (when (pos? end)
       (g/with-iters* buf 0 end (fn [a b] (g/gtk-text-buffer-delete buf a b)))))
+  (reset! (:results cv) [])
   (reset! (:last-entry-active? cv) false)
   nil)
 
@@ -241,6 +268,7 @@
         end (mark-offset buf (:out-end cv))]
     (when-let [[a b] (console/clear-last-range start end)]
       (g/with-iters* buf a b (fn [x y] (g/gtk-text-buffer-delete buf x y)))
+      (shift-spans! cv a b)
       (reset! (:last-entry-active? cv) false)))
   nil)
 
@@ -395,10 +423,13 @@
 ;; --- draining output ---------------------------------------------------
 
 (defn- coalesce
-  "Consecutive same-kind [kind s] chunks merged into one, preserving order."
+  "Consecutive same-kind [kind s] chunks merged into one, preserving order.
+  A result chunk carrying a ref ([kind s ref], append-result!) stays its
+  own chunk, so its span is exactly its line."
   [chunks]
-  (mapv (fn [group] [(ffirst group) (apply str (map second group))])
-        (partition-by first chunks)))
+  (mapv (fn [group] (let [[k _ ref] (first group)]
+                      (cond-> [k (apply str (map second group))] ref (conj ref))))
+        (partition-by (fn [[k _ ref]] (if ref [k ref] k)) chunks)))
 
 (defn- clip-to-cap
   "text's last max characters, or text unchanged when it already fits.
@@ -438,7 +469,8 @@
       (fn [a b]
         (g/gtk-text-buffer-remove-all-tags buf a b)
         (g/gtk-text-buffer-apply-tag buf readonly-tag a b)
-        (when-let [tag (get tags kind)] (g/gtk-text-buffer-apply-tag buf tag a b))))))
+        (when-let [tag (get tags kind)] (g/gtk-text-buffer-apply-tag buf tag a b))))
+    [start end]))
 
 (defn- trim!
   "When the output region (0..out-end) is over MAX-OUTPUT-CHARS, deletes
@@ -483,7 +515,8 @@
             cut (+ from (console/trim-length tail MAX-OUTPUT-CHARS))]
         (when (and @(:last-entry-active? cv) (< (mark-offset buf (:last-entry-start cv)) cut))
           (reset! (:last-entry-active? cv) false))
-        (g/with-iters* buf 0 cut (fn [a b] (g/gtk-text-buffer-delete buf a b)))))))
+        (g/with-iters* buf 0 cut (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+        (shift-spans! cv 0 cut)))))
 
 (defn- scroll-to-end!
   "Scrolls the view to the buffer's end via a dedicated mark, since
@@ -516,10 +549,13 @@
   (reset! (:drain-scheduled? cv) false)
   (let [chunks (first (reset-vals! (:queue cv) []))]
     (when (seq chunks)
-      (doseq [[kind text] (coalesce chunks)]
+      (doseq [[kind text ref] (coalesce chunks)]
         (if (= kind :mark)
           (set-entry-start-mark! cv)
-          (insert-chunk! cv kind (clip-to-cap text MAX-OUTPUT-CHARS))))
+          (let [text (clip-to-cap text MAX-OUTPUT-CHARS)
+                [start end] (insert-chunk! cv kind text)]
+            (when ref
+              (swap! (:results cv) conj {:start start :end end :ref ref :text text})))))
       (trim! cv)
       (scroll-to-end! cv))))
 
@@ -528,6 +564,15 @@
   GTK thread via on-gui!. Never blocks and never touches GTK itself."
   [cv kind s]
   (swap! (:queue cv) conj [kind s])
+  (when (compare-and-set! (:drain-scheduled? cv) false true)
+    (on-gui! (fn [] (drain! cv)))))
+
+(defn append-result!
+  "append! for a result line that keeps a handle to its value (LM1): ref
+  is the evaluator's {:id :kind}, and the line's span is recorded for
+  result-at."
+  [cv kind s ref]
+  (swap! (:queue cv) conj [kind s ref])
   (when (compare-and-set! (:drain-scheduled? cv) false true)
     (on-gui! (fn [] (drain! cv)))))
 
@@ -914,6 +959,8 @@
               :last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)
               :last-entry-active? (atom false)
               :queue (atom [])
+              ;; live results (LM1): [{:start :end :ref :text}], oldest first
+              :results (atom [])
               :drain-scheduled? (atom false)
               :waiting? waiting?
               :evaluating? evaluating?

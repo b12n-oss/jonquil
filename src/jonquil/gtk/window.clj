@@ -983,7 +983,10 @@
                   (on-gui! (fn [] (cview/note-run-end! cv)))
                   (refresh-prompt! cv ev*)
                   (let [[kind text] (console/result-line result)]
-                    (cview/append! cv kind text))
+                    ;; LM1: a result that kept a handle to its value
+                    (if-let [ref (:ref result)]
+                      (cview/append-result! cv kind text ref)
+                      (cview/append! cv kind text)))
                   (when (and is-run?
                              (= :error (:status result))
                              (str/includes? (console/error-text result) "EOF while reading"))
