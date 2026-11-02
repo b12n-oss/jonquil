@@ -17,6 +17,7 @@
             [jonquil.debugger :as debugger]
             [jonquil.inspect.view :as view]
             [jonquil.nrepl.break-middleware :as break-middleware]
+            [jonquil.results-rt :as results-rt]
             [jonquil.trace-rt :as trace-rt]))
 
 (def ops
@@ -27,7 +28,9 @@
    "jonquil-frames" "inspect-local" "jonquil-debug-mode" "jonquil-frame-eval"
    "jonquil-frame-interrupt"
    ;; tracing (jonquil.trace-rt): middleware ops, so *1 stays put
-   "jonquil-trace" "inspect-trace"])
+   "jonquil-trace" "inspect-trace"
+   ;; live console results (jonquil.results-rt)
+   "jonquil-keep-result" "inspect-result"])
 
 (defonce ^:private frame-token
   ;; the token of the frame evaluation running now, for jonquil-frame-interrupt
@@ -119,6 +122,17 @@
                   (pr-str (trace-rt/op (keyword (g "action"))
                                        {:sym (g "sym") :ns (g "ns") :since (some-> (g "since") as-long)})))}
         (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
+      "jonquil-keep-result"
+      ;; the value the eval just made (*1) or its error (*e), kept for the
+      ;; console's line
+      {"status" ["done"]
+       "data" (pr-str (results-rt/keep! (if (= "error" (g "what")) *e *1)))}
+      "inspect-result"
+      (let [v (results-rt/value (as-long (g "result-id")) (g "result-epoch"))]
+        {"status" ["done"]
+         "view" (pr-str (if (= v ::results-rt/gone)
+                            {:error "That result is gone."}
+                            (view/run-op state :start {:value v :rows (as-long (g "rows")) :cols (as-long (g "cols"))})))})
       "inspect-trace"
       (let [v (trace-rt/value (as-long (g "trace-id")) (keyword (g "part")))]
         {"status" ["done"]
@@ -145,7 +159,7 @@
   [state request]
   (future
     (try
-      (server/respond request (if (#{"jonquil-frame-eval" "jonquil-frame-interrupt" "jonquil-trace"} (get request "op"))
+      (server/respond request (if (#{"jonquil-frame-eval" "jonquil-frame-interrupt" "jonquil-trace" "jonquil-keep-result"} (get request "op"))
                                 ;; the user's form, as slow as it is, and the
                                 ;; trace ops (their own atom): never under the
                                 ;; lock every inspector op takes

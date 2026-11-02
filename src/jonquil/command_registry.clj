@@ -9,7 +9,8 @@
   The window's and the editor's chords are registered here; the context
   menus read the same table (editor-menu, console-menu, menu-items), the
   command palette lists it (run-command-in), and plugins add their own."
-  (:require [jonquil.keymap :as km]))
+  (:require [jonquil.keymap :as km]
+            [jonquil.results :as results]))
 
 (defn- call [k & args]
   (fn [ctx _args] (apply (get ctx k) args) :handled))
@@ -41,6 +42,12 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :run/changed {:doc "Run the forms changed since they last ran." :scope :window
                  :run (call :run-changed-fn)}
+   :result/inspect {:doc "Inspect the console result at the caret." :scope :window :run (call :result-inspect-fn)}
+   :result/copy {:doc "Copy the console result at the caret." :scope :window :run (call :result-copy-fn)}
+   :result/define {:doc "Define a var holding the console result at the caret." :scope :window
+                   :run (call :result-define-fn)}
+   :result/jump {:doc "Jump to the definition of the var the console result at the caret names." :scope :window
+                 :run (call :result-jump-fn)}
    :trace/toggle {:doc "Trace the function at the caret, or stop tracing it." :scope :window
                   :run (call :trace-toggle-fn)}
    :trace/show {:doc "Show the calls of the traced functions." :scope :window :run (call :trace-show-fn)}
@@ -221,7 +228,13 @@
 (def console-menu
   "The console's context menu."
   [{:label "Complete" :action "complete" :command :console/complete}
-   {:label "Clear Last Output" :action "clear-last-output" :command :console/clear-last-output}])
+   {:label "Clear Last Output" :action "clear-last-output" :command :console/clear-last-output}
+   ;; live results (LM1): every verb, labelled from jonquil.results' table;
+   ;; each command asks the table whether the result at the caret offers it
+   {:label (results/label :inspect) :action "result-inspect" :command :result/inspect}
+   {:label (results/label :copy) :action "result-copy" :command :result/copy}
+   {:label (results/label :define) :action "result-define" :command :result/define}
+   {:label (results/label :jump) :action "result-jump" :command :result/jump}])
 
 (defn holds-fn
   "The holds? a binding's :when is asked through: true when the named

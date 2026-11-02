@@ -40,6 +40,8 @@
     jonquil.commands-test
     jonquil.changed-test
     jonquil.trace-rt-test
+    jonquil.results-rt-test
+    jonquil.results-test
     jonquil.keymap-test
     jonquil.command-registry-test
     jonquil.keymap-shipped-test

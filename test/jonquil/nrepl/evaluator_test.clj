@@ -86,14 +86,15 @@
     (try
       (is (nil? (ev/start! e)))
       (let [[r out] (run e "(ns demo.run)\n(defn greet \"Says hi.\" [n] (println \"hi\" n) :hi)\n(greet 1)" true (str dir "/src/demo/run.clj"))]
-        (is (= {:status :ok :printed ":hi" :ns 'demo.run} r))
+        ;; :ref is the live-results handle, checked in results-in-the-child-test
+        (is (= {:status :ok :printed ":hi" :ns 'demo.run} (dissoc r :ref)))
         (is (= [[:out "hi 1\n"]] out) "output arrives once, when the evaluation finishes")
         (is (= 'demo.run (ev/prompt-ns e))))
       (is (= ":hi" (:printed (first (run e "(greet 2)" false)))) "the REPL follows the Run's namespace")
       (is (= ["(greet 2)"] (:items @(ev/history e))))
       (testing "an error is text, not a Throwable"
         (is (= {:status :error :error-text "Error: Divide by zero"}
-               (dissoc (first (run e "(/ 1 0)" false)) :ns))))
+               (dissoc (first (run e "(/ 1 0)" false)) :ns :ref))))
       (testing "help: the server's names merged with offline ones"
         (is (some #{"greet"} (map :symbol (ev/complete e "gre" "(gre" 4 nil))))
         (is (= "Says hi." (:doc (ev/lookup e "greet" "(greet 1)" 1))))
@@ -960,4 +961,19 @@
           (is (re-find #"\b20\b" (pr-str v)) (pr-str v))))
       (is (= "20" (:printed (first (run e "*1" false)))) "the trace ops left *1 alone")
       (is (= {:count 1} (trace-sync e :untrace-all {})))
+      (finally (ev/stop! e)))))
+
+;; --- live results in the child (LM1) ---------------------------------------------
+
+(deftest results-in-the-child-test
+  (let [e (make (temp-project))]
+    (try
+      (let [[ok] (run e "(+ 1 2)" false)
+            [err] (run e "(/ 1 0)" false)]
+        (is (= :value (:kind (:ref ok))) (pr-str ok))
+        (is (= :exception (:kind (:ref err))))
+        (is (= "3" (:printed (first (run e "*1" false)))) "the keep op left *1 alone")
+        (run e "(+ 10 10)" false)
+        (let [v (inspect e :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :rows 10 :cols 40})]
+          (is (re-find #"\b3\b" (pr-str v)) (pr-str v))))
       (finally (ev/stop! e)))))

@@ -382,3 +382,17 @@
         (is (re-find #"\b20\b" (pr-str (inspect-sync s :start-trace {:id id :part :ret :rows 10 :cols 40})))))
       (is (= {:count 1} (trace-sync s :untrace-all {})))
       (finally (trace-sync s :untrace-all {}) (trace-sync s :clear {})))))
+
+;; --- live results (LM1) ------------------------------------------------------
+
+(deftest results-keep-a-ref-test
+  (let [s (session/make-session)
+        ok (repl-sync s "(+ 1 2)")
+        err (repl-sync s "(/ 1 0)")
+        quiet (run session/submit-repl! s "(+ 4 5)" {:quiet true})]
+    (is (= :value (:kind (:ref ok))))
+    (is (= :exception (:kind (:ref err))))
+    (is (nil? (:ref quiet)) "a quiet evaluation keeps nothing")
+    (repl-sync s "(+ 10 10)")
+    (is (re-find #"\b3\b" (pr-str (inspect-sync s :start-result {:id (:id (:ref ok)) :epoch (:epoch (:ref ok)) :rows 10 :cols 40})))
+        "the first result, by its ref, after later ones")))

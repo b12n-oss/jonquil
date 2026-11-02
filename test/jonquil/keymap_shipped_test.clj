@@ -176,5 +176,7 @@
           ["Format Selection" :edit/format-selection] ["Indent" :edit/indent]
           ["Unindent" :edit/unindent] ["Find" :find/open] ["Replace" :find/open-replace]]
          (map (juxt :label :command) registry/editor-menu)))
-  (is (= [["Complete" :console/complete] ["Clear Last Output" :console/clear-last-output]]
+  (is (= [["Complete" :console/complete] ["Clear Last Output" :console/clear-last-output]
+          ["Inspect This Result" :result/inspect] ["Copy This Result" :result/copy]
+          ["Define a Var for This Result" :result/define] ["Jump to This Var" :result/jump]]
          (map (juxt :label :command) registry/console-menu))))

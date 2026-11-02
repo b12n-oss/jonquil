@@ -444,6 +444,20 @@
           (and (not= :ok (:status (ops/eval-result msgs false))) on-output)
           (on-output :system (str (clj/auto-require-failed auto-require-retry) "\n")))))))
 
+(defn- keep-result!
+  "Keeps the value the eval just made (or its error) in the child's ring
+  (jonquil.results-rt) through the jonquil-keep-result op: {:id :kind},
+  or nil on a child without the op or when it doesn't answer."
+  [ev status]
+  (let [{:keys [conn session ops]} (runtime ev)]
+    (when (contains? ops "jonquil-keep-result")
+      (try
+        (let [r (client/request-sync conn {:op "jonquil-keep-result" :session session
+                                           :what (if (= :ok status) "value" "error")}
+                                     request-timeout-ms)]
+          (some-> (when (vector? r) (some :data r)) edn/read-string))
+        (catch Throwable _ nil)))))
+
 (defn- quiet-finish
   "A :quiet eval's result (ops/quiet-reply), its output before the token
   line passed on once."
@@ -494,7 +508,11 @@
                   (swap! (:state ev) update-in [:created owner] (fnil into #{})
                          (session/namespaces-created (first before) (first after) (second after))))
                 (finish! ev opts (let [r (cond-> (ops/eval-result msgs (stop-requested? ev))
-                                           (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output))]
+                                           (:quiet opts) (quiet-finish (:quiet opts) (apply str @quiet-out) on-output))
+                                       ;; LM1: the console's line keeps a handle to this value
+                                       ref (when (and (not (:quiet opts)) (#{:ok :error} (:status r)))
+                                             (keep-result! ev (:status r)))
+                                       r (cond-> r ref (assoc :ref ref))]
                                    ;; a Run's prompt is the buffer's ns, as the
                                    ;; JVM and jank evaluators do: a plain server
                                    ;; on a Jolt with #1460 answers load-file

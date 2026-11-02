@@ -58,6 +58,8 @@
     jonquil.commands
     jonquil.changed
     jonquil.trace-rt
+    jonquil.results-rt
+    jonquil.results
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
