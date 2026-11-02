@@ -490,7 +490,7 @@
                            (g/selection-offsets (:buf (:editor ui))))
           _ (on-gtk (g/gtk-widget-grab-focus (:replacement fb)))
           in-replacement? (await-until 2000 20 #(focus-in? (:replacement fb)))]
-      (on-gtk (let [ed (:editor ui) buf (:buf ed)
+      (on-gtk (let [ed (:editor ui)
                     handled (find-bar/handle-key! fb support/KEY-RETURN 0)
                     text (editor/editor-text ed)]
                 (find-bar/close! fb)

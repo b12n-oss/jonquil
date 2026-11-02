@@ -101,6 +101,7 @@
     jonquil.gtk.source-pane
     jonquil.gtk.completion
     jonquil.gtk.find-bar
+    jonquil.gtk.gutter
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
