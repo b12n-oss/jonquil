@@ -57,6 +57,7 @@
     jonquil.runtime-registry
     jonquil.commands
     jonquil.changed
+    jonquil.trace-rt
     jonquil.keymap
     jonquil.command-registry
     jonquil.palette
