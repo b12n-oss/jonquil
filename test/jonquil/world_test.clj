@@ -63,15 +63,26 @@
         p2 (world/entry-path dir 2000)
         p3 (world/entry-path dir 3000)]
     (doseq [p [p1 p2 p3]] (spit p "image"))
+    (world/record! p1 {:at 1000 :kind :save :saved 1 :placeholders 0})
     (world/record! p2 {:at 2000 :kind :save :saved 2 :placeholders 0})
-    (testing "newest first, with each one's record, or just its time"
-      (is (= [[p3 3000 nil] [p2 2000 2] [p1 1000 nil]]
+    (testing "newest first, each with its record; a world file with no record is a save that never finished, so it isn't listed"
+      (is (= [[p2 2000 2] [p1 1000 1]]
              (map (juxt :path :at :saved) (world/entries dir))))
       (is (= [] (world/entries (str dir "/none"))) "no folder yet"))
-    (testing "prune! deletes past keep, the image and its record"
-      (world/prune! dir 1)
-      (is (= [p3] (map :path (world/entries dir))))
-      (is (not (.exists (io/file (str/replace p2 #"\.world$" ".edn"))))))))
+    (testing "prune! deletes past keep, the image and its record, but never a protected one"
+      (world/prune! dir 1 #{p1})
+      (is (= [p2 p1] (map :path (world/entries dir))) "p1 protected")
+      (world/prune! dir 1 #{})
+      (is (= [p2] (map :path (world/entries dir))))
+      (is (not (.exists (io/file (str/replace p1 #"\.world$" ".edn"))))))))
+
+(deftest free-entry-path-test
+  (let [dir (temp-dir)
+        a (world/free-entry-path dir 5000)]
+    (spit a "image")
+    (is (= (world/entry-path dir 5000) a))
+    (is (= (world/entry-path dir 5001) (world/free-entry-path dir 5000))
+        "a save in the same millisecond gets the next free name")))
 
 (deftest save-report-test
   (is (= {:status "; Saved 2 vars to this project's world history." :lines []}
@@ -96,6 +107,11 @@
   (is (= {:status "; Restored 2 vars from this project's world. What you had first is saved: Restore an Earlier World brings it back."
           :lines []}
          (world/restore-report {:restored 2 :placeholders []} {:saved-first? true})))
+  (is (= {:status "; Restored 2 vars from this project's world. What you had first is saved, except 1 placeholder (see the console): Restore an Earlier World brings it back."
+          :lines []}
+         (world/restore-report {:restored 2 :placeholders []} {:saved-first? true :first-placeholders 1})))
+  (is (= {:status "; That saved world is gone: Restore an Earlier World lists what's left." :lines []}
+         (world/restore-report {:missing true} {:picked? true})))
   (is (= {:status "; Restored 2 vars from this project's world, 1 a placeholder (see the console)."
           :lines ["; Restore World: placeholders for what the world couldn't carry:"
                   ";   demo/fut: a future that has not completed"]}

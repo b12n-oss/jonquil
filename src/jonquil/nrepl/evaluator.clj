@@ -30,6 +30,12 @@
   ;; live probe; this bounds a wedged child during start and Run.
   10000)
 
+(def ^:private world-timeout-ms
+  ;; estimate: a world of 1.2 MB saved in 0.38 s and restored in 0.33 s
+  ;; (measured 2026-11-04), so five minutes covers a world of several
+  ;; hundred MB; request-timeout-ms would cut off one of about 30 MB
+  300000)
+
 (def help-timeout-ms
   ;; estimate: completions answered in 6.7 ms and lookup in 1.2 ms while a
   ;; loop ran on the same socket (live probe); this bounds how long a
@@ -845,7 +851,7 @@
                     :else
                     (let [r (client/request-sync conn {:op "jonquil-world" :action (name op)
                                                        :path (str (:path args)) :session session}
-                                                 request-timeout-ms)]
+                                                 world-timeout-ms)]
                       (cond (not (vector? r)) {:error inspect/timeout-message}
                             (some :error r) {:error (some :error r)}
                             (some :data r) (edn/read-string (some :data r))

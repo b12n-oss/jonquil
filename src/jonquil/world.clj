@@ -31,7 +31,15 @@
   [dir ms]
   (str dir "/" (format "%013d" ms) ".world"))
 
-(defn- record-path [world-path]
+(defn free-entry-path
+  "entry-path for ms, or for the next millisecond with no file yet, so two
+  saves landing in one millisecond never share a name."
+  [dir ms]
+  (loop [t ms]
+    (let [p (entry-path dir t)]
+      (if (.exists (io/file p)) (recur (inc t)) p))))
+
+(defn record-path [world-path]
   (str/replace world-path #"\.world$" ".edn"))
 
 (defn record!
@@ -41,7 +49,9 @@
 
 (defn entries
   "dir's saves, newest first: {:path :at} plus the record written beside
-  each one (record!). A missing folder has none."
+  each one (record!). The record is written once a save has landed, so a
+  world file without one is a save that failed or never finished, and
+  isn't listed. A missing folder has none."
   [dir]
   (let [files (or (.listFiles (io/file dir)) [])]
     (->> files
@@ -51,7 +61,7 @@
                          rec (try (let [r (io/file (record-path path))]
                                     (when (.isFile r) (edn/read-string (slurp r))))
                                   (catch Throwable _ nil))]
-                     (merge (when (map? rec) rec) {:path path :at (parse-long stamp)})))))
+                     (when (map? rec) (merge rec {:path path :at (parse-long stamp)}))))))
          (sort-by :at >)
          vec)))
 
@@ -74,9 +84,11 @@
 
 (defn prune!
   "Deletes dir's saves past the newest keep, each world file with its
-  record."
-  [dir keep]
-  (doseq [{:keys [path]} (to-prune (entries dir) keep)]
+  record, but never one whose path is in protect (the save about to be
+  restored)."
+  [dir keep protect]
+  (doseq [{:keys [path]} (to-prune (entries dir) keep)
+          :when (not (contains? protect path))]
     (io/delete-file path true)
     (io/delete-file (record-path path) true)))
 
@@ -129,11 +141,19 @@
 
 (defn restore-report
   "{:status :lines} for a :restore answer. With :saved-first? the status
-  says the data before the restore was saved, and how to get it back."
+  says the data before the restore was saved, and how to get it back; with
+  :first-placeholders n, that n of it went in as placeholders only. With
+  :picked? a missing file is a picked save that has gone."
   ([r] (restore-report r {}))
-  ([{:keys [error missing restored placeholders]} {:keys [saved-first?]}]
-   (let [first-note (when saved-first? " What you had first is saved: Restore an Earlier World brings it back.")]
+  ([{:keys [error missing restored placeholders]} {:keys [saved-first? first-placeholders picked?]}]
+   (let [n (or first-placeholders 0)
+         first-note (when saved-first?
+                      (str " What you had first is saved"
+                           (when (pos? n)
+                             (str ", except " n " placeholder" (when (> n 1) "s") " (see the console)"))
+                           ": Restore an Earlier World brings it back."))]
      (cond
+       (and missing picked?) {:status "; That saved world is gone: Restore an Earlier World lists what's left." :lines []}
        missing {:status "; No saved world for this project yet: Save World makes one." :lines []}
        error {:status (str "; Restore World: " error) :lines []}
 

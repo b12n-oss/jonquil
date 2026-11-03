@@ -4053,48 +4053,71 @@
         ;; the settings file, and every restore saves what's there first,
         ;; so a restore you didn't mean is one more restore away
         world-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/World e)) e)))
-        world-dir! (fn [] (world/world-dir @settings-path*
-                                           (or (:root @(:state tree-pane))
-                                               (some-> @(:path (active-tab)) (java.io.File.) .getCanonicalFile .getParent))))
+        world-dir! (fn []
+                     ;; the window's folder, or one no-folder history: never
+                     ;; the active tab's own folder, which would split the
+                     ;; history by whichever tab is in front
+                     (world/world-dir @settings-path* (:root @(:state tree-pane))))
         world-report! (fn [{:keys [status lines]}]
                         (doseq [l lines] (cview/append! cv :system (str l "\n")))
                         (set-status! status-label status))
-        world-save! (fn [e dir kind on-done]
-                      ;; one save into the history, recorded and pruned when
-                      ;; it lands; on-done gets the answer on the GTK thread
+        world-save! (fn [e dir kind protect on-done]
+                      ;; one save into the history. On success it's recorded,
+                      ;; which is what lists it, then the history is pruned,
+                      ;; sparing protect (a save about to be restored). On
+                      ;; failure the file is deleted, so a half-written or
+                      ;; timed-out world is never picked. on-done always
+                      ;; runs, with the answer, on the GTK thread.
                       (let [at (System/currentTimeMillis)
-                            path (world/entry-path dir at)]
+                            path (world/free-entry-path dir at)]
                         (ev/world-op! e :save {:path path}
                                       (fn [r]
                                         (on-gui! (fn []
-                                                   (when-not (:error r)
-                                                     (world/record! path {:at at :kind kind :saved (:saved r)
-                                                                          :placeholders (count (:placeholders r))})
-                                                     (world/prune! dir world/KEEP))
-                                                   (on-done r)))))))
+                                                   (let [r (if (:error r)
+                                                             (do (.delete (java.io.File. ^String path)) r)
+                                                             (try
+                                                               (world/record! path {:at at :kind kind :saved (:saved r)
+                                                                                    :placeholders (count (:placeholders r))})
+                                                               (world/prune! dir world/KEEP protect)
+                                                               r
+                                                               (catch :default ex
+                                                                 (.delete (java.io.File. ^String path))
+                                                                 (.delete (java.io.File. ^String (world/record-path path)))
+                                                                 {:error (str "the world couldn't be recorded: " (or (ex-message ex) (str ex)))})))]
+                                                     (on-done r))))))))
         world-save-fn (fn []
                         (if-let [e (world-ev)]
                           (do (set-status! status-label "; Saving the world...")
-                              (world-save! e (world-dir!) :save (fn [r] (world-report! (world/save-report r)))))
+                              (world-save! e (world-dir!) :save #{} (fn [r] (world-report! (world/save-report r)))))
                           (set-status! status-label "; Save World needs Jolt.")))
-        world-restore-from! (fn [path]
+        world-restore-from! (fn [path picked?]
                               (if-let [e (world-ev)]
                                 (do (set-status! status-label "; Saving what you have, then restoring...")
-                                    (world-save! e (world-dir!) :before-restore
+                                    (world-save! e (world-dir!) :before-restore #{path}
                                                  (fn [s]
                                                    (if (:error s)
                                                      ;; never restore over data that couldn't be kept
                                                      (do (world-report! (world/save-report s))
                                                          (set-status! status-label
                                                                       (str "; Restore World didn't run: what you have now couldn't be saved first. " (:error s))))
-                                                     (ev/world-op! e :restore {:path path}
-                                                                   (fn [r] (on-gui! (fn [] (world-report! (world/restore-report r {:saved-first? true}))))))))))
+                                                     (do
+                                                       ;; what went into the safety save as placeholders
+                                                       ;; can't come back from it: name it
+                                                       (doseq [l (:lines (world/save-report s))]
+                                                         (cview/append! cv :system (str l "\n")))
+                                                       (ev/world-op! e :restore {:path path}
+                                                                     (fn [r]
+                                                                       (on-gui! (fn []
+                                                                                  (world-report!
+                                                                                   (world/restore-report
+                                                                                    r {:saved-first? true :picked? picked?
+                                                                                       :first-placeholders (count (:placeholders s))})))))))))))
                                 (set-status! status-label "; Restore World needs Jolt.")))
         world-restore-fn (fn []
                            (cond
                              (nil? (world-ev)) (set-status! status-label "; Restore World needs Jolt.")
                              :else (if-let [newest (world/newest-save (world/entries (world-dir!)))]
-                                     (world-restore-from! (:path newest))
+                                     (world-restore-from! (:path newest) false)
                                      (world-report! (world/restore-report {:missing true})))))
         world-restore-earlier-fn (fn []
                                    (let [es (world/entries (world-dir!))
@@ -4473,7 +4496,7 @@
                          :locations-project-usages-fn locations-project-usages-fn
                          :world-save-fn world-save-fn :world-restore-fn world-restore-fn
                          :world-restore-earlier-fn world-restore-earlier-fn
-                         :world-restore-from-fn world-restore-from!
+                         :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn

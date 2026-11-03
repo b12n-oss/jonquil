@@ -108,16 +108,25 @@ an experiment that went wrong. It's Jolt only, in process or in the Jolt
 child, through Jolt's `jolt.image`.
 
 Each project keeps your last 10 saves, beside Jonquil's settings rather than
-in the project, so they never land in git. Before either restore command
+in the project, so they never land in git. The project is the window's
+folder; a window with no folder shares one history with every other. Before either restore command
 runs, the data you have now is saved first, and up to 10 of those are kept
 apart from yours, so restoring never pushes out a save you made. Restore
 World brings back the newest save you made. **Restore an Earlier World**
-lists them all in the palette ("saved 12 minutes ago, 3 vars", or "saved
-before a restore") to pick one, which is how you undo a restore you didn't
-mean.
+lists them all in the palette ("Restore World saved 12 minutes ago (3
+vars)", or "saved before a restore, ...") to pick one, which is how you
+undo a restore you didn't mean. What the save before a restore could only
+keep as a placeholder, an open file say, is named in the console, since
+undoing the restore can't bring that back either.
 
-A world holds the namespaces your code created or loaded, and `user`,
-never Jonquil's or Jolt's own. Before writing, Save World checks each var:
+Which namespaces a world holds depends on where Jolt runs. In process, it's
+`user` and the namespaces your Runs and the prompt created, not the
+libraries they required, and never Jonquil's own. In the Jolt child, it's
+`user` and every namespace loaded after the child started, libraries your
+code required included, but not one a `user.clj` loaded at startup, and
+never a namespace named `clojure.*`, `jolt.*`, `jonquil.*` or `nrepl.*`.
+A library var holding something that can't be written stops the save the
+same as one of yours does. Before writing, Save World checks each var:
 something that can't be written as it is, such as an open file or a future
 that hasn't finished, is saved as a placeholder, and the console names each
 one. If a var holds something that can't be written at all, nothing is
@@ -126,7 +135,9 @@ brought back, which you replace yourself.
 
 A world is data, not code. Functions aren't saved, since Run defines them,
 so restoring doesn't bring back code you've changed since, and a var you
-defined after the save keeps its value. To roll back an experiment
+defined after the save keeps its value. A var that held data when you
+saved and that you've since redefined as a function gets the data back,
+so Run its code again after restoring. To roll back an experiment
 cleanly, put the code back first (with git, say), Run it, then restore.
 And a world reads back only on the Chez Scheme runtime it was saved on, so
 a Jolt upgrade that changes it can leave Restore World unable to read an
