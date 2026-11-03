@@ -398,9 +398,17 @@
         break? (breakable? @(:state ev) opts)
         acc (atom [])
         done (promise)
+        saved (when run? (session/saved-file path code))
         msg (if run?
-              {:op "load-file" :file code :file-path (or path "untitled.clj")
-               :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
+              ;; file-path only for a buffer that is exactly its file: the
+              ;; child records it as the vars' :file (Jolt's load-file, and
+              ;; jolt-lang/nrepl's once it passes it on), and an unsaved or
+              ;; dirty buffer's vars would point at the wrong text. The same
+              ;; key binds *file*, so such a Run has no *file* (the JVM child
+              ;; still gets the path).
+              (cond-> {:op "load-file" :file code
+                       :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
+                saved (assoc :file-path saved))
               ;; the prompt's namespace, as the JVM evaluator sends it: a
               ;; plain server (no jolt-lang/nrepl middleware) on a Jolt with
               ;; jolt-lang/jolt #1460 keeps no ns across evals of its own

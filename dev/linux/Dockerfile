@@ -48,7 +48,7 @@ RUN set -eu; cd /tmp; get() { curl -fsSL --retry 5 --retry-all-errors -o "$1" "$
 
 # jonquil.nrepl.child looks for this checkout at ~/dev/jolt-lang/nrepl, which
 # for user dev is the path below, so no environment variable is needed.
-ARG NREPL_SHA=b8de37a33d039fd64a98b2563c42bc9918d27104
+ARG NREPL_SHA=927dc288b2627fbdf21752391250d7231da6044d
 RUN useradd -m dev \
  && mkdir -p /home/dev/dev/jolt-lang \
  && git clone -q https://github.com/jolt-lang/nrepl.git /home/dev/dev/jolt-lang/nrepl \

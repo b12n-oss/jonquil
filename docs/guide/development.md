@@ -75,7 +75,7 @@ real Jolt child, and a clean exit once stdin closes. Responses have
 deadlines, so a hang fails a check. `--bin ./jonquil` runs it against the
 binary `bb app:build` made, which proves `jolt build` links the MCP
 namespaces. The nREPL step uses a jolt-lang/nrepl checkout if present,
-otherwise fetches v0.4.0 as a git dependency (git and network, first time).
+otherwise fetches v0.4.2 as a git dependency (git and network, first time).
 
 `--window` opens a real window (don't type while it runs) and checks the
 handshake and `listChanged`, the nineteen window tools plus a startup

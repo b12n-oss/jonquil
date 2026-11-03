@@ -123,7 +123,9 @@ window with no folder.
   `$XDG_CACHE_HOME`). If that can't be written or loaded, Jolt starts
   without them and the start lines say why; `{:runtime :in-process}` is the
   way back. A plain nREPL server gets no stdin (`read-line` returns nil).
-- Output streams as it prints with jolt-lang/nrepl v0.4.0 or later.
+- Output streams as it prints with jolt-lang/nrepl v0.4.0 or later, and
+  from v0.4.2 a Run of a saved file records that file as its vars'
+  source, for jump to definition.
 
 </details>
 
@@ -133,8 +135,8 @@ Interrupt needs Jonquil to inject jolt-lang/nrepl's middleware. It uses,
 in order:
 
 1. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` (keep it
-   at v0.4.0 or later).
-2. jolt-lang/nrepl v0.4.0 as a git dependency. The first start clones it
+   at v0.4.2 or later).
+2. jolt-lang/nrepl v0.4.2 as a git dependency. The first start clones it
    into `~/.gitlibs` (about 3 seconds; needs `git` and a network).
 3. If the fetch fails, a plain nREPL server, and the console says so. It
    has no `interrupt`, so Stop kills and restarts the child, and
