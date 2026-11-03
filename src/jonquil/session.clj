@@ -312,10 +312,11 @@
                 v (vals (ns-interns n))]
             [v (meta v)]))))
 
-(defn- saved-file
+(defn saved-file
   "path's canonical path when it names a file on disk holding exactly code,
   else nil. A buffer with unsaved edits doesn't match its file, and its
-  vars' lines would point into the wrong text there."
+  vars' lines would point into the wrong text there. The Jolt child's Run
+  uses it too (jonquil.nrepl.evaluator)."
   [path code]
   (when path
     (try (let [f (io/file path)]

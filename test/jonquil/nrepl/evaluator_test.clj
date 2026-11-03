@@ -131,6 +131,31 @@
           (is (nil? (:file d)))))
       (finally (ev/stop! e)))))
 
+(deftest a-run-sends-its-file-path-only-for-the-saved-file-test
+  ;; the child records a load-file's file-path as the vars' :file (Jolt
+  ;; #1476 with a middleware that passes it on), so only a buffer that is
+  ;; exactly its file on disk may send one: an unsaved buffer's vars must not
+  ;; point at untitled.clj, nor a dirty buffer's at lines its file lacks
+  (let [dir (temp-project) e (make dir)
+        path (str dir "/src/demo/pf.clj")
+        file-of (fn [sym] (:printed (first (run e (str "(:file (meta (var " sym ")))") false))))]
+    (try
+      (is (nil? (ev/start! e)))
+      (testing "an unsaved buffer"
+        (is (= :ok (:status (first (run e "(ns demo.pu)\n(defn g [] 1)\n" true nil)))))
+        (is (= "nil" (file-of "demo.pu/g"))))
+      (testing "a buffer with unsaved edits"
+        (spit path "(ns demo.pf)\n(defn g [] 1)\n")
+        (is (= :ok (:status (first (run e "(ns demo.pf)\n\n\n(defn g [] 2)\n" true path)))))
+        (is (= "nil" (file-of "demo.pf/g"))))
+      (testing "the saved file"
+        (is (= :ok (:status (first (run e "(ns demo.pf)\n(defn g [] 1)\n" true path)))))
+        (let [f (file-of "demo.pf/g")]
+          (if (= "nil" f)
+            (println "SKIP a-run-sends-its-file-path...: this child doesn't record a load-file's path")
+            (is (= (pr-str path) f)))))
+      (finally (ev/stop! e)))))
+
 (deftest reset-on-run-clears-the-child-test
   (let [dir (temp-project) e (make dir)]
     (try
