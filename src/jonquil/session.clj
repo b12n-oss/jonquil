@@ -15,6 +15,7 @@
             [jonquil.debugger :as debugger]
             [jonquil.results-rt :as results-rt]
             [jonquil.trace-rt :as trace-rt]
+            [jonquil.world-rt :as world-rt]
             [jonquil.dialect :as dialect]
             [jonquil.docs :as docs]
             [jonquil.eval :as eval]
@@ -154,6 +155,17 @@
   (trace-op! [_ op args on-result]
     (future
       (let [r (try (trace-rt/op op args)
+                   (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
+  ev/World
+  (world-op! [_ op args on-result]
+    ;; only the namespaces this session's Runs created, and user: in
+    ;; process every other loaded one is Jonquil's own or a library's
+    (future
+      (let [nss (into ["user"] (comp (mapcat val) (map str) (distinct) (remove #{"user"}))
+                      (:created @state))
+            r (try (world-rt/op op (assoc args :namespaces nss))
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-result r) (catch Throwable _))))
     nil)

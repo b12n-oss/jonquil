@@ -998,6 +998,27 @@
       (is (= {:count 1} (trace-sync e :untrace-all {})))
       (finally (ev/stop! e)))))
 
+;; --- Save World and Restore World in the child (LM7) ---------------------------
+
+(defn- world-sync [e op args]
+  (let [p (promise)]
+    (ev/world-op! e op args (fn [r] (deliver p r)))
+    (deref p 20000 :timeout)))
+
+(deftest world-in-the-child-test
+  (let [e (make (temp-project))
+        path (str (System/getProperty "java.io.tmpdir") "/jonquil-world-child-" (System/nanoTime) ".world")]
+    (try
+      (run e "(ns demo.w) (def counter (atom 41)) (def rows [{:a 1}]) (defn f [x] x)" false)
+      (is (= {:saved 2 :placeholders []}
+             (select-keys (world-sync e :save {:path path}) [:saved :placeholders]))
+          "demo.w's two data vars; the fn isn't written")
+      (run e "(do (reset! demo.w/counter 0) (alter-var-root (var demo.w/rows) (constantly nil)))" false)
+      (is (= 2 (:restored (world-sync e :restore {:path path}))))
+      (is (= "[41 [{:a 1}]]" (:printed (first (run e "[@demo.w/counter demo.w/rows]" false)))))
+      (is (= {:missing true} (world-sync e :restore {:path (str path ".none")})))
+      (finally (ev/stop! e) (.delete (java.io.File. path))))))
+
 ;; --- live results in the child (LM1) ---------------------------------------------
 
 (deftest results-in-the-child-test

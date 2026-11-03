@@ -206,6 +206,14 @@
     and :clear take {}, :log takes {:since id}. on-result gets
     jonquil.trace-rt's answer, or {:error s}."))
 
+(defprotocol World
+  "Save World and Restore World where the code runs (jonquil.world-rt):
+  the two Jolt runtimes. Callers check (satisfies? World ev) first."
+  (world-op! [ev op args on-result]
+    "Runs a world op off the caller's thread: :save and :restore take
+    {:path}, the world file. on-result gets jonquil.world-rt/op's answer,
+    or {:error s}."))
+
 (defprotocol Inspector
   "Inspecting the value an evaluator's last :ok result produced,
   through jonquil.inspect.view's lifted ops. op and args are

@@ -45,6 +45,7 @@ Emacs took first:
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
 | Break on error, Continue | `debug-on-error` while the error is live: `e` evaluates in a frame, `c` continues |
 | Retry, Edit and retry, Define and retry | none close: the Elisp debugger resumes a live stack, which an unwound one can't |
+| Save World, Restore World: your session's data, one world per project | none close: `desktop-save` keeps buffers, not values; Genera's Save World wrote the whole machine, this writes data vars only |
 | Plugins written in Clojure, in the settings folder | Emacs Lisp packages |
 
 Three things set it apart:

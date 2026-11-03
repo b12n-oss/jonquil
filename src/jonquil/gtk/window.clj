@@ -83,7 +83,8 @@
             [jonquil.tabs :as tabs]
             [jonquil.timing :as timing]
             [jonquil.theme :as theme]
-            [jonquil.usages :as usages]))
+            [jonquil.usages :as usages]
+            [jonquil.world :as world]))
 
 ;; --- title -------------------------------------------------------------
 
@@ -2755,8 +2756,13 @@
                 (try
                   ;; a tab entry ([:tab/switch id]) is the window's own,
                   ;; not a registry command
-                  (if (and (vector? id) (= :tab/switch (first id)))
+                  (cond
+                    (and (vector? id) (= :tab/switch (first id)))
                     ((:switch-tab-fn window-key-args) (second id))
+                    ;; an earlier world, from Restore an Earlier World
+                    (and (vector? id) (= :world/restore-from (first id)))
+                    ((:world-restore-from-fn window-key-args) (second id))
+                    :else
                     (cmd-registry/run-command-in (plugin-registry/all-commands @plugin-registry/live)
                                                id {:window (window-key-ctx window-key-args 0 0)
                                                    :editor (editor/key-ctx ed)
@@ -4042,6 +4048,88 @@
         ;; Tracing (LM4, jonquil.trace-rt through ev/Trace): the panel's
         ;; rows are the whole log, fetched again when shown and after every
         ;; evaluation while it's showing
+        ;; Save World and Restore World (LM7, jonquil.world-rt through
+        ;; ev/World): each project keeps its last world/KEEP saves beside
+        ;; the settings file, and every restore saves what's there first,
+        ;; so a restore you didn't mean is one more restore away
+        world-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/World e)) e)))
+        world-dir! (fn []
+                     ;; the window's folder, or one no-folder history: never
+                     ;; the active tab's own folder, which would split the
+                     ;; history by whichever tab is in front
+                     (world/world-dir @settings-path* (:root @(:state tree-pane))))
+        world-report! (fn [{:keys [status lines]}]
+                        (doseq [l lines] (cview/append! cv :system (str l "\n")))
+                        (set-status! status-label status))
+        world-save! (fn [e dir kind protect on-done]
+                      ;; one save into the history. On success it's recorded,
+                      ;; which is what lists it, then the history is pruned,
+                      ;; sparing protect (a save about to be restored). On
+                      ;; failure the file is deleted, so a half-written or
+                      ;; timed-out world is never picked. on-done always
+                      ;; runs, with the answer, on the GTK thread.
+                      (let [at (System/currentTimeMillis)
+                            path (world/free-entry-path dir at)]
+                        (ev/world-op! e :save {:path path}
+                                      (fn [r]
+                                        (on-gui! (fn []
+                                                   (let [r (if (:error r)
+                                                             (do (.delete (java.io.File. ^String path)) r)
+                                                             (try
+                                                               (world/record! path {:at at :kind kind :saved (:saved r)
+                                                                                    :placeholders (count (:placeholders r))})
+                                                               (world/prune! dir world/KEEP protect)
+                                                               r
+                                                               (catch :default ex
+                                                                 (.delete (java.io.File. ^String path))
+                                                                 (.delete (java.io.File. ^String (world/record-path path)))
+                                                                 {:error (str "the world couldn't be recorded: " (or (ex-message ex) (str ex)))})))]
+                                                     (on-done r))))))))
+        world-save-fn (fn []
+                        (if-let [e (world-ev)]
+                          (do (set-status! status-label "; Saving the world...")
+                              (world-save! e (world-dir!) :save #{} (fn [r] (world-report! (world/save-report r)))))
+                          (set-status! status-label "; Save World needs Jolt.")))
+        world-restore-from! (fn [path picked?]
+                              (if-let [e (world-ev)]
+                                (do (set-status! status-label "; Saving what you have, then restoring...")
+                                    (world-save! e (world-dir!) :before-restore #{path}
+                                                 (fn [s]
+                                                   (if (:error s)
+                                                     ;; never restore over data that couldn't be kept
+                                                     (do (world-report! (world/save-report s))
+                                                         (set-status! status-label
+                                                                      (str "; Restore World didn't run: what you have now couldn't be saved first. " (:error s))))
+                                                     (do
+                                                       ;; what went into the safety save as placeholders
+                                                       ;; can't come back from it: name it
+                                                       (doseq [l (:lines (world/save-report s))]
+                                                         (cview/append! cv :system (str l "\n")))
+                                                       (ev/world-op! e :restore {:path path}
+                                                                     (fn [r]
+                                                                       (on-gui! (fn []
+                                                                                  (world-report!
+                                                                                   (world/restore-report
+                                                                                    r {:saved-first? true :picked? picked?
+                                                                                       :first-placeholders (count (:placeholders s))})))))))))))
+                                (set-status! status-label "; Restore World needs Jolt.")))
+        world-restore-fn (fn []
+                           (cond
+                             (nil? (world-ev)) (set-status! status-label "; Restore World needs Jolt.")
+                             :else (if-let [newest (world/newest-save (world/entries (world-dir!)))]
+                                     (world-restore-from! (:path newest) false)
+                                     (world-report! (world/restore-report {:missing true})))))
+        world-restore-earlier-fn (fn []
+                                   (let [es (world/entries (world-dir!))
+                                         now (System/currentTimeMillis)]
+                                     (cond
+                                       (nil? (world-ev)) (set-status! status-label "; Restore World needs Jolt.")
+                                       (empty? es) (world-report! (world/restore-report {:missing true}))
+                                       :else (palette/open! (:palette (active-tab))
+                                                            (mapv (fn [x] {:id [:world/restore-from (:path x)]
+                                                                           :doc (world/entry-label now x)
+                                                                           :chords [] :source "world"})
+                                                                  es)))))
         trace-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/Trace e)) e)))
         trace-refresh! (fn [show?]
                          (if-let [e (trace-ev)]
@@ -4406,6 +4494,9 @@
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :locations-project-usages-fn locations-project-usages-fn
+                         :world-save-fn world-save-fn :world-restore-fn world-restore-fn
+                         :world-restore-earlier-fn world-restore-earlier-fn
+                         :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn

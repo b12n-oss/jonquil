@@ -30,6 +30,12 @@
   ;; live probe; this bounds a wedged child during start and Run.
   10000)
 
+(def ^:private world-timeout-ms
+  ;; estimate: a world of 1.2 MB saved in 0.38 s and restored in 0.33 s
+  ;; (measured 2026-11-04), so five minutes covers a world of several
+  ;; hundred MB; request-timeout-ms would cut off one of about 30 MB
+  300000)
+
 (def help-timeout-ms
   ;; estimate: completions answered in 6.7 ms and lookup in 1.2 ms while a
   ;; loop ran on the same socket (live probe); this bounds how long a
@@ -828,6 +834,28 @@
                             (some :error r) {:error (some :error r)}
                             (some :data r) (edn/read-string (some :data r))
                             :else {:error "The Jolt child answered without the trace."}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
+  ;; Save World and Restore World: the inspect middleware's jonquil-world
+  ;; op, over jonquil.world-rt in the child
+  ev/World
+  (world-op! [this op args on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-world")) {:error "Save World needs Jolt."}
+                    :else
+                    (let [r (client/request-sync conn {:op "jonquil-world" :action (name op)
+                                                       :path (str (:path args)) :session session}
+                                                 world-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (some :error r) {:error (some :error r)}
+                            (some :data r) (edn/read-string (some :data r))
+                            :else {:error "The Jolt child answered without the world."}))))
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-result r) (catch Throwable _))))
     nil)
