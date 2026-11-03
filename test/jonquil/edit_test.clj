@@ -89,7 +89,7 @@
   (testing "multi-line block indent, whole text selected, emoji on the
   first line"
     (let [text "😀line 1\nline 2"
-          r (edit/indent (snap-sel text 0 (count text)))]
+          r (edit/indent (snap-sel text 0 14))] ; 14 characters, 15 string indexes
       (is (= "  😀line 1\n  line 2" (edit/apply-edits text (:edits r))))
       (is (= 18 (:caret r)))
       (is (= [2 18] (:sel r))))))
@@ -270,7 +270,7 @@
 
   (testing "renames from a selection, emoji before the symbol"
     (let [text "😀(let [x 1] (+ x x))"
-          sx (str/index-of text "x")
+          sx 7 ; a character offset: (str/index-of text "x") is 8, past the emoji's two indexes
           r (edit/rename (snap-sel text sx (inc sx)) "y")]
       (is (= "😀(let [y 1] (+ y y))" (edit/apply-edits text (:edits r))))
       (is (= 8 (:caret r)))))
