@@ -11,7 +11,7 @@ The full design record, with the reasoning and what was ruled out, is kept in `d
 - `jonquil.nrepl.bencode` is the pure wire format, with a length cap so a hostile reply can't hang the process.
 - `jonquil.nrepl.ops` translates nREPL replies to Jonquil's shapes and builds the reset form, which applies `jonquil.session`'s reset rule over the wire. Bookkeeping evals go through `keeping-history`, so the user's `*1`/`*2`/`*3` stay put.
 
-`jonquil.nrepl.evaluator`'s `NRepl` record implements `Evaluator` on top: `start!` spawns and connects lazily (and refuses after `stop!`), `eval!` sends `load-file` for Run or `eval` for the prompt, and `stop!` interrupts, then kills and restarts the child if that fails.
+`jonquil.nrepl.evaluator`'s `NRepl` record implements `Evaluator` on top: `start!` spawns and connects lazily (and refuses after `stop!`), `eval!` sends `load-file` for Run (with `file-path` only when the file on disk holds exactly the buffer's text, `session/saved-file`, since the child records it as the vars' `:file`) or `eval` for the prompt, and `stop!` interrupts, then kills and restarts the child if that fails.
 
 Every evaluator joins `jonquil.runtime-registry` when made. `jonquil.main` stops them all before exit, and `stop-all!` also runs from a shutdown hook for SIGTERM, SIGHUP and SIGINT. SIGKILL runs no hook; the stdin pipe covers that case.
 
