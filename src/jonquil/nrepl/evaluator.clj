@@ -831,6 +831,28 @@
                 (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
         (try (on-result r) (catch Throwable _))))
     nil)
+  ;; Save World and Restore World: the inspect middleware's jonquil-world
+  ;; op, over jonquil.world-rt in the child
+  ev/World
+  (world-op! [this op args on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-world")) {:error "Save World needs Jolt."}
+                    :else
+                    (let [r (client/request-sync conn {:op "jonquil-world" :action (name op)
+                                                       :path (str (:path args)) :session session}
+                                                 request-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (some :error r) {:error (some :error r)}
+                            (some :data r) (edn/read-string (some :data r))
+                            :else {:error "The Jolt child answered without the world."}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
   ;; Break on error: jonquil.nrepl.break-middleware in the child
   ev/Break
   (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)

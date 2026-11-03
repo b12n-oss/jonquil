@@ -99,6 +99,39 @@ runs: Jolt, JVM Clojure, or another nREPL server that has
 error). ClojureScript, ClojureDart and jank say timing needs Jolt or JVM
 Clojure.
 
+### Saving the world
+
+**Save World** writes your session's data to a file, and **Restore World**
+brings it back: the values of your vars, so an atom you filled from a slow
+source, or the rows you built up at the prompt, survive closing Jonquil or
+an experiment that went wrong. It's Jolt only, in process or in the Jolt
+child, through Jolt's `jolt.image`.
+
+Each project keeps your last 10 saves, beside Jonquil's settings rather than
+in the project, so they never land in git. Before either restore command
+runs, the data you have now is saved first, and up to 10 of those are kept
+apart from yours, so restoring never pushes out a save you made. Restore
+World brings back the newest save you made. **Restore an Earlier World**
+lists them all in the palette ("saved 12 minutes ago, 3 vars", or "saved
+before a restore") to pick one, which is how you undo a restore you didn't
+mean.
+
+A world holds the namespaces your code created or loaded, and `user`,
+never Jonquil's or Jolt's own. Before writing, Save World checks each var:
+something that can't be written as it is, such as an open file or a future
+that hasn't finished, is saved as a placeholder, and the console names each
+one. If a var holds something that can't be written at all, nothing is
+saved and the console names it. Restore World names the placeholders it
+brought back, which you replace yourself.
+
+A world is data, not code. Functions aren't saved, since Run defines them,
+so restoring doesn't bring back code you've changed since, and a var you
+defined after the save keeps its value. To roll back an experiment
+cleanly, put the code back first (with git, say), Run it, then restore.
+And a world reads back only on the Chez Scheme runtime it was saved on, so
+a Jolt upgrade that changes it can leave Restore World unable to read an
+old one: save again.
+
 ## The REPL prompt, and how it differs from Run
 
 ![A Run's output followed by a REPL entry evaluated afterward, in the same console](../images/repl.png)

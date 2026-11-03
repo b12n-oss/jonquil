@@ -18,7 +18,8 @@
             [jonquil.inspect.view :as view]
             [jonquil.nrepl.break-middleware :as break-middleware]
             [jonquil.results-rt :as results-rt]
-            [jonquil.trace-rt :as trace-rt]))
+            [jonquil.trace-rt :as trace-rt]
+            [jonquil.world-rt :as world-rt]))
 
 (def ops
   ["inspect-start" "inspect-in" "inspect-out" "inspect-page"
@@ -30,7 +31,9 @@
    ;; tracing (jonquil.trace-rt): middleware ops, so *1 stays put
    "jonquil-trace" "inspect-trace"
    ;; live console results (jonquil.results-rt)
-   "jonquil-keep-result" "inspect-result"])
+   "jonquil-keep-result" "inspect-result"
+   ;; Save World and Restore World (jonquil.world-rt)
+   "jonquil-world"])
 
 (defonce ^:private frame-token
   ;; the token of the frame evaluation running now, for jonquil-frame-interrupt
@@ -121,6 +124,14 @@
          "data" (binding [*print-length* nil *print-level* nil]
                   (pr-str (trace-rt/op (keyword (g "action"))
                                        {:sym (g "sym") :ns (g "ns") :since (some-> (g "since") as-long)})))}
+        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
+      "jonquil-world"
+      ;; the child's own namespaces (world-rt/child-namespaces): every one
+      ;; here but the language's and the tooling's is the user's
+      (try
+        {"status" ["done"]
+         "data" (binding [*print-length* nil *print-level* nil]
+                  (pr-str (world-rt/op (keyword (g "action")) {:path (g "path")})))}
         (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
       "jonquil-keep-result"
       ;; the value the eval just made (*1) or its error (*e), kept for the

@@ -86,3 +86,13 @@
             {:id [:tab/switch 2] :doc "Switch to tab: b.clj" :chords [] :source "tab"}]
            (palette/tab-entries recent 3)))
     (is (= [] (palette/tab-entries [{:id 1 :label "a.clj"}] 1)) "one tab: nothing to switch to")))
+
+(deftest world-queries-pick-their-own-command-test
+  (testing "the palette runs the first match, so each world query must reach its own command first"
+    (let [es (shipped-entries)
+          first-id (fn [q] (:id (first (palette/filter-entries es q))))]
+      (is (= :world/save (first-id "save world")))
+      (is (= :world/restore (first-id "restore world")))
+      (is (= :world/restore-earlier (first-id "earlier world")))
+      (is (= [:world/save] (map :id (palette/filter-entries es "save world")))
+          "Restore World's doc holds no save, so it doesn't match at all"))))

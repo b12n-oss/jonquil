@@ -41,6 +41,7 @@
             [gtk-selftest-window.gutter :as gutter-rows]
             [gtk-selftest-window.results :as results-rows]
             [gtk-selftest-window.trace :as trace-rows]
+            [gtk-selftest-window.world :as world-rows]
             [gtk-selftest-window.restarts :as restarts-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
@@ -391,6 +392,7 @@
    trace-rows/row-trace-toggle-and-show
    trace-rows/row-trace-throw
    trace-rows/row-trace-not-a-function
+   world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-changed-not-before-first-run
    gutter-rows/row-changed-marks-after-edit
