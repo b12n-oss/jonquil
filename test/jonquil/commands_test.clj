@@ -26,6 +26,11 @@
     (is (= "(defn f [x]\n  (inc x))"
            (edit/apply-edits text (:edits (c/format-all-op (snap text 0))))))
     (is (nil? (c/format-all-op (snap "(defn f [x]\n  (inc x))" 0))) "already formatted"))
+  (testing "the whole-text edit ends at the text's character count, past an emoji"
+    (let [text ";😀\n(defn f [x]\n(inc x))"
+          r (c/format-all-op (snap text 0))]
+      (is (= 23 (second (first (:edits r)))) "23 characters, 24 string indexes")
+      (is (= ";😀\n(defn f [x]\n  (inc x))" (edit/apply-edits text (:edits r))))))
   (testing "selection formats only the lines it spans"
     (let [text "(defn a []\n1)\n(defn b []\n2)"
           out (edit/apply-edits text (:edits (c/format-selection-op (snap text 14 26))))]
