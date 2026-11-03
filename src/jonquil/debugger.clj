@@ -180,8 +180,8 @@
 
 (defn rows
   "The panel's rows for data: a :frame row per frame (its fn and file:line;
-  code run from the editor or typed at the prompt has no file, so its line,
-  counted in that text), then a :local row per local; a :note row when
+  code typed at the prompt or run from an unsaved buffer has no file, so
+  its line, counted in that text), then a :local row per local; a :note row when
   there is a note or no frames."
   [{:keys [frames note]}]
   (cond

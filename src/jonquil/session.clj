@@ -325,8 +325,8 @@
 (defn mark-run-file!
   "Gives file to every var a Run defined: one whose metadata isn't what it
   was before the Run (before, program-vars' map; a def replaces a var's
-  metadata), with a :line and no :file. A Run evaluates the buffer's text
-  with load-string, and Jolt turns the reader's file off there on purpose
+  metadata), with a :line and no :file. On a Jolt whose eval-string takes no
+  source path a Run's text has no file: Jolt turns the reader's file off there on purpose
   (an evaluated string isn't the file that called it), so these vars had a
   line but nowhere to jump to. A var a REPL entry defined earlier keeps its
   metadata, so it isn't marked; one a require loaded already has a :file.
@@ -345,8 +345,8 @@
   evaluations created. Returns nil when started, or the engine's warning
   string when a program is already running (and then resets nothing). With
   :path naming a file that holds exactly code, the vars the Run defines get
-  it as their :file
-  (mark-run-file!), so jump to definition from another tab can open it."
+  it as their :file (eval-string's source path, or mark-run-file! on a Jolt
+  without one), so jump to definition from another tab can open it."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (let [owner (:owner opts :run)]

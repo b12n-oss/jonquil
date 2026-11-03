@@ -144,10 +144,12 @@
   ;; binds it: an armed eval's throw pauses before evaluate catches it
   (if-let [v (mw/hook-var)]
     (with-redefs [debugger/*break-fn* fake-break]
-      (let [{:keys [h entry]} (setup)
+      (let [{:keys [h entry wrapper]} (setup)
             sent (atom [])]
         (h {"op" "eval" "session" "s1" "jonquil-break" "1" :reply (fn [m] (swap! sent conj m))})
-        (let [fut (future (with-bindings {v (mw/session-wrapper entry)}
+        ;; the wrapper clone bound, so a clone binding another session's
+        ;; wrapper fails here
+        (let [fut (future (with-bindings {v wrapper}
                             (server/evaluate "(/ 1 0)" "user" {:out (fn [_])})))]
           (is (wait-for #(some (fn [m] (get m "jonquil-paused")) @sent)))
           (debugger/continue! (:break entry))
