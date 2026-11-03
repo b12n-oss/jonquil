@@ -3882,6 +3882,9 @@
         ;; of its places is visited. A new list deletes the marks, and a
         ;; closing tab takes its own with it. GTK thread only.
         locations-state (atom nil)
+        ;; bumped by every new list, so a Find Usages still running lands
+        ;; only when nothing has replaced the list it was asked for
+        locations-gen (atom 0)
         clear-locations! (fn []
                            (when-let [{:keys [tab-id marks anchors]} @locations-state]
                              (when-let [t (and tab-id (tab-by-id tabs tab-id))]
@@ -3894,12 +3897,18 @@
                        (some (fn [t] (when (and @(:path t) (source/same-path? @(:path t) path)) t)) @tabs))
         anchor-file! (fn [t path]
                        ;; every entry of path's file, filtered out or not, gets
-                       ;; its marks in t's buffer
-                       (let [es (filterv #(= path (:path %)) (:all (:list @locations-state)))
-                             ms (create-location-marks (:buf (:ed t)) es)]
-                         (swap! locations-state update :anchors into
-                                (map (fn [e m] [(:id e) {:tab-id (:id t) :marks m}]) es ms))))
+                       ;; its marks in t's buffer, but only while the buffer
+                       ;; holds the text the search read: otherwise the
+                       ;; offsets would land anywhere, so the file is stale
+                       (let [lst (:list @locations-state)]
+                         (if (= (get (:hashes lst) path) (hash (editor/editor-text (:ed t))))
+                           (let [es (filterv #(= path (:path %)) (:all lst))
+                                 ms (create-location-marks (:buf (:ed t)) es)]
+                             (swap! locations-state update :anchors into
+                                    (map (fn [e m] [(:id e) {:tab-id (:id t) :marks m}]) es ms)))
+                           (swap! locations-state update :stale (fnil conj #{}) path))))
         make-locations! (fn [lst]
+                          (swap! locations-gen inc)
                           (clear-locations!)
                           (if (= :project (:scope lst))
                             (do (reset! locations-state {:list lst :anchors {}})
@@ -3914,7 +3923,8 @@
         place-of (fn [lst]
                    ;; {:tab :marks :buffer-marks} for lst's current entry, a
                    ;; project entry's file opened and anchored first when it
-                   ;; isn't yet; nil when it can't be opened
+                   ;; isn't yet; {:stale path} when that file's text has
+                   ;; changed since the search; nil when it can't be opened
                    (let [{:keys [tab-id marks]} @locations-state
                          i (:index lst)]
                      (if (= :project (:scope lst))
@@ -3924,15 +3934,20 @@
                                        (when-not (:error (open-file! @*tab-ctx (:path e)))
                                          (tab-for-path (:path e))))]
                              (when t (anchor-file! t (:path e)))))
-                         (when-let [a (get (:anchors @locations-state) (:id e))]
+                         (if-let [a (get (:anchors @locations-state) (:id e))]
                            {:tab (tab-by-id tabs (:tab-id a)) :marks (:marks a)
                             :buffer-marks (keep (fn [[_ b]] (when (= (:tab-id a) (:tab-id b)) (:marks b)))
-                                                (:anchors @locations-state))}))
+                                                (:anchors @locations-state))}
+                           (when (contains? (:stale @locations-state) (:path e))
+                             {:stale (:path e)})))
                        {:tab (tab-by-id tabs tab-id) :marks (nth marks i) :buffer-marks marks})))
         goto-location! (fn [lst]
                          (swap! locations-state assoc :list lst)
                          (locations-pane/select! locp lst)
-                         (if-let [{t :tab [ma mb] :marks bm :buffer-marks} (place-of lst)]
+                         (if-let [{t :tab [ma mb] :marks bm :buffer-marks stale :stale} (place-of lst)]
+                           (if stale
+                             (set-status! status-label
+                                          (str "; " (file-name stale) " changed since the search, so its places may be off: search again."))
                            (let [ed (:ed t)
                                  buf (:buf ed)
                                  s (g/mark-offset buf ma)
@@ -3948,7 +3963,7 @@
                                (do (select-tab! @*tab-ctx (:id t))
                                    (place-caret-and-scroll! ed s)
                                    (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
-                                   (set-status! status-label (str "; " (loc/position-text lst))))))
+                                   (set-status! status-label (str "; " (loc/position-text lst)))))))
                            (set-status! status-label "; Couldn't open that file.")))
         locations-step-fn (fn [delta]
                             (if-let [lst (:list @locations-state)]
@@ -3971,7 +3986,6 @@
         ;; Find Usages in Project (LM2): jonquil.usages/scan on a future,
         ;; open tabs' text in place of their files'; a newer search
         ;; supersedes one still running
-        usages-gen (atom 0)
         locations-project-usages-fn
         (fn []
           (let [[_ sym] (symbol-at-caret)
@@ -3982,7 +3996,7 @@
               (nil? sym) (set-status! status-label "; No symbol at the caret.")
               (nil? root) (set-status! status-label "; No project folder: open a folder, or save this file first.")
               :else
-              (let [gen (swap! usages-gen inc)
+              (let [gen (swap! locations-gen inc)
                     name (usages/search-name sym)
                     texts (into {} (keep (fn [x] (when-let [p @(:path x)]
                                                    [(.getCanonicalPath (java.io.File. ^String p))
@@ -3991,15 +4005,18 @@
                 (set-status! status-label (str "; Finding usages of " name "..."))
                 (future
                   (let [r (try (usages/scan {:root root :name name :texts texts})
-                               (catch :default e {:error (ex-message e)}))]
+                               (catch :default e {:error (or (ex-message e) (str e))}))]
                     (on-gui! (fn []
-                               (when (= gen @usages-gen)
-                                 (if-let [err (:error r)]
-                                   (set-status! status-label (str "; Find usages: " err))
-                                   (do (make-locations! (assoc (loc/project-uses r name) :root root))
-                                       (when (pos? (:unreadable r))
-                                         (set-status! status-label
-                                                      (str "; " (:unreadable r) " file(s) couldn't be read."))))))))))))))
+                               (when (= gen @locations-gen)
+                                 (try
+                                   (if-let [err (:error r)]
+                                     (set-status! status-label (str "; Find usages: " err))
+                                     (do (make-locations! (assoc (loc/project-uses r name) :root root))
+                                         (when (pos? (:unreadable r 0))
+                                           (set-status! status-label
+                                                        (str "; " (:unreadable r) " file(s) couldn't be read.")))))
+                                   (catch :default e
+                                     (set-status! status-label (str "; Find usages: " (or (ex-message e) (str e)))))))))))))))
         locations-matches-fn (fn []
                                (let [{:keys [ed fb]} (active-tab)
                                      snap (editor/snapshot ed)

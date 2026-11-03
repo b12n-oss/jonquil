@@ -279,6 +279,7 @@
    locations-rows/row-locations-buffer-replaced
    locations-rows/row-locations-matches-empty-find
    locations-rows/row-find-usages-in-project
+   locations-rows/row-find-usages-stale-file
    locations-rows/row-locations-empty-says-no-places
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette

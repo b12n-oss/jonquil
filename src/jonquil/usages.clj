@@ -29,19 +29,38 @@
            (str/ends-with? t (str "/" name))
            (= (search-name t) name))))
 
-(defn- ns-span
-  "[start end] of text's top-level (ns ...) form, or nil."
+(defn- just-before?
+  "Whether text right before offset i, past spaces, ends with prefix."
+  [^String text i prefix]
+  (str/ends-with? (str/trimr (subs text 0 i)) prefix))
+
+(defn- ns-spans
+  "[[start end] ...] of text's ns forms: a (ns ...) at the top level, or
+  directly inside a reader conditional (#?(:clj (ns ...))), but never one
+  in a (comment ...) block or after #_."
   [text tokens]
   (let [{:keys [matches]} (syntax/compute-brackets text)]
-    (some (fn [[[t1 s1 e1] [t2 s2 e2]]]
-            (when (and (= :bracket t1) (= "(" (subs text s1 e1))
-                       (contains? code-kinds t2) (= "ns" (subs text s2 e2)))
-              (when-let [close (get matches s1)] [s1 (inc close)])))
-          (partition 2 1 tokens))))
+    (loop [ts (seq tokens) stack [] spans []]
+      (if-let [[kind s _] (first ts)]
+        (if (= :bracket kind)
+          (let [ch (.charAt ^String text (int s))]
+            (if (contains? #{\( \[ \{} ch)
+              (let [[nk ns' ne] (second ts)
+                    ns? (and (= \( ch) (contains? code-kinds nk) (= "ns" (subs text ns' ne))
+                             (not (just-before? text s "#_"))
+                             (or (empty? stack)
+                                 (and (= 1 (count stack))
+                                      (let [p (peek stack)]
+                                        (or (just-before? text p "#?") (just-before? text p "#?@"))))))
+                    close (when ns? (get matches s))]
+                (recur (rest ts) (conj stack s) (cond-> spans close (conj [s (inc close)]))))
+              (recur (rest ts) (if (seq stack) (pop stack) stack) spans)))
+          (recur (rest ts) stack spans))
+        spans))))
 
 (defn hits
   "Every use of name in text as code, in order: [{:start :end :how}], how
-  one of :ns (inside the ns form), :definition (the name of a def form),
+  one of :ns (inside an ns form, ns-spans), :definition (the name of a def form),
   :call (the first thing in a list, so (join ...) and #(join ...)) or
   :value (anywhere else). Never in a string, comment, regex or keyword. A
   qualified name searches by its name part."
@@ -50,7 +69,7 @@
     (if (or (str/blank? name) (not (str/includes? text name)))
       []
       (let [tokens (vec (remove #(= :comment (first %)) (syntax/tokenize text)))
-            [ns-s ns-e] (ns-span text tokens)
+            spans (ns-spans text tokens)
             defs (set (map (juxt :start :end) (syntax/find-definitions text name)))]
         (into []
               (keep-indexed
@@ -59,7 +78,7 @@
                    (let [[pk ps pe] (when (pos? i) (nth tokens (dec i)))]
                      {:start s :end e
                       :how (cond
-                             (and ns-s (<= ns-s s) (< e ns-e)) :ns
+                             (some (fn [[a b]] (and (<= a s) (< e b))) spans) :ns
                              (contains? defs [s e]) :definition
                              (and (= :bracket pk) (= "(" (subs text ps pe))) :call
                              :else :value)}))))
@@ -72,22 +91,31 @@
   [root]
   (let [ignore (file-tree/parse-gitignore
                 (let [f (io/file root ".gitignore")] (when (.isFile f) (slurp f))))
+        ;; canonical folders already walked: a link back up the tree, or
+        ;; two links to one folder, is walked once (file-tree/rows guards
+        ;; its rows the same way)
+        seen (volatile! #{})
         walk (fn walk [^java.io.File dir]
-               (mapcat (fn [^java.io.File f]
-                         (let [n (.getName f) dir? (.isDirectory f)]
-                           (cond
-                             (file-tree/ignored? ignore n dir?) nil
-                             dir? (walk f)
-                             (file-tree/clojure-file? n) [(.getCanonicalPath f)]
-                             :else nil)))
-                       (or (.listFiles dir) [])))]
-    (vec (sort (walk (io/file root))))))
+               (let [c (.getCanonicalPath dir)]
+                 (when-not (contains? @seen c)
+                   (vswap! seen conj c)
+                   (mapcat (fn [^java.io.File f]
+                             (let [n (.getName f) dir? (.isDirectory f)]
+                               (cond
+                                 (file-tree/ignored? ignore n dir?) nil
+                                 dir? (walk f)
+                                 (file-tree/clojure-file? n) [(.getCanonicalPath f)]
+                                 :else nil)))
+                           (or (.listFiles dir) [])))))]
+    (vec (sort (distinct (walk (io/file root)))))))
 
 (defn scan
   "{:entries [{:path :start :end :line :text :how}] :files n :matched n
-  :unreadable n}: every use of name in root's project-files, files in path
-  order. texts maps a path to an open tab's text, which replaces the file's
-  own. A file that can't be read is skipped and counted."
+  :unreadable n :hashes {path h}}: every use of name in root's
+  project-files, files in path order. texts maps a path to an open tab's
+  text, which replaces the file's own. :hashes holds the hash of the text
+  each matched file was searched in, so a caller can tell whether its
+  offsets still fit. A file that can't be read is skipped and counted."
   [{:keys [root name texts]}]
   (let [paths (project-files root)
         results (for [p paths]
@@ -95,10 +123,12 @@
                     (if (= ::unreadable text)
                       {:unreadable 1}
                       (let [hs (hits text name)]
-                        {:entries (map (fn [e h] (assoc e :path p :how (:how h)))
+                        {:path p :hash (hash text)
+                         :entries (map (fn [e h] (assoc e :path p :how (:how h)))
                                        (loc/entries text (map (juxt :start :end) hs))
                                        hs)}))))]
     {:entries (vec (mapcat :entries results))
      :files (count paths)
      :matched (count (filter (comp seq :entries) results))
-     :unreadable (reduce + 0 (keep :unreadable results))}))
+     :unreadable (reduce + 0 (keep :unreadable results))
+     :hashes (into {} (keep (fn [r] (when (seq (:entries r)) [(:path r) (:hash r)]))) results)}))

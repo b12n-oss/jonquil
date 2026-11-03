@@ -30,7 +30,12 @@
   (testing "a qualified search name searches by its name part"
     (is (= (usages/hits src "join") (usages/hits src "str/join"))))
   (testing "no ns form: nothing is :ns"
-    (is (= [:call] (mapv :how (usages/hits "(f 1)" "f"))))))
+    (is (= [:call] (mapv :how (usages/hits "(f 1)" "f")))))
+  (testing "only a top-level ns form, never one in a comment block or discarded"
+    (is (= [:ns :call] (mapv :how (usages/hits "(comment (ns scratch))\n(ns a (:require [x :refer [join]]))\n(join)" "join"))))
+    (is (= [:ns] (mapv :how (usages/hits "#_(ns old)\n(ns a (:require [x :refer [join]]))" "join")))))
+  (testing "a reader conditional's ns form counts, as every one in the file does"
+    (is (= [:ns] (mapv :how (usages/hits "(ns a)\n#?(:clj (ns b (:require [x :refer [join]])))" "join"))))))
 
 (defn- temp-project
   "A temp dir holding files, a map of relative path -> text."
@@ -51,6 +56,13 @@
     (is (= #{"src/a.clj" "src/b.cljc"} rels)
         "Clojure files only, never target, a dot folder or what .gitignore names")))
 
+(deftest project-files-symlink-loop-test
+  (let [root (temp-project {"y.clj" "(y)" "sub/x.clj" "(x)"})
+        link (java.nio.file.Paths/get (str root "/sub/loop") (make-array String 0))
+        target (java.nio.file.Paths/get root (make-array String 0))]
+    (java.nio.file.Files/createSymbolicLink link target (make-array java.nio.file.attribute.FileAttribute 0))
+    (is (= 2 (count (usages/project-files root))) "a link back up the tree is walked once")))
+
 (deftest scan-test
   (let [root (temp-project {"src/a.clj" "(ns a)\n(join 1)\n" "src/b.clj" "(ns b)\n(x)\n(map join y)\n"
                             "src/c.clj" "(nothing)\n"})
@@ -62,6 +74,9 @@
                    (:entries r)))))
     (is (= 3 (:files r)) "every Clojure file was looked at")
     (is (= 2 (:matched r)) "and two had a use")
+    (is (= {a (hash (slurp a))} (select-keys (:hashes r) [a]))
+        "each matched file's text is hashed, to check its offsets still fit later")
+    (is (= 2 (count (:hashes r))) "matched files only")
     (testing "an open tab's text replaces the file's"
       (let [r (usages/scan {:root root :name "join" :texts {a "(ns a)\n\n\n(f (join 2))\n"}})
             e (first (:entries r))]

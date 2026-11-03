@@ -288,3 +288,39 @@
                (editor/mark-saved! (:ed t))
                ((:close-tab! ui) (:id t)))
              ((:select-tab! ui) (:id (first ((:tabs* ui))))))))))))
+
+(defn row-find-usages-stale-file
+  "A file that changed on disk after the search isn't anchored at offsets
+  read from its old text: F8 opens it and says it changed, and selects
+  nothing there. The tree's root, the tabs and the panel are put back
+  after."
+  [ui]
+  (go-row :find-usages-stale-file support/check
+    (let [root (fn [] (:root @(:state (:file-tree ui))))
+          original (on-gtk (root))
+          d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-usages-stale-")))
+          f (io/file d "b.clj")
+          _ (spit f "(ns demo.b)\n(join 1)\n")
+          pane (:locations-pane ui)]
+      (on-gtk ((:simulate-folder-result! ui) {:path d})
+              (editor/set-text! (:editor ui) "(join 2)")
+              (support/place-cursor! (:buf (:editor ui)) 2)
+              (run-palette! ui "find usages in project"))
+      (let [_ (await-until 5000 20 #(= 1 (count (lpane/row-texts pane))))
+            _ (spit f ";; edited after the search\n(ns demo.b)\n(join 1)\n")
+            want "; b.clj changed since the search, so its places may be off: search again."
+            _ (on-gtk (f8! ui false))
+            st (await-status ui want)
+            picked (on-gtk (let [s (editor/snapshot (:ed ((:active-tab* ui))))]
+                             (subs (:text s) (:sel-start s) (:sel-end s))))]
+        (on-gtk
+         (try
+           (support/check :find-usages-stale-file (and (= want st) (= "" picked))
+                          {:status st :picked picked})
+           (finally
+             (close-panel! ui)
+             ((:simulate-folder-result! ui) {:path original})
+             (doseq [t (rest ((:tabs* ui)))]
+               (editor/mark-saved! (:ed t))
+               ((:close-tab! ui) (:id t)))
+             ((:select-tab! ui) (:id (first ((:tabs* ui))))))))))))

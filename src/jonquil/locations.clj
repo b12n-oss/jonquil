@@ -66,13 +66,15 @@
 (defn project-uses
   "A list from jonquil.usages/scan's result for name: :scope :project, every
   kind shown, each entry carrying :path, :how and :id, its place in :all,
-  the whole list the filter picks from."
-  [{:keys [entries matched]} name]
+  the whole list the filter picks from. :hashes is the scan's, the text
+  each file was searched in."
+  [{:keys [entries matched hashes]} name]
   (let [n (count entries)
         all (into [] (map-indexed (fn [i e] (assoc e :id i))) (take LIST-MAX entries))]
     {:title (str "Usages of " name " (" n " in " matched (if (= 1 matched) " file" " files") ")"
                  (when (> n LIST-MAX) (str ", the first " LIST-MAX)))
-     :scope :project :all all :entries all :hows (set hows) :index nil}))
+     :scope :project :all all :entries all :hows (set hows) :index nil
+     :hashes (or hashes {})}))
 
 (defn set-hows
   "lst showing only the entries whose :how is in shown, in order. The
