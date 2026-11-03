@@ -403,7 +403,9 @@
               ;; file-path only for a buffer that is exactly its file: the
               ;; child records it as the vars' :file (Jolt's load-file, and
               ;; jolt-lang/nrepl's once it passes it on), and an unsaved or
-              ;; dirty buffer's vars would point at the wrong text
+              ;; dirty buffer's vars would point at the wrong text. The same
+              ;; key binds *file*, so such a Run has no *file* (the JVM child
+              ;; still gets the path).
               (cond-> {:op "load-file" :file code
                        :file-name (or (some-> path (str/split #"/") last) "untitled.clj") :session session}
                 saved (assoc :file-path saved))
