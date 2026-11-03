@@ -41,7 +41,7 @@ Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where 
 
 - [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`
 - GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
-- `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.0 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
+- `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.2 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork is private for now
 - Java 17+ and the `clojure` CLI, only for `bb test:clj` and a JVM project's own server
 - A shadow-cljs project (`shadow-cljs.edn`) with a running watch, only for the ClojureScript dialect when it attaches: Jonquil never starts it

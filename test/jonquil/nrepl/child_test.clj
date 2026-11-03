@@ -54,7 +54,7 @@
               "-e" (child/server-form 7950 ["nrepl.middleware/default-middleware"])]
              (child/launch-args 7950 {:local "/r/nrepl"})))
       (is (= ["jolt" "-Sdeps"
-              "{:deps {nrepl/nrepl {:git/url \"https://github.com/jolt-lang/nrepl.git\", :git/tag \"v0.4.0\", :git/sha \"7efdd6c\"}}}"
+              "{:deps {nrepl/nrepl {:git/url \"https://github.com/jolt-lang/nrepl.git\", :git/tag \"v0.4.2\", :git/sha \"927dc28\"}}}"
               "-e" (child/server-form 7952 ["nrepl.middleware/default-middleware"])]
              (child/launch-args 7952 {:git child/nrepl-git-coord})))
       (is (= ["jolt" "-e" (child/server-form 7951 [])] (child/launch-args 7951 nil))))))

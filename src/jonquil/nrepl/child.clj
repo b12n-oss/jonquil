@@ -58,10 +58,12 @@
 
 (def nrepl-git-coord
   "jolt-lang/nrepl as a git dependency, for a machine with no checkout.
-  v0.4.0 is the first release that streams an evaluation's output. Measured
-  2026-10-18: 2.8 s to ready on the first start (the clone into
-  ~/.gitlibs), 347 ms after that, the same as a checkout."
-  {:git/url "https://github.com/jolt-lang/nrepl.git" :git/tag "v0.4.0" :git/sha "7efdd6c"})
+  v0.4.0 is the first release that streams an evaluation's output, and
+  v0.4.2 the first that passes a load-file's file-path on to evaluate, so a
+  Run of a saved file is evaluated as that file. Measured 2026-10-18: 2.8 s
+  to ready on the first start (the clone into ~/.gitlibs), 347 ms after
+  that, the same as a checkout."
+  {:git/url "https://github.com/jolt-lang/nrepl.git" :git/tag "v0.4.2" :git/sha "927dc28"})
 
 (defn middleware-source
   "Where the injected middleware comes from: {:local checkout} when

@@ -265,7 +265,7 @@
 (deftest unfetchable-git-middleware-falls-back-to-a-plain-server-test
   (with-redefs [child/middleware-source
                 (constantly {:git {:git/url "file:///nonexistent/jonquil-nrepl.git"
-                                   :git/tag "v0.4.0" :git/sha "7efdd6c"}})]
+                                   :git/tag "v0.4.2" :git/sha "927dc28"}})]
     (let [e (make (temp-project))]
       (try
         (is (nil? (ev/start! e)) "the retry without middleware starts")
@@ -289,7 +289,7 @@
   (doseq [program (cond-> [nil] newer-jolt (conj newer-jolt))]
     (with-redefs [child/middleware-source
                   (constantly {:git {:git/url "file:///nonexistent/jonquil-nrepl.git"
-                                     :git/tag "v0.4.0" :git/sha "7efdd6c"}})
+                                     :git/tag "v0.4.2" :git/sha "927dc28"}})
                   tool-path/resolve-program (let [real tool-path/resolve-program]
                                               (fn [n p ok?] (if (and program (= n "jolt")) program (real n p ok?))))]
       (let [e (make (temp-project))]
