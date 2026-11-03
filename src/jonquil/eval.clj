@@ -68,17 +68,33 @@
           (:jolt/interrupted (ex-data c)) true
           :else (recur (.getCause ^Throwable c)))))
 
+(def ^:private source-path-probe
+  ;; whether jolt.host/eval-string takes a source path (jolt-lang/jolt#1476),
+  ;; asked once with an evaluation of nil
+  (delay (if-let [f (resolve 'jolt.host/eval-string)]
+           (try (f "nil" "probe.clj") true (catch Throwable _ false))
+           false)))
+
+(defn source-path?
+  "True when this Jolt's eval-string takes the path of the file the text
+  came from, so its forms carry that :file and *file* is the path."
+  []
+  @source-path-probe)
+
 (defn eval-string
   "Evaluates the forms in s like load-string and answers the last one's
   value, leaving *ns* where the code put it: an (ns ...) or in-ns in s
   switches the caller. Jolt from jolt-lang/jolt #1460 (929e06f5) binds *ns*
   around load-string, as JVM Clojure's Compiler.load does, and adds
   jolt.host/eval-string, the same loop without the binding, for a REPL that
-  should switch; a Jolt without it still leaks the switch from load-string."
-  [s]
-  (if-let [f (resolve 'jolt.host/eval-string)]
-    (f s)
-    (load-string s)))
+  should switch; a Jolt without it still leaks the switch from load-string.
+  With path, on a Jolt where source-path? is true, s is evaluated as that
+  file's text; elsewhere path is ignored."
+  ([s] (eval-string s nil))
+  ([s path]
+   (if-let [f (resolve 'jolt.host/eval-string)]
+     (if (and path (source-path?)) (f s path) (f s))
+     (load-string s))))
 
 (defn format-error [t]
   (let [root (find-root-cause t)
@@ -222,6 +238,8 @@
        :printed rather than re-deriving it from :value.
      :ns-name symbol (default 'user)
      :quiet any non-nil value: *1 *2 *3 and *e stay as they were
+     :source-path the file code is the text of, which its forms carry as
+       their :file on a Jolt where source-path? is true
      :wrap-eval (fn [thunk])  called with the evaluation's thunk (value
        printing included), inside run-interruptible on the worker, and must
        call it: Break on error's jolt.debug handler (jonquil.debugger)
@@ -243,7 +261,7 @@
    should enqueue that work for later and return, not invoke-and-wait."
   [{:keys [queue current-rdr closed? waiting-input? running-state lock repl-vars] :as ctx}
    code
-   {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval] :as opts}]
+   {:keys [on-output on-wait-input on-status-change on-complete before-eval before-idle wrap-eval source-path] :as opts}]
   (let [ns-sym (or (:ns-name opts) 'user)]
     (locking lock
       (if (evaluating? ctx)
@@ -338,7 +356,7 @@
                                                  ;; during that realization
                                                  ;; yields :interrupted like
                                                  ;; any other Stop.
-                                                 (let [v (eval-string (str code "\n"))]
+                                                 (let [v (eval-string (str code "\n") source-path)]
                                                    {:value v
                                                     :printed (binding [*print-length* 1000]
                                                                (pr-str v))})))))]

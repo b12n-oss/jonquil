@@ -56,8 +56,11 @@ reads `break-pauses PASS {:available false}`. `bb test:debugger` runs them on
 a Jolt that has it, sets `JONQUIL_JOLT` for the live child test, and fails
 when one of them skipped or a debugger row took that path. Run it before
 merging a change that touches the debugger, the evaluators or the child's
-middleware, until a Jolt release carries `jolt.debug`. `--no-window` leaves
-out the window self-test for a quicker pass.
+middleware, until a Jolt release carries `jolt.debug`. Build that Jolt from
+Jolt main at merge commit `440ea77a` (jolt-lang/jolt#1474) or later: the
+child's break also needs `jolt.nrepl/*eval-wrapper*`, so on an older build
+the live child break test fails. `--no-window` leaves out the window self-test for a
+quicker pass.
 
 </details>
 

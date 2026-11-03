@@ -3,6 +3,7 @@
   jolt.debug break (jonquil.debugger/*break-fn*)."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
+            [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]
             [jonquil.nrepl.break-middleware :as mw]))
 
@@ -16,20 +17,20 @@
 
 (defn- setup
   "A handler over a fresh sessions atom whose next records requests and, on
-  clone, answers new-session \"s1\" and keeps the session break it saw
+  clone, answers new-session \"s1\" and keeps the eval wrapper it saw
   bound, as jolt-lang/nrepl's session middleware starts its worker under
-  that binding. {:h :sessions :seen :entry}."
+  that binding. {:h :sessions :seen :entry :wrapper}."
   []
   (let [sessions (atom {})
         seen (atom [])
-        entry (atom nil)
+        wrapper (atom nil)
         h (mw/handler sessions (fn [req]
                                  (swap! seen conj (get req "op"))
                                  (when (= "clone" (get req "op"))
-                                   (reset! entry mw/*session-break*)
+                                   (reset! wrapper (some-> (mw/hook-var) deref))
                                    ((:reply req) {"new-session" "s1" "status" ["done"]}))))]
     (h {"op" "clone" :reply (fn [_])})
-    {:h h :sessions sessions :seen seen :entry @entry}))
+    {:h h :sessions sessions :seen seen :entry (get @sessions "s1") :wrapper @wrapper}))
 
 (defn- ask
   "Sends request through h; the replies it gets, waiting up to 3 s for one
@@ -41,17 +42,18 @@
     @replies))
 
 (defn- eval-under
-  "Runs the wrapped (f code) on a future under the session break e, as the
-  session's worker would. The future yields the value or the throwable."
+  "Runs (f code) on a future through session e's eval wrapper, as
+  jolt.nrepl/evaluate does on the session's worker. The future yields the
+  value or the throwable."
   [e f]
-  (let [w (mw/wrap f)]
-    (future (binding [mw/*session-break* e]
-              (try (w "code") (catch Throwable t t))))))
+  (future (try ((mw/session-wrapper e) (fn [] (f "code"))) (catch Throwable t t))))
 
-(deftest clone-binds-a-session-break-test
-  (let [{:keys [sessions entry]} (setup)]
+(deftest clone-binds-the-session-wrapper-test
+  (let [{:keys [entry wrapper]} (setup)]
     (is (some? entry))
-    (is (identical? entry (get @sessions "s1")))))
+    (if (mw/hook-var)
+      (is (fn? wrapper) "the clone's worker gets the session's wrapper")
+      (is (nil? wrapper) "a Jolt without the hook gets nothing bound"))))
 
 (deftest eval-arms-only-when-asked-test
   (let [{:keys [h entry seen]} (setup)]
@@ -90,13 +92,7 @@
       (testing "an eval without jonquil-break"
         (h {"op" "eval" "session" "s1" :reply (fn [m] (swap! sent conj m))})
         (is (instance? ArithmeticException (deref (eval-under entry (fn [_] (/ 1 0))) 3000 :blocked)))
-        (is (empty? @sent)))
-      (testing "an eval-string inside an armed one passes straight through"
-        (h {"op" "eval" "session" "s1" "jonquil-break" "1" :reply (fn [m] (swap! sent conj m))})
-        (let [inner (mw/wrap (fn [_] (/ 1 0)))
-              fut (eval-under entry (fn [_] (try (inner "nested") (catch ArithmeticException _ :caught-inside))))]
-          (is (= :caught-inside (deref fut 3000 :blocked)))
-          (is (empty? @sent)))))))
+        (is (empty? @sent))))))
 
 (deftest interrupt-ends-a-pause-test
   (with-redefs [debugger/*break-fn* fake-break]
@@ -111,8 +107,8 @@
         (is (= "interrupt" (last @seen)) "interrupt goes on to the session middleware")))))
 
 (deftest check-test
-  (mw/install-wrapper!)
-  (with-redefs [debugger/*break-fn* fake-break]
+  (with-redefs [debugger/*break-fn* fake-break
+                mw/hooked? (constantly true)]
     (let [{:keys [h]} (setup)]
       (is (= [{"status" ["done"] "available" "true"}] (ask h {"op" "jonquil-break-check" "session" "s1"}))))))
 
@@ -133,14 +129,29 @@
           (is (false? @(:armed? entry)))
           (is (nil? @(:paused (:break entry)))))))))
 
-(deftest routing-is-checked-test
-  ;; the wrappers only work while jolt.nrepl/evaluate calls eval-string and
-  ;; load-string through their vars; the check says so when it doesn't
-  (mw/install-wrapper!)
-  (is (true? (mw/routed?)) "this Jolt's evaluate reaches both wrappers")
+(deftest the-hook-is-checked-test
+  ;; the break needs jolt.nrepl/*eval-wrapper*; the check says so without it
+  (is (= (some? (resolve 'jolt.nrepl/*eval-wrapper*)) (mw/hooked?)))
   (with-redefs [debugger/*break-fn* fake-break
-                mw/routed? (constantly false)]
+                mw/hooked? (constantly false)]
     (let [{:keys [h]} (setup)
           [r] (ask h {"op" "jonquil-break-check" "session" "s1"})]
       (is (= "false" (get r "available")))
-      (is (re-find #"doesn't evaluate through" (get r "reason"))))))
+      (is (re-find #"\*eval-wrapper\*" (get r "reason"))))))
+
+(deftest evaluate-pauses-through-the-hook-test
+  ;; jolt.nrepl/evaluate itself, with the session's wrapper bound as clone
+  ;; binds it: an armed eval's throw pauses before evaluate catches it
+  (if-let [v (mw/hook-var)]
+    (with-redefs [debugger/*break-fn* fake-break]
+      (let [{:keys [h entry wrapper]} (setup)
+            sent (atom [])]
+        (h {"op" "eval" "session" "s1" "jonquil-break" "1" :reply (fn [m] (swap! sent conj m))})
+        ;; the wrapper clone bound, so a clone binding another session's
+        ;; wrapper fails here
+        (let [fut (future (with-bindings {v wrapper}
+                            (server/evaluate "(/ 1 0)" "user" {:out (fn [_])})))]
+          (is (wait-for #(some (fn [m] (get m "jonquil-paused")) @sent)))
+          (debugger/continue! (:break entry))
+          (is (some? (:err (deref fut 3000 :blocked))) "evaluate still reports the error"))))
+    (println "SKIP evaluate-pauses-through-the-hook-test: this Jolt has no jolt.nrepl/*eval-wrapper*")))

@@ -325,8 +325,8 @@
 (defn mark-run-file!
   "Gives file to every var a Run defined: one whose metadata isn't what it
   was before the Run (before, program-vars' map; a def replaces a var's
-  metadata), with a :line and no :file. A Run evaluates the buffer's text
-  with load-string, and Jolt turns the reader's file off there on purpose
+  metadata), with a :line and no :file. On a Jolt whose eval-string takes no
+  source path a Run's text has no file: Jolt turns the reader's file off there on purpose
   (an evaluated string isn't the file that called it), so these vars had a
   line but nowhere to jump to. A var a REPL entry defined earlier keeps its
   metadata, so it isn't marked; one a require loaded already has a :file.
@@ -334,6 +334,8 @@
   alter-meta! the program does, a load-file of another file, a future the
   program started (all are the Run's own doing)."
   [file before]
+  ;; the fallback for a Jolt whose eval-string takes no source path
+  ;; (before jolt-lang/jolt#1476): run-definitions! passes the path there
   (doseq [[v m] (program-vars)
           :when (and (:line m) (nil? (:file m)) (not= m (get before v)))]
     (try (alter-meta! v assoc :file file) (catch Throwable _ nil))))
@@ -343,8 +345,8 @@
   evaluations created. Returns nil when started, or the engine's warning
   string when a program is already running (and then resets nothing). With
   :path naming a file that holds exactly code, the vars the Run defines get
-  it as their :file
-  (mark-run-file!), so jump to definition from another tab can open it."
+  it as their :file (eval-string's source path, or mark-run-file! on a Jolt
+  without one), so jump to definition from another tab can open it."
   ([session code] (run-definitions! session code {}))
   ([{:keys [ctx state] :as session} code opts]
    (let [owner (:owner opts :run)]
@@ -359,12 +361,15 @@
      (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
        (reset-namespaces! session owner))
      (create-ns 'user)
-     ;; Marked in before-idle, on the Run's own worker before the context
+     ;; A Jolt whose eval-string takes a source path evaluates the text as
+     ;; the file, so its vars get it from the reader. Elsewhere they're
+     ;; marked in before-idle, on the Run's own worker before the context
      ;; goes idle, so a REPL entry or another Run can't define a var in
      ;; between and get this file.
      (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
-           before (when file (program-vars))
+           before (when (and file (not (eval/source-path?))) (program-vars))
            opts (cond-> (assoc opts :owner owner)
+                  file (assoc :source-path file)
                   before (assoc :before-idle
                                 (fn [_] (try (mark-run-file! file before) (catch Throwable _ nil)))))]
        (evaluate! session code 'user opts)))))

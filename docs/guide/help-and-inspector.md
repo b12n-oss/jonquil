@@ -240,9 +240,11 @@ user/dbg-inner  line 2 (no file)
 
 Frames stop where Jonquil's own evaluation code starts, so the list shows your
 code. Return or a click on a frame opens its file at that line, in a tab
-for a file of your project and in the source panel for anything else. Code you
-ran from the editor or typed at the prompt has no file, so its frame shows the
-line within that text and says so instead. Return or a click on a local opens its value in
+for a file of your project and in the source panel for anything else. Code
+typed at the prompt or run from an unsaved buffer has no file, so its frame
+shows the line within that text and says so instead. A Run of a saved file
+keeps the file on a Jolt whose `eval-string` takes a source path (Jolt main
+from merge commit `94309872`, jolt-lang/jolt#1476). Return or a click on a local opens its value in
 the inspector, where it lives, so even a huge or lazy value is never copied out.
 A local's row prints at most 8 items, 3 levels deep, and 100 characters. A lazy seq nothing has realized yet reads `<lazy seq, not realized>`, because printing it would run your code again (a `(map save! rows)` would save the rows again); opening it in the inspector realizes it.
 
@@ -295,11 +297,11 @@ timing). A top-level expression typed at the prompt keeps no frame of its
 own, so its locals show only inside a function it called; when no frame is
 your code's, the panel says so instead of listing Jonquil's own. Break on error
 works for Jolt, in process and in a project's Jolt child, where it needs the
-child's Jolt to have `jolt.debug` and the jolt-lang/nrepl middleware Jonquil
-starts it with; the other runtimes say so. In the child it works by wrapping
-`jolt.host/eval-string` and `load-string`, which Jolt's nREPL server calls;
-the child checks that when it starts, and turning it on says so if a Jolt
-ever evaluates another way.
+child's Jolt to have `jolt.debug`, the jolt-lang/nrepl middleware Jonquil
+starts it with, and `jolt.nrepl/*eval-wrapper*`, the hook Jolt's nREPL
+server calls around each evaluation (Jolt main from merge commit `440ea77a`,
+jolt-lang/jolt#1474, not yet in a release). Turning it on says so when one of them is missing, and the other
+runtimes say so too.
 
 ### Restarts
 
