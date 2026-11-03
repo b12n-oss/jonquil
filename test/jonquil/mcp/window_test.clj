@@ -1,6 +1,7 @@
 (ns jonquil.mcp.window-test
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
+            [jonquil.edit :as edit]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.window :as gw]
             [jonquil.help :as help]
@@ -84,7 +85,11 @@
   (is (= 4 (w/clamp-since 4 10))))
 
 (deftest replace-op-shape
-  (is (= {:edits [[0 3 "xy"]] :caret 2} (w/replace-op "abc" "xy"))))
+  (is (= {:edits [[0 3 "xy"]] :caret 2} (w/replace-op "abc" "xy")))
+  (testing "character offsets past an emoji, which apply-edits takes whole"
+    (let [r (w/replace-op "😀(a)" "😀b")]
+      (is (= {:edits [[0 4 "😀b"]] :caret 2} r))
+      (is (= "😀b" (edit/apply-edits "😀(a)" (:edits r)))))))
 
 (deftest gui-call-ok
   (is (= 3 (w/gui-call sync-gui (fn [] (+ 1 2)) 1000))))

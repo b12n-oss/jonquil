@@ -4,7 +4,8 @@
   steps. No GTK here; the front-end hands in plain text and offsets."
   (:require [clojure.string :as str]
             [jonquil.console :as console]
-            [jonquil.syntax :as syntax]))
+            [jonquil.syntax :as syntax]
+            [jonquil.text-offsets :as offsets]))
 
 (defn- line-bounds
   "[start end] of the line holding `caret`, without its newline."
@@ -202,7 +203,7 @@
    (let [fmt (syntax/format-code text)
          out (if stabilize (stabilize fmt 0 (count fmt)) fmt)]
      (when (not= out text)
-       {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil}))))
+       {:edits [[0 (offsets/char-count text) out]] :caret (carry-caret text out caret) :sel nil}))))
 
 (defn- line-span
   "[start end] character offsets of lines l1..l2 (both inclusive) in text."
@@ -229,7 +230,7 @@
                  (stabilize fmt a b))
                fmt)]
      (when (not= out text)
-       {:edits [[0 (count text) out]] :caret (carry-caret text out caret) :sel nil}))))
+       {:edits [[0 (offsets/char-count text) out]] :caret (carry-caret text out caret) :sel nil}))))
 
 (defn pre-run-problem
   "A sentence naming the first bracket problem in `text`, checked before Run
