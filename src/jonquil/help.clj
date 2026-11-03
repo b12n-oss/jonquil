@@ -4,21 +4,38 @@
   {:edits [[s e r]] :caret n :sel nil} shape jonquil.gtk.editor/apply-op!
   takes. Lookups that depend on the running program (candidates, docs)
   happen in the GTK layer through jonquil.docs; the results are passed in
-  here as plain data."
+  here as plain data. Offsets in and out are character offsets, as in
+  jonquil.edit; the bodies work in string indexes and convert at the edges
+  through jonquil.text-offsets."
   (:require [clojure.string :as str]
             [jonquil.edit :as edit]
-            [jonquil.syntax :as syntax]))
+            [jonquil.syntax :as syntax]
+            [jonquil.text-offsets :as offsets]))
+
+(defn- in-chars
+  "(f snap) for an f whose body works in string indexes, with snap's
+  offsets in characters and the string indexes under ks in f's result map
+  turned into character offsets."
+  [{:keys [text] :as snap} ks f]
+  (if (offsets/astral? text)
+    (when-some [r (f (offsets/snapshot->indexes snap))]
+      (offsets/keys->chars text r ks))
+    (f snap)))
 
 ;; --- completion ------------------------------------------------------------
+
+(defn- prefix-at*
+  [{:keys [text caret sel-start sel-end]}]
+  (when (= sel-start sel-end)
+    (let [p (syntax/get-symbol-prefix-at-pos text caret)]
+      (when-not (str/blank? (:prefix p)) p))))
 
 (defn prefix-at
   "The word prefix before the caret, as syntax/get-symbol-prefix-at-pos
   returns it ({:prefix :start :end :word-end}), or nil when there is a
   selection or the prefix is empty (Ctrl+Space then does nothing)."
-  [{:keys [text caret sel-start sel-end]}]
-  (when (= sel-start sel-end)
-    (let [p (syntax/get-symbol-prefix-at-pos text caret)]
-      (when-not (str/blank? (:prefix p)) p))))
+  [snapshot]
+  (in-chars snapshot [:start :end :word-end] prefix-at*))
 
 (defn open-state
   "The popup state for prefix-info p and the candidate vector (maps with
@@ -52,7 +69,7 @@
   (let [{:keys [start word-end]} (:prefix-info state)
         sym (:symbol (selected state))]
     {:edits [[start word-end sym]]
-     :caret (+ start (count sym))
+     :caret (+ start (offsets/char-count sym))
      :sel nil}))
 
 (defn candidate-label
@@ -114,17 +131,21 @@
 
 ;; --- the symbol quick doc, jump and rename act on ---------------------------
 
-(defn target
-  "The symbol quick doc, jump and rename act on, as {:symbol s :start n :end n}:
-  the selection when it is exactly one symbol, else the symbol at or around
-  the caret. nil when there is none (for example inside a comment or a
-  string)."
+(defn- target*
   [{:keys [text caret sel-start sel-end]}]
   (if (< sel-start sel-end)
     (let [at (syntax/symbol-at-pos text sel-start)]
       (when (and at (= (:start at) sel-start) (= (:end at) sel-end))
         (select-keys at [:symbol :start :end])))
     (some-> (syntax/symbol-at-pos text caret) (select-keys [:symbol :start :end]))))
+
+(defn target
+  "The symbol quick doc, jump and rename act on, as {:symbol s :start n :end n}:
+  the selection when it is exactly one symbol, else the symbol at or around
+  the caret. nil when there is none (for example inside a comment or a
+  string)."
+  [snapshot]
+  (in-chars snapshot [:start :end] target*))
 
 (defn target-symbol
   "The target's symbol string, or nil."
@@ -487,6 +508,17 @@
                              (ancestor-names text tokens matches open close)))))
            (enclosing-parens text matches pos)))))
 
+(defn- jump-target*
+  [snapshot doc-info]
+  (when-let [{:keys [symbol start]} (target* snapshot)]
+    (let [text (:text snapshot)]
+      (if-let [b (local-binding text start symbol)]
+        {:kind :buffer :offset (:start b)}
+        (if-let [d (syntax/find-definition text symbol)]
+          {:kind :buffer :offset (:start d)}
+          (when (= :found (:status doc-info))
+            {:kind :external :doc doc-info}))))))
+
 (defn jump-target
   "Where jump to definition goes from snapshot: {:kind :buffer :offset n} for
   a definition in the buffer, else {:kind :external :doc d} when doc-info (a
@@ -499,14 +531,7 @@
   would wrongly favour an earlier USE over an unbound name's own nil, see
   the section note above); then external; else nil."
   [snapshot doc-info]
-  (when-let [{:keys [symbol start]} (target snapshot)]
-    (let [text (:text snapshot)]
-      (if-let [b (local-binding text start symbol)]
-        {:kind :buffer :offset (:start b)}
-        (if-let [d (syntax/find-definition text symbol)]
-          {:kind :buffer :offset (:start d)}
-          (when (= :found (:status doc-info))
-            {:kind :external :doc doc-info}))))))
+  (in-chars snapshot [:offset] #(jump-target* % doc-info)))
 
 (defn rename-problem
   "Why renaming the target symbol to new-name would do nothing, as a short

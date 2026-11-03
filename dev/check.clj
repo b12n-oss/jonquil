@@ -12,6 +12,7 @@
     jonquil.settings
     jonquil.paint
     jonquil.docs
+    jonquil.text-offsets
     jonquil.edit
     jonquil.eval
     jonquil.console

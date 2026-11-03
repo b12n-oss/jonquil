@@ -37,14 +37,24 @@
     (is (= {:edits [[1 3 "mapv"]] :caret 5 :sel nil} (help/commit-op s))))
   (testing "the whole word around the caret is replaced"
     (let [s (help/open-state (help/prefix-at (snap "(mapx)" 3)) cands)]
-      (is (= {:edits [[1 5 "map"]] :caret 4 :sel nil} (help/commit-op s))))))
+      (is (= {:edits [[1 5 "map"]] :caret 4 :sel nil} (help/commit-op s)))))
+  (testing "character offsets past an emoji"
+    (let [s (help/move (help/open-state (help/prefix-at (snap "😀(ma x)" 4)) cands) 1)]
+      (is (= {:edits [[2 4 "mapv"]] :caret 6 :sel nil} (help/commit-op s))))
+    (let [s (help/open-state (help/prefix-at (snap "(a" 2)) [{:symbol "a😀" :category :user}])]
+      (is (= 3 (:caret (help/commit-op s))) "the caret counts an emoji in the name as one character"))))
 
 (deftest refine-test
   (let [s (help/open-state (help/prefix-at (snap "(ma" 3)) cands)]
     (is (= "map" (:prefix (:prefix-info (help/refine s (snap "(map" 4) [(first cands)])))))
     (is (nil? (help/refine s (snap "(ma " 4) cands)) "a space closes it")
     (is (nil? (help/refine s (snap "(ma (x" 6) cands)) "a different word closes it")
-    (is (nil? (help/refine s (snap "(map" 4) [])) "no candidates left closes it")))
+    (is (nil? (help/refine s (snap "(map" 4) [])) "no candidates left closes it"))
+  (testing "character offsets past an emoji"
+    (let [s (help/open-state (help/prefix-at (snap "😀(ma" 4)) cands)]
+      (is (help/still-valid? s (snap "😀(map" 5)))
+      (is (= "map" (:prefix (:prefix-info (help/refine s (snap "😀(map" 5) [(first cands)])))))
+      (is (not (help/still-valid? s (snap "😀(ma (x" 7))) "a different word closes it"))))
 
 (deftest waiting-and-arrive-test
   (let [p (help/prefix-at (snap "(ma" 3))]
@@ -83,6 +93,11 @@
   (is (nil? (help/target-symbol (snap "; greet" 4))) "inside a comment")
   (is (nil? (help/target-symbol (snap "(f \"greet\")" 6))) "inside a string"))
 
+(deftest target-past-an-emoji-test
+  (is (= {:symbol "greet" :start 2 :end 7} (help/target (snap "😀(greet)" 3))))
+  (is (= {:symbol "greet" :start 2 :end 7} (help/target (snap "😀(greet)" 0 2 7)))
+      "a selection given in character offsets"))
+
 (deftest jump-target-test
   (let [text "(defn greet [name] name)
 (greet \"x\")"]
@@ -92,7 +107,11 @@
         (is (= {:kind :buffer :offset 13} (help/jump-target (snap text c) nil)) (str "caret " c))))
     (is (= :external (:kind (help/jump-target (snap "(map inc [1])" 2) {:status :found :name "map" :ns "clojure.core"}))))
     (is (nil? (help/jump-target (snap "(nope 1)" 2) {:status :not-found})))
-    (is (nil? (help/jump-target (snap "; nope" 3) nil)) "no symbol at the caret")))
+    (is (nil? (help/jump-target (snap "; nope" 3) nil)) "no symbol at the caret"))
+  (testing "character offsets past an emoji"
+    (let [text "😀(defn greet [n] n)\n(greet 1)"]
+      (is (= {:kind :buffer :offset 7} (help/jump-target (snap text 22) nil)) "the top-level def")
+      (is (= {:kind :buffer :offset 14} (help/jump-target (snap text 17) nil)) "the local binding"))))
 
 (deftest jump-target-scope-test
   (testing "a param shadows a top-level def of the same name"

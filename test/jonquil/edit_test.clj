@@ -89,10 +89,18 @@
   (testing "multi-line block indent, whole text selected, emoji on the
   first line"
     (let [text "😀line 1\nline 2"
-          r (edit/indent (snap-sel text 0 (count text)))]
+          r (edit/indent (snap-sel text 0 14))] ; 14 characters, 15 string indexes
       (is (= "  😀line 1\n  line 2" (edit/apply-edits text (:edits r))))
       (is (= 18 (:caret r)))
-      (is (= [2 18] (:sel r))))))
+      (is (= [2 18] (:sel r)))))
+
+  (testing "multi-line block indent, emoji between the edits"
+    (let [text "line 1\n😀line 2\nline 3"
+          r (edit/indent (snap-sel text 0 21))] ; 21 characters, 22 string indexes
+      (is (= [[0 0 "  "] [7 7 "  "] [15 15 "  "]] (:edits r)) "the third line starts at character 15")
+      (is (= "  line 1\n  😀line 2\n  line 3" (edit/apply-edits text (:edits r))))
+      (is (= 27 (:caret r)))
+      (is (= [2 27] (:sel r))))))
 
 (deftest unindent-test
   ;; Upstream ui.clj unindent-selection! (41c56b8); core_test.clj
@@ -270,7 +278,7 @@
 
   (testing "renames from a selection, emoji before the symbol"
     (let [text "😀(let [x 1] (+ x x))"
-          sx (str/index-of text "x")
+          sx 7 ; a character offset: (str/index-of text "x") is 8, past the emoji's two indexes
           r (edit/rename (snap-sel text sx (inc sx)) "y")]
       (is (= "😀(let [y 1] (+ y y))" (edit/apply-edits text (:edits r))))
       (is (= 8 (:caret r)))))
