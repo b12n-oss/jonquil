@@ -104,8 +104,27 @@ closed. Places follow ordinary edits, so a line added above one doesn't
 move it off its text. A place whose text you deleted is reported gone.
 Format All and reloading the file from disk replace the whole buffer, which
 leaves the list out of date: F8 says so, and listing again fixes it.
-Stepping past either end says so. A list belongs to the tab it came from:
-closing that tab clears it.
+Stepping past either end says so. A buffer list belongs to the tab it came
+from: closing that tab clears it.
+
+**Find Usages in Project** lists every use of the symbol at the caret in
+the project's Clojure files: the folder the file tree shows, or the file's
+own folder when there's no tree, minus what `.gitignore`, dot folders,
+`target` and `node_modules` hide. An open tab counts with its unsaved text.
+It matches by name, so `str/join` and `clojure.string/join` count as uses of
+`join`, and so does a `join` of your own in another namespace. Each row
+reads `path:line: kind: text`, where the kind says how the name is used: a
+`call` (the first thing in a list, `(join ...)` or `#(join ...)`), a `value`
+(passed around, `(map join xs)`), a `def` (the name a `def` form defines),
+or `ns` (inside the `ns` form, such as `:refer [join]`). The check boxes
+above the list show or hide each kind. F8 steps through the shown rows and
+opens each file in a tab when it gets there, and from then on that file's
+places follow its edits as a buffer list's do. A file whose text changed
+after the search, on disk or in its tab, isn't stepped into at the old
+places: F8 says it changed, and searching again fixes it. Closing a tab
+keeps the list, and F8 opens that file again. Like the other lists it
+stops at 1,000 places. The search runs in the background, so typing
+carries on while it looks.
 
 ### Freeing Ctrl+Space on macOS
 

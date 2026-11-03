@@ -83,3 +83,46 @@
     (is (= "2 of 4" (loc/position-text (assoc l :index 1))))
     (is (= "1 place" (loc/position-text (loc/definitions "(def x 1)" "x"))))
     (is (= "No places" (loc/position-text (loc/uses src "perimeter"))))))
+
+(def ^:private scan-result
+  {:entries [{:path "/p/a.clj" :start 1 :end 5 :line 1 :text "(join 1)" :how :call}
+             {:path "/p/a.clj" :start 9 :end 13 :line 2 :text "(map join x)" :how :value}
+             {:path "/p/b.clj" :start 6 :end 10 :line 1 :text "(defn join [])" :how :definition}]
+   :files 3 :matched 2})
+
+(deftest project-uses-test
+  (let [lst (loc/project-uses scan-result "join")]
+    (is (= "Usages of join (3 in 2 files)" (:title lst)))
+    (is (= :project (:scope lst)))
+    (is (= [0 1 2] (map :id (:entries lst))) "each entry knows its place in the whole list")
+    (is (= (set loc/hows) (:hows lst)) "every kind shown")
+    (is (nil? (:index lst))))
+  (is (= "Usages of join (1 in 1 file)"
+         (:title (loc/project-uses (assoc scan-result :entries (take 1 (:entries scan-result)) :matched 1) "join")))))
+
+(deftest set-hows-test
+  (let [lst (loc/project-uses scan-result "join")]
+    (testing "only the ticked kinds show, in order"
+      (is (= [:call :definition] (map :how (:entries (loc/set-hows lst #{:call :definition}))))))
+    (testing "the current place stays when it's still shown"
+      (let [at-def (assoc lst :index 2)]
+        (is (= 1 (:index (loc/set-hows at-def #{:call :definition}))))))
+    (testing "a hidden current place moves to the next shown one, else the last"
+      (is (= 1 (:index (loc/set-hows (assoc lst :index 1) #{:call :definition}))) "value hidden: on to the definition")
+      (is (= 0 (:index (loc/set-hows (assoc lst :index 2) #{:call}))) "nothing after: the last shown"))
+    (testing "nothing ticked: no places, no index"
+      (let [none (loc/set-hows (assoc lst :index 0) #{})]
+        (is (= [] (:entries none)))
+        (is (nil? (:index none)))
+        (is (= "No places" (loc/position-text none)))))
+    (testing "ticking it again brings the rows back"
+      (is (= 3 (count (:entries (loc/set-hows (loc/set-hows lst #{}) (set loc/hows)))))))))
+
+(deftest row-text-test
+  (let [lst (assoc (loc/project-uses scan-result "join") :root "/p")]
+    (is (= ["a.clj:1: call: (join 1)" "a.clj:2: value: (map join x)" "b.clj:1: def: (defn join [])"]
+           (map #(loc/row-text lst %) (:entries lst))))
+    (is (= "/q/c.clj:4: ns: x" (loc/row-text lst {:path "/q/c.clj" :line 4 :how :ns :text "x"}))
+        "outside the root: the whole path"))
+  (is (= "4: (area 1)" (loc/row-text (loc/uses "(area 1)" "area") {:line 4 :text "(area 1)"}))
+      "a buffer list: line and text"))

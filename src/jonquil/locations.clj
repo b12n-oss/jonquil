@@ -59,6 +59,49 @@
   (make-list (str "Matches for " query) text
              (syntax/find-text-matches text query {:case-sensitive? false})))
 
+(def hows
+  "The kinds a project usage can be, in the order the filter shows them."
+  [:call :value :definition :ns])
+
+(defn project-uses
+  "A list from jonquil.usages/scan's result for name: :scope :project, every
+  kind shown, each entry carrying :path, :how and :id, its place in :all,
+  the whole list the filter picks from. :hashes is the scan's, the text
+  each file was searched in."
+  [{:keys [entries matched hashes]} name]
+  (let [n (count entries)
+        all (into [] (map-indexed (fn [i e] (assoc e :id i))) (take LIST-MAX entries))]
+    {:title (str "Usages of " name " (" n " in " matched (if (= 1 matched) " file" " files") ")"
+                 (when (> n LIST-MAX) (str ", the first " LIST-MAX)))
+     :scope :project :all all :entries all :hows (set hows) :index nil
+     :hashes (or hashes {})}))
+
+(defn set-hows
+  "lst showing only the entries whose :how is in shown, in order. The
+  current place stays when it's still shown, else moves to the next shown
+  entry, else the last; nil when nothing shows."
+  [lst shown]
+  (let [cur (some->> (:index lst) (nth (:entries lst)) :id)
+        es (filterv #(contains? shown (:how %)) (:all lst))
+        idx (when (and cur (seq es))
+              (or (first (keep-indexed (fn [i e] (when (>= (:id e) cur) i)) es))
+                  (dec (count es))))]
+    (assoc lst :hows shown :entries es :index idx)))
+
+(def ^:private how-words {:call "call" :value "value" :definition "def" :ns "ns"})
+
+(defn row-text
+  "The panel's row for entry e of lst: line: text, and for a project list
+  path:line: kind: text, the path relative to lst's :root."
+  [lst {:keys [line text path how]}]
+  (if (= :project (:scope lst))
+    (let [root (:root lst)
+          rel (if (and root path (str/starts-with? path (str root "/")))
+                (subs path (inc (count root)))
+                path)]
+      (str rel ":" line ": " (how-words how) ": " text))
+    (str line ": " text)))
+
 (defn step
   "lst with its index moved by delta: from no index, +1 goes to the first
   entry and -1 to the last; otherwise it moves and stops at either end.

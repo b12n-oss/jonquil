@@ -9,6 +9,7 @@
    :open-palette-fn :reload-plugins-fn :review-proposals-fn :plugins-list-fn :parinfer-fn
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
+   :locations-project-usages-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn])
 
@@ -37,6 +38,7 @@
    :help/recent-keys [:recent-keys-fn]
    :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
    :locations/matches [:locations-matches-fn]
+   :locations/usages-in-project [:locations-project-usages-fn]
    :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
    :run/time-form [:time-form-fn] :tab/back [:tab-back-fn]
    :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]
@@ -54,7 +56,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the shipped window commands, the palette, plugin reload, review and list, Parinfer's five, the three key-describing commands and the five locations commands")
+      "exactly the shipped window commands, the palette, plugin reload, review and list, Parinfer's five, the three key-describing commands and the six locations commands")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))

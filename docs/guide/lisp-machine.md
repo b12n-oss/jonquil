@@ -36,6 +36,7 @@ Emacs took first:
 | Describe Key, Key Bindings, Recent Keys | `C-h k`, `C-h b`, `C-h l` |
 | The command palette (Cmd/Ctrl+Shift+P) | `M-x` |
 | The locations list and F8 / Shift+F8 | `next-error`, xref |
+| Find Usages in Project, by how each place uses the name | `xref-find-references` (`M-?`); Genera's who-calls, by name rather than from a callers database |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Time the form at the caret | `benchmark-run` |
 | Live console results: click to inspect, right-click verbs | none built in: CIDER inspects the last result; Genera's presentations are where this comes from |
