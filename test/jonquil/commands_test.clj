@@ -29,7 +29,7 @@
   (testing "the whole-text edit ends at the text's character count, past an emoji"
     (let [text ";😀\n(defn f [x]\n(inc x))"
           r (c/format-all-op (snap text 0))]
-      (is (= 23 (second (first (:edits r)))) "23 characters, 24 string indexes")
+      (is (= 23 (second (first (:edits r)))) "23 characters, the emoji one of them")
       (is (= ";😀\n(defn f [x]\n  (inc x))" (edit/apply-edits text (:edits r))))))
   (testing "selection formats only the lines it spans"
     (let [text "(defn a []\n1)\n(defn b []\n2)"
@@ -251,3 +251,26 @@
                                              {:stabilize pe/paren-stable}))))))
     (testing "without :stabilize, a formatter-clean selection is a no-op as today"
       (is (nil? (c/format-selection-op (snap text 2 10)))))))
+
+;; --- character offsets past an emoji ------------------------------------------
+
+(deftest commands-past-an-emoji-test
+  (testing "Run Selection: a selection and the caret's line, in characters"
+    (is (= "(+ 1 2)" (c/run-selection-text (snap "😀 (+ 1 2) y" 2 9))))
+    (is (= "(inc 1)" (c/run-selection-text (snap ";😀\n(inc 1)\n(dec 2)" 5)))))
+  (testing "Run Form: the form around the caret, and its span in characters"
+    (is (= {:text "(inc 1)" :start 3 :end 10}
+           (c/run-form (snap ";😀\n(inc 1)\n(dec 2)" 6)))))
+  (testing "Format All with the caret after an emoji: no throw, caret carried"
+    (let [text ";😀\n(defn f [x]\n(inc x))"
+          r (c/format-all-op (snap text 15))]
+      (is (= ";😀\n(defn f [x]\n  (inc x))" (edit/apply-edits text (:edits r))))
+      (is (= 17 (:caret r)) "still before (inc, two spaces on")))
+  (testing "Format Selection over the line after an emoji"
+    (let [text "(def a\n😀)\n(defn f [x]\n(inc x))"
+          r (c/format-selection-op (snap text 21 29))]
+      (is (= "(def a\n😀)\n(defn f [x]\n  (inc x))" (edit/apply-edits text (:edits r))))))
+  (testing "replacing with an emoji moves the caret by its characters"
+    (is (= {:edits [[0 1 "😀"]] :caret 3 :sel [2 3]}
+           (c/replace-current (snap "a a" 0 1) [[0 1] [2 3]] "😀")))
+    (is (= 1 (:caret (c/replace-all [[0 1] [2 3]] "😀"))))))

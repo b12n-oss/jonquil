@@ -125,6 +125,7 @@
    console-layout/row-console-wraps-long-lines
    window-keys/row-zoom-in-out
    find-replace/row-find-highlights
+   find-replace/row-find-past-an-emoji
    find-replace/row-find-next-wraps
    find-replace/row-find-prev
    find-replace/row-find-no-match

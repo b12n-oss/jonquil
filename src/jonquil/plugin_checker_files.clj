@@ -29,7 +29,6 @@
    "jonquil/plugin_check.clj" (embedded-text "jonquil/plugin_check.clj")
    "jonquil/plugin_protocol.clj" (embedded-text "jonquil/plugin_protocol.clj")
    "jonquil/syntax.clj" (embedded-text "jonquil/syntax.clj")
-   "jonquil/text_offsets.clj" (embedded-text "jonquil/text_offsets.clj")
    "jonquil/theme.clj" (embedded-text "jonquil/theme.clj")
    "jonquil/plugin_checker.clj" (embedded-text "jonquil/plugin_checker.clj")})
 

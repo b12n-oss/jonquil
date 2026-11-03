@@ -76,3 +76,11 @@
   (let [c (ctx-with #{} (atom []))]
     (is (= "this plugin didn't declare :eval" (ex-message (thrown #(p/eval! c "1")))))
     (is (= "this plugin didn't declare :eval" (ex-message (thrown #(p/repl! c "1")))))))
+
+(deftest wrap-form-past-an-emoji-test
+  (testing "the form, the edits and the caret are character offsets"
+    (let [s (snap ";😀\n(a b)" 5)
+          op (p/wrap-form s "(😀 " ")")]
+      (is (= {:text "(a b)" :start 3 :end 8} (p/form-at-caret s)))
+      (is (= {:edits [[3 3 "(😀 "] [8 8 ")"]] :caret 8} op))
+      (is (= ";😀\n(😀 (a b))" (edit/apply-edits (:text s) (:edits op)))))))

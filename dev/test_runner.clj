@@ -27,7 +27,6 @@
     jonquil.syntax-test
     jonquil.docs-test
     jonquil.edit-test
-    jonquil.text-offsets-test
     jonquil.eval-test
     jonquil.restarts-test
     jonquil.registry-test
