@@ -49,6 +49,7 @@
     jonquil.debugger-test
     jonquil.describe-test
     jonquil.locations-test
+    jonquil.usages-test
     jonquil.timing-test
     jonquil.plugin-test
     jonquil.plugin-check-test

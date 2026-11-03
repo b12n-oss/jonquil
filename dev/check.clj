@@ -67,6 +67,7 @@
     jonquil.describe
     jonquil.restarts
     jonquil.locations
+    jonquil.usages
     jonquil.timing
     jonquil.gtk.locations-pane
     jonquil.gtk.debugger-pane

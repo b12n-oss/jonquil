@@ -84,6 +84,8 @@
                            :run (call :locations-definitions-fn)}
    :locations/matches {:doc "List every match of the find query, or of the selection." :scope :window
                        :run (call :locations-matches-fn)}
+   :locations/usages-in-project {:doc "Find Usages in Project: list every use of the symbol at the caret in the project's files."
+                                 :scope :window :run (call :locations-project-usages-fn)}
    :locations/next {:doc "Go to the next place in the list." :scope :window
                     :run (call :locations-step-fn 1)}
    :locations/previous {:doc "Go to the previous place in the list." :scope :window

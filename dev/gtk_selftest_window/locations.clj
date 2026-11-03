@@ -2,7 +2,8 @@
   "The locations list: the panel on its own in a transient window, then
   the real window's commands that fill it and F8 / Shift+F8 stepping
   through it."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
@@ -13,7 +14,8 @@
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
             [jonquil.locations :as loc]
-            [jonquil.syntax :as syntax]))
+            [jonquil.syntax :as syntax]
+            [temp-dirs]))
 
 (def ^:private fixture
   (str "(defmulti area :shape)\n"
@@ -236,3 +238,53 @@
       (let [st (await-status ui "; No places.")]
         (on-gtk (close-panel! ui)
                 (support/check :locations-empty-says-no-places (= "; No places." st) {:status st}))))))
+
+;; --- Find Usages in Project ------------------------------------------------
+
+(defn row-find-usages-in-project
+  "Find Usages in Project, from the palette with the caret on join, lists
+  the three uses in a temp two-file project in path order, each with its
+  file, line and kind. Ticking only Calls leaves b.clj's call, and F8 opens
+  b.clj in a tab with a/join selected. The tree's root, the tabs and the
+  panel are put back after."
+  [ui]
+  (go-row :find-usages-in-project support/check
+    (let [root (fn [] (:root @(:state (:file-tree ui))))
+          original (on-gtk (root))
+          d (.getCanonicalPath (io/file (temp-dirs/temp-dir! "jonquil-selftest-usages-")))
+          b-text "(ns demo.b (:require [demo.a :as a]))\n(a/join 1)\n(map a/join [2])\n"
+          _ (spit (io/file d "a.clj") "(ns demo.a)\n(defn join [x] x)\n")
+          _ (spit (io/file d "b.clj") b-text)
+          pane (:locations-pane ui)]
+      (on-gtk ((:simulate-folder-result! ui) {:path d})
+              (editor/set-text! (:editor ui) "(join 2)")
+              (support/place-cursor! (:buf (:editor ui)) 2)
+              (run-palette! ui "find usages in project"))
+      (let [_ (await-until 5000 20 #(= 3 (count (lpane/row-texts pane))))
+            rows (on-gtk (lpane/row-texts pane))
+            shown? (on-gtk (lpane/filter-shown? pane))
+            calls (on-gtk (lpane/set-ticked! pane #{:call}) (lpane/row-texts pane))
+            {:keys [path picked]} (on-gtk (f8! ui false)
+                                          (let [t ((:active-tab* ui))
+                                                s (editor/snapshot (:ed t))]
+                                            {:path @(:path t)
+                                             :picked (subs (:text s) (:sel-start s) (:sel-end s))}))]
+        (on-gtk
+         (try
+           (support/check :find-usages-in-project
+                          (and (= ["a.clj:2: def: (defn join [x] x)"
+                                   "b.clj:2: call: (a/join 1)"
+                                   "b.clj:3: value: (map a/join [2])"]
+                                  rows)
+                               shown?
+                               (= ["b.clj:2: call: (a/join 1)"] calls)
+                               (some-> path (str/ends-with? "/b.clj"))
+                               (= "a/join" picked))
+                          {:rows rows :filter-shown shown? :calls calls :path path :picked picked})
+           (finally
+             (close-panel! ui)
+             ((:simulate-folder-result! ui) {:path original})
+             (doseq [t (rest ((:tabs* ui)))]
+               (editor/mark-saved! (:ed t))
+               ((:close-tab! ui) (:id t)))
+             ((:select-tab! ui) (:id (first ((:tabs* ui))))))))))))

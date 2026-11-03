@@ -107,6 +107,22 @@ leaves the list out of date: F8 says so, and listing again fixes it.
 Stepping past either end says so. A list belongs to the tab it came from:
 closing that tab clears it.
 
+**Find Usages in Project** lists every use of the symbol at the caret in
+the project's Clojure files: the folder the file tree shows, or the file's
+own folder when there's no tree, minus what `.gitignore`, dot folders,
+`target` and `node_modules` hide. An open tab counts with its unsaved text.
+It matches by name, so `str/join` and `clojure.string/join` count as uses of
+`join`, and so does a `join` of your own in another namespace. Each row
+reads `path:line: kind: text`, where the kind says how the name is used: a
+`call` (the first thing in a list, `(join ...)` or `#(join ...)`), a `value`
+(passed around, `(map join xs)`), a `def` (the name a `def` form defines),
+or `ns` (inside the `ns` form, such as `:refer [join]`). The check boxes
+above the list show or hide each kind. F8 steps through the shown rows and
+opens each file in a tab when it gets there, and from then on that file's
+places follow its edits as a buffer list's do. A file that changed on disk
+after the search can land a place off its text: search again. The search
+runs in the background, so typing carries on while it looks.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System
