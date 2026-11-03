@@ -49,7 +49,12 @@
     (is (= "map" (:prefix (:prefix-info (help/refine s (snap "(map" 4) [(first cands)])))))
     (is (nil? (help/refine s (snap "(ma " 4) cands)) "a space closes it")
     (is (nil? (help/refine s (snap "(ma (x" 6) cands)) "a different word closes it")
-    (is (nil? (help/refine s (snap "(map" 4) [])) "no candidates left closes it")))
+    (is (nil? (help/refine s (snap "(map" 4) [])) "no candidates left closes it"))
+  (testing "character offsets past an emoji"
+    (let [s (help/open-state (help/prefix-at (snap "😀(ma" 4)) cands)]
+      (is (help/still-valid? s (snap "😀(map" 5)))
+      (is (= "map" (:prefix (:prefix-info (help/refine s (snap "😀(map" 5) [(first cands)])))))
+      (is (not (help/still-valid? s (snap "😀(ma (x" 7))) "a different word closes it"))))
 
 (deftest waiting-and-arrive-test
   (let [p (help/prefix-at (snap "(ma" 3))]

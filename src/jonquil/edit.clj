@@ -14,27 +14,39 @@
 
 (def open->close {\( \), \[ \], \{ \}})
 
-(defn- apply-index-edits [text edits]
-  (reduce (fn [t [s e r]] (str (subs t 0 s) r (subs t e)))
-          text
-          (rseq (vec edits))))
+(defn- apply-index-edits
+  "text with edits, in string indexes, applied in one pass: the edits are
+  ascending and don't overlap, so the text between them is copied once."
+  [^String text edits]
+  (let [sb (StringBuilder.)
+        end (reduce (fn [from [s e r]]
+                      (.append sb text from s)
+                      (.append sb ^String r)
+                      e)
+                    0
+                    edits)]
+    (.append sb text end (count text))
+    (str sb)))
 
 (defn apply-edits
-  "Applies :edits to text, back to front. The test oracle for every op, and
-  what a front-end without native edits would do."
+  "Applies :edits to text. The test oracle for every op, and what a
+  front-end without native edits would do."
   [text edits]
   (apply-index-edits text
-                     (cond->> edits
-                       (offsets/astral? text)
-                       (mapv (fn [[s e r]] [(offsets/to-index text s) (offsets/to-index text e) r])))))
+                     (if (offsets/astral? text)
+                       (let [starts (offsets/astral-starts text)]
+                         (mapv (fn [[s e r]] [(offsets/to-index starts s) (offsets/to-index starts e) r])
+                               edits))
+                       edits)))
 
 (defn- result->chars
   "An op's result over text, from string indexes to character offsets: the
   edit spans against text, the caret and selection against the text the
   edits leave."
   [text {:keys [edits caret sel] :as r}]
-  (let [after (apply-index-edits text edits)]
-    (cond-> (assoc r :edits (mapv (fn [[s e rep]] [(offsets/to-char text s) (offsets/to-char text e) rep])
+  (let [before (offsets/astral-starts text)
+        after (offsets/astral-starts (apply-index-edits text edits))]
+    (cond-> (assoc r :edits (mapv (fn [[s e rep]] [(offsets/to-char before s) (offsets/to-char before e) rep])
                                   edits))
       caret (assoc :caret (offsets/to-char after caret))
       sel (assoc :sel (mapv #(offsets/to-char after %) sel)))))
@@ -300,8 +312,9 @@
   the return is [pos match] or nil, never an edit."
   [{:keys [text] :as snap}]
   (if (offsets/astral? text)
-    (some->> (matching-bracket* (offsets/snapshot->indexes snap))
-             (mapv #(offsets/to-char text %)))
+    (let [starts (offsets/astral-starts text)]
+      (some->> (matching-bracket* (offsets/snapshot->indexes snap))
+               (mapv #(offsets/to-char starts %))))
     (matching-bracket* snap)))
 
 (def ^:private code-symbol-re #"^[-_a-zA-Z0-9\p{L}\p{N}.!$%&*+/<=>?#]+$")

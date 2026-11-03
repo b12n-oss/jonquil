@@ -14,15 +14,26 @@
   (is (= 3 (offsets/char-count "a😀b")))
   (is (= 4 (count "a😀b"))))
 
+(deftest astral-starts-test
+  (is (= [1] (offsets/astral-starts "a😀b")))
+  (is (= [0 2 5] (offsets/astral-starts "😀😀b😀")))
+  (is (= [] (offsets/astral-starts "abc"))))
+
 (deftest round-trip-test
-  (let [s "a😀b"]
-    (is (= [0 1 3 4] (mapv #(offsets/to-index s %) [0 1 2 3])))
-    (is (= [0 1 2 3] (mapv #(offsets/to-char s %) [0 1 3 4])))
+  (let [st (offsets/astral-starts "a😀b")]
+    (is (= [0 1 3 4] (mapv #(offsets/to-index st %) [0 1 2 3])))
+    (is (= [0 1 2 3] (mapv #(offsets/to-char st %) [0 1 3 4])))
+    (is (= 1 (offsets/to-char st 2)) "between an emoji's halves: the emoji's offset")
     (testing "outside the text, the offset moves by the same distance"
-      (is (= -1 (offsets/to-index s -1)))
-      (is (= 6 (offsets/to-index s 5)))
-      (is (= -1 (offsets/to-char s -1)))
-      (is (= 5 (offsets/to-char s 6))))))
+      (is (= -1 (offsets/to-index st -1)))
+      (is (= 6 (offsets/to-index st 5)))
+      (is (= -1 (offsets/to-char st -1)))
+      (is (= 5 (offsets/to-char st 6)))))
+  (testing "several emoji, against the JVM's own code point methods"
+    (let [s "😀😀b😀cd" st (offsets/astral-starts s)]
+      (doseq [n (range (inc (offsets/char-count s)))]
+        (is (= (.offsetByCodePoints s 0 n) (offsets/to-index st n)) (str "char " n))
+        (is (= n (offsets/to-char st (offsets/to-index st n))) (str "round trip " n))))))
 
 (deftest snapshot-and-keys-test
   (is (= {:text "😀ab" :caret 3 :sel-start 2 :sel-end 4}
