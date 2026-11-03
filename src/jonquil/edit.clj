@@ -4,19 +4,18 @@
   {:edits [[start end replacement] ...] :caret n :sel [a b]}, or nil when the
   op does not apply. Offsets are character offsets into :text, edits are
   non-overlapping and listed in ascending order, and the front-end applies them
-  back to front inside one undoable user action.
-
-  Each op's body is written in string indexes (subs, nth, count) and runs
-  through in-chars, which converts at the edges (jonquil.text-offsets)."
+  back to front inside one undoable user action."
   (:require [clojure.string :as str]
-            [jonquil.syntax :as syntax]
-            [jonquil.text-offsets :as offsets]))
+            [jonquil.syntax :as syntax]))
 
 (def open->close {\( \), \[ \], \{ \}})
 
-(defn- apply-index-edits
-  "text with edits, in string indexes, applied in one pass: the edits are
-  ascending and don't overlap, so the text between them is copied once."
+(defn apply-edits
+  "Applies :edits to text in one pass: they are ascending and don't
+  overlap, so the text between them is copied once (2,000 edits on 46k
+  characters measured 149 ms by one str per edit, 0 ms this way,
+  2026-11-03). The test oracle for every op, and what a front-end without
+  native edits would do."
   [^String text edits]
   (let [sb (StringBuilder.)
         end (reduce (fn [from [s e r]]
@@ -28,40 +27,15 @@
     (.append sb text end (count text))
     (str sb)))
 
-(defn apply-edits
-  "Applies :edits to text. The test oracle for every op, and what a
-  front-end without native edits would do."
-  [text edits]
-  (apply-index-edits text
-                     (if (offsets/astral? text)
-                       (let [starts (offsets/astral-starts text)]
-                         (mapv (fn [[s e r]] [(offsets/to-index starts s) (offsets/to-index starts e) r])
-                               edits))
-                       edits)))
-
-(defn- result->chars
-  "An op's result over text, from string indexes to character offsets: the
-  edit spans against text, the caret and selection against the text the
-  edits leave."
-  [text {:keys [edits caret sel] :as r}]
-  (let [before (offsets/astral-starts text)
-        after (offsets/astral-starts (apply-index-edits text edits))]
-    (cond-> (assoc r :edits (mapv (fn [[s e rep]] [(offsets/to-char before s) (offsets/to-char before e) rep])
-                                  edits))
-      caret (assoc :caret (offsets/to-char after caret))
-      sel (assoc :sel (mapv #(offsets/to-char after %) sel)))))
-
-(defn- in-chars
-  "(op snap) for an op whose body works in string indexes, with snap's
-  offsets and the result's in characters. A text with no character that
-  takes two indexes passes straight through."
-  [{:keys [text] :as snap} op]
-  (if (offsets/astral? text)
-    (some->> (op (offsets/snapshot->indexes snap)) (result->chars text))
-    (op snap)))
-
-(defn- smart-enter*
-  [{:keys [text sel-start sel-end]} {:keys [between-pair?] :or {between-pair? true}}]
+(defn smart-enter
+  "Upstream ui.clj handle-smart-enter! (41c56b8) as data. Replaces the
+  selection with a newline; between an empty pair opens an indented middle
+  line with the closer on its own line; otherwise indents by
+  syntax/compute-smart-indent measured with the selection removed.
+  {:between-pair? false} skips the pair branch: with Parinfer on the
+  closer is Parinfer's to manage, as upstream's handle-smart-enter! has it."
+  ([snap] (smart-enter snap {}))
+  ([{:keys [text sel-start sel-end]} {:keys [between-pair?] :or {between-pair? true}}]
   (let [text' (str (subs text 0 sel-start) (subs text sel-end))
         pos sel-start
         line-start (inc (or (str/last-index-of text' "\n" (dec pos)) -1))
@@ -77,17 +51,7 @@
       (let [ins (str "\n" (syntax/compute-smart-indent text' pos))]
         {:edits [[sel-start sel-end ins]]
          :caret (+ pos (count ins))
-         :sel nil}))))
-
-(defn smart-enter
-  "Upstream ui.clj handle-smart-enter! (41c56b8) as data. Replaces the
-  selection with a newline; between an empty pair opens an indented middle
-  line with the closer on its own line; otherwise indents by
-  syntax/compute-smart-indent measured with the selection removed.
-  {:between-pair? false} skips the pair branch: with Parinfer on the
-  closer is Parinfer's to manage, as upstream's handle-smart-enter! has it."
-  ([snap] (smart-enter snap {}))
-  ([snap opts] (in-chars snap #(smart-enter* % opts))))
+         :sel nil})))))
 
 ;; --- Line ranges shared by indent, unindent and toggle-comment ---
 ;;
@@ -95,10 +59,10 @@
 ;; carry their own copy (via Swing's root Element / getElementIndex) of "which
 ;; lines does this selection span, and does the selection merely touch the
 ;; next line's own start without entering it". This is that logic once, in
-;; string indexes instead of Swing elements.
+;; character offsets instead of Swing elements.
 
 (defn- line-starts
-  "Ascending vector of the string index each line of `text` starts at,
+  "Ascending vector of the character offset each line of `text` starts at,
   always including 0."
   [^String text]
   (loop [from 0 acc [0]]
@@ -107,13 +71,13 @@
       acc)))
 
 (defn- line-idx-at
-  "Index into `starts` of the line containing string index `pos`."
+  "Index into `starts` of the line containing character offset `pos`."
   [starts pos]
   (loop [i (dec (count starts))]
     (if (<= (nth starts i) pos) i (recur (dec i)))))
 
 (defn- line-span
-  "[start end] string indexes of line `idx`'s content, excluding its
+  "[start end] character offsets of line `idx`'s content, excluding its
   trailing newline."
   [text starts idx]
   (let [s (nth starts idx)
@@ -136,7 +100,7 @@
     [start-line end-line starts]))
 
 (defn- shift-offset
-  "Maps string index `pos` in the original text to its offset after
+  "Maps character offset `pos` in the original text to its offset after
   ascending, non-overlapping `edits` are applied. A pos at or after an edit's
   end shifts by that edit's length delta; a pos strictly inside an edit's
   span snaps to the end of that edit's replacement. Every op below that
@@ -152,7 +116,10 @@
           pos
           edits))
 
-(defn- indent*
+(defn indent
+  "Upstream ui.clj indent-selection! (41c56b8). No selection: two spaces at
+  the caret, like typing them. A selection: two spaces at the start of every
+  line it spans."
   [{:keys [text caret sel-start sel-end]}]
   (if (= sel-start sel-end)
     {:edits [[caret caret "  "]] :caret (+ caret 2) :sel nil}
@@ -163,14 +130,11 @@
        :caret (shift-offset edits sel-end)
        :sel [(shift-offset edits sel-start) (shift-offset edits sel-end)]})))
 
-(defn indent
-  "Upstream ui.clj indent-selection! (41c56b8). No selection: two spaces at
-  the caret, like typing them. A selection: two spaces at the start of every
-  line it spans."
-  [snap]
-  (in-chars snap indent*))
-
-(defn- unindent*
+(defn unindent
+  "Upstream ui.clj unindent-selection! (41c56b8). Strips up to one leading
+  tab or two leading spaces from every line the selection spans (or just the
+  caret's line, with no selection). nil when no spanned line has any
+  matching leading whitespace to remove."
   [{:keys [text caret sel-start sel-end]}]
   (let [[start-line end-line starts] (selection-lines text sel-start sel-end)
         removals (keep (fn [idx]
@@ -187,15 +151,14 @@
            :caret (shift-offset edits sel-end)
            :sel [(shift-offset edits sel-start) (shift-offset edits sel-end)]})))))
 
-(defn unindent
-  "Upstream ui.clj unindent-selection! (41c56b8). Strips up to one leading
-  tab or two leading spaces from every line the selection spans (or just the
-  caret's line, with no selection). nil when no spanned line has any
-  matching leading whitespace to remove."
-  [snap]
-  (in-chars snap unindent*))
-
-(defn- toggle-comment*
+(defn toggle-comment
+  "Upstream ui.clj toggle-comment! (41c56b8): comments every non-blank line
+  the selection spans (or the caret's line) with a leading \"; \", or, when
+  every non-blank spanned line is already commented, strips one leading
+  \";\" run (plus at most one following space) from each. Upstream never
+  repositions the caret or selection itself -- Swing's own default
+  insert/remove caret tracking does that -- so caret and :sel here are
+  computed with the same shift-offset every other multi-line op uses."
   [{:keys [text caret sel-start sel-end]}]
   (let [[start-line end-line starts] (selection-lines text sel-start sel-end)
         lines (mapv (fn [idx]
@@ -219,17 +182,6 @@
          :sel (when (not= sel-start sel-end)
                 [(shift-offset edits sel-start) (shift-offset edits sel-end)])}))))
 
-(defn toggle-comment
-  "Upstream ui.clj toggle-comment! (41c56b8): comments every non-blank line
-  the selection spans (or the caret's line) with a leading \"; \", or, when
-  every non-blank spanned line is already commented, strips one leading
-  \";\" run (plus at most one following space) from each. Upstream never
-  repositions the caret or selection itself -- Swing's own default
-  insert/remove caret tracking does that -- so caret and :sel here are
-  computed with the same shift-offset every other multi-line op uses."
-  [snap]
-  (in-chars snap toggle-comment*))
-
 ;; --- Auto-brackets ---
 ;;
 ;; Upstream's setup-auto-brackets! (41c56b8) matches on one open->matching-close
@@ -239,7 +191,11 @@
 
 (def ^:private bracket-pairs {\( \), \[ \], \{ \}, \" \"})
 
-(defn- insert-open*
+(defn insert-open
+  "Upstream setup-auto-brackets! keyTyped (41c56b8), the open-bracket/quote
+  branch: wraps a selection in ch and its closer, steps a same quote over an
+  existing one instead of nesting, or inserts a fresh empty pair with the
+  caret in the middle. nil when ch isn't one of ( [ { \"."
   [{:keys [text caret sel-start sel-end]} ch]
   (when (contains? bracket-pairs ch)
     (let [close (bracket-pairs ch)]
@@ -257,20 +213,15 @@
         :else
         {:edits [[caret caret (str ch close)]] :caret (inc caret) :sel nil}))))
 
-(defn insert-open
-  "Upstream setup-auto-brackets! keyTyped (41c56b8), the open-bracket/quote
-  branch: wraps a selection in ch and its closer, steps a same quote over an
-  existing one instead of nesting, or inserts a fresh empty pair with the
-  caret in the middle. nil when ch isn't one of ( [ { \"."
-  [snap ch]
-  (in-chars snap #(insert-open* % ch)))
-
 (def ^:private closers
   ;; ) ] } only -- typing a quote goes through insert-open, whose own
   ;; step-over case already covers the quote pair.
   #{\) \] \}})
 
-(defn- insert-close*
+(defn insert-close
+  "Upstream setup-auto-brackets! keyTyped (41c56b8), the close-delimiter
+  branch: typing a closer that's already the next character steps over it
+  instead of inserting a second one. nil otherwise -- let GTK insert it."
   [{:keys [text caret sel-start sel-end]} ch]
   (when (and (= sel-start sel-end)
              (contains? closers ch)
@@ -278,14 +229,10 @@
              (= (nth text caret) ch))
     {:edits [[caret (inc caret) (str ch)]] :caret (inc caret) :sel nil}))
 
-(defn insert-close
-  "Upstream setup-auto-brackets! keyTyped (41c56b8), the close-delimiter
-  branch: typing a closer that's already the next character steps over it
-  instead of inserting a second one. nil otherwise -- let GTK insert it."
-  [snap ch]
-  (in-chars snap #(insert-close* % ch)))
-
-(defn- backspace-pair*
+(defn backspace-pair
+  "Upstream setup-auto-brackets! keyPressed VK_BACK_SPACE (41c56b8): caret
+  sitting inside an empty bracket or quote pair deletes both characters
+  together. nil otherwise -- let GTK do a plain single-character backspace."
   [{:keys [text caret sel-start sel-end]}]
   (when (and (= sel-start sel-end)
              (pos? caret)
@@ -293,33 +240,26 @@
              (= (bracket-pairs (nth text (dec caret))) (nth text caret)))
     {:edits [[(dec caret) (inc caret) ""]] :caret (dec caret) :sel nil}))
 
-(defn backspace-pair
-  "Upstream setup-auto-brackets! keyPressed VK_BACK_SPACE (41c56b8): caret
-  sitting inside an empty bracket or quote pair deletes both characters
-  together. nil otherwise -- let GTK do a plain single-character backspace."
-  [snap]
-  (in-chars snap backspace-pair*))
-
-(defn- matching-bracket*
+(defn matching-bracket
+  "Upstream ui.clj find-matching-bracket (41c56b8) and bracket-matching-test:
+  :caret is the bracket's own offset (not a between-characters caret), and
+  the return is [pos match] or nil, never an edit."
   [{:keys [text caret]}]
   (when (and (<= 0 caret) (< caret (count text)))
     (when-let [m (get (:matches (syntax/compute-brackets text)) caret)]
       [caret m])))
 
-(defn matching-bracket
-  "Upstream ui.clj find-matching-bracket (41c56b8) and bracket-matching-test:
-  :caret is the bracket's own offset (not a between-characters caret), and
-  the return is [pos match] or nil, never an edit."
-  [{:keys [text] :as snap}]
-  (if (offsets/astral? text)
-    (let [starts (offsets/astral-starts text)]
-      (some->> (matching-bracket* (offsets/snapshot->indexes snap))
-               (mapv #(offsets/to-char starts %))))
-    (matching-bracket* snap)))
-
 (def ^:private code-symbol-re #"^[-_a-zA-Z0-9\p{L}\p{N}.!$%&*+/<=>?#]+$")
 
-(defn- rename*
+(defn rename
+  "Upstream ui.clj rename-symbol-dialog! (41c56b8), by way of
+  syntax/find-symbol-occurrences rather than porting the JOptionPane dialog:
+  renames every code occurrence (never inside a comment, string, regex or
+  keyword) of the symbol at the selection or caret to new-name. nil when
+  there's no symbol at the caret/selection, new-name is blank, isn't a valid
+  Clojure symbol, equals the old name, or there are no occurrences to rename
+  -- each of those is upstream's own no-op or error-dialog path, and none of
+  them has anything to apply."
   [{:keys [text caret sel-start sel-end]} new-name]
   (let [new-name (str/trim (str new-name))
         selected (when (< sel-start sel-end) (str/trim (subs text sel-start sel-end)))
@@ -334,15 +274,3 @@
         (when (seq occs)
           (let [edits (mapv (fn [[s e]] [s e new-name]) occs)]
             {:edits edits :caret (shift-offset edits caret) :sel nil}))))))
-
-(defn rename
-  "Upstream ui.clj rename-symbol-dialog! (41c56b8), by way of
-  syntax/find-symbol-occurrences rather than porting the JOptionPane dialog:
-  renames every code occurrence (never inside a comment, string, regex or
-  keyword) of the symbol at the selection or caret to new-name. nil when
-  there's no symbol at the caret/selection, new-name is blank, isn't a valid
-  Clojure symbol, equals the old name, or there are no occurrences to rename
-  -- each of those is upstream's own no-op or error-dialog path, and none of
-  them has anything to apply."
-  [snap new-name]
-  (in-chars snap #(rename* % new-name)))

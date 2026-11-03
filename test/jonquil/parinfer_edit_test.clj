@@ -293,3 +293,51 @@
     (is (false? (#'pe/whitespace-only? "(f ab)" "(f a b)")) "token split")
     (is (false? (#'pe/whitespace-only? "(f \"a b\")" "(f \"ab\")"))
         "a space inside a string is the string's own text")))
+
+;; --- character offsets past an emoji ------------------------------------------
+;;
+;; Each case runs behind a three-character comment line, once ";x\n" and once
+;; ";😀\n". The emoji is one character, as GTK counts it, so both runs must
+;; agree, x for 😀 (on a Jolt that counted it as two, as jolt-lang/jolt#1472
+;; did until #1487, they didn't).
+
+(def ^:private emoji-cases
+  [[:smart "(a)\n\n(b)" 4 "(a)\n(\n(b)" 5]
+   [:smart "(z)\n(a\n  b)\n(y)" 9 "(z)\n(a\nb)\n(y)" 7]
+   [:indent "(z)\n(a\n  b)\n(y)" 9 "(z)\n(a\nb)\n(y)" 7]
+   [:smart "(z)\n(fn [a b]\n     (h a))" 22 "(z)\n(fn [a b]\n     (h (a))" 23]
+   [:smart "(a)\n\n(b)" 4 "(a)\n(c\n(d\n(b)" 9]])
+
+(defn- behind [head [mode prev pc text c]]
+  [mode (str head prev) (+ 3 pc) (str head text) (+ 3 c)])
+
+(deftest adjust-past-an-emoji-test
+  (doseq [case emoji-cases]
+    (let [plain (apply run (behind ";x\n" case))
+          emoji (apply run (behind ";😀\n" case))]
+      (is (some? plain) (pr-str case))
+      (is (= (some-> plain (update 0 str/replace ";x\n" ";😀\n")) emoji) (pr-str case)))))
+
+(deftest adjust-bounds-past-an-emoji-test
+  (testing ":bounds in characters, past an emoji, change nothing"
+    (doseq [case emoji-cases]
+      (let [[mode prev pc text c] (behind ";😀\n" case)
+            ;; head and tail lengths in characters, from the plain twin
+            [_ pp _ pt _] (behind ";x\n" case)
+            n (count pp) m (count pt)
+            p (loop [i 0] (if (and (< i (min n m)) (= (nth pp i) (nth pt i))) (recur (inc i)) i))
+            p (min p c)
+            q (loop [i 0] (if (and (< i (- (min n m) p))
+                                   (= (nth pp (- n 1 i)) (nth pt (- m 1 i))))
+                            (recur (inc i)) i))]
+        (is (= (pe/adjust {:mode mode :prev-text prev :prev-caret pc :text text :caret c})
+               (pe/adjust {:mode mode :prev-text prev :prev-caret pc :text text :caret c
+                           :bounds [p q]}))
+            (pr-str case))))))
+
+(deftest region-and-remap-past-an-emoji-test
+  (let [t ";😀\n(a)\n\n(b\n c)\n(d)"]
+    (is (= [8 14] (pe/region t 12)) "the form around the caret, in characters")
+    (is (= [7 7] (pe/region t 7)) "the blank line"))
+  (is (= 5 (pe/remap-offset "😀(a\nb\nc)" "😀(a)\nb\nc" 4)) "start of b")
+  (is (= 2 (pe/remap-offset "😀b\ncd" "😀b" 5)) "a vanished line clamps to the end"))

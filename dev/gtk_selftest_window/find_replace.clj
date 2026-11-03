@@ -102,6 +102,41 @@
                 (support/check :replace-one (and (= "X bar foo baz foo" text) (= [6 9] sel))
                                {:text text :sel sel}))))))
 
+(defn row-find-past-an-emoji
+  "Past an emoji, everything the bar does is in GTK's characters. In
+  \"😀 foo 😀 foo\" the matches are characters [2 5] and [8 11], each emoji
+  one character as GTK counts it. With [8 11] selected, open! prefills \"foo\",
+  tags both and labels \"2 of 2\", the match at the caret; find-prev!
+  selects [2 5] and find-next! [8 11]. From [2 5], replace-one! with
+  \"😀b\" (two characters for three) lands the selection on the next match
+  shifted one left, [7 10]."
+  [ui]
+  (go-row :find-past-an-emoji support/check
+    (on-gtk (let [ed (:editor ui) fb (:find-bar ui) buf (:buf ed)]
+              (editor/set-text! ed "😀 foo 😀 foo")
+              (g/with-iters* buf 8 11 (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
+              (find-bar/open! fb :replace)
+              (let [query (g/editable-text (:query fb))
+                    tag2 (g/has-tag-at? buf 2 (:tag fb))
+                    tag8 (g/has-tag-at? buf 8 (:tag fb))
+                    tag7 (g/has-tag-at? buf 7 (:tag fb))
+                    label (g/label-text (:count-label fb))
+                    _ (find-bar/find-prev! fb)
+                    sel0 (g/selection-offsets buf)
+                    _ (find-bar/find-next! fb)
+                    sel1 (g/selection-offsets buf)
+                    _ (find-bar/find-prev! fb)
+                    _ (g/gtk-editable-set-text (:replacement fb) "😀b")
+                    _ (find-bar/replace-one! fb)
+                    text (editor/editor-text ed)
+                    sel2 (g/selection-offsets buf)]
+                (support/check :find-past-an-emoji
+                               (and (= "foo" query) tag2 tag8 (not tag7) (= "2 of 2" label)
+                                    (= [2 5] sel0) (= [8 11] sel1)
+                                    (= "😀 😀b 😀 foo" text) (= [7 10] sel2))
+                               {:query query :tag2 tag2 :tag8 tag8 :tag7 tag7 :label label
+                                :sel0 sel0 :sel1 sel1 :text text :sel2 sel2}))))))
+
 (defn row-replace-all
   "replace-all! replaces every match in one edit (commands/replace-all,
   applied through one apply-op! call, so one undo restores every original

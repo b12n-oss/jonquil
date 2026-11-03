@@ -21,8 +21,7 @@
             [jonquil.mcp :as mcp]
             [jonquil.mcp.tools :as tools]
             [jonquil.plugin-mcp :as plugin-mcp]
-            [jonquil.tabs :as tabs]
-            [jonquil.text-offsets :as offsets]))
+            [jonquil.tabs :as tabs]))
 
 (def ^:private gui-deadline-ms 5000)
 (def ^:private default-grace-ms 5000)
@@ -148,9 +147,9 @@
 
 (defn replace-op
   "The edit-op result that swaps all of old-text for new-text, in the shape
-  editor/apply-op! takes: character offsets, as GTK counts."
+  editor/apply-op! takes."
   [old-text new-text]
-  {:edits [[0 (offsets/char-count old-text) new-text]] :caret (offsets/char-count new-text)})
+  {:edits [[0 (count old-text) new-text]] :caret (count new-text)})
 
 ;; --- the gui turn ------------------------------------------------------------
 
