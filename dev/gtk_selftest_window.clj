@@ -382,6 +382,7 @@
    ;; window's first open
    results-rows/row-result-spans
    results-rows/row-result-click-inspects
+   results-rows/row-result-click-waits-double-click-time
    results-rows/row-result-verbs
    results-rows/row-result-right-click-moves-caret
    trace-rows/row-trace-toggle-and-show

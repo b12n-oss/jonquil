@@ -79,6 +79,32 @@
                                {:inspected inspected? :header header :info (g/label-text (:info (:inspector ui)))})))
       (finally (on-gtk ((:close-inspector!* ui)))))))
 
+(defn row-result-click-waits-double-click-time
+  "A single click on a result waits out GTK's own double-click time, so a
+  slower double-click the system still counts never opens the inspector
+  first. With the time at 900 ms the inspector is still closed at 600 ms,
+  then opens."
+  [ui]
+  (go-row :result-click-waits-double-click-time support/check
+    (let [settings (on-gtk (g/gtk-settings-get-default))
+          before (on-gtk (g/double-click-time settings))]
+      (try
+        (let [m (enter! ui "[4 5 6 7]")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> [4 5 6 7]")))
+              _ (on-gtk (g/set-int-property! settings "gtk-double-click-time" 900))
+              read-back (on-gtk (g/double-click-time settings))
+              _ (on-gtk ((:result-release!* ui) (offset-in ui "=> [4 5 6 7]")))
+              _ (Thread/sleep 600)
+              ;; the header: the info line still reads "3 items" from the last row
+              opened? #(= "[4 5 6 7]" (g/label-text (:header (:inspector ui))))
+              early? (on-gtk (opened?))
+              inspected? (await-until 3000 20 opened?)]
+          (on-gtk (support/check :result-click-waits-double-click-time
+                                 (and (= 900 read-back) (not early?) inspected?)
+                                 {:read-back read-back :early early? :inspected inspected?})))
+        (finally (on-gtk (g/set-int-property! settings "gtk-double-click-time" before)
+                         ((:close-inspector!* ui))))))))
+
 (defn row-result-verbs
   "With the caret in a result line: Copy says so, Define puts a def of the
   live value at the prompt, Jump refuses a value that isn't a var, and the

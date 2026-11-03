@@ -838,6 +838,16 @@
                                              GTK-INTERFACE-COLOR-SCHEME-DARK
                                              GTK-INTERFACE-COLOR-SCHEME-LIGHT)))))
 
+(ffi/defcfn g-value-get-int "g_value_get_int" [:pointer] :int)
+
+(defn double-click-time
+  "GtkSettings' gtk-double-click-time in ms: the longest gap between two
+  clicks that GTK still counts as a double-click. On macOS GTK fills it
+  from the system's double-click speed (com.apple.mouse.doubleClickThreshold,
+  probed 2026-11-02 with GTK 4.24.1: 0.5 s read 500, 0.8 s read 800)."
+  [settings]
+  (get-gvalue! settings "gtk-double-click-time" G-TYPE-INT g-value-get-int))
+
 (defn color-scheme-dark?
   "True when gtk-interface-color-scheme reads back DARK."
   [settings]
