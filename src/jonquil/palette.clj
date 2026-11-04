@@ -63,6 +63,25 @@
   (vec (for [{:keys [id label]} recent :when (not= id current-id)]
          {:id [:tab/switch id] :doc (str "Switch to tab: " label) :chords [] :source "tab"})))
 
+(def PANEL-LABELS
+  "The right-hand panels a switch can bring back, by the window's key for
+  each, with the name the palette gives it. Review and History are left
+  out: each shows one proposal or one plugin's history, opened from that
+  thing, so bringing one back would show a stale view."
+  {:inspector "Inspector" :source "Source" :locations "Locations"
+   :debugger "Frames" :trace "Trace" :plugins "Plugins"})
+
+(defn panel-entries
+  "The palette's panel entries: every recent panel but showing, most
+  recently shown first, as {:id [:panel/switch k] :doc \"Switch to panel:
+  Label\" :chords [] :source \"panel\"}. recent is the panels' keys, most
+  recent first; showing is the key of the panel on screen, or nil. Only
+  PANEL-LABELS' panels are offered. The window runs these itself."
+  [recent showing]
+  (vec (for [k recent :when (and (not= k showing) (contains? PANEL-LABELS k))]
+         {:id [:panel/switch k] :doc (str "Switch to panel: " (PANEL-LABELS k))
+          :chords [] :source "panel"})))
+
 (defn filter-entries
   "The entries every word of query (split on whitespace, case ignored)
   appears in, read from each entry's doc and id; order kept. A blank query

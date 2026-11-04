@@ -87,6 +87,18 @@
            (palette/tab-entries recent 3)))
     (is (= [] (palette/tab-entries [{:id 1 :label "a.clj"}] 1)) "one tab: nothing to switch to")))
 
+;; the panels a switch can bring back, most recently shown first; never the
+;; one showing
+(deftest panel-entries-test
+  (is (= [{:id [:panel/switch :inspector] :doc "Switch to panel: Inspector" :chords [] :source "panel"}
+          {:id [:panel/switch :trace] :doc "Switch to panel: Trace" :chords [] :source "panel"}]
+         (palette/panel-entries [:locations :inspector :trace] :locations)))
+  (is (= ["Switch to panel: Locations" "Switch to panel: Frames"]
+         (map :doc (palette/panel-entries [:locations :debugger] nil)))
+      "nothing showing: every recent panel, Frames for the debugger")
+  (is (= [] (palette/panel-entries [:source] :source)) "only the one showing")
+  (is (= [] (palette/panel-entries [:review :history] nil)) "review and history are never offered"))
+
 (deftest world-queries-pick-their-own-command-test
   (testing "the palette runs the first match, so each world query must reach its own command first"
     (let [es (shipped-entries)

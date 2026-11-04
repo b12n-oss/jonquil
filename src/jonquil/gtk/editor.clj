@@ -871,6 +871,9 @@
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
 (def ^:private MAC-KEYCODE-P 35)
+;; the digit row's keycodes, the panel keys' Cmd+Option+1..6; Apple's
+;; kVK_ANSI_1..6, the table F, L and P above were measured against
+(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6"})
 
 ;; os.name read once. The keycode fallback is macOS-only: on Linux X11
 ;; keycode 37 is Control_L.
@@ -979,9 +982,10 @@
        (alt-held? state)))
 
 (defn physical-key
-  "The physical key's name, \"f\", \"l\" or \"p\", for the :physical?
-  bindings (the editor's Cmd/Ctrl+Alt+F and L format chords, and the
-  window's Cmd/Ctrl+Alt+P Parinfer chord), or nil. Pure, so a test can
+  "The physical key's name, \"f\", \"l\", \"p\" or a digit 1 to 6, for
+  the :physical? bindings (the editor's Cmd/Ctrl+Alt+F and L format
+  chords, the window's Cmd/Ctrl+Alt+P Parinfer chord and its Cmd/Ctrl+Alt+1
+  to 6 panel keys), or nil. Pure, so a test can
   pass any os.
 
   On Linux, Alt doesn't remap the keyval, and the binding's plain f and l
@@ -994,8 +998,14 @@
   The (< keyval 0x1000) guard keeps a modifier key's own press out:
   Control_L is 0xffe3, and on Linux keycode 37 is Control_L."
   [os keyval keycode state]
-  (when (and (< keyval 0x1000) (keycode-fallback? os keycode state))
-    (condp = keycode MAC-KEYCODE-F "f" MAC-KEYCODE-L "l" "p")))
+  (cond
+    (and (< keyval 0x1000) (keycode-fallback? os keycode state))
+    (condp = keycode MAC-KEYCODE-F "f" MAC-KEYCODE-L "l" "p")
+    ;; a digit: Option+5 types U+221E, whose keyval (0x100221e) is above
+    ;; the guard, so only the function and modifier keyvals are kept out
+    (and (= "Mac OS X" os) (alt-held? state) (contains? MAC-KEYCODE-DIGITS keycode)
+         (not (<= 0xfd00 keyval 0xffff)))
+    (MAC-KEYCODE-DIGITS keycode)))
 
 (defn- typing-key!
   "The typing stages of the plugins design, 1 when one took the key, else

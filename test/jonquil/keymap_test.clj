@@ -159,6 +159,22 @@
     (doseq [st [shift ctrl meta-m alt]]
       (is (not (km/matches? b f12 st)) (str "state " st)))))
 
+(deftest panel-keys-test
+  ;; Cmd/Ctrl+Alt+1..6 focus or open the panels, ahead of Cmd/Ctrl+1's tab
+  (let [run (fn [kv st physical]
+              (let [got (atom nil)]
+                (km/dispatch (:window km/shipped) kv st
+                             {:holds? (constantly false) :physical physical
+                              :run! (fn [b] (reset! got [(:command b) (:args b)]) :handled)})
+                @got))]
+    (is (= [[:panel/inspector nil] [:panel/source nil] [:panel/locations nil]
+            [:panel/frames nil] [:panel/trace nil] [:panel/plugins nil]]
+           (for [d "123456"] (run (int d) (bit-or ctrl alt) nil)))
+        "Linux: Ctrl+Alt and the plain digit")
+    (is (= [:panel/trace nil] (run 0x100221e (bit-or meta-m alt) "5"))
+        "macOS: Option+5's infinity, through the physical key")
+    (is (= [:tab/select {:n 1}] (run 0x31 ctrl nil)) "Ctrl+1 is still tab 1")))
+
 (deftest physical-test
   ;; the macOS Option-translated keyval matches through the physical key,
   ;; only on a binding that opts in
