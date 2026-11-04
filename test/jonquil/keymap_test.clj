@@ -173,7 +173,8 @@
         "Linux: Ctrl+Alt and the plain digit")
     (is (= [:panel/trace nil] (run 0x100221e (bit-or meta-m alt) "5"))
         "macOS: Option+5's infinity, through the physical key")
-    (is (= [:tab/select {:n 1}] (run 0x31 ctrl nil)) "Ctrl+1 is still tab 1")))
+    (is (= [:tab/select {:n 1}] (run 0x31 ctrl nil)) "Ctrl+1 is still tab 1")
+    (is (not= :panel/inspector (first (run 0x31 (bit-or ctrl alt shift) nil))) "Shift held: not a panel key")))
 
 (deftest physical-test
   ;; the macOS Option-translated keyval matches through the physical key,

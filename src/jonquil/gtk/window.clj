@@ -930,8 +930,9 @@
           (when (and focus-in-panel? active-ed)
             (when-let [ed (active-ed)] (editor/focus! ed))))
         (reset! inspector-state nil)
-        ;; its state is gone, so a panel switch can't bring it back
-        (when-let [r (:recent-panels right)] (swap! r (fn [v] (vec (remove #{:inspector} v)))))
+        ;; their views belong to the old runtime, so a panel switch can't
+        ;; bring them back
+        (when-let [r (:recent-panels right)] (swap! r (fn [v] (vec (remove #{:inspector :source} v)))))
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
         (future
@@ -3919,7 +3920,9 @@
                              (doseq [[tid as] (group-by :tab-id (vals anchors))]
                                (when-let [t (tab-by-id tabs tid)]
                                  (delete-location-marks! (:buf (:ed t)) (map :marks as)))))
-                           (reset! locations-state nil))
+                           (reset! locations-state nil)
+                           ;; an empty list is nothing to switch back to
+                           (swap! (:recent-panels right) (fn [v] (vec (remove #{:locations} v)))))
         tab-for-path (fn [path]
                        (some (fn [t] (when (and @(:path t) (source/same-path? @(:path t) path)) t)) @tabs))
         anchor-file! (fn [t path]
@@ -4506,10 +4509,13 @@
                             :commands (plugin-registry/all-commands plugins)}))
         print-lines! (fn [lines] (doseq [l lines] (cview/append! cv :system (str l "\n"))))
         ;; The panel keys and the palette's Switch to panel: focus the panel
-        ;; when it shows, bring it back with its state when it showed
-        ;; before, else open it the way its own command does. The
-        ;; inspector, source panel and locations list have nothing to show
-        ;; until something fills them, so those say what does.
+        ;; when it shows. Frames, Trace and Plugins otherwise run their own
+        ;; command, which asks for what they show now (a hidden one would
+        ;; show the calls or the error from before). The inspector, source
+        ;; panel and locations list come back with their state when they
+        ;; showed before and it still holds (a dialect switch and a cleared
+        ;; list take them off the recent list); with nothing to show they
+        ;; say what fills them.
         panel-focus-fn (fn [k]
                          (let [focus! (fn []
                                         (case k
@@ -4521,18 +4527,17 @@
                                           :plugins (g/gtk-widget-grab-focus (:list lp))))]
                            (cond
                              (= k (showing-panel right)) (focus!)
+                             (= k :plugins) (plugin-step! {:settings-path @settings-path*
+                                                           :step (fn [] []) :open-list? true})
+                             (= k :trace) (trace-show-fn)
+                             (= k :debugger) (show-frames-fn)
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
-                             (case k
-                               :plugins (plugin-step! {:settings-path @settings-path*
-                                                       :step (fn [] []) :open-list? true})
-                               :trace (trace-show-fn)
-                               :debugger (show-frames-fn)
-                               (set-status! status-label
+                             (set-status! status-label
                                             (case k
                                               :inspector "; Nothing inspected yet: inspect a form or a result first."
                                               :source "; The Source panel is empty: jump to a definition first."
-                                              :locations "; No locations yet: list a symbol's uses or definitions, or the find matches."))))))
+                                              :locations "; No locations yet: list a symbol's uses or definitions, or the find matches.")))))
         window-key-args {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
                          :live-keys live-keys :print-lines! print-lines!
                          :describe-key-fn (fn [] (reset! describe-pending true)

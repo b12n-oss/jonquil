@@ -395,6 +395,7 @@
    trace-rows/row-trace-not-a-function
    panel-rows/row-panel-switch-and-keys
    panel-rows/row-panel-key-says-what-fills
+   panel-rows/row-panel-stale-panels-leave
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-changed-not-before-first-run

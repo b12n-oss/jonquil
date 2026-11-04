@@ -53,8 +53,9 @@
 (defn row-panel-switch-and-keys
   "With Locations shown and then Trace over it, the palette offers
   Switch to panel: Locations and not Trace; running it brings Locations
-  back with focus in its list. Cmd/Ctrl+Alt+5 brings Trace back, and
-  pressed again from the editor it focuses the Trace panel showing."
+  back with focus in its list. Cmd/Ctrl+Alt+5 opens Trace again through
+  its own command, and pressed again from the editor it focuses the
+  Trace panel showing."
   [ui]
   (go-row :panel-switch-and-keys support/check
     (let [locp (:locations-pane ui)
@@ -71,7 +72,8 @@
               _ (on-gtk (run-palette! ui "switch to panel: locations"))
               back (on-gtk {:shown (shown? locp) :focused (list-focused? locp) :trace (shown? tracep)})
               _ (on-gtk (panel-key! ui \5))
-              key5 (on-gtk {:shown (shown? tracep) :focused (list-focused? tracep) :locations (shown? locp)})
+              _ (await-until 3000 20 #(shown? tracep))
+              key5 (on-gtk {:shown (shown? tracep) :locations (shown? locp)})
               _ (on-gtk (editor/focus! (:editor ui)) (panel-key! ui \5))
               again (on-gtk {:shown (shown? tracep) :focused (list-focused? tracep)})]
           (on-gtk (support/check :panel-switch-and-keys
@@ -79,7 +81,7 @@
                                       (= "Switch to panel: Locations" (first docs))
                                       (not-any? #(= "Switch to panel: Trace" %) docs)
                                       (:shown back) (:focused back) (not (:trace back))
-                                      (:shown key5) (:focused key5) (not (:locations key5))
+                                      (:shown key5) (not (:locations key5))
                                       (:shown again) (:focused again))
                                  {:locations locations? :trace trace? :docs docs
                                   :back back :key5 key5 :again again})))
@@ -102,3 +104,29 @@
                                  (and said? (not opened?))
                                  {:said said? :opened opened? :status (g/label-text (:status-label ui))})))
         (finally (reset! recent saved))))))
+
+(defn row-panel-stale-panels-leave
+  "A panel whose state went away is no longer switched back to: closing
+  the tab a locations list came from clears it, and Cmd/Ctrl+Alt+3 then
+  says what fills the panel instead of showing an empty one."
+  [ui]
+  (go-row :panel-stale-panels-leave support/check
+    (on-gtk (let [_ ((:new-tab!* ui))
+                  t ((:active-tab* ui))
+                  ed (:ed t)]
+              (editor/set-text! ed fixture)
+              (support/place-cursor! (:buf ed) (inc (str/last-index-of fixture "(area")))
+              (run-palette! ui "list the uses")
+              (editor/mark-saved! ed)
+              ((:close-tab! ui) (:id t))
+              (g/gtk-label-set-text (:status-label ui) "")
+              (panel-key! ui \3)))
+    (let [want "; No locations yet: list a symbol's uses or definitions, or the find matches."
+          said? (await-until 2000 20 #(= want (g/label-text (:status-label ui))))
+          state (on-gtk {:shown (shown? (:locations-pane ui))
+                         :recent @((:recent-panels* ui))
+                         :docs (palette-docs! ui "switch to panel: locations")})]
+      (on-gtk (support/check :panel-stale-panels-leave
+                             (and said? (not (:shown state)) (not-any? #{:locations} (:recent state))
+                                  (empty? (:docs state)))
+                             (assoc state :said said? :status (g/label-text (:status-label ui))))))))
