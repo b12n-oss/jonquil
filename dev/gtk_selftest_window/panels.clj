@@ -1,0 +1,104 @@
+(ns gtk-selftest-window.panels
+  "Switching between the right-hand panels: the palette's Switch to panel
+  entries and the Cmd/Ctrl+Alt+1..6 keys that focus a panel or open it."
+  (:require [clojure.string :as str]
+            [gtk-async :refer [await-until go-row on-gtk]]
+            [gtk-selftest-window.support :as support]
+            [jolt.ffi :as ffi]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.popover :as popover]))
+
+(def ^:private fixture "(defn area [s] s)\n(area 2)")
+
+(defn- run-palette!
+  "Opens the palette, filters it to query and runs the first entry, then
+  closes it. GTK-thread only."
+  [ui query]
+  (let [p (:palette ui)]
+    ((:open-palette!* ui))
+    (palette/set-query! p query)
+    (palette/run-selected! p)
+    (when (popover/open? p) (popover/hide! p))))
+
+(defn- palette-docs!
+  "The docs the palette shows for query, then closes it. GTK-thread only."
+  [ui query]
+  (let [p (:palette ui)]
+    ((:open-palette!* ui))
+    (palette/set-query! p query)
+    (let [docs (palette/shown-docs p)]
+      (when (popover/open? p) (popover/hide! p))
+      docs)))
+
+(defn- panel-key!
+  "Cmd/Ctrl+Alt+digit through the window's key handler."
+  [ui digit]
+  ((:handle-window-key! ui) ffi/null (int digit) 0 (bit-or g/META-MASK g/ALT-MASK) ffi/null))
+
+(defn- shown? [pane] (pos? (g/gtk-widget-get-visible (:root pane))))
+
+(defn- list-focused?
+  "True when keyboard focus is the pane's list or one of its rows."
+  [pane]
+  (let [f (g/gtk-root-get-focus (g/gtk-widget-get-root (:root pane)))
+        l (:list pane)]
+    (and (not (ffi/null? f))
+         (or (= f l) (not (zero? (g/gtk-widget-is-ancestor f l)))))))
+
+(defn- close! [pane]
+  (when-let [f (:on-close @(:handlers pane))] (f)))
+
+(defn row-panel-switch-and-keys
+  "With Locations shown and then Trace over it, the palette offers
+  Switch to panel: Locations and not Trace; running it brings Locations
+  back with focus in its list. Cmd/Ctrl+Alt+5 brings Trace back, and
+  pressed again from the editor it focuses the Trace panel showing."
+  [ui]
+  (go-row :panel-switch-and-keys support/check
+    (let [locp (:locations-pane ui)
+          tracep (:trace-pane ui)]
+      (try
+        (on-gtk (let [ed (:editor ui)]
+                  (editor/set-text! ed fixture)
+                  (support/place-cursor! (:buf ed) (inc (str/last-index-of fixture "(area")))
+                  (run-palette! ui "list the uses")))
+        (let [locations? (on-gtk (shown? locp))
+              _ (on-gtk (run-palette! ui "show the calls of the traced"))
+              trace? (await-until 3000 20 #(shown? tracep))
+              docs (on-gtk (palette-docs! ui "switch to panel"))
+              _ (on-gtk (run-palette! ui "switch to panel: locations"))
+              back (on-gtk {:shown (shown? locp) :focused (list-focused? locp) :trace (shown? tracep)})
+              _ (on-gtk (panel-key! ui \5))
+              key5 (on-gtk {:shown (shown? tracep) :focused (list-focused? tracep) :locations (shown? locp)})
+              _ (on-gtk (editor/focus! (:editor ui)) (panel-key! ui \5))
+              again (on-gtk {:shown (shown? tracep) :focused (list-focused? tracep)})]
+          (on-gtk (support/check :panel-switch-and-keys
+                                 (and locations? trace?
+                                      (= "Switch to panel: Locations" (first docs))
+                                      (not-any? #(= "Switch to panel: Trace" %) docs)
+                                      (:shown back) (:focused back) (not (:trace back))
+                                      (:shown key5) (:focused key5) (not (:locations key5))
+                                      (:shown again) (:focused again))
+                                 {:locations locations? :trace trace? :docs docs
+                                  :back back :key5 key5 :again again})))
+        (finally (on-gtk (close! locp) (close! tracep)))))))
+
+(defn row-panel-key-says-what-fills
+  "A panel key for a panel that never showed anything opens nothing and
+  says on the status bar what fills it: the inspector here."
+  [ui]
+  (go-row :panel-key-says-what-fills support/check
+    (let [recent ((:recent-panels* ui)) saved @recent]
+      (try
+        (on-gtk (reset! recent [])
+                (g/gtk-label-set-text (:status-label ui) "")
+                (panel-key! ui \1))
+        (let [want "; Nothing inspected yet: inspect a form or a result first."
+              said? (await-until 2000 20 #(= want (g/label-text (:status-label ui))))
+              opened? (on-gtk (shown? (:inspector ui)))]
+          (on-gtk (support/check :panel-key-says-what-fills
+                                 (and said? (not opened?))
+                                 {:said said? :opened opened? :status (g/label-text (:status-label ui))})))
+        (finally (reset! recent saved))))))
