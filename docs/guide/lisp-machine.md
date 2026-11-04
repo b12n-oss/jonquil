@@ -38,6 +38,7 @@ Emacs took first:
 | The locations list and F8 / Shift+F8 | `next-error`, xref |
 | Find Usages in Project, by how each place uses the name | `xref-find-references` (`M-?`); Genera's who-calls, by name rather than from a callers database |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
+| Switch to a recent panel, Cmd/Ctrl+Alt+1 to 6 for each panel | none built in: `C-x o` cycles windows; Genera's Select key, where Select L brings up the Lisp Listener, is where this comes from |
 | Time the form at the caret | `benchmark-run` |
 | Live console results: click to inspect, right-click verbs | none built in: CIDER inspects the last result; Genera's presentations are where this comes from |
 | Trace the function at the caret, the Trace panel | `trace-function` and the `*trace-output*` buffer; CIDER's `cider-toggle-trace-var` |

@@ -76,6 +76,23 @@ Cmd/Ctrl+Shift+P lists Jonquil's commands, with their keys and source
 (built-in or plugin). Type words to narrow by description or id, Up and
 Down to move, Return or a click to run, Escape to close.
 
+### Switching panels
+
+The panels on the right share one place, so opening one hides the one that
+was there. A hidden panel keeps what it showed, and two ways bring it back.
+The palette lists **Switch to panel: name** for each panel you've had open
+in this window, the one you saw last first, leaving out the one on screen.
+Cmd/Ctrl+Alt+1 to 6 each go to one panel: 1 the Inspector, 2 Source, 3
+Locations, 4 Frames, 5 Trace and 6 Plugins. The key focuses the panel when
+it's showing, brings it back when it was hidden, and otherwise opens it the
+way its own command does: Frames shows the last error, Trace the recorded
+calls and Plugins the plugin list. The Inspector, Source and Locations
+panels have nothing to show until something fills them, so their keys say
+on the status bar what does. A plugin's history and an agent's proposal
+aren't in the list, since each belongs to the plugin or proposal it was
+opened from. Switching to another dialect drops the inspector's view, so
+the Inspector leaves the list until you inspect something again.
+
 ### Describing keys
 
 Three palette commands explain the keys, from the live keymap, plugins
