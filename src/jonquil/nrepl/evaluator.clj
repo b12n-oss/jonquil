@@ -515,6 +515,11 @@
               (let [created (:created @(:state ev))]
                 (eval-sync! conn session (ops/reset-code (concat (get created owner) (get created :repl))))
                 (swap! (:state ev) update :created dissoc owner :repl)))
+            ;; LM4: a Run counts its own lines alone, cleared on this worker
+            ;; before the Run goes out, so the two can't race
+            (when (and run? (:clear-line-counts? opts) (contains? (:ops (runtime ev)) "jonquil-line-counts"))
+              (try (client/request-sync conn {:op "jonquil-line-counts" :action "clear" :session session} request-timeout-ms)
+                   (catch Throwable _ nil)))
             (if (stop-requested? ev)
               (finish! ev opts {:status :interrupted})
               (let [before (ns-snapshot conn session)

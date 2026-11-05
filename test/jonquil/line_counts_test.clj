@@ -1,6 +1,6 @@
 (ns jonquil.line-counts-test
   (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [jonquil.line-counts :as lc]))
 
 (deftest label-test
@@ -36,10 +36,16 @@
       (try
         (is (= {:on? true} (lc/set-counting! true)))
         (load-file (.getPath f))
-        (let [{:keys [counts]} (lc/fetch (.getPath f))]
+        (let [{:keys [counts mode]} (lc/fetch (.getPath f))]
+          (is (= :counts mode) "a fetch says the mode it found")
           (is (< 1 (get counts 4 0)) "the loop's test ran more than once")
           (is (= 1 (get counts 6)) "the call ran once"))
         (is (= {:ok true} (lc/clear!)))
         (is (= {} (:counts (lc/fetch (.getPath f)))))
         (is (= {:on? false} (lc/toggle!)))
+        (testing "off-if-counting! turns counting off, and leaves other modes alone"
+          (lc/set-counting! true)
+          (is (= {:on? false} (lc/off-if-counting!)))
+          (is (nil? ((requiring-resolve 'jolt.profile/instrument-mode))))
+          (is (nil? (lc/off-if-counting!)) "nothing to do"))
         (finally ((requiring-resolve 'jolt.profile/instrument!) (or mode false)))))))

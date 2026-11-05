@@ -227,3 +227,58 @@
                               :path @(:path ((:active-tab* ui)))})
               (editor/mark-saved! (active-ed ui))
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+
+(defn- labels-by-line
+  "The active tab's count labels as {0-based line label}."
+  [ui]
+  (let [ed (active-ed ui) text (editor/editor-text ed)]
+    (into (sorted-map) (for [[off label] @(:counts (:gutter (:changed ed)))]
+                         [(count (filter #{\newline} (subs text 0 off))) label]))))
+
+(defn row-line-counts-second-run
+  "A second Run after the file changed counts that Run alone, on the new
+  lines: two comment lines added at the top move the loop's 6 down two
+  lines, and the comments carry none."
+  [ui]
+  (go-row :line-counts-second-run support/check
+    (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-lc2-") "lc2.clj")
+          code "(ns lc-row2)\n(defn spin [n]\n  (loop [i 0]\n    (when (< i n)\n      (recur (inc i)))))\n(spin 5)\n"
+          code2 (str ";; a\n;; b\n" code)
+          _ (spit f code)
+          _ (on-gtk ((:open-file! ui) (.getPath f)) (run-palette! ui "count how often each line runs"))
+          on? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          _ (on-gtk ((:run!* ui)))
+          first? (await-until 8000 20 #(= "6" (get (labels-by-line ui) 3)))
+          _ (spit f code2)
+          _ (on-gtk (editor/set-text! (active-ed ui) code2) ((:run!* ui)))
+          second? (await-until 8000 20 #(= "6" (get (labels-by-line ui) 5)))
+          by-line (on-gtk (labels-by-line ui))
+          _ (on-gtk (run-palette! ui "count how often each line runs"))
+          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+      (on-gtk (support/check :line-counts-second-run
+                             (and on? first? second? off? (nil? (get by-line 0)) (nil? (get by-line 1))
+                                  (= "1" (get by-line 7)))
+                             {:on on? :first first? :second second? :by-line by-line :off off?})
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+
+(defn row-line-counts-went-off
+  "Counting turned off behind the window (a restarted runtime starts
+  without it): the next Run says so on the console, and the next toggle
+  turns counting on, not off."
+  [ui]
+  (go-row :line-counts-went-off support/check
+    (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-lc3-") "lc3.clj")
+          _ (spit f "(ns lc-row3)\n(+ 1 2)\n")
+          _ (on-gtk ((:open-file! ui) (.getPath f)) (run-palette! ui "count how often each line runs"))
+          on? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          _ ((requiring-resolve 'jonquil.line-counts/set-counting!) false)
+          mark (on-gtk (let [m (support/out-end-offset ui)] ((:run!* ui)) m))
+          said? (await-until 8000 20 #(str/includes? (support/since ui mark) "; Line counts went off (the runtime restarted)."))
+          _ (on-gtk (run-palette! ui "count how often each line runs"))
+          on-again? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          _ (on-gtk (run-palette! ui "count how often each line runs"))
+          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+      (on-gtk (support/check :line-counts-went-off (and on? said? on-again? off?)
+                             {:on on? :said said? :on-again on-again? :off off? :status (status ui)})
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+

@@ -470,7 +470,12 @@
                 (run-sync s (str "(load-file " (pr-str (.getPath f)) ")"))
                 (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "the call on line 3 ran once")
                 (is (= {:ok true} (call ev/clear-line-counts!)))
-                (is (= {:counts {}} (call ev/line-counts! (.getPath f))))
+                (is (= {} (:counts (call ev/line-counts! (.getPath f)))))
+                (testing "a Run with :clear-line-counts? counts that Run alone"
+                  (dotimes [_ 2]
+                    (run ev/eval! s (slurp f) {:run? true :path (.getPath f) :clear-line-counts? true}))
+                  (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "not 2"))
+                (is (= :counts (:mode (call ev/line-counts! (.getPath f)))) "a fetch says the runtime's mode")
                 (is (= {:on? false} (call ev/toggle-line-counts!))))))
         (finally (when mode ((requiring-resolve 'jolt.profile/instrument!) mode))
                  (when-not mode (try ((requiring-resolve 'jolt.profile/instrument!) false) (catch Throwable _ nil))))))))

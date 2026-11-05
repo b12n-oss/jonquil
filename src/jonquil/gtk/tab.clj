@@ -31,10 +31,12 @@
         ;; LM3's changed forms: the keys of the forms as they last ran (nil
         ;; until the tab runs), the gutter that marks the others, and the
         ;; refresh the window installs (wire-tab!); on the editor map, which
-        ;; every run path carries. :counts-refresh, installed by wire-tab!
-        ;; too, fetches LM4's line counts after a run (a fn of no args)
+        ;; every run path carries. :counts-refresh and :counting?, installed
+        ;; by wire-tab! too, are LM4's: fetch the line counts after a run (a
+        ;; fn of the run's source and code), and whether the window counts
         ed (assoc ed0 :changed {:ran (atom nil) :refresh (atom (fn [])) :gutter gt
-                                :counts-refresh (atom (fn []))})
+                                :counts-refresh (atom (fn [_source _code]))
+                                :counting? (atom (constantly false))})
         fb (find-bar/make-find-bar ed)
         view (:view ed)
         root (g/gtk-box-new g/ORIENTATION-VERTICAL 0)

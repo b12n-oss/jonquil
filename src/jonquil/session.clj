@@ -390,6 +390,11 @@
      ;; marked in before-idle, on the Run's own worker before the context
      ;; goes idle, so a REPL entry or another Run can't define a var in
      ;; between and get this file.
+     ;; LM4: a Run counts its own lines alone. Cleared here, before the
+     ;; worker starts, so it can't race the Run (an evaluation already
+     ;; running is refused below, and its counts are left alone)
+     (when (and (:clear-line-counts? opts) (not (eval/evaluating? ctx)))
+       (line-counts/clear!))
      (let [file (when-not (eval/evaluating? ctx) (saved-file (:path opts) code))
            before (when (and file (not (eval/source-path?))) (program-vars))
            opts (cond-> (assoc opts :owner owner)

@@ -412,6 +412,8 @@
    gutter-rows/row-run-changed-runs-only-those
    gutter-rows/row-line-counts-after-run
    gutter-rows/row-line-counts-unsaved
+   gutter-rows/row-line-counts-second-run
+   gutter-rows/row-line-counts-went-off
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default

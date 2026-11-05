@@ -62,6 +62,16 @@
     (try (set-counting! (not= :counts ((requiring-resolve 'jolt.profile/instrument-mode))))
          (catch Throwable e (err e)))))
 
+(defn off-if-counting!
+  "Turns this process's counting off when it is on, as set-counting!
+  answers; nil when it wasn't counting. A window leaving its in-process Jolt
+  calls it: the mode is the whole process's, so it would go on counting
+  everything Jonquil compiles."
+  []
+  (when (and (available?)
+             (= :counts (try ((requiring-resolve 'jolt.profile/instrument-mode)) (catch Throwable _ nil))))
+    (set-counting! false)))
+
 (defn clear!
   "Zeroes every counter. {:ok true} or {:error s}."
   []
@@ -71,9 +81,12 @@
          (catch Throwable e (err e)))))
 
 (defn fetch
-  "{:counts {line hits}} for the file at path, or {:error s}."
+  "{:counts {line hits} :mode m} for the file at path, m the runtime's
+  instrumentation mode now (:counts while counting; a restarted runtime
+  answers nil), or {:error s}."
   [path]
   (if-not (available?)
     {:error NO-API}
-    (try {:counts (for-file ((requiring-resolve 'jolt.profile/line-counts)) path)}
+    (try {:counts (for-file ((requiring-resolve 'jolt.profile/line-counts)) path)
+          :mode ((requiring-resolve 'jolt.profile/instrument-mode))}
          (catch Throwable e (err e)))))

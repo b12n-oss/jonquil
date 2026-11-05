@@ -89,11 +89,14 @@
         (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
       "jonquil-line-counts"
       {"status" ["done"]
-       "data" (pr-str (case (g "action")
+       ;; unbounded, as jonquil-frames: a person's *print-length* would cut
+       ;; the map and the reply wouldn't read
+       "data" (binding [*print-length* nil *print-level* nil]
+                (pr-str (case (g "action")
                         "toggle" (line-counts/toggle!)
                         "fetch" (line-counts/fetch (g "path"))
                         "clear" (line-counts/clear!)
-                        {:error (str "jonquil-line-counts: no action " (pr-str (g "action")))}))}
+                        {:error (str "jonquil-line-counts: no action " (pr-str (g "action")))})))}
       "jonquil-debug-mode"
       (let [r (try (debugger/toggle-debug-mode!)
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
