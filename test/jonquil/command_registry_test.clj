@@ -53,7 +53,8 @@
    :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn] :restart/define [:define-retry-fn]
    :panel/inspector [:panel-focus-fn :inspector] :panel/source [:panel-focus-fn :source]
    :panel/locations [:panel-focus-fn :locations] :panel/frames [:panel-focus-fn :debugger]
-   :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]})
+   :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]
+   :panel/messages [:panel-focus-fn :messages]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)

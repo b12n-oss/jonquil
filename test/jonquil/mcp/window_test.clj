@@ -5,6 +5,7 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.window :as gw]
             [jonquil.help :as help]
+            [jonquil.mcp :as mcp]
             [jonquil.mcp.tools :as tools]
             [jonquil.mcp.window :as w]))
 
@@ -49,7 +50,7 @@
 (deftest plugin-tools-over-a-fake-ui
   (let [calls (atom [])
         t (tools-for (plugin-ui calls))]
-    (is (= {:error? false
+    (is (= {:error? false :plugin-id "fmt"
             :text "status: pending\nproposal: v1\nThe user reviews it in the window. Call jonquil_plugin_status with id fmt and n 1 to see what they decide."}
            (call t "jonquil_plugin_propose" {"id" "fmt" "source" "(ns x)" "reason" "faster"})))
     (is (= [{:id "fmt" :source "(ns x)" :reason "faster"}] @calls))
@@ -293,7 +294,7 @@
     (is (= 20 (count (names))))
     (is (= "plugin_fmt_echo" (last (names))))
     (is (= {:text "echo hi" :error? false} ((:call (f)) "plugin_fmt_echo" {"text" "hi"})))
-    (is (= {:text "Selected tab 1." :error? false}
+    (is (= {:text "Selected tab 1." :error? false :tab-id 1}
            ((:call ((w/with-plugin-tools (tools-for {:tabs* (fn [] [{:id 1}]) :select-tab! (fn [_] nil)})
                                          {:plugin-tools* (fn [] @served)}))) "jonquil_select_tab" {"id" 1}))
         "a built-in still reaches its own handler")
@@ -305,3 +306,74 @@
   ;; a window that can watch its plugin tools declares it
   (is (true? (:list-changed? ((w/with-plugin-tools (tools-for {}) {:watch-plugin-tools* (fn [_] (fn []))})))))
   (is (not (contains? ((w/with-plugin-tools (tools-for {}) {})) :list-changed?))))
+
+(deftest side-fields-not-in-json
+  (let [t {:defs [{"name" "x" "description" "x" "inputSchema" {"type" "object"}}]
+           :call (fn [_ _] {:text "ok" :error? false :tab-id 3 :plugin-id "p"})}
+        r (mcp/handle-message t {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "x"}})]
+    (is (= {"content" [{"type" "text" "text" "ok"}] "isError" false} (get r "result")))))
+
+(defn- logging-ui [entries & {:as more}]
+  (merge {:log!* (fn [e] (swap! entries conj e))
+          :tabs* (fn [] [{:id 1}]) :select-tab! (fn [_] nil)}
+         more))
+
+(deftest with-messages-logs-a-call
+  (let [entries (atom [])
+        ui (logging-ui entries)
+        session* (atom {:client "Claude Code"})
+        f (w/with-messages (w/with-plugin-tools (tools-for ui) ui) ui session*)]
+    (is (= {:text "Selected tab 1." :error? false :tab-id 1}
+           ((:call (f)) "jonquil_select_tab" {"id" 1})))
+    (is (= [{:kind :agent :summary "Claude Code switched to tab 1" :client "Claude Code"
+             :target {:tab-id 1} :summary-tab 1}]
+           @entries))
+    (is (= 19 (count (:defs (f)))) "the defs pass through")))
+
+(deftest with-messages-rethrows
+  (let [entries (atom [])
+        boom (ex-info "bad" {})
+        ui (logging-ui entries)
+        f (w/with-messages (fn [] {:defs [] :call (fn [_ _] (throw boom))}) ui (atom {}))
+        caught (try ((:call (f)) "jonquil_eval" {"code" "x"}) nil (catch Throwable e e))]
+    (is (identical? boom caught))
+    (is (= 1 (count @entries)))
+    (is (= "Agent evaluated code, which failed: bad" (:summary (first @entries))))
+    (is (:error? (first @entries)))))
+
+(deftest with-messages-survives-a-broken-log
+  (let [ui {:log!* (fn [_] (throw (ex-info "log broke" {})))}
+        f (w/with-messages (fn [] {:defs [] :call (fn [_ _] {:text "ok" :error? false})}) ui (atom {}))]
+    (is (= {:text "ok" :error? false}
+           (binding [*err* (java.io.StringWriter.)] ((:call (f)) "jonquil_tabs" {}))))))
+
+(deftest with-messages-without-log
+  (let [base (fn [] {:defs [] :call (fn [_ _] {:text "ok" :error? false})})
+        f (w/with-messages base {} (atom {}))]
+    (is (= {:text "ok" :error? false} ((:call (f)) "jonquil_tabs" {})))))
+
+(deftest client-name-fallbacks
+  (is (= "Claude Code" (w/client-name {"name" "Claude Code"})))
+  (doseq [ci [nil {} {"name" 42} {"name" "  "} "not a map"]]
+    (is (= "Agent" (w/client-name ci)) (pr-str ci))))
+
+(deftest serve-window-logs-the-attach
+  (let [entries (atom [])
+        lines (atom [(str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
+                          "{\"protocolVersion\":\"2025-06-18\",\"clientInfo\":{\"name\":\"Claude Code\"}}}")])]
+    (binding [*err* (java.io.StringWriter.)]
+      (w/serve-window! {:ui {:tabs* (fn [] []) :request-close!* (fn [] nil)
+                             :log!* (fn [e] (swap! entries conj e))}
+                        :dir "/tmp" :gui sync-gui
+                        :read-line (fn [] (let [l (first @lines)] (swap! lines (comp vec rest)) l))
+                        :write-line (fn [_] nil)}))
+    (is (= [{:kind :connection :summary "Claude Code attached"}] @entries))))
+
+(deftest with-messages-logs-an-unknown-tool
+  (let [entries (atom [])
+        ui {:log!* (fn [e] (swap! entries conj e))}
+        f (w/with-messages (fn [] {:defs [] :call (fn [_ _] {:text "ok" :error? false})}) ui (atom {:client "Claude Code"}))
+        r (mcp/handle-message f {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "jonquil_nope"}})]
+    (is (= -32602 (get-in r ["error" "code"])) "the agent's reply is unchanged")
+    (is (= [{:kind :plugin :error? true :summary "Claude Code called jonquil_nope, which failed: Unknown tool: jonquil_nope"}]
+           (mapv #(select-keys % [:kind :error? :summary]) @entries)))))

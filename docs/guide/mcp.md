@@ -83,6 +83,8 @@ on the live window:
 
 </details>
 
+Every call shows in the window's [Messages panel](help-and-inspector.md#messages), named by the client, so you can see afterwards what the agent did.
+
 <details>
 <summary><strong>Timeouts, other projects' tabs, disconnecting and trust</strong></summary>
 

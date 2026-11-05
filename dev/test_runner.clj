@@ -29,6 +29,7 @@
     jonquil.edit-test
     jonquil.eval-test
     jonquil.restarts-test
+    jonquil.messages-test
     jonquil.registry-test
     jonquil.console-test
     jonquil.mcp-test
@@ -36,6 +37,7 @@
     jonquil.mcp.tools-test
     jonquil.mcp.window-test
     jonquil.mcp.listen-test
+    jonquil.mcp.describe-test
     jonquil.session-test
     jonquil.commands-test
     jonquil.changed-test
@@ -103,6 +105,7 @@
     jonquil.gtk.trash-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
+    jonquil.gtk.messages-pane-test
     jonquil.inspect.view-test
     jonquil.nrepl.info-middleware-test
     jonquil.project-roots-test

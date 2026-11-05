@@ -66,6 +66,7 @@
   {:key "4" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/frames}
   {:key "5" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/trace}
   {:key "6" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/plugins}
+  {:key "7" :mods #{:cmd :alt} :not #{:shift} :physical? true :command :panel/messages}
   {:key "1" :mods #{:cmd} :command :tab/select :args {:n 1}}
   {:key "2" :mods #{:cmd} :command :tab/select :args {:n 2}}
   {:key "3" :mods #{:cmd} :command :tab/select :args {:n 3}}

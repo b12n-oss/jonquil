@@ -334,3 +334,25 @@
     (is (wait-until #(= 3 (count @out)) 2000))
     (eof! s)
     (deref (:done s) 2000 nil)))
+
+(deftest on-initialize-gets-client-info
+  (let [seen (atom [])
+        in (atom [(json/encode (req 1 "initialize" {"protocolVersion" "2025-06-18"
+                                                    "clientInfo" {"name" "Claude Code" "version" "2"}}))])
+        out (atom [])]
+    (mcp/serve! {:tools tools
+                 :on-initialize (fn [ci] (swap! seen conj ci))
+                 :read-line (fn [] (let [l (first @in)] (swap! in (comp vec rest)) l))
+                 :write-line (fn [s] (swap! out conj s))})
+    (is (= [{"name" "Claude Code" "version" "2"}] @seen))
+    (is (= 1 (count @out)))))
+
+(deftest on-initialize-throw-is-ignored
+  (let [in (atom [(json/encode (req 1 "initialize" {"protocolVersion" "2025-06-18"}))])
+        out (atom [])]
+    (mcp/serve! {:tools tools
+                 :on-initialize (fn [_] (throw (ex-info "hook broke" {})))
+                 :read-line (fn [] (let [l (first @in)] (swap! in (comp vec rest)) l))
+                 :write-line (fn [s] (swap! out conj s))})
+    (is (= 1 (count @out)))
+    (is (= 1 (get (json/decode (first @out)) "id")))))
