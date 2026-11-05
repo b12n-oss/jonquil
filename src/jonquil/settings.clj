@@ -117,11 +117,26 @@
       (and (set? d) (every? keyword? d)) {:plugins {:disabled d}}
       :else {:warning (str path "'s :plugins :disabled isn't a set of plugin ids, ignoring it")})))
 
+(defn- layouts-part
+  "{:layouts {name layout}} keeping the entries with a string name and a
+  map layout (LM8's named layouts), {} when there are none, and a
+  :warning when some were dropped."
+  [path m]
+  (let [v (when (map? m) (:layouts m))]
+    (cond
+      (nil? v) {}
+      (not (map? v)) {:warning (str path "'s :layouts isn't a map, ignoring it")}
+      :else (let [good (into {} (filter (fn [[k l]] (and (string? k) (map? l)))) v)]
+              (cond-> {}
+                (seq good) (assoc :layouts good)
+                (< (count good) (count v)) (assoc :warning (str path "'s :layouts has entries that aren't a name and a layout, ignoring them")))))))
+
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
   :file-tree when it holds a usable one, :reopen-tabs? and :mcp-listen? when
   they hold a boolean, :plugins when it holds a set of disabled ids,
-  :parinfer when it holds one of parinfer-modes, and
+  :parinfer when it holds one of parinfer-modes, :layouts when it holds
+  named layouts, and
   :warning when the file exists but part of it can't be used.
   A missing file is {:theme theme/default-theme} with no warning."
   [path]
@@ -136,11 +151,12 @@
             ml (mcp-listen-part path m)
             pl (plugins-part path m)
             pi (parinfer-part path m)
+            ly (layouts-part path m)
             warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt)
-                                   (:warning ml) (:warning pl) (:warning pi)])]
+                                   (:warning ml) (:warning pl) (:warning pi) (:warning ly)])]
         (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning)
                        (dissoc rt :warning) (dissoc ml :warning) (dissoc pl :warning)
-                       (dissoc pi :warning))
+                       (dissoc pi :warning) (dissoc ly :warning))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 
 (defn- resolved-target

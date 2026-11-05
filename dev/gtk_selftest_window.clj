@@ -397,6 +397,7 @@
    panel-rows/row-panel-switch-and-keys
    panel-rows/row-panel-key-says-what-fills
    panel-rows/row-panel-stale-panels-leave
+   panel-rows/row-layout-save-and-use
    messages-rows/row-messages-agent-replace-logged
    messages-rows/row-messages-reads-hidden
    messages-rows/row-messages-status-collapses
