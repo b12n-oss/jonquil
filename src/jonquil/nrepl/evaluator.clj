@@ -576,6 +576,16 @@
       (edn/read-string d)
       {:error "The Jolt child answered without its frames."})))
 
+(defn line-counts-reply
+  "The child's jonquil-line-counts responses as jonquil.line-counts' map,
+  or {:error s} when the reply has no data."
+  [responses]
+  (if-let [err (some :error responses)]
+    {:error err}
+    (if-let [d (some :data responses)]
+      (edn/read-string d)
+      {:error "The Jolt child answered without its line counts."})))
+
 (defn frame-eval-reply
   "The child's jonquil-frame-eval responses as {:out :text} or {:error s},
   never a guess when the reply carries neither."
@@ -595,6 +605,24 @@
     (if-let [on (some :on responses)]
       {:on? (= "true" on)}
       {:error "The Jolt child didn't say whether debug mode is on."})))
+
+(defn- line-counts-call!
+  "One jonquil-line-counts request to the child, off the caller's thread;
+  on-done gets its map or {:error s}."
+  [ev msg on-done]
+  (future
+    (let [r (try
+              (let [{:keys [conn session ops] :as rt} (runtime ev)]
+                (cond
+                  (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                  (not (live? ev)) {:error inspect-lost}
+                  (not (contains? ops "jonquil-line-counts")) {:error "Line counts need Jolt."}
+                  :else
+                  (let [r (client/request-sync conn (assoc msg :op "jonquil-line-counts" :session session) request-timeout-ms)]
+                    (if (vector? r) (line-counts-reply r) {:error inspect/timeout-message}))))
+              (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+      (try (on-done r) (catch Throwable _))))
+  nil)
 
 (defrecord NRepl [selection state history start-lock]
   ev/Evaluator
@@ -860,6 +888,10 @@
         (try (on-result r) (catch Throwable _))))
     nil)
   ;; Break on error: jonquil.nrepl.break-middleware in the child
+  ev/LineCounts
+  (toggle-line-counts! [this on-done] (line-counts-call! this {:action "toggle"} on-done))
+  (line-counts! [this path on-data] (line-counts-call! this {:action "fetch" :path path} on-data))
+  (clear-line-counts! [this on-done] (line-counts-call! this {:action "clear"} on-done))
   ev/Break
   (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)
   (toggle-break! [this on-done]

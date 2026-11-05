@@ -15,6 +15,7 @@
   (measured 2026-10-18). inspect-start reads that global *1."
   (:require [jolt.nrepl :as server]
             [jonquil.debugger :as debugger]
+            [jonquil.line-counts :as line-counts]
             [jonquil.inspect.view :as view]
             [jonquil.nrepl.break-middleware :as break-middleware]
             [jonquil.results-rt :as results-rt]
@@ -33,7 +34,9 @@
    ;; live console results (jonquil.results-rt)
    "jonquil-keep-result" "inspect-result"
    ;; Save World and Restore World (jonquil.world-rt)
-   "jonquil-world"])
+   "jonquil-world"
+   ;; LM4's line counts (jonquil.line-counts over jolt.profile)
+   "jonquil-line-counts"])
 
 (defonce ^:private frame-token
   ;; the token of the frame evaluation running now, for jonquil-frame-interrupt
@@ -84,6 +87,13 @@
                             (debugger/frames-data e {:frames-fn (debugger/frames-fn) :resolve-file break-middleware/resource-url})
                             {:note "No error yet."})))}
         (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
+      "jonquil-line-counts"
+      {"status" ["done"]
+       "data" (pr-str (case (g "action")
+                        "toggle" (line-counts/toggle!)
+                        "fetch" (line-counts/fetch (g "path"))
+                        "clear" (line-counts/clear!)
+                        {:error (str "jonquil-line-counts: no action " (pr-str (g "action")))}))}
       "jonquil-debug-mode"
       (let [r (try (debugger/toggle-debug-mode!)
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]

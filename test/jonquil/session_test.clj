@@ -453,3 +453,24 @@
     (ev/set-break-handlers! s {:on-eval-start (fn [_] (throw (ex-info "boom" {})))
                                :on-eval-end (fn [_] (throw (ex-info "boom" {})))})
     (is (= "3" (:printed (repl! "(+ 1 2)" {}))) "throwing handlers don't stop the evaluation")))
+
+(deftest line-counts-test
+  (let [s (session/make-session)
+        call (fn [f & args] (let [p (promise)] (apply f s (concat args [(fn [r] (deliver p r))])) (deref p 5000 :timeout)))
+        mode (try ((requiring-resolve 'jolt.profile/instrument-mode)) (catch Throwable _ nil))
+        f (io/file (temp-dirs/temp-dir! "jonquil-session-lc-") "lc.clj")]
+    (if-not (requiring-resolve 'jonquil.line-counts/available?)
+      (is false "jonquil.line-counts loads")
+      (try
+        (spit f "(ns jonquil.session-lc)\n(defn twice [] (dotimes [_ 2] (inc 1)))\n(twice)\n")
+        (let [on (call ev/toggle-line-counts!)]
+          (if (:error on)
+            (is (= {:error "Line counts need a Jolt with jolt.profile."} on))
+            (do (is (= {:on? true} on))
+                (run-sync s (str "(load-file " (pr-str (.getPath f)) ")"))
+                (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "the call on line 3 ran once")
+                (is (= {:ok true} (call ev/clear-line-counts!)))
+                (is (= {:counts {}} (call ev/line-counts! (.getPath f))))
+                (is (= {:on? false} (call ev/toggle-line-counts!))))))
+        (finally (when mode ((requiring-resolve 'jolt.profile/instrument!) mode))
+                 (when-not mode (try ((requiring-resolve 'jolt.profile/instrument!) false) (catch Throwable _ nil))))))))

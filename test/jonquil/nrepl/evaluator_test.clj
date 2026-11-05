@@ -1058,3 +1058,23 @@
         (is (and (some? id1) (identical? id1 id2)))
         (is (true? done?) "the end comes after the evaluation's own on-complete"))
       (finally (ev/stop! e)))))
+
+(deftest line-counts-in-the-child-test
+  (let [dir (temp-project)
+        e (make dir)
+        call (fn [f & args] (let [p (promise)] (apply f e (concat args [(fn [r] (deliver p r))])) (deref p 20000 :timeout)))
+        f (java.io.File. ^String dir "lc_child.clj")]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (spit f "(ns lc-child)\n(defn twice [] (dotimes [_ 2] (inc 1)))\n(twice)\n")
+      (let [on (call ev/toggle-line-counts!)]
+        (if (and (:error on) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP line-counts-in-the-child-test: this child can't count lines:" (:error on))
+              (is (string? (:error on))))
+          (do (is (= {:on? true} on))
+              (run e (str "(load-file " (pr-str (.getPath f)) ")") false)
+              (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "the call on line 3 ran once")
+              (is (= {:ok true} (call ev/clear-line-counts!)))
+              (is (= {:counts {}} (call ev/line-counts! (.getPath f))))
+              (is (= {:on? false} (call ev/toggle-line-counts!))))))
+      (finally (ev/stop! e)))))
