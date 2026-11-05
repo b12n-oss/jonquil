@@ -81,8 +81,8 @@ Down to move, Return or a click to run, Escape to close.
 The panels on the right share one place, so opening one hides the one that
 was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
-screen. Cmd/Ctrl+Alt+1 to 6 each go to one panel: 1 the Inspector, 2
-Source, 3 Locations, 4 Frames, 5 Trace and 6 Plugins. Both focus the panel
+screen. Cmd/Ctrl+Alt+1 to 7 each go to one panel: 1 the Inspector, 2
+Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins and 7 Messages. Both focus the panel
 when it's showing. Otherwise Frames, Trace and Plugins open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with
@@ -92,6 +92,32 @@ the Inspector and Source, and closing the tab a locations list came from
 clears that list, so those leave the palette's list too. A plugin's history
 and an agent's proposal aren't offered, since each belongs to the plugin or
 proposal it was opened from.
+
+### Messages
+
+The Messages panel keeps a log of what happened in the background while you
+were looking elsewhere, newest at the top. Every MCP tool call an agent makes
+gets a row naming the agent by the name its client sends, so a
+`jonquil_replace_text` from Claude Code reads "Claude Code replaced the text
+of core.clj". When an open tab's file changes on disk, there's a row for that
+too. That's the case to watch for, because agents usually edit files with
+their own tools, which Jonquil never sees. The panel also logs an agent
+attaching or leaving, an attached runtime losing its connection, and a
+runtime starting or failing to start.
+
+The tick boxes above the list choose what shows. Agent, Files, Plugins,
+Connections and Runtime are on to begin with. Reads (an agent reading a tab,
+the console or the docs) and Status (everything the status bar has said, with
+repeats merged into one row like "Ready ×3") are logged but hidden. While
+there's anything unread of the kinds that start ticked, the status bar shows
+"● 3 messages", and clicking it opens the panel. Showing the panel marks
+everything read.
+
+Enter on a row jumps to its tab, and on an agent's evaluation it opens the
+code and the result below the row, cut at 20 lines. A row for a plugin
+proposal opens the Review panel. The disk check covers files open in tabs,
+about every two seconds, and never reloads or changes a tab. The log keeps
+the newest 1,000 entries, and the footer says how many older ones it dropped.
 
 ### Describing keys
 
