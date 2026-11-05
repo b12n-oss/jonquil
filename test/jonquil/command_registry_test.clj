@@ -10,7 +10,7 @@
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
-   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn
+   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :panel-focus-fn])
 
 (defn- recording-ctx
@@ -54,7 +54,8 @@
    :panel/inspector [:panel-focus-fn :inspector] :panel/source [:panel-focus-fn :source]
    :panel/locations [:panel-focus-fn :locations] :panel/frames [:panel-focus-fn :debugger]
    :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]
-   :panel/messages [:panel-focus-fn :messages]})
+   :panel/messages [:panel-focus-fn :messages] :panel/processes [:panel-focus-fn :processes]
+   :processes/show [:processes-show-fn]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)
