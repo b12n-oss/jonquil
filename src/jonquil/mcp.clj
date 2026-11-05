@@ -134,8 +134,13 @@
   called once before the loop; its unsubscribe runs when the loop ends,
   however it ends. notify! sends notifications/tools/list_changed (see
   notifier). Every write, response or notification, holds one lock, so
-  lines never interleave."
-  [{:keys [tools read-line write-line subscribe]}]
+  lines never interleave.
+
+  :on-initialize (optional) is (fn [client-info]), called with an
+  initialize request's params.clientInfo (any value, nil when absent)
+  before its response is written. A throw from it is ignored: it only
+  names the client for the window's Messages panel."
+  [{:keys [tools read-line write-line subscribe on-initialize]}]
   (let [lock (Object.)
         write! (fn [s] (locking lock (write-line s)))
         ready? (atom false)
@@ -145,6 +150,9 @@
         (when-let [line (read-line)]
           (when-not (str/blank? line)
             (let [{:keys [msg resp]} (respond tools line)]
+              (when (and on-initialize (map? msg) (= "initialize" (get msg "method")))
+                (try (on-initialize (get-in msg ["params" "clientInfo"]))
+                     (catch Throwable _ nil)))
               (when resp (write! (encode-response resp)))
               (when (and (map? msg) (= "notifications/initialized" (get msg "method")))
                 (reset! ready? true))))

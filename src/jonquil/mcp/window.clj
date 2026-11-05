@@ -19,6 +19,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
+            [jonquil.mcp.describe :as describe]
             [jonquil.mcp.tools :as tools]
             [jonquil.plugin-mcp :as plugin-mcp]
             [jonquil.tabs :as tabs]))
@@ -276,12 +277,18 @@
         tool-eval (fn [args]
                     (let [code (tools/required-string args "code")]
                       (await! args (fn [notify] ((:mcp-eval!* ui) code notify)))))
+        ;; the tab a run runs, for the Messages entry's jump (a :tab-id
+        ;; side field the agent never sees); a ui without tabs has none
+        active-id (fn [] (when-let [f (:active-tab* ui)] (turn (fn [] (:id (f))))))
+        with-tab (fn [r id] (cond-> r id (assoc :tab-id id)))
         tool-run (fn [args]
-                   (await! args (fn [notify] ((:mcp-run!* ui) notify))))
+                   (let [id (active-id)]
+                     (with-tab (await! args (fn [notify] ((:mcp-run!* ui) notify))) id)))
         tool-run-selection (fn [args]
                              (let [start (required-number args "start")
-                                   end (required-number args "end")]
-                               (await! args (fn [notify] ((:mcp-run-selection!* ui) start end notify)))))
+                                   end (required-number args "end")
+                                   id (active-id)]
+                               (with-tab (await! args (fn [notify] ((:mcp-run-selection!* ui) start end notify))) id)))
         tool-stop (fn [_]
                     (let [running? (turn (fn []
                                            (when (ev/evaluating? ((:evaluator* ui)))
@@ -307,7 +314,7 @@
                                   {:text (str (:error r)) :error? true}
                                   (let [t ((:active-tab* ui))]
                                     {:text (str "Opened tab " (:id t) " " (or @(:path t) "Untitled"))
-                                     :error? false})))))))
+                                     :error? false :tab-id (:id t)})))))))
         tool-tabs (fn [_]
                     (turn (fn []
                             (let [active-id (:id ((:active-tab* ui)))]
@@ -324,7 +331,7 @@
                         (turn (fn []
                                 (if (find-tab ui id)
                                   (do ((:select-tab! ui) id)
-                                      {:text (str "Selected tab " id ".") :error? false})
+                                      {:text (str "Selected tab " id ".") :error? false :tab-id id})
                                   (no-tab id))))))
         tool-read (fn [args]
                     (let [id (number-arg args "id")]
@@ -351,8 +358,8 @@
                                        (if id (no-tab id) {:text "No active tab." :error? true})
                                        (let [ed (:ed t)]
                                          (if (editor/apply-op-plain! ed (replace-op (editor/editor-text ed) text))
-                                           {:text (str "Replaced the text of tab " (:id t) ".") :error? false}
-                                           {:text (str "Tab " (:id t) " is read-only.") :error? true})))))))))
+                                           {:text (str "Replaced the text of tab " (:id t) ".") :error? false :tab-id (:id t)}
+                                           {:text (str "Tab " (:id t) " is read-only.") :error? true :tab-id (:id t)})))))))))
         tool-save (fn [args]
                     (let [arg-path (when (get args "path")
                                      (tools/absolute dir (tools/required-string args "path")))]
@@ -365,8 +372,8 @@
                                   :else
                                   (do ((:save-to! ui) p)
                                       (if (editor/dirty? (:ed t))
-                                        {:text "The save failed; the console names the reason." :error? true}
-                                        {:text (str "Saved " p) :error? false}))))))))
+                                        {:text "The save failed; the console names the reason." :error? true :tab-id (:id t)}
+                                        {:text (str "Saved " p) :error? false :tab-id (:id t)}))))))))
         tool-console (fn [args]
                        (let [since (number-arg args "since")]
                          (turn (fn []
@@ -406,10 +413,11 @@
         tool-plugin-propose (fn [args]
                               (let [p {:id (get args "id") :source (get args "source") :reason (get args "reason")}
                                     why (plugin-mcp/propose-refusal (assoc p :plugins? (:plugins? ((:plugin-state* ui)))))]
-                                (plugin-mcp/propose-text (:id p)
-                                                         (if why
-                                                           {:status :refused :n nil :problems [why]}
-                                                           ((:plugin-propose!* ui) p)))))
+                                (cond-> (plugin-mcp/propose-text (:id p)
+                                                                 (if why
+                                                                   {:status :refused :n nil :problems [why]}
+                                                                   ((:plugin-propose!* ui) p)))
+                                  (string? (:id p)) (assoc :plugin-id (:id p)))))
         handlers {"jonquil_eval" tool-eval
                   "jonquil_run" tool-run
                   "jonquil_run_selection" tool-run-selection
@@ -456,6 +464,43 @@
                          ((:call base) tname args)))}
         (:watch-plugin-tools* ui) (assoc :list-changed? true)))))
 
+(defn client-name
+  "What the Messages panel calls an MCP client: the name in its
+  initialize's clientInfo, else \"Agent\"."
+  [client-info]
+  (let [n (when (map? client-info) (get client-info "name"))]
+    (if (and (string? n) (not (str/blank? n))) n "Agent")))
+
+(defn- log-call!
+  "One Messages entry for a tool call. Never throws: a log that broke would
+  break the agent's call it describes."
+  [log! m]
+  (try (log! (describe/describe-call m))
+       (catch Throwable e
+         (binding [*out* *err*]
+           (println "jonquil: couldn't log an MCP call:" (or (ex-message e) (str e)))))))
+
+(defn with-messages
+  "tables-fn (with-plugin-tools' fn answering a table per message) with
+  every :call logged to the window's Messages through (:log!* ui), named
+  by (:client @session*). What the agent gets back is unchanged: a result
+  passes through, a throw is logged and re-thrown as itself. A ui without
+  :log!* (a test's) gets tables-fn as it is."
+  [tables-fn ui session*]
+  (if-let [log! (:log!* ui)]
+    (fn []
+      (let [t (tables-fn)
+            call (:call t)]
+        (assoc t :call (fn [tname args]
+                         (let [base {:tool tname :args args :client (:client @session*)}
+                               r (try (call tname args)
+                                      (catch Throwable e
+                                        (log-call! log! (assoc base :threw (or (ex-message e) (str e))))
+                                        (throw e)))]
+                           (log-call! log! (assoc base :result r))
+                           r)))))
+    tables-fn))
+
 (defn serve-window!
   "Serves the window table over :read-line / :write-line until EOF, then quits
   the window, discarding unsaved edits: one gui turn that, when any tab is
@@ -469,10 +514,12 @@
     (binding [*out* *err*]
       (println "jonquil: MCP server driving the window on stdio, default directory" dir))
     (try
-      (mcp/serve! {:tools (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui)
-                   :subscribe (:watch-plugin-tools* ui)
-                   :read-line read-line
-                   :write-line write-line})
+      (let [session* (atom {})]
+        (mcp/serve! {:tools (with-messages (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui) ui session*)
+                     :on-initialize #(swap! session* assoc :client (client-name %))
+                     :subscribe (:watch-plugin-tools* ui)
+                     :read-line read-line
+                     :write-line write-line}))
       (catch Throwable e
         (binding [*out* *err*]
           (println "jonquil: the MCP serve loop failed:" (or (ex-message e) (str e))))))

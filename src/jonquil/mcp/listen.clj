@@ -85,26 +85,44 @@
   (binding [*out* *err*]
     (apply println "jonquil: MCP listener:" parts)))
 
+(defn- log-connection!
+  "One :connection entry in the window's Messages, when the ui keeps them."
+  [ui summary]
+  (when-let [log! (:log!* ui)]
+    (try (log! {:kind :connection :summary summary})
+         (catch Throwable e (log "couldn't log a connection:" (or (ex-message e) (str e)))))))
+
 (defn- serve-connection!
   "Serves one accepted socket until the client's EOF, then closes it. A throw
-  out of serve! logs one stderr line; the caller accepts the next client."
-  [sock {:keys [ui dir-fn gui]}]
-  (try
-    (let [in (io/reader (.getInputStream sock) :encoding "UTF-8")
-          out (io/writer (.getOutputStream sock) :encoding "UTF-8")]
-      (mcp/serve! {:tools (mcp-window/with-plugin-tools
-                           (mcp-window/make-window-tools
-                            {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
-                           ui)
-                   :subscribe (:watch-plugin-tools* ui)
-                   :read-line (fn [] (.readLine ^java.io.BufferedReader in))
-                   :write-line (fn [s]
-                                 (.write ^java.io.Writer out (str s "\n"))
-                                 (.flush ^java.io.Writer out))}))
-    (catch Throwable e
-      (log "a connection failed:" (or (ex-message e) (str e))))
-    (finally
-      (try (.close sock) (catch Throwable _ nil)))))
+  out of serve! logs one stderr line; the caller accepts the next client.
+  The window's Messages get the client's attach (on its initialize, named
+  by its clientInfo) and its leave, numbered from conn-count*."
+  [sock {:keys [ui dir-fn gui conn-count*]}]
+  (let [n (swap! (or conn-count* (atom 0)) inc)
+        session* (atom {})]
+    (try
+      (let [in (io/reader (.getInputStream sock) :encoding "UTF-8")
+            out (io/writer (.getOutputStream sock) :encoding "UTF-8")]
+        (mcp/serve! {:tools (mcp-window/with-messages
+                             (mcp-window/with-plugin-tools
+                              (mcp-window/make-window-tools
+                               {:ui ui :gui gui :dir (or (dir-fn) (System/getProperty "user.dir"))})
+                              ui)
+                             ui session*)
+                     :on-initialize (fn [ci]
+                                      (let [c (mcp-window/client-name ci)]
+                                        (swap! session* assoc :client c)
+                                        (log-connection! ui (str c " attached (connection " n ")"))))
+                     :subscribe (:watch-plugin-tools* ui)
+                     :read-line (fn [] (.readLine ^java.io.BufferedReader in))
+                     :write-line (fn [s]
+                                   (.write ^java.io.Writer out (str s "\n"))
+                                   (.flush ^java.io.Writer out))}))
+      (catch Throwable e
+        (log "a connection failed:" (or (ex-message e) (str e))))
+      (finally
+        (try (.close sock) (catch Throwable _ nil))
+        (log-connection! ui (str (or (:client @session*) "An MCP client") " left (connection " n ")"))))))
 
 (def ^:private accept-retry-ms
   "Pause after a failed accept, so a persistent error doesn't spin. estimate:
@@ -178,7 +196,7 @@
       (catch Throwable e
         (try (.close ss) (catch Throwable _ nil))
         (throw e)))
-    (future (accept-loop! ss {:ui ui :dir-fn (fn [] @dir*) :gui gui} stop!))
+    (future (accept-loop! ss {:ui ui :dir-fn (fn [] @dir*) :gui gui :conn-count* (atom 0)} stop!))
     {:port port :stop! stop! :set-dir! set-dir!}))
 
 (defn follow-root!

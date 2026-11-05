@@ -438,3 +438,28 @@
           (is (= 1 @(:unsubs w)))
           (finally (.close (:socket c2)))))
       (finally ((:stop! l))))))
+
+(defn- await-count [a n]
+  (loop [i 0]
+    (when (and (< (count @a) n) (< i 200))
+      (Thread/sleep 25)
+      (recur (inc i)))))
+
+(deftest connection-entries
+  (let [entries (atom [])
+        l (listen/start-listener! {:ui (assoc (fake-ui) :log!* (fn [e] (swap! entries conj e)))
+                                   :dir "/tmp" :gui (fn [f] (f)) :settings-path (settings-path)})]
+    (try
+      (let [c (connect (:port l))]
+        (send! c init-msg)
+        (recv! c)
+        (.close (:socket c)))
+      (await-count entries 2)
+      (is (= [{:kind :connection :summary "t attached (connection 1)"}
+              {:kind :connection :summary "t left (connection 1)"}]
+             (mapv #(select-keys % [:kind :summary]) @entries)))
+      (let [c (connect (:port l))]
+        (.close (:socket c)))
+      (await-count entries 3)
+      (is (= "An MCP client left (connection 2)" (:summary (nth @entries 2))))
+      (finally ((:stop! l))))))
