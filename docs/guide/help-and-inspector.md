@@ -81,8 +81,11 @@ a command without leaving the keyboard's place: `!clear the console` and
 Return runs it, and the console names what ran. Words that match several
 commands list them and run none, and a command whose description is
 exactly the words wins over the longer ones. The line goes into the
-history like any other, so Up brings it back. A symbol that really starts
-with `!` still evaluates inside a form, as in `(identity !x)`.
+history like any other, so Up brings it back. Only one line of words
+counts, with a space somewhere after the `!`: a single word after it is
+read as code, since `!x` and `!=` are Clojure symbols, so type `! clear`
+for a one-word command. A line with brackets or quotes, or more than one
+line, always goes to the evaluator.
 
 ### Switching panels
 

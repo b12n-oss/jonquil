@@ -3963,8 +3963,10 @@
                                                 :os (System/getProperty "os.name")})
                           say (fn [s] (cview/append! cv :system (str s "\n")))
                           {:keys [run doc choices words none] :as r} (pal-data/bang-pick es text)]
+                      ;; not an entry: Clear the last entry's output reaches the one before
+                      (cview/restore-entry-start! cv)
                       ;; Up brings the line back, as for any entry
-                      (try (swap! (ev/history @ev*) eval/history-add (str/trim text)) (catch :default _ nil))
+                      (swap! (ev/history @ev*) eval/history-add (str/trim text))
                       (cond
                         (:help r) (say "; ! runs a command by name, as the palette does: !clear line counts")
                         none (say (str "; ! No command matches \"" none "\". Cmd/Ctrl+Shift+P lists them all."))
@@ -3972,7 +3974,8 @@
                                           (str/join "\n" (map #(str ";   " %) (take 8 choices)))
                                           (when (< 8 (count choices)) "\n;   ...")))
                         :else (do (say (str "; ! " doc))
-                                  ((deref (:on-run (:palette (active-tab)))) run))))))
+                                  (try ((deref (:on-run (:palette (active-tab)))) run)
+                                       (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         ;; The locations list, or nil. A buffer list is {:tab-id :list

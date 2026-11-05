@@ -240,8 +240,23 @@
   [cv]
   (let [buf (:buf cv)
         offset (mark-offset buf (:out-end cv))]
+    ;; where it was, for restore-entry-start! (a ! command isn't an entry)
+    (reset! (:prev-entry cv) [(mark-offset buf (:last-entry-start cv)) @(:last-entry-active? cv)])
     (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-move-mark buf (:last-entry-start cv) a)))
     (reset! (:last-entry-active? cv) true)))
+
+(defn restore-entry-start!
+  "Puts the last-entry mark back where the submit before this one found
+  it: a `!` command line (jonquil.gtk.window) is not an entry, so Clear the
+  last entry's output still reaches the code entry before it. GTK-thread
+  only."
+  [cv]
+  (when-let [[offset active?] @(:prev-entry cv)]
+    (let [buf (:buf cv)
+          offset (min offset (g/gtk-text-buffer-get-char-count buf))]
+      (g/with-iters* buf offset offset (fn [a _] (g/gtk-text-buffer-move-mark buf (:last-entry-start cv) a)))
+      (reset! (:last-entry-active? cv) active?)))
+  nil)
 
 (defn clear-last-output!
   "Deletes the last entry's own block -- its echo (or the Run banner),
@@ -957,7 +972,7 @@
               ;; lifetime. :last-entry-active? is false until mark-entry-
               ;; start! first arms it; see that fn's own docstring.
               :last-entry-start (create-mark! buf "jonquil-console-last-entry-start" 0 true)
-              :last-entry-active? (atom false)
+              :last-entry-active? (atom false) :prev-entry (atom nil)
               :queue (atom [])
               ;; live results (LM1): [{:start :end :ref :text}], oldest first
               :results (atom [])

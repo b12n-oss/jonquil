@@ -94,10 +94,19 @@
              entries)))
 
 (defn bang?
-  "True when text, a line typed at the Interactions prompt, is a `!`
-  command: its first non-blank character is !."
+  "True when text, an entry typed at the Interactions prompt, is a `!`
+  command rather than code: one line whose first non-blank character is !,
+  holding no bracket or quote, and either nothing after the ! or a space
+  somewhere after it (`!clear the console`, `! clear`). So a symbol that
+  starts with ! (`!x`, `!=`), a multi-line entry and anything with a form
+  in it still go to the evaluator."
   [text]
-  (str/starts-with? (str/triml (or text "")) "!"))
+  (let [t (str/trim (or text ""))
+        rest (when (str/starts-with? t "!") (subs t 1))]
+    (boolean
+     (and rest
+          (not (re-find #"[\n\r()\[\]{}\"]" rest))
+          (or (str/blank? rest) (re-find #"\s" rest))))))
 
 (defn bang-pick
   "What a `!` line at the prompt does with entries (the palette's command

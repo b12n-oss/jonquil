@@ -115,8 +115,16 @@
             {:id :a/count :doc "Count how often each line runs (Jolt)."}
             {:id :a/out :doc "Clear the console"}
             {:id :a/out2 :doc "Clear the console output and the Trace panel"}]]
-    (is (true? (palette/bang? "  !clear")))
+    (is (true? (palette/bang? "  !clear the console")))
+    (is (true? (palette/bang? "!")) "! alone asks for the hint")
+    (is (true? (palette/bang? "! clear")) "one word after a space")
     (is (false? (palette/bang? "(! x)")))
+    (testing "real Clojure still evaluates"
+      (is (false? (palette/bang? "!x")) "a symbol")
+      (is (false? (palette/bang? "!=")))
+      (is (false? (palette/bang? "!x\n(+ 1 2)")) "a multi-line entry")
+      (is (false? (palette/bang? "!x (+ 1 2)")) "brackets")
+      (is (false? (palette/bang? "!a \"b\"")) "a string"))
     (is (= {:help true} (palette/bang-pick es "!")))
     (is (= {:run :a/clear :doc "Clear line counts: zero Jolt's counters and hide them."}
            (palette/bang-pick es "!clear line counts")))

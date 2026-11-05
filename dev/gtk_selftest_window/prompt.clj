@@ -128,11 +128,25 @@
   [ui]
   (go-row :bang-lists-choices support/check
     (let [mark (on-gtk (support/out-end-offset ui))
-          _ (on-gtk (submit! ui "!key"))
+          _ (on-gtk (submit! ui "! key"))
           listed? (await-until 3000 20 #(str/includes? (support/since ui mark) "commands match \"key\":"))
-          _ (on-gtk (submit! ui "!zzqx"))
+          _ (on-gtk (submit! ui "! zzqx"))
           none? (await-until 3000 20 #(str/includes? (support/since ui mark) "; ! No command matches \"zzqx\"."))
           text (on-gtk (support/since ui mark))]
       (on-gtk (support/check :bang-lists-choices (and listed? none? (not (str/includes? text "; ! List every key binding.")))
                              {:listed listed? :none none? :tail (subs text (max 0 (- (count text) 300)))})))))
+
+(defn row-bang-clears-the-last-output
+  "!clear the last entry's output clears the entry before the ! line, as
+  Cmd/Ctrl+Shift+L would, not the ! line itself."
+  [ui]
+  (go-row :bang-clears-the-last-output support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (submit! ui "(+ 40 2)"))
+          ran? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "=> 42")))
+          _ (on-gtk (submit! ui "!clear the last entry's output"))
+          cleared? (await-until 3000 20 #(not (str/includes? (support/since ui mark) "=> 42")))
+          text (on-gtk (support/since ui mark))]
+      (on-gtk (support/check :bang-clears-the-last-output (and ran? cleared? (str/ends-with? text "user=> "))
+                             {:ran ran? :cleared cleared? :text text})))))
 
