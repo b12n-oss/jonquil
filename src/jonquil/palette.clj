@@ -69,7 +69,7 @@
   out: each shows one proposal or one plugin's history, opened from that
   thing, so bringing one back would show a stale view."
   {:inspector "Inspector" :source "Source" :locations "Locations"
-   :debugger "Frames" :trace "Trace" :plugins "Plugins"})
+   :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"})
 
 (defn panel-entries
   "The palette's panel entries: every recent panel but showing, most

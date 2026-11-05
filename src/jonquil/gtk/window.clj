@@ -46,6 +46,8 @@
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.gtk.trace-pane :as trace-pane]
+            [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.messages :as messages]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -148,6 +150,26 @@
                   (catch :default e
                     (cview/append! cv :error (str "; prompt: " (ex-message e) "\n")))))))
 
+;; The Messages log (LM8) for each window, keyed by its status label: the
+;; one handle every set-status! call already passes, so status lines, the
+;; runtime's start and its connection reach the log without threading it
+;; through sixty call sites. A pointer is a long, so it's a plain map key.
+;; Kept for the process's life: the window is the process.
+(defonce ^:private status-logs (atom {}))
+
+(defn- register-status-log!
+  "Routes entries logged against status-label to log!."
+  [status-label log!]
+  (swap! status-logs assoc status-label log!)
+  nil)
+
+(defn- log-at!
+  "Logs entry to the Messages of the window whose status label this is,
+  when it keeps them (a test's label may not). Safe from any thread."
+  [status-label entry]
+  (when-let [f (get @status-logs status-label)] (f entry))
+  nil)
+
 (defn- watch-connection!
   "For an attach evaluator e, keeps the dialect label and the console's
   prompt in step with its connection (a new connection is a fresh session,
@@ -155,9 +177,14 @@
   connected or lost the socket, so it hands both to the GTK thread, and it
   does nothing once e is no longer the window's evaluator (a later switch
   made another)."
-  [e ev* sel* dialect-label cv]
+  [e ev* sel* dialect-label cv status-label]
   (when (satisfies? connection/Attached e)
-    (connection/on-connection! e (fn [_]
+    (connection/on-connection! e (fn [connected?]
+                                   (when (identical? e @ev*)
+                                     (log-at! status-label
+                                              {:kind :connection :error? (not connected?)
+                                               :summary (str (dialect/label @sel*)
+                                                             (if connected? " connected" " lost its connection"))}))
                                    (on-gui! (fn []
                                               (when (identical? e @ev*)
                                                 (g/gtk-label-set-text dialect-label (dialect-text @sel* e))
@@ -727,8 +754,10 @@
 ;; --- Run / Stop ------------------------------------------------------------
 
 (defn- set-status!
-  "Safe from any thread: hands the label update to the GTK thread."
+  "Safe from any thread: hands the label update to the GTK thread, and
+  logs the text to the window's Messages as a status line."
   [status-label text]
+  (log-at! status-label {:kind :status :summary text})
   (on-gui! (fn [] (g/gtk-label-set-text status-label text))))
 
 (defn- contain-click
@@ -768,13 +797,19 @@
         (future
           (try
             (if-let [problem (ev/start! e)]
-              (cview/append! cv :error (str "; " problem "\n; Run will try again.\n"))
-              (do (cview/append! cv :system
+              (do (log-at! status-label {:kind :runtime :error? true
+                                         :summary (str (dialect/label sel) " couldn't start: " problem)})
+                  (cview/append! cv :error (str "; " problem "\n; Run will try again.\n")))
+              (do (log-at! status-label {:kind :runtime
+                                         :summary (str (dialect/label sel) " is running (pid " (nrepl/child-pid e) ")")})
+                  (cview/append! cv :system
                                  (str "; " (dialect/label sel) " is running (pid " (nrepl/child-pid e)
                                       ", port " (nrepl/child-port e) ") in " (home-relative (:project-dir sel)) ".\n"))
                   (doseq [l (ev/limitations e)]
                     (cview/append! cv :system (str "; Limit: " l "\n")))))
             (catch :default ex
+              (log-at! status-label {:kind :runtime :error? true
+                                     :summary (str (dialect/label sel) " couldn't start: " (ex-message ex))})
               (cview/append! cv :error (str "; start: " (ex-message ex) "\n")))
             (finally
               (when-not (ev/evaluating? e) (set-status! status-label "Ready"))))))
@@ -819,18 +854,19 @@
 (defn- right-roots
   "{which root} for the panels right's slot holds; a right without
   :review-root, :plugins-root or :history-root (a test's) has fewer."
-  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root]}]
+  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root messages-root]}]
   (cond-> {:inspector inspector-root :source source-root}
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)
     locations-root (assoc :locations locations-root)
     debugger-root (assoc :debugger debugger-root)
-    trace-root (assoc :trace trace-root)))
+    trace-root (assoc :trace trace-root)
+    messages-root (assoc :messages messages-root)))
 
 (defn- show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
-  :locations, :debugger or :trace) in
+  :locations, :debugger, :trace or :messages) in
   the slot and hides the others; any but :history clears
   plugin-history-shown, and which moves to the front of right's
   :recent-panels when it has one. When the slot was hidden, also sizes h-paned so
@@ -919,7 +955,7 @@
       (let [old @ev*
             new (doto (ev/make sel) registry/register!)]
         (ev/set-mode! new (mode-fn))
-        (watch-connection! new ev* sel* dialect-label cv)
+        (watch-connection! new ev* sel* dialect-label cv status-label)
         (reset! ev* new)
         ;; Focus inside a panel this hides would go nowhere, so it moves to
         ;; the active tab's editor, as closing the inspector does.
@@ -3478,6 +3514,12 @@
         lp (plugin-list-pane/make-pane)
         locp (locations-pane/make-pane)
         tracep (trace-pane/make-pane)
+        ;; The Messages panel (LM8): the window's one log of background
+        ;; events, written from any thread (messages/log!), and the status
+        ;; bar's unread count, shown while it's above zero
+        msgp (messages-pane/make-pane)
+        messages* (atom (messages/empty-log))
+        unread-label (g/gtk-label-new "")
         dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
@@ -3609,7 +3651,7 @@
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
-               :debugger-root (:root dbgp) :trace-root (:root tracep)
+               :debugger-root (:root dbgp) :trace-root (:root tracep) :messages-root (:root msgp)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
                ;; Switch to panel entries, and the panel keys' "open it"
@@ -4296,6 +4338,45 @@
                                                  [:start-trace {:id (:id entry) :part (if (:threw entry) :args :ret)
                                                                 :label (inspect/root-label (:args entry))}]))
                    :on-close (fn [] (hide-right-panel! right :trace))})
+        ;; A tab's name as its strip shows it, without the dirty mark, for
+        ;; a message's "tab N"; nil once it's closed
+        tab-label-of (fn [id]
+                       (let [ts @tabs]
+                         (some (fn [[t text]] (when (= id (:id t)) text))
+                               (map vector ts (tabs/labels (map (fn [t] {:path @(:path t) :dirty? false}) ts))))))
+        ;; GTK thread: the unread count, and the panel itself while it's
+        ;; the one on screen (then everything in it is read)
+        refresh-messages! (fn []
+                            (when (= :messages (showing-panel right))
+                              (swap! messages* messages/mark-read)
+                              (messages-pane/show! msgp @messages* tab-label-of))
+                            (let [n (messages/unread-count @messages*)]
+                              (g/gtk-label-set-text unread-label (str "● " n " message" (when (not= 1 n) "s")))
+                              (g/gtk-widget-set-visible unread-label (if (pos? n) 1 0))))
+        ;; one refresh queued at a time, so a burst of entries costs one
+        ;; GTK turn, not one each
+        messages-refresh-queued (atom false)
+        log-entry! (fn [entry]
+                     (messages/log! messages* entry)
+                     (when (compare-and-set! messages-refresh-queued false true)
+                       (on-gui! (fn []
+                                  (reset! messages-refresh-queued false)
+                                  (try (refresh-messages!)
+                                       (catch :default e
+                                         (binding [*out* *err*]
+                                           (println "jonquil: messages refresh:" (ex-message e)))))))))
+        _ (register-status-log! status-label log-entry!)
+        _ (messages-pane/set-handlers!
+           msgp {:on-activate (fn [entry]
+                                (let [{:keys [tab-id plugin-id]} (:target entry)]
+                                  (cond
+                                    tab-id (if (some #(= tab-id (:id %)) @tabs)
+                                             (select-tab! @*tab-ctx tab-id)
+                                             (messages-pane/report! msgp "That tab is closed."))
+                                    plugin-id (plugin-step! {:settings-path @settings-path* :step (fn [] []) :open? true})
+                                    :else (messages-pane/show! msgp @messages* tab-label-of))))
+                 :on-filter (fn [] (messages-pane/show! msgp @messages* tab-label-of))
+                 :on-close (fn [] (hide-right-panel! right :messages) (editor/focus! (:ed (active-tab))))})
         ;; Live console results (LM1): a click on a result line inspects
         ;; its value; the verbs act on the result at the console's caret
         ;; (a right-click moves the caret there first)
@@ -4524,9 +4605,14 @@
                                           :debugger (debugger-pane/focus! dbgp)
                                           :locations (g/gtk-widget-grab-focus (:list locp))
                                           :trace (g/gtk-widget-grab-focus (:list tracep))
+                                          :messages (g/gtk-widget-grab-focus (:list msgp))
                                           :plugins (g/gtk-widget-grab-focus (:list lp))))]
                            (cond
                              (= k (showing-panel right)) (focus!)
+                             ;; never "nothing yet": an empty log says what fills it
+                             (= k :messages) (do (show-right-panel! right :messages)
+                                                 (refresh-messages!)
+                                                 (focus!))
                              (= k :plugins) (plugin-step! {:settings-path @settings-path*
                                                            :step (fn [] []) :open-list? true})
                              (= k :trace) (trace-show-fn)
@@ -4538,6 +4624,17 @@
                                               :inspector "; Nothing inspected yet: inspect a form or a result first."
                                               :source "; The Source panel is empty: jump to a definition first."
                                               :locations "; No locations yet: list a symbol's uses or definitions, or the find matches.")))))
+        ;; a click on the status bar's unread count opens the Messages
+        _ (let [click (g/gtk-gesture-click-new)]
+            (g/g-signal-connect-data click "pressed"
+                                     (callable (fn [_gesture _n _x _y _data]
+                                                 (try (panel-focus-fn :messages)
+                                                      (catch :default e
+                                                        (set-status! status-label (str "; messages: " (ex-message e)))))
+                                                 nil)
+                                               [:pointer :int :double :double :pointer] :void)
+                                     ffi/null ffi/null g/CONNECT-DEFAULT)
+            (g/gtk-widget-add-controller unread-label click))
         window-key-args {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
                          :live-keys live-keys :print-lines! print-lines!
                          :describe-key-fn (fn [] (reset! describe-pending true)
@@ -4649,6 +4746,8 @@
     (g/gtk-box-append slot (:root dbgp))
     (g/gtk-widget-set-vexpand (:root tracep) 1)
     (g/gtk-box-append slot (:root tracep))
+    (g/gtk-widget-set-vexpand (:root msgp) 1)
+    (g/gtk-box-append slot (:root msgp))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -4659,6 +4758,7 @@
     (g/gtk-widget-set-visible (:root locp) 0)
     (g/gtk-widget-set-visible (:root dbgp) 0)
     (g/gtk-widget-set-visible (:root tracep) 0)
+    (g/gtk-widget-set-visible (:root msgp) 0)
     (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
@@ -4672,6 +4772,8 @@
     (g/gtk-box-append status-box status-label)
     (g/gtk-box-append status-box pending-label)
     (g/gtk-widget-set-visible pending-label 0)
+    (g/gtk-box-append status-box unread-label)
+    (g/gtk-widget-set-visible unread-label 0)
     (g/gtk-box-append status-box dialect-label)
     (g/gtk-box-append status-box parinfer-label)
     (update-parinfer-label!)
@@ -4921,7 +5023,7 @@
         (show-selection! cv dialect-label @sel*)
         ;; The starting evaluator's connection, label and Reset on Run, as
         ;; apply-selection! does for every later one.
-        (watch-connection! @ev* ev* sel* dialect-label cv)
+        (watch-connection! @ev* ev* sel* dialect-label cv status-label)
         (apply-reset-toggle! reset-chk reset-state @sel*)
         (g/gtk-label-set-text dialect-label (dialect-text @sel* @ev*))
         (refresh-prompt! cv ev*)
@@ -5368,6 +5470,10 @@
                    ;; the Frames panel and the inspector's own Close
                    :debugger-pane dbgp
                    :trace-pane tracep
+                   :messages-pane msgp
+                   :messages* messages*
+                   :log!* log-entry!
+                   :unread-label unread-label
                    ;; the recent panels atom, most recent first, and the
                    ;; panel keys' and Switch to panel's fn
                    :recent-panels* (fn [] (:recent-panels right))

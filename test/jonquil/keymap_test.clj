@@ -168,11 +168,13 @@
                               :run! (fn [b] (reset! got [(:command b) (:args b)]) :handled)})
                 @got))]
     (is (= [[:panel/inspector nil] [:panel/source nil] [:panel/locations nil]
-            [:panel/frames nil] [:panel/trace nil] [:panel/plugins nil]]
-           (for [d "123456"] (run (int d) (bit-or ctrl alt) nil)))
+            [:panel/frames nil] [:panel/trace nil] [:panel/plugins nil] [:panel/messages nil]]
+           (for [d "1234567"] (run (int d) (bit-or ctrl alt) nil)))
         "Linux: Ctrl+Alt and the plain digit")
     (is (= [:panel/trace nil] (run 0x100221e (bit-or meta-m alt) "5"))
         "macOS: Option+5's infinity, through the physical key")
+    (is (= [:panel/messages nil] (run 0xb6 (bit-or meta-m alt) "7"))
+        "macOS: Option+7's pilcrow, through the physical key")
     (is (= [:tab/select {:n 1}] (run 0x31 ctrl nil)) "Ctrl+1 is still tab 1")
     (is (not= :panel/inspector (first (run 0x31 (bit-or ctrl alt shift) nil))) "Shift held: not a panel key")))
 
