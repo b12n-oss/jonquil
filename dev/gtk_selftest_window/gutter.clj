@@ -158,6 +158,10 @@
           _ (on-gtk (editor/set-text! ed "(defn hinted [x] (inc x))\n\n")
                     (g/with-iters* (:buf ed) 18 18 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
           on-symbol? (await-until 3000 20 #(= "Ctrl+Q doc · F12 jump · Shift+F6 rename" (hint ui)))
+          ;; a switch to another tab takes the old tab's hint away
+          _ (on-gtk ((:new-tab!* ui)))
+          switched? (await-until 3000 20 #(nil? (hint ui)))
+          _ (on-gtk ((:close-tab! ui) (:id ((:active-tab* ui)))))
           _ (on-gtk (g/with-iters* (:buf ed) 27 27 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
           gone? (await-until 3000 20 #(nil? (hint ui)))
           _ (on-gtk (run-palette! ui "show what keys do at the caret"))
@@ -167,7 +171,7 @@
           stays-off? (on-gtk (nil? (hint ui)))
           _ (on-gtk (run-palette! ui "show what keys do at the caret"))
           back? (await-until 3000 20 #(str/starts-with? (status ui) "; Key hints on"))]
-      (on-gtk (support/check :key-hints-follow-the-caret (and on-symbol? gone? off? stays-off? back?)
-                             {:on-symbol on-symbol? :gone gone? :off off? :stays-off stays-off? :back back? :hint (hint ui)})
+      (on-gtk (support/check :key-hints-follow-the-caret (and on-symbol? switched? gone? off? stays-off? back?)
+                             {:on-symbol on-symbol? :switched switched? :gone gone? :off off? :stays-off stays-off? :back back? :hint (hint ui)})
               (editor/set-text! ed "")))))
 

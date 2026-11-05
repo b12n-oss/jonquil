@@ -109,6 +109,7 @@
 ;; (pango/pango-layout.h:99-116: NONE=0, START=1, MIDDLE=2, END=3).
 (ffi/defcfn gtk-label-set-ellipsize "gtk_label_set_ellipsize" [:pointer :int] :void)
 (def PANGO-ELLIPSIZE-START 1)
+(def PANGO-ELLIPSIZE-END 3)
 
 ;; --- text view / buffer ------------------------------------------------------
 (ffi/defcfn gtk-text-view-new "gtk_text_view_new" [] :pointer)

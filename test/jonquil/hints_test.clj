@@ -23,3 +23,17 @@
   (is (nil? (hints/at-caret "(defn foo [x] \"a string\")" 18)) "a string")
   (is (nil? (hints/at-caret "; a comment" 4)))
   (is (nil? (hints/at-caret "" 0))))
+
+(deftest shadowed-chord-test
+  (let [km {:editor [{:key "q" :mods #{:ctrl} :command :plugin/thing}
+                     {:key "q" :mods #{:ctrl} :command :help/quick-doc}
+                     {:key "F1" :exact #{:shift} :command :help/quick-doc}
+                     {:key "F12" :exact #{} :when :never :command :help/jump}]
+            :window []}]
+    (is (= "Shift+F1 doc" (hints/hint {:at :symbol :keymap km :os "Linux"}))
+        "Ctrl+Q runs the plugin's command first, and a :when binding may not apply")))
+
+(deftest line-at-test
+  (is (= ["(inc x)" 2] (hints/line-at "(defn f [x]\n(inc x)\n)" 14)) "the caret's line and its offset in it")
+  (is (= ["" 0] (hints/line-at "" 0))))
+

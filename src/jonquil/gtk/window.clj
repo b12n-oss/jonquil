@@ -2559,8 +2559,10 @@
   "Makes t the active tab: the window's title, Ln/Col and focus follow it,
   and every open popover closes (one on a hidden page would be lost). The
   saved tab list records the new active tab (session-changed!)."
-  [{:keys [active-id win line-col-label close-popovers-fn tree-pane] :as ctx} t]
+  [{:keys [active-id win line-col-label close-popovers-fn tree-pane hint-label] :as ctx} t]
   (reset! active-id (:id t))
+  ;; LM6's key hint was for the tab left behind
+  (when hint-label (g/gtk-widget-set-visible hint-label 0))
   (when-let [r (:recent-tabs ctx)]
     (swap! r (fn [v] (into [(:id t)] (remove #{(:id t)}) v))))
   (close-popovers-fn)
@@ -2798,32 +2800,42 @@
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
-    ;; LM6: what keys do at the caret, 200 ms after it stops, found off the
-    ;; GTK thread (symbol-at-pos tokenizes the text) and shown only if the
-    ;; caret hasn't moved since
+    ;; LM6: what keys do at the caret, 200 ms after it stops: a one-shot
+    ;; GLib timeout per move, the newest one alone acting. It reads only the
+    ;; caret's line (a window of the buffer around it), so the work is the
+    ;; same on any size of file and stays on the GTK thread.
     (when hint-label
-      (let [pending (atom 0)]
+      (let [pending (atom 0)
+            failed? (atom false)]
         (editor/on-cursor-moved!
          ed (fn [_lc]
               (let [n (swap! pending inc)]
-                (future
-                  (Thread/sleep 200)
-                  (when (= n @pending)
-                    (on-gui! (fn []
-                               (when (and (active? t) (not @(:destroyed? ed)) @hints-on?)
-                                 (let [text (editor/editor-text ed)
-                                       pos (g/cursor-offset (:buf ed))]
-                                   (future
-                                     (let [plugins @plugin-registry/live
-                                           h (try (hints/hint {:at (hints/at-caret text pos)
-                                                               :keymap {:editor (plugin-registry/editor-bindings plugins)
-                                                                        :window (plugin-registry/window-bindings plugins)}
-                                                               :os (System/getProperty "os.name")})
-                                                  (catch Throwable _ nil))]
-                                       (on-gui! (fn []
-                                                  (when (and (= n @pending) @hints-on?)
-                                                    (g/gtk-label-set-text hint-label (or h ""))
-                                                    (g/gtk-widget-set-visible hint-label (if h 1 0))))))))))))))))))
+                (g/g-timeout-add
+                 200
+                 (callable
+                  (fn [_data]
+                    (when (and (= n @pending) @hints-on? (active? t) (not @(:destroyed? ed)))
+                      (try
+                        (let [buf (:buf ed)
+                              pos (g/cursor-offset buf)
+                              a (max 0 (- pos 1000))
+                              text (g/buffer-text-range buf a (min (g/gtk-text-buffer-get-char-count buf) (+ pos 1000)))
+                              [line at] (hints/line-at text (- pos a))
+                              plugins @plugin-registry/live
+                              h (hints/hint {:at (hints/at-caret line at)
+                                             :keymap {:editor (plugin-registry/editor-bindings plugins)
+                                                      :window (plugin-registry/window-bindings plugins)}
+                                             :os (System/getProperty "os.name")})]
+                          (g/gtk-label-set-text hint-label (or h ""))
+                          (g/gtk-widget-set-visible hint-label (if h 1 0)))
+                        ;; said once on the console, then quiet
+                        (catch :default e
+                          (g/gtk-widget-set-visible hint-label 0)
+                          (when (compare-and-set! failed? false true)
+                            (cview/append! cv :error (str "; key hints: " (or (ex-message e) (str e)) "\n"))))))
+                    0)
+                  [:pointer] :int :on-throw 0)
+                 ffi/null))))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
@@ -3486,7 +3498,11 @@
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
         ;; LM6: what keys do at the caret, dim, hidden while there's nothing
-        hint-label (doto (g/gtk-label-new "") (g/gtk-widget-add-css-class "dim-label"))
+        hint-label (doto (g/gtk-label-new "")
+                     (g/gtk-widget-add-css-class "dim-label")
+                     ;; never wider than this, so the status bar doesn't jump
+                     (g/gtk-label-set-ellipsize g/PANGO-ELLIPSIZE-END)
+                     (g/gtk-label-set-max-width-chars 44))
         hints-on? (atom true)
         parinfer-label (g/gtk-label-new "")
         ;; How many agent proposals are pending, hidden at zero
