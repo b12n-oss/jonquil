@@ -18,6 +18,7 @@
     jonquil.mcp
     jonquil.mcp.json
     jonquil.mcp.tools
+    jonquil.compare
     jonquil.messages
     jonquil.mcp.describe
     jonquil.evaluator
