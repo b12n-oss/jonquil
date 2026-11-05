@@ -4406,6 +4406,7 @@
                                    :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
                                                 (log-entry! {:kind :file :target {:tab-id (:id t)}
                                                              :summary (str name " was deleted or moved on disk")}))
+                                   :clear (swap! disk-seen update (:id t) dissoc :reported)
                                    nil))))
                            ;; a read that failed logs nothing; the next tick tries again
                            (catch :default _ (swap! disk-seen update (:id t) dissoc :stat))))))

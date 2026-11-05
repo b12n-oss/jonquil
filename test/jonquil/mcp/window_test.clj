@@ -368,3 +368,12 @@
                         :read-line (fn [] (let [l (first @lines)] (swap! lines (comp vec rest)) l))
                         :write-line (fn [_] nil)}))
     (is (= [{:kind :connection :summary "Claude Code attached"}] @entries))))
+
+(deftest with-messages-logs-an-unknown-tool
+  (let [entries (atom [])
+        ui {:log!* (fn [e] (swap! entries conj e))}
+        f (w/with-messages (fn [] {:defs [] :call (fn [_ _] {:text "ok" :error? false})}) ui (atom {:client "Claude Code"}))
+        r (mcp/handle-message f {"jsonrpc" "2.0" "id" 1 "method" "tools/call" "params" {"name" "jonquil_nope"}})]
+    (is (= -32602 (get-in r ["error" "code"])) "the agent's reply is unchanged")
+    (is (= [{:kind :plugin :error? true :summary "Claude Code called jonquil_nope, which failed: Unknown tool: jonquil_nope"}]
+           (mapv #(select-keys % [:kind :error? :summary]) @entries)))))

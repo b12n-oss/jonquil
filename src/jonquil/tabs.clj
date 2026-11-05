@@ -136,10 +136,13 @@
   the tab is never touched): :changed when the disk holds text other than
   the tab last saved (so its own save never counts) and other than the
   text last reported for it (so one change is said once), :missing when the
-  file went and that wasn't said yet (reported ::missing), nil otherwise."
+  file went and that wasn't said yet (reported ::missing), :clear when the
+  disk is back to what the tab saved after a report (so the same edit made
+  again is said again), nil otherwise."
   [{:keys [saved disk reported]}]
   (cond
     (nil? disk) (when (not= ::missing reported) :missing)
+    (= disk saved) (when (some? reported) :clear)
     (and (not= disk saved) (not= disk reported)) :changed))
 
 (defn nul-line

@@ -77,3 +77,16 @@
 (deftest file-changes-are-shown-and-counted
   (is (contains? m/SHOWN-KINDS :file))
   (is (contains? m/COUNTED-KINDS :file)))
+
+(deftest hidden-kinds-are-dropped-first
+  (let [l (adds (m/empty-log) (concat [{:kind :agent :summary "first agent"}]
+                                      (for [i (range 999)] {:kind :status :summary (str "s" i)})
+                                      (for [i (range 5)] {:kind :agent :summary (str "a" i)})))]
+    (is (= 1000 (count (:entries l))))
+    (is (= 5 (:dropped l)))
+    (is (= 6 (count (filter #(= :agent (:kind %)) (:entries l)))) "no agent row went while status rows were left")
+    (is (= "first agent" (:summary (first (:entries l)))))
+    (is (apply < (map :id (:entries l))) "still in id order"))
+  (testing "with only shown kinds, the oldest goes"
+    (let [l (adds (m/empty-log) (for [i (range 1002)] {:kind :agent :summary (str "e" i)}))]
+      (is (= 3 (:id (first (:entries l))))))))

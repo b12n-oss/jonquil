@@ -50,3 +50,10 @@
 
 (deftest clock-text-is-hh-mm-ss
   (is (re-matches #"\d\d:\d\d:\d\d" (mp/clock-text 1762300000000))))
+
+(deftest selection-survives-a-rebuild
+  (let [es [{:id 9} {:id 7} {:id 4}]]
+    (is (= 1 (mp/selected-index es 7)) "the same entry, wherever it moved")
+    (is (= 0 (mp/selected-index es 3)) "gone: the top")
+    (is (= 0 (mp/selected-index es nil)))
+    (is (nil? (mp/selected-index [] 7)))))

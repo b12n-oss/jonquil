@@ -31,22 +31,32 @@
   (and a (= (:kind a) (:kind b)) (= (:summary a) (:summary b))
        (= (boolean (:error? a)) (boolean (:error? b)))))
 
+(defn- drop-one
+  "es without its oldest hidden-kind entry (a status line or a read), or
+  without its oldest entry when it has none: past CAP, the rows nobody
+  ticked go before an agent's."
+  [es]
+  (if-let [i (first (keep-indexed (fn [i e] (when-not (contains? SHOWN-KINDS (:kind e)) i)) es))]
+    (into (subvec es 0 i) (subvec es (inc i)))
+    (subvec es 1)))
+
 (defn add
   "log with entry ({:kind :summary & [:error? :detail :target :client
   :summary-tab]}) added at now-ms. An entry equal in kind, summary and
   failure to the newest one bumps that one's :repeat and :at instead,
-  keeping its :id. Past CAP the oldest go, counted in :dropped."
+  keeping its :id. Past CAP the oldest go, hidden kinds first (drop-one),
+  counted in :dropped."
   [log entry now-ms]
   (let [es (:entries log)
         newest (peek es)]
     (if (same-row? newest entry)
       (assoc log :entries (conj (pop es) (assoc newest :at now-ms :repeat (inc (or (:repeat newest) 1)))))
       (let [es (conj es (assoc entry :id (:next-id log) :at now-ms))
-            over (max 0 (- (count es) CAP))]
+            over? (> (count es) CAP)]
         (-> log
-            (assoc :entries (if (pos? over) (subvec es over) es))
+            (assoc :entries (if over? (vec (drop-one es)) es))
             (update :next-id inc)
-            (update :dropped + over))))))
+            (update :dropped + (if over? 1 0)))))))
 
 (defn mark-read [log]
   (assoc log :read-id (or (:id (peek (:entries log))) (:read-id log))))

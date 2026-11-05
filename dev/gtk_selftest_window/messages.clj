@@ -194,3 +194,30 @@
                                       (= "(def x 1)\n" (:text state)))
                                  (assoc state :logged logged?))))
         (finally (on-gtk (drop-tab! ui id)) (close-panel! ui))))))
+
+(defn- selected-entry-id [mp]
+  (let [row (g/gtk-list-box-get-selected-row (:list mp))]
+    (when-not (ffi/null? row)
+      (:id (get @(:entries mp) (g/gtk-list-box-row-get-index row))))))
+
+(defn row-messages-selection-stays
+  "With the panel open and the second row selected, a hidden status line
+  and a new agent entry arriving keep that row selected."
+  [ui]
+  (go-row :messages-selection-stays support/check
+    (let [mp (:messages-pane ui)]
+      (on-gtk (fresh! ui))
+      (try
+        (doseq [s ["one" "two" "three"]] ((:log!* ui) {:kind :agent :summary s}))
+        (on-gtk (panel-key! ui \7))
+        (await-until 3000 20 #(= 3 (count (messages-pane/row-texts mp))))
+        (let [picked (on-gtk (g/gtk-list-box-select-row (:list mp) (g/gtk-list-box-get-row-at-index (:list mp) 1))
+                             (selected-entry-id mp))
+              _ ((:log!* ui) {:kind :status :summary "Ready"})
+              _ ((:log!* ui) {:kind :agent :summary "four"})
+              arrived? (await-until 3000 20 #(= 4 (count (messages-pane/row-texts mp))))
+              after (on-gtk (selected-entry-id mp))]
+          (on-gtk (support/check :messages-selection-stays
+                                 (and arrived? (= 2 picked) (= picked after))
+                                 {:picked picked :after after :arrived arrived?})))
+        (finally (close-panel! ui))))))

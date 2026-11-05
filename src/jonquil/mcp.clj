@@ -40,7 +40,11 @@
         tname (get-in msg ["params" "name"])
         args (or (get-in msg ["params" "arguments"]) {})]
     (if-not (some #(= tname (get % "name")) (:defs tools))
-      (rpc-error id -32602 (str "Unknown tool: " tname))
+      (do ;; the window's Messages log the miss too (:on-unknown, optional);
+          ;; the reply is the same either way
+          (when-let [f (:on-unknown tools)]
+            (try (f tname args) (catch Throwable _ nil)))
+          (rpc-error id -32602 (str "Unknown tool: " tname)))
       (rpc-result
        id
        (try

@@ -491,7 +491,11 @@
     (fn []
       (let [t (tables-fn)
             call (:call t)]
-        (assoc t :call (fn [tname args]
+        (assoc t
+               :on-unknown (fn [tname args]
+                             (log-call! log! {:tool tname :args args :client (:client @session*)
+                                              :threw (str "Unknown tool: " tname)}))
+               :call (fn [tname args]
                          (let [base {:tool tname :args args :client (:client @session*)}
                                r (try (call tname args)
                                       (catch Throwable e

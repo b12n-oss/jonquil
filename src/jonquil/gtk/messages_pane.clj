@@ -65,27 +65,45 @@
   (reset! (:handlers pane) m)
   nil)
 
+(defn selected-index
+  "Where the entry with id sits in es, so a rebuild keeps the row the
+  person was on; 0 when it's gone (or none was), nil when es is empty."
+  [es id]
+  (when (seq es)
+    (or (first (keep-indexed (fn [i e] (when (= id (:id e)) i)) es)) 0)))
+
+(defn- selected-id [pane]
+  (let [row (g/gtk-list-box-get-selected-row (:list pane))]
+    (when-not (ffi/null? row)
+      (:id (get @(:entries pane) (g/gtk-list-box-row-get-index row))))))
+
 (defn show!
-  "Shows log's entries of the ticked kinds, newest at the top, the top
-  one selected. tab-label is (fn [tab-id]) -> label or nil."
+  "Shows log's entries of the ticked kinds, newest at the top, keeping the
+  selected entry selected (the top one at first). When no shown row
+  changed (a hidden status line arrived), only the footer is set, so the
+  list and its scroll stay where the person left them. tab-label is
+  (fn [tab-id]) -> label or nil."
   [pane log tab-label]
   (let [lb (:list pane)
         es (messages/visible log @(:kinds* pane))
         open @(:expanded* pane)
         rows (mapv #(row-text % tab-label clock-text {:expanded? (contains? open (:id %))}) es)]
-    (reset! (:entries pane) es)
-    (reset! (:rows pane) rows)
-    (g/gtk-list-box-remove-all lb)
-    (doseq [r rows]
-      ;; plain text, never markup: a row carries an agent's own text
-      (let [label (g/gtk-label-new r)]
-        (g/gtk-label-set-xalign label 0.0)
-        (g/gtk-label-set-wrap label 1)
-        (g/gtk-widget-set-halign label g/ALIGN-START)
-        (g/gtk-list-box-append lb label)))
-    (when (seq rows)
-      (g/gtk-list-box-select-row lb (g/gtk-list-box-get-row-at-index lb 0)))
-    (report! pane (footer-text log @(:kinds* pane)))))
+    (if (and (= rows @(:rows pane)) (= (map :id es) (map :id @(:entries pane))))
+      (report! pane (footer-text log @(:kinds* pane)))
+      (let [keep-id (selected-id pane)]
+        (reset! (:entries pane) es)
+        (reset! (:rows pane) rows)
+        (g/gtk-list-box-remove-all lb)
+        (doseq [r rows]
+          ;; plain text, never markup: a row carries an agent's own text
+          (let [label (g/gtk-label-new r)]
+            (g/gtk-label-set-xalign label 0.0)
+            (g/gtk-label-set-wrap label 1)
+            (g/gtk-widget-set-halign label g/ALIGN-START)
+            (g/gtk-list-box-append lb label)))
+        (when-let [i (selected-index es keep-id)]
+          (g/gtk-list-box-select-row lb (g/gtk-list-box-get-row-at-index lb i)))
+        (report! pane (footer-text log @(:kinds* pane)))))))
 
 (defn row-texts
   "The shown rows, in order."
