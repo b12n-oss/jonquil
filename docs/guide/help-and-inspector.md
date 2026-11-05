@@ -287,6 +287,25 @@ definition isn't traced. Tracing runs where your code runs, in process or in
 a project's Jolt child, and doesn't touch `*1`; other runtimes say it needs
 Jolt for now.
 
+## Counting how often each line runs
+
+**Count how often each line runs**, in the palette, turns on Jolt's line
+counters for code compiled from then on. Run a saved file and the gutter
+shows, beside each line that ran, how many times it did: `6`, `999`,
+`1.2k`, `12k`. Each Run counts its own lines alone. The counts are for the
+text that ran, so the first edit hides them until the next Run, and a Run
+Form or Run Selection refreshes them only while the file still holds the
+text its last Run did. An Untitled or unsaved tab has no file for Jolt to
+count by, and the console says so. **Clear line counts** zeroes the
+counters, and the toggle again turns counting off.
+
+Jolt has one instrumentation mode at a time, so counting and Keep every
+local (debug mode) take turns: turning one on turns the other off, and the
+status bar says so. A Jolt child that restarts comes back without
+counting, and the next Run says so on the console. Counting works in
+process and in a project's Jolt child, on a Jolt with `jolt.profile`
+(v0.8.24 or later); other runtimes say it needs Jolt.
+
 ## The last error's frames
 
 After an error in Jolt, **Show the last error's frames and locals**, in the
