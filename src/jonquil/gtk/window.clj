@@ -42,6 +42,7 @@
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.gutter :as gutter]
+            [jonquil.line-counts :as line-counts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
@@ -962,6 +963,11 @@
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label cv status-label)
         (reset! ev* new)
+        ;; LM4: counting is the whole process's mode, so leaving the
+        ;; in-process Jolt for another runtime mustn't leave Jonquil counting
+        ;; what it compiles (another in-process session shares the mode)
+        (when-not (instance? jonquil.session.InProcess new)
+          (line-counts/off-if-counting!))
         ;; Focus inside a panel this hides would go nowhere, so it moves to
         ;; the active tab's editor, as closing the inspector does.
         (let [focus-in-panel? (or (focus-within? (:inspector-root right))
@@ -1119,6 +1125,9 @@
                  (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
                       ((deref (:refresh changed)))
                       (catch :default _ nil)))
+               ;; LM4: the lines that ran, whether it ended well or not
+               (when (and changed (#{:run :form :selection} hook-source))
+                 (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil)))
                (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
 (defn- before-run-stopped
@@ -1171,8 +1180,11 @@
    (let [{ed :ed path-atom :path id :id} tab
          out (atom [])
          refused (refuse-foreign! ctx)
-         opts (fn [] (let [base (assoc (make-eval-opts ed cv ev* status-label true)
-                                       :run? true :path @path-atom :owner id)]
+         opts (fn [] (let [base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
+                                              :run? true :path @path-atom :owner id)
+                                       ;; LM4: a Run counts its own lines alone
+                                       (some-> (:changed ed) :counting? deref (apply []))
+                                       (assoc :clear-line-counts? true))]
                        (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
                                            :hook-source :run :hook-tab id
                                            :hook-code (editor/editor-text ed) :failure* (:failure* cv)
@@ -2689,10 +2701,58 @@
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
-           open-find-fn open-replace-fn window-key-args repl-complete-fn] :as ctx}
+           open-find-fn open-replace-fn window-key-args repl-complete-fn line-counting?] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
   ;; LM3: the gutter's marks follow edits, 150 ms after the last change,
   ;; computed off the GTK thread and drawn only if the text is still the same
+  ;; LM4: after a run, the file's line counts in the gutter, while
+  ;; counting is on; drawn only for a saved, clean tab whose text is still
+  ;; what it was when the fetch started, and hidden at the first edit
+  (when-let [{:keys [counts-refresh counting? gutter]} (:changed ed)]
+    (reset! counting? (fn [] (boolean (and line-counting? @line-counting?))))
+    ;; the text the tab's last full Run ran: counts are drawn only while the
+    ;; buffer still holds it, so a Run Form or Run Selection never shows
+    ;; counts for lines that have moved since
+    (let [run-text (atom nil)]
+      (reset! counts-refresh
+              (fn [source code]
+                (on-gui! (fn []
+                           (when (= :run source) (reset! run-text code))
+                           (when (and line-counting? @line-counting? (not @(:destroyed? ed)))
+                             (let [e @ev* path @path]
+                               (cond
+                                 (not (satisfies? ev/LineCounts e)) nil
+                                 ;; on the console: the Run's own Ready lands on the
+                                 ;; status bar after this. Only for a Run: a Run Form
+                                 ;; on an edited tab is the usual case, not news
+                                 (or (nil? path) (editor/dirty? ed))
+                                 (when (= :run source)
+                                   (cview/append! cv :system "; Line counts show for a saved file.\n"))
+                                 :else
+                                 (let [text (editor/editor-text ed)]
+                                   (when (= text @run-text)
+                                     (ev/line-counts!
+                                      e path
+                                      (fn [r]
+                                        (on-gui! (fn []
+                                                   (cond
+                                                     (:error r) (cview/append! cv :system (str "; " (:error r) "\n"))
+                                                     ;; the runtime isn't counting: a restart, or a
+                                                     ;; toggle elsewhere
+                                                     (not= :counts (:mode r))
+                                                     (when @line-counting?
+                                                       (reset! line-counting? false)
+                                                       (gutter/set-counts! gutter {})
+                                                       (cview/append! cv :system "; Line counts went off (the runtime restarted).\n"))
+                                                     (and (not @(:destroyed? ed)) (= text (editor/editor-text ed)))
+                                                     (gutter/set-counts! gutter (into {} (for [[line hits] (:counts r) :when line]
+                                                                                           [(dec line) (line-counts/label hits)]))))))))))))))))))
+    (g/g-signal-connect-data (:buf ed) "changed"
+                             (callable (fn [_buf _data]
+                                         (when (seq @(:counts gutter)) (gutter/set-counts! gutter {}))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT))
   (when-let [{:keys [ran refresh gutter]} (:changed ed)]
     (let [pending (atom 0)
           ;; a closed tab's buffer and gutter are gone (:destroyed?), and a
@@ -4259,6 +4319,8 @@
         ;; mode has no flag here: the toggle reads the runtime's own mode.
         frames-state (atom nil)
         frames-ev (fn [] (let [e @ev*] (when (satisfies? ev/Frames e) e)))
+        ;; LM4: whether Jolt is counting lines, from each toggle's answer
+        line-counting? (atom false)
         show-frames-fn (fn []
                          (if-let [e (frames-ev)]
                            (ev/error-frames! e (fn [d]
@@ -4285,14 +4347,42 @@
                                (debugger-pane/show-restarts! dbgp (restarts/options f))
                                (show-right-panel! right :debugger))
                              (set-status! status-label "; The debugger needs Jolt."))))
+        hide-line-counts! (fn [] (doseq [t @tabs] (some-> t :ed :changed :gutter (gutter/set-counts! {}))))
+        line-counts-fn (fn []
+                         (let [e @ev*]
+                           (if (satisfies? ev/LineCounts e)
+                             (ev/toggle-line-counts!
+                              e (fn [r]
+                                  (on-gui! (fn []
+                                             (when-not (:error r) (reset! line-counting? (boolean (:on? r))))
+                                             (when (and (not (:error r)) (not (:on? r))) (hide-line-counts!))
+                                             (set-status! status-label
+                                                          (cond (:error r) (str "; " (:error r))
+                                                                (:was-debug? r) "; Line counts on, so debug mode is off: Run your file to count its lines."
+                                                                (:on? r) "; Line counts on: Run your file to count its lines."
+                                                                :else "; Line counts off."))))))
+                             (set-status! status-label "; Line counts need Jolt."))))
+        clear-line-counts-fn (fn []
+                               (let [e @ev*]
+                                 (if (satisfies? ev/LineCounts e)
+                                   (ev/clear-line-counts!
+                                    e (fn [r]
+                                        (on-gui! (fn []
+                                                   (hide-line-counts!)
+                                                   (set-status! status-label (if (:error r) (str "; " (:error r)) "; Line counts cleared."))))))
+                                   (set-status! status-label "; Line counts need Jolt."))))
         locals-mode-fn (fn []
                          (if-let [e (frames-ev)]
                            (ev/toggle-debug-mode! e (fn [r]
                                                       (on-gui! (fn []
+                                                                 ;; Jolt has one mode: debug on ends counting
+                                                                 (let [was-counting? @line-counting?]
+                                                                   (when (:on? r) (reset! line-counting? false) (hide-line-counts!))
                                                                  (set-status! status-label
                                                                               (cond (:error r) (str "; " (:error r))
+                                                                                    (and (:on? r) was-counting?) "; Debug mode on: code you load from now on keeps its locals. Line counts are off."
                                                                                     (:on? r) "; Debug mode on: code you load from now on keeps its locals."
-                                                                                    :else "; Debug mode off."))))))
+                                                                                    :else "; Debug mode off.")))))))
                            (set-status! status-label "; The debugger needs Jolt.")))
         _ (debugger-pane/set-handlers!
            dbgp {:on-frame (fn [i]
@@ -4722,6 +4812,7 @@
                          :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
+                         :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          :trace-toggle-fn trace-toggle-fn :trace-show-fn trace-show-fn
@@ -5000,7 +5091,8 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs}
+                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs
+                   :line-counting? line-counting?}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
