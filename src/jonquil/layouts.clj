@@ -16,11 +16,27 @@
           p p
           :else "Editor only")))
 
+(defn- width? [x] (or (nil? x) (and (int? x) (<= 0 x))))
+
+(defn valid?
+  "Whether layout can be applied: :tree? a boolean or absent, :panel nil
+  or one the palette can bring back (palette/PANEL-LABELS), widths and the
+  split non-negative whole numbers or absent."
+  [{:keys [tree? panel tree-width panel-width split] :as l}]
+  (boolean (and (map? l)
+                (or (nil? tree?) (boolean? tree?))
+                (or (nil? panel) (contains? palette/PANEL-LABELS panel))
+                (width? tree-width) (width? panel-width) (width? split))))
+
 (defn save
   "layouts ({name layout}) with layout under its name, replacing one with
-  the same parts showing."
+  the same parts showing. A panel the palette can't bring back (Review,
+  History) isn't kept."
   [layouts layout]
-  (assoc layouts (layout-name layout) layout))
+  (let [l (cond-> layout
+            (not (contains? palette/PANEL-LABELS (:panel layout))) (assoc :panel nil)
+            (not (contains? palette/PANEL-LABELS (:panel layout))) (dissoc :panel-width))]
+    (assoc layouts (layout-name l) l)))
 
 (defn entries
   "The palette's entries for layouts, sorted by name: {:id [:layout/use

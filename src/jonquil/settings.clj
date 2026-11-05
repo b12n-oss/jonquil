@@ -12,7 +12,8 @@
   a temp file beside the target and renames it over the target with
   ATOMIC_MOVE (the same move jonquil.gtk.window's Save uses), and returns
   nil or an error string instead of throwing."
-  (:require [clojure.edn :as edn]
+  (:require [jonquil.layouts :as layouts]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [jonquil.dialect :as dialect]
@@ -126,7 +127,7 @@
     (cond
       (nil? v) {}
       (not (map? v)) {:warning (str path "'s :layouts isn't a map, ignoring it")}
-      :else (let [good (into {} (filter (fn [[k l]] (and (string? k) (map? l)))) v)]
+      :else (let [good (into {} (filter (fn [[k l]] (and (string? k) (layouts/valid? l)))) v)]
               (cond-> {}
                 (seq good) (assoc :layouts good)
                 (< (count good) (count v)) (assoc :warning (str path "'s :layouts has entries that aren't a name and a layout, ignoring them")))))))

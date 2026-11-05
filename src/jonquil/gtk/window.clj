@@ -891,7 +891,8 @@
     (when-let [r (:recent-panels right)]
       (swap! r (fn [v] (into [which] (remove #{which}) v))))
     (when was-hidden?
-      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
+      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))
+    ))
 
 (defn- showing-panel
   "The key of the right-hand panel on screen, or nil when the slot is
@@ -4769,26 +4770,50 @@
                                    l (cond-> {:tree? (pos? (g/gtk-widget-get-visible (:root tree-pane)))
                                               :tree-width (g/gtk-paned-get-position tree-paned)
                                               :panel panel
-                                              :split (g/gtk-paned-get-position paned)}
-                                       panel (assoc :panel-width (- (g/gtk-widget-get-width h-paned)
-                                                                    (g/gtk-paned-get-position h-paned))))]
+                                              :split (g/gtk-paned-get-position paned)})]
                                (save! (layouts/save (saved) l))
                                (said (str "; Saved the layout \"" (layouts/layout-name l) "\"."))))
                      :use (fn [n]
-                            (if-let [{:keys [tree? tree-width panel panel-width split]} (get (saved) n)]
-                              (do (g/gtk-toggle-button-set-active files-btn (if tree? 1 0))
-                                  (if panel
-                                    (panel-focus-fn panel)
-                                    (when-let [k (showing-panel right)] (hide-right-panel! right k)))
-                                  ;; the widths on the next turn: showing the tree or a
-                                  ;; panel sizes its pane first, and would undo them
-                                  (on-gui! (fn []
-                                             (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
-                                             (when (and panel panel-width (= panel (showing-panel right)))
-                                               (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width h-paned) panel-width))))
-                                             (when split (g/gtk-paned-set-position paned split))))
-                                  (said (str "; Layout \"" n "\".")))
-                              (said (str "; No layout named \"" n "\"."))))
+                            (let [{:keys [tree? tree-width panel split] :as l} (get (saved) n)]
+                              (cond
+                                (nil? l) (said (str "; No layout named \"" n "\"."))
+                                ;; checked before anything moves, so a bad one never half-applies
+                                (not (layouts/valid? l)) (said (str "; The layout \"" n "\" can't be used: its settings entry is malformed."))
+                                :else
+                                (let [before (g/label-text status-label)]
+                                  (g/gtk-toggle-button-set-active files-btn (if tree? 1 0))
+                                  ;; the panel showing goes unless it's the layout's own
+                                  (when-let [k (showing-panel right)]
+                                    (when (not= k panel) (hide-right-panel! right k)))
+                                  (when panel
+                                    (if (= panel (showing-panel right))
+                                      (show-right-panel! right panel)
+                                      (panel-focus-fn panel)))
+                                  ;; GTK lays the tree and a panel out over its next frames (and
+                                  ;; a panel shown from an evaluator's answer arrives later), so
+                                  ;; the tree's width and the split are set every 100 ms until
+                                  ;; they read back, for at most 2 s. The panel opens at its own
+                                  ;; width: set together with the tree's, GTK kept neither.
+                                  (let [tries (atom 0)
+                                        near? (fn [a b] (<= (abs (- a b)) 2))]
+                                    (g/g-timeout-add
+                                     100
+                                     (callable
+                                      (fn [_d]
+                                        (let [ready? (or (nil? panel) (= panel (showing-panel right)))]
+                                          (when ready?
+                                            (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
+                                            (when split (g/gtk-paned-set-position paned split)))
+                                          (if (or (>= (swap! tries inc) 20)
+                                                  (and ready?
+                                                       (or (not (and tree? tree-width)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
+                                                       (or (not split) (near? split (g/gtk-paned-get-position paned)))))
+                                            0 1)))
+                                      [:pointer] :int :on-throw 0)
+                                     ffi/null))
+                                  ;; a panel with nothing to show said so: that line stays
+                                  (when (= before (g/label-text status-label))
+                                    (said (str "; Layout \"" n "\".")))))))
                      :forget (fn [] (save! {}) (said "; Forgot the saved layouts."))}))
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
@@ -5318,6 +5343,7 @@
                    :file-tree tree-pane
                    :files-btn files-btn
                    :tree-paned tree-paned
+                   :h-paned h-paned
                    :toggle-file-tree!* (fn [] (g/gtk-toggle-button-set-active
                                                files-btn (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                    :file-tree-visible?* (fn [] (pos? (g/gtk-widget-get-visible (:root tree-pane))))

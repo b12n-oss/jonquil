@@ -21,3 +21,15 @@
           {:id [:layout/use "File tree"] :doc "Use layout: File tree" :chords [] :source "layout"}]
          (layouts/entries {"File tree" {} "Editor only" {}}))
       "sorted by name"))
+
+(deftest valid-test
+  (is (layouts/valid? {:tree? true :tree-width 240 :panel :trace :panel-width 400 :split 430}))
+  (is (layouts/valid? {:tree? false :panel nil}))
+  (is (not (layouts/valid? {:panel "trace"})) "a string panel")
+  (is (not (layouts/valid? {:panel :review})) "a panel the palette can't bring back")
+  (is (not (layouts/valid? {:tree-width -1})))
+  (is (not (layouts/valid? {:tree? "yes"}))))
+
+(deftest save-drops-a-panel-it-cant-bring-back-test
+  (is (= {"File tree" {:tree? true :panel nil}} (layouts/save {} {:tree? true :panel :review}))))
+
