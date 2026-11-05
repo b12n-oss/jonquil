@@ -18,6 +18,8 @@
     jonquil.mcp
     jonquil.mcp.json
     jonquil.mcp.tools
+    jonquil.messages
+    jonquil.mcp.describe
     jonquil.evaluator
     jonquil.session
     jonquil.inspect.view
@@ -109,6 +111,7 @@
     jonquil.gtk.find-bar
     jonquil.gtk.gutter
     jonquil.gtk.trace-pane
+    jonquil.gtk.messages-pane
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
