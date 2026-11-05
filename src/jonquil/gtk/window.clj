@@ -4118,7 +4118,18 @@
                             (do (reset! compare-state {:tab-id (:id t) :label label :other other})
                                 (make-locations! l))
                             (do (reset! compare-state nil)
+                                ;; a list of differences that are gone goes too
+                                (when (some-> @locations-state :list :title (str/starts-with? "Differences from "))
+                                  (clear-locations!)
+                                  (locations-pane/show! locp {:title "" :entries [] :index nil})
+                                  (hide-right-panel! right :locations))
                                 (set-status! status-label (str "; No differences from " label "."))))))
+        read-disk (fn [path]
+                    (let [f (java.io.File. ^String path)]
+                      (if-not (.exists f)
+                        {:error "The file isn't on disk any more."}
+                        (try {:text (slurp path)}
+                             (catch :default e {:error (str "Couldn't read the file: " (or (ex-message e) (str e)))})))))
         compare-with! (fn [label read-other]
                         (let [t (active-tab)
                               path @(:path t)]
@@ -4128,31 +4139,34 @@
                               (if error
                                 (set-status! status-label (str "; " error))
                                 (compare-list! t label text))))))
-        compare-disk-fn (fn [] (compare-with! "disk"
-                                              (fn [path] (try {:text (slurp path)}
-                                                              (catch :default _ {:error "The file isn't on disk any more."})))))
+        compare-disk-fn (fn [] (compare-with! "disk" read-disk))
         compare-head-fn (fn [] (compare-with! "HEAD"
                                               (fn [path]
                                                 (let [f (java.io.File. ^String path)
                                                       r (try (jolt.process/sh {:dir (.getParent f)} "git" "show" (str "HEAD:./" (.getName f)))
                                                              (catch :default e {:exit -1 :err (ex-message e)}))]
-                                                  (if (zero? (:exit r))
+                                                  (if (= 0 (:exit r))
                                                     {:text (:out r)}
-                                                    {:error (str "git: " (first (str/split-lines (str (:err r)))))})))))
+                                                    {:error (str "git: " (or (not-empty (first (str/split-lines (str (:err r)))))
+                                                                             (str "exited " (:exit r))))})))))
         compare-take-fn (fn []
                           (let [t (active-tab)
-                                {:keys [tab-id label other]} @compare-state]
+                                {:keys [tab-id label]} @compare-state
+                                ;; the disk as it is now, not as it was at the compare
+                                other (if (= "disk" label)
+                                        (or (:text (some-> @(:path t) read-disk)) (:other @compare-state))
+                                        (:other @compare-state))]
                             (if (not= tab-id (:id t))
                               (set-status! status-label "; Compare this tab first: Compare with the file on disk, or with git HEAD.")
                               (let [ed (:ed t)
                                     buffer (editor/editor-text ed)
                                     line (first (g/cursor-line-col (:buf ed)))]
-                                (if-let [h (compare/hunk-at (compare/hunks other buffer) line)]
+                                (if-let [h (compare/hunk-at (compare/hunks other buffer) line buffer)]
                                   (let [[s e r] (compare/take-edit buffer h)]
                                     ;; one undo step, exactly the other version's lines
                                     (editor/apply-op-plain! ed {:edits [[s e r]] :caret s})
                                     (compare-list! t label other)
-                                    (when (seq (compare/hunks other (editor/editor-text ed)))
+                                    (when (seq (:entries (:list @locations-state)))
                                       (set-status! status-label (str "; Took " (if (= "disk" label) "the disk's" (str label "'s"))
                                                                      " version of line " (inc (:line h)) "."))))
                                   (set-status! status-label "; No difference at the caret: F8 steps to the next one."))))))

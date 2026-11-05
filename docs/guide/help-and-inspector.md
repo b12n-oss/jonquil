@@ -177,7 +177,9 @@ other version here** puts the compared version's lines in place of the
 difference at the caret, as one step Cmd/Ctrl+Z undoes and with Parinfer
 left out of it, and lists what's left. git runs as `git show HEAD:./name`
 in the file's own folder, so a file outside a repository, or one git
-doesn't track, gets git's reason on the status bar.
+doesn't track, gets git's reason on the status bar. Line endings and trailing
+blank lines don't count as differences, and a Take keeps the tab's own line
+endings.
 
 ### Freeing Ctrl+Space on macOS
 

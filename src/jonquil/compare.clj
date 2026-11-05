@@ -6,20 +6,31 @@
   (:require [clojure.string :as str]
             [jonquil.plugin-review :as review]))
 
+(defn- lines [s] (if (empty? s) [] (str/split-lines s)))
+
 (defn hunks
   "The differences from other to buffer, in buffer order: {:line l :here
   [buffer lines] :there [other lines]}, l the 0-based buffer line the
   difference starts at (where the other's lines would go when :here is
-  empty)."
+  empty). Line endings don't count. The lines the two share at the start
+  and the end are set aside before the line diff, so a big file with a
+  local change stays under plugin-review's cap and gives a small hunk."
   [other buffer]
-  (loop [ops (review/line-diff other buffer) line 0 cur nil acc []]
-    (let [close (fn [acc] (if cur (conj acc cur) acc))]
-      (if-let [[k l] (first ops)]
-        (case k
-          :same (recur (rest ops) (inc line) nil (close acc))
-          :del (recur (rest ops) line (update (or cur {:line line :here [] :there []}) :there conj l) acc)
-          :add (recur (rest ops) (inc line) (update (or cur {:line line :here [] :there []}) :here conj l) acc))
-        (close acc)))))
+  (let [a (vec (lines other))
+        b (vec (lines buffer))]
+    (if (= a b)
+      []
+      (let [p (count (take-while true? (map = a b)))
+            q (count (take-while true? (map = (rseq (subvec a p)) (rseq (subvec b p)))))
+            mid (fn [v] (str/join "\n" (subvec v p (- (count v) q))))]
+        (loop [ops (review/line-diff (mid a) (mid b)) line p cur nil acc []]
+          (let [close (fn [acc] (if cur (conj acc cur) acc))]
+            (if-let [[k l] (first ops)]
+              (case k
+                :same (recur (rest ops) (inc line) nil (close acc))
+                :del (recur (rest ops) line (update (or cur {:line line :here [] :there []}) :there conj l) acc)
+                :add (recur (rest ops) (inc line) (update (or cur {:line line :here [] :there []}) :here conj l) acc))
+              (close acc))))))))
 
 (defn- line-starts
   "The offset each line of text starts at, plus the text's length last."
@@ -31,43 +42,65 @@
 
 (defn- offset-of [starts line] (nth starts (min line (dec (count starts)))))
 
+(defn- eol [buffer] (if (str/includes? buffer "\r\n") "\r\n" "\n"))
+
 (defn take-edit
   "The edit, [start end replacement] in buffer offsets, that puts the
-  other version's lines in place of hunk h's lines in buffer. A buffer
-  that doesn't end in a newline keeps not ending in one."
+  other version's lines in place of hunk h's lines in buffer, joined with
+  the buffer's own line ending. A buffer that doesn't end in one keeps not
+  ending in one, and lines added past such a last line start on a line of
+  their own."
   [buffer {:keys [line here there]}]
-  (let [starts (line-starts buffer)
+  (let [nl (eol buffer)
+        starts (line-starts buffer)
         s (offset-of starts line)
         e (offset-of starts (+ line (count here)))
-        r (apply str (map #(str % "\n") there))
-        r (if (and (= e (count buffer)) (not (str/ends-with? buffer "\n")) (seq r))
-            (subs r 0 (dec (count r)))
-            r)]
+        open-end? (and (pos? (count buffer)) (= e (count buffer)) (not (str/ends-with? buffer "\n")))
+        r (apply str (map #(str % nl) there))
+        r (if (and open-end? (seq r)) (subs r 0 (- (count r) (count nl))) r)
+        r (if (and open-end? (empty? here) (seq r)) (str nl r) r)]
     [s e r]))
 
 (defn- lines-word [n] (case n 0 "none" 1 "1 line" (str n " lines")))
 
+(defn- shown-line
+  "The 0-based buffer line a hunk's row points at: its own, or for lines
+  only in the other version past the buffer's last line, that last line."
+  [buffer {:keys [line here]}]
+  (let [n (count (lines buffer))]
+    (if (and (empty? here) (>= line n) (pos? n)) (dec n) line)))
+
 (defn location-list
   "A Locations list of the differences from other to buffer, titled for
   label (\"disk\", \"HEAD\"): one entry per hunk, its range the hunk's
-  lines in buffer, its 1-based line, and what differs."
+  lines in buffer (for lines only in the other version, the line they'd go
+  at, so the list can step there), its 1-based line, and what differs."
   [label other buffer]
-  (let [hs (hunks other buffer)]
+  (let [hs (hunks other buffer)
+        starts (line-starts buffer)]
     {:title (str "Differences from " label)
      :index nil
      :entries (mapv (fn [h]
-                      (let [[s e] (take-edit buffer h)]
-                        {:start s :end e :line (inc (:line h)) :hunk h
+                      (let [sl (shown-line buffer h)
+                            [s e] (if (seq (:here h))
+                                    [(offset-of starts (:line h)) (offset-of starts (+ (:line h) (count (:here h))))]
+                                    [(offset-of starts sl) (offset-of starts (inc sl))])]
+                        {:start s :end e :line (inc sl) :hunk h
                          :text (str (lines-word (count (:here h))) " here, "
-                                    (str/lower-case (lines-word (count (:there h)))) " "
+                                    (lines-word (count (:there h))) " "
                                     (if (= "disk" label) "on disk" (str "in " label))
                                     ": " (or (first (:there h)) (first (:here h)) ""))}))
                     hs)}))
 
 (defn hunk-at
-  "The hunk in hs whose buffer lines hold 0-based line, or one that sits
-  right at line when it has no lines here; nil when none does."
-  [hs line]
-  (some (fn [{l :line here :here :as h}]
-          (when (if (empty? here) (= l line) (<= l line (+ l (count here) -1))) h))
-        hs))
+  "The hunk in hs that 0-based line of buffer is in: one whose buffer
+  lines hold it, or one with no lines here that sits at it (or just past
+  the buffer's last line, when line is that last line)."
+  [hs line buffer]
+  (let [n (count (lines buffer))]
+    (some (fn [{l :line here :here :as h}]
+            (when (if (empty? here)
+                    (or (= l line) (and (>= l n) (= line (dec l))))
+                    (<= l line (+ l (count here) -1)))
+              h))
+          hs)))

@@ -286,6 +286,7 @@
    locations-rows/row-locations-empty-says-no-places
    locations-rows/row-compare-with-disk-and-take
    locations-rows/row-compare-with-head
+   locations-rows/row-compare-line-only-on-disk
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named

@@ -379,3 +379,30 @@
                              {:listed listed? :rows rows :said said? :status (status ui)})
               ((:close-tab! ui) (:id ((:active-tab* ui))))))))
 
+(defn row-compare-line-only-on-disk
+  "A line only on disk is a place the list steps to; Take puts it back,
+  and with no differences left the list goes."
+  [ui]
+  (go-row :compare-line-only-on-disk support/check
+    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-compare-ins-") "i.clj")
+          disk "(ns i)\n(def a 1)\n(def b 2)\n"
+          _ (spit f disk)
+          _ (on-gtk ((:open-file! ui) (.getPath f)))
+          ed (on-gtk (:ed ((:active-tab* ui))))
+          _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) "(ns i)\n(def b 2)\n"]] :caret 0})
+                    (run-palette! ui "compare with the file on disk"))
+          listed? (await-until 3000 20 #(= ["2: none here, 1 line on disk: (def a 1)"] (lpane/row-texts (:locations-pane ui))))
+          _ (on-gtk (support/place-cursor! (:buf ed) 0)
+                    (run-palette! ui "go to the next place in the list"))
+          stepped? (await-until 3000 20 #(= 1 (first (g/cursor-line-col (:buf ed)))))
+          _ (on-gtk (run-palette! ui "take the other version here"))
+          took? (await-until 3000 20 #(= disk (editor/editor-text ed)))
+          cleared? (await-until 3000 20 #(and (empty? (lpane/row-texts (:locations-pane ui)))
+                                              (= "; No differences from disk." (status ui))))]
+      (on-gtk (support/check :compare-line-only-on-disk (and listed? stepped? took? cleared?)
+                             {:listed listed? :stepped stepped? :took took? :cleared cleared?
+                              :rows (lpane/row-texts (:locations-pane ui)) :status (status ui)
+                              :text (editor/editor-text ed)})
+              (editor/mark-saved! ed)
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+
