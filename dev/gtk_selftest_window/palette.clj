@@ -64,13 +64,16 @@
                               :open open? :escape hesc :closed closed?})))))
 
 (defn row-palette-chord-opens
-  "The chord opens the palette with every entry shown and the entry focused."
+  "The chord opens the palette with every entry shown and the entry focused.
+  The tab and panel switch entries ahead of the commands depend on what
+  earlier rows opened, so only the commands are counted."
   [ui]
   (go-row :palette-chord-opens support/check
     (let [p (:palette ui)
           handled (on-gtk (open-by-chord! ui))
           focused? (await-until 2000 20 #(focus-in? ui (:popover p)))
-          [open? shown] (on-gtk [(popover/open? p) (count (palette/shown-docs p))])
+          switch? (fn [d] (or (str/starts-with? d "Switch to tab: ") (str/starts-with? d "Switch to panel: ")))
+          [open? shown] (on-gtk [(popover/open? p) (count (remove switch? (palette/shown-docs p)))])
           expected (count (pal-data/entries {:commands registry/commands :keymap km/shipped
                                              :os (System/getProperty "os.name")}))]
       (on-gtk (close! ui)

@@ -140,5 +140,6 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 | Cmd/Ctrl+[ | Elsewhere, after F12 opened a tab | Back to where F12 was pressed |
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
 | Escape | Source panel | Close the panel |
+| Cmd/Ctrl+Alt+1 to 6 | anywhere in the window | Focus the Inspector, Source, Locations, Frames, Trace or Plugins panel, bring it back, or open it ([Switching panels](help-and-inspector.md#switching-panels)) |
 
 </details>

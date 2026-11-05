@@ -832,7 +832,8 @@
   "Shows which (:inspector, :source, :review, :plugins, :history,
   :locations, :debugger or :trace) in
   the slot and hides the others; any but :history clears
-  plugin-history-shown. When the slot was hidden, also sizes h-paned so
+  plugin-history-shown, and which moves to the front of right's
+  :recent-panels when it has one. When the slot was hidden, also sizes h-paned so
   the panel claims about PANEL-WIDTH; while
   it's showing, the split stays where the person put it. right is {:win
   :h-paned :slot :inspector-root :source-root :review-root}. GTK-thread
@@ -844,8 +845,18 @@
     (doseq [[k root] roots :when (not= k which)] (g/gtk-widget-set-visible root 0))
     (g/gtk-widget-set-visible (get roots which) 1)
     (g/gtk-widget-set-visible slot 1)
+    ;; the recent panels, most recently shown first (a test's right has none)
+    (when-let [r (:recent-panels right)]
+      (swap! r (fn [v] (into [which] (remove #{which}) v))))
     (when was-hidden?
       (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
+
+(defn- showing-panel
+  "The key of the right-hand panel on screen, or nil when the slot is
+  hidden."
+  [{:keys [slot] :as right}]
+  (when (pos? (g/gtk-widget-get-visible slot))
+    (some (fn [[k root]] (when (pos? (g/gtk-widget-get-visible root)) k)) (right-roots right))))
 
 (defn- focus-within?
   "True when keyboard focus is widget or inside it."
@@ -919,6 +930,9 @@
           (when (and focus-in-panel? active-ed)
             (when-let [ed (active-ed)] (editor/focus! ed))))
         (reset! inspector-state nil)
+        ;; their views belong to the old runtime, so a panel switch can't
+        ;; bring them back
+        (when-let [r (:recent-panels right)] (swap! r (fn [v] (vec (remove #{:inspector :source} v)))))
         (cview/append! cv :system (str "; Switched to " (dialect/label sel)
                                        ". The previous session is gone.\n"))
         (future
@@ -2759,6 +2773,9 @@
                   (cond
                     (and (vector? id) (= :tab/switch (first id)))
                     ((:switch-tab-fn window-key-args) (second id))
+                    ;; a panel entry ([:panel/switch k]), as its key does
+                    (and (vector? id) (= :panel/switch (first id)))
+                    ((:panel-focus-fn window-key-args) (second id))
                     ;; an earlier world, from Restore an Earlier World
                     (and (vector? id) (= :world/restore-from (first id)))
                     ((:world-restore-from-fn window-key-args) (second id))
@@ -3593,7 +3610,10 @@
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
                :debugger-root (:root dbgp) :trace-root (:root tracep)
-               :history-root (:root hp) :source-pane sp}
+               :history-root (:root hp) :source-pane sp
+               ;; the panels shown, most recent first: the palette's
+               ;; Switch to panel entries, and the panel keys' "open it"
+               :recent-panels (atom [])}
         _ (reset! *right right)
         ;; The plugin-step! opts for Accept or Reject of the
         ;; proposal the panel shows (nil when none is), its lines put on
@@ -3873,11 +3893,13 @@
                                                                    {:id id :label (g/label-text (:label t))}))
                                                         @recent-tabs)
                                                   (:id (active-tab)))
-                                                 (pal-data/entries
+                                                 (into (pal-data/panel-entries @(:recent-panels right)
+                                                                               (showing-panel right))
+                                                       (pal-data/entries
                                                  {:commands (plugin-registry/all-commands plugins)
                                                   :keymap {:window (plugin-registry/window-bindings plugins)
                                                            :editor (plugin-registry/editor-bindings plugins)}
-                                                  :os (System/getProperty "os.name")})))))
+                                                  :os (System/getProperty "os.name")}))))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         ;; The locations list, or nil. A buffer list is {:tab-id :list
@@ -3898,7 +3920,9 @@
                              (doseq [[tid as] (group-by :tab-id (vals anchors))]
                                (when-let [t (tab-by-id tabs tid)]
                                  (delete-location-marks! (:buf (:ed t)) (map :marks as)))))
-                           (reset! locations-state nil))
+                           (reset! locations-state nil)
+                           ;; an empty list is nothing to switch back to
+                           (swap! (:recent-panels right) (fn [v] (vec (remove #{:locations} v)))))
         tab-for-path (fn [path]
                        (some (fn [t] (when (and @(:path t) (source/same-path? @(:path t) path)) t)) @tabs))
         anchor-file! (fn [t path]
@@ -4484,7 +4508,37 @@
                                      :editor (plugin-registry/editor-bindings plugins)}
                             :commands (plugin-registry/all-commands plugins)}))
         print-lines! (fn [lines] (doseq [l lines] (cview/append! cv :system (str l "\n"))))
-        window-key-args {:describe-pending describe-pending :recent-keys recent-keys
+        ;; The panel keys and the palette's Switch to panel: focus the panel
+        ;; when it shows. Frames, Trace and Plugins otherwise run their own
+        ;; command, which asks for what they show now (a hidden one would
+        ;; show the calls or the error from before). The inspector, source
+        ;; panel and locations list come back with their state when they
+        ;; showed before and it still holds (a dialect switch and a cleared
+        ;; list take them off the recent list); with nothing to show they
+        ;; say what fills them.
+        panel-focus-fn (fn [k]
+                         (let [focus! (fn []
+                                        (case k
+                                          :inspector (inspector-pane/focus! pane)
+                                          :source (source-pane/focus! sp)
+                                          :debugger (debugger-pane/focus! dbgp)
+                                          :locations (g/gtk-widget-grab-focus (:list locp))
+                                          :trace (g/gtk-widget-grab-focus (:list tracep))
+                                          :plugins (g/gtk-widget-grab-focus (:list lp))))]
+                           (cond
+                             (= k (showing-panel right)) (focus!)
+                             (= k :plugins) (plugin-step! {:settings-path @settings-path*
+                                                           :step (fn [] []) :open-list? true})
+                             (= k :trace) (trace-show-fn)
+                             (= k :debugger) (show-frames-fn)
+                             (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
+                             :else
+                             (set-status! status-label
+                                            (case k
+                                              :inspector "; Nothing inspected yet: inspect a form or a result first."
+                                              :source "; The Source panel is empty: jump to a definition first."
+                                              :locations "; No locations yet: list a symbol's uses or definitions, or the find matches.")))))
+        window-key-args {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
                          :live-keys live-keys :print-lines! print-lines!
                          :describe-key-fn (fn [] (reset! describe-pending true)
                                             (print-lines! ["; Press the key to describe."]))
@@ -5314,6 +5368,10 @@
                    ;; the Frames panel and the inspector's own Close
                    :debugger-pane dbgp
                    :trace-pane tracep
+                   ;; the recent panels atom, most recent first, and the
+                   ;; panel keys' and Switch to panel's fn
+                   :recent-panels* (fn [] (:recent-panels right))
+                   :panel-focus!* panel-focus-fn
                    :result-click!* result-click!
                    :result-release!* result-release!
                    :console-right-press!* console-right-press!

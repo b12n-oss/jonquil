@@ -11,7 +11,7 @@
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn
-   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn])
+   :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :panel-focus-fn])
 
 (defn- recording-ctx
   "A ctx whose every fn records [fn-key & args] into calls."
@@ -50,7 +50,10 @@
    :trace/clear [:trace-clear-fn] :trace/untrace-all [:trace-untrace-all-fn]
    :result/inspect [:result-inspect-fn] :result/copy [:result-copy-fn]
    :result/define [:result-define-fn] :result/jump [:result-jump-fn]
-   :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn] :restart/define [:define-retry-fn]})
+   :restart/retry [:retry-fn] :restart/edit [:edit-retry-fn] :restart/define [:define-retry-fn]
+   :panel/inspector [:panel-focus-fn :inspector] :panel/source [:panel-focus-fn :source]
+   :panel/locations [:panel-focus-fn :locations] :panel/frames [:panel-focus-fn :debugger]
+   :panel/trace [:panel-focus-fn :trace] :panel/plugins [:panel-focus-fn :plugins]})
 
 (deftest each-command-calls-its-fn-test
   (is (= (into (conj (set (keys expected)) :tab/select)

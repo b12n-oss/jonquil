@@ -36,6 +36,19 @@
                 :run (fn [ctx args] ((:digit-tab-fn ctx) (:n args)) :handled)}
    :tab/new {:doc "Open a new tab." :scope :window :run (call :new-tab-fn)}
    :tab/back {:doc "Go back to the tab used before." :scope :window :run (call :tab-back-fn)}
+   ;; the right-hand panels: focus the one named, or bring it back
+   :panel/inspector {:doc "Focus the Inspector panel, or open it." :scope :window
+                     :run (call :panel-focus-fn :inspector)}
+   :panel/source {:doc "Focus the Source panel, or open it." :scope :window
+                  :run (call :panel-focus-fn :source)}
+   :panel/locations {:doc "Focus the Locations panel, or open it." :scope :window
+                     :run (call :panel-focus-fn :locations)}
+   :panel/frames {:doc "Focus the Frames panel, or open it." :scope :window
+                  :run (call :panel-focus-fn :debugger)}
+   :panel/trace {:doc "Focus the Trace panel, or open it." :scope :window
+                 :run (call :panel-focus-fn :trace)}
+   :panel/plugins {:doc "Focus the Plugins panel, or open it." :scope :window
+                   :run (call :panel-focus-fn :plugins)}
    :view/cycle-theme {:doc "Switch to the next theme." :scope :window :run (call :theme-cycle-fn)}
    :inspect/form {:doc "Inspect the value of the form at the caret." :scope :window
                   :run (call :inspect-form-fn)}
