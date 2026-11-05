@@ -112,6 +112,7 @@
     jonquil.gtk.find-bar
     jonquil.gtk.gutter
     jonquil.gtk.trace-pane
+    jonquil.gtk.processes-pane
     jonquil.gtk.messages-pane
     jonquil.gtk.console-view
     jonquil.gtk.tab
