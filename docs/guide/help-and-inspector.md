@@ -93,6 +93,18 @@ clears that list, so those leave the palette's list too. A plugin's history
 and an agent's proposal aren't offered, since each belongs to the plugin or
 proposal it was opened from.
 
+### Layouts
+
+**Save the layout**, in the palette, keeps the window's arrangement as it
+is: whether the file tree shows and how wide, which right-hand panel shows
+and how wide, and where the editor and console split. It's named after what
+shows, such as `File tree and Trace panel` or `Editor only`, so saving again
+with the same parts showing replaces it. The palette then lists **Use
+layout: name** for each one, which shows or hides the tree, opens the panel
+the way its key does and sets the widths. **Forget every saved layout**
+clears them. Layouts live in the settings file, so every window and the
+next start see them.
+
 ### Messages
 
 The Messages panel keeps a log of what happened in the background while you
