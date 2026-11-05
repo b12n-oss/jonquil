@@ -76,6 +76,14 @@ Cmd/Ctrl+Shift+P lists Jonquil's commands, with their keys and source
 (built-in or plugin). Type words to narrow by description or id, Up and
 Down to move, Return or a click to run, Escape to close.
 
+The same words work at the Interactions prompt after a `!`, so you can run
+a command without leaving the keyboard's place: `!clear the console` and
+Return runs it, and the console names what ran. Words that match several
+commands list them and run none, and a command whose description is
+exactly the words wins over the longer ones. The line goes into the
+history like any other, so Up brings it back. A symbol that really starts
+with `!` still evaluates inside a form, as in `(identity !x)`.
+
 ### Switching panels
 
 The panels on the right share one place, so opening one hides the one that

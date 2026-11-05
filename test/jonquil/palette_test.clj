@@ -126,4 +126,8 @@
                       "Clear the console output and the Trace panel"]
             :words "clear"}
            (palette/bang-pick es "!clear")))
-    (is (= {:none "zap"} (palette/bang-pick es "!zap")))))
+    (is (= {:none "zap"} (palette/bang-pick es "!zap")))
+    (is (= {:run :b/c :doc "Clear the console."}
+           (palette/bang-pick [{:id :b/c :doc "Clear the console."} {:id :b/o :doc "Clear the console output."}]
+                              "!clear the console"))
+        "the doc's closing period doesn't count against an exact match")))

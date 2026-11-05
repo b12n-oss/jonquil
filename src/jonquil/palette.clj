@@ -108,7 +108,8 @@
   [entries text]
   (let [words (str/trim (subs (str/triml text) 1))
         hits (filter-entries entries words)
-        exact (filter #(= (str/lower-case words) (str/lower-case (str/trim (:doc %)))) hits)
+        bare (fn [s] (str/replace (str/lower-case (str/trim (or s ""))) #"\.$" ""))
+        exact (filter #(= (bare words) (bare (:doc %))) hits)
         one (cond (= 1 (count hits)) (first hits)
                   (= 1 (count exact)) (first exact))]
     (cond (str/blank? words) {:help true}
