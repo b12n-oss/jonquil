@@ -4255,14 +4255,21 @@
                                                   (when show? (show-right-panel! right :processes))
                                                   (when (= :processes (showing-panel right))
                                                     (if (:error r)
-                                                      (processes-pane/report! procp (str "; " (:error r)))
+                                                      ;; no stale rows to act on while the runtime's away
+                                                      (do (processes-pane/show! procp [])
+                                                          (processes-pane/report! procp (str "; " (:error r))))
                                                       (processes-pane/show! procp (:fibers r))))
                                                   (when show? (g/gtk-widget-grab-focus (:list procp)))))))))
-                                 (set-status! status-label "; Processes need Jolt."))))
+                                 (case (processes-pane/no-jolt-goes-to show?)
+                                   :status (set-status! status-label "; Processes need Jolt.")
+                                   :footer (when (= :processes (showing-panel right))
+                                             (processes-pane/show! procp [])
+                                             (processes-pane/report! procp "; Processes need Jolt."))))))
         processes-show-fn (fn [] (processes-refresh! true))
         processes-signal! (fn [k id]
                             (let [e @ev*]
-                              (when (satisfies? ev/Fibers e)
+                              (if-not (satisfies? ev/Fibers e)
+                                (processes-pane/report! procp "; Processes need Jolt.")
                                 (ev/fibers-op! e k (if id {:id id} {})
                                                (fn [r]
                                                  (on-gui! (fn []

@@ -13,8 +13,10 @@
   50)
 
 (defonce ^:private registry
-  ;; {:next id :fibers {id {:fiber f :label s :at ms}} :wrapped? b}
-  (atom {:next 1 :fibers (sorted-map) :wrapped? false}))
+  ;; {:next id :fibers {id {:fiber f :label s :at ms}} :finished [id ...]
+  ;;  :wrapped? b}; :finished holds the finished ids oldest first, at most
+  ;; KEEP-FINISHED, so a spawn never scans the fibers
+  (atom {:next 1 :fibers (sorted-map) :finished [] :wrapped? false}))
 
 (defn available? []
   (boolean (try (requiring-resolve 'jolt.fibers/spawn) (catch Throwable _ nil))))
@@ -22,30 +24,40 @@
 (defn- f* [sym] (requiring-resolve (symbol "jolt.fibers" (name sym))))
 
 (defn label
-  "What a spawned fn reads as: user$worker@1f2e as user/worker, an
-  anonymous one as \"a fn\"."
+  "What a spawned fn reads as: my_app.core$worker_QMARK_@1f2e as
+  my-app.core/worker?, an anonymous one as \"a fn\"."
   [f]
-  (let [s (str/replace (str f) #"@[0-9a-f]+$" "")]
+  (let [s (str/replace (str f) #"@[0-9a-f]+$" "")
+        demunge (try (requiring-resolve 'clojure.repl/demunge) (catch Throwable _ nil))]
     (if (or (str/includes? s "AFunction") (str/blank? s))
       "a fn"
-      (-> s (str/replace-first "$" "/") (str/replace #"\$fn__\d+" "") (str/replace "$" "/")))))
+      (let [named (-> s (str/replace #"\$fn__\d+" ""))]
+        (if demunge (demunge named) (str/replace-first named "$" "/"))))))
 
 (defn- finished? [state] (contains? #{:done :dead} state))
 
 (defn- state-of [fib] (try ((f* 'state) fib) (catch Throwable _ :dead)))
 
-(defn- prune
-  "The registry with at most KEEP-FINISHED finished fibers, the newest."
-  [{:keys [fibers] :as r}]
-  (let [done (filter (fn [[_ {:keys [fiber]}]] (finished? (state-of fiber))) (rseq fibers))
-        drop (map first (drop KEEP-FINISHED done))]
-    (assoc r :fibers (apply dissoc fibers drop))))
+(defn- note-finished
+  "r with id among the finished, dropping the oldest finished fiber past
+  KEEP-FINISHED."
+  [r id]
+  (let [fin (conj (:finished r) id)
+        over (- (count fin) KEEP-FINISHED)]
+    (if (pos? over)
+      (-> r
+          (assoc :finished (vec (drop over fin)))
+          (update :fibers #(apply dissoc % (take over fin))))
+      (assoc r :finished fin))))
 
 (defn- record! [fib f]
-  (swap! registry (fn [{:keys [next] :as r}]
-                    (prune (-> r
-                               (assoc :next (inc next))
-                               (assoc-in [:fibers next] {:fiber fib :label (label f) :at (System/currentTimeMillis)}))))))
+  (let [id (:next (first (swap-vals! registry
+                                     (fn [{:keys [next] :as r}]
+                                       (-> r
+                                           (assoc :next (inc next))
+                                           (assoc-in [:fibers next] {:fiber fib :label (label f) :at (System/currentTimeMillis)}))))))]
+    ;; called once it ends (at once when it already has), on its carrier
+    ((f* 'monitor!) fib (fn [_] (swap! registry note-finished id)))))
 
 (defn- watch! []
   (locking registry
@@ -64,11 +76,13 @@
 
 (defn- signal! [id kind]
   (if-let [{:keys [fiber]} (get-in @registry [:fibers id])]
-    (if (finished? (state-of fiber))
-      {:error (str "Fiber #" id " has already finished.")}
-      (do ((f* (if (= kind :kill) 'kill! 'interrupt!))
-           fiber (ex-info "Interrupted from Jonquil's Processes panel" {:fiber id}))
-          {:ok true}))
+    ;; interrupt! and kill! answer false for a fiber that already finished,
+    ;; including one that finished since the panel listed it
+    (if (and (not (finished? (state-of fiber)))
+             ((f* (if (= kind :kill) 'kill! 'interrupt!))
+              fiber (ex-info "Interrupted from Jonquil's Processes panel" {:fiber id})))
+      {:ok true}
+      {:error (str "Fiber #" id " has already finished.")})
     {:error (str "No fiber #" id ".")}))
 
 (defn op
@@ -82,13 +96,13 @@
       (case k
         :watch (watch!)
         :list (let [now (System/currentTimeMillis)
-                    {:keys [fibers wrapped?]} (swap! registry prune)]
+                    {:keys [fibers wrapped?]} @registry]
                 {:watching? wrapped?
                  :fibers (vec (for [[id e] (rseq fibers)] (fiber-entry id e now)))})
         :interrupt (signal! (:id args) :interrupt)
         :kill (signal! (:id args) :kill)
-        :forget (do (swap! registry update :fibers
-                           (fn [fs] (into (sorted-map) (remove (fn [[_ {:keys [fiber]}]] (finished? (state-of fiber)))) fs)))
+        :forget (do (swap! registry (fn [{:keys [finished] :as r}]
+                                      (-> r (update :fibers #(apply dissoc % finished)) (assoc :finished []))))
                     {:ok true})
         {:error (str "Unknown Processes op " k)})
       (catch Throwable e {:error (str "Processes: " (or (ex-message e) (str (class e))))}))))

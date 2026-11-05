@@ -1,5 +1,6 @@
 (ns jonquil.fibers-rt-test
   (:require [clojure.test :refer [deftest is testing]]
+            [jolt.fibers]
             [jonquil.fibers-rt :as fr]))
 
 (defn- spawn [f] ((requiring-resolve 'jolt.fibers/spawn) f))
@@ -48,3 +49,34 @@
           (is (empty? (filter #(#{:done :dead} (:state %)) (:fibers (fr/op :list {}))))))
         (reset! stop true)
         (is (some? loop-fib))))))
+
+(defn worker? [] :w)
+
+(deftest label-test
+  (is (= "jonquil.fibers-rt-test/worker?" (fr/label worker?)) "demunged")
+  (is (= "a fn" (fr/label (fn [] 1)))))
+
+(deftest spawn-stays-cheap-test
+  (when (fr/available?)
+    (fr/op :watch {})
+    (let [stop (atom false)
+          spawn (requiring-resolve 'jolt.fibers/spawn)
+          yield (requiring-resolve 'jolt.fibers/yield)
+          t0 (System/currentTimeMillis)]
+      (dotimes [_ 3000] (spawn (fn [] (loop [] (when-not @stop (yield) (recur))))))
+      (let [ms (- (System/currentTimeMillis) t0)]
+        (reset! stop true)
+        (is (< ms 1500) (str "3000 spawns of live fibers while watching took " ms " ms"))))))
+
+(deftest interrupt-that-lands-on-a-finished-fiber-test
+  (when (fr/available?)
+    (fr/op :watch {})
+    (let [stop (atom false)
+          fib ((requiring-resolve 'jolt.fibers/spawn) (fn [] (loop [] (when-not @stop ((requiring-resolve 'jolt.fibers/yield)) (recur)))))
+          id (:id (first (:fibers (fr/op :list {}))))]
+      (with-redefs [jolt.fibers/interrupt! (fn [& _] false)]
+        (is (= {:error (str "Fiber #" id " has already finished.")} (fr/op :interrupt {:id id}))
+            "interrupt! answered false: it finished in between"))
+      (reset! stop true)
+      (is (some? fib)))))
+

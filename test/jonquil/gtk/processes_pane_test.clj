@@ -22,3 +22,14 @@
     (is (= 1 (pp/selected-index fs 7)))
     (is (= 0 (pp/selected-index fs 3)))
     (is (nil? (pp/selected-index [] 7)))))
+
+(deftest rebuild-test
+  (is (false? (pp/rebuild? [{:id 1 :state :parked :age-ms 1000}] [{:id 1 :state :parked :age-ms 2000}]))
+      "only the age moved: the rows are relabelled in place")
+  (is (true? (pp/rebuild? [{:id 1 :state :parked}] [{:id 1 :state :dead}])))
+  (is (true? (pp/rebuild? [{:id 1 :state :parked}] [{:id 2 :state :parked} {:id 1 :state :parked}]))))
+
+(deftest refresh-problem-test
+  (is (= :status (pp/no-jolt-goes-to true)) "a person asked: the status bar")
+  (is (= :footer (pp/no-jolt-goes-to false)) "the timer: the panel's own footer, never the status bar"))
+

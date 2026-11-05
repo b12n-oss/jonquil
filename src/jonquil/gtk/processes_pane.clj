@@ -36,6 +36,20 @@
   (when (seq fibers)
     (or (first (keep-indexed (fn [i f] (when (= id (:id f)) i)) fibers)) 0)))
 
+(defn rebuild?
+  "Whether new fibers need the rows rebuilt: their ids or states differ
+  from old's. Only the ages moving is a relabel in place, so the focused
+  row and the scroll stay put through the panel's one-second refresh."
+  [old new]
+  (not= (map (juxt :id :state) old) (map (juxt :id :state) new)))
+
+(defn no-jolt-goes-to
+  "Where \"Processes need Jolt.\" goes: the status bar when a person asked
+  (shown? true), else the panel's own footer, so the timer's refresh never
+  writes a line a second to the status bar and Messages."
+  [asked?]
+  (if asked? :status :footer))
+
 (defn report!
   "Puts msg on the panel's footer."
   [pane msg]
@@ -63,17 +77,28 @@
   (let [lb (:list pane)
         rows (mapv row-text fibers)
         keep-id (selected-id pane)]
-    (when (not= rows @(:rows pane))
-      (reset! (:fibers pane) (vec fibers))
-      (reset! (:rows pane) rows)
-      (g/gtk-list-box-remove-all lb)
-      (doseq [r rows]
-        (let [label (g/gtk-label-new r)]
-          (g/gtk-label-set-xalign label 0.0)
-          (g/gtk-widget-set-halign label g/ALIGN-START)
-          (g/gtk-list-box-append lb label)))
-      (when-let [i (selected-index fibers keep-id)]
-        (g/gtk-list-box-select-row lb (g/gtk-list-box-get-row-at-index lb i))))
+    (cond
+      (= rows @(:rows pane)) nil
+      (rebuild? @(:fibers pane) fibers)
+      (do (reset! (:fibers pane) (vec fibers))
+          (reset! (:rows pane) rows)
+          (g/gtk-list-box-remove-all lb)
+          (reset! (:labels pane)
+                  (mapv (fn [r]
+                          (let [label (g/gtk-label-new r)]
+                            (g/gtk-label-set-xalign label 0.0)
+                            (g/gtk-widget-set-halign label g/ALIGN-START)
+                            (g/gtk-list-box-append lb label)
+                            label))
+                        rows))
+          (when-let [i (selected-index fibers keep-id)]
+            (g/gtk-list-box-select-row lb (g/gtk-list-box-get-row-at-index lb i))))
+      ;; the same fibers in the same states: new ages, same rows
+      :else
+      (do (reset! (:fibers pane) (vec fibers))
+          (reset! (:rows pane) rows)
+          (doseq [[label r] (map vector @(:labels pane) rows)]
+            (g/gtk-label-set-text label r))))
     (report! pane (footer-text fibers))))
 
 (defn row-texts
@@ -98,7 +123,7 @@
         bar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 4)
         footer (g/gtk-label-new "")
         pane {:root root :title title :list lb :scroll scroll :footer footer
-              :rows (atom []) :fibers (atom []) :handlers (atom {})}
+              :rows (atom []) :fibers (atom []) :labels (atom []) :handlers (atom {})}
         call (fn [k & args]
                (try (when-let [f (k @(:handlers pane))] (apply f args))
                     (catch :default e (report! pane (str "; " (ex-message e))))))
