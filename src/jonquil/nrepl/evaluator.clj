@@ -815,6 +815,26 @@
     nil)
   ;; Tracing: jonquil.nrepl.inspect-middleware's jonquil-trace op, over
   ;; jonquil.trace-rt in the child
+  ev/Fibers
+  (fibers-op! [this op args on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-fibers")) {:error "Processes need Jolt."}
+                    :else
+                    (let [r (client/request-sync conn (cond-> {:op "jonquil-fibers" :action (name op) :session session}
+                                                        (:id args) (assoc :fiber (:id args)))
+                                                 request-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (some :error r) {:error (some :error r)}
+                            (some :data r) (edn/read-string (some :data r))
+                            :else {:error "The Jolt child answered without its fibers."}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
   ev/Trace
   (trace-op! [this op args on-result]
     (future

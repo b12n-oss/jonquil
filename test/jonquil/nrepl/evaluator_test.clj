@@ -1058,3 +1058,20 @@
         (is (and (some? id1) (identical? id1 id2)))
         (is (true? done?) "the end comes after the evaluation's own on-complete"))
       (finally (ev/stop! e)))))
+
+(deftest fibers-in-the-child-test
+  (let [e (make (temp-project))
+        op (fn [k args] (let [p (promise)] (ev/fibers-op! e k args (fn [r] (deliver p r))) (deref p 20000 :timeout)))]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [w (op :watch {})]
+        (if (and (:error w) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP fibers-in-the-child-test: this child has no fibers:" (:error w))
+              (is (string? (:error w))))
+          (do (is (= {:watching? true} w))
+              (run e "(def fib-stop (atom false)) (jolt.fibers/spawn (fn [] (loop [] (when-not @fib-stop (jolt.fibers/yield) (recur)))))" false)
+              (let [{:keys [fibers]} (op :list {})
+                    id (:id (first fibers))]
+                (is (#{:running :ready :parked} (:state (first fibers))) (pr-str fibers))
+                (is (= {:ok true} (op :interrupt {:id id})) (pr-str fibers))))))
+      (finally (ev/stop! e)))))

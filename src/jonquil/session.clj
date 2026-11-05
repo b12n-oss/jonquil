@@ -13,6 +13,7 @@
             [clojure.set :as set]
             [jonquil.clj :as clj]
             [jonquil.debugger :as debugger]
+            [jonquil.fibers-rt :as fibers-rt]
             [jonquil.results-rt :as results-rt]
             [jonquil.trace-rt :as trace-rt]
             [jonquil.world-rt :as world-rt]
@@ -138,6 +139,10 @@
                    (catch Throwable e {:error (or (ex-message e) (str (class e)))})
                    (finally (swap! state (fn [st] (cond-> st (identical? token (:frame-token st)) (dissoc :frame-token))))))]
         (try (on-result r) (catch Throwable _))))
+    nil)
+  ev/Fibers
+  (fibers-op! [_ op args on-result]
+    (future (let [r (fibers-rt/op op args)] (try (on-result r) (catch Throwable _))))
     nil)
   ev/Break
   (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)
