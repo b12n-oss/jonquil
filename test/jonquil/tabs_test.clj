@@ -103,3 +103,11 @@
   (is (nil? (tabs/disk-follow {:saved "a" :disk "a" :dirty? true :buffer "c"})) "the tab's own save")
   (is (= :missing (tabs/disk-follow {:saved "a" :disk nil :reported nil})))
   (is (nil? (tabs/disk-follow {:saved "a" :disk nil :reported ::tabs/missing})) "said once"))
+(deftest stat-step-test
+  (is (= :same (tabs/stat-step {:stat [1 10] :seen-stat [1 10]})) "unchanged")
+  (is (= :wait (tabs/stat-step {:stat [2 0] :seen-stat [1 10]}))
+      "a first sight of a new stat waits a tick: a writer may be mid-write")
+  (is (= :act (tabs/stat-step {:stat [2 20] :seen-stat [1 10] :pending [2 20]})) "steady for a tick")
+  (is (= :wait (tabs/stat-step {:stat [3 20] :seen-stat [1 10] :pending [2 0]})) "still moving")
+  (is (= :wait (tabs/stat-step {:stat nil :seen-stat [1 10]})) "a delete waits too")
+  (is (= :act (tabs/stat-step {:stat nil :seen-stat [1 10] :pending nil})) "and is acted on once it holds"))

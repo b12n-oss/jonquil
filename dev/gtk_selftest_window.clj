@@ -406,6 +406,8 @@
    messages-rows/row-messages-disk-change-dirty
    messages-rows/row-messages-disk-change-nul
    messages-rows/row-messages-disk-deleted-then-back
+   messages-rows/row-messages-disk-waits-a-tick
+   messages-rows/row-messages-disk-follow-failure-said
    messages-rows/row-messages-selection-stays
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines

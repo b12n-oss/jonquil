@@ -142,6 +142,19 @@
     (when (not= ::missing reported) :missing)
     (disk-sync m)))
 
+(defn stat-step
+  "What the disk check does with a tab's file stat ([modified-ms length],
+  or nil when the file is gone) this tick: :same when it equals the stat
+  the tab last followed, :act when it moved and has held steady since the
+  last tick (:pending, present only while one is waiting, since a pending
+  delete is nil), else :wait, with stat becoming the pending one. The
+  tick's wait keeps a clean tab from reloading a file a writer has
+  truncated but not finished writing."
+  [{:keys [stat seen-stat pending] :as m}]
+  (cond (= stat seen-stat) :same
+        (and (contains? m :pending) (= stat pending)) :act
+        :else :wait))
+
 (defn nul-line
   "The 1-based line of the first NUL byte in text, or nil when it has
   none. Lines are counted by \\n alone, so a CRLF file reports the line a
