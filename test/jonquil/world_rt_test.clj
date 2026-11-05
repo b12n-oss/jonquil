@@ -40,17 +40,23 @@
       (is (= [] (:placeholders r))))))
 
 (deftest placeholders-test
-  (let [reader (java.io.StringReader. "x")
-        n (fresh-ns! 'jonquil.world-rt-test.c {'reader (java.io.BufferedReader. reader) 'n 1})
-        path (temp-path)
-        saved (world-rt/op :save {:path path :namespaces [n]})]
-    (testing "a var that can only be a placeholder is named, and the world is still written"
-      (is (= 2 (:saved saved)))
-      (is (= ["jonquil.world-rt-test.c/reader"] (map :var (:placeholders saved))))
-      (is (.isFile (io/file path))))
-    (testing "the restore names it too"
-      (is (= ["jonquil.world-rt-test.c/reader"]
-             (map :var (:placeholders (world-rt/op :restore {:path path}))))))))
+  ;; An open file, which every Jolt with jolt.image writes as a
+  ;; placeholder. A BufferedReader over a StringReader isn't one on Jolt
+  ;; v0.8.23 (the Linux image's), which writes it as plain data.
+  (let [f (doto (java.io.File/createTempFile "jonquil-world" ".txt") (spit "x"))
+        reader (java.io.FileReader. f)]
+    (try
+      (let [n (fresh-ns! 'jonquil.world-rt-test.c {'reader reader 'n 1})
+            path (temp-path)
+            saved (world-rt/op :save {:path path :namespaces [n]})]
+        (testing "a var that can only be a placeholder is named, and the world is still written"
+          (is (= 2 (:saved saved)))
+          (is (= ["jonquil.world-rt-test.c/reader"] (map :var (:placeholders saved))))
+          (is (.isFile (io/file path))))
+        (testing "the restore names it too"
+          (is (= ["jonquil.world-rt-test.c/reader"]
+                 (map :var (:placeholders (world-rt/op :restore {:path path})))))))
+      (finally (.close reader) (.delete f)))))
 
 (deftest unwritable-writes-nothing-test
   (let [n (fresh-ns! 'jonquil.world-rt-test.d {'x 1 'y 2})
