@@ -11,12 +11,12 @@
             [jonquil.messages :as messages]))
 
 (def KIND-TAGS
-  {:agent "agent" :agent-read "read" :plugin "plugin" :connection "conn"
+  {:agent "agent" :agent-read "read" :plugin "plugin" :file "file" :connection "conn"
    :runtime "runtime" :status "status"})
 
 (def FILTERS
   "[kind label] for the filter buttons, in their order."
-  [[:agent "Agent"] [:agent-read "Reads"] [:plugin "Plugins"]
+  [[:agent "Agent"] [:file "Files"] [:agent-read "Reads"] [:plugin "Plugins"]
    [:connection "Connections"] [:runtime "Runtime"] [:status "Status"]])
 
 (def ^:private EMPTY
@@ -123,10 +123,10 @@
         pane {:root root :title title :filter-btns filter-btns :list lb :scroll scroll
               :close-btn close-btn :footer footer :kinds* (atom messages/SHOWN-KINDS)
               :expanded* (atom #{}) :rows (atom []) :entries (atom []) :handlers (atom {})}]
-    ;; two rows of three, so six labels fit the panel's width
+    ;; two rows (four, then three), so seven labels fit the panel's width
     (doseq [[i [k btn]] (map-indexed vector filter-btns)]
       (g/gtk-check-button-set-active btn (if (contains? messages/SHOWN-KINDS k) 1 0))
-      (g/gtk-box-append (filter-rows (quot i 3)) btn)
+      (g/gtk-box-append (filter-rows (quot i 4)) btn)
       (g/g-signal-connect-data btn "toggled"
                                (callable (fn [b _data]
                                            (try (swap! (:kinds* pane) (if (pos? (g/gtk-check-button-get-active b)) conj disj) k)

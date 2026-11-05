@@ -131,6 +131,17 @@
           (= buffer disk) :rebase
           :else :warn)))
 
+(defn disk-change
+  "What the Messages panel says about an open tab's file (LM8, log only:
+  the tab is never touched): :changed when the disk holds text other than
+  the tab last saved (so its own save never counts) and other than the
+  text last reported for it (so one change is said once), :missing when the
+  file went and that wasn't said yet (reported ::missing), nil otherwise."
+  [{:keys [saved disk reported]}]
+  (cond
+    (nil? disk) (when (not= ::missing reported) :missing)
+    (and (not= disk saved) (not= disk reported)) :changed))
+
 (defn nul-line
   "The 1-based line of the first NUL byte in text, or nil when it has
   none. Lines are counted by \\n alone, so a CRLF file reports the line a

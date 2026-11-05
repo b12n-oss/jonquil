@@ -402,6 +402,7 @@
    messages-rows/row-messages-status-collapses
    messages-rows/row-messages-closed-tab-target
    messages-rows/row-messages-burst
+   messages-rows/row-messages-disk-change
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-changed-not-before-first-run

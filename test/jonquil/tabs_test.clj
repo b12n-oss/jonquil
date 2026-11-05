@@ -95,3 +95,12 @@
   ;; CRLF counts by \n, so the line a person sees
   (is (= 2 (tabs/nul-line "a\r\nb\u0000")))
   (is (= 1 (tabs/nul-line "\u0000\u0000\u0000\u0000"))))
+
+(deftest disk-change-test
+  (is (nil? (tabs/disk-change {:saved "a" :disk "a" :reported nil})) "unchanged")
+  (is (nil? (tabs/disk-change {:saved "b" :disk "b" :reported "x"})) "the tab's own save")
+  (is (= :changed (tabs/disk-change {:saved "a" :disk "b" :reported nil})) "first change")
+  (is (nil? (tabs/disk-change {:saved "a" :disk "b" :reported "b"})) "same change again")
+  (is (= :changed (tabs/disk-change {:saved "a" :disk "c" :reported "b"})) "a second, different change")
+  (is (= :missing (tabs/disk-change {:saved "a" :disk nil :reported nil})) "deleted")
+  (is (nil? (tabs/disk-change {:saved "a" :disk nil :reported ::tabs/missing})) "deleted, said once"))

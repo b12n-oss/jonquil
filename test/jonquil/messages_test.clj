@@ -73,3 +73,7 @@
 (deftest log!-never-throws
   (is (nil? (binding [*err* (java.io.StringWriter.)]
               (m/log! (atom :not-a-log) {:kind :agent :summary "x"})))))
+
+(deftest file-changes-are-shown-and-counted
+  (is (contains? m/SHOWN-KINDS :file))
+  (is (contains? m/COUNTED-KINDS :file)))

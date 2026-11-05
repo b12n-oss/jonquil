@@ -12,8 +12,9 @@
   1000)
 
 (def SHOWN-KINDS
-  "The kinds the panel shows until the person changes its filter."
-  #{:agent :plugin :connection :runtime})
+  "The kinds the panel shows until the person changes its filter. :file is
+  an open tab's file changed on disk, an agent's own edit tool most often."
+  #{:agent :plugin :file :connection :runtime})
 
 (def COUNTED-KINDS
   "The kinds that raise the unread count: the background ones. Reads and

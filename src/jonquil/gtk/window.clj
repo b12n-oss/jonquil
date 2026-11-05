@@ -827,6 +827,11 @@
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
+(def ^:private DISK-POLL-MS
+  ;; estimate: quick enough to see an agent's edit while it works, slow
+  ;; enough that statting the open tabs costs nothing
+  2000)
+
 (def ^:private PANEL-WIDTH
   ;; estimate: matched against jonquil.gtk.inspector-pane/WIDTH-REQUEST
   ;; (360) plus room for the paned's handle.
@@ -4366,6 +4371,45 @@
                                          (binding [*out* *err*]
                                            (println "jonquil: messages refresh:" (ex-message e)))))))))
         _ (register-status-log! status-label log-entry!)
+        ;; Open files changed on disk (LM8, log only): agents mostly edit
+        ;; files with their own tools, which no MCP call shows. Each tick
+        ;; stats every open tab's file (plugin tabs keep sync-plugin-tabs!)
+        ;; and reads one only when its time or size moved; a change from
+        ;; what the tab last saved logs once. Tabs are never touched.
+        ;; GTK thread, so the tab list and saved text are read safely.
+        disk-seen (atom {})
+        disk-tick! (fn []
+                     (let [dir (plugin-loader/plugins-dir @settings-path*)
+                           ts @tabs]
+                       (swap! disk-seen select-keys (map :id ts))
+                       (doseq [t ts
+                               :let [path @(:path t)]
+                               :when (and path (not (plugin-loader/plugin-file-or-target? dir path)))]
+                         (try
+                           (let [f (java.io.File. ^String path)
+                                 stat (when (.exists f) [(.lastModified f) (.length f)])
+                                 seen (get @disk-seen (:id t))]
+                             (cond
+                               ;; first sight (or a new path): only remember it
+                               (or (nil? seen) (not= path (:path seen)))
+                               (swap! disk-seen assoc (:id t) {:path path :stat stat})
+                               (not= stat (:stat seen))
+                               (let [disk (when stat (slurp path))
+                                     ed (:ed t)
+                                     name (last (str/split path #"/"))]
+                                 (swap! disk-seen assoc-in [(:id t) :stat] stat)
+                                 (case (tabs/disk-change {:saved @(:saved-text ed) :disk disk :reported (:reported seen)})
+                                   :changed (do (swap! disk-seen assoc-in [(:id t) :reported] disk)
+                                                (log-entry! {:kind :file :target {:tab-id (:id t)}
+                                                             :summary (str name " changed on disk"
+                                                                           (when (editor/dirty? ed) " (this tab has unsaved edits)"))}))
+                                   :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
+                                                (log-entry! {:kind :file :target {:tab-id (:id t)}
+                                                             :summary (str name " was deleted or moved on disk")}))
+                                   nil))))
+                           ;; a read that failed logs nothing; the next tick tries again
+                           (catch :default _ (swap! disk-seen update (:id t) dissoc :stat))))))
+        _ (g/g-timeout-add DISK-POLL-MS (callable (fn [_data] (disk-tick!) 1) [:pointer] :int :on-throw 1) ffi/null)
         _ (messages-pane/set-handlers!
            msgp {:on-activate (fn [entry]
                                 (let [{:keys [tab-id plugin-id]} (:target entry)]
@@ -5473,6 +5517,7 @@
                    :messages-pane msgp
                    :messages* messages*
                    :log!* log-entry!
+                   :disk-tick!* disk-tick!
                    :unread-label unread-label
                    ;; the recent panels atom, most recent first, and the
                    ;; panel keys' and Switch to panel's fn

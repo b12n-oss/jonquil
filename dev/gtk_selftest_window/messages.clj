@@ -165,3 +165,32 @@
                                  (and counted? (= (range 1 201) (:ids state)) (= 200 (:top state)) (= 200 (:rows state)))
                                  (assoc (dissoc state :ids) :counted counted?))))
         (finally (close-panel! ui))))))
+
+(defn row-messages-disk-change
+  "An open file rewritten on disk by someone else (an agent's own edit
+  tool) logs one Files row and counts unread; the tab's text stays as it
+  was, and the same text written again logs nothing more."
+  [ui]
+  (go-row :messages-disk-change support/check
+    (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-msg-disk-") "x.clj")
+          path (.getPath f)
+          _ (spit f "(def x 1)\n")
+          id (on-gtk (fresh! ui) ((:open-file! ui) path) (:id ((:active-tab* ui))))]
+      (try
+        ;; the poll's tick, run here so the row needn't wait on its timer:
+        ;; once to see the file, once after each write
+        (on-gtk ((:disk-tick!* ui)))
+        (spit f "(def x 2)\n;; written by an agent\n")
+        (on-gtk ((:disk-tick!* ui)))
+        (let [logged? (await-until 3000 20 #(= "● 1 message" (unread ui)))
+              _ (spit f "(def x 2)\n;; written by an agent\n")
+              _ (on-gtk ((:disk-tick!* ui)) ((:disk-tick!* ui)))
+              state (on-gtk {:entries (mapv #(select-keys % [:kind :summary :target]) (:entries @(:messages* ui)))
+                             :text (editor/editor-text (:ed (some #(when (= id (:id %)) %) ((:tabs* ui)))))})]
+          (on-gtk (support/check :messages-disk-change
+                                 (and logged?
+                                      (= [{:kind :file :summary "x.clj changed on disk" :target {:tab-id id}}]
+                                         (filterv #(= :file (:kind %)) (:entries state)))
+                                      (= "(def x 1)\n" (:text state)))
+                                 (assoc state :logged logged?))))
+        (finally (on-gtk (drop-tab! ui id)) (close-panel! ui))))))
