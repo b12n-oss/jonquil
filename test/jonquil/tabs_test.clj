@@ -96,14 +96,10 @@
   (is (= 2 (tabs/nul-line "a\r\nb\u0000")))
   (is (= 1 (tabs/nul-line "\u0000\u0000\u0000\u0000"))))
 
-(deftest disk-change-test
-  (is (nil? (tabs/disk-change {:saved "a" :disk "a" :reported nil})) "unchanged")
-  (is (nil? (tabs/disk-change {:saved "b" :disk "b" :reported nil})) "the tab's own save")
-  (is (= :changed (tabs/disk-change {:saved "a" :disk "b" :reported nil})) "first change")
-  (is (nil? (tabs/disk-change {:saved "a" :disk "b" :reported "b"})) "same change again")
-  (is (= :changed (tabs/disk-change {:saved "a" :disk "c" :reported "b"})) "a second, different change")
-  (is (= :missing (tabs/disk-change {:saved "a" :disk nil :reported nil})) "deleted")
-  (is (nil? (tabs/disk-change {:saved "a" :disk nil :reported ::tabs/missing})) "deleted, said once")
-  (is (= :clear (tabs/disk-change {:saved "s" :disk "s" :reported "x"}))
-      "the disk back to what the tab saved forgets the report, so the same edit again is said again")
-  (is (= :clear (tabs/disk-change {:saved "s" :disk "s" :reported ::tabs/missing})) "restored after a delete"))
+(deftest disk-follow-test
+  (is (= :reload (tabs/disk-follow {:saved "a" :disk "b" :dirty? false :buffer "a"})))
+  (is (= :warn (tabs/disk-follow {:saved "a" :disk "b" :dirty? true :buffer "c"})))
+  (is (= :rebase (tabs/disk-follow {:saved "a" :disk "b" :dirty? true :buffer "b"})))
+  (is (nil? (tabs/disk-follow {:saved "a" :disk "a" :dirty? true :buffer "c"})) "the tab's own save")
+  (is (= :missing (tabs/disk-follow {:saved "a" :disk nil :reported nil})))
+  (is (nil? (tabs/disk-follow {:saved "a" :disk nil :reported ::tabs/missing})) "said once"))

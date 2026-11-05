@@ -131,19 +131,16 @@
           (= buffer disk) :rebase
           :else :warn)))
 
-(defn disk-change
-  "What the Messages panel says about an open tab's file (LM8, log only:
-  the tab is never touched): :changed when the disk holds text other than
-  the tab last saved (so its own save never counts) and other than the
-  text last reported for it (so one change is said once), :missing when the
-  file went and that wasn't said yet (reported ::missing), :clear when the
-  disk is back to what the tab saved after a report (so the same edit made
-  again is said again), nil otherwise."
-  [{:keys [saved disk reported]}]
-  (cond
-    (nil? disk) (when (not= ::missing reported) :missing)
-    (= disk saved) (when (some? reported) :clear)
-    (and (not= disk saved) (not= disk reported)) :changed))
+(defn disk-follow
+  "What the disk check does with an open tab whose file's stat changed:
+  disk-sync's answer (:reload a clean tab, :warn a dirty one, :rebase one
+  whose edits already equal the disk, nil when the disk holds what the tab
+  saved), or, when the file is gone (disk nil), :missing unless that was
+  already said (reported ::missing), else nil."
+  [{:keys [disk reported] :as m}]
+  (if (nil? disk)
+    (when (not= ::missing reported) :missing)
+    (disk-sync m)))
 
 (defn nul-line
   "The 1-based line of the first NUL byte in text, or nil when it has

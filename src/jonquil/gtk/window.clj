@@ -4371,11 +4371,12 @@
                                          (binding [*out* *err*]
                                            (println "jonquil: messages refresh:" (ex-message e)))))))))
         _ (register-status-log! status-label log-entry!)
-        ;; Open files changed on disk (LM8, log only): agents mostly edit
-        ;; files with their own tools, which no MCP call shows. Each tick
-        ;; stats every open tab's file (plugin tabs keep sync-plugin-tabs!)
-        ;; and reads one only when its time or size moved; a change from
-        ;; what the tab last saved logs once. Tabs are never touched.
+        ;; Open files changed on disk: agents mostly edit files with their
+        ;; own tools, which no MCP call shows. Each tick stats every open
+        ;; tab's file (plugin tabs keep sync-plugin-tabs!) and reads one only
+        ;; when its time or size moved. A clean tab follows the file as one
+        ;; undo step; a dirty one keeps its edits and takes the disk text as
+        ;; its saved baseline (tabs/disk-follow), each logged to Messages.
         ;; GTK thread, so the tab list and saved text are read safely.
         disk-seen (atom {})
         disk-tick! (fn []
@@ -4396,18 +4397,27 @@
                                (not= stat (:stat seen))
                                (let [disk (when stat (slurp path))
                                      ed (:ed t)
-                                     name (last (str/split path #"/"))]
+                                     name (last (str/split path #"/"))
+                                     log! (fn [summary] (log-entry! {:kind :file :target {:tab-id (:id t)} :summary summary}))]
                                  (swap! disk-seen assoc-in [(:id t) :stat] stat)
-                                 (case (tabs/disk-change {:saved @(:saved-text ed) :disk disk :reported (:reported seen)})
-                                   :changed (do (swap! disk-seen assoc-in [(:id t) :reported] disk)
-                                                (log-entry! {:kind :file :target {:tab-id (:id t)}
-                                                             :summary (str name " changed on disk"
-                                                                           (when (editor/dirty? ed) " (this tab has unsaved edits)"))}))
-                                   :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
-                                                (log-entry! {:kind :file :target {:tab-id (:id t)}
-                                                             :summary (str name " was deleted or moved on disk")}))
-                                   :clear (swap! disk-seen update (:id t) dissoc :reported)
-                                   nil))))
+                                 ;; the file is there again: a later delete is said again
+                                 (when disk (swap! disk-seen update (:id t) dissoc :reported))
+                                 (if (and disk (tabs/nul-line disk))
+                                   ;; GTK would truncate it, and rebasing on it would leave the
+                                   ;; tab dirty for good
+                                   (log! (str name " changed on disk but holds a NUL byte, so this tab keeps its text"))
+                                   (case (tabs/disk-follow {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
+                                                            :buffer (when disk (editor/editor-text ed)) :reported (:reported seen)})
+                                     :reload (do (editor/reload-text! ed disk)
+                                                 (refresh-labels! @*tab-ctx)
+                                                 (log! (str name " was reloaded from disk")))
+                                     :warn (do (editor/rebase-saved! ed disk)
+                                               (refresh-labels! @*tab-ctx)
+                                               (log! (str name " changed on disk, and this tab keeps your unsaved edits")))
+                                     :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
+                                     :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
+                                                  (log! (str name " was deleted or moved on disk")))
+                                     nil)))))
                            ;; a read that failed logs nothing; the next tick tries again
                            (catch :default _ (swap! disk-seen update (:id t) dissoc :stat))))))
         _ (g/g-timeout-add DISK-POLL-MS (callable (fn [_data] (disk-tick!) 1) [:pointer] :int :on-throw 1) ffi/null)

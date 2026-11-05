@@ -403,6 +403,9 @@
    messages-rows/row-messages-closed-tab-target
    messages-rows/row-messages-burst
    messages-rows/row-messages-disk-change
+   messages-rows/row-messages-disk-change-dirty
+   messages-rows/row-messages-disk-change-nul
+   messages-rows/row-messages-disk-deleted-then-back
    messages-rows/row-messages-selection-stays
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
