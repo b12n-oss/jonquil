@@ -3760,7 +3760,7 @@
                                         (g/gtk-label-set-text status-label (str "; " l))))}))))
         ;; After a plugin step, each tab on a plugin file whose
         ;; file now holds other text than the tab last saved follows it: a
-        ;; clean tab reloads, keeping its caret's offset, and a dirty one
+        ;; clean tab reloads as one undo step, keeping its caret's offset, and a dirty one
         ;; keeps its edits, is warned once on the console and takes the disk
         ;; text as its saved baseline. GTK-thread only.
         sync-plugin-tabs! (fn []
@@ -3783,10 +3783,7 @@
                                     (cview/append! cv :system (str "; " path " changed on disk but now holds a NUL byte, so this tab keeps its text.\n")))
                                   (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
                                                     :buffer (editor/editor-text ed)})
-                                    :reload (let [caret (g/cursor-offset (:buf ed))
-                                                  at (min caret (count disk))]
-                                              (editor/set-text! ed disk)
-                                              (g/with-iters* (:buf ed) at at (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+                                    :reload (do (editor/reload-text! ed disk)
                                               (cview/append! cv :system (str "; " path " changed on disk, so this tab was reloaded.\n"))
                                               (refresh-labels! @*tab-ctx))
                                     :warn (do (editor/rebase-saved! ed disk)
