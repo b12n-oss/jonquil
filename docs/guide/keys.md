@@ -140,6 +140,6 @@ the next key you press** from the palette ([Describing keys](help-and-inspector.
 | Cmd/Ctrl+[ | Elsewhere, after F12 opened a tab | Back to where F12 was pressed |
 | Cmd/Ctrl+Shift+O | Source panel | Open the panel's project file in a tab |
 | Escape | Source panel | Close the panel |
-| Cmd/Ctrl+Alt+1 to 7 | anywhere in the window | Focus the Inspector, Source, Locations, Frames, Trace, Plugins or Messages panel, bring it back, or open it ([Switching panels](help-and-inspector.md#switching-panels), [Messages](help-and-inspector.md#messages)) |
+| Cmd/Ctrl+Alt+1 to 8 | anywhere in the window | Focus the Inspector, Source, Locations, Frames, Trace, Plugins, Messages or Processes panel, bring it back, or open it ([Switching panels](help-and-inspector.md#switching-panels), [Messages](help-and-inspector.md#messages), [Processes](help-and-inspector.md#the-processes-panel)) |
 
 </details>

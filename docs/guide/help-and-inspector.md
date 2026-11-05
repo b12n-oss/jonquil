@@ -81,8 +81,9 @@ Down to move, Return or a click to run, Escape to close.
 The panels on the right share one place, so opening one hides the one that
 was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
-screen. Cmd/Ctrl+Alt+1 to 7 each go to one panel: 1 the Inspector, 2
-Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins and 7 Messages. Both focus the panel
+screen. Cmd/Ctrl+Alt+1 to 8 each go to one panel: 1 the Inspector, 2
+Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages and 8
+Processes. Both focus the panel
 when it's showing. Otherwise Frames, Trace and Plugins open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with
@@ -286,6 +287,24 @@ redefining a traced function (Run again) replaces the wrapper, so the new
 definition isn't traced. Tracing runs where your code runs, in process or in
 a project's Jolt child, and doesn't touch `*1`; other runtimes say it needs
 Jolt for now.
+
+## The Processes panel
+
+**Show the processes**, in the palette, or Cmd/Ctrl+Alt+8 opens the
+Processes panel: the fibers your program spawned with `jolt.fibers/spawn`,
+newest first, each with its number, its state as Jolt reports it
+(`running`, `ready`, `parked`, `done` or `dead`), the function it runs and
+how long ago it started. **Interrupt** raises an error in the selected fiber
+("Interrupted from Jonquil's Processes panel"), which a `masked` region
+holds off until it ends, and **Kill** ends it outright. **Forget finished**
+drops the done and dead ones; Jonquil keeps the last 50 of those anyway.
+While the panel shows, it refreshes every second.
+
+Jolt keeps no list of live fibers, so the first time the panel opens Jonquil
+starts watching `spawn`, the way Trace wraps a function, and code compiled
+earlier goes through it too. Fibers spawned before that aren't listed, and
+neither are threads (`future`, agents), which aren't fibers. It works in
+process and in a project's Jolt child; other runtimes say it needs Jolt.
 
 ## The last error's frames
 
