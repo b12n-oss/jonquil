@@ -116,7 +116,9 @@ everything read.
 Enter on a row jumps to its tab, and on an agent's evaluation it opens the
 code and the result below the row, cut at 20 lines. A row for a plugin
 proposal opens the Review panel. The disk check covers files open in tabs,
-about every two seconds, and never reloads or changes a tab. The log keeps
+about every two seconds. A tab with no unsaved edits follows its file, and
+one with unsaved edits keeps them ([When the file changes on
+disk](files-and-tabs.md#when-the-file-changes-on-disk)). The log keeps
 the newest 1,000 entries, and the footer says how many older ones it dropped.
 
 ### Describing keys
