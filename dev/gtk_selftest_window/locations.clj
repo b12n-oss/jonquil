@@ -324,3 +324,58 @@
                (editor/mark-saved! (:ed t))
                ((:close-tab! ui) (:id t)))
              ((:select-tab! ui) (:id (first ((:tabs* ui))))))))))))
+
+;; --- compare with disk (LM3) ---------------------------------------------------
+
+(defn row-compare-with-disk-and-take
+  "Compare with the file on disk lists the tab's two differences in the
+  Locations list; Take the other version here, with the caret on the first,
+  puts the disk's line back as one undo step and lists one difference."
+  [ui]
+  (go-row :compare-with-disk-and-take support/check
+    (let [f (io/file (temp-dirs/temp-dir! "jonquil-selftest-compare-") "c.clj")
+          _ (spit f "(ns c)\n(def a 1)\n(def b 2)\n(def c 3)\n")
+          _ (on-gtk ((:open-file! ui) (.getPath f)))
+          ed (on-gtk (:ed ((:active-tab* ui))))
+          edited "(ns c)\n(def a 10)\n(def b 2)\n(def c 30)\n"
+          _ (on-gtk (editor/apply-op-plain! ed {:edits [[0 (count (editor/editor-text ed)) edited]] :caret 0})
+                    (run-palette! ui "compare with the file on disk"))
+          listed? (await-until 3000 20 #(= 2 (count (lpane/row-texts (:locations-pane ui)))))
+          rows (on-gtk (lpane/row-texts (:locations-pane ui)))
+          _ (on-gtk (support/place-cursor! (:buf ed) 9)
+                    (run-palette! ui "take the other version here"))
+          took? (await-until 3000 20 #(= "(ns c)\n(def a 1)\n(def b 2)\n(def c 30)\n" (editor/editor-text ed)))
+          one-left? (await-until 3000 20 #(= 1 (count (lpane/row-texts (:locations-pane ui)))))
+          _ (on-gtk (g/gtk-text-buffer-undo (:buf ed)))
+          undone (on-gtk (editor/editor-text ed))]
+      (on-gtk (support/check :compare-with-disk-and-take
+                             (and listed? took? one-left? (= edited undone)
+                                  (= ["2: 1 line here, 1 line on disk: (def a 1)" "4: 1 line here, 1 line on disk: (def c 3)"] rows))
+                             {:listed listed? :rows rows :took took? :one-left one-left? :undone undone :status (status ui)})
+              (editor/mark-saved! ed)
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+
+(defn row-compare-with-head
+  "Compare with git HEAD lists what changed since the last commit; a file
+  outside any repository says git's own reason."
+  [ui]
+  (go-row :compare-with-head support/check
+    (let [d (io/file (temp-dirs/temp-dir! "jonquil-selftest-compare-git-"))
+          f (io/file d "g.clj")
+          sh (requiring-resolve 'jolt.process/sh)
+          _ (spit f "(ns g)\n(def x 1)\n")
+          git (fn [& args] (apply sh {:dir (.getPath d)} "git" "-c" "user.name=t" "-c" "user.email=t@t" args))
+          _ (git "init" "-q") _ (git "add" "g.clj") _ (git "commit" "-q" "-m" "one")
+          _ (spit f "(ns g)\n(def x 2)\n")
+          _ (on-gtk ((:open-file! ui) (.getPath f)) (run-palette! ui "compare with git head"))
+          listed? (await-until 5000 20 #(= ["2: 1 line here, 1 line in HEAD: (def x 1)"] (lpane/row-texts (:locations-pane ui))))
+          rows (on-gtk (lpane/row-texts (:locations-pane ui)))
+          _ (on-gtk ((:close-tab! ui) (:id ((:active-tab* ui)))))
+          loose (io/file (temp-dirs/temp-dir! "jonquil-selftest-compare-loose-") "l.clj")
+          _ (spit loose "(ns l)\n")
+          _ (on-gtk ((:open-file! ui) (.getPath loose)) (run-palette! ui "compare with git head"))
+          said? (await-until 5000 20 #(str/starts-with? (status ui) "; git: fatal:"))]
+      (on-gtk (support/check :compare-with-head (and listed? said?)
+                             {:listed listed? :rows rows :said said? :status (status ui)})
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+

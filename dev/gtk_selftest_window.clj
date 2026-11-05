@@ -284,6 +284,8 @@
    locations-rows/row-find-usages-in-project
    locations-rows/row-find-usages-stale-file
    locations-rows/row-locations-empty-says-no-places
+   locations-rows/row-compare-with-disk-and-take
+   locations-rows/row-compare-with-head
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named
