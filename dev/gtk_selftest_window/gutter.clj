@@ -9,7 +9,8 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.gutter :as gutter]
             [jonquil.gtk.palette :as palette]
-            [jonquil.gtk.popover :as popover]))
+            [jonquil.gtk.popover :as popover]
+            [temp-dirs]))
 
 (defn- line-start [text n]
   ;; offset of line n (0-based)
@@ -173,3 +174,56 @@
                              (and ran? marked? said? redefined? kept? cleared? nothing?)
                              {:ran ran? :marked marked? :said said? :redefined redefined? :kept kept?
                               :cleared cleared? :nothing nothing? :status (status ui)})))))
+
+;; --- exact line counts (LM4) ----------------------------------------------
+
+(defn- active-ed [ui] (:ed ((:active-tab* ui))))
+
+(defn- counts-of [ui] (mapv second @(:counts (:gutter (:changed (active-ed ui))))))
+
+(defn row-line-counts-after-run
+  "Count how often each line runs, then a Run of a saved file: the gutter
+  labels each line that ran with its hits (the loop's test 6 times); an
+  edit hides them; Clear line counts and the toggle off say so."
+  [ui]
+  (go-row :line-counts-after-run support/check
+    (let [f (java.io.File. ^String (temp-dirs/temp-dir! "jonquil-selftest-lc-") "lc.clj")
+          code "(ns lc-row)\n(defn spin [n]\n  (loop [i 0]\n    (when (< i n)\n      (recur (inc i)))))\n(spin 5)\n"
+          _ (spit f code)
+          _ (on-gtk ((:open-file! ui) (.getPath f)))
+          _ (on-gtk (run-palette! ui "count how often each line runs"))
+          on? (await-until 3000 20 #(= "; Line counts on: Run your file to count its lines." (status ui)))
+          _ (on-gtk ((:run!* ui)))
+          counted? (await-until 8000 20 #(some #{"6"} (counts-of ui)))
+          labels (on-gtk (counts-of ui))
+          _ (on-gtk (let [buf (:buf (active-ed ui))] (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a " " -1)))))
+          hidden? (await-until 3000 20 #(empty? (counts-of ui)))
+          _ (on-gtk (editor/set-text! (active-ed ui) code) (run-palette! ui "clear line counts"))
+          cleared? (await-until 3000 20 #(= "; Line counts cleared." (status ui)))
+          _ (on-gtk (run-palette! ui "count how often each line runs"))
+          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+      (on-gtk (support/check :line-counts-after-run
+                             (and on? counted? hidden? cleared? off?)
+                             {:on on? :counted counted? :labels labels :hidden hidden? :cleared cleared? :off off?
+                              :status (status ui)})
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
+
+(defn row-line-counts-unsaved
+  "With counting on, a Run of an Untitled tab says on the console that the
+  counts need a saved file."
+  [ui]
+  (go-row :line-counts-unsaved support/check
+    (let [_ (on-gtk ((:new-tab!* ui)) (run-palette! ui "count how often each line runs"))
+          on? (await-until 3000 20 #(str/starts-with? (status ui) "; Line counts on"))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (editor/set-text! (active-ed ui) "(+ 1 2)")
+                         ((:run!* ui))
+                         m))
+          said? (await-until 5000 20 #(str/includes? (support/since ui mark) "; Line counts show for a saved file."))
+          _ (on-gtk (run-palette! ui "count how often each line runs"))
+          off? (await-until 3000 20 #(= "; Line counts off." (status ui)))]
+      (on-gtk (support/check :line-counts-unsaved (and on? said? off?)
+                             {:on on? :said said? :off off? :status (status ui)
+                              :path @(:path ((:active-tab* ui)))})
+              (editor/mark-saved! (active-ed ui))
+              ((:close-tab! ui) (:id ((:active-tab* ui))))))))
