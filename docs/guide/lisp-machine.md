@@ -41,6 +41,7 @@ Emacs took first:
 | Switch to a recent panel, Cmd/Ctrl+Alt+1 to 7 for each panel | none built in: `C-x o` cycles windows; Genera's Select key, where Select L brings up the Lisp Listener, is where this comes from |
 | The Messages panel: agent actions, files changed on disk, connections, with an unread count | the `*Messages*` buffer, which keeps the echo area's lines; Genera's notifications and Converse are where this comes from |
 | Time the form at the caret | `benchmark-run` |
+| Count how often each line runs, beside the code | `profiler-start`'s call tree and `elp`, which sample or time functions; Genera's metering and `gcov`-style line counts are closer |
 | Live console results: click to inspect, right-click verbs | none built in: CIDER inspects the last result; Genera's presentations are where this comes from |
 | Trace the function at the caret, the Trace panel | `trace-function` and the `*trace-output*` buffer; CIDER's `cider-toggle-trace-var` |
 | The changed-form marks, Run the forms changed since they last ran | none built in: `diff-hl` marks lines changed since the last commit, not since the last eval |

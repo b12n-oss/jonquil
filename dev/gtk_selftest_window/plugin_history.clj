@@ -233,21 +233,26 @@
 (def ^:private warned "changed on disk. This tab keeps your unsaved edits")
 
 (defn row-plugin-tab-follows-a-revert
-  "A clean tab on v2's file: Revert to v1 reloads it, clean."
+  "A clean tab on v2's file: Revert to v1 reloads it, clean, as one undo
+  step: Cmd/Ctrl+Z brings v2's text back, dirty."
   [ui]
   (go-row :plugin-tab-follows-a-revert support/check
     (with-history ui (files "pt-a")
       (fn []
         (v1-then-v2! ui "pt-a")
         (let [t (open-tab! ui "pt-a")
+              v2 (:text (tab-state t))
               before (count-of ui reloaded)
               _ ((:plugin-history!* ui) "pt-a")
               lines ((:plugin-revert!* ui) 1 "")
-              st (tab-state t)]
+              st (tab-state t)
+              _ (on-gtk (g/gtk-text-buffer-undo (:buf (:ed t))))
+              undone (tab-state t)]
           (support/check :plugin-tab-follows-a-revert
                          (and t (= (review/source "pt-a") (:text st)) (not (:dirty? st))
-                              (= (inc before) (count-of ui reloaded)))
-                         {:lines lines :st st}))))))
+                              (= (inc before) (count-of ui reloaded))
+                              (= v2 (:text undone)) (:dirty? undone))
+                         {:lines lines :st st :undone undone}))))))
 
 (defn row-plugin-tab-keeps-edits-on-a-revert
   "A dirty tab on v2's file: Revert keeps the edits, warns once, and a

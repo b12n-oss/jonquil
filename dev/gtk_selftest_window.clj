@@ -403,12 +403,22 @@
    messages-rows/row-messages-closed-tab-target
    messages-rows/row-messages-burst
    messages-rows/row-messages-disk-change
+   messages-rows/row-messages-disk-change-dirty
+   messages-rows/row-messages-disk-change-nul
+   messages-rows/row-messages-disk-deleted-then-back
+   messages-rows/row-messages-disk-waits-a-tick
+   messages-rows/row-messages-disk-follow-failure-said
    messages-rows/row-messages-selection-stays
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
+   gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run
    gutter-rows/row-changed-marks-after-edit
    gutter-rows/row-run-changed-runs-only-those
+   gutter-rows/row-line-counts-after-run
+   gutter-rows/row-line-counts-unsaved
+   gutter-rows/row-line-counts-second-run
+   gutter-rows/row-line-counts-went-off
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default
