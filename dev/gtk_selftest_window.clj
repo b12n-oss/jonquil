@@ -436,6 +436,8 @@
    prompt/row-prompt-follows-repl-ns
    prompt/row-prompt-keeps-typed-input
    prompt/row-prompt-follows-run
+   prompt/row-bang-runs-a-command
+   prompt/row-bang-lists-choices
    prompt/row-prompt-echo-uses-prompt
    source-pane/row-source-pane-shows-line
    source-pane/row-source-pane-user-scroll-wins
