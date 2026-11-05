@@ -105,6 +105,7 @@
     jonquil.gtk.trash-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
+    jonquil.gtk.messages-pane-test
     jonquil.inspect.view-test
     jonquil.nrepl.info-middleware-test
     jonquil.project-roots-test
