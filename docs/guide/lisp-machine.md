@@ -34,6 +34,7 @@ Emacs took first:
 | Jonquil | Emacs |
 |---|---|
 | Describe Key, Key Bindings, Recent Keys | `C-h k`, `C-h b`, `C-h l` |
+| The keys for the symbol at the caret, in the status bar | `eldoc` shows the signature, not the keys; Genera's mouse documentation line, which named each click's action on the thing under the pointer |
 | The command palette (Cmd/Ctrl+Shift+P) | `M-x` |
 | The locations list and F8 / Shift+F8 | `next-error`, xref |
 | Find Usages in Project, by how each place uses the name | `xref-find-references` (`M-?`); Genera's who-calls, by name rather than from a callers database |
