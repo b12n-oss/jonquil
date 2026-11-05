@@ -57,6 +57,37 @@
                                   :text-y text-y :r1 r1 :r2 r2 :moved moved?})))
         (finally (on-gtk (g/gtk-window-close win)))))))
 
+(defn row-gutter-counts-widen-and-draw
+  "Line count labels (LM4) widen the gutter past the bar, each drawn at its
+  own line's top; no labels narrow it back to the bar."
+  [_ui]
+  (go-row :gutter-counts-widen-and-draw support/check
+    (let [text (apply str (map #(str "line " % "\n") (range 20)))
+          {:keys [win ed gt]} (on-gtk (let [win (g/gtk-window-new)
+                                            ed (editor/make-editor)
+                                            gt (gutter/attach! ed)]
+                                        (g/gtk-window-set-default-size win 300 200)
+                                        (g/gtk-window-set-child win (:scroll ed))
+                                        (g/gtk-window-present win)
+                                        (editor/set-text! ed text)
+                                        {:win win :ed ed :gt gt}))]
+      (try
+        (let [shown? (await-until 3000 20 #(pos? (g/gtk-widget-get-height (:view ed))))
+              draws0 (on-gtk @(:draws gt))
+              _ (on-gtk (gutter/set-counts! gt {0 "6" 3 "1.2k"}))
+              wide (on-gtk (gutter/count-width gt))
+              drawn? (await-until 3000 20 #(> @(:draws gt) draws0))
+              spots (on-gtk (gutter/label-spots gt))
+              line3-y (on-gtk (first (gutter/line-yrange gt (line-start text 3))))
+              _ (on-gtk (gutter/set-counts! gt {}))
+              narrow (on-gtk (gutter/count-width gt))]
+          (on-gtk (support/check :gutter-counts-widen-and-draw
+                                 (and shown? drawn? (> wide gutter/WIDTH) (= gutter/WIDTH narrow)
+                                      (= ["6" "1.2k"] (mapv first spots))
+                                      (< (nth (first spots) 2) (nth (second spots) 2)))
+                                 {:shown shown? :drawn drawn? :wide wide :narrow narrow :spots spots :line3-y line3-y})))
+        (finally (on-gtk (g/gtk-window-close win)))))))
+
 ;; --- marks on forms changed since they last ran (LM3) ----------------------
 
 (defn- run-palette!

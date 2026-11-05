@@ -406,6 +406,7 @@
    messages-rows/row-messages-selection-stays
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
+   gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run
    gutter-rows/row-changed-marks-after-edit
    gutter-rows/row-run-changed-runs-only-those
