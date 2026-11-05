@@ -29,6 +29,7 @@
     jonquil.edit-test
     jonquil.eval-test
     jonquil.restarts-test
+    jonquil.layouts-test
     jonquil.messages-test
     jonquil.registry-test
     jonquil.console-test
