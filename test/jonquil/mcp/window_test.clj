@@ -356,3 +356,15 @@
   (is (= "Claude Code" (w/client-name {"name" "Claude Code"})))
   (doseq [ci [nil {} {"name" 42} {"name" "  "} "not a map"]]
     (is (= "Agent" (w/client-name ci)) (pr-str ci))))
+
+(deftest serve-window-logs-the-attach
+  (let [entries (atom [])
+        lines (atom [(str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
+                          "{\"protocolVersion\":\"2025-06-18\",\"clientInfo\":{\"name\":\"Claude Code\"}}}")])]
+    (binding [*err* (java.io.StringWriter.)]
+      (w/serve-window! {:ui {:tabs* (fn [] []) :request-close!* (fn [] nil)
+                             :log!* (fn [e] (swap! entries conj e))}
+                        :dir "/tmp" :gui sync-gui
+                        :read-line (fn [] (let [l (first @lines)] (swap! lines (comp vec rest)) l))
+                        :write-line (fn [_] nil)}))
+    (is (= [{:kind :connection :summary "Claude Code attached"}] @entries))))

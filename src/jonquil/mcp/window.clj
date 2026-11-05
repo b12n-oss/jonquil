@@ -516,7 +516,12 @@
     (try
       (let [session* (atom {})]
         (mcp/serve! {:tools (with-messages (with-plugin-tools (make-window-tools {:ui ui :dir dir :gui gui}) ui) ui session*)
-                     :on-initialize #(swap! session* assoc :client (client-name %))
+                     ;; stdio's EOF closes the window, so only the attach is logged
+                     :on-initialize (fn [ci]
+                                      (let [c (client-name ci)]
+                                        (swap! session* assoc :client c)
+                                        (when-let [log! (:log!* ui)]
+                                          (log! {:kind :connection :summary (str c " attached")}))))
                      :subscribe (:watch-plugin-tools* ui)
                      :read-line read-line
                      :write-line write-line}))

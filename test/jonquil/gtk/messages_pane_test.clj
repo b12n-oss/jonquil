@@ -36,6 +36,11 @@
     (is (= "1000 entries, 3 dropped" (mp/footer-text l m/SHOWN-KINDS))))
   (is (= "1 entry" (mp/footer-text (m/add (m/empty-log) {:kind :agent :summary "a"} 1) m/SHOWN-KINDS))))
 
+(deftest footer-says-what-the-filter-hides
+  (let [l (-> (m/empty-log) (m/add {:kind :agent :summary "a"} 1) (m/add {:kind :status :summary "s"} 2))]
+    (is (= "1 of 2 entries" (mp/footer-text l m/SHOWN-KINDS)))
+    (is (= "2 entries" (mp/footer-text l (conj m/SHOWN-KINDS :status))))))
+
 (deftest footer-empty
   (is (= "No messages yet. Agent actions, connections and restarts show up here."
          (mp/footer-text (m/empty-log) m/SHOWN-KINDS)))

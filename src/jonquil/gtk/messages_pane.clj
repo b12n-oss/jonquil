@@ -46,10 +46,12 @@
   were dropped, or the empty text when nothing is shown."
   [log kinds]
   (let [n (count (:entries log))
+        shown (count (messages/visible log kinds))
         d (:dropped log)]
-    (if (empty? (messages/visible log kinds))
+    (if (zero? shown)
       EMPTY
-      (str n (if (= 1 n) " entry" " entries") (when (pos? d) (str ", " d " dropped"))))))
+      (str (when (< shown n) (str shown " of "))
+           n (if (= 1 n) " entry" " entries") (when (pos? d) (str ", " d " dropped"))))))
 
 (defn report!
   "Puts msg on the panel's footer."
