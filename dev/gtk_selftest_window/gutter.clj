@@ -1,7 +1,8 @@
 (ns gtk-selftest-window.gutter
   "The Definitions editor's left gutter (jonquil.gtk.gutter): its bars
   follow the lines of the ranges they mark, through scrolling."
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :refer [<! timeout]]
+            [clojure.string :as str]
             [gtk-async :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [jolt.ffi :as ffi]
@@ -142,3 +143,31 @@
                              (and ran? marked? said? redefined? kept? cleared? nothing?)
                              {:ran ran? :marked marked? :said said? :redefined redefined? :kept kept?
                               :cleared cleared? :nothing nothing? :status (status ui)})))))
+
+;; --- what keys do at the caret (LM6) ----------------------------------------
+
+(defn- hint [ui]
+  (let [l (:hint-label ui)] (when (pos? (g/gtk-widget-get-visible l)) (g/label-text l))))
+
+(defn row-key-hints-follow-the-caret
+  "The caret on a symbol names its keys in the status bar, from the live
+  keymap; on blank space the line goes; the palette toggle turns it off."
+  [ui]
+  (go-row :key-hints-follow-the-caret support/check
+    (let [ed (:editor ui)
+          _ (on-gtk (editor/set-text! ed "(defn hinted [x] (inc x))\n\n")
+                    (g/with-iters* (:buf ed) 18 18 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
+          on-symbol? (await-until 3000 20 #(= "Ctrl+Q doc · F12 jump · Shift+F6 rename" (hint ui)))
+          _ (on-gtk (g/with-iters* (:buf ed) 27 27 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
+          gone? (await-until 3000 20 #(nil? (hint ui)))
+          _ (on-gtk (run-palette! ui "show what keys do at the caret"))
+          off? (await-until 3000 20 #(= "; Key hints off." (status ui)))
+          _ (on-gtk (g/with-iters* (:buf ed) 18 18 (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a))))
+          _ (<! (timeout 400))
+          stays-off? (on-gtk (nil? (hint ui)))
+          _ (on-gtk (run-palette! ui "show what keys do at the caret"))
+          back? (await-until 3000 20 #(str/starts-with? (status ui) "; Key hints on"))]
+      (on-gtk (support/check :key-hints-follow-the-caret (and on-symbol? gone? off? stays-off? back?)
+                             {:on-symbol on-symbol? :gone gone? :off off? :stays-off stays-off? :back back? :hint (hint ui)})
+              (editor/set-text! ed "")))))
+

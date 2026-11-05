@@ -42,6 +42,7 @@
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.gutter :as gutter]
+            [jonquil.hints :as hints]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
@@ -2689,7 +2690,7 @@
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
-           open-find-fn open-replace-fn window-key-args repl-complete-fn] :as ctx}
+           open-find-fn open-replace-fn window-key-args repl-complete-fn hint-label hints-on?] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
   ;; LM3: the gutter's marks follow edits, 150 ms after the last change,
   ;; computed off the GTK thread and drawn only if the text is still the same
@@ -2797,6 +2798,32 @@
     (editor/set-quick-doc-fn! ed quick-doc-fn)
     (editor/set-jump-fn! ed jump-fn)
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? help-pop) (popover/hide! help-pop))))
+    ;; LM6: what keys do at the caret, 200 ms after it stops, found off the
+    ;; GTK thread (symbol-at-pos tokenizes the text) and shown only if the
+    ;; caret hasn't moved since
+    (when hint-label
+      (let [pending (atom 0)]
+        (editor/on-cursor-moved!
+         ed (fn [_lc]
+              (let [n (swap! pending inc)]
+                (future
+                  (Thread/sleep 200)
+                  (when (= n @pending)
+                    (on-gui! (fn []
+                               (when (and (active? t) (not @(:destroyed? ed)) @hints-on?)
+                                 (let [text (editor/editor-text ed)
+                                       pos (g/cursor-offset (:buf ed))]
+                                   (future
+                                     (let [plugins @plugin-registry/live
+                                           h (try (hints/hint {:at (hints/at-caret text pos)
+                                                               :keymap {:editor (plugin-registry/editor-bindings plugins)
+                                                                        :window (plugin-registry/window-bindings plugins)}
+                                                               :os (System/getProperty "os.name")})
+                                                  (catch Throwable _ nil))]
+                                       (on-gui! (fn []
+                                                  (when (and (= n @pending) @hints-on?)
+                                                    (g/gtk-label-set-text hint-label (or h ""))
+                                                    (g/gtk-widget-set-visible hint-label (if h 1 0))))))))))))))))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
@@ -3458,6 +3485,9 @@
                       (show-alert! win alert TIME-ALERT on-choice)))
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
+        ;; LM6: what keys do at the caret, dim, hidden while there's nothing
+        hint-label (doto (g/gtk-label-new "") (g/gtk-widget-add-css-class "dim-label"))
+        hints-on? (atom true)
         parinfer-label (g/gtk-label-new "")
         ;; How many agent proposals are pending, hidden at zero
         pending-label (g/gtk-label-new "")
@@ -4695,6 +4725,12 @@
                          :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
+                         :hints-toggle-fn (fn []
+                                            (let [on? (swap! hints-on? not)]
+                                              (when-not on? (g/gtk-widget-set-visible hint-label 0))
+                                              (set-status! status-label (if on?
+                                                                          "; Key hints on: the status bar names the keys for the symbol at the caret."
+                                                                          "; Key hints off."))))
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          :trace-toggle-fn trace-toggle-fn :trace-show-fn trace-show-fn
@@ -4815,6 +4851,8 @@
     (g/gtk-box-append vbox tree-paned)
     (g/gtk-widget-set-hexpand status-label 1)
     (g/gtk-box-append status-box status-label)
+    (g/gtk-box-append status-box hint-label)
+    (g/gtk-widget-set-visible hint-label 0)
     (g/gtk-box-append status-box pending-label)
     (g/gtk-widget-set-visible pending-label 0)
     (g/gtk-box-append status-box unread-label)
@@ -4973,7 +5011,8 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs}
+                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs
+                   :hint-label hint-label :hints-on? hints-on?}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
@@ -5516,6 +5555,7 @@
                    :debugger-pane dbgp
                    :trace-pane tracep
                    :messages-pane msgp
+                   :hint-label hint-label
                    :messages* messages*
                    :log!* log-entry!
                    :disk-tick!* disk-tick!

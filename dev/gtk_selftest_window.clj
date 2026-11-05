@@ -409,6 +409,7 @@
    gutter-rows/row-changed-not-before-first-run
    gutter-rows/row-changed-marks-after-edit
    gutter-rows/row-run-changed-runs-only-those
+   gutter-rows/row-key-hints-follow-the-caret
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default
