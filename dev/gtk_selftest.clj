@@ -1056,6 +1056,43 @@
                           {:dedented dedented :undone undone :redone redone}))
                  (finally (parinfer-off! ed))))))
 
+(defn- row-reload-text-undoable [ed]
+  (go-row :reload-text-undoable check
+    (on-gtk (let [buf (:buf ed)]
+              (editor/set-text! ed "(a)\n")
+              (caret! ed 4)
+              (type-str! ed "x")
+              (editor/reload-text! ed "(b)\n")
+              (let [text (editor/editor-text ed)
+                    clean? (not (editor/dirty? ed))
+                    caret (g/cursor-offset buf)
+                    _ (g/gtk-text-buffer-undo buf)
+                    undone (editor/editor-text ed)
+                    dirty? (editor/dirty? ed)
+                    _ (g/gtk-text-buffer-undo buf)
+                    undone2 (editor/editor-text ed)]
+                (check :reload-text-undoable
+                       (and (= "(b)\n" text) clean? (= 4 caret)
+                            (= "(a)\nx" undone) dirty? (= "(a)\n" undone2))
+                       {:text text :clean clean? :caret caret :undone undone :dirty dirty? :undone2 undone2}))))))
+
+(defn- row-reload-text-caret-clamps [ed]
+  (go-row :reload-text-caret-clamps check
+    (on-gtk (editor/set-text! ed "(defn long-name [])\n")
+            (caret! ed 18)
+            (editor/reload-text! ed "(a)")
+            (let [caret (g/cursor-offset (:buf ed))]
+              (check :reload-text-caret-clamps (= 3 caret) {:caret caret})))))
+
+(defn- row-reload-text-parinfer-held-off [ed]
+  (go-row :reload-text-parinfer-held-off check
+    (on-gtk (try (parinfer-on! ed :smart)
+                 (editor/set-text! ed "")
+                 (editor/reload-text! ed "(a\n  b")
+                 (let [text (editor/editor-text ed)]
+                   (check :reload-text-parinfer-held-off (= "(a\n  b" text) {:text text}))
+                 (finally (parinfer-off! ed))))))
+
 (defn- row-parinfer-mcp-and-reload-unchanged [ed]
   (go-row :parinfer-mcp-and-reload-unchanged check
     (on-gtk (try (parinfer-on! ed :smart)
@@ -1920,6 +1957,9 @@ b" text) eq (pos? @splices))
    row-paint-async-drops-after-edit
    row-parinfer-open-paren
    row-parinfer-dedent-undo-redo
+   row-reload-text-undoable
+   row-reload-text-caret-clamps
+   row-reload-text-parinfer-held-off
    row-parinfer-mcp-and-reload-unchanged
    row-parinfer-unstable-form-only
    row-parinfer-off-no-change
