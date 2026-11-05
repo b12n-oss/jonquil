@@ -169,6 +169,16 @@ keeps the list, and F8 opens that file again. Like the other lists it
 stops at 1,000 places. The search runs in the background, so typing
 carries on while it looks.
 
+**Compare with the file on disk** and **Compare with git HEAD** list the
+places where the tab differs from that version, one row per difference,
+such as `4: 2 lines here, 1 line in HEAD: (def c 3)` with the other
+version's first line. F8 steps through them like any list. **Take the
+other version here** puts the compared version's lines in place of the
+difference at the caret, as one step Cmd/Ctrl+Z undoes and with Parinfer
+left out of it, and lists what's left. git runs as `git show HEAD:./name`
+in the file's own folder, so a file outside a repository, or one git
+doesn't track, gets git's reason on the status bar.
+
 ### Freeing Ctrl+Space on macOS
 
 macOS reserves Ctrl+Space for "Select the previous input source" (System

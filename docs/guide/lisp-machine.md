@@ -43,6 +43,7 @@ Emacs took first:
 | Time the form at the caret | `benchmark-run` |
 | Live console results: click to inspect, right-click verbs | none built in: CIDER inspects the last result; Genera's presentations are where this comes from |
 | Trace the function at the caret, the Trace panel | `trace-function` and the `*trace-output*` buffer; CIDER's `cider-toggle-trace-var` |
+| Compare with the file on disk or git HEAD, Take the other version here | `diff-buffer-with-file`, `vc-diff` and `ediff`'s per-hunk copy; Genera's Compare Files |
 | The changed-form marks, Run the forms changed since they last ran | none built in: `diff-hl` marks lines changed since the last commit, not since the last eval |
 | Show the last error's frames and locals | the `*Backtrace*` buffer (`debug-on-error`) |
 | Break on error, Continue | `debug-on-error` while the error is live: `e` evaluates in a frame, `c` continues |
