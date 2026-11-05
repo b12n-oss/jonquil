@@ -278,6 +278,12 @@
   (is (= {:out "hi\n" :value "3"} (ops/quiet-result (run-quiet "(println \"hi\") (+ 1 2)" "TOK:") "TOK:")))
   (is (= {:out "" :error "boom"} (ops/quiet-result (run-quiet "(throw (ex-info \"boom\" {}))" "TOK:") "TOK:"))
       "a throw comes back as data, not out of the eval")
+  (is (= {:out "" :error "outer"}
+         (ops/quiet-result (run-quiet "(throw (ex-info \"outer\" {} (ex-info \"inner\" {})))" "TOK:") "TOK:"))
+      "only load-string's own wrapper is unwrapped, not a cause the code gave its throw")
+  (is (= {:out "" :error "First argument to def must be a Symbol"}
+         (ops/quiet-result (run-quiet "(def 123)" "TOK:") "TOK:"))
+      "a compile error keeps its message")
   (is (= {:out "" :value "1"} (ops/quiet-result (run-quiet "1 ; a trailing comment" "TOK:") "TOK:"))
       "a trailing comment doesn't swallow the wrap")
   (create-ns 'jonquil.quiet-ns-probe)

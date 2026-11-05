@@ -24,8 +24,11 @@
            (let [err (sut/format-error t)]
              (is (str/includes? err "ArithmeticException"))
              (is (str/includes? err "Divide by zero"))
-             ;; DEVIATION: Jolt runtime exceptions carry no line (known gap).
-             (is (not (str/includes? err "Location: line 1")))))))
+             ;; Jolt since #1489 (not the Linux image's v0.8.23) wraps the
+             ;; throw in a CompilerException carrying the form's line, as
+             ;; JVM Clojure does; the Location shows exactly when it's there
+             (is (= (boolean (:clojure.error/line (ex-data t)))
+                    (str/includes? err "Location: line 1")))))))
   (testing "Syntax error formatting"
     (try (load-string "(def 123)")
          (catch :default t

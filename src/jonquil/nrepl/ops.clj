@@ -215,7 +215,12 @@
        " r (try {:value (clojure.core/binding [clojure.core/*ns* n clojure.core/*print-length* 1000]"
        " (clojure.core/pr-str (clojure.core/load-string " (pr-str (str code "
 ")) ")))}"
-       " (catch :default e {:error (clojure.core/or (clojure.core/ex-message e) (clojure.core/str e))}))]"
+       ;; load-string wraps a form's runtime throw in a CompilerException
+       ;; (:clojure.error/phase :execution, the throw as cause), as the JVM
+       ;; does; the message the person wants is the cause's
+       " (catch :default e0 (clojure.core/let [c (clojure.core/ex-cause e0)"
+       " e (if (clojure.core/and c (clojure.core/= :execution (:clojure.error/phase (clojure.core/ex-data e0)))) c e0)]"
+       " {:error (clojure.core/or (clojure.core/ex-message e) (clojure.core/str e))})))]"
        " (clojure.core/print (clojure.core/str \"\\n\" " (pr-str token) " (clojure.core/pr-str r)))"
        " (clojure.core/flush)"
        " (clojure.core/alter-var-root (var clojure.core/*2) (clojure.core/constantly o3))"
