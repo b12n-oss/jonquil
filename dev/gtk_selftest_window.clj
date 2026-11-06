@@ -45,6 +45,7 @@
             [gtk-selftest-window.messages :as messages-rows]
             [gtk-selftest-window.processes :as processes-rows]
             [gtk-selftest-window.world :as world-rows]
+            [gtk-selftest-window.replay :as replay-rows]
             [gtk-selftest-window.restarts :as restarts-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
             [gtk-selftest-window.no-plugins :as no-plugins-rows]
@@ -416,6 +417,12 @@
    messages-rows/row-messages-disk-follow-failure-said
    messages-rows/row-messages-selection-stays
    world-rows/row-world-save-restore
+   replay-rows/row-replay-records-console
+   replay-rows/row-replay-records-saved-run
+   replay-rows/row-replay-skips-errors
+   replay-rows/row-replay-offer-at-open
+   replay-rows/row-replay-history-restored
+   replay-rows/row-replay-off
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run
