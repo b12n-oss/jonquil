@@ -2331,11 +2331,14 @@
   call time -- by then activate! has reset! it to the real cv (the only
   forward reference; every other closure below is built after its pieces
   already exist)."
-  [tab-fn *cv ev* status-label]
+  [tab-fn *cv ev* status-label bang*]
   (fn [{:keys [action text]}]
     (case action
-      :eval (let [tab (tab-fn)]
-              (do-repl-eval! (:ed tab) @*cv ev* status-label text {:hook-source :repl :hook-tab (:id tab)}))
+      ;; LM1: a line starting with ! runs a palette command (@bang*)
+      :eval (if (pal-data/bang? text)
+              (@bang* text)
+              (let [tab (tab-fn)]
+                (do-repl-eval! (:ed tab) @*cv ev* status-label text {:hook-source :repl :hook-tab (:id tab)})))
       :send-stdin (ev/send-input! @ev* text)
       :eof (ev/send-eof! @ev*))))
 
@@ -3529,9 +3532,12 @@
         suppress-close? (atom false)
         closing? (atom false)
         *cv (atom nil)
+        ;; LM1's ! commands at the prompt, installed once the palette's
+        ;; pieces exist (below, after open-palette-fn)
+        bang* (atom (fn [_text]))
         ;; :failure*, the last failed evaluation, for the restarts
         cv (assoc
-            (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label)
+            (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label bang*)
                                      :history-prev (history-prev-fn ev*)
                                      :history-next (history-next-fn ev*)
                                      ;; The console reads busy/waiting state
@@ -4004,6 +4010,29 @@
                                                   :keymap {:window (plugin-registry/window-bindings plugins)
                                                            :editor (plugin-registry/editor-bindings plugins)}
                                                   :os (System/getProperty "os.name")}))))))
+        _ (reset! bang*
+                  (fn [text]
+                    (let [cv @*cv
+                          plugins @plugin-registry/live
+                          es (pal-data/entries {:commands (plugin-registry/all-commands plugins)
+                                                :keymap {:window (plugin-registry/window-bindings plugins)
+                                                         :editor (plugin-registry/editor-bindings plugins)}
+                                                :os (System/getProperty "os.name")})
+                          say (fn [s] (cview/append! cv :system (str s "\n")))
+                          {:keys [run doc choices words none] :as r} (pal-data/bang-pick es text)]
+                      ;; not an entry: Clear the last entry's output reaches the one before
+                      (cview/restore-entry-start! cv)
+                      ;; Up brings the line back, as for any entry
+                      (swap! (ev/history @ev*) eval/history-add (str/trim text))
+                      (cond
+                        (:help r) (say "; ! runs a command by name, as the palette does: !clear line counts")
+                        none (say (str "; ! No command matches \"" none "\". Cmd/Ctrl+Shift+P lists them all."))
+                        choices (say (str "; ! " (count choices) " commands match \"" words "\":\n"
+                                          (str/join "\n" (map #(str ";   " %) (take 8 choices)))
+                                          (when (< 8 (count choices)) "\n;   ...")))
+                        :else (do (say (str "; ! " doc))
+                                  (try ((deref (:on-run (:palette (active-tab)))) run)
+                                       (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         ;; The locations list, or nil. A buffer list is {:tab-id :list

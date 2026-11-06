@@ -93,6 +93,39 @@
                  (every? #(str/includes? text %) words)))
              entries)))
 
+(defn bang?
+  "True when text, an entry typed at the Interactions prompt, is a `!`
+  command rather than code: one line whose first non-blank character is !,
+  holding no bracket or quote, and either nothing after the ! or a space
+  somewhere after it (`!clear the console`, `! clear`). So a symbol that
+  starts with ! (`!x`, `!=`), a multi-line entry and anything with a form
+  in it still go to the evaluator."
+  [text]
+  (let [t (str/trim (or text ""))
+        rest (when (str/starts-with? t "!") (subs t 1))]
+    (boolean
+     (and rest
+          (not (re-find #"[\n\r()\[\]{}\"]" rest))
+          (or (str/blank? rest) (re-find #"\s" rest))))))
+
+(defn bang-pick
+  "What a `!` line at the prompt does with entries (the palette's command
+  entries): {:run id :doc d} when the words after ! pick one, filtered as
+  the palette's field filters, an entry whose doc equals the words winning
+  over the longer ones they also match; {:choices [doc ...] :words w} when
+  several match; {:none w} when none does; {:help true} for ! alone."
+  [entries text]
+  (let [words (str/trim (subs (str/triml text) 1))
+        hits (filter-entries entries words)
+        bare (fn [s] (str/replace (str/lower-case (str/trim (or s ""))) #"\.$" ""))
+        exact (filter #(= (bare words) (bare (:doc %))) hits)
+        one (cond (= 1 (count hits)) (first hits)
+                  (= 1 (count exact)) (first exact))]
+    (cond (str/blank? words) {:help true}
+          one {:run (:id one) :doc (:doc one)}
+          (seq hits) {:choices (mapv :doc hits) :words words}
+          :else {:none words})))
+
 (defn row-text
   "One palette row: the doc, its chords when it has any, and its source."
   [{:keys [doc chords source]}]
