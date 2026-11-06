@@ -3,7 +3,9 @@
   {:version 1 :previous [entry ...] :current [entry ...] :history [text ...]}
   in replays/<folder>-<hash>.edn beside settings.edn. An entry is
   {:kind :file :path abs :at ms :dialect name} or
-  {:kind :form :text s :ns \"user\" :source-file abs-or-nil :at ms :dialect name}.
+  {:kind :form :text s :ns \"user\" :source-file abs-or-nil :at ms :dialect name
+  :key k}, k being [head name] for a definition ([head name dispatch] for
+  defmethod), :setup or :other; an entry without :key is parsed for it.
   The record holds whatever the user typed, secrets included, so the file is
   owner-only (rw-------) and a directory made for it is rwx------. Nothing
   here throws: loading a bad file gives an empty record plus a :warning, and
@@ -35,7 +37,7 @@
   (.getName (java.io.File. ^String path)))
 
 (defn- good-entry? [e]
-  (and (map? e) (contains? #{:file :form} (:kind e))))
+  (and (map? e) (contains? #{:file :form} (:kind e)) (number? (:at e))))
 
 (defn- clean-entries [xs]
   (vec (filter good-entry? xs)))
@@ -44,7 +46,8 @@
   "{:record r} from path. A missing file is {:record (empty-record)}. A file
   that isn't EDN, isn't a map, or whose :previous, :current or :history
   isn't sequential (when present) is the empty record plus a :warning.
-  Entries that aren't maps with :kind :file or :form are dropped silently."
+  Entries that aren't maps with :kind :file or :form and a number :at are
+  dropped silently."
   [path]
   (let [f (io/file path)]
     (if-not (.exists f)
@@ -65,13 +68,13 @@
 (def ^:private owner-only-dir "rwx------")
 
 (defn- make-private-dir!
-  "Makes the directory of path as rwx------ when it doesn't exist yet.
-  Never throws."
+  "Makes the directory of path when it doesn't exist yet, and sets it (new
+  or already there) to rwx------. Never throws."
   [path]
   (try
     (let [dir (.getParentFile (java.io.File. ^String path))]
-      (when (and dir (not (.exists dir)))
-        (.mkdirs dir)
+      (when dir
+        (when-not (.exists dir) (.mkdirs dir))
         (java.nio.file.Files/setPosixFilePermissions
          (.toPath dir)
          (java.nio.file.attribute.PosixFilePermissions/fromString owner-only-dir))))
@@ -79,7 +82,8 @@
 
 (defn save-record!
   "Writes record to path atomically; the file is rw------- from the moment
-  it exists. A replays/ directory it has to make is rwx------. Failing to
+  it exists. Its replays/ directory, made or already there, is set to
+  rwx------. Failing to
   set permissions never fails the save. Never throws: nil on success, else
   \"couldn't save <path>: <message>\"."
   [path record]
@@ -90,6 +94,12 @@
       (str "couldn't save " path ": " (.getMessage e)))))
 
 ;; --- entries -------------------------------------------------------------
+
+(def ^:private def-heads
+  #{"def" "defn" "defn-" "defmacro" "defonce" "defmulti" "defmethod"
+    "defprotocol" "defrecord" "deftype" "definterface" "defstruct"})
+
+(def ^:private setup-heads #{"ns" "in-ns" "require" "use" "import" "refer"})
 
 (def ^:private slot-cap 2000)
 (def ^:private history-cap 500)
@@ -155,11 +165,27 @@
         (let [p (try (edn/read-string t) (catch Exception _ nil))]
           (when (and (string? p) (absolute-path? p)) p))))))
 
+(defn- key-of
+  "A form entry's :key from its head and its kids' texts: [head name] for a
+  definition ([head name dispatch] for defmethod), name metadata stripped,
+  :setup for a setup form and :other for the rest."
+  [head texts]
+  (cond
+    (contains? def-heads head)
+    (let [names (map strip-meta (rest texts))]
+      (if (= "defmethod" head)
+        [head (first names) (second names)]
+        [head (first names)]))
+    (contains? setup-heads head) :setup
+    :else :other))
+
 (defn entries
   "Entries for what one action ran. source is :run (a whole buffer: a saved
   one is a file entry, an untitled one is split into forms), :form,
   :selection or :repl (forms). An in-ns or ns form moves the ns the later
-  forms are recorded in, starting from ns (default \"user\"). An absolute
+  forms are recorded in, starting from ns (default \"user\"). A top-level
+  (in-ns 'x) does only that and is no entry of its own, since the script
+  writes its in-ns lines from each form's :ns. An absolute
   (load-file \"...\") is a file entry; a relative one stays a form."
   [{:keys [source code path ns at dialect]}]
   (if (and (= :run source) path)
@@ -171,14 +197,15 @@
                 texts (mapv #(kid-text code %) kids)
                 head (when (and (seq kids) (not (:open (first kids)))) (first texts))
                 lf (load-file-path head texts)
-                next-ns (or (when (contains? #{"ns" "in-ns"} head)
-                              (in-ns-target head (second texts)))
-                            cur-ns)]
-            (recur (rest forms) next-ns
-                   (conj out (if lf
-                               {:kind :file :path lf :at at :dialect dialect}
-                               {:kind :form :text (kid-text code f) :ns cur-ns
-                                :source-file source-file :at at :dialect dialect}))))
+                target (when (contains? #{"ns" "in-ns"} head)
+                         (in-ns-target head (second texts)))]
+            (recur (rest forms) (or target cur-ns)
+                   (cond
+                     (and target (= "in-ns" head)) out
+                     lf (conj out {:kind :file :path lf :at at :dialect dialect})
+                     :else (conj out {:kind :form :text (kid-text code f) :ns cur-ns
+                                      :source-file source-file :at at :dialect dialect
+                                      :key (key-of head texts)}))))
           out)))))
 
 ;; --- slots ---------------------------------------------------------------
@@ -210,47 +237,54 @@
 
 ;; --- compaction ----------------------------------------------------------
 
-(def ^:private def-heads
-  #{"def" "defn" "defn-" "defmacro" "defonce" "defmulti" "defmethod"
-    "defprotocol" "defrecord" "deftype" "definterface" "defstruct"})
-
-(def ^:private setup-heads #{"ns" "in-ns" "require" "use" "import" "refer"})
-
-(defn- form-key
-  "[group key] for a form entry: group is :defs or :others."
-  [{:keys [text ns]}]
+(defn- parse-key
+  "key-of for a form's text, for an entry recorded without :key."
+  [text]
   (let [kids (:kids (first (commands/top-level-forms text)))
         texts (mapv #(kid-text text %) kids)
-        head (when (and (seq kids) (not (:open (first kids)))) (first texts))
-        names (map strip-meta (rest texts))]
-    (cond
-      (contains? def-heads head)
-      [:defs (if (= "defmethod" head)
-               [ns head (first names) (second names)]
-               [ns head (first names)])]
-      (contains? setup-heads head) [:defs [:setup text]]
-      :else [:others [:other text]])))
+        head (when (and (seq kids) (not (:open (first kids)))) (first texts))]
+    (key-of head texts)))
 
-(defn- keep-last
-  "The entries whose key is the last one seen for it, in order."
-  [es key-fn]
-  (let [last-idx (reduce-kv (fn [m i e] (assoc m (key-fn e) i)) {} (vec es))]
-    (vec (keep-indexed (fn [i e] (when (= i (get last-idx (key-fn e))) e)) es))))
+(defn- form-key
+  "[group key] for a form entry: group is :defs or :others. A setup form
+  keys on [:setup ns text], a definition on [ns head name ...], another
+  form on [:other text]."
+  [{:keys [text ns] :as e}]
+  (let [k (:key e)
+        k (if (or (= :setup k) (= :other k) (vector? k)) k (parse-key text))]
+    (cond
+      (= :setup k) [:defs [:setup ns text]]
+      (= :other k) [:others [:other text]]
+      :else [:defs (into [ns] k)])))
+
+(defn- setup-key? [k] (= :setup (first (second k))))
+
+(defn- keep-by
+  "The entries whose key is the one kept for it, in order: the first seen
+  when (first? key), else the last."
+  [es key-fn first?]
+  (let [idx (reduce-kv (fn [m i e]
+                         (let [k (key-fn e)]
+                           (if (and (contains? m k) (first? k)) m (assoc m k i))))
+                       {} (vec es))]
+    (vec (keep-indexed (fn [i e] (when (= i (get idx (key-fn e))) e)) es))))
 
 (defn compact
   "Collapses es into {:files [path ...] :defs [entry ...] :others [entry ...]}.
   Files are deduped at their last position. Forms recorded from a file
   that is in :files are dropped. A def is kept once per [ns head name]
-  (plus the dispatch value for defmethod), setup forms and other forms once
-  per identical text, each at its last position."
+  (plus the dispatch value for defmethod) and other forms once per
+  identical text, each at its last position. A setup form is kept once per
+  ns and identical text at its first position, so it stays ahead of the
+  definitions that need it."
   [es]
-  (let [files (keep-last (filter #(= :file (:kind %)) es) :path)
+  (let [files (keep-by (filter #(= :file (:kind %)) es) :path (constantly false))
         loaded (set (map :path files))
         forms (->> es
                    (filter #(= :form (:kind %)))
                    (remove #(contains? loaded (:source-file %)))
                    (mapv #(assoc % ::k (form-key %))))
-        kept (keep-last forms ::k)
+        kept (keep-by forms ::k setup-key?)
         strip #(dissoc % ::k)
         group (fn [g] (into [] (comp (filter #(= g (first (::k %)))) (map strip)) kept))]
     {:files (mapv :path files)
@@ -273,38 +307,41 @@
 
 (defn summary
   "{:files n :defs n :others n :dialect newest-name :when text} for es, or
-  nil when es is empty. now is epoch ms."
-  [es now]
-  (when (seq es)
-    (let [c (compact es)]
-      {:files (count (:files c))
-       :defs (count (:defs c))
-       :others (count (:others c))
-       :dialect (newest-dialect es)
-       :when (when-text now es)})))
+  nil when es is empty. now is epoch ms; c, when given, is (compact es)."
+  ([es now] (when (seq es) (summary es now (compact es))))
+  ([es now c]
+   (when (seq es)
+     {:files (count (:files c))
+      :defs (count (:defs c))
+      :others (count (:others c))
+      :dialect (newest-dialect es)
+      :when (when-text now es)})))
 
 (defn- plural [n one many] (str n " " (if (= 1 n) one many)))
 
 (defn- ns-runs
   "Lines for forms: an (in-ns 'x) before the first and before each form whose
-  ns differs from the one before. render makes a form's own line."
-  [forms render]
+  ns differs from the one before, written with prefix in front. render
+  makes a form's own line."
+  [forms render prefix]
   (loop [fs forms prev ::none out []]
     (if-let [f (first fs)]
       (recur (rest fs) (:ns f)
              (cond-> out
-               (not= prev (:ns f)) (conj (str "(in-ns '" (:ns f) ")"))
+               (not= prev (:ns f)) (conj (str prefix "(in-ns '" (:ns f) ")"))
                true (conj (render f))))
       out)))
 
 (defn script
   "The replay tab's text for es: a header, then files, definitions and other
-  forms (commented out with #_), each under a heading and left out when
+  forms (commented out with #_, their in-ns lines too, so an unedited Run
+  leaves the prompt where it was), each under a heading and left out when
   empty. opts: :root project folder or nil, :now epoch ms, :dialect the
   current window's dialect name."
   [es {:keys [root now dialect]}]
-  (let [{:keys [files defs others]} (compact es)
-        s (summary es now)
+  (let [c (compact es)
+        {:keys [files defs others]} c
+        s (summary es now c)
         recorded (:dialect s)
         header (str ";; Last session "
                     (if root (str "in " root) "with no folder")
@@ -322,6 +359,6 @@
                        (section ";; Files you ran, loaded as they are on disk now"
                                 (map #(str "(load-file " (pr-str %) ")") files))
                        (section ";; Definitions from the console"
-                                (ns-runs defs :text))
+                                (ns-runs defs :text ""))
                        (section ";; Other forms, skipped: remove the #_ to run one"
-                                (ns-runs others #(str "#_" (:text %))))]))))
+                                (ns-runs others #(str "#_" (:text %)) "#_"))]))))

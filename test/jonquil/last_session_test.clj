@@ -112,3 +112,23 @@
   (is (= "; Couldn't reopen 2 files from last time: a.clj, b.clj\n"
          (ls/missing-line ["a.clj" "b.clj"])))
   (is (nil? (ls/missing-line []))))
+
+(defn- perms [path]
+  (java.nio.file.attribute.PosixFilePermissions/toString
+   (java.nio.file.Files/getPosixFilePermissions
+    (.toPath (io/file path)) (make-array java.nio.file.LinkOption 0))))
+
+(deftest create-owner-only-test
+  (let [d (dir!)
+        p (str d "/fresh.tmp")]
+    (is (true? (ls/create-owner-only! p)))
+    (is (= "rw-------" (perms p)))
+    (is (= "" (slurp p)))
+    (is (false? (ls/create-owner-only! p)) "an existing file is left alone")
+    (is (false? (ls/create-owner-only! (str d "/no/such/dir/x.tmp"))))))
+
+(deftest write-atomically-owner-only-test
+  (let [p (str (dir!) "/sub/rec.edn")]
+    (is (nil? (ls/write-atomically! p "{:a 1}" {:owner-only? true})))
+    (is (= "{:a 1}" (slurp p)))
+    (is (= "rw-------" (perms p)))))

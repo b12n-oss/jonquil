@@ -67,10 +67,18 @@
 
 (deftest load-drops-bad-entries-test
   (let [p (str (dir!) "/rec.edn")]
-    (spit p (pr-str {:version 1 :current [{:kind :file :path "/a.clj"} "junk" {:kind :zap}]}))
+    (spit p (pr-str {:version 1 :current [{:kind :file :path "/a.clj" :at 1} "junk" {:kind :zap}]}))
     (let [r (replay/load-record p)]
       (is (not (contains? r :warning)))
-      (is (= [{:kind :file :path "/a.clj"}] (:current (:record r)))))))
+      (is (= [{:kind :file :path "/a.clj" :at 1}] (:current (:record r)))))))
+
+(deftest load-drops-entries-without-a-time-test
+  (let [p (str (dir!) "/rec.edn")]
+    (spit p (pr-str {:version 1
+                     :previous [{:kind :form :text "(+ 1 2)" :ns "user"}
+                                {:kind :file :path "/a.clj" :at "yesterday"}
+                                {:kind :file :path "/b.clj" :at 5}]}))
+    (is (= [{:kind :file :path "/b.clj" :at 5}] (:previous (:record (replay/load-record p)))))))
 
 (deftest save-record-preexisting-open-dir-test
   (let [d (dir!)
@@ -82,14 +90,14 @@
      (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x"))
     (is (nil? (replay/save-record! p (replay/empty-record))))
     (is (= "rw-------" (perms p)))
-    (is (= "rwxr-xr-x" (perms rd)))))
+    (is (= "rwx------" (perms rd)))))
 
 (deftest save-record-nil-path-test
   (is (string? (replay/save-record! nil (replay/empty-record)))))
 
 ;; --- entries, slots, compaction, script ------------------------------------
 
-(defn- ents [m] (replay/entries (merge {:at 1 :dialect "Jolt"} m)))
+(defn- ents [m] (mapv #(dissoc % :key) (replay/entries (merge {:at 1 :dialect "Jolt"} m))))
 
 (defn- form [text ns & {:as more}]
   (merge {:kind :form :text text :ns ns :source-file nil :at 1 :dialect "Jolt"} more))
@@ -107,7 +115,7 @@
 
 (deftest entries-track-in-ns-test
   (let [es (ents {:source :repl :ns "user" :code "(in-ns 'foo) (def x 1)"})]
-    (is (= [(form "(in-ns 'foo)" "user") (form "(def x 1)" "foo")] es))))
+    (is (= [(form "(def x 1)" "foo")] es))))
 
 (deftest entries-form-in-file-test
   (is (= [(form "(defn g [] 2)" "a" :source-file "/p/a.clj")]
@@ -175,7 +183,7 @@
               "(def conn 1)\n"
               "\n"
               ";; Other forms, skipped: remove the #_ to run one\n"
-              "(in-ns 'app.core)\n"
+              "#_(in-ns 'app.core)\n"
               "#_(start-server)")
          (replay/script script-es {:root "/p" :now (+ 3000 (* 14 hour)) :dialect "Jolt"}))))
 
@@ -186,7 +194,7 @@
                          {:root nil :now now :dialect "Jolt"})]
     (is (str/starts-with? s ";; Last session with no folder (Jolt, 14 hours ago), 2 files,\n;; 0 definitions, 3 other forms."))
     (is (not (str/includes? s "Definitions from the console")))
-    (is (str/includes? s "(in-ns 'x)\n#_(a)\n(in-ns 'y)\n#_(b)\n#_(c)"))))
+    (is (str/includes? s "#_(in-ns 'x)\n#_(a)\n#_(in-ns 'y)\n#_(b)\n#_(c)"))))
 
 (deftest script-dialect-differs-test
   (let [lines (str/split-lines (replay/script script-es {:root "/p" :now 5000 :dialect "Clojure (JVM)"}))]
@@ -214,7 +222,8 @@
 
 (deftest entries-ns-metadata-test
   (let [es (ents {:source :repl :ns "user" :code "(ns ^:foo a) (def x 1) (in-ns 'b) (def y 1)"})]
-    (is (= ["user" "a" "a" "b"] (map :ns es)))))
+    (is (= ["user" "a" "b"] (map :ns es)))
+    (is (= ["(ns ^:foo a)" "(def x 1)" "(def y 1)"] (map :text es)))))
 
 (deftest entries-non-symbol-in-ns-keeps-ns-test
   (let [es (ents {:source :repl :ns "user" :code "(in-ns (symbol x)) (in-ns b) (def y 1)"})]
@@ -225,3 +234,87 @@
     (is (= [(tfile "/p/a\"b\\c.clj")] es))
     (is (str/includes? (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})
                        "(load-file \"/p/a\\\"b\\\\c.clj\")"))))
+
+;; --- final review fixes ------------------------------------------------------
+
+(deftest compact-setup-per-ns-test
+  (let [c (replay/compact [(form "(require '[clojure.string :as str])" "a")
+                           (form "(def x (str/join [1]))" "a")
+                           (form "(require '[clojure.string :as str])" "b")
+                           (form "(def y (str/join [2]))" "b")])]
+    (is (= [["a" "(require '[clojure.string :as str])"] ["a" "(def x (str/join [1]))"]
+            ["b" "(require '[clojure.string :as str])"] ["b" "(def y (str/join [2]))"]]
+           (map (juxt :ns :text) (:defs c))))))
+
+(deftest compact-setup-keeps-first-position-test
+  (let [c (replay/compact [(form "(require '[clojure.set :as set])" "user")
+                           (form "(def z (set/union #{1} #{2}))" "user")
+                           (form "(require '[clojure.set :as set])" "user")])]
+    (is (= ["(require '[clojure.set :as set])" "(def z (set/union #{1} #{2}))"]
+           (map :text (:defs c))))))
+
+(deftest script-ns-then-defs-in-another-ns-test
+  (let [es (concat (replay/entries {:source :repl :ns "user" :at 1000 :dialect "Jolt"
+                                    :code "(ns a) (require '[clojure.string :as str]) (def x (str/join [1]))"})
+                   (replay/entries {:source :repl :ns "a" :at 2000 :dialect "Jolt"
+                                    :code "(ns b) (require '[clojure.string :as str]) (def y (str/join [2]))"}))
+        s (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})]
+    (is (str/ends-with? s (str ";; Definitions from the console\n"
+                               "(in-ns 'user)\n(ns a)\n"
+                               "(in-ns 'a)\n(require '[clojure.string :as str])\n(def x (str/join [1]))\n(ns b)\n"
+                               "(in-ns 'b)\n(require '[clojure.string :as str])\n(def y (str/join [2]))")))))
+
+(defn- section-of
+  "The script s without its Other forms section."
+  [s]
+  (first (str/split s #"\n\n;; Other forms, skipped")))
+
+(defn- counts-line [s] (second (str/split-lines s)))
+
+(deftest script-round-trip-test
+  (let [es [(assoc (tfile "/p/src/app/core.clj") :at 1000)
+            (form "(ns a)" "user" :at 1100)
+            (form "(require '[clojure.string :as str])" "a" :at 1200)
+            (form "(def x (str/join [1]))" "a" :at 1300)
+            (form "(ns b)" "a" :at 1400)
+            (form "(require '[clojure.string :as str])" "b" :at 1500)
+            (form "(defn y [] (str/join [2]))" "b" :at 1600)
+            (form "(swap! db inc)" "a" :at 1700)
+            (form "(y)" "b" :at 1800)]
+        opts {:root "/p" :now 5000 :dialect "Jolt"}
+        s1 (replay/script es opts)
+        again (fn [s] (replay/script (replay/entries {:source :run :path nil :code s :ns "user"
+                                                      :at 1800 :dialect "Jolt"})
+                                     opts))
+        s2 (again s1)
+        s3 (again s2)
+        c1 (replay/compact es)
+        c2 (replay/compact (replay/entries {:source :run :path nil :code s1 :ns "user"
+                                            :at 1800 :dialect "Jolt"}))]
+    (is (str/includes? s1 ";; Other forms, skipped"))
+    ;; the skipped forms stay skipped, so they don't come back; the rest is the same
+    (is (= (section-of s1) (str/replace-first (section-of s2) (counts-line s2) (counts-line s1))))
+    (is (= ";; 6 definitions, 0 other forms. Nothing has run. Edit, then Run (Cmd/Ctrl+R)." (counts-line s2)))
+    (is (= s2 s3))
+    (is (= (:files c1) (:files c2)))
+    (is (= (map (juxt :ns :text) (:defs c1)) (map (juxt :ns :text) (:defs c2))))
+    (is (empty? (:others c2)))))
+
+(deftest entries-carry-key-test
+  (is (= [["defn" "f"] ["defmethod" "area" ":sq"] :setup :setup :other]
+         (map :key (replay/entries {:source :repl :ns "user" :at 1 :dialect "Jolt"
+                                    :code "(defn ^:private f [] 1) (defmethod area :sq [s] 1) (ns a) (require 'x) (+ 1 2)"})))))
+
+(deftest compact-same-with-or-without-key-test
+  (let [es (replay/entries {:source :repl :ns "user" :at 1 :dialect "Jolt"
+                            :code (str "(def x 1) (def x 2) (require 'a) (defn f [] 1) (require 'a) "
+                                       "(defmethod m :a [_] 1) (defmethod m :b [_] 2) (+ 1 2) (+ 1 2)")})
+        strip (fn [c] (-> c (update :defs #(mapv (fn [e] (dissoc e :key)) %))
+                          (update :others #(mapv (fn [e] (dissoc e :key)) %))))]
+    (is (every? :key es))
+    (is (= (strip (replay/compact es)) (replay/compact (map #(dissoc % :key) es))))))
+
+(deftest summary-takes-compact-test
+  (let [es [(tfile "/a.clj") (form "(+ 1 2)" "user")]
+        c {:files ["/x" "/y"] :defs [] :others []}]
+    (is (= 2 (:files (replay/summary es 5000 c))))))

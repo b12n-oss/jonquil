@@ -73,12 +73,28 @@
       (str (.toRealPath p (make-array java.nio.file.LinkOption 0)))
       path)))
 
+(defn create-owner-only!
+  "Creates path as an empty rw------- file, the mode given as the file is
+  made. true when it did; false, never a throw, when it couldn't (the file
+  already exists, its directory is missing, or the platform has no POSIX
+  file attributes)."
+  [path]
+  (try
+    (java.nio.file.Files/createFile
+     (.toPath (java.io.File. ^String path))
+     (into-array java.nio.file.attribute.FileAttribute
+                 [(java.nio.file.attribute.PosixFilePermissions/asFileAttribute
+                   (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))]))
+    true
+    (catch Exception _ false)))
+
 (defn write-atomically!
   "Writes text to path atomically (temp file beside the target, then
   ATOMIC_MOVE over it), rewriting a symlink's real target in place. nil on
   success, else \"couldn't save <path>: <message>\". With opts
-  {:owner-only? true} the temp file is set to rw------- before the move
-  (a failure to set that never fails the write)."
+  {:owner-only? true} the temp file is created rw------- before anything is
+  written to it; when that can't be done it is set to rw------- after the
+  write, before the move (a failure to set that never fails the write)."
   ([path text] (write-atomically! path text nil))
   ([path text opts]
   (let [tmp (atom nil)]
@@ -86,12 +102,13 @@
       (let [target (resolved-target path)]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
-        (spit @tmp text)
-        (when (:owner-only? opts)
-          (try (java.nio.file.Files/setPosixFilePermissions
-                (.toPath (java.io.File. ^String @tmp))
-                (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
-               (catch Exception _ nil)))
+        (let [private? (and (:owner-only? opts) (create-owner-only! @tmp))]
+          (spit @tmp text)
+          (when (and (:owner-only? opts) (not private?))
+            (try (java.nio.file.Files/setPosixFilePermissions
+                  (.toPath (java.io.File. ^String @tmp))
+                  (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
+                 (catch Exception _ nil))))
         (java.nio.file.Files/move
          (.toPath (java.io.File. ^String @tmp))
          (.toPath (java.io.File. ^String target))
