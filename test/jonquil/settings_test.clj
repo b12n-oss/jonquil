@@ -190,6 +190,22 @@
       (is (not (contains? r :reopen-tabs?)))
       (is (str/includes? (:warning r) ":reopen-tabs?")))))
 
+(deftest remember-session-test
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :remember-session? false}")
+    (is (false? (:remember-session? (settings/load-settings path)))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :remember-session? true}")
+    (is (true? (:remember-session? (settings/load-settings path)))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light}")
+    (is (not (contains? (settings/load-settings path) :remember-session?))))
+  (let [path (str (temp-dir) "/settings.edn")]
+    (spit path "{:theme :light :remember-session? 5}")
+    (let [r (settings/load-settings path)]
+      (is (not (contains? r :remember-session?)))
+      (is (str/includes? (:warning r) ":remember-session?")))))
+
 (deftest reopen-tabs-no-spurious-warning-test
   (doseq [text ["{:theme" "[1 2]" "{:theme :light :reopen-tabs? nil}"]]
     (let [path (str (temp-dir) "/settings.edn")]

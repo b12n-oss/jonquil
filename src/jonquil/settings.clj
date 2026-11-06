@@ -3,7 +3,7 @@
   $XDG_CONFIG_HOME/jonquil/settings.edn, or ~/.config/jonquil/settings.edn
   when XDG_CONFIG_HOME is unset or blank. It stores :theme, :dialect (the
   fallback dialect for a file no project decides) when the user set one by
-  hand, :file-tree {:visible? :width}, the booleans :reopen-tabs? and :mcp-listen?,
+  hand, :file-tree {:visible? :width}, the booleans :reopen-tabs?, :remember-session? and :mcp-listen?,
   and :parinfer (:off unless set). A save
   merges into what the file already holds, so each feature only writes its
   own keys. Loading never throws: a missing file gives the defaults with no
@@ -80,6 +80,16 @@
       (boolean? v) {:reopen-tabs? v}
       :else {:warning (str path " has an unusable :reopen-tabs?, ignoring it")})))
 
+(defn- remember-session-part
+  "{:remember-session? b} when m holds a boolean one, {} when it holds none
+  (absent or nil), and {:warning ..} otherwise."
+  [path m]
+  (let [v (when (map? m) (:remember-session? m))]
+    (cond
+      (nil? v) {}
+      (boolean? v) {:remember-session? v}
+      :else {:warning (str path " has an unusable :remember-session?, ignoring it")})))
+
 (defn- mcp-listen-part
   "{:mcp-listen? b} when m holds a boolean one, {} when it holds none (absent
   or nil), and {:warning ..} otherwise."
@@ -134,8 +144,8 @@
 
 (defn load-settings
   "{:theme k} from path, plus :dialect when the file names a known one,
-  :file-tree when it holds a usable one, :reopen-tabs? and :mcp-listen? when
-  they hold a boolean, :plugins when it holds a set of disabled ids,
+  :file-tree when it holds a usable one, :reopen-tabs?, :remember-session? and
+  :mcp-listen? when they hold a boolean, :plugins when it holds a set of disabled ids,
   :parinfer when it holds one of parinfer-modes, :layouts when it holds
   named layouts, and
   :warning when the file exists but part of it can't be used.
@@ -149,14 +159,15 @@
             d (dialect-part path m)
             ft (file-tree-part path m)
             rt (reopen-tabs-part path m)
+            rs (remember-session-part path m)
             ml (mcp-listen-part path m)
             pl (plugins-part path m)
             pi (parinfer-part path m)
             ly (layouts-part path m)
-            warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt)
+            warnings (remove nil? [(:warning t) (:warning d) (:warning ft) (:warning rt) (:warning rs)
                                    (:warning ml) (:warning pl) (:warning pi) (:warning ly)])]
         (cond-> (merge (dissoc t :warning) (dissoc d :warning) (dissoc ft :warning)
-                       (dissoc rt :warning) (dissoc ml :warning) (dissoc pl :warning)
+                       (dissoc rt :warning) (dissoc rs :warning) (dissoc ml :warning) (dissoc pl :warning)
                        (dissoc pi :warning) (dissoc ly :warning))
           (seq warnings) (assoc :warning (str/join "; " warnings)))))))
 

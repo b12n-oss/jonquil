@@ -387,7 +387,8 @@
      (when-let [dir (and (not (eval/evaluating? ctx))
                          (some-> (:path opts) dialect/find-project :dir))]
        (swap! state assoc :project-dir dir))
-     (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state)))
+     (when (and (not (eval/evaluating? ctx)) (= :reset (:mode @state))
+                (not (false? (:reset? opts))))
        (reset-namespaces! session owner))
      (create-ns 'user)
      ;; A Jolt whose eval-string takes a source path evaluates the text as

@@ -66,6 +66,7 @@
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.locations :as loc]
+            [jonquil.replay :as replay]
             [jonquil.restarts :as restarts]
             [jonquil.results :as results]
             [jonquil.login-path :as login-path]
@@ -970,6 +971,9 @@
             new (doto (ev/make sel) registry/register!)]
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label cv status-label)
+        ;; LM7: the prompt history follows the window, not the evaluator
+        (let [items (:items @(ev/history old))]
+          (reset! (ev/history new) {:items items :index (count items) :draft ""}))
         (reset! ev* new)
         ;; LM4: counting is the whole process's mode, so leaving the
         ;; in-process Jolt for another runtime mustn't leave Jonquil counting
@@ -1109,15 +1113,23 @@
 
 (defn- hooked-opts
   "opts without :hook-source (:run :selection :form :repl), :hook-tab,
-  :hook-code, :failure* and :changed, and, when it had a source, its :on-complete
+  :hook-code, :failure*, :changed, :record, :recorder and :replay-root, and, when it had a source, its :on-complete
   chained so the plugins' :after-run and :on-error hooks hear how the eval
   ended, and the window's failure* atom records an error (or clears on
-  success) for the restarts. Only
+  success) for the restarts. With a :record ({:source :code :path :ns}) and
+  the :recorder atom, the window's recorder (LM7) hears it too, after the
+  rest and inside a try, with the tab and the tree's root (from the
+  :replay-root atom's fn) as it started. Only
   opts handed to ev/eval! come here, so an eval that never started fires
   nothing. after-eval! only starts futures and reports its own throws, so
   the eval's own completion is never lost to it."
-  [{:keys [hook-source hook-tab hook-code failure* changed on-complete] :as opts}]
-  (let [opts (dissoc opts :hook-source :hook-tab :hook-code :failure* :changed)]
+  [{:keys [hook-source hook-tab hook-code failure* changed record recorder replay-root on-complete] :as opts}]
+  (let [opts (dissoc opts :hook-source :hook-tab :hook-code :failure* :changed :record :recorder :replay-root)
+        ;; LM7: the tree's root now, as the eval starts (the GTK thread), so
+        ;; a re-root before it ends doesn't move it into another project's record
+        record (when record
+                 (assoc record :tab-id hook-tab
+                        :root (when-let [f (some-> replay-root deref)] (f))))]
     (if-not hook-source
       opts
       (assoc opts :on-complete
@@ -1136,7 +1148,13 @@
                ;; LM4: the lines that ran, whether it ended well or not
                (when (and changed (#{:run :form :selection} hook-source))
                  (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil)))
-               (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
+               (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result})
+               ;; LM7: what the user ran, for the last session's replay.
+               ;; Last, and never throwing into the evaluation: the recorder
+               ;; hands its work to the GTK thread and says its own failures
+               (when-let [f (and record (some-> recorder deref))]
+                 (try (f record result)
+                      (catch :default _ nil))))))))
 
 (defn- before-run-stopped
   "Asks the :before-run hooks about a Run of kind sending text
@@ -1150,6 +1168,13 @@
     (cview/append! cv :system (str "; " line "\n"))
     (set-status! status-label (str "; " line))
     line))
+
+(defn- run-record-ns
+  "The ns a Run's forms start in, for the replay record (LM7): user for the
+  in-process session, which runs a Run there, else the evaluator's prompt
+  ns. Read as the Run is submitted."
+  [ev]
+  (if (instance? jonquil.session.InProcess ev) "user" (str (ev/prompt-ns ev))))
 
 (defn- do-run!
   "The upstream banner, printed ONLY when the Run actually starts.
@@ -1190,13 +1215,21 @@
          refused (refuse-foreign! ctx)
          opts (fn [] (let [base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
                                               :run? true :path @path-atom :owner id)
+                                       ;; LM7: the replay tab's Run adds to the session, and
+                                       ;; what it defines is the REPL's, as if typed there
+                                       (= id (:id @(:replay-tab* cv))) (assoc :reset? false :owner :repl)
                                        ;; LM4: a Run counts its own lines alone
                                        (some-> (:changed ed) :counting? deref (apply []))
                                        (assoc :clear-line-counts? true))]
                        (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
                                            :hook-source :run :hook-tab id
                                            :hook-code (editor/editor-text ed) :failure* (:failure* cv)
-                                           :changed (:changed ed)))))]
+                                           :changed (:changed ed) :recorder (:recorder* cv)
+                                           :replay-root (:replay-root* cv)
+                                           ;; MCP's Run (notify) is never recorded
+                                           :record (when-not notify
+                                                     {:source :run :code (editor/editor-text ed)
+                                                      :path @path-atom :ns (run-record-ns @ev*)})))))]
      (cond
        refused (when notify (notify {:refused refused}))
        (ev/evaluating? @ev*)
@@ -1265,9 +1298,18 @@
    (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
          warning (ev/eval! @ev* text (hooked-opts (merge (assoc (make-eval-opts ed cv ev* status-label false) :run? false
                                                                 :hook-code text :failure* (:failure* cv)
-                                                                :changed (:changed ed))
+                                                                :changed (:changed ed) :recorder (:recorder* cv)
+                                                                :replay-root (:replay-root* cv))
                                                          extra-opts)))]
      (when warning (cview/append! cv :system warning)))))
+
+(defn- tab-record
+  "The :record map (LM7) for code that Run Selection or Run Form sends from
+  tab: its saved path, and the namespace the buffer's ns form names, else
+  the prompt's."
+  [tab ev* source code buffer-text]
+  {:source source :code code :path @(:path tab)
+   :ns (or (clj/buffer-ns buffer-text) (str (ev/prompt-ns @ev*)))})
 
 (defn- do-run-selection!
   "Cmd/Ctrl+E: commands/run-selection-text on the editor's snapshot
@@ -1292,7 +1334,8 @@
                     (and (not (ev/evaluating? @ev*)) (before-run-stopped ctx :selection tab text)))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
-                                                    :hook-source :selection :hook-tab (:id tab)})))))
+                                                    :hook-source :selection :hook-tab (:id tab)
+                                                    :record (tab-record tab ev* :selection text (:text snap))})))))
 
 ;; --- MCP hooks: run/eval/run-selection that report back -----------------------
 
@@ -1417,7 +1460,8 @@
         ((:flash! flash-fns) start end (:caret snap))
         (cview/echo-entry! cv text (not (ev/evaluating? @ev*)))
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
-                                                    :hook-source :form :hook-tab (:id tab)}))
+                                                    :hook-source :form :hook-tab (:id tab)
+                                                    :record (tab-record tab ev* :form text (:text snap))}))
       (set-status! status-label "No form at the caret."))))
 
 (defn- do-run-changed!
@@ -1443,7 +1487,8 @@
               (cview/append! cv :system (str "; Running " (count forms) " changed form"
                                              (when (> (count forms) 1) "s") "\n"))
               (do-repl-eval! ed cv ev* status-label code {:ns-source text :owner (:id tab)
-                                                          :hook-source :selection :hook-tab (:id tab)}))))))))
+                                                          :hook-source :selection :hook-tab (:id tab)
+                                                          :record (tab-record tab ev* :form code text)}))))))))
 
 ;; --- inspector panel -----------------------------------------------------
 
@@ -2346,7 +2391,10 @@
       :eval (if (pal-data/bang? text)
               (@bang* text)
               (let [tab (tab-fn)]
-                (do-repl-eval! (:ed tab) @*cv ev* status-label text {:hook-source :repl :hook-tab (:id tab)})))
+                (do-repl-eval! (:ed tab) @*cv ev* status-label text
+                               {:hook-source :repl :hook-tab (:id tab)
+                                ;; the namespace it runs in, read before it can move
+                                :record {:source :repl :code text :path nil :ns (str (ev/prompt-ns @ev*))}})))
       :send-stdin (ev/send-input! @ev* text)
       :eof (ev/send-eof! @ev*))))
 
@@ -2644,6 +2692,8 @@
       ;; Nothing will Run as this tab again, so
       ;; its namespaces go to the REPL's set for the next Run to clear.
       (let [e @ev*] (when (satisfies? ev/Owners e) (ev/release-owner! e id)))
+      ;; LM7: a closed replay tab is no longer the one whose Run forgets
+      (when (= id (:id @(:replay-tab* cv))) (reset! (:replay-tab* cv) nil))
       (tab/dispose-popovers! t)
       (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook (:root t)))
       (refresh-labels! ctx)
@@ -3169,6 +3219,217 @@
     (reopen-entry! ctx entry))
   nil)
 
+;; --- LM7: the last session's record ---------------------------------------------
+;; Each project has a record (jonquil.replay): what its windows evaluated, in
+;; :current, and what earlier windows did, in :previous. ctx is the window's
+;; tab map (tab-ctx), which carries :replay*, an atom holding
+;; {:root :path :record :dirty?} for the root the window records under (nil
+;; until a root opens with :remember-session? on).
+
+;; The roots a window of this process has opened: only the first window to
+;; open one moves its :current to :previous.
+(defonce ^:private opened-roots (atom #{}))
+
+(defn- remember-session?
+  "False only when the settings file holds :remember-session? false."
+  [settings-path]
+  (not (false? (:remember-session? (settings/load-settings settings-path)))))
+
+(defn- replayable?
+  "Whether the window's dialect gets a replay: Jolt and JVM Clojure."
+  [sel]
+  (contains? #{:jolt :clj} (:id (:profile sel))))
+
+(defn- count-text [n one many]
+  (str n " " (if (= 1 n) one many)))
+
+(defn- offer-line
+  "The console line that offers back the previous slot's entries es at open,
+  or nil when es is empty. now is epoch ms, sel the window's selection. When
+  the newest entry's dialect isn't the window's, the line says so."
+  [es now sel]
+  (when (seq es)
+    (let [s (replay/summary es now)
+          dialect (:name (:profile sel))]
+      (if (replayable? sel)
+        (str "; Last session (" (:dialect s) ", " (:when s) "): "
+             (count-text (:files s) "file" "files") ", "
+             (count-text (:defs s) "definition" "definitions") ", "
+             (count-text (:others s) "other form" "other forms")
+             ". Open last session's replay from the palette to review it."
+             (when (not= (:dialect s) dialect)
+               (str " Recorded in " (:dialect s) "; this window runs " dialect ".")))
+        (str "; Last session (" dialect ", " (:when s) "): replay isn't available for "
+             dialect " yet. Your prompt history is back.")))))
+
+;; A record change is written about this long after it, once, however many
+;; changes came meanwhile (estimate: the spec lets a crash lose up to a second).
+(def ^:private REPLAY-SAVE-MS 300)
+
+(defn- note-replay-result!
+  "Says err once on the console, as \"; last session: <error>\", until a
+  write works again (err nil)."
+  [{:keys [cv replay-error]} err]
+  (if err
+    (when (not= err @replay-error)
+      (reset! replay-error err)
+      (cview/append! cv :system (str "; last session: " err "\n")))
+    (reset! replay-error nil)))
+
+(defn- save-replay!
+  "Writes {:path :record} now."
+  [ctx {:keys [path record]}]
+  (note-replay-result! ctx (replay/save-record! path record)))
+
+(defn- flush-replay!
+  "Writes the window's record when it has changes not yet on disk. GTK thread."
+  [{:keys [replay*] :as ctx}]
+  (let [st @replay*]
+    (when (:dirty? st)
+      (swap! replay* assoc :dirty? false)
+      (save-replay! ctx st))))
+
+(defn- schedule-replay-save!
+  "Arranges one flush-replay! in REPLAY-SAVE-MS unless one is already due."
+  [{:keys [replay-save-pending?] :as ctx}]
+  (when (compare-and-set! replay-save-pending? false true)
+    (g/g-timeout-add REPLAY-SAVE-MS
+                     (callable (fn [_data]
+                                 (reset! replay-save-pending? false)
+                                 (try (flush-replay! ctx) (catch :default _ nil))
+                                 0)
+                               [:pointer] :int :on-throw 0)
+                     ffi/null)))
+
+(defn- open-root!
+  "The tree's root has opened (at startup, or an Open Folder re-root):
+  writes the old root's pending changes, loads the new root's record, and, for
+  the first window of the process on this root, moves its :current to
+  :previous (saved at once). Then the root's prompt history goes into the
+  evaluator and the console offers :previous when it isn't empty. Does
+  nothing with :remember-session? off, or when the record is already this
+  root's. GTK thread. Never throws; a failure is said on the console."
+  [{:keys [cv ev* sel* settings-path* tree-pane replay*] :as ctx}]
+  (let [root (:root @(:state tree-pane))]
+    (when (and (remember-session? @settings-path*)
+               (not (and @replay* (= root (:root @replay*)))))
+      (try
+        (flush-replay! ctx)
+        (let [path (replay/record-path @settings-path* root)
+              {:keys [record warning]} (replay/load-record path)
+              first? (not (contains? @opened-roots root))
+              moved (if first? (replay/open-slot record) record)
+              state {:root root :path path :record moved :dirty? false}]
+          (swap! opened-roots conj root)
+          (when warning (cview/append! cv :system (str "; " warning "\n")))
+          (reset! replay* state)
+          (when (not= moved record) (save-replay! ctx state))
+          (let [v (:history moved)]
+            (reset! (ev/history @ev*) {:items v :index (count v) :draft ""}))
+          (when-let [line (offer-line (:previous moved) (System/currentTimeMillis) @sel*)]
+            (cview/append! cv :system (str line "\n"))))
+        (catch :default e
+          (cview/append! cv :system (str "; last session: " (ex-message e) "\n")))))))
+
+(defn- append-to-root!
+  "Files es (and forgets :previous when asked) in root's own record file and
+  saves it at once: the window has moved to another root since the evaluation
+  started, so its replay state stays as it is. A file that can't be read is
+  left alone and the warning said (once), since saving would replace it."
+  [{:keys [settings-path*] :as ctx} root es forget?]
+  (when (or (seq es) forget?)
+    (let [path (replay/record-path @settings-path* root)
+          {:keys [record warning]} (replay/load-record path)]
+      (if warning
+        (note-replay-result! ctx warning)
+        (save-replay! ctx {:path path
+                           :record (cond-> record
+                                     (seq es) (replay/add-entries es)
+                                     forget? replay/forget)})))))
+
+(defn- record-eval!
+  "The recorder's work for one finished evaluation, on the GTK thread."
+  [{:keys [cv ev* sel* settings-path* replay*] :as ctx} {:keys [source tab-id root] :as record} result]
+  (when (remember-session? @settings-path*)
+    (let [ok? (= :ok (:status result))
+          es (when ok?
+               (replay/entries (assoc (select-keys record [:source :code :path :ns])
+                                      :at (System/currentTimeMillis)
+                                      :dialect (:name (:profile @sel*)))))
+          rt @(:replay-tab* cv)
+          ;; an :ok Run of the replay tab forgets its own root's :previous,
+          ;; which may not be the root the entries are filed under
+          forget? (and ok? (= :run source) (some? tab-id) (= tab-id (:id rt)))
+          forget-here? (and forget? (= root (:root rt)))
+          st @replay*]
+      (if (and st (= root (:root st)))
+        (let [items (:items @(ev/history @ev*))]
+          (swap! replay* (fn [s]
+                           (-> s
+                               (update :record (fn [r] (cond-> (replay/with-history r items)
+                                                         (seq es) (replay/add-entries es)
+                                                         forget-here? replay/forget)))
+                               (assoc :dirty? true))))
+          (schedule-replay-save! ctx))
+        (append-to-root! ctx root es forget-here?))
+      (when (and forget? (not forget-here?))
+        (if (and st (= (:root rt) (:root st)))
+          (do (swap! replay* (fn [s] (-> s (update :record replay/forget) (assoc :dirty? true))))
+              (schedule-replay-save! ctx))
+          (append-to-root! ctx (:root rt) nil true))))))
+
+(defn- make-recorder
+  "The fn (record result) hooked-opts calls when an evaluation that carries a
+  :record (with the :root it started under) finishes. It runs on the eval's
+  worker thread, so it only hands the work to the GTK thread, where every
+  read and write of the replay state happens. The work files the entries of
+  an :ok evaluation under the record's root, stores the evaluator's history
+  and schedules a save; an :ok Run of the replay tab also forgets the
+  :previous of the root that tab was opened for.
+  A throw is said once, like a failed save, and never reaches the evaluation."
+  [ctx]
+  (fn [record result]
+    (on-gui! (fn []
+               (try (record-eval! ctx record result)
+                    (catch :default e
+                      (try (note-replay-result! ctx (or (ex-message e) (str e)))
+                           (catch :default _ nil))))))))
+
+(defn- replay-open!
+  "Open last session's replay: an Untitled tab holding the script of :previous,
+  marked saved, and now the replay tab, {:id :root} in :replay-tab*. A
+  second Open selects that tab while it exists and was opened for this
+  root; one opened for another root stops being the replay tab when the
+  new one opens. With nothing to replay, or a dialect that doesn't replay,
+  the console says so instead. GTK thread."
+  [{:keys [cv sel* replay* tabs] :as ctx}]
+  (let [st @replay*
+        es (:previous (:record st))
+        sel @sel*
+        {open-id :id open-root :root} @(:replay-tab* cv)]
+    (cond
+      ;; this root's replay tab is still there: show it, change nothing (an
+      ;; older one left behind would become a plain Untitled tab whose Run resets)
+      (and open-id (= open-root (:root st)) (tab-by-id tabs open-id)) (select-tab! ctx open-id)
+      (empty? es) (cview/append! cv :system "; There's no last session to replay for this folder.\n")
+      (not (replayable? sel)) (cview/append! cv :system (str (offer-line es (System/currentTimeMillis) sel) "\n"))
+      :else (when-let [t (new-tab! ctx {:path nil
+                                        :text (replay/script es {:root (:root st)
+                                                                 :now (System/currentTimeMillis)
+                                                                 :dialect (:name (:profile sel))})})]
+              (editor/mark-saved! (:ed t))
+              (reset! (:replay-tab* cv) {:id (:id t) :root (:root st)})))))
+
+(defn- replay-forget!
+  "Forget last session: empties :previous (the prompt history stays), saves
+  at once and says so. GTK thread."
+  [{:keys [cv replay* settings-path*] :as ctx}]
+  (if (and @replay* (remember-session? @settings-path*))
+    (do (swap! replay* (fn [s] (-> s (update :record replay/forget) (assoc :dirty? true))))
+        (flush-replay! ctx)
+        (cview/append! cv :system "; Forgot the last session. Your prompt history stays.\n"))
+    (cview/append! cv :system "; There's no last session to forget for this folder.\n")))
+
 (def ^:private FIRST-FRAME-FALLBACK-MS
   "How long after-first-frame! waits for a frame before running anyway (a
   window that starts minimized may not paint)."
@@ -3602,7 +3863,14 @@
                                      :waiting? (fn [] (ev/waiting-for-input? @ev*))})
             :failure* (atom nil)
             ;; a fn the window runs after every evaluation (the Trace panel's refresh)
-            :after-eval* (atom nil))
+            :after-eval* (atom nil)
+            ;; LM7: the fn (record result) that files a finished evaluation
+            ;; in the project's record, and the replay tab as {:id :root},
+            ;; the root it was opened for (or nil)
+            :recorder* (atom nil)
+            ;; a fn returning the tree's root, read as an evaluation starts
+            :replay-root* (atom nil)
+            :replay-tab* (atom nil))
         _ (reset! *cv cv)
         provider (g/gtk-css-provider-new)
         zoom-px (atom commands/DEFAULT-FONT-PX)
@@ -4409,6 +4677,8 @@
                                                                            :doc (world/entry-label now x)
                                                                            :chords [] :source "world"})
                                                                   es)))))
+        replay-open-fn (fn [] (replay-open! @*tab-ctx))
+        replay-forget-fn (fn [] (replay-forget! @*tab-ctx))
         trace-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/Trace e)) e)))
         trace-refresh! (fn [show?]
                          (if-let [e (trace-ev)]
@@ -4860,7 +5130,11 @@
                            :else
                            (do (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
                                (do-repl-eval! (:ed t) cv ev* status-label code
-                                              (cond-> {:hook-source (:kind f) :hook-tab (:id t)}
+                                              (cond-> {:hook-source (:kind f) :hook-tab (:id t)
+                                                       :record (if buffer?
+                                                                 (tab-record t ev* (:kind f) code (editor/editor-text (:ed t)))
+                                                                 {:source (:kind f) :code code :path nil
+                                                                  :ns (str (ev/prompt-ns @ev*))})}
                                                 ;; as Run Selection and Run Form send them
                                                 buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t)))))))
                        (set-status! status-label "; The tab that failed is closed."))
@@ -5017,6 +5291,7 @@
                          :locations-project-usages-fn locations-project-usages-fn
                          :world-save-fn world-save-fn :world-restore-fn world-restore-fn
                          :world-restore-earlier-fn world-restore-earlier-fn
+                         :replay-open-fn replay-open-fn :replay-forget-fn replay-forget-fn
                          :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
@@ -5280,6 +5555,8 @@
                                                           ;; tabs open are only part of the list.
                                                           :save-session! (fn [] (let [c @*tab-ctx
                                                                                       restoring? (some-> c :session-restoring? deref)]
+                                                                                  ;; LM7: a pending record write is not left to the timer
+                                                                                  (when c (flush-replay! c))
                                                                                   (some-> c :session-live? (reset! false))
                                                                                   (some-> c :session-restoring? (reset! false))
                                                                                   (when-not restoring? (save-session! c))))})
@@ -5363,6 +5640,7 @@
                    :tree-pane tree-pane :tree-saved! tree-saved! :folder-result* *folder-result
                    :session-live? (atom false) :session-last (atom nil) :session-error (atom nil)
                    :session-restoring? (atom false)
+                   :replay* (atom nil) :replay-error (atom nil) :replay-save-pending? (atom false)
                    :window-key-args window-key-args :repl-complete-fn repl-complete-fn
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
@@ -5383,7 +5661,9 @@
                                      (when (and (= 1 (count ts))
                                                 (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))}))
                                        (apply-selection! sel-ctx (ft/project-selection
-                                                                  p (:dialect (settings/load-settings @settings-path*)))))))
+                                                                  p (:dialect (settings/load-settings @settings-path*))))))
+                                   ;; LM7: the new root's record, its offer and history
+                                   (open-root! tab-ctx))
                              (dialog-dismissed? r) nil
                              :else (cview/append! cv :error (str "; open folder: " err "\n"))))]
       ;; switch-page fired inside that first append, before the tab was in
@@ -5394,6 +5674,8 @@
       ;; on-switch!, so its override reaches the label here.
       (update-parinfer-label!)
       (reset! *tab-ctx tab-ctx)
+      (reset! (:recorder* cv) (make-recorder tab-ctx))
+      (reset! (:replay-root* cv) (fn [] (:root @(:state tree-pane))))
       (reset! *folder-result folder-result!)
       ;; Open With and Dock drops. A directory re-roots the tree like an
       ;; Open Folder result and shows it; a file opens in a tab, and one
@@ -5488,7 +5770,9 @@
             ;; same reason; the next tab change does.
             live! (fn []
                     (reset! (:session-last tab-ctx) (session-snapshot tab-ctx))
-                    (reset! (:session-live? tab-ctx) true))]
+                    (reset! (:session-live? tab-ctx) true)
+                    ;; LM7: the root's record, its offer and history
+                    (open-root! tab-ctx))]
         ;; Say where the child tools' PATH came from. The wait for the
         ;; lookup is off the GTK thread; the append goes through on-gui!, and
         ;; a window closed meanwhile must not throw out of the future.
@@ -5779,6 +6063,15 @@
                  ;; Live saving on or off, so a row can stand in for a quit
                  ;; and a new launch (off until that launch's restore).
                    :session-live!* (fn [on?] (reset! (:session-live? @*tab-ctx) on?))
+                 ;; LM7: the window's record, {:root :path :record}, and the
+                 ;; replay tab's id (nil until one is open)
+                   :replay-record* (fn [] (select-keys @(:replay* @*tab-ctx) [:root :path :record]))
+                   :replay-tab-id* (fn [] (:id @(:replay-tab* cv)))
+                   :replay-open!* replay-open-fn
+                   :replay-forget!* replay-forget-fn
+                 ;; forgets that this process opened root, so the next
+                 ;; open-root! on it moves :current to :previous again
+                   :replay-reopen-root!* (fn [root] (swap! opened-roots disj root))
                  ;; The window's own popover registry -- close-popovers-fn
                  ;; is exactly what the keymap's Escape binding calls;
                  ;; register-popover-fn is how a popover (a self-test row's
@@ -6081,6 +6374,7 @@
   :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count* :poll-armed?*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :save-session!* :restore-session!* :session-live!*
+  :replay-record* :replay-tab-id* :replay-open!* :replay-forget!* :replay-reopen-root!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :full-doc-popover
   :rename!* :rename-to!* :rename-popover

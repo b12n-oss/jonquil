@@ -143,6 +143,56 @@ And a world reads back only on the Chez Scheme runtime it was saved on, so
 a Jolt upgrade that changes it can leave Restore World unable to read an
 old one: save again.
 
+### Last session's replay
+
+Jonquil records what each project evaluated, so that next time you can look
+at it and run it again. When you open a project that has a record from before,
+the console offers it: `; Last session (Jolt, 14 hours ago): 2 files, 31
+definitions, 4 other forms. Open last session's replay from the palette to
+review it.` If the record was made in another dialect than the window's, the
+line adds which one. Open Folder gets the same offer for the new folder.
+**Open last session's replay** in the palette puts a script in a new Untitled
+tab, and nothing runs until you press Run. Times are relative ("from 3 days
+ago to 14 hours ago"), not clock times.
+
+What gets recorded:
+
+- A Run of a saved file records the file. Run Form, Run Selection and Run
+  Changed in a saved file record their forms with that file as their source,
+  and the replay drops those forms when it loads the file.
+- A Run of an Untitled tab and every console entry record each top-level
+  form with its namespace. `(load-file "/abs/path")` counts as a file.
+- An evaluation that threw records nothing.
+- What an agent evaluates through MCP isn't recorded. The code it sends does
+  land in the Up/Down history, and that history is saved with the record.
+
+The script has three groups. Files come first, as `load-file` lines that load
+them as they are on disk now. Definitions follow, each once at its last
+position, with setup forms such as `ns` and `require` ahead of them, grouped
+by namespace. Every other form comes last behind `#_`, so it's skipped until
+you remove the `#_`. A setup form you ran again later (a second
+`(refer 'lib)`) keeps its first position, which is a known limit.
+
+The replay tab counts as typed at the console, so its Run never resets
+earlier definitions. A second Open selects the replay tab that's already open
+for the same folder, and after Open Folder it opens a new tab for the new
+folder. Running the replay records its files and definitions again, but not
+the skipped `#_` forms, which are gone from the next replay.
+
+The record keeps growing across days until you run the replay or choose
+**Forget last session** in the palette. It's one file per project in
+`replays/`, beside `settings.edn`, kept to 2,000 evaluations and 500 history
+entries, and written owner-only (`0600`, in a `0700` folder). It's plain text
+and holds whatever you typed, secrets included. Two Jonquil processes on one
+project aren't guarded against each other, so the later write wins.
+
+Replay runs in Jolt (in process and in the child) and JVM Clojure. The other
+dialects still record, and their Up/Down history comes back, but the console
+says replay isn't available for them yet. That history also survives a
+dialect switch. `:remember-session? false` in `settings.edn` turns off the
+recording, the offer, loading the history and Forget, and leaves any file
+already written alone.
+
 ## The REPL prompt, and how it differs from Run
 
 ![A Run's output followed by a REPL entry evaluated afterward, in the same console](../images/repl.png)
