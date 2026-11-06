@@ -103,7 +103,16 @@
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
         (let [private? (and (:owner-only? opts) (create-owner-only! @tmp))]
-          (spit @tmp text)
+          (if private?
+            ;; not spit: on Linux, Jolt's spit replaces the file, dropping the
+            ;; rw------- it was created with; Files/write keeps the inode
+            (java.nio.file.Files/write
+             (.toPath (java.io.File. ^String @tmp))
+             (.getBytes ^String text "UTF-8")
+             (into-array java.nio.file.OpenOption
+                         [java.nio.file.StandardOpenOption/WRITE
+                          java.nio.file.StandardOpenOption/TRUNCATE_EXISTING]))
+            (spit @tmp text))
           (when (and (:owner-only? opts) (not private?))
             (try (java.nio.file.Files/setPosixFilePermissions
                   (.toPath (java.io.File. ^String @tmp))
