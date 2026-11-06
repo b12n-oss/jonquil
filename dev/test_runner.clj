@@ -29,6 +29,7 @@
     jonquil.edit-test
     jonquil.eval-test
     jonquil.restarts-test
+    jonquil.compare-test
     jonquil.fibers-rt-test
     jonquil.hints-test
     jonquil.line-counts-test

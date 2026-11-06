@@ -18,6 +18,7 @@
     jonquil.mcp
     jonquil.mcp.json
     jonquil.mcp.tools
+    jonquil.compare
     jonquil.fibers-rt
     jonquil.hints
     jonquil.line-counts

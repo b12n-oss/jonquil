@@ -100,6 +100,12 @@
                        :run (call :describe-key-fn)}
    :help/key-hints {:doc "Show what keys do at the caret, in the status bar (on or off)." :scope :window
                     :run (call :hints-toggle-fn)}
+   :compare/disk {:doc "Compare with the file on disk: list the differences." :scope :window
+                  :run (call :compare-disk-fn)}
+   :compare/head {:doc "Compare with git HEAD: list the differences." :scope :window
+                  :run (call :compare-head-fn)}
+   :compare/take {:doc "Take the other version here: the compared file's lines for the difference at the caret."
+                  :scope :window :run (call :compare-take-fn)}
    :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
    ;; the locations list: three ways to fill it, F8 and Shift+F8 to step
