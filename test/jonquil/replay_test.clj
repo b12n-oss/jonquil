@@ -384,3 +384,33 @@
   (is (empty? (carried-texts ["(f)"] "(def s \"#_(f)\")")))
   (is (= ["(f)"] (carried-texts ["(f)"] "(a) ; note\n#_(f)\n")))
   (is (= ["(f)"] (carried-texts ["(f)"] "(foo #_(f))\n#_(f)"))))
+
+(deftest carry-skipped-nested-in-discard-test
+  (doseq [t ["#_(foo #_(f))" "(a) #_(foo #_(f)) (b)" "#_\"#_(f)\"" "#_[1 #_(f)]" "(a) #_(g\n  #_(f))"
+             "(comment #_(f))"]]
+    (is (empty? (carried-texts ["(f)"] t)) (pr-str t))))
+
+(deftest carry-skipped-positive-shapes-test
+  (doseq [t ["(a)\n#_(f)\n(b)" "(def s \";\") #_(f)" "(def s \"line one\n#_(g)\nline two\")\n#_(f)"
+             "#_(f)\n#_(f)" "#_ (f)" "#_\n(f)" "#_ #_ (g) (f)" "(a) ; c\n#_(f) ; #_(g)"]]
+    (is (= ["(f)"] (carried-texts ["(f)"] t)) (pr-str t)))
+  (is (= ["(g)" "(f)"] (carried-texts ["(g)" "(f)"] "#_ #_ (g) (f)"))))
+
+(deftest carry-skipped-real-script-test
+  (let [others (map #(str "(swap! db conj " % ")") (range 5))
+        es (concat [(form "(def a 1)" "user" :at 1) (form "(ns b)" "user" :at 2) (form "(def c 2)" "b" :at 3)]
+                   (map-indexed (fn [i t] (form t (if (even? i) "user" "b") :at (+ 10 i))) others))
+        script (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})
+        r (replay/carry-skipped {:version 1 :previous (vec es) :current [] :history []} script)]
+    (is (= others (map :text (:current r))))))
+
+(deftest carry-skipped-perf-test
+  (let [es (mapv #(form (str "(swap! db conj " % ")") "user" :at %) (range 2000))
+        script (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})
+        rec {:version 1 :previous es :current [] :history []}
+        t0 (System/nanoTime)
+        r (replay/carry-skipped rec script)
+        ms (/ (- (System/nanoTime) t0) 1e6)]
+    (println "carry-skipped 2000 forms:" ms "ms")
+    (is (= 2000 (count (:current r))))
+    (is (< ms 200))))
