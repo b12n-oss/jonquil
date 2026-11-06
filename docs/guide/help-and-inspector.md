@@ -76,13 +76,25 @@ Cmd/Ctrl+Shift+P lists Jonquil's commands, with their keys and source
 (built-in or plugin). Type words to narrow by description or id, Up and
 Down to move, Return or a click to run, Escape to close.
 
+The same words work at the Interactions prompt after a `!`, so you can run
+a command without leaving the keyboard's place: `!clear the console` and
+Return runs it, and the console names what ran. Words that match several
+commands list them and run none, and a command whose description is
+exactly the words wins over the longer ones. The line goes into the
+history like any other, so Up brings it back. Only one line of words
+counts, with a space somewhere after the `!`: a single word after it is
+read as code, since `!x` and `!=` are Clojure symbols, so type `! clear`
+for a one-word command. A line with brackets or quotes, or more than one
+line, always goes to the evaluator.
+
 ### Switching panels
 
 The panels on the right share one place, so opening one hides the one that
 was there. The palette lists **Switch to panel: name** for each panel you've
 had open in this window, the one you saw last first, leaving out the one on
-screen. Cmd/Ctrl+Alt+1 to 7 each go to one panel: 1 the Inspector, 2
-Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins and 7 Messages. Both focus the panel
+screen. Cmd/Ctrl+Alt+1 to 8 each go to one panel: 1 the Inspector, 2
+Source, 3 Locations, 4 Frames, 5 Trace, 6 Plugins, 7 Messages and 8
+Processes. Both focus the panel
 when it's showing. Otherwise Frames, Trace and Plugins open the way their own
 commands do, asking for the last error, the recorded calls or the plugin
 list as they are now. The Inspector, Source and Locations come back with
@@ -130,7 +142,9 @@ everything read.
 Enter on a row jumps to its tab, and on an agent's evaluation it opens the
 code and the result below the row, cut at 20 lines. A row for a plugin
 proposal opens the Review panel. The disk check covers files open in tabs,
-about every two seconds, and never reloads or changes a tab. The log keeps
+about every two seconds. A tab with no unsaved edits follows its file, and
+one with unsaved edits keeps them ([When the file changes on
+disk](files-and-tabs.md#when-the-file-changes-on-disk)). The log keeps
 the newest 1,000 entries, and the footer says how many older ones it dropped.
 
 ### Describing keys
@@ -145,6 +159,12 @@ command's description. **Show the keys you pressed last** lists the last
 on to the editor or GTK. Typing, including Return, Tab and Backspace, shows
 only as a count, never as the characters typed. A command's own keys are in the
 palette's row for it.
+
+When the editor's caret sits on a symbol, the status bar names the keys
+that act on it, such as `Ctrl+Q doc · F12 jump · Shift+F6 rename`. They're
+read from the live keymap, so your own bindings show, and the line follows
+the caret a moment after it stops. **Show what keys do at the caret**, in
+the palette, turns the line off or back on for this session.
 
 ### The locations list
 
@@ -182,6 +202,18 @@ places: F8 says it changed, and searching again fixes it. Closing a tab
 keeps the list, and F8 opens that file again. Like the other lists it
 stops at 1,000 places. The search runs in the background, so typing
 carries on while it looks.
+
+**Compare with the file on disk** and **Compare with git HEAD** list the
+places where the tab differs from that version, one row per difference,
+such as `4: 2 lines here, 1 line in HEAD: (def c 3)` with the other
+version's first line. F8 steps through them like any list. **Take the
+other version here** puts the compared version's lines in place of the
+difference at the caret, as one step Cmd/Ctrl+Z undoes and with Parinfer
+left out of it, and lists what's left. git runs as `git show HEAD:./name`
+in the file's own folder, so a file outside a repository, or one git
+doesn't track, gets git's reason on the status bar. Line endings and trailing
+blank lines don't count as differences, and a Take keeps the tab's own line
+endings.
 
 ### Freeing Ctrl+Space on macOS
 
@@ -300,6 +332,43 @@ redefining a traced function (Run again) replaces the wrapper, so the new
 definition isn't traced. Tracing runs where your code runs, in process or in
 a project's Jolt child, and doesn't touch `*1`; other runtimes say it needs
 Jolt for now.
+
+## The Processes panel
+
+**Show the processes**, in the palette, or Cmd/Ctrl+Alt+8 opens the
+Processes panel: the fibers your program spawned with `jolt.fibers/spawn`,
+newest first, each with its number, its state as Jolt reports it
+(`running`, `ready`, `parked`, `done` or `dead`), the function it runs and
+how long ago it started. **Interrupt** raises an error in the selected fiber
+("Interrupted from Jonquil's Processes panel"), which a `masked` region
+holds off until it ends, and **Kill** ends it outright. **Forget finished**
+drops the done and dead ones; Jonquil keeps the last 50 of those anyway.
+While the panel shows, it refreshes every second.
+
+Jolt keeps no list of live fibers, so the first time the panel opens Jonquil
+starts watching `spawn`, the way Trace wraps a function, and code compiled
+earlier goes through it too. Fibers spawned before that aren't listed, and
+neither are threads (`future`, agents), which aren't fibers. It works in
+process and in a project's Jolt child; other runtimes say it needs Jolt.
+
+## Counting how often each line runs
+
+**Count how often each line runs**, in the palette, turns on Jolt's line
+counters for code compiled from then on. Run a saved file and the gutter
+shows, beside each line that ran, how many times it did: `6`, `999`,
+`1.2k`, `12k`. Each Run counts its own lines alone. The counts are for the
+text that ran, so the first edit hides them until the next Run, and a Run
+Form or Run Selection refreshes them only while the file still holds the
+text its last Run did. An Untitled or unsaved tab has no file for Jolt to
+count by, and the console says so. **Clear line counts** zeroes the
+counters, and the toggle again turns counting off.
+
+Jolt has one instrumentation mode at a time, so counting and Keep every
+local (debug mode) take turns: turning one on turns the other off, and the
+status bar says so. A Jolt child that restarts comes back without
+counting, and the next Run says so on the console. Counting works in
+process and in a project's Jolt child, on a Jolt with `jolt.profile`
+(v0.8.24 or later); other runtimes say it needs Jolt.
 
 ## The last error's frames
 

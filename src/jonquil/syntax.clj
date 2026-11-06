@@ -184,12 +184,16 @@
 (defn symbol-at-pos
   "Returns a map `{:symbol str, :start int, :end int, :type keyword}` for the symbol
    covering or immediately around `pos` in `text`.
-   Returns nil if caret is not on or adjacent to a code symbol (e.g. inside comments, strings, or blank space)."
-  [^String text pos]
+   Returns nil if caret is not on or adjacent to a code symbol (e.g. inside comments, strings, or blank space).
+   With uncached? true it tokenizes without touching tokenize's one-entry
+   cache, for a caller with a throwaway string (jonquil.hints' one line),
+   which would otherwise push out the editor's whole-buffer entry."
+  ([text pos] (symbol-at-pos text pos false))
+  ([^String text pos uncached?]
   (when (and (string? text) (pos? (.length text)))
     (let [len (.length text)
           pos (min len (max 0 (int (or pos 0))))
-          tokens (tokenize text)
+          tokens (if uncached? (tokenize* text) (tokenize text))
           in-literal? (some (fn [[tok-type s e]]
                               (when (contains? #{:comment :string :regex :char} tok-type)
                                 (if (= tok-type :comment)
@@ -237,7 +241,7 @@
                           sym-tokens)]
                 (when-let [best (first (sort-by :score candidates))]
                   (let [[tok-type s e] (:tok best)]
-                    {:symbol (.substring text s e) :start s :end e :type tok-type}))))))))))
+                    {:symbol (.substring text s e) :start s :end e :type tok-type})))))))))))
 
 (defn find-symbol-occurrences
   "Returns a vector of `[start end]` positions for all occurrences of `sym-name`

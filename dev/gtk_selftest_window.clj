@@ -43,6 +43,7 @@
             [gtk-selftest-window.trace :as trace-rows]
             [gtk-selftest-window.panels :as panel-rows]
             [gtk-selftest-window.messages :as messages-rows]
+            [gtk-selftest-window.processes :as processes-rows]
             [gtk-selftest-window.world :as world-rows]
             [gtk-selftest-window.restarts :as restarts-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
@@ -284,6 +285,9 @@
    locations-rows/row-find-usages-in-project
    locations-rows/row-find-usages-stale-file
    locations-rows/row-locations-empty-says-no-places
+   locations-rows/row-compare-with-disk-and-take
+   locations-rows/row-compare-with-head
+   locations-rows/row-compare-line-only-on-disk
    plugin-rows/row-plugin-key-runs-edit
    plugin-rows/row-plugin-in-palette
    plugin-rows/row-plugin-broken-file-named
@@ -397,6 +401,7 @@
    panel-rows/row-panel-switch-and-keys
    panel-rows/row-panel-key-says-what-fills
    panel-rows/row-panel-stale-panels-leave
+   processes-rows/row-processes-interrupt-and-forget
    panel-rows/row-layout-save-and-use
    messages-rows/row-messages-agent-replace-logged
    messages-rows/row-messages-reads-hidden
@@ -404,12 +409,23 @@
    messages-rows/row-messages-closed-tab-target
    messages-rows/row-messages-burst
    messages-rows/row-messages-disk-change
+   messages-rows/row-messages-disk-change-dirty
+   messages-rows/row-messages-disk-change-nul
+   messages-rows/row-messages-disk-deleted-then-back
+   messages-rows/row-messages-disk-waits-a-tick
+   messages-rows/row-messages-disk-follow-failure-said
    messages-rows/row-messages-selection-stays
    world-rows/row-world-save-restore
    gutter-rows/row-gutter-bars-follow-lines
+   gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run
    gutter-rows/row-changed-marks-after-edit
    gutter-rows/row-run-changed-runs-only-those
+   gutter-rows/row-line-counts-after-run
+   gutter-rows/row-line-counts-unsaved
+   gutter-rows/row-line-counts-second-run
+   gutter-rows/row-line-counts-went-off
+   gutter-rows/row-key-hints-follow-the-caret
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default
@@ -437,6 +453,9 @@
    prompt/row-prompt-follows-repl-ns
    prompt/row-prompt-keeps-typed-input
    prompt/row-prompt-follows-run
+   prompt/row-bang-runs-a-command
+   prompt/row-bang-lists-choices
+   prompt/row-bang-clears-the-last-output
    prompt/row-prompt-echo-uses-prompt
    source-pane/row-source-pane-shows-line
    source-pane/row-source-pane-user-scroll-wins

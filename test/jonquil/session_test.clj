@@ -4,6 +4,7 @@
             [jonquil.debugger :as debugger]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.fibers-rt]
             [jonquil.session :as session]
             [jonquil.source :as source]
             [temp-dirs]))
@@ -453,3 +454,41 @@
     (ev/set-break-handlers! s {:on-eval-start (fn [_] (throw (ex-info "boom" {})))
                                :on-eval-end (fn [_] (throw (ex-info "boom" {})))})
     (is (= "3" (:printed (repl! "(+ 1 2)" {}))) "throwing handlers don't stop the evaluation")))
+
+(deftest fibers-op-test
+  (let [s (session/make-session)
+        op (fn [k args] (let [p (promise)] (ev/fibers-op! s k args (fn [r] (deliver p r))) (deref p 5000 :timeout)))]
+    (if-not (jonquil.fibers-rt/available?)
+      (is (= {:error "Processes need a Jolt with jolt.fibers."} (op :list {})))
+      (do (is (= {:watching? true} (op :watch {})))
+          (run-sync s "(def fib-stop (atom false)) (jolt.fibers/spawn (fn [] (loop [] (when-not @fib-stop (jolt.fibers/yield) (recur)))))")
+          (let [{:keys [fibers]} (op :list {})
+                id (:id (first fibers))]
+            (is (#{:running :ready :parked} (:state (first fibers))))
+            (is (= {:ok true} (op :interrupt {:id id}))))))))
+
+(deftest line-counts-test
+  (let [s (session/make-session)
+        call (fn [f & args] (let [p (promise)] (apply f s (concat args [(fn [r] (deliver p r))])) (deref p 5000 :timeout)))
+        mode (try ((requiring-resolve 'jolt.profile/instrument-mode)) (catch Throwable _ nil))
+        f (io/file (temp-dirs/temp-dir! "jonquil-session-lc-") "lc.clj")]
+    (if-not (requiring-resolve 'jonquil.line-counts/available?)
+      (is false "jonquil.line-counts loads")
+      (try
+        (spit f "(ns jonquil.session-lc)\n(defn twice [] (dotimes [_ 2] (inc 1)))\n(twice)\n")
+        (let [on (call ev/toggle-line-counts!)]
+          (if (:error on)
+            (is (= {:error "Line counts need a Jolt with jolt.profile."} on))
+            (do (is (= {:on? true} on))
+                (run-sync s (str "(load-file " (pr-str (.getPath f)) ")"))
+                (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "the call on line 3 ran once")
+                (is (= {:ok true} (call ev/clear-line-counts!)))
+                (is (= {} (:counts (call ev/line-counts! (.getPath f)))))
+                (testing "a Run with :clear-line-counts? counts that Run alone"
+                  (dotimes [_ 2]
+                    (run ev/eval! s (slurp f) {:run? true :path (.getPath f) :clear-line-counts? true}))
+                  (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "not 2"))
+                (is (= :counts (:mode (call ev/line-counts! (.getPath f)))) "a fetch says the runtime's mode")
+                (is (= {:on? false} (call ev/toggle-line-counts!))))))
+        (finally (when mode ((requiring-resolve 'jolt.profile/instrument!) mode))
+                 (when-not mode (try ((requiring-resolve 'jolt.profile/instrument!) false) (catch Throwable _ nil))))))))

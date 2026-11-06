@@ -160,6 +160,37 @@
   (doseq [f @(:on-cursor-fns ed)] (f (g/cursor-line-col (:buf ed))))
   nil)
 
+(defn reload-text!
+  "Replaces the whole buffer with s, the file's text on disk, as ONE user
+  action, so Cmd/Ctrl+Z right after brings back what the tab held (and
+  the tab then reads dirty) while earlier undo history survives. Parinfer
+  is held off through :parinfer-busy?, so it never adjusts the reloaded
+  text. s becomes the saved text; the caret keeps its offset, clamped to
+  the new end. A read-only editor goes through set-text! instead (no edit
+  to undo there, and set-text! reapplies the read-only tag). The caller
+  keeps NUL-bearing text out: GTK would truncate it."
+  [ed s]
+  (let [buf (:buf ed)
+        at (min (g/cursor-offset buf) (count s))]
+    (if @(:read-only? ed)
+      (set-text! ed s)
+      (do (swap! (:paint ed) update :gen inc)
+          (forget-painted! ed)
+          (reset! (:parinfer-busy? ed) true)
+          (try
+            (g/gtk-text-buffer-begin-user-action buf)
+            (try
+              (g/with-iters* buf 0 (g/gtk-text-buffer-get-char-count buf)
+                (fn [a b] (g/gtk-text-buffer-delete buf a b)))
+              (g/with-iters* buf 0 0 (fn [a _] (g/gtk-text-buffer-insert buf a s -1)))
+              (g/with-iters* buf at at (fn [a _] (g/gtk-text-buffer-place-cursor buf a)))
+              (finally (g/gtk-text-buffer-end-user-action buf)))
+            (finally (reset! (:parinfer-busy? ed) false)))
+          (rebase-saved! ed s)))
+    (when @(:read-only? ed)
+      (g/with-iters* buf at at (fn [a _] (g/gtk-text-buffer-place-cursor buf a))))
+    nil))
+
 (defn dirty?
   "True when the buffer's text differs from the last-saved text. Computed
   live against the buffer on every call, never cached, so it is correct
@@ -871,9 +902,9 @@
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
 (def ^:private MAC-KEYCODE-P 35)
-;; the digit row's keycodes, the panel keys' Cmd+Option+1..7; Apple's
-;; kVK_ANSI_1..7, the table F, L and P above were measured against
-(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7"})
+;; the digit row's keycodes, the panel keys' Cmd+Option+1..8; Apple's
+;; kVK_ANSI_1..8, the table F, L and P above were measured against
+(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7" 28 "8"})
 
 ;; os.name read once. The keycode fallback is macOS-only: on Linux X11
 ;; keycode 37 is Control_L.

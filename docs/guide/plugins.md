@@ -210,7 +210,9 @@ Revert refuses, saying why in the footer, if the version was never live
 live, or the file differs from the live version (an unreloaded or failing edit
 a write would lose). A tab open on the file follows a Revert or Accept: it
 reloads if clean, and otherwise keeps your unsaved edits with a one-time
-console warning that saving overwrites the version on disk.
+console warning that saving overwrites the version on disk. The reload is
+one undo step, as for any [file changed on
+disk](files-and-tabs.md#when-the-file-changes-on-disk).
 
 ## Proposals from an agent
 
