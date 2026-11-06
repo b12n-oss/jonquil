@@ -3322,15 +3322,18 @@
 (defn- append-to-root!
   "Files es (and forgets :previous when asked) in root's own record file and
   saves it at once: the window has moved to another root since the evaluation
-  started, so its replay state stays as it is."
+  started, so its replay state stays as it is. A file that can't be read is
+  left alone and the warning said (once), since saving would replace it."
   [{:keys [settings-path*] :as ctx} root es forget?]
   (when (or (seq es) forget?)
     (let [path (replay/record-path @settings-path* root)
-          {:keys [record]} (replay/load-record path)]
-      (save-replay! ctx {:path path
-                         :record (cond-> record
-                                   (seq es) (replay/add-entries es)
-                                   forget? replay/forget)}))))
+          {:keys [record warning]} (replay/load-record path)]
+      (if warning
+        (note-replay-result! ctx warning)
+        (save-replay! ctx {:path path
+                           :record (cond-> record
+                                     (seq es) (replay/add-entries es)
+                                     forget? replay/forget)})))))
 
 (defn- record-eval!
   "The recorder's work for one finished evaluation, on the GTK thread."

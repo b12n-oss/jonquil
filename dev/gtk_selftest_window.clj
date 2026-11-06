@@ -425,6 +425,7 @@
    replay-rows/row-replay-off
    replay-rows/row-replay-files-under-start-root
    replay-rows/row-replay-records-run-changed
+   replay-rows/row-replay-unreadable-other-root
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run

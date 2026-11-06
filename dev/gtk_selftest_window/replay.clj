@@ -225,25 +225,62 @@
                 (finally (restore! ui original [da db])))))))
 
 (defn row-replay-records-run-changed
-  "Run the forms changed records the edited form it sent."
+  "Run the forms changed records the edited form it sent, as a form whose
+  source file is the tab's path."
   [ui]
   (go-row :replay-records-run-changed support/check
     (let [original (on-gtk (root ui))
-          d (on-gtk (tabs/occupy-first! ui)
-                    ((:select-tab! ui) (:id (first (tab-list ui))))
-                    (let [[d] (project!)] ((:simulate-folder-result! ui) {:path d}) d))
-          [ran? _] (support/run-and-await ui "(def hits (atom 0))\n(defn cc [] 1)" 5000 #(str/includes? % "#'user/cc"))
-          _ (on-gtk (editor/set-text! (:editor ui) "(def hits (atom 0))\n(defn cc [] 10)"))
-          _ (await-until 3000 20 #(seq @(:ranges (:gutter (:changed (:editor ui))))))
+          [d a t]
+          (on-gtk (tabs/occupy-first! ui)
+                  (let [[d a] (project!)]
+                    ((:simulate-folder-result! ui) {:path d})
+                    ((:open-file! ui) a)
+                    (let [t (some (fn [t] (when (= a @(:path t)) t)) (tab-list ui))]
+                      ((:select-tab! ui) (:id t))
+                      (editor/set-text! (:ed t) "(def hits (atom 0))\n(defn cc [] 1)")
+                      ((:run!* ui))
+                      [d a t])))
+          ran? (await-until 5000 20 #(and (support/idle? ui) (some (fn [e] (= a (:path e))) (:current (record ui)))))
+          _ (on-gtk (editor/set-text! (:ed t) "(def hits (atom 0))\n(defn cc [] 10)"))
+          _ (await-until 3000 20 #(seq @(:ranges (:gutter (:changed (:ed t))))))
           _ (on-gtk (let [p (:palette ui)]
                       ((:open-palette!* ui))
                       (palette/set-query! p "run the forms changed")
                       (palette/run-selected! p)
                       (when (popover/open? p) (popover/hide! p))))
-          ok? (await-until 5000 20 #(and (support/idle? ui)
-                                         (some (fn [e] (= "(defn cc [] 10)" (:text e))) (:current (on-disk ui d)))))]
+          find-e (fn [] (some (fn [e] (when (= "(defn cc [] 10)" (:text e)) e)) (:current (on-disk ui d))))
+          ok? (await-until 5000 20 #(and (support/idle? ui) (find-e)))
+          e (find-e)]
       (on-gtk (try
                 (support/check :replay-records-run-changed
-                               (and ran? ok?)
-                               {:ran ran? :ok ok? :current (:current (record ui))})
+                               (and ran? ok? (= :form (:kind e)) (= a (:source-file e)))
+                               {:ran ran? :ok ok? :entry e :path a})
                 (finally (restore! ui original [d])))))))
+
+(defn row-replay-unreadable-other-root
+  "A slow eval begun at A, finished after a re-root to B, finds A's record
+  file unreadable: the file stays as it was and the console says so."
+  [ui]
+  (go-row :replay-unreadable-other-root support/check
+    (let [original (on-gtk (root ui))
+          garbage "{:version 1 :previous [oops"
+          [da db]
+          (on-gtk (tabs/occupy-first! ui)
+                  (let [[da] (project!)
+                        [db] (project!)]
+                    (io/make-parents (record-file ui da))
+                    (spit (record-file ui da) garbage)
+                    ((:simulate-folder-result! ui) {:path da})
+                    [da db]))
+          mark (on-gtk (support/out-end-offset ui))
+          _ (enter! ui "(Thread/sleep 600)")
+          busy? (await-until 2000 20 #(not (support/idle? ui)))
+          _ (on-gtk ((:simulate-folder-result! ui) {:path db}))
+          said? (await-until 6000 20 #(and (support/idle? ui)
+                                           (str/includes? (support/since ui mark) "; last session: Couldn't read")))]
+      (on-gtk (try
+                (support/check :replay-unreadable-other-root
+                               (and busy? said? (= garbage (slurp (record-file ui da))))
+                               {:busy busy? :said said? :file (slurp (record-file ui da))
+                                :console (support/since ui mark)})
+                (finally (restore! ui original [da db])))))))
