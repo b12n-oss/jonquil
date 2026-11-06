@@ -3334,9 +3334,12 @@
 (defn- append-to-root!
   "Files es (and forgets :previous when asked) in root's own record file and
   saves it at once: the window has moved to another root since the evaluation
-  started, so its replay state stays as it is. A file that can't be read is
-  left alone and the warning said (once), since saving would replace it."
-  [{:keys [settings-path*] :as ctx} root es forget?]
+  started, so its replay state stays as it is. opts: :forget? forgets
+  :previous, after carrying the other forms of that file's own :previous that
+  are still skipped in :run-text (replay/carry-skipped, ahead of es). A file
+  that can't be read is left alone and the warning said (once), since saving
+  would replace it."
+  [{:keys [settings-path*] :as ctx} root es {:keys [forget? run-text]}]
   (when (or (seq es) forget?)
     (let [path (replay/record-path @settings-path* root)
           {:keys [record warning]} (replay/load-record path)]
@@ -3344,11 +3347,16 @@
         (note-replay-result! ctx warning)
         (save-replay! ctx {:path path
                            :record (cond-> record
+                                     forget? (replay/carry-skipped run-text)
                                      (seq es) (replay/add-entries es)
                                      forget? replay/forget)})))))
 
 (defn- record-eval!
-  "The recorder's work for one finished evaluation, on the GTK thread."
+  "The recorder's work for one finished evaluation, on the GTK thread. An :ok
+  Run of the replay tab forgets the :previous of the root the tab was opened
+  for, but first carries into :current the other forms of that :previous that
+  are still behind #_ in the Run's text (the record's :code), ahead of what
+  the Run recorded."
   [{:keys [cv ev* sel* settings-path* replay*] :as ctx} {:keys [source tab-id root] :as record} result]
   (when (remember-session? @settings-path*)
     (let [ok? (= :ok (:status result))
@@ -3361,22 +3369,26 @@
           ;; which may not be the root the entries are filed under
           forget? (and ok? (= :run source) (some? tab-id) (= tab-id (:id rt)))
           forget-here? (and forget? (= root (:root rt)))
+          run-text (:code record)
           st @replay*]
       (if (and st (= root (:root st)))
         (let [items (:items @(ev/history @ev*))]
           (swap! replay* (fn [s]
                            (-> s
                                (update :record (fn [r] (cond-> (replay/with-history r items)
+                                                         forget-here? (replay/carry-skipped run-text)
                                                          (seq es) (replay/add-entries es)
                                                          forget-here? replay/forget)))
                                (assoc :dirty? true))))
           (schedule-replay-save! ctx))
-        (append-to-root! ctx root es forget-here?))
+        (append-to-root! ctx root es {:forget? forget-here? :run-text run-text}))
       (when (and forget? (not forget-here?))
         (if (and st (= (:root rt) (:root st)))
-          (do (swap! replay* (fn [s] (-> s (update :record replay/forget) (assoc :dirty? true))))
+          (do (swap! replay* (fn [s] (-> s
+                                         (update :record #(-> % (replay/carry-skipped run-text) replay/forget))
+                                         (assoc :dirty? true))))
               (schedule-replay-save! ctx))
-          (append-to-root! ctx (:root rt) nil true))))))
+          (append-to-root! ctx (:root rt) nil {:forget? true :run-text run-text}))))))
 
 (defn- make-recorder
   "The fn (record result) hooked-opts calls when an evaluation that carries a
@@ -3385,7 +3397,8 @@
   read and write of the replay state happens. The work files the entries of
   an :ok evaluation under the record's root, stores the evaluator's history
   and schedules a save; an :ok Run of the replay tab also forgets the
-  :previous of the root that tab was opened for.
+  :previous of the root that tab was opened for, after carrying forward the
+  other forms still skipped (#_) in the Run's text.
   A throw is said once, like a failed save, and never reaches the evaluation."
   [ctx]
   (fn [record result]

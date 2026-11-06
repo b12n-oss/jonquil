@@ -318,3 +318,50 @@
   (let [es [(tfile "/a.clj") (form "(+ 1 2)" "user")]
         c {:files ["/x" "/y"] :defs [] :others []}]
     (is (= 2 (:files (replay/summary es 5000 c))))))
+
+;; --- carry-skipped -------------------------------------------------------
+
+(def ^:private carry-prev
+  [(form "(def x 1)" "app.core" :at 100)
+   (form "(start-server)" "app.core" :at 200)
+   (form "(swap! db inc)" "user" :at 300)])
+
+(def ^:private carry-record {:version 1 :previous carry-prev :current [] :history []})
+
+(deftest carry-skipped-keeps-skipped-form-test
+  (let [text "(def x 1)\n#_(start-server)\n#_(swap! db inc)\n"
+        r (replay/carry-skipped carry-record text)]
+    (is (= ["(start-server)" "(swap! db inc)"] (map :text (:current r))))
+    (is (= [["app.core" 200] ["user" 300]] (map (juxt :ns :at) (:current r))))
+    (is (= carry-prev (:previous r)))))
+
+(deftest carry-skipped-drops-deleted-form-test
+  (let [r (replay/carry-skipped carry-record "(def x 1)\n#_(swap! db inc)\n")]
+    (is (= ["(swap! db inc)"] (map :text (:current r))))))
+
+(deftest carry-skipped-drops-unskipped-form-test
+  (let [r (replay/carry-skipped carry-record "(def x 1)\n(start-server)\n#_(swap! db inc)\n")]
+    (is (= ["(swap! db inc)"] (map :text (:current r))))))
+
+(deftest carry-skipped-blank-text-test
+  (doseq [t [nil "" "  \n"]]
+    (is (= carry-record (replay/carry-skipped carry-record t)) (pr-str t))))
+
+(deftest carry-skipped-extends-current-test
+  (let [mine (form "(def z 1)" "user" :at 50)
+        r (replay/carry-skipped (assoc carry-record :current [mine]) "#_(start-server)")]
+    (is (= ["(def z 1)" "(start-server)"] (map :text (:current r))))))
+
+(deftest carry-skipped-round-trip-test
+  (let [opts {:root "/p" :now 5000 :dialect "Jolt"}
+        s1 (replay/script carry-prev opts)
+        run-es (replay/entries {:source :run :path nil :code s1 :ns "user" :at 900 :dialect "Jolt"})
+        r (-> carry-record
+              (replay/carry-skipped s1)
+              (replay/add-entries run-es)
+              replay/forget)
+        s2 (replay/script (:current r) opts)
+        others (fn [s] (last (str/split s #"\n\n;; Other forms, skipped")))]
+    (is (empty? (:previous r)))
+    (is (= (others s1) (others s2)))
+    (is (str/includes? s2 "#_(start-server)"))))

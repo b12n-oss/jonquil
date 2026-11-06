@@ -226,7 +226,9 @@
            :current [])))
 
 (defn forget
-  "record with :previous emptied."
+  "record with :previous emptied. A successful Run of the replay tab applies
+  carry-skipped first, so the other forms still skipped in the tab outlive
+  this; Forget last session calls it alone and clears everything."
   [record]
   (assoc record :previous []))
 
@@ -290,6 +292,21 @@
     {:files (mapv :path files)
      :defs (group :defs)
      :others (group :others)}))
+
+(defn carry-skipped
+  "record with :current extended by the other forms of (compact (:previous
+  record)), in that order, that are still skipped in run-text: those whose
+  \"#_\" followed by their exact text occurs in it. Each keeps its own :ns,
+  :at, :dialect and :key, and the 2,000 cap applies (add-entries). :previous
+  is unchanged. A nil or blank run-text carries nothing. A form the user
+  deleted, edited or reindented in the tab no longer matches and isn't
+  carried; one whose #_ came off ran, so the Run records it itself."
+  [record run-text]
+  (if (str/blank? run-text)
+    record
+    (add-entries record
+                 (filterv #(str/includes? run-text (str "#_" (:text %)))
+                          (:others (compact (:previous record)))))))
 
 ;; --- summary and script --------------------------------------------------
 
