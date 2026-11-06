@@ -219,6 +219,14 @@
     and :clear take {}, :log takes {:since id}. on-result gets
     jonquil.trace-rt's answer, or {:error s}."))
 
+(defprotocol Fibers
+  "LM4's Processes panel where the code runs (jonquil.fibers-rt): the two
+  Jolt runtimes. Callers check (satisfies? Fibers ev) first."
+  (fibers-op! [ev op args on-result]
+    "Runs a fibers op off the caller's thread: :watch, :list, :forget take
+    {}, :interrupt and :kill take {:id n}. on-result gets
+    jonquil.fibers-rt/op's answer, or {:error s}."))
+
 (defprotocol World
   "Save World and Restore World where the code runs (jonquil.world-rt):
   the two Jolt runtimes. Callers check (satisfies? World ev) first."

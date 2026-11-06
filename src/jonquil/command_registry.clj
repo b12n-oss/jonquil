@@ -51,6 +51,10 @@
                    :run (call :panel-focus-fn :plugins)}
    :panel/messages {:doc "Focus the Messages panel, or open it." :scope :window
                     :run (call :panel-focus-fn :messages)}
+   :panel/processes {:doc "Focus the Processes panel, or open it." :scope :window
+                     :run (call :panel-focus-fn :processes)}
+   :processes/show {:doc "Show the processes (the fibers your program spawned)." :scope :window
+                    :run (call :processes-show-fn)}
    :view/cycle-theme {:doc "Switch to the next theme." :scope :window :run (call :theme-cycle-fn)}
    :inspect/form {:doc "Inspect the value of the form at the caret." :scope :window
                   :run (call :inspect-form-fn)}

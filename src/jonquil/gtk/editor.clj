@@ -902,9 +902,9 @@
 (def ^:private MAC-KEYCODE-F 3)
 (def ^:private MAC-KEYCODE-L 37)
 (def ^:private MAC-KEYCODE-P 35)
-;; the digit row's keycodes, the panel keys' Cmd+Option+1..7; Apple's
-;; kVK_ANSI_1..7, the table F, L and P above were measured against
-(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7"})
+;; the digit row's keycodes, the panel keys' Cmd+Option+1..8; Apple's
+;; kVK_ANSI_1..8, the table F, L and P above were measured against
+(def ^:private MAC-KEYCODE-DIGITS {18 "1" 19 "2" 20 "3" 21 "4" 23 "5" 22 "6" 26 "7" 28 "8"})
 
 ;; os.name read once. The keycode fallback is macOS-only: on Linux X11
 ;; keycode 37 is Control_L.

@@ -98,6 +98,7 @@
       "nothing showing: every recent panel, Frames for the debugger")
   (is (= [] (palette/panel-entries [:source] :source)) "only the one showing")
   (is (= ["Switch to panel: Messages"] (map :doc (palette/panel-entries [:messages] nil))))
+  (is (= ["Switch to panel: Processes"] (map :doc (palette/panel-entries [:processes] nil))))
   (is (= [] (palette/panel-entries [:review :history] nil)) "review and history are never offered"))
 
 (deftest world-queries-pick-their-own-command-test

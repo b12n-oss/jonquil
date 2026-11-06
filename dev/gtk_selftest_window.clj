@@ -43,6 +43,7 @@
             [gtk-selftest-window.trace :as trace-rows]
             [gtk-selftest-window.panels :as panel-rows]
             [gtk-selftest-window.messages :as messages-rows]
+            [gtk-selftest-window.processes :as processes-rows]
             [gtk-selftest-window.world :as world-rows]
             [gtk-selftest-window.restarts :as restarts-rows]
             [gtk-selftest-window.plugin-list :as plugin-list-rows]
@@ -397,6 +398,7 @@
    panel-rows/row-panel-switch-and-keys
    panel-rows/row-panel-key-says-what-fills
    panel-rows/row-panel-stale-panels-leave
+   processes-rows/row-processes-interrupt-and-forget
    messages-rows/row-messages-agent-replace-logged
    messages-rows/row-messages-reads-hidden
    messages-rows/row-messages-status-collapses

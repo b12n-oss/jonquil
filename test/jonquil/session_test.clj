@@ -4,6 +4,7 @@
             [jonquil.debugger :as debugger]
             [jonquil.eval :as eval]
             [jonquil.evaluator :as ev]
+            [jonquil.fibers-rt]
             [jonquil.session :as session]
             [jonquil.source :as source]
             [temp-dirs]))
@@ -453,6 +454,18 @@
     (ev/set-break-handlers! s {:on-eval-start (fn [_] (throw (ex-info "boom" {})))
                                :on-eval-end (fn [_] (throw (ex-info "boom" {})))})
     (is (= "3" (:printed (repl! "(+ 1 2)" {}))) "throwing handlers don't stop the evaluation")))
+
+(deftest fibers-op-test
+  (let [s (session/make-session)
+        op (fn [k args] (let [p (promise)] (ev/fibers-op! s k args (fn [r] (deliver p r))) (deref p 5000 :timeout)))]
+    (if-not (jonquil.fibers-rt/available?)
+      (is (= {:error "Processes need a Jolt with jolt.fibers."} (op :list {})))
+      (do (is (= {:watching? true} (op :watch {})))
+          (run-sync s "(def fib-stop (atom false)) (jolt.fibers/spawn (fn [] (loop [] (when-not @fib-stop (jolt.fibers/yield) (recur)))))")
+          (let [{:keys [fibers]} (op :list {})
+                id (:id (first fibers))]
+            (is (#{:running :ready :parked} (:state (first fibers))))
+            (is (= {:ok true} (op :interrupt {:id id}))))))))
 
 (deftest line-counts-test
   (let [s (session/make-session)

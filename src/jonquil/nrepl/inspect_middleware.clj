@@ -20,6 +20,7 @@
             [jonquil.nrepl.break-middleware :as break-middleware]
             [jonquil.results-rt :as results-rt]
             [jonquil.trace-rt :as trace-rt]
+            [jonquil.fibers-rt :as fibers-rt]
             [jonquil.world-rt :as world-rt]))
 
 (def ops
@@ -31,6 +32,8 @@
    "jonquil-frame-interrupt"
    ;; tracing (jonquil.trace-rt): middleware ops, so *1 stays put
    "jonquil-trace" "inspect-trace"
+   ;; the Processes panel (jonquil.fibers-rt)
+   "jonquil-fibers"
    ;; live console results (jonquil.results-rt)
    "jonquil-keep-result" "inspect-result"
    ;; Save World and Restore World (jonquil.world-rt)
@@ -137,6 +140,13 @@
          "data" (binding [*print-length* nil *print-level* nil]
                   (pr-str (trace-rt/op (keyword (g "action"))
                                        {:sym (g "sym") :ns (g "ns") :since (some-> (g "since") as-long)})))}
+        (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
+      "jonquil-fibers"
+      (try
+        {"status" ["done"]
+         "data" (binding [*print-length* nil *print-level* nil]
+                  (pr-str ;; "fiber", not "id": every nREPL message's own id is "id"
+                  (fibers-rt/op (keyword (g "action")) {:id (some-> (g "fiber") as-long)})))}
         (catch Throwable e {"status" ["done"] "error" (or (ex-message e) (str (class e)))}))
       "jonquil-world"
       ;; the child's own namespaces (world-rt/child-namespaces): every one
