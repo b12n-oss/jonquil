@@ -66,6 +66,26 @@ Known rough edges, parked for later:
 </details>
 
 <details>
+<summary><strong>The last session's replay</strong> (6)</summary>
+
+- Replay runs only in Jolt and JVM Clojure. ClojureDart, ClojureScript,
+  jank and the nREPL dialect record and get their Up/Down history back,
+  but the console says replay isn't available for them yet.
+- Running the replay drops the other forms you left behind `#_`: only what
+  ran is recorded again, so they're gone from the next replay.
+- A setup form run again later, such as a second `(refer 'lib)` to pick up
+  new vars, keeps its first position, so on replay it can run before the
+  vars it was meant to see.
+- An evaluation that threw records nothing, including the forms of that
+  console entry or Untitled Run that ran before the error.
+- Two Jonquil processes on one project aren't guarded against each other:
+  each writes the whole record, and the later write wins.
+- `:remember-session?` is one setting for every project; there's no
+  per-project switch yet.
+
+</details>
+
+<details>
 <summary><strong>ClojureDart</strong> (7)</summary>
 
 - Stop detaches instead of interrupting, and there is no stdin.

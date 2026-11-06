@@ -177,7 +177,9 @@ The replay tab counts as typed at the console, so its Run never resets
 earlier definitions. A second Open selects the replay tab that's already open
 for the same folder, and after Open Folder it opens a new tab for the new
 folder. Running the replay records its files and definitions again, but not
-the skipped `#_` forms, which are gone from the next replay.
+the skipped `#_` forms, which are gone from the next replay. So before you
+press Run, take the `#_` off any skipped form you'll want next time, or copy
+it somewhere else.
 
 The record keeps growing across days until you run the replay or choose
 **Forget last session** in the palette. It's one file per project in
