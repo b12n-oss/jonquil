@@ -38,6 +38,7 @@ Emacs took first:
 | The command palette (Cmd/Ctrl+Shift+P) | `M-x` |
 | The locations list and F8 / Shift+F8 | `next-error`, xref |
 | Find Usages in Project, by how each place uses the name | `xref-find-references` (`M-?`); Genera's who-calls, by name rather than from a callers database |
+| Save the layout, Use layout: name | `window-configuration-to-register` and `jump-to-register`; Genera's Select key brought up a whole activity |
 | Switch to a recent tab, Go back to the tab used before | `switch-to-buffer`, most recent first |
 | Switch to a recent panel, Cmd/Ctrl+Alt+1 to 8 for each panel | none built in: `C-x o` cycles windows; Genera's Select key, where Select L brings up the Lisp Listener, is where this comes from |
 | The Messages panel: agent actions, files changed on disk, connections, with an unread count | the `*Messages*` buffer, which keeps the echo area's lines; Genera's notifications and Converse are where this comes from |

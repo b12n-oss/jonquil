@@ -279,3 +279,13 @@
     (is (nil? (settings/save-plugin-disabled! link :a true)))
     (is (java.nio.file.Files/isSymbolicLink (.toPath (io/file link))))
     (is (= {:theme :dark :plugins {:disabled #{:a}}} (edn/read-string (slurp target))))))
+
+(deftest layouts-test
+  (let [path (str (temp-dir) "/settings.edn")
+        l {:tree? true :tree-width 240 :panel :trace :panel-width 400 :split 430}]
+    (is (nil? (settings/save-settings! path {:layouts {"File tree and Trace panel" l}})))
+    (is (= {"File tree and Trace panel" l} (:layouts (settings/load-settings path))))
+    (spit path (pr-str {:layouts {"Good" {:tree? false} :bad {:tree? true} "Worse" 3 "Odd" {:panel "trace"}}}))
+    (let [s (settings/load-settings path)]
+      (is (= {"Good" {:tree? false}} (:layouts s)) "only string names with valid layouts are kept")
+      (is (re-find #":layouts" (:warning s))))))

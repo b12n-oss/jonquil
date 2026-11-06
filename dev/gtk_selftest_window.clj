@@ -402,6 +402,7 @@
    panel-rows/row-panel-key-says-what-fills
    panel-rows/row-panel-stale-panels-leave
    processes-rows/row-processes-interrupt-and-forget
+   panel-rows/row-layout-save-and-use
    messages-rows/row-messages-agent-replace-logged
    messages-rows/row-messages-reads-hidden
    messages-rows/row-messages-status-collapses

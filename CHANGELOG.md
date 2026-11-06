@@ -8,6 +8,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Named layouts: Save the layout keeps whether the file tree and a right-hand panel show, the tree's width and the editor/console split, named after what shows; Use layout: name in the palette brings one back. Kept in the settings file.
 - Compare with the file on disk, or with git HEAD: the tab's differences from that version go in the Locations list, and Take the other version here puts that version's lines back for the difference at the caret, as one undo step.
 - The status bar names the keys that act on the symbol at the caret (`Ctrl+Q doc · F12 jump · Shift+F6 rename`), from the live keymap. Show what keys do at the caret, in the palette, turns it off for the session.
 - The Processes panel (Cmd/Ctrl+Alt+8, or Show the processes in the palette): the fibers your program spawns with `jolt.fibers/spawn`, each with its state and age, and Interrupt, Kill and Forget finished. Jonquil starts watching `spawn` the first time the panel opens, since Jolt keeps no list of live fibers. In process and in the Jolt child.

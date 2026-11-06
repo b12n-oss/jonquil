@@ -106,6 +106,9 @@
                   :run (call :compare-head-fn)}
    :compare/take {:doc "Take the other version here: the compared file's lines for the difference at the caret."
                   :scope :window :run (call :compare-take-fn)}
+   :layout/save {:doc "Save the layout: the file tree, the panel and the split, named after what shows." :scope :window
+                 :run (call :layout-save-fn)}
+   :layout/forget {:doc "Forget every saved layout." :scope :window :run (call :layout-forget-fn)}
    :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
    ;; the locations list: three ways to fill it, F8 and Shift+F8 to step

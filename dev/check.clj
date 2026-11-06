@@ -21,6 +21,7 @@
     jonquil.compare
     jonquil.fibers-rt
     jonquil.hints
+    jonquil.layouts
     jonquil.line-counts
     jonquil.messages
     jonquil.mcp.describe

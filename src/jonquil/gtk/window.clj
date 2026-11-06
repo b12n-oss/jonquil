@@ -46,6 +46,7 @@
             [jonquil.line-counts :as line-counts]
             [jonquil.compare :as compare]
             [jolt.process]
+            [jonquil.layouts :as layouts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
@@ -897,7 +898,8 @@
     (when-let [r (:recent-panels right)]
       (swap! r (fn [v] (into [which] (remove #{which}) v))))
     (when was-hidden?
-      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))))
+      (g/gtk-paned-set-position h-paned (max 0 (- (g/gtk-widget-get-width win) PANEL-WIDTH))))
+    ))
 
 (defn- showing-panel
   "The key of the right-hand panel on screen, or nil when the slot is
@@ -2924,6 +2926,9 @@
                     ;; a panel entry ([:panel/switch k]), as its key does
                     (and (vector? id) (= :panel/switch (first id)))
                     ((:panel-focus-fn window-key-args) (second id))
+                    ;; a named layout (LM8)
+                    (and (vector? id) (= :layout/use (first id)))
+                    ((:layout-use-fn window-key-args) (second id))
                     ;; an earlier world, from Restore an Earlier World
                     (and (vector? id) (= :world/restore-from (first id)))
                     ((:world-restore-from-fn window-key-args) (second id))
@@ -4057,8 +4062,9 @@
                                                                    {:id id :label (g/label-text (:label t))}))
                                                         @recent-tabs)
                                                   (:id (active-tab)))
-                                                 (into (pal-data/panel-entries @(:recent-panels right)
-                                                                               (showing-panel right))
+                                                 (into (into (pal-data/panel-entries @(:recent-panels right)
+                                                                                     (showing-panel right))
+                                                             (layouts/entries (:layouts (settings/load-settings @settings-path*))))
                                                        (pal-data/entries
                                                  {:commands (plugin-registry/all-commands plugins)
                                                   :keymap {:window (plugin-registry/window-bindings plugins)
@@ -4993,7 +4999,13 @@
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
             (g/gtk-widget-add-controller unread-label click))
-        window-key-args {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
+        ;; LM8's named layouts, installed once the editor/console split
+        ;; exists (below, after paned)
+        layout-fns* (atom {})
+        window-key-args {:layout-use-fn (fn [n] (some-> (:use @layout-fns*) (apply [n])))
+                         :layout-save-fn (fn [] (some-> (:save @layout-fns*) (apply [])))
+                         :layout-forget-fn (fn [] (some-> (:forget @layout-fns*) (apply [])))
+                         :panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
                          :live-keys live-keys :print-lines! print-lines!
                          :describe-key-fn (fn [] (reset! describe-pending true)
                                             (print-lines! ["; Press the key to describe."]))
@@ -5070,6 +5082,61 @@
         ;; Ln/Col label on the right.
         status-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
+        _ (reset! layout-fns*
+                  (let [saved (fn [] (or (:layouts (settings/load-settings @settings-path*)) {}))
+                        said (fn [s] (set-status! status-label s))
+                        save! (fn [m] (when-let [err (settings/save-settings! @settings-path* {:layouts m})]
+                                        (cview/append! cv :system (str "; settings: " err "\n"))))]
+                    {:save (fn []
+                             (let [panel (showing-panel right)
+                                   l (cond-> {:tree? (pos? (g/gtk-widget-get-visible (:root tree-pane)))
+                                              :tree-width (g/gtk-paned-get-position tree-paned)
+                                              :panel panel
+                                              :split (g/gtk-paned-get-position paned)})]
+                               (save! (layouts/save (saved) l))
+                               (said (str "; Saved the layout \"" (layouts/layout-name l) "\"."))))
+                     :use (fn [n]
+                            (let [{:keys [tree? tree-width panel split] :as l} (get (saved) n)]
+                              (cond
+                                (nil? l) (said (str "; No layout named \"" n "\"."))
+                                ;; checked before anything moves, so a bad one never half-applies
+                                (not (layouts/valid? l)) (said (str "; The layout \"" n "\" can't be used: its settings entry is malformed."))
+                                :else
+                                (let [before (g/label-text status-label)]
+                                  (g/gtk-toggle-button-set-active files-btn (if tree? 1 0))
+                                  ;; the panel showing goes unless it's the layout's own
+                                  (when-let [k (showing-panel right)]
+                                    (when (not= k panel) (hide-right-panel! right k)))
+                                  (when panel
+                                    (if (= panel (showing-panel right))
+                                      (show-right-panel! right panel)
+                                      (panel-focus-fn panel)))
+                                  ;; GTK lays the tree and a panel out over its next frames (and
+                                  ;; a panel shown from an evaluator's answer arrives later), so
+                                  ;; the tree's width and the split are set every 100 ms until
+                                  ;; they read back, for at most 2 s. The panel opens at its own
+                                  ;; width: set together with the tree's, GTK kept neither.
+                                  (let [tries (atom 0)
+                                        near? (fn [a b] (<= (abs (- a b)) 2))]
+                                    (g/g-timeout-add
+                                     100
+                                     (callable
+                                      (fn [_d]
+                                        (let [ready? (or (nil? panel) (= panel (showing-panel right)))]
+                                          (when ready?
+                                            (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
+                                            (when split (g/gtk-paned-set-position paned split)))
+                                          (if (or (>= (swap! tries inc) 20)
+                                                  (and ready?
+                                                       (or (not (and tree? tree-width)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
+                                                       (or (not split) (near? split (g/gtk-paned-get-position paned)))))
+                                            0 1)))
+                                      [:pointer] :int :on-throw 0)
+                                     ffi/null))
+                                  ;; a panel with nothing to show said so: that line stays
+                                  (when (= before (g/label-text status-label))
+                                    (said (str "; Layout \"" n "\".")))))))
+                     :forget (fn [] (save! {}) (said "; Forgot the saved layouts."))}))
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
     (g/gtk-box-append toolbar files-btn)
@@ -5605,6 +5672,7 @@
                    :file-tree tree-pane
                    :files-btn files-btn
                    :tree-paned tree-paned
+                   :h-paned h-paned
                    :toggle-file-tree!* (fn [] (g/gtk-toggle-button-set-active
                                                files-btn (if (zero? (g/gtk-toggle-button-get-active files-btn)) 1 0)))
                    :file-tree-visible?* (fn [] (pos? (g/gtk-widget-get-visible (:root tree-pane))))

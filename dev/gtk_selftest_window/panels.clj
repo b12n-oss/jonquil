@@ -37,6 +37,8 @@
   [ui digit]
   ((:handle-window-key! ui) ffi/null (int digit) 0 (bit-or g/META-MASK g/ALT-MASK) ffi/null))
 
+(defn- status [ui] (g/label-text (:status-label ui)))
+
 (defn- shown? [pane] (pos? (g/gtk-widget-get-visible (:root pane))))
 
 (defn- list-focused?
@@ -130,3 +132,34 @@
                              (and said? (not (:shown state)) (not-any? #{:locations} (:recent state))
                                   (empty? (:docs state)))
                              (assoc state :said said? :status (g/label-text (:status-label ui))))))))
+
+;; --- named layouts (LM8) -----------------------------------------------------
+
+(defn row-layout-save-and-use
+  "Save the layout with the file tree and the Trace panel showing; hide
+  both; Use layout brings both back; Forget every saved layout empties the
+  list. \"save the layout\" in the palette picks Save, not Forget. The
+  widths aren't asserted: in this window GTK holds the re-shown tree to a
+  width of its own (an open question, recorded in the plan)."
+  [ui]
+  (go-row :layout-save-and-use support/check
+    (let [tree-root (:root (:file-tree ui))
+          trace-root (:root (:trace-pane ui))
+          vis? (fn [w] (pos? (g/gtk-widget-get-visible w)))
+          _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 1)
+                    (run-palette! ui "show the calls of the traced functions"))
+          both? (await-until 3000 20 #(and (vis? tree-root) (vis? trace-root)))
+          _ (on-gtk (run-palette! ui "save the layout"))
+          saved? (await-until 3000 20 #(= "; Saved the layout \"File tree and Trace panel\"." (status ui)))
+          _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 0)
+                    ((:on-close @(:handlers (:trace-pane ui)))))
+          hidden? (await-until 3000 20 #(and (not (vis? tree-root)) (not (vis? trace-root))))
+          _ (on-gtk (run-palette! ui "use layout: file tree and trace panel"))
+          back? (await-until 3000 20 #(and (vis? tree-root) (vis? trace-root)))
+          said? (await-until 3000 20 #(= "; Layout \"File tree and Trace panel\"." (status ui)))
+          _ (on-gtk (run-palette! ui "forget every saved layout"))
+          forgot? (await-until 3000 20 #(= "; Forgot the saved layouts." (status ui)))
+          _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 0) ((:on-close @(:handlers (:trace-pane ui)))))]
+      (on-gtk (support/check :layout-save-and-use (and both? saved? hidden? back? said? forgot?)
+                             {:both both? :saved saved? :hidden hidden? :back back? :said said? :forgot forgot?
+                              :status (status ui)})))))

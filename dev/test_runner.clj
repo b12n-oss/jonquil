@@ -32,6 +32,7 @@
     jonquil.compare-test
     jonquil.fibers-rt-test
     jonquil.hints-test
+    jonquil.layouts-test
     jonquil.line-counts-test
     jonquil.messages-test
     jonquil.registry-test
