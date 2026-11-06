@@ -42,6 +42,7 @@
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
             [jonquil.gtk.find-bar :as find-bar]
             [jonquil.gtk.gutter :as gutter]
+            [jonquil.line-counts :as line-counts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
@@ -965,6 +966,11 @@
         (ev/set-mode! new (mode-fn))
         (watch-connection! new ev* sel* dialect-label cv status-label)
         (reset! ev* new)
+        ;; LM4: counting is the whole process's mode, so leaving the
+        ;; in-process Jolt for another runtime mustn't leave Jonquil counting
+        ;; what it compiles (another in-process session shares the mode)
+        (when-not (instance? jonquil.session.InProcess new)
+          (line-counts/off-if-counting!))
         ;; Focus inside a panel this hides would go nowhere, so it moves to
         ;; the active tab's editor, as closing the inspector does.
         (let [focus-in-panel? (or (focus-within? (:inspector-root right))
@@ -1122,6 +1128,9 @@
                  (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
                       ((deref (:refresh changed)))
                       (catch :default _ nil)))
+               ;; LM4: the lines that ran, whether it ended well or not
+               (when (and changed (#{:run :form :selection} hook-source))
+                 (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil)))
                (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result}))))))
 
 (defn- before-run-stopped
@@ -1174,8 +1183,11 @@
    (let [{ed :ed path-atom :path id :id} tab
          out (atom [])
          refused (refuse-foreign! ctx)
-         opts (fn [] (let [base (assoc (make-eval-opts ed cv ev* status-label true)
-                                       :run? true :path @path-atom :owner id)]
+         opts (fn [] (let [base (cond-> (assoc (make-eval-opts ed cv ev* status-label true)
+                                              :run? true :path @path-atom :owner id)
+                                       ;; LM4: a Run counts its own lines alone
+                                       (some-> (:changed ed) :counting? deref (apply []))
+                                       (assoc :clear-line-counts? true))]
                        (hooked-opts (assoc (if notify (notifying-opts base out notify) base)
                                            :hook-source :run :hook-tab id
                                            :hook-code (editor/editor-text ed) :failure* (:failure* cv)
@@ -2322,11 +2334,14 @@
   call time -- by then activate! has reset! it to the real cv (the only
   forward reference; every other closure below is built after its pieces
   already exist)."
-  [tab-fn *cv ev* status-label]
+  [tab-fn *cv ev* status-label bang*]
   (fn [{:keys [action text]}]
     (case action
-      :eval (let [tab (tab-fn)]
-              (do-repl-eval! (:ed tab) @*cv ev* status-label text {:hook-source :repl :hook-tab (:id tab)}))
+      ;; LM1: a line starting with ! runs a palette command (@bang*)
+      :eval (if (pal-data/bang? text)
+              (@bang* text)
+              (let [tab (tab-fn)]
+                (do-repl-eval! (:ed tab) @*cv ev* status-label text {:hook-source :repl :hook-tab (:id tab)})))
       :send-stdin (ev/send-input! @ev* text)
       :eof (ev/send-eof! @ev*))))
 
@@ -2692,10 +2707,58 @@
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
-           open-find-fn open-replace-fn window-key-args repl-complete-fn] :as ctx}
+           open-find-fn open-replace-fn window-key-args repl-complete-fn line-counting?] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
   ;; LM3: the gutter's marks follow edits, 150 ms after the last change,
   ;; computed off the GTK thread and drawn only if the text is still the same
+  ;; LM4: after a run, the file's line counts in the gutter, while
+  ;; counting is on; drawn only for a saved, clean tab whose text is still
+  ;; what it was when the fetch started, and hidden at the first edit
+  (when-let [{:keys [counts-refresh counting? gutter]} (:changed ed)]
+    (reset! counting? (fn [] (boolean (and line-counting? @line-counting?))))
+    ;; the text the tab's last full Run ran: counts are drawn only while the
+    ;; buffer still holds it, so a Run Form or Run Selection never shows
+    ;; counts for lines that have moved since
+    (let [run-text (atom nil)]
+      (reset! counts-refresh
+              (fn [source code]
+                (on-gui! (fn []
+                           (when (= :run source) (reset! run-text code))
+                           (when (and line-counting? @line-counting? (not @(:destroyed? ed)))
+                             (let [e @ev* path @path]
+                               (cond
+                                 (not (satisfies? ev/LineCounts e)) nil
+                                 ;; on the console: the Run's own Ready lands on the
+                                 ;; status bar after this. Only for a Run: a Run Form
+                                 ;; on an edited tab is the usual case, not news
+                                 (or (nil? path) (editor/dirty? ed))
+                                 (when (= :run source)
+                                   (cview/append! cv :system "; Line counts show for a saved file.\n"))
+                                 :else
+                                 (let [text (editor/editor-text ed)]
+                                   (when (= text @run-text)
+                                     (ev/line-counts!
+                                      e path
+                                      (fn [r]
+                                        (on-gui! (fn []
+                                                   (cond
+                                                     (:error r) (cview/append! cv :system (str "; " (:error r) "\n"))
+                                                     ;; the runtime isn't counting: a restart, or a
+                                                     ;; toggle elsewhere
+                                                     (not= :counts (:mode r))
+                                                     (when @line-counting?
+                                                       (reset! line-counting? false)
+                                                       (gutter/set-counts! gutter {})
+                                                       (cview/append! cv :system "; Line counts went off (the runtime restarted).\n"))
+                                                     (and (not @(:destroyed? ed)) (= text (editor/editor-text ed)))
+                                                     (gutter/set-counts! gutter (into {} (for [[line hits] (:counts r) :when line]
+                                                                                           [(dec line) (line-counts/label hits)]))))))))))))))))))
+    (g/g-signal-connect-data (:buf ed) "changed"
+                             (callable (fn [_buf _data]
+                                         (when (seq @(:counts gutter)) (gutter/set-counts! gutter {}))
+                                         nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT))
   (when-let [{:keys [ran refresh gutter]} (:changed ed)]
     (let [pending (atom 0)
           ;; a closed tab's buffer and gutter are gone (:destroyed?), and a
@@ -3472,9 +3535,12 @@
         suppress-close? (atom false)
         closing? (atom false)
         *cv (atom nil)
+        ;; LM1's ! commands at the prompt, installed once the palette's
+        ;; pieces exist (below, after open-palette-fn)
+        bang* (atom (fn [_text]))
         ;; :failure*, the last failed evaluation, for the restarts
         cv (assoc
-            (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label)
+            (cview/make-console-view {:on-submit (make-on-submit active-tab *cv ev* status-label bang*)
                                      :history-prev (history-prev-fn ev*)
                                      :history-next (history-next-fn ev*)
                                      ;; The console reads busy/waiting state
@@ -3766,7 +3832,7 @@
                                         (g/gtk-label-set-text status-label (str "; " l))))}))))
         ;; After a plugin step, each tab on a plugin file whose
         ;; file now holds other text than the tab last saved follows it: a
-        ;; clean tab reloads, keeping its caret's offset, and a dirty one
+        ;; clean tab reloads as one undo step, keeping its caret's offset, and a dirty one
         ;; keeps its edits, is warned once on the console and takes the disk
         ;; text as its saved baseline. GTK-thread only.
         sync-plugin-tabs! (fn []
@@ -3789,10 +3855,7 @@
                                     (cview/append! cv :system (str "; " path " changed on disk but now holds a NUL byte, so this tab keeps its text.\n")))
                                   (case (tabs/disk-sync {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
                                                     :buffer (editor/editor-text ed)})
-                                    :reload (let [caret (g/cursor-offset (:buf ed))
-                                                  at (min caret (count disk))]
-                                              (editor/set-text! ed disk)
-                                              (g/with-iters* (:buf ed) at at (fn [a _] (g/gtk-text-buffer-place-cursor (:buf ed) a)))
+                                    :reload (do (editor/reload-text! ed disk)
                                               (cview/append! cv :system (str "; " path " changed on disk, so this tab was reloaded.\n"))
                                               (refresh-labels! @*tab-ctx))
                                     :warn (do (editor/rebase-saved! ed disk)
@@ -3953,6 +4016,29 @@
                                                   :keymap {:window (plugin-registry/window-bindings plugins)
                                                            :editor (plugin-registry/editor-bindings plugins)}
                                                   :os (System/getProperty "os.name")}))))))
+        _ (reset! bang*
+                  (fn [text]
+                    (let [cv @*cv
+                          plugins @plugin-registry/live
+                          es (pal-data/entries {:commands (plugin-registry/all-commands plugins)
+                                                :keymap {:window (plugin-registry/window-bindings plugins)
+                                                         :editor (plugin-registry/editor-bindings plugins)}
+                                                :os (System/getProperty "os.name")})
+                          say (fn [s] (cview/append! cv :system (str s "\n")))
+                          {:keys [run doc choices words none] :as r} (pal-data/bang-pick es text)]
+                      ;; not an entry: Clear the last entry's output reaches the one before
+                      (cview/restore-entry-start! cv)
+                      ;; Up brings the line back, as for any entry
+                      (swap! (ev/history @ev*) eval/history-add (str/trim text))
+                      (cond
+                        (:help r) (say "; ! runs a command by name, as the palette does: !clear line counts")
+                        none (say (str "; ! No command matches \"" none "\". Cmd/Ctrl+Shift+P lists them all."))
+                        choices (say (str "; ! " (count choices) " commands match \"" words "\":\n"
+                                          (str/join "\n" (map #(str ";   " %) (take 8 choices)))
+                                          (when (< 8 (count choices)) "\n;   ...")))
+                        :else (do (say (str "; ! " doc))
+                                  (try ((deref (:on-run (:palette (active-tab)))) run)
+                                       (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
         ;; The locations list, or nil. A buffer list is {:tab-id :list
@@ -4306,6 +4392,8 @@
         ;; mode has no flag here: the toggle reads the runtime's own mode.
         frames-state (atom nil)
         frames-ev (fn [] (let [e @ev*] (when (satisfies? ev/Frames e) e)))
+        ;; LM4: whether Jolt is counting lines, from each toggle's answer
+        line-counting? (atom false)
         show-frames-fn (fn []
                          (if-let [e (frames-ev)]
                            (ev/error-frames! e (fn [d]
@@ -4332,14 +4420,42 @@
                                (debugger-pane/show-restarts! dbgp (restarts/options f))
                                (show-right-panel! right :debugger))
                              (set-status! status-label "; The debugger needs Jolt."))))
+        hide-line-counts! (fn [] (doseq [t @tabs] (some-> t :ed :changed :gutter (gutter/set-counts! {}))))
+        line-counts-fn (fn []
+                         (let [e @ev*]
+                           (if (satisfies? ev/LineCounts e)
+                             (ev/toggle-line-counts!
+                              e (fn [r]
+                                  (on-gui! (fn []
+                                             (when-not (:error r) (reset! line-counting? (boolean (:on? r))))
+                                             (when (and (not (:error r)) (not (:on? r))) (hide-line-counts!))
+                                             (set-status! status-label
+                                                          (cond (:error r) (str "; " (:error r))
+                                                                (:was-debug? r) "; Line counts on, so debug mode is off: Run your file to count its lines."
+                                                                (:on? r) "; Line counts on: Run your file to count its lines."
+                                                                :else "; Line counts off."))))))
+                             (set-status! status-label "; Line counts need Jolt."))))
+        clear-line-counts-fn (fn []
+                               (let [e @ev*]
+                                 (if (satisfies? ev/LineCounts e)
+                                   (ev/clear-line-counts!
+                                    e (fn [r]
+                                        (on-gui! (fn []
+                                                   (hide-line-counts!)
+                                                   (set-status! status-label (if (:error r) (str "; " (:error r)) "; Line counts cleared."))))))
+                                   (set-status! status-label "; Line counts need Jolt."))))
         locals-mode-fn (fn []
                          (if-let [e (frames-ev)]
                            (ev/toggle-debug-mode! e (fn [r]
                                                       (on-gui! (fn []
+                                                                 ;; Jolt has one mode: debug on ends counting
+                                                                 (let [was-counting? @line-counting?]
+                                                                   (when (:on? r) (reset! line-counting? false) (hide-line-counts!))
                                                                  (set-status! status-label
                                                                               (cond (:error r) (str "; " (:error r))
+                                                                                    (and (:on? r) was-counting?) "; Debug mode on: code you load from now on keeps its locals. Line counts are off."
                                                                                     (:on? r) "; Debug mode on: code you load from now on keeps its locals."
-                                                                                    :else "; Debug mode off."))))))
+                                                                                    :else "; Debug mode off.")))))))
                            (set-status! status-label "; The debugger needs Jolt.")))
         _ (debugger-pane/set-handlers!
            dbgp {:on-frame (fn [i]
@@ -4415,11 +4531,12 @@
                                          (binding [*out* *err*]
                                            (println "jonquil: messages refresh:" (ex-message e)))))))))
         _ (register-status-log! status-label log-entry!)
-        ;; Open files changed on disk (LM8, log only): agents mostly edit
-        ;; files with their own tools, which no MCP call shows. Each tick
-        ;; stats every open tab's file (plugin tabs keep sync-plugin-tabs!)
-        ;; and reads one only when its time or size moved; a change from
-        ;; what the tab last saved logs once. Tabs are never touched.
+        ;; Open files changed on disk: agents mostly edit files with their
+        ;; own tools, which no MCP call shows. Each tick stats every open
+        ;; tab's file (plugin tabs keep sync-plugin-tabs!) and reads one only
+        ;; when its time or size moved. A clean tab follows the file as one
+        ;; undo step; a dirty one keeps its edits and takes the disk text as
+        ;; its saved baseline (tabs/disk-follow), each logged to Messages.
         ;; GTK thread, so the tab list and saved text are read safely.
         disk-seen (atom {})
         disk-tick! (fn []
@@ -4437,23 +4554,52 @@
                                ;; first sight (or a new path): only remember it
                                (or (nil? seen) (not= path (:path seen)))
                                (swap! disk-seen assoc (:id t) {:path path :stat stat})
-                               (not= stat (:stat seen))
-                               (let [disk (when stat (slurp path))
-                                     ed (:ed t)
-                                     name (last (str/split path #"/"))]
-                                 (swap! disk-seen assoc-in [(:id t) :stat] stat)
-                                 (case (tabs/disk-change {:saved @(:saved-text ed) :disk disk :reported (:reported seen)})
-                                   :changed (do (swap! disk-seen assoc-in [(:id t) :reported] disk)
-                                                (log-entry! {:kind :file :target {:tab-id (:id t)}
-                                                             :summary (str name " changed on disk"
-                                                                           (when (editor/dirty? ed) " (this tab has unsaved edits)"))}))
-                                   :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
-                                                (log-entry! {:kind :file :target {:tab-id (:id t)}
-                                                             :summary (str name " was deleted or moved on disk")}))
-                                   :clear (swap! disk-seen update (:id t) dissoc :reported)
-                                   nil))))
-                           ;; a read that failed logs nothing; the next tick tries again
-                           (catch :default _ (swap! disk-seen update (:id t) dissoc :stat))))))
+                               :else
+                               (case (tabs/stat-step (cond-> {:stat stat :seen-stat (:stat seen)}
+                                                       (contains? seen :pending) (assoc :pending (:pending seen))))
+                                 :same (swap! disk-seen update (:id t) dissoc :pending)
+                                 ;; moved: wait a tick, so a writer that truncates and then
+                                 ;; writes is never caught halfway
+                                 :wait (swap! disk-seen assoc-in [(:id t) :pending] stat)
+                                 :act
+                                 ;; a read that fails logs nothing: the stat stays pending and
+                                 ;; the next tick tries again
+                                 (when-some [disk (try (if stat (slurp path) ::gone) (catch :default _ nil))]
+                                   (let [disk (when-not (= ::gone disk) disk)
+                                         ed (:ed t)
+                                         name (last (str/split path #"/"))
+                                         log! (fn [summary] (log-entry! {:kind :file :target {:tab-id (:id t)} :summary summary}))]
+                                     (swap! disk-seen update (:id t) #(-> % (assoc :stat stat) (dissoc :pending)))
+                                     ;; the file is there again: a later delete is said again
+                                     (when disk (swap! disk-seen update (:id t) dissoc :reported))
+                                     ;; a throw from here on is one row, not a silent retry: the
+                                     ;; tab may already have changed
+                                     (try
+                                       (if (and disk (tabs/nul-line disk))
+                                         ;; GTK would truncate it, and rebasing on it would leave the
+                                         ;; tab dirty for good; said once per text
+                                         (when (not= disk (:nul seen))
+                                           (swap! disk-seen assoc-in [(:id t) :nul] disk)
+                                           (log! (str name " changed on disk but holds a NUL byte, so this tab keeps its text")))
+                                         (do (swap! disk-seen update (:id t) dissoc :nul)
+                                             (case (tabs/disk-follow {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
+                                                                      :buffer (when disk (editor/editor-text ed)) :reported (:reported seen)})
+                                               :reload (do (editor/reload-text! ed disk)
+                                                           (refresh-labels! @*tab-ctx)
+                                                           (log! (str name " was reloaded from disk")))
+                                               :warn (do (editor/rebase-saved! ed disk)
+                                                         (refresh-labels! @*tab-ctx)
+                                                         (log! (str name " changed on disk, and this tab keeps your unsaved edits")))
+                                               :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
+                                               :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
+                                                            (log! (str name " was deleted or moved on disk")))
+                                               nil)))
+                                       (catch :default e
+                                         (log-entry! {:kind :file :error? true :target {:tab-id (:id t)}
+                                                      :summary (str name " changed on disk, but following it failed: "
+                                                                    (or (ex-message e) (str e)))}))))))))
+                           ;; the stat itself failed: the next tick tries again
+                           (catch :default _ nil)))))
         _ (g/g-timeout-add DISK-POLL-MS (callable (fn [_data] (disk-tick!) 1) [:pointer] :int :on-throw 1) ffi/null)
         _ (messages-pane/set-handlers!
            msgp {:on-activate (fn [entry]
@@ -4752,6 +4898,7 @@
                          :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
+                         :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          :trace-toggle-fn trace-toggle-fn :trace-show-fn trace-show-fn
@@ -5034,7 +5181,8 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs}
+                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs
+                   :line-counting? line-counting?}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))

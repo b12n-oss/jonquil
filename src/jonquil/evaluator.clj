@@ -173,6 +173,19 @@
     {:out :text} or {:error s}, jonquil.debugger/STALE when error-id names
     an older error."))
 
+(defprotocol LineCounts
+  "LM4's exact line counts (jonquil.line-counts over jolt.profile), for the
+  two Jolt runtimes. Callers check (satisfies? LineCounts ev) first. Each
+  call runs off the caller's thread and calls back once."
+  (toggle-line-counts! [ev on-done]
+    "Flips counting for code compiled from now on, reading the runtime's
+    own mode; on-done gets {:on? b} (with :was-debug? true when it ended
+    debug mode) or {:error s}.")
+  (line-counts! [ev path on-data]
+    "on-data gets {:counts {line hits}} for the file at path, or {:error s}.")
+  (clear-line-counts! [ev on-done]
+    "Zeroes the counters; on-done gets {:ok true} or {:error s}."))
+
 (defprotocol Break
   "Break on error (jonquil.debugger's break): an evaluation that throws
   pauses on its worker before anything unwinds. Jolt in process. Callers
