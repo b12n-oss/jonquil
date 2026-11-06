@@ -85,7 +85,8 @@ Dock or Finder it reopens the project you quit most recently.
 - A remembered file that's gone is skipped, and the console names it.
 - The list lives in `sessions.edn`, next to `settings.edn` (see
   [Themes](using-jonquil.md#themes)). `:reopen-tabs? false` in
-  `settings.edn` turns it off.
+  `settings.edn` turns it off. The forms you evaluated are kept separately
+  (see [Last session's replay](using-jonquil.md#last-sessions-replay)).
 
 ## Opening from Finder and the Dock
 

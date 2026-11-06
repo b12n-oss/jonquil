@@ -180,7 +180,8 @@ when that variable is unset, blank, or not an absolute path:
 {:theme :navy
  :file-tree {:visible? true :width 240}
  :dialect :jolt
- :reopen-tabs? true}
+ :reopen-tabs? true
+ :remember-session? true}
 ```
 
 - `:theme`: the theme you last picked with Cmd/Ctrl+Shift+M, one of
@@ -193,6 +194,10 @@ when that variable is unset, blank, or not an absolute path:
   [Choosing a dialect](dialects/index.md#choosing-a-dialect)).
 - `:reopen-tabs?` (hand-written): `false` stops Jonquil saving and
   reopening the last session's tabs. Omitted or `true` keeps it on.
+- `:remember-session?` (hand-written): `false` stops Jonquil recording what
+  each project evaluated and offering it back as a replay (see
+  [Last session's replay](using-jonquil.md#last-sessions-replay)). Omitted
+  or `true` keeps it on.
 - `:mcp-listen?` (hand-written): `true` makes each window serve Jonquil's
   MCP tools on a loopback socket, so an agent can attach to an open window
   with `jonquil --mcp-attach` (see [Driving Jonquil from an agent](mcp.md)).
@@ -206,7 +211,8 @@ edit by hand.
 A missing file means the defaults; an unreadable file or unusable value
 falls back per key with one console note. Saving changes only its own key,
 refuses to overwrite a file it couldn't read, and is atomic. Delete the
-file to reset everything, and `sessions.edn` to forget remembered tabs.
+file to reset everything, and `sessions.edn` to forget remembered tabs. The
+replay records are in `replays/` next to it.
 
 See [Using Jonquil](using-jonquil.md) for the rest of the window, and
 [Development](development.md) for the test suite, the self-test harnesses,
