@@ -8,7 +8,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
-- Last session's replay (Jolt and JVM Clojure): Jonquil records what each project evaluated, the console offers it at open and at Open Folder, and Open last session's replay in the palette puts it in a new tab as files, definitions and `#_`-skipped other forms. Nothing runs until you Run. Forget last session clears it, and `:remember-session? false` turns recording off. The record is plain text in `replays/` beside the settings file, owner-only.
+- Last session's replay (Jolt and JVM Clojure): Jonquil records what each project evaluated, the console offers it at open and at Open Folder, and Open last session's replay in the palette puts it in a new tab as files, definitions and `#_`-skipped other forms. Nothing runs until you Run. Forget last session clears it, and `:remember-session? false` turns recording off. Running the replay carries the forms still behind `#_` into the next replay. The record is plain text in `replays/` beside the settings file, owner-only.
 - The Up/Down history survives a dialect switch, and is saved with the replay record.
 - Named layouts: Save the layout keeps whether the file tree and a right-hand panel show, the tree's width and the editor/console split, named after what shows; Use layout: name in the palette brings one back. Kept in the settings file.
 - Compare with the file on disk, or with git HEAD: the tab's differences from that version go in the Locations list, and Take the other version here puts that version's lines back for the difference at the caret, as one undo step.

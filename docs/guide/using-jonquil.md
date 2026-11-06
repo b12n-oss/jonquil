@@ -176,10 +176,12 @@ you remove the `#_`. A setup form you ran again later (a second
 The replay tab counts as typed at the console, so its Run never resets
 earlier definitions. A second Open selects the replay tab that's already open
 for the same folder, and after Open Folder it opens a new tab for the new
-folder. Running the replay records its files and definitions again, but not
-the skipped `#_` forms, which are gone from the next replay. So before you
-press Run, take the `#_` off any skipped form you'll want next time, or copy
-it somewhere else.
+folder. Running the replay records its files and definitions again, and the
+skipped forms still in the tab behind `#_` come back in the next replay, with
+their old namespace and time. They're matched by their exact text. A skipped
+form you delete from the tab before Run, or reindent or edit, is dropped, and
+one whose `#_` you take off runs and is recorded like any other form. Forget
+last session clears everything, skipped forms included.
 
 The record keeps growing across days until you run the replay or choose
 **Forget last session** in the palette. It's one file per project in

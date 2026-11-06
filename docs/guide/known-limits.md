@@ -71,8 +71,9 @@ Known rough edges, parked for later:
 - Replay runs only in Jolt and JVM Clojure. ClojureDart, ClojureScript,
   jank and the nREPL dialect record and get their Up/Down history back,
   but the console says replay isn't available for them yet.
-- Running the replay drops the other forms you left behind `#_`: only what
-  ran is recorded again, so they're gone from the next replay.
+- A skipped form carries into the next replay only while its exact text is
+  still behind `#_` in the tab. Reindent or edit it there and it isn't
+  recognised, so it's dropped.
 - A setup form run again later, such as a second `(refer 'lib)` to pick up
   new vars, keeps its first position, so on replay it can run before the
   vars it was meant to see.
