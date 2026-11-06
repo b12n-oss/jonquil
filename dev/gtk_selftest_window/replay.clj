@@ -589,12 +589,31 @@
                                {:ok ok? :line line})
                 (finally (restore! ui original [d])))))))
 
+(defn- fake-evaluator
+  "An idle Evaluator, every method implemented, whose prompt is in ns."
+  [ns]
+  (reify ev/Evaluator
+    (start! [_] nil)
+    (stop! [_] nil)
+    (eval! [_ _ _] nil)
+    (interrupt! [_] nil)
+    (evaluating? [_] false)
+    (waiting-for-input? [_] false)
+    (send-input! [_ _] nil)
+    (send-eof! [_] nil)
+    (history [_] (atom {:items [] :index 0 :draft ""}))
+    (prompt-ns [_] ns)
+    (set-mode! [_ _] nil)
+    (complete [_ _ _ _ _] [])
+    (lookup [_ _ _ _] nil)
+    (limitations [_] [])))
+
 (defn row-replay-run-ns
   "The ns an Untitled Run is recorded in: user for the in-process session,
   the prompt's ns for any other evaluator."
   [ui]
   (go-row :replay-run-ns support/check
     (on-gtk (let [f (resolve 'jonquil.gtk.window/run-record-ns)
-                  other (reify ev/Evaluator (prompt-ns [_] 'zz.other))
+                  other (fake-evaluator 'zz.other)
                   got (when f [(f (:session ui)) (f other)])]
               (support/check :replay-run-ns (= ["user" "zz.other"] got) {:got got})))))
