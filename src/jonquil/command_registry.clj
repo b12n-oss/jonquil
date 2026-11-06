@@ -98,6 +98,8 @@
    ;; describing keys: palette-only, no chords
    :help/describe-key {:doc "Describe the next key you press." :scope :window
                        :run (call :describe-key-fn)}
+   :help/key-hints {:doc "Show what keys do at the caret, in the status bar (on or off)." :scope :window
+                    :run (call :hints-toggle-fn)}
    :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
    ;; the locations list: three ways to fill it, F8 and Shift+F8 to step

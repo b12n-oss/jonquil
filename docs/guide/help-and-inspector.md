@@ -146,6 +146,12 @@ on to the editor or GTK. Typing, including Return, Tab and Backspace, shows
 only as a count, never as the characters typed. A command's own keys are in the
 palette's row for it.
 
+When the editor's caret sits on a symbol, the status bar names the keys
+that act on it, such as `Ctrl+Q doc · F12 jump · Shift+F6 rename`. They're
+read from the live keymap, so your own bindings show, and the line follows
+the caret a moment after it stops. **Show what keys do at the caret**, in
+the palette, turns the line off or back on for this session.
+
 ### The locations list
 
 Three palette commands list places in the buffer, in a panel on the right:

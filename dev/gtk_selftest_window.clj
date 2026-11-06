@@ -421,6 +421,7 @@
    gutter-rows/row-line-counts-unsaved
    gutter-rows/row-line-counts-second-run
    gutter-rows/row-line-counts-went-off
+   gutter-rows/row-key-hints-follow-the-caret
    debugger-rows/row-debugger-pane-shows
    debugger-rows/row-frames-after-error
    debugger-rows/row-break-off-by-default

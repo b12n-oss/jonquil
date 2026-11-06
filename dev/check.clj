@@ -19,6 +19,7 @@
     jonquil.mcp.json
     jonquil.mcp.tools
     jonquil.fibers-rt
+    jonquil.hints
     jonquil.line-counts
     jonquil.messages
     jonquil.mcp.describe

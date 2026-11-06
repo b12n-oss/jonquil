@@ -8,6 +8,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- The status bar names the keys that act on the symbol at the caret (`Ctrl+Q doc · F12 jump · Shift+F6 rename`), from the live keymap. Show what keys do at the caret, in the palette, turns it off for the session.
 - The Processes panel (Cmd/Ctrl+Alt+8, or Show the processes in the palette): the fibers your program spawns with `jolt.fibers/spawn`, each with its state and age, and Interrupt, Kill and Forget finished. Jonquil starts watching `spawn` the first time the panel opens, since Jolt keeps no list of live fibers. In process and in the Jolt child.
 - `!` at the Interactions prompt runs a palette command by its words: `!list every key binding` and Return runs it, words that match several list them, and the line goes into the history.
 - Count how often each line runs (Jolt, v0.8.24 or later): a palette toggle turns on Jolt's `jolt.profile` line counters, and after a Run of a saved file the gutter shows each line's hits beside it (`6`, `1.2k`). Each Run counts itself alone, an edit hides the counts until the next Run, and Clear line counts zeroes them. In process and in the Jolt child.

@@ -10,7 +10,7 @@
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
-   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn
+   :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :panel-focus-fn])
 
 (defn- recording-ctx
@@ -43,7 +43,7 @@
    :world/restore-earlier [:world-restore-earlier-fn]
    :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
    :run/time-form [:time-form-fn] :tab/back [:tab-back-fn]
-   :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn]
+   :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn] :help/key-hints [:hints-toggle-fn]
    :run/line-counts [:line-counts-fn] :run/clear-line-counts [:clear-line-counts-fn]
    :debug/break-on-error [:break-fn] :debug/continue [:continue-fn]
    :run/changed [:run-changed-fn]
