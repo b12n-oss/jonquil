@@ -78,6 +78,7 @@
     jonquil.tabs-test
     jonquil.file-ops-test
     jonquil.last-session-test
+    jonquil.replay-test
     jonquil.file-tree-test
     jonquil.tool-path-test
     jonquil.save-path-test

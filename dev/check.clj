@@ -102,6 +102,7 @@
     jonquil.tabs
     jonquil.file-ops
     jonquil.last-session
+    jonquil.replay
     jonquil.file-tree
     jonquil.gtk.ffi
     jonquil.gtk.appearance
