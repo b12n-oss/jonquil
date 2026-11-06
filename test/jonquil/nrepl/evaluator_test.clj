@@ -750,6 +750,18 @@
         (is (= "3" (:printed (first (run e "here" false))))))
       (finally (ev/stop! e)))))
 
+(deftest run-without-reset-over-nrepl-test
+  (let [e (make (temp-project))]
+    (try
+      (run e "(def kept 1)" false)
+      (let [done (promise)]
+        (ev/eval! e "(def other 2)" {:run? true :owner :repl :reset? false
+                                     :on-complete (fn [r] (deliver done r))})
+        (is (= :ok (:status (deref done 20000 :timeout)))))
+      (is (= "1" (:printed (first (run e "kept" false)))))
+      (is (= "2" (:printed (first (run e "other" false)))))
+      (finally (ev/stop! e)))))
+
 (deftest history-vars-survive-owner-snapshots-test
   ;; the owner snapshots are evals on the user's
   ;; session, and the server shifts *1/*2/*3 on every successful eval.

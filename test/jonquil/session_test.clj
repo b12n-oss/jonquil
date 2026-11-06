@@ -95,6 +95,13 @@
       (run session/run-definitions! s "(ns tabs.a) (def only 1)" {:owner 1})
       (is (nil? (ns-resolve 'tabs.a 'hello))))))
 
+(deftest run-without-reset-keeps-repl-defs-test
+  (let [s (session/make-session)]
+    (run session/submit-repl! s "(def kept 1)")
+    (run session/run-definitions! s "(def other 2)" {:reset? false :owner :repl})
+    (is (some? (ns-resolve 'user 'kept)))
+    (is (some? (ns-resolve 'user 'other)))))
+
 (deftest owner-repl-namespaces-go-with-any-run-test
   (let [s (session/make-session)]
     (run session/submit-repl! s "(create-ns 'tabs.scratch)")

@@ -24,6 +24,7 @@
     in :reset mode), and :owner: who the evaluation's new namespaces belong
     to (a tab id, or :repl). A reset-mode Run removes only its own owner's,
     the REPL's, and `user`. Defaults: :run for a Run, :repl otherwise.
+    :reset? false makes a Run skip that reset and add to the session.
     Attach evaluators ignore it. :quiet, a token, asks an evaluator that
     satisfies QuietEval for an eval that leaves the REPL as it was (no
     history entry, *1 *2 *3 *e and the prompt namespace unchanged), in the

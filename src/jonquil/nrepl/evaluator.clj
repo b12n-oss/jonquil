@@ -511,7 +511,7 @@
           (auto-require! ev on-output)
           (let [{:keys [conn session]} (runtime ev)
                 owner (:owner opts (if run? :run :repl))]
-            (when (and run? (= :reset (:mode @(:state ev))))
+            (when (and run? (= :reset (:mode @(:state ev))) (not (false? (:reset? opts))))
               (let [created (:created @(:state ev))]
                 (eval-sync! conn session (ops/reset-code (concat (get created owner) (get created :repl))))
                 (swap! (:state ev) update :created dissoc owner :repl)))
