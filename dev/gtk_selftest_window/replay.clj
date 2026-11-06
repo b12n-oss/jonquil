@@ -15,6 +15,8 @@
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
+            [jonquil.gtk.palette :as palette]
+            [jonquil.gtk.popover :as popover]
             [jonquil.replay :as replay]
             [jonquil.settings :as settings]
             [temp-dirs]))
@@ -197,3 +199,51 @@
                                {:done done? :wrote wrote? :offered offered?
                                 :disk2 (:record (replay/load-record (record-file ui d2)))})
                 (finally (restore! ui original [d1 d2])))))))
+
+(defn row-replay-files-under-start-root
+  "An evaluation is filed under the root it started in: a slow entry begun
+  at A and finished after a re-root to B lands in A's file, not B's."
+  [ui]
+  (go-row :replay-files-under-start-root support/check
+    (let [original (on-gtk (root ui))
+          [da db] (on-gtk (tabs/occupy-first! ui)
+                          (let [[da] (project!)
+                                [db] (project!)]
+                            ((:simulate-folder-result! ui) {:path da})
+                            [da db]))
+          _ (enter! ui "(Thread/sleep 600)")
+          busy? (await-until 2000 20 #(not (support/idle? ui)))
+          _ (on-gtk ((:simulate-folder-result! ui) {:path db}))
+          done? (await-until 6000 20 #(and (support/idle? ui)
+                                           (= ["(Thread/sleep 600)"] (mapv :text (:current (on-disk ui da))))))
+          b-got? (await-until 600 20 #(or (seq (:current (record ui))) (seq (:current (on-disk ui db)))))]
+      (on-gtk (try
+                (support/check :replay-files-under-start-root
+                               (and busy? done? (not b-got?) (= db (root ui)))
+                               {:busy busy? :done done? :b-got b-got? :a (on-disk ui da)
+                                :b (record ui) :b-disk (on-disk ui db)})
+                (finally (restore! ui original [da db])))))))
+
+(defn row-replay-records-run-changed
+  "Run the forms changed records the edited form it sent."
+  [ui]
+  (go-row :replay-records-run-changed support/check
+    (let [original (on-gtk (root ui))
+          d (on-gtk (tabs/occupy-first! ui)
+                    ((:select-tab! ui) (:id (first (tab-list ui))))
+                    (let [[d] (project!)] ((:simulate-folder-result! ui) {:path d}) d))
+          [ran? _] (support/run-and-await ui "(def hits (atom 0))\n(defn cc [] 1)" 5000 #(str/includes? % "#'user/cc"))
+          _ (on-gtk (editor/set-text! (:editor ui) "(def hits (atom 0))\n(defn cc [] 10)"))
+          _ (await-until 3000 20 #(seq @(:ranges (:gutter (:changed (:editor ui))))))
+          _ (on-gtk (let [p (:palette ui)]
+                      ((:open-palette!* ui))
+                      (palette/set-query! p "run the forms changed")
+                      (palette/run-selected! p)
+                      (when (popover/open? p) (popover/hide! p))))
+          ok? (await-until 5000 20 #(and (support/idle? ui)
+                                         (some (fn [e] (= "(defn cc [] 10)" (:text e))) (:current (on-disk ui d)))))]
+      (on-gtk (try
+                (support/check :replay-records-run-changed
+                               (and ran? ok?)
+                               {:ran ran? :ok ok? :current (:current (record ui))})
+                (finally (restore! ui original [d])))))))

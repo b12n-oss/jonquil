@@ -423,6 +423,8 @@
    replay-rows/row-replay-offer-at-open
    replay-rows/row-replay-history-restored
    replay-rows/row-replay-off
+   replay-rows/row-replay-files-under-start-root
+   replay-rows/row-replay-records-run-changed
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run
