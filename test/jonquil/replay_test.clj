@@ -201,3 +201,27 @@
     (is (= "13 hours ago" (:when (replay/summary near now))))
     (is (= {:files 1 :defs 0 :others 1 :dialect "Jolt"} (dissoc (replay/summary es now) :when)))
     (is (nil? (replay/summary [] now)))))
+
+(deftest entries-selection-in-file-keeps-source-file-test
+  (is (= [(form "(def a 1)" "a" :source-file "/p/a.clj")]
+         (ents {:source :selection :path "/p/a.clj" :ns "a" :code "(def a 1)"}))))
+
+(deftest compact-ignores-name-metadata-test
+  (doseq [meta ["^:private" "^:dynamic" "^{:doc \"x} {y\"}" "^String ^:private"]]
+    (let [c (replay/compact [(form "(def x 1)" "user")
+                             (form (str "(def " meta " x 2)") "user")])]
+      (is (= [(str "(def " meta " x 2)")] (map :text (:defs c))) meta))))
+
+(deftest entries-ns-metadata-test
+  (let [es (ents {:source :repl :ns "user" :code "(ns ^:foo a) (def x 1) (in-ns 'b) (def y 1)"})]
+    (is (= ["user" "a" "a" "b"] (map :ns es)))))
+
+(deftest entries-non-symbol-in-ns-keeps-ns-test
+  (let [es (ents {:source :repl :ns "user" :code "(in-ns (symbol x)) (in-ns b) (def y 1)"})]
+    (is (= ["user" "user" "user"] (map :ns es)))))
+
+(deftest load-file-escaped-path-test
+  (let [es (ents {:source :repl :ns "user" :code "(load-file \"/p/a\\\"b\\\\c.clj\")"})]
+    (is (= [(tfile "/p/a\"b\\c.clj")] es))
+    (is (str/includes? (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})
+                       "(load-file \"/p/a\\\"b\\\\c.clj\")"))))

@@ -96,7 +96,51 @@
 
 (defn- kid-text [code kid] (subs code (:start kid) (:end kid)))
 
-(defn- unquote-sym [s] (if (str/starts-with? s "'") (subs s 1) s))
+(defn- skip-meta-map
+  "Index just past the balanced {...} map that starts at i in s, strings
+  skipped. Past the end of s when it never closes."
+  [s i]
+  (loop [j i depth 0 in-str? false]
+    (if (>= j (count s))
+      j
+      (let [c (nth s j)]
+        (cond
+          in-str? (cond (= c \\) (recur (+ j 2) depth true)
+                        (= c \") (recur (inc j) depth false)
+                        :else (recur (inc j) depth true))
+          (= c \") (recur (inc j) depth true)
+          (= c \{) (recur (inc j) (inc depth) false)
+          (= c \}) (if (= 1 depth) (inc j) (recur (inc j) (dec depth) false))
+          :else (recur (inc j) depth false))))))
+
+(defn- strip-meta
+  "s without leading ^:kw, ^Sym and ^{...} metadata prefixes (repeated
+  ones too), trimmed."
+  [s]
+  (loop [t (str/triml s)]
+    (if (str/starts-with? t "^")
+      (let [end (if (str/starts-with? t "^{")
+                  (skip-meta-map t 1)
+                  (or (some (fn [i] (when (Character/isWhitespace ^char (nth t i)) i))
+                            (range (count t)))
+                      (count t)))]
+        (recur (str/triml (subs t (min end (count t))))))
+      t)))
+
+(defn- plain-symbol? [s]
+  (boolean (re-matches #"[^\s()\[\]{}\"'`~@^;,\\]+" s)))
+
+(defn- in-ns-target
+  "The ns an (ns x) or (in-ns 'x) form switches to, or nil: ns takes a plain
+  symbol (metadata allowed), in-ns only a quoted plain symbol."
+  [head arg]
+  (when arg
+    (let [t (strip-meta arg)]
+      (if (= "ns" head)
+          (when (plain-symbol? t) t)
+          (when (str/starts-with? t "'")
+            (let [sym (strip-meta (subs t 1))]
+              (when (plain-symbol? sym) sym)))))))
 
 (defn- absolute-path? [p]
   (boolean (or (str/starts-with? p "/") (re-find #"^[A-Za-z]:[\\/]" p))))
@@ -107,9 +151,9 @@
   [head kid-texts]
   (when (and (= "load-file" head) (second kid-texts))
     (let [t (second kid-texts)]
-      (when (and (> (count t) 2) (str/starts-with? t "\"") (str/ends-with? t "\""))
-        (let [p (subs t 1 (dec (count t)))]
-          (when (absolute-path? p) p))))))
+      (when (and (> (count t) 1) (str/starts-with? t "\"") (str/ends-with? t "\""))
+        (let [p (try (edn/read-string t) (catch Exception _ nil))]
+          (when (and (string? p) (absolute-path? p)) p))))))
 
 (defn entries
   "Entries for what one action ran. source is :run (a whole buffer: a saved
@@ -120,16 +164,16 @@
   [{:keys [source code path ns at dialect]}]
   (if (and (= :run source) path)
     [{:kind :file :path path :at at :dialect dialect}]
-    (let [source-file (when (= :form source) path)]
+    (let [source-file (when (contains? #{:form :selection} source) path)]
       (loop [forms (commands/top-level-forms (or code "")) cur-ns (or ns "user") out []]
         (if-let [f (first forms)]
           (let [kids (:kids f)
                 texts (mapv #(kid-text code %) kids)
                 head (when (and (seq kids) (not (:open (first kids)))) (first texts))
                 lf (load-file-path head texts)
-                next-ns (if (and (contains? #{"ns" "in-ns"} head) (second texts))
-                          (unquote-sym (second texts))
-                          cur-ns)]
+                next-ns (or (when (contains? #{"ns" "in-ns"} head)
+                              (in-ns-target head (second texts)))
+                            cur-ns)]
             (recur (rest forms) next-ns
                    (conj out (if lf
                                {:kind :file :path lf :at at :dialect dialect}
@@ -178,7 +222,7 @@
   (let [kids (:kids (first (commands/top-level-forms text)))
         texts (mapv #(kid-text text %) kids)
         head (when (and (seq kids) (not (:open (first kids)))) (first texts))
-        names (remove #(str/starts-with? % "^") (rest texts))]
+        names (map strip-meta (rest texts))]
     (cond
       (contains? def-heads head)
       [:defs (if (= "defmethod" head)
