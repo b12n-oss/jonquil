@@ -432,6 +432,8 @@
    replay-rows/row-replay-survives-new-eval
    replay-rows/row-replay-forget
    replay-rows/row-replay-none
+   replay-rows/row-replay-open-twice
+   replay-rows/row-replay-forget-off
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run

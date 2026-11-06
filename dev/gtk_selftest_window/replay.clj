@@ -351,7 +351,7 @@
                       (seeded! ui {:version 1 :previous [e] :current [] :history []}))
           mark (on-gtk (support/out-end-offset ui))
           _ (on-gtk ((:replay-open!* ui)) ((:run!* ui)))
-          failed? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "x")))
+          failed? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "ExceptionInfo")))
           settled? (await-until 800 20 #(seq (:current (record ui))))
           prev (:previous (record ui))]
       (on-gtk (try
@@ -393,13 +393,17 @@
           [d mark] (on-gtk (tabs/occupy-first! ui)
                            (seeded! ui {:version 1 :previous [(entry "(def f 1)")] :current []
                                         :history ["(+ 40 2)"]}))
+          _ (enter! ui "(def keep 1)")
+          _ (await-until 5000 20 #(and (support/idle? ui) (= ["(def keep 1)"] (mapv :text (:current (on-disk ui d))))))
           _ (on-gtk ((:replay-forget!* ui)))
           ok? (await-until 5000 20 #(empty? (:previous (on-disk ui d))))
           rec (record ui)]
       (on-gtk (try
                 (support/check :replay-forget
-                               (and ok? (empty? (:previous rec)) (= ["(+ 40 2)"] (:history rec))
-                                    (= ["(+ 40 2)"] (:history (on-disk ui d)))
+                               (and ok? (empty? (:previous rec)) (= ["(def keep 1)"] (mapv :text (:current rec)))
+                                    (= ["(def keep 1)"] (mapv :text (:current (on-disk ui d))))
+                                    (some #{"(+ 40 2)"} (:history rec))
+                                    (some #{"(+ 40 2)"} (:history (on-disk ui d)))
                                     (str/includes? (support/since ui mark)
                                                    "; Forgot the last session. Your prompt history stays."))
                                {:ok ok? :record rec :disk (on-disk ui d)})
@@ -421,4 +425,44 @@
                                     (str/includes? (support/since ui mark)
                                                    "; There's no last session to replay for this folder."))
                                {:tabs (count (tab-list ui)) :n0 n0 :console (support/since ui mark)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-open-twice
+  "A second Open selects the replay tab it already made: one new tab in
+  total, and it is the selected one."
+  [ui]
+  (go-row :replay-open-twice support/check
+    (let [original (on-gtk (root ui))
+          n0 (on-gtk (count (tab-list ui)))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous [(entry "(def r 1)")] :current [] :history []}))
+          _ (on-gtk ((:replay-open!* ui)))
+          id ((:replay-tab-id* ui))
+          _ (on-gtk ((:select-tab! ui) (:id (first (tab-list ui)))))
+          _ (on-gtk ((:replay-open!* ui)))]
+      (on-gtk (try
+                (support/check :replay-open-twice
+                               (and id (= (inc n0) (count (tab-list ui)))
+                                    (= id ((:replay-tab-id* ui)))
+                                    (= id (:id ((:active-tab* ui)))))
+                               {:n0 n0 :n (count (tab-list ui)) :id id :now ((:replay-tab-id* ui))
+                                :active (:id ((:active-tab* ui)))})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-forget-off
+  "With :remember-session? false, Forget leaves the record file as it was."
+  [ui]
+  (go-row :replay-forget-off support/check
+    (let [original (on-gtk (root ui))
+          [d mark] (on-gtk (tabs/occupy-first! ui)
+                           (seeded! ui {:version 1 :previous [(entry "(def f 1)")] :current [] :history []}))
+          before (slurp (record-file ui d))
+          _ (on-gtk (remember! ui false) ((:replay-forget!* ui)))
+          _ (await-until 500 20 #(not= before (slurp (record-file ui d))))
+          after (slurp (record-file ui d))]
+      (on-gtk (try
+                (support/check :replay-forget-off
+                               (and (= before after)
+                                    (str/includes? (support/since ui mark) "; There's no last session to forget for this folder."))
+                               {:same (= before after) :console (support/since ui mark)})
                 (finally (restore! ui original [d])))))))

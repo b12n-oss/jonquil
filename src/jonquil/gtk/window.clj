@@ -3377,14 +3377,18 @@
 
 (defn- replay-open!
   "Open last session's replay: an Untitled tab holding the script of :previous,
-  marked saved, and now the replay tab (a second Open moves it to the newer
-  tab). With nothing to replay, or a dialect that doesn't replay, the console
+  marked saved, and now the replay tab (a second Open selects that tab
+  while it exists). With nothing to replay, or a dialect that doesn't replay, the console
   says so instead. GTK thread."
-  [{:keys [cv sel* replay*] :as ctx}]
+  [{:keys [cv sel* replay* tabs] :as ctx}]
   (let [st @replay*
         es (:previous (:record st))
-        sel @sel*]
+        sel @sel*
+        open-id @(:replay-tab* cv)]
     (cond
+      ;; the replay tab is still there: show it, change nothing (an older one
+      ;; left behind would become a plain Untitled tab whose Run resets)
+      (and open-id (tab-by-id tabs open-id)) (select-tab! ctx open-id)
       (empty? es) (cview/append! cv :system "; There's no last session to replay for this folder.\n")
       (not (replayable? sel)) (cview/append! cv :system (str (offer-line es (System/currentTimeMillis) sel) "\n"))
       :else (when-let [t (new-tab! ctx {:path nil
@@ -3397,8 +3401,8 @@
 (defn- replay-forget!
   "Forget last session: empties :previous (the prompt history stays), saves
   at once and says so. GTK thread."
-  [{:keys [cv replay*] :as ctx}]
-  (if @replay*
+  [{:keys [cv replay* settings-path*] :as ctx}]
+  (if (and @replay* (remember-session? @settings-path*))
     (do (swap! replay* (fn [s] (-> s (update :record replay/forget) (assoc :dirty? true))))
         (flush-replay! ctx)
         (cview/append! cv :system "; Forgot the last session. Your prompt history stays.\n"))
