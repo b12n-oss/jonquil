@@ -365,3 +365,22 @@
     (is (empty? (:previous r)))
     (is (= (others s1) (others s2)))
     (is (str/includes? s2 "#_(start-server)"))))
+
+(defn- carried-texts [others text]
+  (map :text (:current (replay/carry-skipped
+                        {:version 1 :previous (mapv #(form % "user" :at 1) others) :current [] :history []}
+                        text))))
+
+(deftest carry-skipped-token-boundary-test
+  (is (empty? (carried-texts ["x"] "#_xs")))
+  (is (empty? (carried-texts ["42"] "#_421")))
+  (is (= ["xs"] (carried-texts ["xs"] "#_xs")))
+  (is (= ["42"] (carried-texts ["42"] "(a)\n#_42\n(b)"))))
+
+(deftest carry-skipped-top-level-only-test
+  (is (empty? (carried-texts ["(f)"] "(foo #_(f))")))
+  (is (empty? (carried-texts ["(f)"] ";; #_(f)\n(a)")))
+  (is (empty? (carried-texts ["(f)"] "(a) ; #_(f)")))
+  (is (empty? (carried-texts ["(f)"] "(def s \"#_(f)\")")))
+  (is (= ["(f)"] (carried-texts ["(f)"] "(a) ; note\n#_(f)\n")))
+  (is (= ["(f)"] (carried-texts ["(f)"] "(foo #_(f))\n#_(f)"))))

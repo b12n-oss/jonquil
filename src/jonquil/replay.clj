@@ -293,20 +293,46 @@
      :defs (group :defs)
      :others (group :others)}))
 
+(defn- top-level-gap?
+  "Whether offset p of text is outside every form of forms and not in a ;
+  comment: the line's text before p, back to the previous form's end, holds
+  no semicolon."
+  [text forms p]
+  (let [inside? (some #(and (< (:start %) p) (< p (:end %))) forms)
+        prev-end (reduce (fn [m f] (if (<= (:end f) p) (max m (:end f)) m)) 0 forms)
+        line-start (inc (or (str/last-index-of (subs text 0 p) "\n") -1))
+        before (subs text (max prev-end line-start) p)]
+    (and (not inside?) (not (str/includes? before ";")))))
+
+(defn- skipped-here?
+  "Whether text has a top-level #_ whose discarded form is exactly form-text."
+  [text forms form-text]
+  (let [needle (str "#_" form-text)]
+    (loop [from 0]
+      (when-let [p (str/index-of text needle from)]
+        (if (and (top-level-gap? text forms p)
+                 (when-let [f (first (commands/top-level-forms (subs text (+ p 2))))]
+                   (= form-text (subs text (+ p 2 (:start f)) (+ p 2 (:end f))))))
+          true
+          (recur (inc p)))))))
+
 (defn carry-skipped
   "record with :current extended by the other forms of (compact (:previous
-  record)), in that order, that are still skipped in run-text: those whose
-  \"#_\" followed by their exact text occurs in it. Each keeps its own :ns,
-  :at, :dialect and :key, and the 2,000 cap applies (add-entries). :previous
-  is unchanged. A nil or blank run-text carries nothing. A form the user
-  deleted, edited or reindented in the tab no longer matches and isn't
-  carried; one whose #_ came off ran, so the Run records it itself."
+  record)), in that order, that are still skipped in run-text: those that
+  are the exact text of a top-level #_ form there (not one nested inside
+  another form, a comment or a string, and not a longer atom that merely
+  starts with it). Each keeps its own :ns, :at, :dialect and :key, and the
+  2,000 cap applies (add-entries). :previous is unchanged. A nil or blank
+  run-text carries nothing. A form the user deleted, edited or reindented in
+  the tab no longer matches and isn't carried; one whose #_ came off ran, so
+  the Run records it itself."
   [record run-text]
   (if (str/blank? run-text)
     record
-    (add-entries record
-                 (filterv #(str/includes? run-text (str "#_" (:text %)))
-                          (:others (compact (:previous record)))))))
+    (let [forms (commands/top-level-forms run-text)]
+      (add-entries record
+                   (filterv #(skipped-here? run-text forms (:text %))
+                            (:others (compact (:previous record))))))))
 
 ;; --- summary and script --------------------------------------------------
 
