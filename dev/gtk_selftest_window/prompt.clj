@@ -103,3 +103,50 @@
           t (on-gtk (support/since ui mark))
           back (back-to-user ui)]
       (on-gtk (support/check :prompt-echo-uses-prompt (and moved ok back) {:moved moved :console t :back back})))))
+
+(defn row-bang-runs-a-command
+  "!list every key binding at the prompt runs that palette command: the
+  console says so and prints the bindings, the prompt comes back, nothing
+  is evaluated, and Up brings the line back."
+  [ui]
+  (go-row :bang-runs-a-command support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (submit! ui "!list every key binding"))
+          ran? (await-until 3000 20 #(let [t (support/since ui mark)]
+                                       (and (str/includes? t "; ! List every key binding.")
+                                            (str/includes? t "Cmd") (str/ends-with? t "user=> "))))
+          text (on-gtk (support/since ui mark))
+          recalled (on-gtk (cview/handle-history! (:console ui) :prev) (cview/input-text (:console ui)))
+          _ (on-gtk (cview/clear-input! (:console ui)))]
+      (on-gtk (support/check :bang-runs-a-command
+                             (and ran? (not (str/includes? text "Unable to resolve")) (= "!list every key binding" recalled))
+                             {:ran ran? :recalled recalled :tail (subs text (max 0 (- (count text) 200)))})))))
+
+(defn row-bang-lists-choices
+  "! words that match several commands list them and run none; words that
+  match nothing say so."
+  [ui]
+  (go-row :bang-lists-choices support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (submit! ui "! key"))
+          listed? (await-until 3000 20 #(str/includes? (support/since ui mark) "commands match \"key\":"))
+          _ (on-gtk (submit! ui "! zzqx"))
+          none? (await-until 3000 20 #(str/includes? (support/since ui mark) "; ! No command matches \"zzqx\"."))
+          text (on-gtk (support/since ui mark))]
+      (on-gtk (support/check :bang-lists-choices (and listed? none? (not (str/includes? text "; ! List every key binding.")))
+                             {:listed listed? :none none? :tail (subs text (max 0 (- (count text) 300)))})))))
+
+(defn row-bang-clears-the-last-output
+  "!clear the last entry's output clears the entry before the ! line, as
+  Cmd/Ctrl+Shift+L would, not the ! line itself."
+  [ui]
+  (go-row :bang-clears-the-last-output support/check
+    (let [mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk (submit! ui "(+ 40 2)"))
+          ran? (await-until 3000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "=> 42")))
+          _ (on-gtk (submit! ui "!clear the last entry's output"))
+          cleared? (await-until 3000 20 #(not (str/includes? (support/since ui mark) "=> 42")))
+          text (on-gtk (support/since ui mark))]
+      (on-gtk (support/check :bang-clears-the-last-output (and ran? cleared? (str/ends-with? text "user=> "))
+                             {:ran ran? :cleared cleared? :text text})))))
+

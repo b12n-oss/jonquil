@@ -515,6 +515,11 @@
               (let [created (:created @(:state ev))]
                 (eval-sync! conn session (ops/reset-code (concat (get created owner) (get created :repl))))
                 (swap! (:state ev) update :created dissoc owner :repl)))
+            ;; LM4: a Run counts its own lines alone, cleared on this worker
+            ;; before the Run goes out, so the two can't race
+            (when (and run? (:clear-line-counts? opts) (contains? (:ops (runtime ev)) "jonquil-line-counts"))
+              (try (client/request-sync conn {:op "jonquil-line-counts" :action "clear" :session session} request-timeout-ms)
+                   (catch Throwable _ nil)))
             (if (stop-requested? ev)
               (finish! ev opts {:status :interrupted})
               (let [before (ns-snapshot conn session)
@@ -576,6 +581,16 @@
       (edn/read-string d)
       {:error "The Jolt child answered without its frames."})))
 
+(defn line-counts-reply
+  "The child's jonquil-line-counts responses as jonquil.line-counts' map,
+  or {:error s} when the reply has no data."
+  [responses]
+  (if-let [err (some :error responses)]
+    {:error err}
+    (if-let [d (some :data responses)]
+      (edn/read-string d)
+      {:error "The Jolt child answered without its line counts."})))
+
 (defn frame-eval-reply
   "The child's jonquil-frame-eval responses as {:out :text} or {:error s},
   never a guess when the reply carries neither."
@@ -595,6 +610,24 @@
     (if-let [on (some :on responses)]
       {:on? (= "true" on)}
       {:error "The Jolt child didn't say whether debug mode is on."})))
+
+(defn- line-counts-call!
+  "One jonquil-line-counts request to the child, off the caller's thread;
+  on-done gets its map or {:error s}."
+  [ev msg on-done]
+  (future
+    (let [r (try
+              (let [{:keys [conn session ops] :as rt} (runtime ev)]
+                (cond
+                  (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                  (not (live? ev)) {:error inspect-lost}
+                  (not (contains? ops "jonquil-line-counts")) {:error "Line counts need Jolt."}
+                  :else
+                  (let [r (client/request-sync conn (assoc msg :op "jonquil-line-counts" :session session) request-timeout-ms)]
+                    (if (vector? r) (line-counts-reply r) {:error inspect/timeout-message}))))
+              (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+      (try (on-done r) (catch Throwable _))))
+  nil)
 
 (defrecord NRepl [selection state history start-lock]
   ev/Evaluator
@@ -815,6 +848,26 @@
     nil)
   ;; Tracing: jonquil.nrepl.inspect-middleware's jonquil-trace op, over
   ;; jonquil.trace-rt in the child
+  ev/Fibers
+  (fibers-op! [this op args on-result]
+    (future
+      (let [r (try
+                (let [{:keys [conn session ops] :as rt} (runtime this)]
+                  (cond
+                    (nil? rt) {:error "The Jolt child isn't running yet: Run something first."}
+                    (not (live? this)) {:error inspect-lost}
+                    (not (contains? ops "jonquil-fibers")) {:error "Processes need Jolt."}
+                    :else
+                    (let [r (client/request-sync conn (cond-> {:op "jonquil-fibers" :action (name op) :session session}
+                                                        (:id args) (assoc :fiber (:id args)))
+                                                 request-timeout-ms)]
+                      (cond (not (vector? r)) {:error inspect/timeout-message}
+                            (some :error r) {:error (some :error r)}
+                            (some :data r) (edn/read-string (some :data r))
+                            :else {:error "The Jolt child answered without its fibers."}))))
+                (catch Throwable e {:error (or (ex-message e) (str (class e)))}))]
+        (try (on-result r) (catch Throwable _))))
+    nil)
   ev/Trace
   (trace-op! [this op args on-result]
     (future
@@ -860,6 +913,10 @@
         (try (on-result r) (catch Throwable _))))
     nil)
   ;; Break on error: jonquil.nrepl.break-middleware in the child
+  ev/LineCounts
+  (toggle-line-counts! [this on-done] (line-counts-call! this {:action "toggle"} on-done))
+  (line-counts! [this path on-data] (line-counts-call! this {:action "fetch" :path path} on-data))
+  (clear-line-counts! [this on-done] (line-counts-call! this {:action "clear"} on-done))
   ev/Break
   (set-break-handlers! [_ handlers] (swap! state assoc :break-handlers handlers) nil)
   (toggle-break! [this on-done]

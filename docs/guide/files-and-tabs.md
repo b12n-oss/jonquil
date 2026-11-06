@@ -18,6 +18,19 @@ Opening and saving files, tabs, opening from Finder and the Dock, and the file t
 Saves are atomic (a temporary file, then a rename), so a crash can't leave
 half a file. Saving through a symlink updates the file it points to.
 
+### When the file changes on disk
+
+Jonquil checks each open file about every two seconds, so an agent editing
+files with its own tools, or a formatter, or `git checkout`, shows up in
+the tab. Once the change has held for one check, a tab with no unsaved edits
+reloads to the new text and keeps its caret. The reload is one undo step,
+so Cmd/Ctrl+Z right after it brings your old text back (the tab then reads
+unsaved). A tab with unsaved edits keeps them, and the new text on disk
+becomes what it was last saved as, so the tab stays unsaved and a Save
+writes your version over the one on disk. A file that now holds a NUL byte
+leaves the tab as it was, and a deleted or moved file leaves it alone too.
+Each of these gets a row in the [Messages panel](help-and-inspector.md#messages).
+
 ![The close prompt: Save, Don't Save and Cancel over unsaved changes](../images/close-prompt.png)
 
 Closing with unsaved changes asks first, however you close (Cmd/Ctrl+W on
