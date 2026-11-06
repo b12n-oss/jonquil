@@ -334,9 +334,10 @@
 
 (defn script
   "The replay tab's text for es: a header, then files, definitions and other
-  forms (commented out with #_, their in-ns lines too, so an unedited Run
-  leaves the prompt where it was), each under a heading and left out when
-  empty. opts: :root project folder or nil, :now epoch ms, :dialect the
+  forms (commented out with #_, their in-ns lines too), each under a
+  heading and left out when empty. An unedited Run ends with the prompt in
+  the definitions group's last namespace, as any Run that ends in another ns
+  does. opts: :root project folder or nil, :now epoch ms, :dialect the
   current window's dialect name."
   [es {:keys [root now dialect]}]
   (let [c (compact es)
