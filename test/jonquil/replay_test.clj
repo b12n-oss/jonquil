@@ -318,3 +318,98 @@
   (let [es [(tfile "/a.clj") (form "(+ 1 2)" "user")]
         c {:files ["/x" "/y"] :defs [] :others []}]
     (is (= 2 (:files (replay/summary es 5000 c))))))
+
+;; --- carry-skipped -------------------------------------------------------
+
+(def ^:private carry-prev
+  [(form "(def x 1)" "app.core" :at 100)
+   (form "(start-server)" "app.core" :at 200)
+   (form "(swap! db inc)" "user" :at 300)])
+
+(def ^:private carry-record {:version 1 :previous carry-prev :current [] :history []})
+
+(deftest carry-skipped-keeps-skipped-form-test
+  (let [text "(def x 1)\n#_(start-server)\n#_(swap! db inc)\n"
+        r (replay/carry-skipped carry-record text)]
+    (is (= ["(start-server)" "(swap! db inc)"] (map :text (:current r))))
+    (is (= [["app.core" 200] ["user" 300]] (map (juxt :ns :at) (:current r))))
+    (is (= carry-prev (:previous r)))))
+
+(deftest carry-skipped-drops-deleted-form-test
+  (let [r (replay/carry-skipped carry-record "(def x 1)\n#_(swap! db inc)\n")]
+    (is (= ["(swap! db inc)"] (map :text (:current r))))))
+
+(deftest carry-skipped-drops-unskipped-form-test
+  (let [r (replay/carry-skipped carry-record "(def x 1)\n(start-server)\n#_(swap! db inc)\n")]
+    (is (= ["(swap! db inc)"] (map :text (:current r))))))
+
+(deftest carry-skipped-blank-text-test
+  (doseq [t [nil "" "  \n"]]
+    (is (= carry-record (replay/carry-skipped carry-record t)) (pr-str t))))
+
+(deftest carry-skipped-extends-current-test
+  (let [mine (form "(def z 1)" "user" :at 50)
+        r (replay/carry-skipped (assoc carry-record :current [mine]) "#_(start-server)")]
+    (is (= ["(def z 1)" "(start-server)"] (map :text (:current r))))))
+
+(deftest carry-skipped-round-trip-test
+  (let [opts {:root "/p" :now 5000 :dialect "Jolt"}
+        s1 (replay/script carry-prev opts)
+        run-es (replay/entries {:source :run :path nil :code s1 :ns "user" :at 900 :dialect "Jolt"})
+        r (-> carry-record
+              (replay/carry-skipped s1)
+              (replay/add-entries run-es)
+              replay/forget)
+        s2 (replay/script (:current r) opts)
+        others (fn [s] (last (str/split s #"\n\n;; Other forms, skipped")))]
+    (is (empty? (:previous r)))
+    (is (= (others s1) (others s2)))
+    (is (str/includes? s2 "#_(start-server)"))))
+
+(defn- carried-texts [others text]
+  (map :text (:current (replay/carry-skipped
+                        {:version 1 :previous (mapv #(form % "user" :at 1) others) :current [] :history []}
+                        text))))
+
+(deftest carry-skipped-token-boundary-test
+  (is (empty? (carried-texts ["x"] "#_xs")))
+  (is (empty? (carried-texts ["42"] "#_421")))
+  (is (= ["xs"] (carried-texts ["xs"] "#_xs")))
+  (is (= ["42"] (carried-texts ["42"] "(a)\n#_42\n(b)"))))
+
+(deftest carry-skipped-top-level-only-test
+  (is (empty? (carried-texts ["(f)"] "(foo #_(f))")))
+  (is (empty? (carried-texts ["(f)"] ";; #_(f)\n(a)")))
+  (is (empty? (carried-texts ["(f)"] "(a) ; #_(f)")))
+  (is (empty? (carried-texts ["(f)"] "(def s \"#_(f)\")")))
+  (is (= ["(f)"] (carried-texts ["(f)"] "(a) ; note\n#_(f)\n")))
+  (is (= ["(f)"] (carried-texts ["(f)"] "(foo #_(f))\n#_(f)"))))
+
+(deftest carry-skipped-nested-in-discard-test
+  (doseq [t ["#_(foo #_(f))" "(a) #_(foo #_(f)) (b)" "#_\"#_(f)\"" "#_[1 #_(f)]" "(a) #_(g\n  #_(f))"
+             "(comment #_(f))"]]
+    (is (empty? (carried-texts ["(f)"] t)) (pr-str t))))
+
+(deftest carry-skipped-positive-shapes-test
+  (doseq [t ["(a)\n#_(f)\n(b)" "(def s \";\") #_(f)" "(def s \"line one\n#_(g)\nline two\")\n#_(f)"
+             "#_(f)\n#_(f)" "#_ (f)" "#_\n(f)" "#_ #_ (g) (f)" "(a) ; c\n#_(f) ; #_(g)"]]
+    (is (= ["(f)"] (carried-texts ["(f)"] t)) (pr-str t)))
+  (is (= ["(g)" "(f)"] (carried-texts ["(g)" "(f)"] "#_ #_ (g) (f)"))))
+
+(deftest carry-skipped-real-script-test
+  (let [others (map #(str "(swap! db conj " % ")") (range 5))
+        es (concat [(form "(def a 1)" "user" :at 1) (form "(ns b)" "user" :at 2) (form "(def c 2)" "b" :at 3)]
+                   (map-indexed (fn [i t] (form t (if (even? i) "user" "b") :at (+ 10 i))) others))
+        script (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})
+        r (replay/carry-skipped {:version 1 :previous (vec es) :current [] :history []} script)]
+    (is (= others (map :text (:current r))))))
+
+(deftest carry-skipped-perf-test
+  (let [es (mapv #(form (str "(swap! db conj " % ")") "user" :at %) (range 2000))
+        script (replay/script es {:root "/p" :now 5000 :dialect "Jolt"})
+        rec {:version 1 :previous es :current [] :history []}
+        t0 (System/nanoTime)
+        r (replay/carry-skipped rec script)
+        ms (/ (- (System/nanoTime) t0) 1e6)]
+    (is (= 2000 (count (:current r))))
+    (is (< ms 1500))))

@@ -440,6 +440,8 @@
    replay-rows/row-replay-end-to-end
    replay-rows/row-replay-offer-dialect-differs
    replay-rows/row-replay-run-ns
+   replay-rows/row-replay-run-carries-skipped
+   replay-rows/row-replay-run-drops-deleted-skipped
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run

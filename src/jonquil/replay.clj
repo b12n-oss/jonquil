@@ -226,7 +226,9 @@
            :current [])))
 
 (defn forget
-  "record with :previous emptied."
+  "record with :previous emptied. A successful Run of the replay tab applies
+  carry-skipped first, so the other forms still skipped in the tab outlive
+  this; Forget last session calls it alone and clears everything."
   [record]
   (assoc record :previous []))
 
@@ -290,6 +292,122 @@
     {:files (mapv :path files)
      :defs (group :defs)
      :others (group :others)}))
+
+(defn- skip-blank
+  "Index of the first character at or after i that isn't whitespace, a
+  comma or part of a ; comment."
+  [^String s i]
+  (let [n (count s)]
+    (loop [i i]
+      (if (>= i n)
+        n
+        (let [c (nth s i)]
+          (cond
+            (or (Character/isWhitespace ^char c) (= c \,)) (recur (inc i))
+            (= c \;) (recur (or (str/index-of s "\n" i) n))
+            :else i))))))
+
+(defn- string-end
+  "Index just past the string whose opening quote is at i."
+  [^String s i]
+  (let [n (count s)]
+    (loop [j (inc i)]
+      (cond
+        (>= j n) n
+        (= (nth s j) \\) (recur (+ j 2))
+        (= (nth s j) \") (inc j)
+        :else (recur (inc j))))))
+
+(defn- bracket-end
+  "Index just past the bracket whose opener is at i, strings, comments and
+  character literals skipped; past the end of s when it never closes."
+  [^String s i]
+  (let [n (count s)]
+    (loop [j i depth 0]
+      (if (>= j n)
+        n
+        (let [c (nth s j)]
+          (cond
+            (= c \") (recur (string-end s j) depth)
+            (= c \;) (recur (or (str/index-of s "\n" j) n) depth)
+            (= c \\) (recur (+ j 2) depth)
+            (contains? #{\( \[ \{} c) (recur (inc j) (inc depth))
+            (contains? #{\) \] \}} c) (if (= 1 depth) (inc j) (recur (inc j) (dec depth)))
+            :else (recur (inc j) depth)))))))
+
+(defn- atom-end [^String s i]
+  (let [n (count s)]
+    (loop [j i]
+      (if (or (>= j n)
+              (let [c (nth s j)]
+                (or (Character/isWhitespace ^char c)
+                    (contains? #{\, \( \) \[ \] \{ \} \" \;} c))))
+        (max j (inc i))
+        (recur (inc j))))))
+
+(defn- form-end
+  "Index just past the form that starts at i (not blank there), or nil when
+  none follows: a prefix (quote, deref, syntax quote, unquote, metadata, #',
+  #?, a nested #_) is part of the form it applies to."
+  [^String s i]
+  (let [n (count s)]
+    (when (< i n)
+      (let [c (nth s i)
+            c2 (when (< (inc i) n) (nth s (inc i)))
+            after (fn [j] (let [k (skip-blank s j)] (when (< k n) (form-end s k))))]
+        (cond
+          (= c \") (string-end s i)
+          (contains? #{\( \[ \{} c) (bracket-end s i)
+          (= c \\) (atom-end s (inc i))
+          (contains? #{\' \` \~ \@} c) (after (if (and (= c \~) (= c2 \@)) (+ i 2) (inc i)))
+          (= c \^) (when-let [e (after (inc i))] (after e))
+          (= c \#) (cond
+                     (contains? #{\( \[ \{} c2) (bracket-end s (inc i))
+                     (= c2 \") (string-end s (inc i))
+                     (= c2 \') (after (+ i 2))
+                     (= c2 \?) (after (if (and (< (+ i 2) n) (= (nth s (+ i 2)) \@)) (+ i 3) (+ i 2)))
+                     (= c2 \_) (when-let [e (after (+ i 2))] (after e))
+                     :else (atom-end s (inc i)))
+          :else (atom-end s i))))))
+
+(defn- skipped-texts
+  "The set of texts of the forms that top-level #_ discards in text, one
+  linear pass. A #_ inside a form doesn't count: nested in a form, inside a
+  top-level (comment ...) block, inside a discarded form, a string or a ;
+  comment. Stacked #_ #_ discard that many forms, and blanks may sit between
+  a #_ and its form. A tagged literal or namespaced map after #_ (#_#inst
+  \"2020\", #_#:a{:b 1}) isn't read as one form, so it isn't carried: a
+  missed carry, never a wrong one."
+  [^String text]
+  (let [n (count text)]
+    (loop [i (skip-blank text 0) pending 0 out #{}]
+      (cond
+        (>= i n) out
+        (str/starts-with? (subs text i (min n (+ i 2))) "#_")
+        (recur (skip-blank text (+ i 2)) (inc pending) out)
+        :else
+        (if-let [e (form-end text i)]
+          (recur (skip-blank text e) (max 0 (dec pending))
+                 (if (pos? pending) (conj out (subs text i e)) out))
+          out)))))
+
+(defn carry-skipped
+  "record with :current extended by the other forms of (compact (:previous
+  record)), in that order, whose exact text is that of a form a top-level #_
+  discards in run-text (skipped-texts: not one nested inside another form,
+  inside a (comment ...) block, a comment or a string, and not a longer atom
+  that merely starts with it). Each keeps its own :ns, :at, :dialect and
+  :key, and the 2,000 cap applies (add-entries). :previous is unchanged. A
+  nil or blank run-text carries nothing. A form the user deleted, edited or
+  reindented in the tab no longer matches and isn't carried; one whose #_
+  came off ran, so the Run records it itself."
+  [record run-text]
+  (if (str/blank? run-text)
+    record
+    (let [skipped (skipped-texts run-text)]
+      (add-entries record
+                   (filterv #(contains? skipped (:text %))
+                            (:others (compact (:previous record))))))))
 
 ;; --- summary and script --------------------------------------------------
 

@@ -617,3 +617,57 @@
                   other (fake-evaluator 'zz.other)
                   got (when f [(f (:session ui)) (f other)])]
               (support/check :replay-run-ns (= ["user" "zz.other"] got) {:got got})))))
+
+(def ^:private carry-form "(swap! (atom 0) inc)")
+
+(defn- carry-prev []
+  (let [at (- (System/currentTimeMillis) 3600000)]
+    [{:kind :form :text "(def carried-d 1)" :ns "user" :source-file nil :at at :dialect "Jolt"}
+     {:kind :form :text carry-form :ns "user" :source-file nil :at at :dialect "Jolt"}]))
+
+(defn row-replay-run-carries-skipped
+  "Open, Run unedited: the other form still behind #_ is in :current (in
+  memory and on disk) and :previous is empty."
+  [ui]
+  (go-row :replay-run-carries-skipped support/check
+    (let [original (on-gtk (root ui))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous (carry-prev) :current [] :history []}))
+          _ (on-gtk ((:replay-open!* ui)) ((:run!* ui)))
+          ok? (await-until 5000 20 #(and (support/idle? ui) (empty? (:previous (record ui)))
+                                         (some (fn [e] (= carry-form (:text e))) (:current (record ui)))
+                                         (= (record ui) (on-disk ui d))))
+          cur (:current (record ui))]
+      (on-gtk (try
+                (support/check :replay-run-carries-skipped
+                               (and ok? (some #(= carry-form (:text %)) cur)
+                                    (empty? (:previous (record ui)))
+                                    (= (:current (on-disk ui d)) cur))
+                               {:ok ok? :record (record ui) :disk (on-disk ui d)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-run-drops-deleted-skipped
+  "Open, delete the #_ line from the tab text, Run: the form is not in
+  :current, and :previous is empty."
+  [ui]
+  (go-row :replay-run-drops-deleted-skipped support/check
+    (let [original (on-gtk (root ui))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous (carry-prev) :current [] :history []}))
+          _ (on-gtk ((:replay-open!* ui))
+                    (let [t (replay-tab ui)
+                          kept (->> (str/split-lines (editor/editor-text (:ed t)))
+                                    (remove #(str/includes? % (str "#_" carry-form)))
+                                    (str/join "\n"))]
+                      (editor/set-text! (:ed t) kept))
+                    ((:run!* ui)))
+          ok? (await-until 5000 20 #(and (support/idle? ui) (empty? (:previous (record ui)))
+                                         (seq (:current (record ui)))
+                                         (= (record ui) (on-disk ui d))))
+          cur (:current (record ui))]
+      (on-gtk (try
+                (support/check :replay-run-drops-deleted-skipped
+                               (and ok? (not-any? #(= carry-form (:text %)) cur)
+                                    (empty? (:previous (record ui))))
+                               {:ok ok? :record (record ui) :disk (on-disk ui d)})
+                (finally (restore! ui original [d])))))))
