@@ -1058,3 +1058,52 @@
         (is (and (some? id1) (identical? id1 id2)))
         (is (true? done?) "the end comes after the evaluation's own on-complete"))
       (finally (ev/stop! e)))))
+
+(deftest fibers-in-the-child-test
+  (let [e (make (temp-project))
+        op (fn [k args] (let [p (promise)] (ev/fibers-op! e k args (fn [r] (deliver p r))) (deref p 20000 :timeout)))]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (let [w (op :watch {})]
+        (if (and (:error w) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP fibers-in-the-child-test: this child has no fibers:" (:error w))
+              (is (string? (:error w))))
+          (do (is (= {:watching? true} w))
+              (run e "(def fib-stop (atom false)) (jolt.fibers/spawn (fn [] (loop [] (when-not @fib-stop (jolt.fibers/yield) (recur)))))" false)
+              (let [{:keys [fibers]} (op :list {})
+                    id (:id (first fibers))]
+                (is (#{:running :ready :parked} (:state (first fibers))) (pr-str fibers))
+                (is (= {:ok true} (op :interrupt {:id id})) (pr-str fibers))))))
+      (finally (ev/stop! e)))))
+
+(deftest line-counts-in-the-child-test
+  (let [dir (temp-project)
+        e (make dir)
+        call (fn [f & args] (let [p (promise)] (apply f e (concat args [(fn [r] (deliver p r))])) (deref p 20000 :timeout)))
+        f (java.io.File. ^String dir "lc_child.clj")]
+    (try
+      (is (= "3" (:printed (first (run e "(+ 1 2)" false)))) "the child is up")
+      (spit f "(ns lc-child)\n(defn twice [] (dotimes [_ 2] (inc 1)))\n(twice)\n(def a 1)\n(def b 2)\n")
+      (let [on (call ev/toggle-line-counts!)]
+        (if (and (:error on) (not (System/getenv "JONQUIL_JOLT")))
+          (do (println "SKIP line-counts-in-the-child-test: this child can't count lines:" (:error on))
+              (is (string? (:error on))))
+          (do (is (= {:on? true} on))
+              (run e (str "(load-file " (pr-str (.getPath f)) ")") false)
+              (is (= 1 (get-in (call ev/line-counts! (.getPath f)) [:counts 3])) "the call on line 3 ran once")
+              (is (= {:ok true} (call ev/clear-line-counts!)))
+              (is (= {} (:counts (call ev/line-counts! (.getPath f)))))
+              ;; a Run sends the file's path (load-file's file-path), and a
+              ;; Run with :clear-line-counts? counts that Run alone
+              (run e "(set! *print-length* 2)" false)
+              (dotimes [_ 2]
+                (let [done (promise)]
+                  (ev/eval! e (slurp f) {:run? true :path (.getPath f) :clear-line-counts? true
+                                         :on-output (fn [& _]) :on-complete (fn [r] (deliver done r))})
+                  (deref done 20000 :timeout)))
+              (let [r (call ev/line-counts! (.getPath f))]
+                (is (= 1 (get-in r [:counts 3])) (str "the Run's own count, read past *print-length*: " r))
+                (is (< 2 (count (:counts r))) "more lines than *print-length*")
+                (is (= :counts (:mode r))))
+              (is (= {:on? false} (call ev/toggle-line-counts!))))))
+      (finally (ev/stop! e)))))

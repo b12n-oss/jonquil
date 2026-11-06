@@ -29,7 +29,9 @@
     jonquil.edit-test
     jonquil.eval-test
     jonquil.restarts-test
+    jonquil.fibers-rt-test
     jonquil.hints-test
+    jonquil.line-counts-test
     jonquil.messages-test
     jonquil.registry-test
     jonquil.console-test
@@ -106,6 +108,7 @@
     jonquil.gtk.trash-test
     jonquil.gtk.ffi-test
     jonquil.gtk.editor-test
+    jonquil.gtk.processes-pane-test
     jonquil.gtk.messages-pane-test
     jonquil.inspect.view-test
     jonquil.nrepl.info-middleware-test

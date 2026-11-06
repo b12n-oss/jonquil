@@ -51,6 +51,10 @@
                    :run (call :panel-focus-fn :plugins)}
    :panel/messages {:doc "Focus the Messages panel, or open it." :scope :window
                     :run (call :panel-focus-fn :messages)}
+   :panel/processes {:doc "Focus the Processes panel, or open it." :scope :window
+                     :run (call :panel-focus-fn :processes)}
+   :processes/show {:doc "Show the processes (the fibers your program spawned)." :scope :window
+                    :run (call :processes-show-fn)}
    :view/cycle-theme {:doc "Switch to the next theme." :scope :window :run (call :theme-cycle-fn)}
    :inspect/form {:doc "Inspect the value of the form at the caret." :scope :window
                   :run (call :inspect-form-fn)}
@@ -74,6 +78,10 @@
                        :run (call :show-frames-fn)}
    :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
                        :scope :window :run (call :locals-mode-fn)}
+   :run/line-counts {:doc "Count how often each line runs (Jolt): turn it on, then Run your saved file."
+                     :scope :window :run (call :line-counts-fn)}
+   :run/clear-line-counts {:doc "Clear line counts: zero Jolt's counters and hide them."
+                           :scope :window :run (call :clear-line-counts-fn)}
    :debug/break-on-error {:doc "Break on error: pause an evaluation where it throws, before anything unwinds."
                           :scope :window :run (call :break-fn)}
    :debug/continue {:doc "Continue from the break: let the error unwind." :scope :window

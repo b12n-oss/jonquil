@@ -985,6 +985,10 @@
 (ffi/defcfn cairo-set-source-rgb "cairo_set_source_rgb" [:pointer :double :double :double] :void)
 (ffi/defcfn cairo-rectangle "cairo_rectangle" [:pointer :double :double :double :double] :void)
 (ffi/defcfn cairo-fill "cairo_fill" [:pointer] :void)
+(ffi/defcfn cairo-move-to "cairo_move_to" [:pointer :double :double] :void)
+;; pango/pangocairo.h -- pango_cairo_show_layout (cairo_t*, PangoLayout*);
+;; pangocairo comes with GTK, as cairo does (the gutter's line counts)
+(ffi/defcfn pango-cairo-show-layout "pango_cairo_show_layout" [:pointer :pointer] :void)
 
 (defn caret-window-rect
   "The insert mark's rectangle in view's TEXT-window coordinates:

@@ -98,6 +98,7 @@
       "nothing showing: every recent panel, Frames for the debugger")
   (is (= [] (palette/panel-entries [:source] :source)) "only the one showing")
   (is (= ["Switch to panel: Messages"] (map :doc (palette/panel-entries [:messages] nil))))
+  (is (= ["Switch to panel: Processes"] (map :doc (palette/panel-entries [:processes] nil))))
   (is (= [] (palette/panel-entries [:review :history] nil)) "review and history are never offered"))
 
 (deftest world-queries-pick-their-own-command-test
@@ -109,3 +110,33 @@
       (is (= :world/restore-earlier (first-id "earlier world")))
       (is (= [:world/save] (map :id (palette/filter-entries es "save world")))
           "Restore World's doc holds no save, so it doesn't match at all"))))
+
+(deftest bang-pick-test
+  (let [es [{:id :a/clear :doc "Clear line counts: zero Jolt's counters and hide them."}
+            {:id :a/count :doc "Count how often each line runs (Jolt)."}
+            {:id :a/out :doc "Clear the console"}
+            {:id :a/out2 :doc "Clear the console output and the Trace panel"}]]
+    (is (true? (palette/bang? "  !clear the console")))
+    (is (true? (palette/bang? "!")) "! alone asks for the hint")
+    (is (true? (palette/bang? "! clear")) "one word after a space")
+    (is (false? (palette/bang? "(! x)")))
+    (testing "real Clojure still evaluates"
+      (is (false? (palette/bang? "!x")) "a symbol")
+      (is (false? (palette/bang? "!=")))
+      (is (false? (palette/bang? "!x\n(+ 1 2)")) "a multi-line entry")
+      (is (false? (palette/bang? "!x (+ 1 2)")) "brackets")
+      (is (false? (palette/bang? "!a \"b\"")) "a string"))
+    (is (= {:help true} (palette/bang-pick es "!")))
+    (is (= {:run :a/clear :doc "Clear line counts: zero Jolt's counters and hide them."}
+           (palette/bang-pick es "!clear line counts")))
+    (is (= {:run :a/out :doc "Clear the console"} (palette/bang-pick es "!  Clear the CONSOLE "))
+        "a doc equal to the words wins over the longer one it also matches")
+    (is (= {:choices ["Clear line counts: zero Jolt's counters and hide them." "Clear the console"
+                      "Clear the console output and the Trace panel"]
+            :words "clear"}
+           (palette/bang-pick es "!clear")))
+    (is (= {:none "zap"} (palette/bang-pick es "!zap")))
+    (is (= {:run :b/c :doc "Clear the console."}
+           (palette/bang-pick [{:id :b/c :doc "Clear the console."} {:id :b/o :doc "Clear the console output."}]
+                              "!clear the console"))
+        "the doc's closing period doesn't count against an exact match")))
