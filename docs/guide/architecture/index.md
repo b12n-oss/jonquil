@@ -31,7 +31,8 @@ Other pure namespaces, one line each:
 - `jonquil.keymap`, `jonquil.command-registry`, `jonquil.plugin*`: see [Commands, keys and plugins](commands-keys-plugins.md).
 - `jonquil.theme`: the four palettes as data, the five choices, `resolve-choice` (turns `auto` into light or dark), `code-css`.
 - `jonquil.settings`: `load-settings` and `save-settings!` (atomic); neither throws.
-- `jonquil.last-session`: tabs to reopen, per tree root, in `sessions.edn` (kept apart from the hand-edited `settings.edn`).
+- `jonquil.last-session`: tabs to reopen, per tree root, in `sessions.edn` (kept apart from the hand-edited `settings.edn`), and `write-atomically!`, the temp-file-and-rename write it shares with the replay's record.
+- `jonquil.replay`: the last session's record per project (`{:version 1 :previous [...] :current [...] :history [...]}` in `replays/<folder>-<hash>.edn`), turning one evaluation into entries, compacting them into files, definitions and other forms, and writing the replay script. Pure apart from `load-record` and `save-record!`.
 - `jonquil.help`: the pure decisions behind completion, quick doc, jump and rename.
 - `jonquil.console`: what Return does at the prompt, output trimming, result display, the unclosed-bracket message.
 - `jonquil.file-tree`: the tree's model as plain data, `{:root :expanded :ignore}`, flattened to rows.
@@ -52,6 +53,7 @@ The front-end and core exchange plain data. An edit sends a snapshot and gets ed
 The front-end applies the edits in reverse order inside one `gtk_text_buffer_begin/end_user_action`, so undo sees one step.
 
 - Saves write a temp file in the resolved target's directory, copy the target's permissions, then rename with `ATOMIC_MOVE`. A failed write never leaves a half-written file, a symlink is updated rather than replaced, and the tab counts as saved only after the rename. `resolve-target` follows symlinks by hand because `.getCanonicalPath` on this Jolt returns a dangling link's own path.
+- The replay's recorder hangs off `hooked-opts`' completion chain in `gtk/window.clj`, so only evaluations that started are seen, and only the call sites that build a `:record` map (never MCP's). The tree root is read when the evaluation is submitted, and the recorder itself runs on the GTK thread through `on-gui!`, so it never races `open-root!`. Writes are coalesced to one per 300 ms and flushed on quit and before a re-root. The record is written owner-only: the temp file is created `rw-------` and filled with `Files/write`, since on Linux Jolt's `spit` replaces the file and drops its mode.
 - Reopening tabs waits for the window's first painted frame, then opens every saved path in one main-loop turn through the same `open-file!` as Open. A path that fails is named on the console and the rest still open. A quit before the reopen saves nothing.
 
 ## GTK is not everywhere

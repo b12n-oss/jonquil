@@ -199,3 +199,9 @@ Whoever can start `jonquil --mcp` can run code as you; nothing authenticates
 the caller, as with any MCP stdio server and `bb nrepl-server`. Don't put it
 behind anything that lets someone else choose its command line or feed its
 stdin.
+
+What an agent evaluates in a window isn't recorded for the
+[last session's replay](using-jonquil.md#last-sessions-replay), but the code
+it sends does land in the console's Up/Down history, and that history is
+saved to disk with the replay's record (owner-only, in `replays/` beside the
+settings file). `:remember-session? false` keeps it off disk.

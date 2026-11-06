@@ -35,11 +35,11 @@ Plugin support loads `<id>.clj` files from the settings folder's `plugins/`, who
 
 ## Lisp Machine ideas, and Emacs
 
-Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where the whole system was live Lisp that you could inspect and change while it ran. Emacs keeps that idea as an application, and Jonquil heads the same way, so Describe Key, Recent Keys, the command palette, the locations list, switching to a recent tab, timing a form and tracing a function all have an Emacs counterpart. The difference is that your Jolt code runs on the editor's own runtime, which lets the inspector, timing and the debugger work on your program's real values. [Lisp Machine ideas, and Emacs](docs/guide/lisp-machine.md) explains where each idea comes from.
+Some of Jonquil's features come from the MIT and Symbolics Lisp Machines, where the whole system was live Lisp that you could inspect and change while it ran. Emacs keeps that idea as an application, and Jonquil heads the same way, so Describe Key, Recent Keys, the command palette, the locations list, switching to a recent tab, timing a form and tracing a function all have an Emacs counterpart. The difference is that your Jolt code runs on the editor's own runtime, which lets the inspector, timing and the debugger work on your program's real values. Later steps brought in more of them: Find Usages in Project, compare with the file on disk or git HEAD, counts of how often each line runs, the Processes and Messages panels, named layouts, Save World, and a replay of the last session's evaluations. [Lisp Machine ideas, and Emacs](docs/guide/lisp-machine.md) explains where each idea comes from.
 
 ## Requirements
 
-- [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`
+- [Jolt](https://github.com/jolt-lang/jolt) v0.8.23 or later. It carries the reader fixes from jolt-lang/jolt#1134 and #1138 that `(read)` from the console needs, the closed-socket fix from jolt-lang/jolt#1183 that the ClojureDart attach connection relies on, the fix from jolt-lang/jolt#1355 that sends `pprint` output to the console, and the fix from jolt-lang/jolt#1389 that makes `pp` print `*1`. Counting how often each line runs needs v0.8.24, which added `jolt.profile`, and says so on an older Jolt
 - GTK4 and pango: Homebrew on macOS, your distribution's packages on Linux (`libgtk-4-1`, `libpango-1.0-0` and `adwaita-icon-theme` on Ubuntu; see [Getting started](docs/guide/getting-started.md#linux))
 - `git` on `PATH` and a network connection the first time Jolt runs out of process, when Jonquil fetches [jolt-lang/nrepl](https://github.com/jolt-lang/nrepl) v0.4.2 as a git dependency. A checkout at `$JONQUIL_JOLT_NREPL` or `~/dev/jolt-lang/nrepl` is used instead when there is one, and `bb test:nrepl` needs it
 - A ClojureDart fork that adds an nREPL server, only for the ClojureDart dialect: upstream ClojureDart has none for Jonquil to attach to, and the fork is private for now
@@ -77,7 +77,7 @@ jolt build: note — on macOS this binary is unsigned; to share it,
 
 ## What works headless
 
-The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-10-30, 1270 tests pass (7560 assertions on macOS; 7529 on Linux, measured with `bb linux:test` the same day).
+The core runs without GTK: everything below, plus smaller pure namespaces such as `jonquil.console`, `jonquil.session`, `jonquil.commands`, `jonquil.keymap`, `jonquil.command-registry` and `jonquil.palette` (key bindings, commands and the palette's entries as data), `jonquil.theme` and `jonquil.settings`. Run `bb test` to verify. As of 2026-11-07, 1559 tests pass (8892 assertions on macOS; 8837 on Linux, measured with `bb linux:test` the same day).
 
 <details>
 <summary><strong>The namespaces, and what each one does</strong></summary>
@@ -92,6 +92,8 @@ The core runs without GTK: everything below, plus smaller pure namespaces such a
 - `jonquil.file-ops`: The file tree's disk operations: create, rename and the console sentences for a trash or a hidden new name.
 - `jonquil.tabs`: The window's tabs as plain data: labels, the open-file lookup, the runnable-here check, and alert and banner text.
 - `jonquil.last-session`: Which tabs are open in each project, kept in `sessions.edn` beside the settings file.
+- `jonquil.replay`: What each project evaluated, kept owner-only in `replays/` beside the settings file, and the replay script built from it.
+- The Lisp Machine features, each a pure namespace the window draws: `jonquil.changed` (forms changed since they last ran), `jonquil.compare` (the buffer against disk or git HEAD), `jonquil.locations` (the locations list), `jonquil.usages` (Find Usages in Project), `jonquil.results` (the console results' verbs), `jonquil.restarts` and `jonquil.debugger` (Retry, and the last error's frames), `jonquil.timing`, `jonquil.line-counts`, `jonquil.world` (Save World), `jonquil.layouts`, `jonquil.messages` and `jonquil.hints` (the key hints in the status bar).
 - `jonquil.source`: Where a definition outside the buffer lives and its text, the pure half of the source panel and of jump into a tab.
 - `jonquil.project-roots`: A project kept in process: its `deps.edn` `:paths` and `:deps` as Jolt's roots, after Jolt's own.
 - `jonquil.dialect`: Dialect profiles and the per-project choice between them, from `.jonquil.edn`, a project marker, the file's extension, or settings.
