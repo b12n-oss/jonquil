@@ -140,3 +140,10 @@
            (palette/bang-pick [{:id :b/c :doc "Clear the console."} {:id :b/o :doc "Clear the console output."}]
                               "!clear the console"))
         "the doc's closing period doesn't count against an exact match")))
+
+(deftest last-session-commands-pick-first-test
+  (let [es (shipped-entries)
+        first-id (fn [q] (:id (first (palette/filter-entries es q))))]
+    (is (= :session/open-replay (first-id "replay")))
+    (is (= :session/forget-last (first-id "forget last")))
+    (is (= :layout/forget (first-id "forget")) "bare forget sorts the layout command first, by doc")))

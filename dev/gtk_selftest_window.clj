@@ -426,6 +426,12 @@
    replay-rows/row-replay-files-under-start-root
    replay-rows/row-replay-records-run-changed
    replay-rows/row-replay-unreadable-other-root
+   replay-rows/row-replay-open-tab
+   replay-rows/row-replay-run-no-reset
+   replay-rows/row-replay-throw-keeps-record
+   replay-rows/row-replay-survives-new-eval
+   replay-rows/row-replay-forget
+   replay-rows/row-replay-none
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run

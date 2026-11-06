@@ -10,6 +10,7 @@
    :describe-key-fn :key-bindings-fn :recent-keys-fn
    :locations-uses-fn :locations-definitions-fn :locations-matches-fn :locations-step-fn
    :locations-project-usages-fn :world-save-fn :world-restore-fn :world-restore-earlier-fn
+   :replay-open-fn :replay-forget-fn
    :time-form-fn :tab-back-fn :show-frames-fn :locals-mode-fn :processes-show-fn :line-counts-fn :clear-line-counts-fn :hints-toggle-fn :compare-disk-fn :compare-head-fn :compare-take-fn :layout-save-fn :layout-forget-fn
    :retry-fn :edit-retry-fn :define-retry-fn :break-fn :continue-fn :run-changed-fn :trace-toggle-fn :trace-show-fn :trace-clear-fn :trace-untrace-all-fn :result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn :panel-focus-fn])
 
@@ -41,6 +42,7 @@
    :locations/usages-in-project [:locations-project-usages-fn]
    :world/save [:world-save-fn] :world/restore [:world-restore-fn]
    :world/restore-earlier [:world-restore-earlier-fn]
+   :session/open-replay [:replay-open-fn] :session/forget-last [:replay-forget-fn]
    :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
    :run/time-form [:time-form-fn] :tab/back [:tab-back-fn]
    :debug/show-frames [:show-frames-fn] :debug/locals-mode [:locals-mode-fn] :help/key-hints [:hints-toggle-fn]
@@ -66,7 +68,7 @@
                 :find/bar-key :popover/close-all :inspector/close :source/close
                 :tree/close-menu :tree/leave :run/stop :source/back :source/jump-back])
          (set (keys registry/window-commands)))
-      "exactly the shipped window commands, the palette, plugin reload, review and list, Parinfer's five, the three key-describing commands the six locations commands and the three world commands")
+      "exactly the shipped window commands, the palette, plugin reload, review and list, Parinfer's five, the three key-describing commands the six locations commands and the three world commands and the two last-session commands")
   (doseq [[id call] expected]
     (let [calls (atom [])]
       (is (= :handled (registry/run-command! registry/window-commands {:command id} (recording-ctx calls))) (str id))

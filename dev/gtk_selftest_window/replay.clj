@@ -284,3 +284,141 @@
                                {:busy busy? :said said? :file (slurp (record-file ui da))
                                 :console (support/since ui mark)})
                 (finally (restore! ui original [da db])))))))
+
+(defn- replay-tab [ui]
+  (let [id ((:replay-tab-id* ui))]
+    (some (fn [t] (when (= id (:id t)) t)) (tab-list ui))))
+
+(defn- seeded!
+  "A fresh project whose record file holds rec, the window re-rooted to it:
+  [dir mark], mark the console offset before the re-root."
+  [ui rec]
+  (let [[d] (project!)
+        mark (support/out-end-offset ui)]
+    (write-record! ui d rec)
+    ((:simulate-folder-result! ui) {:path d})
+    [d mark]))
+
+(defn row-replay-open-tab
+  "Open last session's replay: an Untitled tab, text from the script, saved."
+  [ui]
+  (go-row :replay-open-tab support/check
+    (let [original (on-gtk (root ui))
+          n0 (on-gtk (count (tab-list ui)))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous [(entry "(def r 1)")] :current [] :history []}))
+          _ (on-gtk ((:replay-open!* ui)))
+          t (on-gtk (replay-tab ui))]
+      (on-gtk (try
+                (let [text (when t (editor/editor-text (:ed t)))]
+                  (support/check :replay-open-tab
+                                 (and t (= (inc n0) (count (tab-list ui))) (nil? @(:path t))
+                                      (str/starts-with? text ";; Last session in ")
+                                      (str/includes? text "(def r 1)")
+                                      (not (editor/dirty? (:ed t)))
+                                      (= (:id t) (:id ((:active-tab* ui)))))
+                                 {:tab (some? t) :text text}))
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-run-no-reset
+  "Running the replay adds to the session: a console definition made before
+  it survives, and a successful Run empties :previous."
+  [ui]
+  (go-row :replay-run-no-reset support/check
+    (let [original (on-gtk (root ui))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous [(entry "(def r 1)")] :current [] :history []}))
+          _ (enter! ui "(def typed 7)")
+          _ (await-until 5000 20 #(and (support/idle? ui) (some #{"(def typed 7)"} (history ui))))
+          _ (on-gtk ((:replay-open!* ui)) ((:run!* ui)))
+          emptied? (await-until 5000 20 #(and (support/idle? ui) (empty? (:previous (record ui)))))
+          m (enter! ui "typed")
+          shown? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 7")))
+          prev (:previous (record ui))]
+      (on-gtk (try
+                (support/check :replay-run-no-reset
+                               (and emptied? shown? (empty? prev))
+                               {:emptied emptied? :shown shown? :previous prev :console (support/since ui m)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-throw-keeps-record
+  "A replay Run that throws leaves :previous as it was."
+  [ui]
+  (go-row :replay-throw-keeps-record support/check
+    (let [original (on-gtk (root ui))
+          e (entry "(def boom (throw (ex-info \"x\" {})))")
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous [e] :current [] :history []}))
+          mark (on-gtk (support/out-end-offset ui))
+          _ (on-gtk ((:replay-open!* ui)) ((:run!* ui)))
+          failed? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui mark) "x")))
+          settled? (await-until 800 20 #(seq (:current (record ui))))
+          prev (:previous (record ui))]
+      (on-gtk (try
+                (support/check :replay-throw-keeps-record
+                               (and failed? (not settled?) (= [(:text e)] (mapv :text prev)))
+                               {:failed failed? :settled settled? :previous prev
+                                :console (support/since ui mark)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-survives-new-eval
+  "Yesterday's three forms plus a new eval: the next launch's :previous holds
+  all four, in order."
+  [ui]
+  (go-row :replay-survives-new-eval support/check
+    (let [original (on-gtk (root ui))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous []
+                                   :current [(entry "(def s1 1)") (entry "(def s2 2)") (entry "(def s3 3)")]
+                                   :history []}))
+          [d2] (on-gtk (project!))
+          _ (enter! ui "(+ 1 2)")
+          saved? (await-until 5000 20 #(and (support/idle? ui) (= ["(+ 1 2)"] (mapv :text (:current (on-disk ui d))))))
+          _ (on-gtk ((:simulate-folder-result! ui) {:path d2})
+                    ((:replay-reopen-root!* ui) d)
+                    ((:simulate-folder-result! ui) {:path d}))
+          prev (mapv :text (:previous (record ui)))]
+      (on-gtk (try
+                (support/check :replay-survives-new-eval
+                               (and saved? (= ["(def s1 1)" "(def s2 2)" "(def s3 3)" "(+ 1 2)"] prev)
+                                    (empty? (:current (record ui))))
+                               {:saved saved? :previous prev})
+                (finally (restore! ui original [d d2])))))))
+
+(defn row-replay-forget
+  "Forget empties :previous, in memory and on disk, and leaves :history."
+  [ui]
+  (go-row :replay-forget support/check
+    (let [original (on-gtk (root ui))
+          [d mark] (on-gtk (tabs/occupy-first! ui)
+                           (seeded! ui {:version 1 :previous [(entry "(def f 1)")] :current []
+                                        :history ["(+ 40 2)"]}))
+          _ (on-gtk ((:replay-forget!* ui)))
+          ok? (await-until 5000 20 #(empty? (:previous (on-disk ui d))))
+          rec (record ui)]
+      (on-gtk (try
+                (support/check :replay-forget
+                               (and ok? (empty? (:previous rec)) (= ["(+ 40 2)"] (:history rec))
+                                    (= ["(+ 40 2)"] (:history (on-disk ui d)))
+                                    (str/includes? (support/since ui mark)
+                                                   "; Forgot the last session. Your prompt history stays."))
+                               {:ok ok? :record rec :disk (on-disk ui d)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-none
+  "With nothing recorded, Open says so and opens no tab."
+  [ui]
+  (go-row :replay-none support/check
+    (let [original (on-gtk (root ui))
+          n0 (on-gtk (count (tab-list ui)))
+          [d mark] (on-gtk (tabs/occupy-first! ui)
+                           (seeded! ui {:version 1 :previous [] :current [] :history []}))
+          _ (on-gtk ((:replay-open!* ui)))]
+      (on-gtk (try
+                (support/check :replay-none
+                               (and (= n0 (count (tab-list ui)))
+                                    (nil? ((:replay-tab-id* ui)))
+                                    (str/includes? (support/since ui mark)
+                                                   "; There's no last session to replay for this folder."))
+                               {:tabs (count (tab-list ui)) :n0 n0 :console (support/since ui mark)})
+                (finally (restore! ui original [d])))))))

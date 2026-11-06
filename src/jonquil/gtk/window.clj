@@ -2685,6 +2685,8 @@
       ;; Nothing will Run as this tab again, so
       ;; its namespaces go to the REPL's set for the next Run to clear.
       (let [e @ev*] (when (satisfies? ev/Owners e) (ev/release-owner! e id)))
+      ;; LM7: a closed replay tab is no longer the one whose Run forgets
+      (when (= id @(:replay-tab* cv)) (reset! (:replay-tab* cv) nil))
       (tab/dispose-popovers! t)
       (g/gtk-notebook-remove-page notebook (g/gtk-notebook-page-num notebook (:root t)))
       (refresh-labels! ctx)
@@ -3372,6 +3374,35 @@
                     (catch :default e
                       (try (note-replay-result! ctx (or (ex-message e) (str e)))
                            (catch :default _ nil))))))))
+
+(defn- replay-open!
+  "Open last session's replay: an Untitled tab holding the script of :previous,
+  marked saved, and now the replay tab (a second Open moves it to the newer
+  tab). With nothing to replay, or a dialect that doesn't replay, the console
+  says so instead. GTK thread."
+  [{:keys [cv sel* replay*] :as ctx}]
+  (let [st @replay*
+        es (:previous (:record st))
+        sel @sel*]
+    (cond
+      (empty? es) (cview/append! cv :system "; There's no last session to replay for this folder.\n")
+      (not (replayable? sel)) (cview/append! cv :system (str (offer-line es (System/currentTimeMillis) sel) "\n"))
+      :else (when-let [t (new-tab! ctx {:path nil
+                                        :text (replay/script es {:root (:root st)
+                                                                 :now (System/currentTimeMillis)
+                                                                 :dialect (:name (:profile sel))})})]
+              (editor/mark-saved! (:ed t))
+              (reset! (:replay-tab* cv) (:id t))))))
+
+(defn- replay-forget!
+  "Forget last session: empties :previous (the prompt history stays), saves
+  at once and says so. GTK thread."
+  [{:keys [cv replay*] :as ctx}]
+  (if @replay*
+    (do (swap! replay* (fn [s] (-> s (update :record replay/forget) (assoc :dirty? true))))
+        (flush-replay! ctx)
+        (cview/append! cv :system "; Forgot the last session. Your prompt history stays.\n"))
+    (cview/append! cv :system "; There's no last session to forget for this folder.\n")))
 
 (def ^:private FIRST-FRAME-FALLBACK-MS
   "How long after-first-frame! waits for a frame before running anyway (a
@@ -4619,6 +4650,8 @@
                                                                            :doc (world/entry-label now x)
                                                                            :chords [] :source "world"})
                                                                   es)))))
+        replay-open-fn (fn [] (replay-open! @*tab-ctx))
+        replay-forget-fn (fn [] (replay-forget! @*tab-ctx))
         trace-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/Trace e)) e)))
         trace-refresh! (fn [show?]
                          (if-let [e (trace-ev)]
@@ -5231,6 +5264,7 @@
                          :locations-project-usages-fn locations-project-usages-fn
                          :world-save-fn world-save-fn :world-restore-fn world-restore-fn
                          :world-restore-earlier-fn world-restore-earlier-fn
+                         :replay-open-fn replay-open-fn :replay-forget-fn replay-forget-fn
                          :world-restore-from-fn (fn [path] (world-restore-from! path true))
                          :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
@@ -6006,6 +6040,11 @@
                  ;; replay tab's id (nil until one is open)
                    :replay-record* (fn [] (select-keys @(:replay* @*tab-ctx) [:root :path :record]))
                    :replay-tab-id* (fn [] @(:replay-tab* cv))
+                   :replay-open!* replay-open-fn
+                   :replay-forget!* replay-forget-fn
+                 ;; forgets that this process opened root, so the next
+                 ;; open-root! on it moves :current to :previous again
+                   :replay-reopen-root!* (fn [root] (swap! opened-roots disj root))
                  ;; The window's own popover registry -- close-popovers-fn
                  ;; is exactly what the keymap's Escape binding calls;
                  ;; register-popover-fn is how a popover (a self-test row's
@@ -6308,7 +6347,7 @@
   :theme-choice* :system-dark-fn!* :poll-appearance!* :poll-arm-count* :poll-armed?*
   :cycle-theme!* :settings-path* :load-settings!* :settings-path!*
   :save-session!* :restore-session!* :session-live!*
-  :replay-record* :replay-tab-id*
+  :replay-record* :replay-tab-id* :replay-open!* :replay-forget!* :replay-reopen-root!*
   :close-popovers!* :register-popover!* :quick-doc!* :jump!* :help-popover
   :full-doc-popover
   :rename!* :rename-to!* :rename-popover
