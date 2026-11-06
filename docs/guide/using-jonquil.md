@@ -188,7 +188,7 @@ project aren't guarded against each other, so the later write wins.
 
 Replay runs in Jolt (in process and in the child) and JVM Clojure. The other
 dialects still record, and their Up/Down history comes back, but the console
-says replay isn't available for them yet. That history now also survives a
+says replay isn't available for them yet. That history also survives a
 dialect switch. `:remember-session? false` in `settings.edn` turns off the
 recording, the offer, loading the history and Forget, and leaves any file
 already written alone.
