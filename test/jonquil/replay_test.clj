@@ -70,3 +70,18 @@
     (let [r (replay/load-record p)]
       (is (not (contains? r :warning)))
       (is (= [{:kind :file :path "/a.clj"}] (:current (:record r)))))))
+
+(deftest save-record-preexisting-open-dir-test
+  (let [d (dir!)
+        rd (str d "/replays")
+        p (str rd "/rec.edn")]
+    (.mkdirs (io/file rd))
+    (java.nio.file.Files/setPosixFilePermissions
+     (.toPath (io/file rd))
+     (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x"))
+    (is (nil? (replay/save-record! p (replay/empty-record))))
+    (is (= "rw-------" (perms p)))
+    (is (= "rwxr-xr-x" (perms rd)))))
+
+(deftest save-record-nil-path-test
+  (is (string? (replay/save-record! nil (replay/empty-record)))))

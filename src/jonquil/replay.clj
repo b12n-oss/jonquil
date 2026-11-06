@@ -60,31 +60,29 @@
            :warning (str "Couldn't read " (file-name path)
                          ", so the last session starts empty.")})))))
 
-(def ^:private owner-only-file "rw-------")
 (def ^:private owner-only-dir "rwx------")
 
-(defn- set-perms!
-  "Sets path's POSIX permissions to perms (e.g. \"rw-------\"). Never throws."
-  [path perms]
+(defn- make-private-dir!
+  "Makes the directory of path as rwx------ when it doesn't exist yet.
+  Never throws."
+  [path]
   (try
-    (java.nio.file.Files/setPosixFilePermissions
-     (.toPath (java.io.File. ^String path))
-     (java.nio.file.attribute.PosixFilePermissions/fromString perms))
+    (let [dir (.getParentFile (java.io.File. ^String path))]
+      (when (and dir (not (.exists dir)))
+        (.mkdirs dir)
+        (java.nio.file.Files/setPosixFilePermissions
+         (.toPath dir)
+         (java.nio.file.attribute.PosixFilePermissions/fromString owner-only-dir))))
     (catch Exception _ nil)))
 
 (defn save-record!
-  "Writes record to path atomically as owner-only. A replays/ directory it
-  has to make is rwx------. Failing to set permissions never fails the
-  save. nil on success, else \"couldn't save <path>: <message>\"."
+  "Writes record to path atomically; the file is rw------- from the moment
+  it exists. A replays/ directory it has to make is rwx------. Failing to
+  set permissions never fails the save. Never throws: nil on success, else
+  \"couldn't save <path>: <message>\"."
   [path record]
-  (let [dir (.getParentFile (java.io.File. ^String path))
-        fresh-dir? (and dir (not (.exists dir)))]
-    (when fresh-dir?
-      (try (.mkdirs dir) (catch Exception _ nil))
-      (set-perms! (.getPath dir) owner-only-dir))
-    (let [err (last-session/write-atomically! path (pr-str record))]
-      (when-not err
-        (set-perms! (str (.toRealPath (.toPath (java.io.File. ^String path))
-                                      (make-array java.nio.file.LinkOption 0)))
-                    owner-only-file))
-      err)))
+  (try
+    (make-private-dir! path)
+    (last-session/write-atomically! path (pr-str record) {:owner-only? true})
+    (catch Exception e
+      (str "couldn't save " path ": " (.getMessage e)))))

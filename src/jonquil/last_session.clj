@@ -76,14 +76,22 @@
 (defn write-atomically!
   "Writes text to path atomically (temp file beside the target, then
   ATOMIC_MOVE over it), rewriting a symlink's real target in place. nil on
-  success, else \"couldn't save <path>: <message>\"."
-  [path text]
+  success, else \"couldn't save <path>: <message>\". With opts
+  {:owner-only? true} the temp file is set to rw------- before the move
+  (a failure to set that never fails the write)."
+  ([path text] (write-atomically! path text nil))
+  ([path text opts]
   (let [tmp (atom nil)]
     (try
       (let [target (resolved-target path)]
         (reset! tmp (str target ".tmp-" (System/nanoTime)))
         (io/make-parents target)
         (spit @tmp text)
+        (when (:owner-only? opts)
+          (try (java.nio.file.Files/setPosixFilePermissions
+                (.toPath (java.io.File. ^String @tmp))
+                (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------"))
+               (catch Exception _ nil)))
         (java.nio.file.Files/move
          (.toPath (java.io.File. ^String @tmp))
          (.toPath (java.io.File. ^String target))
@@ -93,7 +101,7 @@
         nil)
       (catch Exception e
         (when @tmp (try (io/delete-file @tmp true) (catch Exception _ nil)))
-        (str "couldn't save " path ": " (.getMessage e))))))
+        (str "couldn't save " path ": " (.getMessage e)))))))
 
 (defn save-sessions!
   "Writes {:version 1 :sessions sessions} to path atomically, rewriting a
