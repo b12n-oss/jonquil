@@ -375,7 +375,9 @@
   linear pass. A #_ inside a form doesn't count: nested in a form, inside a
   top-level (comment ...) block, inside a discarded form, a string or a ;
   comment. Stacked #_ #_ discard that many forms, and blanks may sit between
-  a #_ and its form."
+  a #_ and its form. A tagged literal or namespaced map after #_ (#_#inst
+  \"2020\", #_#:a{:b 1}) isn't read as one form, so it isn't carried: a
+  missed carry, never a wrong one."
   [^String text]
   (let [n (count text)]
     (loop [i (skip-blank text 0) pending 0 out #{}]
