@@ -149,7 +149,8 @@
                 (support/check :replay-offer-at-open
                                (and ok? (= ["(def z 9)"] (mapv :text (:previous rec))) (empty? (:current rec))
                                     (str/starts-with? line "; Last session (Jolt, ")
-                                    (str/ends-with? line "Open last session's replay from the palette to review it."))
+                                    (str/ends-with? line "Open last session's replay from the palette to review it.")
+                                    (not (str/includes? line "Recorded in")))
                                {:ok ok? :line line :record rec})
                 (finally (restore! ui original [d])))))))
 
@@ -466,3 +467,134 @@
                                     (str/includes? (support/since ui mark) "; There's no last session to forget for this folder."))
                                {:same (= before after) :console (support/since ui mark)})
                 (finally (restore! ui original [d])))))))
+
+;; --- final review fixes --------------------------------------------------------
+
+(defn row-replay-reroot-open-new-tab
+  "Open at A, re-root to B, Open again: a new tab with B's script, not A's
+  tab. A Run of A's old tab (no longer the replay tab) leaves both records'
+  :previous alone."
+  [ui]
+  (go-row :replay-reroot-open-new-tab support/check
+    (let [original (on-gtk (root ui))
+          [da] (on-gtk (tabs/occupy-first! ui)
+                       (seeded! ui {:version 1 :previous [(entry "(def ra 1)")] :current [] :history []}))
+          ta (on-gtk ((:replay-open!* ui)) (replay-tab ui))
+          [db] (on-gtk (seeded! ui {:version 1 :previous [(entry "(def rb 2)")] :current [] :history []}))
+          tb (on-gtk ((:replay-open!* ui)) (replay-tab ui))
+          text-b (on-gtk (when tb (editor/editor-text (:ed tb))))
+          active-b (on-gtk (:id ((:active-tab* ui))))
+          _ (on-gtk ((:select-tab! ui) (:id ta)) ((:run!* ui)))
+          ran? (await-until 5000 20 #(and (support/idle? ui) (seq (:current (on-disk ui db)))))
+          settled? (await-until 800 20 #(or (empty? (:previous (on-disk ui db)))
+                                             (empty? (:previous (on-disk ui da)))))]
+      (on-gtk (try
+                (support/check :replay-reroot-open-new-tab
+                               (and ta tb (not= (:id ta) (:id tb)) (= (:id tb) active-b)
+                                    (str/includes? text-b "(def rb 2)") (not (str/includes? text-b "(def ra 1)"))
+                                    ran? (not settled?)
+                                    (= ["(def rb 2)"] (mapv :text (:previous (on-disk ui db))))
+                                    (= ["(def ra 1)"] (mapv :text (:previous (on-disk ui da)))))
+                               {:ta (:id ta) :tb (:id tb) :active active-b :text-b text-b :ran ran?
+                                :a (on-disk ui da) :b (on-disk ui db)})
+                (finally (restore! ui original [da db])))))))
+
+(defn row-replay-run-forgets-own-root
+  "Open at A, re-root to B, Run A's replay tab: A's :previous is forgotten,
+  B's stays."
+  [ui]
+  (go-row :replay-run-forgets-own-root support/check
+    (let [original (on-gtk (root ui))
+          [da] (on-gtk (tabs/occupy-first! ui)
+                       (seeded! ui {:version 1 :previous [(entry "(def rc 1)")] :current [] :history []}))
+          ta (on-gtk ((:replay-open!* ui)) (replay-tab ui))
+          [db] (on-gtk (seeded! ui {:version 1 :previous [(entry "(def rd 2)")] :current [] :history []}))
+          _ (on-gtk ((:select-tab! ui) (:id ta)) ((:run!* ui)))
+          forgot? (await-until 5000 20 #(and (support/idle? ui) (empty? (:previous (on-disk ui da)))))
+          b-lost? (await-until 800 20 #(or (empty? (:previous (record ui))) (empty? (:previous (on-disk ui db)))))]
+      (on-gtk (try
+                (support/check :replay-run-forgets-own-root
+                               (and ta forgot? (not b-lost?)
+                                    (= ["(def rd 2)"] (mapv :text (:previous (record ui)))))
+                               {:forgot forgot? :b-lost b-lost? :a (on-disk ui da) :b (record ui)})
+                (finally (restore! ui original [da db])))))))
+
+(defn row-replay-stale-tab
+  "Open, close the replay tab, Open again: a fresh replay tab, selected."
+  [ui]
+  (go-row :replay-stale-tab support/check
+    (let [original (on-gtk (root ui))
+          [d] (on-gtk (tabs/occupy-first! ui)
+                      (seeded! ui {:version 1 :previous [(entry "(def rs 1)")] :current [] :history []}))
+          t1 (on-gtk ((:replay-open!* ui)) (replay-tab ui))
+          _ (on-gtk ((:close-tab! ui) (:id t1)))
+          gone? (on-gtk (nil? ((:replay-tab-id* ui))))
+          t2 (on-gtk ((:replay-open!* ui)) (replay-tab ui))]
+      (on-gtk (try
+                (support/check :replay-stale-tab
+                               (and t1 gone? t2 (not= (:id t1) (:id t2)) (= (:id t2) (:id ((:active-tab* ui))))
+                                    (str/includes? (editor/editor-text (:ed t2)) "(def rs 1)"))
+                               {:t1 (:id t1) :gone gone? :t2 (:id t2)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-end-to-end
+  "A record with a file, a definition in that file's ns and a form: re-root,
+  Open, Run. app.core/x exists, :previous is empty and the new :current
+  compacts to the same files and definitions."
+  [ui]
+  (go-row :replay-end-to-end support/check
+    (let [original (on-gtk (root ui))
+          [d] (on-gtk (project!))
+          core (str d "/src/app/core.clj")
+          at (- (System/currentTimeMillis) 3600000)
+          prev [{:kind :file :path core :at at :dialect "Jolt"}
+                {:kind :form :text "(def x (f))" :ns "app.core" :source-file nil :at at :dialect "Jolt"}
+                {:kind :form :text "(swap! (atom 0) inc)" :ns "user" :source-file nil :at at :dialect "Jolt"}]
+          _ (io/make-parents core)
+          _ (spit core "(ns app.core)\n(defn f [] 1)\n")
+          _ (on-gtk (tabs/occupy-first! ui)
+                    (write-record! ui d {:version 1 :previous prev :current [] :history []})
+                    ((:simulate-folder-result! ui) {:path d}))
+          _ (on-gtk ((:replay-open!* ui)) ((:run!* ui)))
+          emptied? (await-until 5000 20 #(and (support/idle? ui) (empty? (:previous (record ui)))
+                                              (seq (:current (record ui)))
+                                              (empty? (:previous (on-disk ui d)))))
+          m (enter! ui "app.core/x")
+          shown? (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 1")))
+          c0 (replay/compact prev)
+          c1 (replay/compact (:current (record ui)))
+          shape (fn [c] [(:files c) (mapv (juxt :ns :text) (:defs c))])]
+      (on-gtk (try
+                (support/check :replay-end-to-end
+                               (and emptied? shown? (= (shape c0) (shape c1)))
+                               {:emptied emptied? :shown shown? :before (shape c0) :after (shape c1)
+                                :console (support/since ui m)})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-offer-dialect-differs
+  "A record made in another dialect: the offer line says so."
+  [ui]
+  (go-row :replay-offer-dialect-differs support/check
+    (let [original (on-gtk (root ui))
+          [d mark] (on-gtk (tabs/occupy-first! ui)
+                           (seeded! ui {:version 1 :previous [(assoc (entry "(def z 9)") :dialect "Clojure (JVM)")]
+                                        :current [] :history []}))
+          ok? (await-until 5000 20 #(offer-line ui mark))
+          line (offer-line ui mark)]
+      (on-gtk (try
+                (support/check :replay-offer-dialect-differs
+                               (and ok? (str/starts-with? line "; Last session (Clojure (JVM), ")
+                                    (str/ends-with? line (str "Open last session's replay from the palette to review it."
+                                                              " Recorded in Clojure (JVM); this window runs Jolt.")))
+                               {:ok ok? :line line})
+                (finally (restore! ui original [d])))))))
+
+(defn row-replay-run-ns
+  "The ns an Untitled Run is recorded in: user for the in-process session,
+  the prompt's ns for any other evaluator."
+  [ui]
+  (go-row :replay-run-ns support/check
+    (on-gtk (let [f (resolve 'jonquil.gtk.window/run-record-ns)
+                  other (reify ev/Evaluator (prompt-ns [_] 'zz.other))
+                  got (when f [(f (:session ui)) (f other)])]
+              (support/check :replay-run-ns (= ["user" "zz.other"] got) {:got got})))))

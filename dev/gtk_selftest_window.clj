@@ -434,6 +434,12 @@
    replay-rows/row-replay-none
    replay-rows/row-replay-open-twice
    replay-rows/row-replay-forget-off
+   replay-rows/row-replay-reroot-open-new-tab
+   replay-rows/row-replay-run-forgets-own-root
+   replay-rows/row-replay-stale-tab
+   replay-rows/row-replay-end-to-end
+   replay-rows/row-replay-offer-dialect-differs
+   replay-rows/row-replay-run-ns
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run
