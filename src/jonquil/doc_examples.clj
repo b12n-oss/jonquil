@@ -125,6 +125,22 @@
   [text i]
   (if-let [j (when (pos? i) (str/last-index-of text "\n" (dec i)))] (inc j) 0))
 
+(defn- insert-in-comment-op
+  "insert-op for a caret in a (comment ...) block: the code goes on its own
+  line before the block's closing paren, indented two spaces on its first
+  line, with a blank line before it. A paren on its own line stays on the line
+  after the code; otherwise it follows the code directly."
+  [text form code]
+  (let [close (dec (:end form))
+        ls (line-start text close)
+        own-line? (str/blank? (subs text ls close))
+        prev-blank? (or (zero? ls) (str/blank? (subs text (line-start text (dec ls)) (dec ls))))
+        [pos prefix suffix] (if own-line?
+                              [ls (if prev-blank? "" "\n") "\n"]
+                              [close "\n\n" ""])
+        indented (str "  " code)]
+    {:edits [[pos pos (str prefix indented suffix)]] :caret (+ pos (count prefix) (count indented))}))
+
 (defn insert-op
   "The edit that puts code after the top-level form holding the caret (a
   caret just past its last character counts), else after the caret's line.
@@ -132,7 +148,8 @@
   or a second form stays with its form, one blank line before it (none at
   the start of the buffer, none doubled on a blank line) and one after it
   when text follows. {:edits [[pos pos inserted]] :caret int}, the shape
-  jonquil.gtk.editor/apply-op! takes; :caret is the end of the code."
+  jonquil.gtk.editor/apply-op! takes; :caret is the end of the code. A caret in
+  a (comment ...) block puts the code inside it instead (insert-in-comment-op)."
   [{:keys [text caret]} code]
   (let [forms (commands/top-level-forms text)
         form (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
@@ -150,4 +167,6 @@
                         (not (str/blank? (subs text next-start (eol text next-start)))))
                  "\n"
                  "")]
-    {:edits [[pos pos (str prefix code suffix)]] :caret (+ pos (count prefix) (count code))}))
+    (if (and form (commands/comment-form? text form))
+      (insert-in-comment-op text form code)
+      {:edits [[pos pos (str prefix code suffix)]] :caret (+ pos (count prefix) (count code))})))

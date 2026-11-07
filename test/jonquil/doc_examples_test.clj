@@ -1,6 +1,7 @@
 (ns jonquil.doc-examples-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [jonquil.commands :as commands]
             [jonquil.doc-examples :as de]))
 
 (defn- doc-with
@@ -115,3 +116,16 @@
 
 (deftest insert-on-the-second-line-when-the-first-is-blank
   (is (= ["\n(inc 1)\n\n(b)" 8] (applied "\n\n(b)" 1 "(inc 1)"))))
+
+(deftest insert-inside-a-comment-block
+  ;; the closing paren was directly after the last form: it stays directly after the code
+  (is (= ["(comment\n  (a)\n\n  (inc 1))" 25] (applied "(comment\n  (a))" 12 "(inc 1)")))
+  (is (= ["(comment (a)\n\n  (inc 1))" 23] (applied "(comment (a))" 10 "(inc 1)")))
+  ;; the paren was on its own line: it stays on the line after the code
+  (is (= ["(comment\n  (a)\n\n  (inc 1)\n)" 25] (applied "(comment\n  (a)\n)" 12 "(inc 1)")))
+  ;; only the first line is indented; later lines stay as written
+  (is (= ["(comment\n  (a)\n\n  (do\n  1))" 26] (applied "(comment\n  (a))" 12 "(do\n  1)")))
+  (doseq [[t c] [["(comment\n  (a))" 12] ["(comment (a))" 10] ["(comment\n  (a)\n)" 12]]]
+    (let [[res _] (applied t c "(inc 1)")]
+      (is (= 1 (count (commands/top-level-forms res))))
+      (is (= (count res) (:end (first (commands/top-level-forms res))))))))
