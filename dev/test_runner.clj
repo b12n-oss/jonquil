@@ -74,6 +74,7 @@
     jonquil.plugin-list-test
     jonquil.plugin-mcp-test
     jonquil.help-test
+    jonquil.doc-examples-test
     jonquil.source-test
     jonquil.tabs-test
     jonquil.file-ops-test
