@@ -26,6 +26,7 @@
             [jonquil.console :as console]
             [jonquil.describe :as describe]
             [jonquil.dialect :as dialect]
+            [jonquil.doc-examples :as doc-examples]
             [jonquil.docs :as docs]
             [jonquil.edit :as edit]
             [jonquil.eval :as eval]
@@ -1337,6 +1338,33 @@
                                                     :hook-source :selection :hook-tab (:id tab)
                                                     :record (tab-record tab ev* :selection text (:text snap))})))))
 
+(defn- do-run-example!
+  "Run in Interactions on a ClojureDocs example's code: evaluated in user at
+  the console without moving the prompt (the JVM evaluator evals in
+  (clj/buffer-ns ns-source) and leaves the prompt alone for a non-nil
+  :ns-source). When the prompt is elsewhere the console says '; in user'
+  first. Echo, busy warning and recording follow do-run-selection!."
+  [{:keys [tab cv ev* status-label] :as ctx} code]
+  (when-not (refuse-foreign! ctx)
+    (let [idle? (not (ev/evaluating? @ev*))]
+      (when (not= "user" (str (ev/prompt-ns @ev*)))
+        (cview/append! cv :system "; in user\n"))
+      (cview/echo-entry! cv code idle?)
+      (do-repl-eval! (:ed tab) cv ev* status-label code
+                     {:ns-source "(ns user)" :owner (:id tab) :hook-source :example :hook-tab (:id tab)
+                      :record {:source :example :code code :path nil :ns "user"}}))))
+
+(defn- do-copy-example!
+  "Copy to Definitions: code goes into the tab's editor after the form at
+  the caret (jonquil.doc-examples/insert-op), one undo step; a read-only
+  editor ignores it. The full-doc popover closes and the editor takes focus
+  back, posted since GTK moves focus as the popover unmaps."
+  [{:keys [tab full-doc-pop]} code]
+  (let [ed (:ed tab)]
+    (editor/apply-op! ed (doc-examples/insert-op (editor/snapshot ed) code))
+    (popover/hide! full-doc-pop)
+    (on-gui! #(when-not @(:destroyed? ed) (editor/focus! ed)))))
+
 ;; --- MCP hooks: run/eval/run-selection that report back -----------------------
 
 (defn- mcp-eval!
@@ -1844,12 +1872,13 @@
   it. Otherwise this closes every OTHER open popover (close-popovers-fn
   full-doc-pop, never full-doc-pop itself, so it's never hidden and
   reshown within the same frame) and shows the text at 60% of the
-  window's own height (gtk-widget-get-height), then clears the status
+  window's own height (gtk-widget-get-height) with Run/Copy buttons per
+  ClojureDocs example (do-run-example!, do-copy-example!), then clears the status
   back to Ready -- or, a non-:ok result, sets it from help/full-doc-
   status. Every other press, and every evaluator without FullDoc (cljd,
   in-process), takes the ordinary re-show path below unchanged, which
   also records the freshly shown target in last-shown."
-  [{:keys [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win active?]}]
+  [{:keys [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win active? example-ctx]}]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start] :as target} (help/target snap)]
@@ -1879,7 +1908,9 @@
                                       (do (close-popovers-fn full-doc-pop)
                                           (help-popover/show-full-doc!
                                            full-doc-pop (:text result)
-                                           (int (* 0.6 (g/gtk-widget-get-height win))))
+                                           (int (* 0.6 (g/gtk-widget-get-height win)))
+                                           {:on-run (fn [code] (do-run-example! example-ctx code))
+                                            :on-copy (fn [code] (do-copy-example! example-ctx code))})
                                           (set-status! status-label "Ready"))
 
                                       :else
@@ -2846,6 +2877,8 @@
   (let [flash-fns (make-flash-fn ed)
         quick-doc-fn (fn [] (do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
                                             :full-doc-pop full-doc-pop :last-shown last-shown
+                                            :example-ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                                          :full-doc-pop full-doc-pop}
                                             :close-popovers-fn close-popovers-fn :win win
                                             :active? (fn [] (active? t))}))
         jump-fn (fn [] (do-jump! (source-ctx t)))
@@ -2958,7 +2991,7 @@
                  ffi/null))))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
-    (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
+    (editor/on-focus-lost! ed (fn [] (help-popover/hide-unless-focused! full-doc-pop)))
     ;; Rename is autohide ON, so GTK's own grab closes it.
     (register-popover-fn rename-pop)
     ;; The command palette runs a command as its key would, with its
