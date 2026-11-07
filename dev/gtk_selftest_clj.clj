@@ -37,6 +37,8 @@
    rows/row-clj-example-rows
    rows/row-clj-example-run
    rows/row-clj-example-run-busy
+   rows/row-clj-example-run-vetoed
+   rows/row-clj-example-popover-closes-when-inactive
    rows/row-clj-example-copy
    rows/row-clj-example-copy-read-only
    rows/row-clj-example-focus

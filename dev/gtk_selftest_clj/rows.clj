@@ -20,6 +20,7 @@
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.popover :as popover]
+            [jonquil.plugin-hooks :as plugin-hooks]
             [temp-dirs]))
 
 ;; This file's own private copies (gdkkeysyms.h, GTK 4.22.4 installed
@@ -559,6 +560,48 @@
       (on-gtk (support/check :clj-example-focus
                              (and still-open closed?)
                              {:still-open still-open :closed closed?})
+              (popover/hide! fp)))))
+
+(defn row-clj-example-run-vetoed
+  "A :before-run hook that vetoes (stubbed here) stops Run on an example like
+  it stops Run Selection: the plugin's line shows, nothing is echoed or sent."
+  [ui]
+  (go-row :clj-example-run-vetoed support/check
+    (let [fp (:full-doc-popover ui)
+          exs (open-shout-full-doc! ui)
+          n (count (fake/requests (srv)))
+          [m seen] (on-gtk (let [m (support/out-end-offset ui)
+                                 seen (atom nil)]
+                             (with-redefs [plugin-hooks/before-run! (fn [e] (reset! seen e) "example vetoed")]
+                               (click! (:run (first exs))))
+                             [m @seen]))
+          text (on-gtk (support/since ui m))
+          sent (filter #(= "(shout \"a\")" (get % "code")) (drop n (fake/requests (srv))))]
+      (on-gtk (support/check :clj-example-run-vetoed
+                             (and (= "(shout \"a\")" (:text seen)) (str/includes? text "; example vetoed")
+                                  (not (str/includes? text "demo.core=> (shout")) (empty? sent))
+                             {:seen seen :text text :sent sent})
+              (popover/hide! fp)))))
+
+(defn row-clj-example-popover-closes-when-inactive
+  "With the window no longer active (gtk_window_is_active stubbed to 0 for the
+  row), the focus check closes the full-doc popover although the root's focus
+  widget is still the example's Run button."
+  [ui]
+  (go-row :clj-example-popover-closes-when-inactive support/check
+    (let [fp (:full-doc-popover ui)
+          exs (open-shout-full-doc! ui)
+          _ (on-gtk (g/gtk-widget-grab-focus (:run (first exs))))
+          _ (ga/settle 5)
+          open-before (on-gtk (popover/open? fp))
+          orig g/gtk-window-is-active
+          _ (on-gtk (alter-var-root #'g/gtk-window-is-active (constantly (fn [_] 0))))
+          _ (on-gtk (help-popover/hide-unless-focused! fp))
+          closed? (await-until 1000 20 #(not (popover/open? fp)))]
+      (on-gtk (alter-var-root #'g/gtk-window-is-active (constantly orig))
+              (support/check :clj-example-popover-closes-when-inactive
+                             (and open-before closed?)
+                             {:open-before open-before :closed closed?})
               (popover/hide! fp)))))
 
 (defn row-clj-full-doc-no-examples

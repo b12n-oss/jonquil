@@ -1345,8 +1345,11 @@
   :ns-source). When the prompt is elsewhere the console says '; in user'
   first. Echo, busy warning and recording follow do-run-selection!."
   [{:keys [tab cv ev* status-label] :as ctx} code]
-  (when-not (refuse-foreign! ctx)
-    (let [idle? (not (ev/evaluating? @ev*))]
+  (let [idle? (not (ev/evaluating? @ev*))]
+    (when-not (or (refuse-foreign! ctx)
+                  ;; asked only when the Run would start, as Run Selection does
+                  ;; (plugin docs list :selection, not an :example kind)
+                  (and idle? (before-run-stopped ctx :selection tab code)))
       (when (not= "user" (str (ev/prompt-ns @ev*)))
         (cview/append! cv :system "; in user\n"))
       (cview/echo-entry! cv code idle?)

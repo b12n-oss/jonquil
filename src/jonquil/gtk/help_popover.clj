@@ -84,11 +84,15 @@
 ;; --- full doc ---------------------------------------------------------------
 
 (defn- focus-inside?
-  "True when the root's focus widget is view or inside popover."
+  "True when the root's window is active and its focus widget is view or
+  inside popover. An inactive window (Cmd+Tab, another window) keeps its
+  focus widget, so the focus widget alone would leave the popover open over
+  a background window."
   [pp]
   (let [view (:view pp)
         root (g/gtk-widget-get-root view)]
     (and (not (ffi/null? root))
+         (not (zero? (g/gtk-window-is-active root)))
          (let [f (g/gtk-root-get-focus root)]
            (and (not (ffi/null? f))
                 (or (= f view)
