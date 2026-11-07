@@ -87,6 +87,7 @@
 
 ;; --- labels (minibuffer / status line) ---------------------------------------
 (ffi/defcfn gtk-label-new "gtk_label_new" [:string] :pointer)
+(ffi/defcfn gtk-label-set-selectable "gtk_label_set_selectable" [:pointer :int] :void)
 (ffi/defcfn gtk-label-set-text "gtk_label_set_text" [:pointer :string] :void)
 (ffi/defcfn gtk-label-set-xalign "gtk_label_set_xalign" [:pointer :float] :void)
 ;; gtklabel.h (GTK 4.22.4, installed headers):

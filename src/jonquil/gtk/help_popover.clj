@@ -23,7 +23,11 @@
   more than quick doc's summary. show-full-doc! raises its max content
   height (60% of the window's own height) before popping it up, since
   unlike the quick-doc popover it can't size itself once at construction."
-  (:require [jonquil.gtk.ffi :as g]
+  (:require [clojure.string :as str]
+            [jolt.ffi :as ffi]
+            [jonquil.doc-examples :as doc-examples]
+            [jonquil.gtk.callbacks :refer [callable on-gui!]]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]))
 
 ;; Wide enough for a real docstring line's hard break to
@@ -79,6 +83,35 @@
 
 ;; --- full doc ---------------------------------------------------------------
 
+(defn- focus-inside?
+  "True when the root's window is active and its focus widget is view or
+  inside popover. An inactive window (Cmd+Tab, another window) keeps its
+  focus widget, so the focus widget alone would leave the popover open over
+  a background window."
+  [pp]
+  (let [view (:view pp)
+        root (g/gtk-widget-get-root view)]
+    (and (not (ffi/null? root))
+         (not (zero? (g/gtk-window-is-active root)))
+         (let [f (g/gtk-root-get-focus root)]
+           (and (not (ffi/null? f))
+                (or (= f view)
+                    (not (zero? (g/gtk-widget-is-ancestor f (:popover pp))))))))))
+
+(defn hide-unless-focused!
+  "Hides fp, unless the root's focus is the editor view or something inside
+  fp (an example's button). Posted (on-gui!): GTK updates the root's focus
+  after the leave handler that calls this has run (see
+  jonquil.gtk.popover/refocus!). A no-op while fp is closed."
+  [fp]
+  (let [view (:view fp)]
+    (g/g-object-ref view)
+    (on-gui! (fn []
+               (try
+                 (when (and (popover/open? fp) (not (focus-inside? fp)))
+                   (popover/hide! fp))
+                 (finally (g/g-object-unref view)))))))
+
 (defn make-full-doc-popover
   "Builds the full-doc popover: a SECOND popover, built once per editor
   the same way make-help-popover above builds the quick-doc one (same
@@ -87,28 +120,109 @@
   Its own map also keeps :scroll, unlike make-help-popover's
   -- show-full-doc! below raises this popover's max content height at
   every show (60% of the window's own height, computed by the
-  caller), something the quick-doc popover never needs to do."
+  caller), something the quick-doc popover never needs to do. It also
+  keeps :text* and :examples*, what show-full-doc! last showed, and a focus
+  controller on the popover that closes it (hide-unless-focused!) when
+  focus leaves it for anything but the editor."
   [view]
   (let [{:keys [label scroll]} (popover/make-doc-scroll DOC-WIDTH DOC-HEIGHT)
-        pp (popover/make-popover view {:autohide? false :position :bottom})]
+        pp (popover/make-popover view {:autohide? false :position :bottom})
+        fp (assoc pp :label label :scroll scroll :text* (atom "") :examples* (atom []))
+        focusctl (g/gtk-event-controller-focus-new)]
     (popover/set-child! pp scroll)
-    (assoc pp :label label :scroll scroll)))
+    ;; Escape or any other close with focus on an example's button returns
+    ;; focus to the editor
+    (popover/refocus-view-on-close! pp)
+    ;; the scroll swaps its child between this label and a per-show box; the
+    ;; extra ref keeps the label alive while the box is the child
+    (g/g-object-ref label)
+    (g/g-signal-connect-data focusctl "leave"
+                             (callable (fn [_ctl _data] (hide-unless-focused! fp) nil)
+                                       [:pointer :pointer] :void)
+                             ffi/null ffi/null g/CONNECT-DEFAULT)
+    (g/gtk-widget-add-controller (:popover pp) focusctl)
+    fp))
+
+(defn- doc-label
+  "A selectable, wrapped, monospace label (class jonquil-doc) holding text."
+  [text]
+  (let [l (g/gtk-label-new text)]
+    (g/gtk-widget-add-css-class l "jonquil-doc")
+    (g/gtk-label-set-xalign l 0.0)
+    (g/gtk-label-set-wrap l 1)
+    (g/gtk-label-set-wrap-mode l g/PANGO-WRAP-WORD-CHAR)
+    (g/gtk-label-set-selectable l 1)
+    (g/gtk-widget-set-halign l g/ALIGN-START)
+    l))
+
+(defn- connect-click! [btn f]
+  (g/g-signal-connect-data btn "clicked"
+                           (callable (fn [_btn _data] (f) nil) [:pointer :pointer] :void)
+                           ffi/null ffi/null g/CONNECT-DEFAULT))
+
+(defn- example-widgets
+  "Appends one example's heading, code label and buttons to box. Returns
+  {:n :code :run :copy}; the buttons are nil for blank code."
+  [box {:keys [n body code]} {:keys [on-run on-copy]}]
+  (let [head (g/gtk-label-new (str "Example " n))
+        ex {:n n :code code}]
+    (g/gtk-widget-set-halign head g/ALIGN-START)
+    (g/gtk-box-append box head)
+    (g/gtk-box-append box (doc-label body))
+    (if (empty? (str/trim code))
+      (assoc ex :run nil :copy nil)
+      (let [row (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
+            run (g/gtk-button-new-with-label "Run in Interactions")
+            copy (g/gtk-button-new-with-label "Copy to Definitions")]
+        (connect-click! run #(when on-run (on-run code)))
+        (connect-click! copy #(when on-copy (on-copy code)))
+        (g/gtk-box-append row run)
+        (g/gtk-box-append row copy)
+        (g/gtk-box-append box row)
+        (assoc ex :run run :copy copy)))))
 
 (defn show-full-doc!
   "Raises fp's max content height (gtk_scrolled_window_set_max_content_
-  height) to max-height, sets its label to text, then pops it up at
-  view's caret (popover/show-at-caret!) -- same shape as show-doc! above,
-  with the height set first since it changes on every show."
-  [fp text max-height]
-  (g/gtk-scrolled-window-set-max-content-height (:scroll fp) max-height)
-  (g/gtk-label-set-text (:label fp) text)
-  (popover/show-at-caret! fp)
-  nil)
+  height) to max-height, shows text, then pops it up at view's caret
+  (popover/show-at-caret!) -- same shape as show-doc! above, with the
+  height set first since it changes on every show.
+
+  The 3-arity puts text in the single label. The 4-arity splits text
+  (jonquil.doc-examples/split): without examples that is the label path;
+  with them the scroll holds a vertical box built per show: the doc, then
+  per example a heading, its raw body (selectable) and buttons \"Run in
+  Interactions\" and \"Copy to Definitions\", whose clicks call (on-run
+  code) / (on-copy code) with the cleaned code. full-doc-text keeps the
+  whole text either way."
+  ([fp text max-height] (show-full-doc! fp text max-height nil))
+  ([fp text max-height handlers]
+   (g/gtk-scrolled-window-set-max-content-height (:scroll fp) max-height)
+   ;; a throw in the split shows the plain text, as a doc without examples
+   (let [{:keys [doc title examples]} (try (doc-examples/split text)
+                                           (catch :default _ {:examples []}))]
+     (reset! (:text* fp) text)
+     (if (or (nil? handlers) (empty? examples))
+       (do (g/gtk-label-set-text (:label fp) text)
+           (g/gtk-scrolled-window-set-child (:scroll fp) (:label fp))
+           (reset! (:examples* fp) []))
+       (let [box (g/gtk-box-new g/ORIENTATION-VERTICAL 6)]
+         (g/gtk-box-append box (doc-label (str doc "\n\n== " title)))
+         (reset! (:examples* fp) (mapv #(example-widgets box % handlers) examples))
+         (g/gtk-scrolled-window-set-child (:scroll fp) box))))
+   (popover/show-at-caret! fp)
+   nil))
 
 (defn full-doc-text
-  "fp's label text -- for rows, same contract as quick-doc-text above."
+  "fp's text last shown by show-full-doc!, whole -- for rows, same
+  contract as quick-doc-text above."
   [fp]
-  (g/label-text (:label fp)))
+  @(:text* fp))
+
+(defn full-doc-examples
+  "[{:n :code :run :copy}] for the examples fp last showed (the buttons are
+  nil for blank code), [] when it showed the single label. For rows."
+  [fp]
+  @(:examples* fp))
 
 ;; --- rename -----------------------------------------------------------------
 

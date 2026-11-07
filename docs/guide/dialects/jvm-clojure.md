@@ -78,6 +78,23 @@ Press Ctrl+Q or Shift+F1 a second time for the full ClojureDocs entry,
 examples included. The first request downloads ClojureDocs' export (a few
 megabytes), which can take several seconds.
 
+Each example has two buttons. **Run in Interactions** cleans the example's
+transcript (the `user=>` prompts, and the results and output printed after
+each prompted form, are dropped) and runs what is left in the `user`
+namespace, so an example can't replace your own definitions. When the prompt
+is in another namespace the console prints `; in user` before the echo, and
+the prompt stays where it was. Run honours plugin before-run vetoes and
+refuses while the console is busy. **Copy to Definitions** puts the cleaned
+example on its own line after the top-level form at the caret, separated by
+blank lines, as one undo step. With the caret inside a `(comment ...)` block
+the example goes inside the block, just before its closing paren, so nothing
+runs when the file loads. In a read-only tab it says "This tab is read-only."
+and the popover stays open.
+
+The popover stays open after Run and closes after Copy, on Escape (focus
+returns to the editor), when the caret moves, and when focus leaves it or the
+window. The buttons are mouse-only.
+
 ![Full documentation for map after a second quick-doc press, with ClojureDocs' examples](../../images/clj-full-doc.png)
 
 More in [Known limits](../known-limits.md).

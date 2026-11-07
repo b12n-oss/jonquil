@@ -101,7 +101,7 @@ Known rough edges, parked for later:
 </details>
 
 <details>
-<summary><strong>JVM Clojure</strong> (5)</summary>
+<summary><strong>JVM Clojure</strong> (9)</summary>
 
 - It attaches to a server you started and never starts or stops the JVM.
 - No Reset on Run.
@@ -109,6 +109,18 @@ Known rough edges, parked for later:
 - Output printed from another thread after the evaluation ends isn't shown.
 - On nREPL 1.7 with JDK 20 or later, Stop can't end a loop that never checks
   for interruption (`(loop [] (recur))`); restart the server yourself.
+- ClojureDocs examples run in `user`, so an example for a var outside
+  `clojure.core` that calls it unqualified, or through an alias it never
+  requires, fails with "Unable to resolve symbol". A regex over the export
+  puts this at about 241 of 2,623 examples (an estimate).
+- Run in Interactions runs every form in an example, including ones
+  ClojureDocs shows as "don't do this". A few examples print an infinite
+  sequence, about 15 read stdin, and about 8 call `System/exit` or
+  `shutdown-agents`, which stop your own JVM.
+- An example that uses a bare `=>` as its prompt loses that form when
+  cleaned. After cleaning, 44 of 2,623 examples still have unbalanced
+  brackets.
+- The example buttons are mouse-only for now.
 
 </details>
 

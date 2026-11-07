@@ -34,6 +34,19 @@
    rows/row-clj-quick-doc
    rows/row-clj-full-doc
    rows/row-clj-full-doc-escape
+   rows/row-clj-example-rows
+   rows/row-clj-example-run
+   rows/row-clj-example-run-busy
+   rows/row-clj-example-run-vetoed
+   rows/row-clj-example-popover-closes-when-inactive
+   rows/row-clj-example-copy
+   rows/row-clj-example-copy-read-only
+   rows/row-clj-example-focus
+   rows/row-clj-example-retry
+   rows/row-clj-example-hooks
+   rows/row-clj-example-escape-refocuses-editor
+   rows/row-clj-full-doc-split-throws
+   rows/row-clj-full-doc-no-examples
    rows/row-clj-slow-completion
    rows/row-clj-slow-quick-doc
    rows/row-clj-slow-quick-doc-moved-on

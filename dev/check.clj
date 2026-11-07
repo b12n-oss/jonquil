@@ -98,6 +98,7 @@
     jonquil.gtk.plugin-history-pane
     jonquil.gtk.palette
     jonquil.help
+    jonquil.doc-examples
     jonquil.source
     jonquil.tabs
     jonquil.file-ops

@@ -7,10 +7,11 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [fake-jvm-nrepl :as fake]
-            [gtk-async :refer [await-until go-row on-gtk]]
+            [gtk-async :as ga :refer [await-until go-row on-gtk]]
             [gtk-selftest-window.support :as support]
             [gtk-selftest-window.tabs :as tabs]
             [jonquil.clj :as clj]
+            [jonquil.doc-examples :as doc-examples]
             [jonquil.dialect :as dialect]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.completion :as completion]
@@ -19,7 +20,9 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
+            [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
+            [jonquil.plugin-hooks :as plugin-hooks]
             [temp-dirs]))
 
 ;; This file's own private copies (gdkkeysyms.h, GTK 4.22.4 installed
@@ -61,6 +64,16 @@
 ;; own full-doc-greet-text embeds.
 (def full-doc-greet-text
   "demo.core/greet\n([who])\nSays hello.\n\n== examples")
+
+(def full-doc-boomer-text
+  ;; its one example fails on the fake (:fail-on "(boom-example)")
+  (str "demo.core/boomer\n([])\nFails.\n\n== demo.core/boomer\n\n"
+       "= example 1\n(boom-example)"))
+
+(def full-doc-shout-text
+  (str "demo.core/shout\n([s])\nUpper-cases s.\n\n== demo.core/shout\n\n"
+       "= example 1\nuser=> (shout \"a\")\n\"A\"\n\n"
+       "= example 2\n(shout \"b\")"))
 
 (defn- temp-project-dir []
   (io/file (System/getProperty "java.io.tmpdir")
@@ -139,11 +152,16 @@
       (write-jar! jar {"clojure/core.clj" lib-text})
       (let [srv (fake/start!
                  {:slow {"(slow)" 5000}
+                  :fail-on "(boom-example)"
                   :completions {"gre" [["greet" "demo.core"] ["greetings" "demo.core"]]}
                   :delays slow-server
                   :loaded ["demo.util" "other.place" "clojure.core"]
                   :docs {"greet" {"ns" "demo.core" "name" "greet" "doc" "Says hello."
                                   "arglists-str" "([who])" "file" (.getCanonicalPath f) "line" 4}
+                         "shout" {"ns" "demo.core" "name" "shout" "doc" "Upper-cases s."
+                                  "arglists-str" "([s])" "file" (.getCanonicalPath f) "line" 4}
+                         "boomer" {"ns" "demo.core" "name" "boomer" "doc" "Fails."
+                                   "arglists-str" "([])" "file" (.getCanonicalPath f) "line" 4}
                          "map" {"ns" "clojure.core" "name" "map"
                                 "doc" "Returns a lazy sequence of the results of applying f."
                                 "arglists-str" "([f] [f coll] [f c1 c2] [f c1 c2 c3] [f c1 c2 c3 & colls])"
@@ -155,7 +173,7 @@
                                        "file" (.getCanonicalPath outside) "line" 2}
                          "ghost" {"ns" "clojure.core" "name" "ghost" "file" (str jar-url "nope/ghost.clj") "line" 1}
                          "late" {"ns" "demo.util" "name" "late" "file" (.getCanonicalPath outside-util) "line" 999}}
-                  :full-docs {"greet" full-doc-greet-text}
+                  :full-docs {"greet" full-doc-greet-text "shout" full-doc-shout-text "boomer" full-doc-boomer-text}
                   ;; row-clj-inspect-in-out's own REPL entry, a
                   ;; single-key map so :in always lands on idx 0 with no
                   ;; ambiguity. row-clj-inspect-lost-connection's own delay:
@@ -414,6 +432,348 @@
                   (support/check :clj-full-doc-escape
                                  (and opened? (= 1 handled) (not (popover/open? fp)))
                                  {:opened opened? :handled handled :open (popover/open? fp)})))))))
+
+;; --- rows: runnable ClojureDocs examples in the full-doc popover -------
+
+(defn- open-full-doc!
+  "Opens the full-doc popover on the form text (caret inside its symbol)
+  with the double quick-doc press, and parks until the examples are built
+  (or 2000 ms). Returns the examples vector."
+  [ui text]
+  (let [fp (:full-doc-popover ui)]
+    ;; let the last row's close (and the editor refocus it posts) land before
+    ;; this open, or that refocus can take the focus off the new popover
+    (ga/settle 10)
+    (on-gtk (let [ed (:editor ui)]
+              (editor/set-text! ed text)
+              (support/place-cursor! (:buf ed) 2)
+              ((:quick-doc!* ui))
+              ((:quick-doc!* ui))))
+    (await-until 2000 20 #(and (popover/open? fp) (seq (help-popover/full-doc-examples fp))))
+    (help-popover/full-doc-examples fp)))
+
+(defn- open-shout-full-doc! [ui] (open-full-doc! ui "(shout \"x\")"))
+
+(defn- run-palette!
+  "Opens the palette, filters it to query and runs the first entry, then
+  closes it. GTK-thread only."
+  [ui query]
+  (let [p (:palette ui)]
+    ((:open-palette!* ui))
+    (palette/set-query! p query)
+    (palette/run-selected! p)
+    (when (popover/open? p) (popover/hide! p))))
+
+(defn- stub-var!
+  "Replaces var v's root with f and returns the original, to put back with
+  stub-var!. For the rows' stubs of functions the window calls through the var."
+  [v f]
+  (let [orig @v]
+    (alter-var-root v (constantly f))
+    orig))
+
+(defn- click! [btn] (g/g-signal-emit-by-name btn "clicked"))
+
+(defn row-clj-example-rows
+  "The shout full doc splits into two examples, each with its buttons, and
+  the whole text is still what full-doc-text reports."
+  [ui]
+  (go-row :clj-example-rows support/check
+    (let [fp (:full-doc-popover ui)
+          exs (open-shout-full-doc! ui)]
+      (on-gtk (support/check :clj-example-rows
+                             (and (= 2 (count exs))
+                                  (= ["(shout \"a\")" "(shout \"b\")"] (mapv :code exs))
+                                  (every? #(and (:run %) (:copy %)) exs)
+                                  (= full-doc-shout-text (help-popover/full-doc-text fp)))
+                             {:codes (mapv :code exs) :text (help-popover/full-doc-text fp)})
+              (popover/hide! fp)))))
+
+(defn row-clj-example-run
+  "Run in Interactions on example 1, with the prompt moved off user: the
+  console says '; in user', echoes the code, the server evals it in user,
+  the prompt stays demo.core and the popover stays open."
+  [ui]
+  (go-row :clj-example-run support/check
+    (let [fp (:full-doc-popover ui)
+          [moved? _] (run-and-await ui "(ns demo.core)" 10000 (constantly true))
+          exs (open-shout-full-doc! ui)
+          n (count (fake/requests (srv)))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (click! (:run (first exs)))
+                         m))
+          ok (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> :ok")))
+          text (support/since ui mark)
+          sent (filter #(and (= "eval" (get % "op")) (= "(shout \"a\")" (get % "code")))
+                       (drop n (fake/requests (srv))))
+          in-user (str/index-of text "; in user")
+          echo (str/index-of text "(shout \"a\")")]
+      (on-gtk (support/check :clj-example-run
+                             (and moved? ok in-user echo (< in-user echo)
+                                  (= 1 (count sent)) (= "user" (get (first sent) "ns"))
+                                  (= 'demo.core (ev/prompt-ns (evaluator ui)))
+                                  (popover/open? fp))
+                             {:moved moved? :ok ok :text text :sent sent
+                              :prompt (ev/prompt-ns (evaluator ui)) :open (popover/open? fp)})
+              (popover/hide! fp)))))
+
+(defn row-clj-example-run-busy
+  "With (read-line) waiting, Run on an example appends the busy warning and
+  sends no second eval."
+  [ui]
+  (go-row :clj-example-run-busy support/check
+    (let [cv (:console ui) fp (:full-doc-popover ui)
+          [moved? _] (run-and-await ui "(ns demo.core)" 10000 (constantly true))
+          _ (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "(read-line)" -1 1)
+                    (cview/handle-return! cv false))
+          waiting? (await-until 3000 20 #(and (ev/waiting-for-input? (evaluator ui)) ((:waiting? cv))))
+          exs (open-shout-full-doc! ui)
+          n (count (fake/requests (srv)))
+          mark (on-gtk (let [m (support/out-end-offset ui)]
+                         (click! (:run (first exs)))
+                         m))
+          warned? (await-until 2000 20 #(str/includes? (support/since ui mark) "Evaluation already in progress"))
+          sent (filter #(= "(shout \"a\")" (get % "code")) (drop n (fake/requests (srv))))
+          _ (on-gtk (g/gtk-text-buffer-insert-interactive-at-cursor (:buf cv) "typed" -1 1)
+                    (cview/handle-return! cv false))
+          idle (await-until 3000 20 #(idle? ui))]
+      (on-gtk (support/check :clj-example-run-busy
+                             (and moved? waiting? warned? (empty? sent) idle
+                                  (not (str/includes? (support/since ui mark) "; in user")))
+                             {:moved moved? :waiting waiting? :warned warned? :sent sent :idle idle
+                              :text (support/since ui mark)})
+              (popover/hide! fp)))))
+
+(defn row-clj-example-copy
+  "Copy to Definitions on example 2 appends it after a blank line, caret at
+  the end, one undo step, popover closed."
+  [ui]
+  (go-row :clj-example-copy support/check
+    (let [fp (:full-doc-popover ui) ed (:editor ui)
+          exs (open-shout-full-doc! ui)]
+      (on-gtk (click! (:copy (second exs))))
+      (on-gtk (let [text (editor/editor-text ed)
+                    caret (:caret (editor/snapshot ed))
+                    open (popover/open? fp)]
+                (g/gtk-text-buffer-undo (:buf ed))
+                (support/check :clj-example-copy
+                               (and (= "(shout \"x\")\n\n(shout \"b\")" text)
+                                    (= (count text) caret)
+                                    (= "(shout \"x\")" (editor/editor-text ed))
+                                    (not open))
+                               {:text text :caret caret :open open :undone (editor/editor-text ed)}))))))
+
+(defn row-clj-example-copy-read-only
+  "A read-only Definitions buffer: Copy changes nothing, throws nothing,
+  says the tab is read-only and leaves the popover open."
+  [ui]
+  (go-row :clj-example-copy-read-only support/check
+    (let [fp (:full-doc-popover ui) ed (:editor ui)
+          exs (open-shout-full-doc! ui)]
+      (on-gtk (editor/set-read-only! ed true))
+      (let [thrown (on-gtk (try (click! (:copy (second exs))) nil
+                                (catch :default e (ex-message e))))
+            text (on-gtk (editor/editor-text ed))
+            open (on-gtk (popover/open? fp))
+            status (on-gtk (g/label-text (:status-label ui)))]
+        (on-gtk (editor/set-read-only! ed false)
+                (support/check :clj-example-copy-read-only
+                               (and (nil? thrown) (= "(shout \"x\")" text) open
+                                    (= "; This tab is read-only." status))
+                               {:thrown thrown :text text :open open :status status})
+                (popover/hide! fp))))))
+
+(defn row-clj-example-focus
+  "Focus on an example's Run button keeps the popover open; moving focus to
+  the console closes it. gtk_window_is_active is stubbed to 1 for the row: the
+  popover closes itself when the window isn't the active one, and a self-test
+  window started from a terminal often isn't. The failure map carries the
+  real value, read through the original function."
+  [ui]
+  (go-row :clj-example-focus support/check
+    (let [fp (:full-doc-popover ui)
+          orig (on-gtk (stub-var! #'g/gtk-window-is-active (fn [_] 1)))]
+      (try
+        (let [exs (open-shout-full-doc! ui)
+              _ (on-gtk (g/gtk-widget-grab-focus (:run (first exs))))
+              _ (ga/settle 5)
+              still-open (on-gtk (popover/open? fp))
+              _ (on-gtk (g/gtk-widget-grab-focus (:view (:console ui))))
+              closed? (await-until 1000 20 #(not (popover/open? fp)))
+              active (on-gtk (orig (g/gtk-widget-get-root (:view (:console ui)))))]
+          (on-gtk (support/check :clj-example-focus
+                                 (and still-open closed?)
+                                 {:still-open still-open :closed closed? :window-active active})))
+        (finally
+          (on-gtk (stub-var! #'g/gtk-window-is-active orig)
+                  (popover/hide! fp)))))))
+
+(defn row-clj-example-run-vetoed
+  "A :before-run hook that vetoes (stubbed here) stops Run on an example like
+  it stops Run Selection: the plugin's line shows, nothing is echoed or sent."
+  [ui]
+  (go-row :clj-example-run-vetoed support/check
+    (let [fp (:full-doc-popover ui)
+          exs (open-shout-full-doc! ui)
+          n (count (fake/requests (srv)))
+          [m seen] (on-gtk (let [m (support/out-end-offset ui)
+                                 seen (atom nil)]
+                             (with-redefs [plugin-hooks/before-run! (fn [e] (reset! seen e) "example vetoed")]
+                               (click! (:run (first exs))))
+                             [m @seen]))
+          text (on-gtk (support/since ui m))
+          sent (filter #(= "(shout \"a\")" (get % "code")) (drop n (fake/requests (srv))))]
+      (on-gtk (support/check :clj-example-run-vetoed
+                             (and (= "(shout \"a\")" (:text seen)) (str/includes? text "; example vetoed")
+                                  (not (str/includes? text "demo.core=> (shout")) (empty? sent))
+                             {:seen seen :text text :sent sent})
+              (popover/hide! fp)))))
+
+(defn row-clj-example-popover-closes-when-inactive
+  "With the window no longer active (gtk_window_is_active stubbed to 0 for the
+  row), the focus check closes the full-doc popover although the root's focus
+  widget is still the example's Run button."
+  [ui]
+  (go-row :clj-example-popover-closes-when-inactive support/check
+    (let [fp (:full-doc-popover ui)
+          exs (open-shout-full-doc! ui)
+          _ (on-gtk (g/gtk-widget-grab-focus (:run (first exs))))
+          _ (ga/settle 5)
+          open-before (on-gtk (popover/open? fp))
+          orig (on-gtk (stub-var! #'g/gtk-window-is-active (fn [_] 0)))]
+      (try
+        (on-gtk (help-popover/hide-unless-focused! fp))
+        (let [closed? (await-until 1000 20 #(not (popover/open? fp)))]
+          (on-gtk (support/check :clj-example-popover-closes-when-inactive
+                                 (and open-before closed?)
+                                 {:open-before open-before :closed closed?})))
+        (finally
+          (on-gtk (stub-var! #'g/gtk-window-is-active orig)
+                  (popover/hide! fp)))))))
+
+(defn- eval-sends
+  "The eval requests for code the fake saw after the first n requests."
+  [n code]
+  (filter #(and (= "eval" (get % "op")) (= code (get % "code"))) (drop n (fake/requests (srv)))))
+
+(defn row-clj-example-retry
+  "A failing example, Retry: the code is evaluated again in user (not the
+  prompt's namespace), the prompt stays put, and the plugins hear both runs
+  as :selection Runs. The fake fails the form (boom-example)."
+  [ui]
+  (go-row :clj-example-retry support/check
+    (let [fp (:full-doc-popover ui)
+          [moved? _] (run-and-await ui "(ns demo.core)" 10000 (constantly true))
+          exs (open-full-doc! ui "(boomer)")
+          n (count (fake/requests (srv)))
+          events (atom [])
+          orig (on-gtk (stub-var! #'plugin-hooks/after-eval!
+                                  (fn [e] (swap! events conj (select-keys e [:source])) nil)))]
+      (try
+        (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                             (click! (:run (first exs)))
+                             m))
+              failed? (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "boom")))
+              _ (on-gtk (popover/hide! fp))
+              _ (on-gtk (run-palette! ui "retry the last failed"))
+              retried? (await-until 5000 20 #(and (idle? ui) (= 2 (count (eval-sends n "(boom-example)")))))
+              _ (await-until 2000 20 #(= 2 (count @events)))
+              sent (eval-sends n "(boom-example)")]
+          (on-gtk (support/check :clj-example-retry
+                                 (and moved? failed? retried? (= 2 (count sent))
+                                      (every? #(= "user" (get % "ns")) sent)
+                                      (= 'demo.core (ev/prompt-ns (evaluator ui)))
+                                      (= [{:source :selection} {:source :selection}] @events))
+                                 {:moved moved? :failed failed? :retried retried?
+                                  :ns (mapv #(get % "ns") sent) :events @events
+                                  :prompt (ev/prompt-ns (evaluator ui))})))
+        (finally
+          (on-gtk (stub-var! #'plugin-hooks/after-eval! orig)))))))
+
+(defn row-clj-example-hooks
+  "A successful example Run reaches the plugins' after-run side as a
+  :selection Run (after-eval! with source :selection fires :after-run)."
+  [ui]
+  (go-row :clj-example-hooks support/check
+    (let [fp (:full-doc-popover ui)
+          exs (open-shout-full-doc! ui)
+          events (atom [])
+          orig (on-gtk (stub-var! #'plugin-hooks/after-eval!
+                                  (fn [e] (swap! events conj [(:source e) (get-in e [:result :status])]) nil)))]
+      (try
+        (let [mark (on-gtk (let [m (support/out-end-offset ui)]
+                             (click! (:run (first exs)))
+                             m))
+              ok (await-until 5000 20 #(and (idle? ui) (str/includes? (support/since ui mark) "=> :ok")))
+              fired (await-until 2000 20 #(= 1 (count @events)))]
+          (on-gtk (support/check :clj-example-hooks
+                                 (and ok fired (= [[:selection :ok]] @events))
+                                 {:ok ok :fired fired :events @events})
+                  (popover/hide! fp)))
+        (finally
+          (on-gtk (stub-var! #'plugin-hooks/after-eval! orig)))))))
+
+(defn row-clj-example-escape-refocuses-editor
+  "Escape pressed with focus on an example's Run button closes the popover
+  and gives the editor view the focus back. gtk_window_is_active is stubbed
+  to 1 for the row: the popover closes itself when the window isn't the
+  active one, and a self-test window in the background isn't always."
+  [ui]
+  (go-row :clj-example-escape-refocuses-editor support/check
+    (let [fp (:full-doc-popover ui) ed (:editor ui)
+          orig (on-gtk (stub-var! #'g/gtk-window-is-active (fn [_] 1)))]
+      (try
+        (let [exs (open-shout-full-doc! ui)
+              _ (on-gtk (g/gtk-widget-grab-focus (:run (first exs))))
+              _ (ga/settle 5)
+              open-before (on-gtk (popover/open? fp))
+              handled (on-gtk ((:handle-window-key! ui) nil support/KEY-ESCAPE 0 0 nil))
+              closed? (await-until 1000 20 #(not (popover/open? fp)))
+              focused? (await-until 2000 20 #(= (:view ed) (g/gtk-root-get-focus (g/gtk-widget-get-root (:view ed)))))]
+          (on-gtk (support/check :clj-example-escape-refocuses-editor
+                                 (and open-before (= 1 handled) closed? focused?)
+                                 {:open-before open-before :handled handled :closed closed? :focused focused?})))
+        (finally
+          (on-gtk (stub-var! #'g/gtk-window-is-active orig)
+                  (popover/hide! fp)))))))
+
+(defn row-clj-full-doc-split-throws
+  "When splitting the doc throws, the popover still shows the whole text in
+  the plain label: no example entries."
+  [ui]
+  (go-row :clj-full-doc-split-throws support/check
+    (let [fp (:full-doc-popover ui)
+          orig (on-gtk (stub-var! #'doc-examples/split (fn [_] (throw (ex-info "split boom" {})))))]
+      (try
+        (on-gtk (let [ed (:editor ui)]
+                  (editor/set-text! ed "(shout \"x\")")
+                  (support/place-cursor! (:buf ed) 2)
+                  ((:quick-doc!* ui))
+                  ((:quick-doc!* ui))))
+        (let [shown (await-until 2000 20 #(= full-doc-shout-text (help-popover/full-doc-text fp)))]
+          (on-gtk (support/check :clj-full-doc-split-throws
+                                 (and shown (popover/open? fp) (= [] (help-popover/full-doc-examples fp)))
+                                 {:shown shown :open (popover/open? fp)
+                                  :examples (help-popover/full-doc-examples fp)})))
+        (finally
+          (on-gtk (stub-var! #'doc-examples/split orig)
+                  (popover/hide! fp)))))))
+
+(defn row-clj-full-doc-no-examples
+  "A doc with no examples keeps the single label: no example entries."
+  [ui]
+  (go-row :clj-full-doc-no-examples support/check
+    (let [fp (:full-doc-popover ui)]
+      (on-gtk (let [ed (:editor ui)]
+                (editor/set-text! ed "(greet \"x\")")
+                (support/place-cursor! (:buf ed) 2)
+                ((:quick-doc!* ui))
+                ((:quick-doc!* ui))))
+      (let [ok (await-until 2000 20 #(= full-doc-greet-text (help-popover/full-doc-text fp)))]
+        (on-gtk (support/check :clj-full-doc-no-examples
+                               (and ok (= [] (help-popover/full-doc-examples fp)))
+                               {:ok ok :examples (help-popover/full-doc-examples fp)})
+                (popover/hide! fp))))))
 
 ;; --- rows: the inspector over the JVM attach evaluator ---------------
 

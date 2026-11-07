@@ -26,6 +26,7 @@
             [jonquil.console :as console]
             [jonquil.describe :as describe]
             [jonquil.dialect :as dialect]
+            [jonquil.doc-examples :as doc-examples]
             [jonquil.docs :as docs]
             [jonquil.edit :as edit]
             [jonquil.eval :as eval]
@@ -1112,7 +1113,9 @@
                                (notify {:done {:result result :output (apply str @out)}}))))))
 
 (defn- hooked-opts
-  "opts without :hook-source (:run :selection :form :repl), :hook-tab,
+  "opts without :hook-source (:run :selection :form :repl), :failure-kind
+  (the kind the restarts record when it differs from what plugins see, as an
+  example Run's :example), :hook-tab,
   :hook-code, :failure*, :changed, :record, :recorder and :replay-root, and, when it had a source, its :on-complete
   chained so the plugins' :after-run and :on-error hooks hear how the eval
   ended, and the window's failure* atom records an error (or clears on
@@ -1123,8 +1126,8 @@
   opts handed to ev/eval! come here, so an eval that never started fires
   nothing. after-eval! only starts futures and reports its own throws, so
   the eval's own completion is never lost to it."
-  [{:keys [hook-source hook-tab hook-code failure* changed record recorder replay-root on-complete] :as opts}]
-  (let [opts (dissoc opts :hook-source :hook-tab :hook-code :failure* :changed :record :recorder :replay-root)
+  [{:keys [hook-source failure-kind hook-tab hook-code failure* changed record recorder replay-root on-complete] :as opts}]
+  (let [opts (dissoc opts :hook-source :failure-kind :hook-tab :hook-code :failure* :changed :record :recorder :replay-root)
         ;; LM7: the tree's root now, as the eval starts (the GTK thread), so
         ;; a re-root before it ends doesn't move it into another project's record
         record (when record
@@ -1138,7 +1141,7 @@
                ;; after the eval's own completion, and never throwing: the
                ;; window's last failure, for the restarts (jonquil.restarts)
                (when failure*
-                 (restarts/record-failure! failure* {:kind hook-source :code hook-code :tab-id hook-tab}
+                 (restarts/record-failure! failure* {:kind (or failure-kind hook-source) :code hook-code :tab-id hook-tab}
                                            result console/error-text))
                ;; LM3: what ran :ok is no longer changed (jonquil.changed)
                (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
@@ -1336,6 +1339,43 @@
         (do-repl-eval! ed cv ev* status-label text {:ns-source (:text snap) :owner (:id tab)
                                                     :hook-source :selection :hook-tab (:id tab)
                                                     :record (tab-record tab ev* :selection text (:text snap))})))))
+
+(defn- do-run-example!
+  "Run in Interactions on a ClojureDocs example's code: evaluated in user at
+  the console without moving the prompt (the JVM evaluator evals in
+  (clj/buffer-ns ns-source) and leaves the prompt alone for a non-nil
+  :ns-source). When the prompt is elsewhere and the Run starts, the console
+  says '; in user' first. Echo, busy warning and recording follow
+  do-run-selection!. Plugins see a :selection Run on all three hooks;
+  :failure-kind :example is the window's own marker so Retry runs it here
+  again. No :changed, since the code isn't the tab's."
+  [{:keys [tab cv ev* status-label] :as ctx} code]
+  (let [idle? (not (ev/evaluating? @ev*))]
+    (when-not (or (refuse-foreign! ctx)
+                  ;; asked only when the Run would start, as Run Selection does
+                  (and idle? (before-run-stopped ctx :selection tab code)))
+      (when (and idle? (not= "user" (str (ev/prompt-ns @ev*))))
+        (cview/append! cv :system "; in user\n"))
+      (cview/echo-entry! cv code idle?)
+      (do-repl-eval! (:ed tab) cv ev* status-label code
+                     {:ns-source "(ns user)" :owner (:id tab)
+                      :hook-source :selection :failure-kind :example :hook-tab (:id tab)
+                      :changed nil
+                      :record {:source :example :code code :path nil :ns "user"}}))))
+
+(defn- do-copy-example!
+  "Copy to Definitions: code goes into the tab's editor after the form at
+  the caret (jonquil.doc-examples/insert-op), exactly as written (Parinfer
+  skipped, so it matches what Run runs), one undo step. A read-only editor
+  refuses it: the status says so and the popover stays open. Otherwise the
+  full-doc popover closes and the editor takes focus back, posted since GTK
+  moves focus as the popover unmaps."
+  [{:keys [tab full-doc-pop status-label]} code]
+  (let [ed (:ed tab)]
+    (if (editor/apply-op-plain! ed (doc-examples/insert-op (editor/snapshot ed) code))
+      (do (popover/hide! full-doc-pop)
+          (on-gui! #(when-not @(:destroyed? ed) (editor/focus! ed))))
+      (set-status! status-label "; This tab is read-only."))))
 
 ;; --- MCP hooks: run/eval/run-selection that report back -----------------------
 
@@ -1844,12 +1884,13 @@
   it. Otherwise this closes every OTHER open popover (close-popovers-fn
   full-doc-pop, never full-doc-pop itself, so it's never hidden and
   reshown within the same frame) and shows the text at 60% of the
-  window's own height (gtk-widget-get-height), then clears the status
+  window's own height (gtk-widget-get-height) with Run/Copy buttons per
+  ClojureDocs example (do-run-example!, do-copy-example!), then clears the status
   back to Ready -- or, a non-:ok result, sets it from help/full-doc-
   status. Every other press, and every evaluator without FullDoc (cljd,
   in-process), takes the ordinary re-show path below unchanged, which
   also records the freshly shown target in last-shown."
-  [{:keys [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win active?]}]
+  [{:keys [ed ev* status-label help-pop full-doc-pop last-shown close-popovers-fn win active? example-ctx]}]
   (try
     (let [snap (editor/snapshot ed)]
       (if-let [{:keys [symbol start] :as target} (help/target snap)]
@@ -1879,7 +1920,9 @@
                                       (do (close-popovers-fn full-doc-pop)
                                           (help-popover/show-full-doc!
                                            full-doc-pop (:text result)
-                                           (int (* 0.6 (g/gtk-widget-get-height win))))
+                                           (int (* 0.6 (g/gtk-widget-get-height win)))
+                                           {:on-run (fn [code] (do-run-example! example-ctx code))
+                                            :on-copy (fn [code] (do-copy-example! example-ctx code))})
                                           (set-status! status-label "Ready"))
 
                                       :else
@@ -2846,6 +2889,8 @@
   (let [flash-fns (make-flash-fn ed)
         quick-doc-fn (fn [] (do-quick-doc! {:ed ed :ev* ev* :status-label status-label :help-pop help-pop
                                             :full-doc-pop full-doc-pop :last-shown last-shown
+                                            :example-ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label
+                                                          :full-doc-pop full-doc-pop}
                                             :close-popovers-fn close-popovers-fn :win win
                                             :active? (fn [] (active? t))}))
         jump-fn (fn [] (do-jump! (source-ctx t)))
@@ -2958,7 +3003,7 @@
                  ffi/null))))))
     (editor/on-focus-lost! ed (fn [] (when (popover/open? help-pop) (popover/hide! help-pop))))
     (editor/on-cursor-moved! ed (fn [_lc] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
-    (editor/on-focus-lost! ed (fn [] (when (popover/open? full-doc-pop) (popover/hide! full-doc-pop))))
+    (editor/on-focus-lost! ed (fn [] (help-popover/hide-unless-focused! full-doc-pop)))
     ;; Rename is autohide ON, so GTK's own grab closes it.
     (register-popover-fn rename-pop)
     ;; The command palette runs a command as its key would, with its
@@ -5135,6 +5180,8 @@
                              buffer? (#{:selection :form} (:kind f))]
                          (cond
                            (= :run (:kind f)) (do-run! ctx)
+                           ;; an example goes back through its own Run, in user
+                           (= :example (:kind f)) (do-run-example! ctx code)
                            ;; the checks Run Selection and Run Form make first
                            (and buffer? (or (refuse-foreign! ctx)
                                             (and (not (ev/evaluating? @ev*))
