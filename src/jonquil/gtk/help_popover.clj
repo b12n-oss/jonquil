@@ -130,6 +130,9 @@
         fp (assoc pp :label label :scroll scroll :text* (atom "") :examples* (atom []))
         focusctl (g/gtk-event-controller-focus-new)]
     (popover/set-child! pp scroll)
+    ;; Escape or any other close with focus on an example's button returns
+    ;; focus to the editor
+    (popover/refocus-view-on-close! pp)
     ;; the scroll swaps its child between this label and a per-show box; the
     ;; extra ref keeps the label alive while the box is the child
     (g/g-object-ref label)
@@ -194,7 +197,9 @@
   ([fp text max-height] (show-full-doc! fp text max-height nil))
   ([fp text max-height handlers]
    (g/gtk-scrolled-window-set-max-content-height (:scroll fp) max-height)
-   (let [{:keys [doc title examples]} (doc-examples/split text)]
+   ;; a throw in the split shows the plain text, as a doc without examples
+   (let [{:keys [doc title examples]} (try (doc-examples/split text)
+                                           (catch :default _ {:examples []}))]
      (reset! (:text* fp) text)
      (if (or (nil? handlers) (empty? examples))
        (do (g/gtk-label-set-text (:label fp) text)
