@@ -585,20 +585,28 @@
 
 (defn row-clj-example-focus
   "Focus on an example's Run button keeps the popover open; moving focus to
-  the console closes it."
+  the console closes it. gtk_window_is_active is stubbed to 1 for the row: the
+  popover closes itself when the window isn't the active one, and a self-test
+  window started from a terminal often isn't. The failure map carries the
+  real value, read through the original function."
   [ui]
   (go-row :clj-example-focus support/check
     (let [fp (:full-doc-popover ui)
-          exs (open-shout-full-doc! ui)
-          _ (on-gtk (g/gtk-widget-grab-focus (:run (first exs))))
-          _ (ga/settle 5)
-          still-open (on-gtk (popover/open? fp))
-          _ (on-gtk (g/gtk-widget-grab-focus (:view (:console ui))))
-          closed? (await-until 1000 20 #(not (popover/open? fp)))]
-      (on-gtk (support/check :clj-example-focus
-                             (and still-open closed?)
-                             {:still-open still-open :closed closed?})
-              (popover/hide! fp)))))
+          orig (on-gtk (stub-var! #'g/gtk-window-is-active (fn [_] 1)))]
+      (try
+        (let [exs (open-shout-full-doc! ui)
+              _ (on-gtk (g/gtk-widget-grab-focus (:run (first exs))))
+              _ (ga/settle 5)
+              still-open (on-gtk (popover/open? fp))
+              _ (on-gtk (g/gtk-widget-grab-focus (:view (:console ui))))
+              closed? (await-until 1000 20 #(not (popover/open? fp)))
+              active (on-gtk (orig (g/gtk-widget-get-root (:view (:console ui)))))]
+          (on-gtk (support/check :clj-example-focus
+                                 (and still-open closed?)
+                                 {:still-open still-open :closed closed? :window-active active})))
+        (finally
+          (on-gtk (stub-var! #'g/gtk-window-is-active orig)
+                  (popover/hide! fp)))))))
 
 (defn row-clj-example-run-vetoed
   "A :before-run hook that vetoes (stubbed here) stops Run on an example like
