@@ -59,6 +59,19 @@
 (deftest clean-unclosed-form-keeps-rest
   (is (= "(map inc [1 2" (de/clean "user=> (map inc [1 2"))))
 
+(deftest clean-cider-prompt
+  (is (= "(inc 1)" (de/clean "user> (inc 1)\n2")))
+  (is (= "x" (de/clean "my.ns> x\n1"))))
+
+(deftest clean-cider-prompt-needs-a-name-and-line-start
+  (is (= "(> 1 2)\n(f x>y)\nx>y\n> 1" (de/clean "(> 1 2)\n(f x>y)\nx>y\n> 1"))))
+
+(deftest clean-keeps-same-line-remainder
+  (is (= "(f) (g)" (de/clean "user=> (f) (g)\n3"))))
+
+(deftest clean-keeps-same-line-comment
+  (is (= "(f) ; why\n\n(h)" (de/clean "user=> (f) ; why\n3\n\n(h)"))))
+
 (deftest clean-to-blank
   (is (= "" (de/clean "user=>\n"))))
 

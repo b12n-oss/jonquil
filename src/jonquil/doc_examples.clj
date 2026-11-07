@@ -7,7 +7,10 @@
 
 ;; Cleaning
 
-(def ^:private named-prompt-re #"^[ \t]*[A-Za-z0-9_.*+!?<>-]+=>")
+(def ^:private named-prompt-re
+  ;; user=>, cljs.user=>, and CIDER's user> (a name, then > before a space or
+  ;; the line's end). A bare > or => has no name and is not a prompt.
+  #"^[ \t]*(?:[A-Za-z0-9_.*+!?<>-]+=>|[A-Za-z_][A-Za-z0-9_.*+!?<>-]*?>(?=[ \t]|$))")
 (def ^:private bare-marker-re #"^[ \t]*=>")
 
 (defn- eol
@@ -65,7 +68,9 @@
                     ;; nothing after the prompt on its line: drop the prompt only
                     (recur p acc)
                     (if-let [fe (form-end body p)]
-                      (recur (skip-output body (min n (inc (eol body fe)))) (conj acc (subs body p fe)))
+                      (let [le (eol body fe)]
+                        ;; the form's whole line stays (a second form, a ; comment)
+                        (recur (skip-output body (min n (inc le))) (conj acc (subs body p le))))
                       (conj acc (subs body p)))))
 
                 (re-find bare-marker-re line)
