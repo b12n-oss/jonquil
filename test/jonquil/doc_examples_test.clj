@@ -76,9 +76,42 @@
   (is (= "" (de/clean "user=>\n"))))
 
 (deftest insert-after-enclosing-form
-  (is (= {:edits [[11 11 "\n\n(inc 1)"]] :caret 20}
+  (is (= {:edits [[11 11 "\n\n(inc 1)\n"]] :caret 20}
          (de/insert-op {:text "(greet \"x\")\n(other)" :caret 2} "(inc 1)"))))
 
 (deftest insert-between-forms-goes-after-caret-line
-  (is (= {:edits [[8 8 "\n\n(inc 1)"]] :caret 17}
+  (is (= {:edits [[8 8 "\n\n(inc 1)\n"]] :caret 17}
          (de/insert-op {:text "(a)\n;; c\n(b)" :caret 5} "(inc 1)"))))
+
+(defn- applied
+  "text after insert-op's edit lands, and the caret."
+  [text caret code]
+  (let [{:keys [edits] :as op} (de/insert-op {:text text :caret caret} code)
+        [[s e ins]] edits]
+    [(str (subs text 0 s) ins (subs text e)) (:caret op)]))
+
+(deftest insert-goes-after-the-line-of-the-forms-end
+  ;; a trailing comment stays with its form
+  (is (= ["(a) ; note\n\n(inc 1)\n\n(b)" 19] (applied "(a) ; note\n(b)" 2 "(inc 1)")))
+  ;; a second form on the same line stays with the first
+  (is (= ["(a) (b)\n\n(inc 1)" 16] (applied "(a) (b)" 2 "(inc 1)"))))
+
+(deftest insert-separates-from-what-follows
+  (is (= ["(a)\n\n(inc 1)\n\n(b)" 12] (applied "(a)\n(b)" 1 "(inc 1)")))
+  ;; a blank line already follows: no second one
+  (is (= ["(a)\n\n(inc 1)\n\n(b)" 12] (applied "(a)\n\n(b)" 1 "(inc 1)")))
+  ;; nothing follows but a newline
+  (is (= ["(a)\n\n(inc 1)\n" 12] (applied "(a)\n" 1 "(inc 1)"))))
+
+(deftest insert-into-empty-buffer-has-no-leading-blank-lines
+  (is (= ["(inc 1)" 7] (applied "" 0 "(inc 1)")))
+  (is (= ["(inc 1)\n\n(b)" 7] (applied "\n(b)" 0 "(inc 1)"))))
+
+(deftest insert-on-a-blank-line-between-forms
+  ;; one blank line before and one after, not two and none
+  (is (= ["(a)\n\n(inc 1)\n\n(b)" 12] (applied "(a)\n\n(b)" 4 "(inc 1)")))
+  ;; blank line after a blank line: goes straight in
+  (is (= ["(a)\n\n(inc 1)\n\n(b)" 12] (applied "(a)\n\n\n(b)" 5 "(inc 1)"))))
+
+(deftest insert-on-the-second-line-when-the-first-is-blank
+  (is (= ["\n(inc 1)\n\n(b)" 8] (applied "\n\n(b)" 1 "(inc 1)"))))

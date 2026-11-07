@@ -120,15 +120,34 @@
 
 ;; Inserting
 
+(defn- line-start
+  "Index of the first character of the line that holds i."
+  [text i]
+  (if-let [j (when (pos? i) (str/last-index-of text "\n" (dec i)))] (inc j) 0))
+
 (defn insert-op
   "The edit that puts code after the top-level form holding the caret (a
-  caret just past its last character counts), else after the caret's line,
-  separated by a blank line. {:edits [[pos pos inserted]] :caret int}, the
-  shape jonquil.gtk.editor/apply-op! takes; :caret is the end of the insertion."
+  caret just past its last character counts), else after the caret's line.
+  It goes after the end of the line the form ends on, so a trailing comment
+  or a second form stays with its form, one blank line before it (none at
+  the start of the buffer, none doubled on a blank line) and one after it
+  when text follows. {:edits [[pos pos inserted]] :caret int}, the shape
+  jonquil.gtk.editor/apply-op! takes; :caret is the end of the code."
   [{:keys [text caret]} code]
   (let [forms (commands/top-level-forms text)
         form (or (first (filter (fn [{:keys [start end]}] (and (<= start caret) (< caret end))) forms))
                  (first (filter (fn [{:keys [end]}] (= end caret)) forms)))
-        pos (if form (:end form) (eol text caret))
-        ins (str "\n\n" code)]
-    {:edits [[pos pos ins]] :caret (+ pos (count ins))}))
+        pos (eol text (if form (:end form) caret))
+        ls (line-start text pos)
+        blank-line? (str/blank? (subs text ls pos))
+        ;; a blank line already gives one of the two newlines
+        prefix (cond (not blank-line?) "\n\n"
+                     (zero? ls) ""
+                     (str/blank? (subs text (line-start text (dec ls)) (dec ls))) ""
+                     :else "\n")
+        next-start (inc pos)
+        suffix (if (and (< next-start (count text))
+                        (not (str/blank? (subs text next-start (eol text next-start)))))
+                 "\n"
+                 "")]
+    {:edits [[pos pos (str prefix code suffix)]] :caret (+ pos (count prefix) (count code))}))
