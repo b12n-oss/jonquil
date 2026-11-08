@@ -7,6 +7,8 @@
             [jonquil.gtk.messages-pane :as messages-pane]
             [jonquil.gtk.parts.disk-poll :as disk-poll-part]
             [jonquil.gtk.parts.layouts :as layouts-part]
+            [jonquil.gtk.parts.live-results :as live-results-part]
+            [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.parts.messages :as messages-part]
             [jonquil.gtk.parts.processes :as processes-part]
             [jonquil.gtk.processes-pane :as processes-pane]
@@ -67,10 +69,11 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :replay] (mapv :id parts/specs)))
   (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
-          :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all}
+          :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
+          :result/inspect :result/copy :result/define :result/jump}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -512,3 +515,33 @@
       (let [c ((deref #'trace-part/install) wctx)]
         (is (fn? @(:after-eval* (:cv wctx))))
         (is (= :root (get-in c [:panels :trace :root])))))))
+
+(deftest live-results-part-owns-its-commands
+  (let [spec (some #(when (= :live-results (:id %)) %) parts/specs)]
+    (is (= [:result-inspect-fn] (get-in spec [:commands :result/inspect :call])))
+    (is (= [:result-copy-fn] (get-in spec [:commands :result/copy :call])))
+    (is (= [:result-define-fn] (get-in spec [:commands :result/define :call])))
+    (is (= [:result-jump-fn] (get-in spec [:commands :result/jump :call])))
+    (is (= 4 (count (:commands spec))))))
+
+(deftest live-results-say-no-result
+  (let [statuses (atom [])
+        wctx {:cv {:view :view :buf :buf :results (atom [])}
+              :set-status! #(swap! statuses conj %) :status-label :lbl
+              :ev* (atom nil) :active-tab (fn [] nil)
+              :inspect! (fn [_]) :ask-lookup! (fn [& _]) :jump-to! (fn [& _])
+              :source-ctx (fn [_] {})}]
+    (with-redefs [cview/result-at (fn [_ _] nil)
+                  cview/result-text-at (fn [_ _] nil)
+                  g/cursor-offset (fn [_] 0)
+                  g/gtk-gesture-click-new (fn [] :gesture)
+                  g/gtk-gesture-single-set-button (fn [& _])
+                  g/gtk-event-controller-set-propagation-phase (fn [& _])
+                  g/g-signal-connect-data (fn [& _] 1)
+                  g/gtk-widget-add-controller (fn [& _])]
+      (let [c ((deref #'live-results-part/install) wctx)]
+        (doseq [k [:result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn]]
+          (reset! statuses [])
+          ((get-in c [:fns k]))
+          (is (= ["; No result here."] @statuses) (str k)))
+        (is (= #{:result-click!* :result-release!* :console-right-press!*} (set (keys (:ui c)))))))))

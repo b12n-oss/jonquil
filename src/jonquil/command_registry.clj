@@ -56,12 +56,6 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :run/changed {:doc "Run the forms changed since they last ran." :scope :window
                  :run (call :run-changed-fn)}
-   :result/inspect {:doc "Inspect the console result at the caret." :scope :window :run (call :result-inspect-fn)}
-   :result/copy {:doc "Copy the console result at the caret." :scope :window :run (call :result-copy-fn)}
-   :result/define {:doc "Define a var holding the console result at the caret." :scope :window
-                   :run (call :result-define-fn)}
-   :result/jump {:doc "Jump to the definition of the var the console result at the caret names." :scope :window
-                 :run (call :result-jump-fn)}
    :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window
                        :run (call :show-frames-fn)}
    :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
