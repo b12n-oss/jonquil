@@ -132,8 +132,8 @@ Applying a theme rebuilds nothing: each component's `apply-theme!` retints its t
 
 A window feature that owns its own state, commands and startup work is a part, so it doesn't have to grow `jonquil.gtk.window`. A part has two namespaces:
 
-- `jonquil.parts.<name>` is GTK-free and holds `spec`: `{:id :name :commands {cmd-id {:doc "..." :scope :window :call [ctx-key & args]}}}`. A command names its context function as data (`:call`), never as a `:run` fn, so a spec needs nothing from `jonquil.command-registry`, which requires it.
-- `jonquil.gtk.parts.<name>` holds `part`, an install fn tagged `^{:part/id :name}`. `(part wctx)` returns `{:fns :ui :hooks :exports}`.
+- `jonquil.parts.<name>` is GTK-free and holds `spec`: `{:id :<name> :commands {cmd-id {:doc "..." :scope :window :call [ctx-key & args]}}}`. A command names its context function as data (`:call`), never as a `:run` fn, so a spec needs nothing from `jonquil.command-registry`, which requires it.
+- `jonquil.gtk.parts.<name>` holds `part`, an install fn tagged `^{:part/id :<name>}`. `(part wctx)` returns `{:fns :ui :hooks :exports}`.
 
 `jonquil.parts/specs` and `jonquil.gtk.parts/installs` list the parts in install order, and a test checks that both name the same ones. A part may read another part's `:exports` only if that part comes earlier.
 

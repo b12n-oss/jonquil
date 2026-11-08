@@ -250,9 +250,9 @@ names these harnesses make); `bb clean:tmp --dry-run` lists them first.
 The design is in [Window parts](architecture/index.md#window-parts). In short:
 
 1. Add `src/jonquil/parts/<name>.clj` with `spec` (its commands, each with a `:call` data entry) and list it in `jonquil.parts/specs`.
-2. Add `src/jonquil/gtk/parts/<name>.clj` with `(part wctx)` tagged `^{:part/id :name}`, returning `{:fns :ui :hooks :exports}`, and list it in `jonquil.gtk.parts/installs`.
+2. Add `src/jonquil/gtk/parts/<name>.clj` with `(part wctx)` tagged `^{:part/id :<name>}`, returning `{:fns :ui :hooks :exports}`, and list it in `jonquil.gtk.parts/installs`.
 3. Take everything the part needs from `wctx`, never by requiring `jonquil.gtk.window`.
-4. Test the spec headless in `bb test`, and add a row to a window self-test for the install. `specs-and-installs-name-the-same-parts` fails if only one list has the part.
+4. Test the spec in `bb test`, and add a row to a window self-test for the install. `specs-and-installs-name-the-same-parts` fails if only one list has the part.
 5. Run `bb verify`.
 
 ## The macOS app: bundle, install, icon

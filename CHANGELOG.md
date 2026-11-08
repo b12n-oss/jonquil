@@ -83,7 +83,7 @@ phase by phase, is in [ROADMAP.md](ROADMAP.md).
 
 ### Changed
 
-- Internal: a window feature can be added as a part, a spec namespace plus an install fn that returns its context functions, slots and start, re-root and quit hooks. The last session's replay is the first part, and nothing you see changes. See Window parts in the architecture guide.
+- Internal: a window feature can be added as a part, a spec namespace plus an install fn that returns its context functions, self-test and MCP entries, and start, re-root and quit hooks. The last session's replay is the first part, and nothing you see changes. See Window parts in the architecture guide.
 - Every screenshot in the guide was retaken on 2026-10-21 with `bb docs:shots` (30 scenes, all passing), so the images match the current window.
 - A crash or force-quit of Jonquil no longer leaves its out-of-process Jolt child running: the child notices its parent is gone and exits within a few seconds.
 - Jolt running out of process no longer writes `.nrepl-port` into your project while its child runs, so the file doesn't show up in `git status` and no other nREPL client can attach to Jonquil's own child by mistake. A `.nrepl-port` your project already has is left alone.
