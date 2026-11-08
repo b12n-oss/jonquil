@@ -31,6 +31,7 @@
    "jonquil/parts/extra.clj" (embedded-text "jonquil/parts/extra.clj")
    "jonquil/parts/layouts.clj" (embedded-text "jonquil/parts/layouts.clj")
    "jonquil/parts/live_results.clj" (embedded-text "jonquil/parts/live_results.clj")
+   "jonquil/parts/locations.clj" (embedded-text "jonquil/parts/locations.clj")
    "jonquil/parts/messages.clj" (embedded-text "jonquil/parts/messages.clj")
    "jonquil/parts/processes.clj" (embedded-text "jonquil/parts/processes.clj")
    "jonquil/parts/replay.clj" (embedded-text "jonquil/parts/replay.clj")

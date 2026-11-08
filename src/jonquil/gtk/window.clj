@@ -45,12 +45,9 @@
             [jonquil.gtk.gutter :as gutter]
             [jonquil.hints :as hints]
             [jonquil.line-counts :as line-counts]
-            [jonquil.compare :as compare]
-            [jolt.process]
             [jonquil.layouts :as layouts]
             [jonquil.gtk.help-popover :as help-popover]
             [jonquil.gtk.inspector-pane :as inspector-pane]
-            [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -62,7 +59,6 @@
             [jonquil.help :as help]
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
-            [jonquil.locations :as loc]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.parts :as parts]
             [jonquil.restarts :as restarts]
@@ -87,8 +83,7 @@
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
-            [jonquil.theme :as theme]
-            [jonquil.usages :as usages]))
+            [jonquil.theme :as theme]))
 
 ;; --- title -------------------------------------------------------------
 
@@ -856,7 +851,7 @@
   "{which root} for the panels right's slot holds, a part's among them; a
   right without :review-root, :plugins-root or :history-root (a test's) has
   fewer, and one without :part-panels* has no part panels."
-  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root
+  [{:keys [inspector-root source-root review-root plugins-root history-root debugger-root
            part-panels*]}]
   (cond-> (into {:inspector inspector-root :source source-root}
                 (map (fn [[id p]] [id (:root p)]))
@@ -864,7 +859,6 @@
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)
-    locations-root (assoc :locations locations-root)
     debugger-root (assoc :debugger debugger-root)))
 
 (defn- show-right-panel!
@@ -2507,23 +2501,6 @@
         (set-status! status-label (str "; key: " (ex-message e)))
         1)))))
 
-;; --- the locations list ----------------------------------------------------
-
-(defn- create-location-marks
-  "Two anonymous marks per entry in buf, so the place follows edits: the
-  start's mark has right gravity and the end's left, so text typed at
-  either edge stays outside the place."
-  [buf entries]
-  (mapv (fn [{:keys [start end]}]
-          (g/with-iters* buf start end
-            (fn [a b] [(g/gtk-text-buffer-create-mark buf nil a 0)
-                       (g/gtk-text-buffer-create-mark buf nil b 1)])))
-        entries))
-
-(defn- delete-location-marks! [buf marks]
-  (doseq [[a b] marks]
-    (g/gtk-text-buffer-delete-mark buf a)
-    (g/gtk-text-buffer-delete-mark buf b)))
 
 ;; --- context menus -------------------------------------------------------
 
@@ -2650,7 +2627,7 @@
           was-active? (= id @active-id)
           gone (set (tab/popovers t))]
       ;; while the buffer is alive, so the list's marks can be deleted
-      (when-let [f (:locations-tab-closed! ctx)] (f id))
+      (parts/run-tab-hooks! ctx :on-tab-removed t)
       (when-let [r (:recent-tabs ctx)] (swap! r (fn [v] (vec (remove #{id} v)))))
       (swap! tabs (fn [v] (vec (remove (fn [x] (= id (:id x))) v))))
       (when was-active? (reset! active-id (:id neighbour)))
@@ -3658,7 +3635,6 @@
         ;; The plugin list shares the slot too; its rows are rebuilt after
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
-        locp (locations-pane/make-pane)
         ;; The Messages panel's unread count (LM8), shown in the status
         ;; bar while it's above zero; the Messages part fills it
         unread-label (g/gtk-label-new "")
@@ -3796,7 +3772,7 @@
         ;; right-roots are built first, like *tab-ctx.
         part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
-               :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
+               :review-root (:root rp) :plugins-root (:root lp)
                :debugger-root (:root dbgp)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
@@ -4103,245 +4079,6 @@
                                        (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
-        ;; The locations list, or nil. A buffer list is {:tab-id :list
-        ;; :marks}, its marks in that tab's buffer. A project list (:scope
-        ;; :project, Find Usages in Project) is {:list :anchors}: anchors
-        ;; maps an entry's :id to {:tab-id :marks}, made for a whole file
-        ;; the first time its tab is open, when the list is made or when one
-        ;; of its places is visited. A new list deletes the marks, and a
-        ;; closing tab takes its own with it. GTK thread only.
-        locations-state (atom nil)
-        ;; bumped by every new list, so a Find Usages still running lands
-        ;; only when nothing has replaced the list it was asked for
-        locations-gen (atom 0)
-        clear-locations! (fn []
-                           (when-let [{:keys [tab-id marks anchors]} @locations-state]
-                             (when-let [t (and tab-id (tab-by-id tabs tab-id))]
-                               (delete-location-marks! (:buf (:ed t)) marks))
-                             (doseq [[tid as] (group-by :tab-id (vals anchors))]
-                               (when-let [t (tab-by-id tabs tid)]
-                                 (delete-location-marks! (:buf (:ed t)) (map :marks as)))))
-                           (reset! locations-state nil)
-                           ;; an empty list is nothing to switch back to
-                           (swap! (:recent-panels right) (fn [v] (vec (remove #{:locations} v)))))
-        tab-for-path (fn [path]
-                       (some (fn [t] (when (and @(:path t) (source/same-path? @(:path t) path)) t)) @tabs))
-        anchor-file! (fn [t path]
-                       ;; every entry of path's file, filtered out or not, gets
-                       ;; its marks in t's buffer, but only while the buffer
-                       ;; holds the text the search read: otherwise the
-                       ;; offsets would land anywhere, so the file is stale
-                       (let [lst (:list @locations-state)]
-                         (if (= (get (:hashes lst) path) (hash (editor/editor-text (:ed t))))
-                           (let [es (filterv #(= path (:path %)) (:all lst))
-                                 ms (create-location-marks (:buf (:ed t)) es)]
-                             (swap! locations-state update :anchors into
-                                    (map (fn [e m] [(:id e) {:tab-id (:id t) :marks m}]) es ms)))
-                           (swap! locations-state update :stale (fnil conj #{}) path))))
-        make-locations! (fn [lst]
-                          (swap! locations-gen inc)
-                          (clear-locations!)
-                          (if (= :project (:scope lst))
-                            (do (reset! locations-state {:list lst :anchors {}})
-                                (doseq [path (distinct (map :path (:all lst)))]
-                                  (when-let [t (tab-for-path path)] (anchor-file! t path))))
-                            (let [t (active-tab)]
-                              (reset! locations-state {:tab-id (:id t) :list lst
-                                                       :marks (create-location-marks (:buf (:ed t)) (:entries lst))})))
-                          (locations-pane/show! locp lst)
-                          (show-right-panel! right :locations)
-                          (set-status! status-label (str "; " (:title lst) ": " (loc/position-text lst))))
-        place-of (fn [lst]
-                   ;; {:tab :marks :buffer-marks} for lst's current entry, a
-                   ;; project entry's file opened and anchored first when it
-                   ;; isn't yet; {:stale path} when that file's text has
-                   ;; changed since the search; nil when it can't be opened
-                   (let [{:keys [tab-id marks]} @locations-state
-                         i (:index lst)]
-                     (if (= :project (:scope lst))
-                       (let [e (nth (:entries lst) i)]
-                         (when-not (get (:anchors @locations-state) (:id e))
-                           (let [t (or (tab-for-path (:path e))
-                                       (when-not (:error (open-file! @*tab-ctx (:path e)))
-                                         (tab-for-path (:path e))))]
-                             (when t (anchor-file! t (:path e)))))
-                         (if-let [a (get (:anchors @locations-state) (:id e))]
-                           {:tab (tab-by-id tabs (:tab-id a)) :marks (:marks a)
-                            :buffer-marks (keep (fn [[_ b]] (when (= (:tab-id a) (:tab-id b)) (:marks b)))
-                                                (:anchors @locations-state))}
-                           (when (contains? (:stale @locations-state) (:path e))
-                             {:stale (:path e)})))
-                       {:tab (tab-by-id tabs tab-id) :marks (nth marks i) :buffer-marks marks})))
-        goto-location! (fn [lst]
-                         (swap! locations-state assoc :list lst)
-                         (locations-pane/select! locp lst)
-                         (if-let [{t :tab [ma mb] :marks bm :buffer-marks stale :stale} (place-of lst)]
-                           (if stale
-                             (set-status! status-label
-                                          (str "; " (file-name stale) " changed since the search, so its places may be off: search again."))
-                           (let [ed (:ed t)
-                                 buf (:buf ed)
-                                 s (g/mark-offset buf ma)
-                                 e (g/mark-offset buf mb)]
-                             (if (>= s e)
-                               ;; Every place collapsed at once is a whole-buffer
-                               ;; replace (Format All's one edit, a reload's
-                               ;; set-text!), not one deleted place
-                               (set-status! status-label
-                                            (if (every? (fn [[a b]] (>= (g/mark-offset buf a) (g/mark-offset buf b))) bm)
-                                              "; The buffer was replaced (Format All or a reload), so the list is out of date: list again."
-                                              "; That place is gone."))
-                               (do (select-tab! @*tab-ctx (:id t))
-                                   (place-caret-and-scroll! ed s)
-                                   (g/with-iters* buf s e (fn [a b] (g/gtk-text-buffer-select-range buf a b)))
-                                   (set-status! status-label (str "; " (loc/position-text lst)))))))
-                           (set-status! status-label "; Couldn't open that file.")))
-        locations-step-fn (fn [delta]
-                            (if-let [lst (:list @locations-state)]
-                              (let [{l :list moved? :moved?} (loc/step lst delta)]
-                                (cond moved? (goto-location! l)
-                                      (empty? (:entries l)) (set-status! status-label "; No places.")
-                                      :else (set-status! status-label (if (pos? delta) "; End of the list." "; Start of the list."))))
-                              (set-status! status-label "; No locations list.")))
-        symbol-at-caret (fn []
-                          (let [snap (editor/snapshot (:ed (active-tab)))]
-                            [(:text snap) (:symbol (help/target snap))]))
-        locations-uses-fn (fn [] (let [[text sym] (symbol-at-caret)]
-                                   (if sym
-                                     (make-locations! (loc/uses text sym))
-                                     (set-status! status-label "; No symbol at the caret."))))
-        locations-definitions-fn (fn [] (let [[text sym] (symbol-at-caret)]
-                                          (if sym
-                                            (make-locations! (loc/definitions text sym))
-                                            (set-status! status-label "; No symbol at the caret."))))
-        ;; Find Usages in Project (LM2): jonquil.usages/scan on a future,
-        ;; open tabs' text in place of their files'; a newer search
-        ;; supersedes one still running
-        locations-project-usages-fn
-        (fn []
-          (let [[_ sym] (symbol-at-caret)
-                t (active-tab)
-                root (or (:root @(:state tree-pane))
-                         (some-> @(:path t) (java.io.File.) .getCanonicalFile .getParent))]
-            (cond
-              (nil? sym) (set-status! status-label "; No symbol at the caret.")
-              (nil? root) (set-status! status-label "; No project folder: open a folder, or save this file first.")
-              :else
-              (let [gen (swap! locations-gen inc)
-                    name (usages/search-name sym)
-                    texts (into {} (keep (fn [x] (when-let [p @(:path x)]
-                                                   [(.getCanonicalPath (java.io.File. ^String p))
-                                                    (editor/editor-text (:ed x))])))
-                                @tabs)]
-                (set-status! status-label (str "; Finding usages of " name "..."))
-                (future
-                  (let [r (try (usages/scan {:root root :name name :texts texts})
-                               (catch :default e {:error (or (ex-message e) (str e))}))]
-                    (on-gui! (fn []
-                               (when (= gen @locations-gen)
-                                 (try
-                                   (if-let [err (:error r)]
-                                     (set-status! status-label (str "; Find usages: " err))
-                                     (do (make-locations! (assoc (loc/project-uses r name) :root root))
-                                         (when (pos? (:unreadable r 0))
-                                           (set-status! status-label
-                                                        (str "; " (:unreadable r) " file(s) couldn't be read.")))))
-                                   (catch :default e
-                                     (set-status! status-label (str "; Find usages: " (or (ex-message e) (str e)))))))))))))))
-        locations-matches-fn (fn []
-                               (let [{:keys [ed fb]} (active-tab)
-                                     snap (editor/snapshot ed)
-                                     find-q (when (pos? (g/gtk-widget-get-visible (:box fb)))
-                                              (g/editable-text (:query fb)))
-                                     ;; the find query when the bar has one, else the selection
-                                     q (if (str/blank? find-q)
-                                         (subs (:text snap) (:sel-start snap) (:sel-end snap))
-                                         find-q)]
-                                 (if (str/blank? q)
-                                   (set-status! status-label "; Nothing to list: open Find, or select some text.")
-                                   (make-locations! (loc/matches (:text snap) q)))))
-        ;; LM3: the tab against another version of its file, its differences
-        ;; in the Locations list. compare-state is {:tab-id :label :other}
-        ;; for Take, which works out the difference at the caret afresh.
-        compare-state (atom nil)
-        compare-list! (fn [t label other]
-                        (let [l (compare/location-list label other (editor/editor-text (:ed t)))]
-                          (if (seq (:entries l))
-                            (do (reset! compare-state {:tab-id (:id t) :label label :other other})
-                                (make-locations! l))
-                            (do (reset! compare-state nil)
-                                ;; a list of differences that are gone goes too
-                                (when (some-> @locations-state :list :title (str/starts-with? "Differences from "))
-                                  (clear-locations!)
-                                  (locations-pane/show! locp {:title "" :entries [] :index nil})
-                                  (hide-right-panel! right :locations))
-                                (set-status! status-label (str "; No differences from " label "."))))))
-        read-disk (fn [path]
-                    (let [f (java.io.File. ^String path)]
-                      (if-not (.exists f)
-                        {:error "The file isn't on disk any more."}
-                        (try {:text (slurp path)}
-                             (catch :default e {:error (str "Couldn't read the file: " (or (ex-message e) (str e)))})))))
-        compare-with! (fn [label read-other]
-                        (let [t (active-tab)
-                              path @(:path t)]
-                          (if-not path
-                            (set-status! status-label "; Compare needs a saved file.")
-                            (let [{:keys [text error]} (read-other path)]
-                              (if error
-                                (set-status! status-label (str "; " error))
-                                (compare-list! t label text))))))
-        compare-disk-fn (fn [] (compare-with! "disk" read-disk))
-        compare-head-fn (fn [] (compare-with! "HEAD"
-                                              (fn [path]
-                                                (let [f (java.io.File. ^String path)
-                                                      r (try (jolt.process/sh {:dir (.getParent f)} "git" "show" (str "HEAD:./" (.getName f)))
-                                                             (catch :default e {:exit -1 :err (ex-message e)}))]
-                                                  (if (= 0 (:exit r))
-                                                    {:text (:out r)}
-                                                    {:error (str "git: " (or (not-empty (first (str/split-lines (str (:err r)))))
-                                                                             (str "exited " (:exit r))))})))))
-        compare-take-fn (fn []
-                          (let [t (active-tab)
-                                {:keys [tab-id label]} @compare-state
-                                ;; the disk as it is now, not as it was at the compare
-                                other (if (= "disk" label)
-                                        (or (:text (some-> @(:path t) read-disk)) (:other @compare-state))
-                                        (:other @compare-state))]
-                            (if (not= tab-id (:id t))
-                              (set-status! status-label "; Compare this tab first: Compare with the file on disk, or with git HEAD.")
-                              (let [ed (:ed t)
-                                    buffer (editor/editor-text ed)
-                                    line (first (g/cursor-line-col (:buf ed)))]
-                                (if-let [h (compare/hunk-at (compare/hunks other buffer) line buffer)]
-                                  (let [[s e r] (compare/take-edit buffer h)]
-                                    ;; one undo step, exactly the other version's lines
-                                    (editor/apply-op-plain! ed {:edits [[s e r]] :caret s})
-                                    (compare-list! t label other)
-                                    (when (seq (:entries (:list @locations-state)))
-                                      (set-status! status-label (str "; Took " (if (= "disk" label) "the disk's" (str label "'s"))
-                                                                     " version of line " (inc (:line h)) "."))))
-                                  (set-status! status-label "; No difference at the caret: F8 steps to the next one."))))))
-        _ (locations-pane/set-handlers!
-           locp {:on-activate (fn [i] (when-let [lst (:list @locations-state)]
-                                        (goto-location! (assoc lst :index i))))
-                 :on-close (fn [] (hide-right-panel! right :locations))
-                 :on-hows (fn [shown]
-                            (when-let [lst (:list @locations-state)]
-                              (let [l (loc/set-hows lst shown)]
-                                (swap! locations-state assoc :list l)
-                                (locations-pane/show! locp l)
-                                (set-status! status-label (str "; " (:title l) ": " (loc/position-text l))))))})
-        locations-tab-closed! (fn [id]
-                                (let [{:keys [tab-id anchors]} @locations-state]
-                                  (cond
-                                    (= id tab-id) (do (clear-locations!)
-                                                      (hide-right-panel! right :locations))
-                                    ;; a project list keeps its other files;
-                                    ;; this one's marks went with its buffer
-                                    (some #(= id (:tab-id %)) (vals anchors))
-                                    (swap! locations-state update :anchors
-                                           (fn [as] (into {} (remove (fn [[_ a]] (= id (:tab-id a)))) as))))))
         ;; The Frames panel's data (jonquil.debugger). GTK thread only. Debug
         ;; mode has no flag here: the toggle reads the runtime's own mode.
         frames-state (atom nil)
@@ -4579,7 +4316,6 @@
                                           :inspector (inspector-pane/focus! pane)
                                           :source (source-pane/focus! sp)
                                           :debugger (debugger-pane/focus! dbgp)
-                                          :locations (g/gtk-widget-grab-focus (:list locp))
                                           :plugins (g/gtk-widget-grab-focus (:list lp))
                                           (if-let [p (get @part-panels* k)]
                                             ((:focus! p))
@@ -4595,8 +4331,7 @@
                              (set-status! status-label
                                             (case k
                                               :inspector "; Nothing inspected yet: inspect a form or a result first."
-                                              :source "; The Source panel is empty: jump to a definition first."
-                                              :locations "; No locations yet: list a symbol's uses or definitions, or the find matches.")))))
+                                              :source "; The Source panel is empty: jump to a definition first.")))))
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         ;; Window parts (jonquil.gtk.parts): each install fn reads the core
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
@@ -4623,7 +4358,8 @@
                                                       (inspect-last! ev* right pane inspector-state inspecting?
                                                                      inspector-last-args on-view status-label start))
                                           :ask-lookup! ask-lookup! :jump-to! jump-to!
-                                          :source-ctx source-ctx}
+                                          :source-ctx source-ctx
+                                          :place-caret-and-scroll! place-caret-and-scroll! :file-name file-name}
                                          part-error!
                                          {:specs parts/specs})
         _ (reset! part-panels* (:panels part-contribution))
@@ -4649,9 +4385,6 @@
                          :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
                                                                 (assoc (live-keys) :os (System/getProperty "os.name")))))
                          :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
-                         :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
-                         :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
-                         :locations-project-usages-fn locations-project-usages-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :hints-toggle-fn (fn []
@@ -4660,7 +4393,6 @@
                                               (set-status! status-label (if on?
                                                                           "; Key hints on: the status bar names the keys for the symbol at the caret."
                                                                           "; Key hints off."))))
-                         :compare-disk-fn compare-disk-fn :compare-head-fn compare-head-fn :compare-take-fn compare-take-fn
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          ;; switching tabs: a palette tab entry, and Go back
@@ -4747,8 +4479,6 @@
     (g/gtk-box-append slot (:root lp))
     (g/gtk-widget-set-vexpand (:root hp) 1)
     (g/gtk-box-append slot (:root hp))
-    (g/gtk-widget-set-vexpand (:root locp) 1)
-    (g/gtk-box-append slot (:root locp))
     (g/gtk-widget-set-vexpand (:root dbgp) 1)
     (g/gtk-box-append slot (:root dbgp))
     (doseq [[_ p] @part-panels*]
@@ -4761,7 +4491,6 @@
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible (:root lp) 0)
-    (g/gtk-widget-set-visible (:root locp) 0)
     (g/gtk-widget-set-visible (:root dbgp) 0)
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-visible (:root p) 0))
@@ -4937,7 +4666,8 @@
                    :parinfer-mode-read (fn [] @parinfer-mode*)
                    :parinfer-status-fn parinfer-status-fn
                    :parinfer-label-update! update-parinfer-label!
-                   :locations-tab-closed! locations-tab-closed! :recent-tabs recent-tabs
+                   :part-contribution part-contribution :part-error! part-error!
+                   :recent-tabs recent-tabs
                    :hint-label hint-label :hints-on? hints-on?
                    :line-counting? line-counting?}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
@@ -5481,7 +5211,6 @@
                  ;; for), Enable, Disable and Open on an id's row as the
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
-                   :locations-pane locp
                    ;; the Frames panel and the inspector's own Close
                    :debugger-pane dbgp
                    :part-owners* (fn [] (:owners part-contribution))

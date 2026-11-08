@@ -69,11 +69,14 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :locations :replay] (mapv :id parts/specs)))
   (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
             :panel/processes :processes/show
           :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
-          :result/inspect :result/copy :result/define :result/jump}
+          :result/inspect :result/copy :result/define :result/jump
+          :panel/locations :locations/uses :locations/definitions :locations/matches
+          :locations/usages-in-project :locations/next :locations/previous
+          :compare/disk :compare/head :compare/take}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -545,3 +548,47 @@
           ((get-in c [:fns k]))
           (is (= ["; No result here."] @statuses) (str k)))
         (is (= #{:result-click!* :result-release!* :console-right-press!*} (set (keys (:ui c)))))))))
+
+(deftest run-tab-hooks-calls-each-part
+  (let [seen (atom [])
+        ctx {:part-contribution {:hooks {:on-tab-removed [(fn [c t] (swap! seen conj [:a c t]))
+                                                          (fn [c t] (swap! seen conj [:b c t]))]}
+                                 :owners {:hooks {:on-tab-removed [:a :b]}}}
+             :part-error! (fn [& _] (throw (ex-info "no error expected" {})))}]
+    (is (nil? (parts/run-tab-hooks! ctx :on-tab-removed {:id 7})))
+    (is (= [[:a ctx {:id 7}] [:b ctx {:id 7}]] @seen))))
+
+(deftest run-tab-hooks-reports-a-throw
+  (let [seen (atom []) errors (atom [])
+        ctx {:part-contribution {:hooks {:on-tab-removed [(fn [_ _] (throw (ex-info "boom" {})))
+                                                          (fn [_ t] (swap! seen conj (:id t)))]}
+                                 :owners {:hooks {:on-tab-removed [:a :b]}}}
+             :part-error! (fn [id ex] (swap! errors conj [id (ex-message ex)]))}]
+    (is (nil? (parts/run-tab-hooks! ctx :on-tab-removed {:id 3})))
+    (is (= [[:a "boom"]] @errors))
+    (is (= [3] @seen))))
+
+(deftest run-tab-hooks-without-a-contribution
+  (is (nil? (parts/run-tab-hooks! {} :on-tab-removed {:id 1})))
+  (is (nil? (parts/run-tab-hooks! {:part-error! (fn [& _])} :on-tab-removed {:id 1}))))
+
+(deftest tab-hook-kinds-are-accepted
+  (let [errors (atom [])
+        ok (install-fn :ok (fn [_] {:hooks {:on-tab-removed (fn [_ _])}}))
+        wired (install-fn :wired (fn [_] {:hooks {:on-tab-wired (fn [_ _])}}))
+        c (parts/install [ok wired] {} (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+    (is (= [:on-tab-removed] (keys (:hooks c))))
+    (is (= [[:wired "part :wired: unknown hook :on-tab-wired"]] @errors))))
+
+(deftest locations-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :locations (:id %)) %) parts/specs)]
+    (is (= {:panel/locations [:panel-focus-fn :locations]
+            :locations/uses [:locations-uses-fn] :locations/definitions [:locations-definitions-fn]
+            :locations/matches [:locations-matches-fn]
+            :locations/usages-in-project [:locations-project-usages-fn]
+            :locations/next [:locations-step-fn 1] :locations/previous [:locations-step-fn -1]
+            :compare/disk [:compare-disk-fn] :compare/head [:compare-head-fn]
+            :compare/take [:compare-take-fn]}
+           (update-vals (:commands spec) :call)))
+    (is (= [{:id :locations :label "Locations"}] (:panels spec)))
+    (is (= "Locations" (:locations palette/PANEL-LABELS)))))

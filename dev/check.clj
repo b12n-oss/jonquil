@@ -9,6 +9,7 @@
     jonquil.parts.disk-poll
     jonquil.parts.messages
     jonquil.parts.layouts
+    jonquil.parts.locations
     jonquil.parts.processes
     jonquil.parts.replay
     jonquil.parts.trace
@@ -137,6 +138,7 @@
     jonquil.gtk.parts.disk-poll
     jonquil.gtk.parts.messages
     jonquil.gtk.parts.layouts
+    jonquil.gtk.parts.locations
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.replay
     jonquil.gtk.parts.trace

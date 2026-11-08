@@ -7,6 +7,7 @@
             [jonquil.gtk.parts.disk-poll :as disk-poll]
             [jonquil.gtk.parts.layouts :as layouts]
             [jonquil.gtk.parts.live-results :as live-results]
+            [jonquil.gtk.parts.locations :as locations]
             [jonquil.gtk.parts.messages :as messages]
             [jonquil.gtk.parts.processes :as processes]
             [jonquil.gtk.parts.replay :as replay]
@@ -17,4 +18,4 @@
 (def installs
   "Install fns, in order: the real parts, then any registered in
   jonquil.parts.extra."
-  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part live-results/part replay/part] @extra/installs*))
+  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part live-results/part locations/part replay/part] @extra/installs*))
