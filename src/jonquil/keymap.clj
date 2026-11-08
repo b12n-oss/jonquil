@@ -22,7 +22,8 @@
   Cmd+Option+F/L keycode fallback (jonquil.gtk.editor/physical-key), kept
   per binding so no other chord picks it up."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [jonquil.parts :as parts]))
 
 (def MODIFIER-MASKS
   "GDK modifier bits, from gdktypes.h. Copied rather than read from
@@ -169,6 +170,34 @@
   [path]
   (slurp (io/resource path)))
 
+(defn- chord-state
+  "The modifier state a binding's own chord holds: its :exact set, else its
+  :mods (:cmd as Control)."
+  [{:keys [exact mods]}]
+  (reduce bit-or 0 (for [m (or exact mods)]
+                     (get MODIFIER-MASKS (if (= :cmd m) :ctrl m)))))
+
+(defn unreachable-bindings
+  "The bindings whose own chord, with every :when condition true, resolves
+  in scope-vector to a binding with another command (or none), for any of
+  the binding's key names. Resolution is the first match, which is what
+  dispatch answers when every command runs. A binding only matched through
+  :physical is judged on its key names alone."
+  [bindings scope-vector]
+  (filterv (fn [b]
+             (some (fn [k]
+                     (let [hit (when-let [kv (key-value k)]
+                                 (resolve-binding scope-vector kv (chord-state b) (constantly true)))]
+                       (not (and hit
+                                 (= (:command hit) (:command b))
+                                 (= (:outcome hit) (:outcome b))))))
+                   (key-names b)))
+           bindings))
+
 (def shipped
-  "The shipped keymap, {scope [bindings...]}, from jonquil/keymap.edn."
-  (edn/read-string (embedded-text "jonquil/keymap.edn")))
+  "The shipped keymap, {scope [bindings...]}, from jonquil/keymap.edn, with
+  every spec's bindings for the scope appended after its vector, so a spec
+  binding can never shadow a shipped key."
+  (let [base (edn/read-string (embedded-text "jonquil/keymap.edn"))]
+    (into {} (for [[scope v] base]
+               [scope (into (vec v) (parts/bindings parts/specs scope))]))))

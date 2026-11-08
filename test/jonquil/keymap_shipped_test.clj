@@ -13,7 +13,8 @@
   modifier, and each context-menu item's command."
   (:require [clojure.test :refer [deftest is]]
             [jonquil.command-registry :as registry]
-            [jonquil.keymap :as km]))
+            [jonquil.keymap :as km]
+            [jonquil.parts :as parts]))
 
 (def ^:private M km/MODIFIER-MASKS)
 
@@ -180,3 +181,17 @@
           ["Inspect This Result" :result/inspect] ["Copy This Result" :result/copy]
           ["Define a Var for This Result" :result/define] ["Jump to This Var" :result/jump]]
          (map (juxt :label :command) registry/console-menu))))
+
+(deftest unreachable-bindings-finds-a-shadowed-one
+  (let [broad {:key "8" :mods #{:cmd} :command :tab/select :args {:n 8}}
+        narrow {:key "8" :mods #{:cmd :alt} :command :panel/x}
+        free {:key "9" :mods #{:cmd :alt} :command :panel/y}
+        shipped [broad]]
+    (is (= [narrow] (km/unreachable-bindings [narrow free] (into shipped [narrow free]))))
+    (is (= [] (km/unreachable-bindings [free] (conj shipped free))))
+    (is (= [] (km/unreachable-bindings [narrow] [narrow broad])))))
+
+(deftest spec-bindings-are-reachable
+  (doseq [scope [:window :editor]]
+    (is (empty? (km/unreachable-bindings (parts/bindings parts/specs scope) (get km/shipped scope)))
+        (str scope))))

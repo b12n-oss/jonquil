@@ -4,14 +4,18 @@
   public tables. A spec command names its context fn as :call data
   ([ctx-key & args]), never a :run fn, so a spec namespace needs nothing
   from the registry (which requires this namespace)."
-  (:require [jonquil.parts.layouts :as layouts]
+  (:require [jonquil.parts.extra :as extra]
+            [jonquil.parts.layouts :as layouts]
             [jonquil.parts.replay :as replay]
             [jonquil.parts.time-form :as time-form]
             [jonquil.parts.worlds :as worlds]))
 
 (def specs
-  "Every part's spec, {:id kw :commands {cmd-id {:doc s :scope sc :call [k & args]}}}."
-  [layouts/spec worlds/spec time-form/spec replay/spec])
+  "Every part's spec, {:id kw :commands {cmd-id {:doc s :scope sc :call [k & args]}}
+  :panels [{:id kw :label s}] :bindings {:window [binding ...] :editor [binding ...]}};
+  :panels and :bindings are optional, a binding has keymap.edn's shape. The
+  real parts, then any registered in jonquil.parts.extra."
+  (into [layouts/spec worlds/spec time-form/spec replay/spec] @extra/specs*))
 
 (defn- claim
   "owners with id's owner added, or throws when id is already owned."
@@ -50,12 +54,51 @@
     (throw (ex-info (str "command " id " of " part-id ": :call must be a non-empty vector")
                     {:command id :part part-id :call call}))))
 
+(defn merge-panels
+  "core-labels ({panel-id label}) with every spec's :panels added. Throws on
+  an id two owners share; an owner is :core or a spec's :id."
+  [core-labels specs]
+  (loop [acc core-labels
+         owners (reduce #(assoc %1 %2 :core) {} (keys core-labels))
+         [[owner {:keys [id label]}] & more :as entries]
+         (for [spec specs, panel (:panels spec)] [(:id spec) panel])]
+    (if (empty? entries)
+      acc
+      (do (when-let [prior (get owners id)]
+            (throw (ex-info (str "duplicate panel " id ": " prior " and " owner)
+                            {:panel id :owners [prior owner]})))
+          (recur (assoc acc id label) (assoc owners id owner) more)))))
+
+(defn bindings
+  "The specs' :bindings for scope (:window or :editor), concatenated in
+  spec order."
+  [specs scope]
+  (into [] (mapcat #(get-in % [:bindings scope])) specs))
+
+(defn- check-panels-and-bindings
+  "Throws unless spec's :panels are {:id kw :label s} maps and its :bindings
+  are a map of :window and :editor vectors."
+  [{:keys [id panels bindings]}]
+  (doseq [{pid :id label :label} panels]
+    (when-not (and (keyword? pid) (string? label))
+      (throw (ex-info (str "part " id ": a panel needs a keyword :id and a string :label")
+                      {:part id :panel pid :label label}))))
+  (doseq [[scope bs] bindings]
+    (when-not (contains? #{:window :editor} scope)
+      (throw (ex-info (str "part " id ": :bindings scope must be :window or :editor, got " scope)
+                      {:part id :scope scope})))
+    (when-not (vector? bs)
+      (throw (ex-info (str "part " id ": :bindings " scope " must be a vector")
+                      {:part id :scope scope})))))
+
 (defn check-clashes
   "Throws when a command id has two owners across every scope: the core
   tables (cores, {scope table}) and every spec, whatever each command's
   scope. Same message as merge-commands. Also throws when a spec command
   has no known :scope or no :call vector. Answers nil."
   [cores specs]
+  (doseq [spec specs]
+    (check-panels-and-bindings spec))
   (doseq [spec specs, [id cmd] (:commands spec)]
     (check-command-shape (:id spec) id cmd))
   (reduce (fn [owners [owner id]] (claim owners id owner))

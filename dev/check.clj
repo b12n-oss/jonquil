@@ -5,6 +5,12 @@
   ;; Project namespaces in dependency order. Add each one as it lands.
   '[jonquil.core
     jonquil.dialect
+    jonquil.parts.extra
+    jonquil.parts.layouts
+    jonquil.parts.replay
+    jonquil.parts.time-form
+    jonquil.parts.worlds
+    jonquil.parts
     jonquil.syntax
     jonquil.parinfer
     jonquil.parinfer-edit
@@ -70,11 +76,6 @@
     jonquil.results-rt
     jonquil.results
     jonquil.keymap
-    jonquil.parts.layouts
-    jonquil.parts.replay
-    jonquil.parts.time-form
-    jonquil.parts.worlds
-    jonquil.parts
     jonquil.command-registry
     jonquil.palette
     jonquil.debugger

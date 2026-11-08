@@ -7,6 +7,7 @@
             [jonquil.gtk.parts.replay :as replay-part]
             [jonquil.gtk.parts.time-form :as time-form-part]
             [jonquil.gtk.parts.worlds :as worlds-part]
+            [jonquil.palette :as palette]
             [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
@@ -291,3 +292,41 @@
     (is (false? @(:time-confirmed? (:ui c2))))
     (is (not (identical? (:time-confirmed? (:ui c1)) (:time-confirmed? (:ui c2)))))
     (is (not (identical? (:time-ask* (:ui c1)) (:time-ask* (:ui c2)))))))
+
+(deftest merge-panels-adds-and-refuses
+  (let [core {:processes "Processes"}
+        spec {:id :p :panels [{:id :p-panel :label "P"}]}]
+    (is (= {:processes "Processes" :p-panel "P"} (parts/merge-panels core [spec])))
+    (is (= "duplicate panel :processes: :core and :p"
+           (message #(parts/merge-panels core [{:id :p :panels [{:id :processes :label "X"}]}]))))
+    (is (= "duplicate panel :p-panel: :p and :q"
+           (message #(parts/merge-panels core [spec {:id :q :panels [{:id :p-panel :label "Q"}]}]))))))
+
+(deftest bindings-concatenate-in-spec-order
+  (let [b (fn [k] {:key k :mods #{:cmd} :command :p/go})
+        specs [{:id :a :bindings {:window [(b "1")] :editor [(b "2")]}}
+               {:id :b}
+               {:id :c :bindings {:window [(b "3") (b "4")]}}]]
+    (is (= [(b "1") (b "3") (b "4")] (parts/bindings specs :window)))
+    (is (= [(b "2")] (parts/bindings specs :editor)))
+    (is (= [] (parts/bindings [{:id :b}] :window)))))
+
+(deftest check-clashes-refuses-a-bad-panel-or-binding
+  (let [bad (fn [spec] (message #(parts/check-clashes {} [(merge {:id :p} spec)])))]
+    (is (= "part :p: a panel needs a keyword :id and a string :label"
+           (bad {:panels [{:id :x}]})))
+    (is (= "part :p: a panel needs a keyword :id and a string :label"
+           (bad {:panels [{:id :x :label :y}]})))
+    (is (= "part :p: :bindings scope must be :window or :editor, got :console"
+           (bad {:bindings {:console []}})))
+    (is (= "part :p: :bindings :window must be a vector"
+           (bad {:bindings {:window '()}})))
+    (is (nil? (bad {:panels [{:id :x :label "X"}]
+                    :bindings {:window [{:key "9" :command :p/go}] :editor []}})))))
+
+(deftest palette-labels-hold-the-core-panels
+  (is (= "Processes" (:processes palette/PANEL-LABELS)))
+  (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
+          :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"
+          :processes "Processes"}
+         palette/PANEL-LABELS)))
