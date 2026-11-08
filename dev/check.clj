@@ -6,6 +6,7 @@
   '[jonquil.core
     jonquil.dialect
     jonquil.parts.extra
+    jonquil.parts.messages
     jonquil.parts.layouts
     jonquil.parts.processes
     jonquil.parts.replay
@@ -130,6 +131,7 @@
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
+    jonquil.gtk.parts.messages
     jonquil.gtk.parts.layouts
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.replay

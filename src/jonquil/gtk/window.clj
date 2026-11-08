@@ -52,8 +52,6 @@
             [jonquil.gtk.inspector-pane :as inspector-pane]
             [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.gtk.trace-pane :as trace-pane]
-            [jonquil.gtk.messages-pane :as messages-pane]
-            [jonquil.messages :as messages]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
             [jonquil.gtk.plugin-list-pane :as plugin-list-pane]
@@ -865,7 +863,7 @@
   "{which root} for the panels right's slot holds, a part's among them; a
   right without :review-root, :plugins-root or :history-root (a test's) has
   fewer, and one without :part-panels* has no part panels."
-  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root messages-root
+  [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root
            part-panels*]}]
   (cond-> (into {:inspector inspector-root :source source-root}
                 (map (fn [[id p]] [id (:root p)]))
@@ -875,8 +873,7 @@
     history-root (assoc :history history-root)
     locations-root (assoc :locations locations-root)
     debugger-root (assoc :debugger debugger-root)
-    trace-root (assoc :trace trace-root)
-    messages-root (assoc :messages messages-root)))
+    trace-root (assoc :trace trace-root)))
 
 (defn- show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
@@ -3674,8 +3671,6 @@
         ;; The Messages panel (LM8): the window's one log of background
         ;; events, written from any thread (messages/log!), and the status
         ;; bar's unread count, shown while it's above zero
-        msgp (messages-pane/make-pane)
-        messages* (atom (messages/empty-log))
         unread-label (g/gtk-label-new "")
         dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
@@ -3812,7 +3807,7 @@
         part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
-               :debugger-root (:root dbgp) :trace-root (:root tracep) :messages-root (:root msgp)
+               :debugger-root (:root dbgp) :trace-root (:root tracep)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
                ;; Switch to panel entries, and the panel keys' "open it"
@@ -4522,115 +4517,6 @@
                                                  [:start-trace {:id (:id entry) :part (if (:threw entry) :args :ret)
                                                                 :label (inspect/root-label (:args entry))}]))
                    :on-close (fn [] (hide-right-panel! right :trace))})
-        ;; A tab's name as its strip shows it, without the dirty mark, for
-        ;; a message's "tab N"; nil once it's closed
-        tab-label-of (fn [id]
-                       (let [ts @tabs]
-                         (some (fn [[t text]] (when (= id (:id t)) text))
-                               (map vector ts (tabs/labels (map (fn [t] {:path @(:path t) :dirty? false}) ts))))))
-        ;; GTK thread: the unread count, and the panel itself while it's
-        ;; the one on screen (then everything in it is read)
-        refresh-messages! (fn []
-                            (when (= :messages (showing-panel right))
-                              (swap! messages* messages/mark-read)
-                              (messages-pane/show! msgp @messages* tab-label-of))
-                            (let [n (messages/unread-count @messages*)]
-                              (g/gtk-label-set-text unread-label (str "● " n " message" (when (not= 1 n) "s")))
-                              (g/gtk-widget-set-visible unread-label (if (pos? n) 1 0))))
-        ;; one refresh queued at a time, so a burst of entries costs one
-        ;; GTK turn, not one each
-        messages-refresh-queued (atom false)
-        log-entry! (fn [entry]
-                     (messages/log! messages* entry)
-                     (when (compare-and-set! messages-refresh-queued false true)
-                       (on-gui! (fn []
-                                  (reset! messages-refresh-queued false)
-                                  (try (refresh-messages!)
-                                       (catch :default e
-                                         (binding [*out* *err*]
-                                           (println "jonquil: messages refresh:" (ex-message e)))))))))
-        _ (register-status-log! status-label log-entry!)
-        ;; Open files changed on disk: agents mostly edit files with their
-        ;; own tools, which no MCP call shows. Each tick stats every open
-        ;; tab's file (plugin tabs keep sync-plugin-tabs!) and reads one only
-        ;; when its time or size moved. A clean tab follows the file as one
-        ;; undo step; a dirty one keeps its edits and takes the disk text as
-        ;; its saved baseline (tabs/disk-follow), each logged to Messages.
-        ;; GTK thread, so the tab list and saved text are read safely.
-        disk-seen (atom {})
-        disk-tick! (fn []
-                     (let [dir (plugin-loader/plugins-dir @settings-path*)
-                           ts @tabs]
-                       (swap! disk-seen select-keys (map :id ts))
-                       (doseq [t ts
-                               :let [path @(:path t)]
-                               :when (and path (not (plugin-loader/plugin-file-or-target? dir path)))]
-                         (try
-                           (let [f (java.io.File. ^String path)
-                                 stat (when (.exists f) [(.lastModified f) (.length f)])
-                                 seen (get @disk-seen (:id t))]
-                             (cond
-                               ;; first sight (or a new path): only remember it
-                               (or (nil? seen) (not= path (:path seen)))
-                               (swap! disk-seen assoc (:id t) {:path path :stat stat})
-                               :else
-                               (case (tabs/stat-step (cond-> {:stat stat :seen-stat (:stat seen)}
-                                                       (contains? seen :pending) (assoc :pending (:pending seen))))
-                                 :same (swap! disk-seen update (:id t) dissoc :pending)
-                                 ;; moved: wait a tick, so a writer that truncates and then
-                                 ;; writes is never caught halfway
-                                 :wait (swap! disk-seen assoc-in [(:id t) :pending] stat)
-                                 :act
-                                 ;; a read that fails logs nothing: the stat stays pending and
-                                 ;; the next tick tries again
-                                 (when-some [disk (try (if stat (slurp path) ::gone) (catch :default _ nil))]
-                                   (let [disk (when-not (= ::gone disk) disk)
-                                         ed (:ed t)
-                                         name (last (str/split path #"/"))
-                                         log! (fn [summary] (log-entry! {:kind :file :target {:tab-id (:id t)} :summary summary}))]
-                                     (swap! disk-seen update (:id t) #(-> % (assoc :stat stat) (dissoc :pending)))
-                                     ;; the file is there again: a later delete is said again
-                                     (when disk (swap! disk-seen update (:id t) dissoc :reported))
-                                     ;; a throw from here on is one row, not a silent retry: the
-                                     ;; tab may already have changed
-                                     (try
-                                       (if (and disk (tabs/nul-line disk))
-                                         ;; GTK would truncate it, and rebasing on it would leave the
-                                         ;; tab dirty for good; said once per text
-                                         (when (not= disk (:nul seen))
-                                           (swap! disk-seen assoc-in [(:id t) :nul] disk)
-                                           (log! (str name " changed on disk but holds a NUL byte, so this tab keeps its text")))
-                                         (do (swap! disk-seen update (:id t) dissoc :nul)
-                                             (case (tabs/disk-follow {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
-                                                                      :buffer (when disk (editor/editor-text ed)) :reported (:reported seen)})
-                                               :reload (do (editor/reload-text! ed disk)
-                                                           (refresh-labels! @*tab-ctx)
-                                                           (log! (str name " was reloaded from disk")))
-                                               :warn (do (editor/rebase-saved! ed disk)
-                                                         (refresh-labels! @*tab-ctx)
-                                                         (log! (str name " changed on disk, and this tab keeps your unsaved edits")))
-                                               :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
-                                               :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
-                                                            (log! (str name " was deleted or moved on disk")))
-                                               nil)))
-                                       (catch :default e
-                                         (log-entry! {:kind :file :error? true :target {:tab-id (:id t)}
-                                                      :summary (str name " changed on disk, but following it failed: "
-                                                                    (or (ex-message e) (str e)))}))))))))
-                           ;; the stat itself failed: the next tick tries again
-                           (catch :default _ nil)))))
-        _ (g/g-timeout-add DISK-POLL-MS (callable (fn [_data] (disk-tick!) 1) [:pointer] :int :on-throw 1) ffi/null)
-        _ (messages-pane/set-handlers!
-           msgp {:on-activate (fn [entry]
-                                (let [{:keys [tab-id plugin-id]} (:target entry)]
-                                  (cond
-                                    tab-id (if (some #(= tab-id (:id %)) @tabs)
-                                             (select-tab! @*tab-ctx tab-id)
-                                             (messages-pane/report! msgp "That tab is closed."))
-                                    plugin-id (plugin-step! {:settings-path @settings-path* :step (fn [] []) :open? true})
-                                    :else (messages-pane/show! msgp @messages* tab-label-of))))
-                 :on-filter (fn [] (messages-pane/show! msgp @messages* tab-label-of))
-                 :on-close (fn [] (hide-right-panel! right :messages) (editor/focus! (:ed (active-tab))))})
         ;; Live console results (LM1): a click on a result line inspects
         ;; its value; the verbs act on the result at the console's caret
         ;; (a right-click moves the caret there first)
@@ -4876,17 +4762,12 @@
                                           :debugger (debugger-pane/focus! dbgp)
                                           :locations (g/gtk-widget-grab-focus (:list locp))
                                           :trace (g/gtk-widget-grab-focus (:list tracep))
-                                          :messages (g/gtk-widget-grab-focus (:list msgp))
                                           :plugins (g/gtk-widget-grab-focus (:list lp))
                                           (if-let [p (get @part-panels* k)]
                                             ((:focus! p))
                                             (throw (IllegalArgumentException. (str "No matching clause: " k))))))]
                            (cond
                              (= k (showing-panel right)) (focus!)
-                             ;; never "nothing yet": an empty log says what fills it
-                             (= k :messages) (do (show-right-panel! right :messages)
-                                                 (refresh-messages!)
-                                                 (focus!))
                              (= k :plugins) (plugin-step! {:settings-path @settings-path*
                                                            :step (fn [] []) :open-list? true})
                              (= k :trace) (trace-show-fn)
@@ -4899,17 +4780,6 @@
                                               :inspector "; Nothing inspected yet: inspect a form or a result first."
                                               :source "; The Source panel is empty: jump to a definition first."
                                               :locations "; No locations yet: list a symbol's uses or definitions, or the find matches.")))))
-        ;; a click on the status bar's unread count opens the Messages
-        _ (let [click (g/gtk-gesture-click-new)]
-            (g/g-signal-connect-data click "pressed"
-                                     (callable (fn [_gesture _n _x _y _data]
-                                                 (try (panel-focus-fn :messages)
-                                                      (catch :default e
-                                                        (set-status! status-label (str "; messages: " (ex-message e)))))
-                                                 nil)
-                                               [:pointer :int :double :double :pointer] :void)
-                                     ffi/null ffi/null g/CONNECT-DEFAULT)
-            (g/gtk-widget-add-controller unread-label click))
         paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         ;; Window parts (jonquil.gtk.parts): each install fn reads the core
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
@@ -4927,10 +4797,84 @@
                                           :showing-panel showing-panel :show-right-panel! show-right-panel!
                                           :hide-right-panel! hide-right-panel!
                                           :alert-pending? alert-pending? :show-alert! show-alert!
-                                          :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!}
+                                          :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!
+                                          :unread-label unread-label
+                                          :register-status-log! (fn [log!] (register-status-log! status-label log!))
+                                          :plugin-step! plugin-step!}
                                          part-error!
                                          {:specs parts/specs})
         _ (reset! part-panels* (:panels part-contribution))
+        ;; Open files changed on disk: agents mostly edit files with their
+        ;; own tools, which no MCP call shows. Each tick stats every open
+        ;; tab's file (plugin tabs keep sync-plugin-tabs!) and reads one only
+        ;; when its time or size moved. A clean tab follows the file as one
+        ;; undo step; a dirty one keeps its edits and takes the disk text as
+        ;; its saved baseline (tabs/disk-follow), each logged to Messages.
+        ;; GTK thread, so the tab list and saved text are read safely.
+        log-entry! (:log-entry! (:exports part-contribution))
+        disk-seen (atom {})
+        disk-tick! (fn []
+                     (let [dir (plugin-loader/plugins-dir @settings-path*)
+                           ts @tabs]
+                       (swap! disk-seen select-keys (map :id ts))
+                       (doseq [t ts
+                               :let [path @(:path t)]
+                               :when (and path (not (plugin-loader/plugin-file-or-target? dir path)))]
+                         (try
+                           (let [f (java.io.File. ^String path)
+                                 stat (when (.exists f) [(.lastModified f) (.length f)])
+                                 seen (get @disk-seen (:id t))]
+                             (cond
+                               ;; first sight (or a new path): only remember it
+                               (or (nil? seen) (not= path (:path seen)))
+                               (swap! disk-seen assoc (:id t) {:path path :stat stat})
+                               :else
+                               (case (tabs/stat-step (cond-> {:stat stat :seen-stat (:stat seen)}
+                                                       (contains? seen :pending) (assoc :pending (:pending seen))))
+                                 :same (swap! disk-seen update (:id t) dissoc :pending)
+                                 ;; moved: wait a tick, so a writer that truncates and then
+                                 ;; writes is never caught halfway
+                                 :wait (swap! disk-seen assoc-in [(:id t) :pending] stat)
+                                 :act
+                                 ;; a read that fails logs nothing: the stat stays pending and
+                                 ;; the next tick tries again
+                                 (when-some [disk (try (if stat (slurp path) ::gone) (catch :default _ nil))]
+                                   (let [disk (when-not (= ::gone disk) disk)
+                                         ed (:ed t)
+                                         name (last (str/split path #"/"))
+                                         log! (fn [summary] (log-entry! {:kind :file :target {:tab-id (:id t)} :summary summary}))]
+                                     (swap! disk-seen update (:id t) #(-> % (assoc :stat stat) (dissoc :pending)))
+                                     ;; the file is there again: a later delete is said again
+                                     (when disk (swap! disk-seen update (:id t) dissoc :reported))
+                                     ;; a throw from here on is one row, not a silent retry: the
+                                     ;; tab may already have changed
+                                     (try
+                                       (if (and disk (tabs/nul-line disk))
+                                         ;; GTK would truncate it, and rebasing on it would leave the
+                                         ;; tab dirty for good; said once per text
+                                         (when (not= disk (:nul seen))
+                                           (swap! disk-seen assoc-in [(:id t) :nul] disk)
+                                           (log! (str name " changed on disk but holds a NUL byte, so this tab keeps its text")))
+                                         (do (swap! disk-seen update (:id t) dissoc :nul)
+                                             (case (tabs/disk-follow {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
+                                                                      :buffer (when disk (editor/editor-text ed)) :reported (:reported seen)})
+                                               :reload (do (editor/reload-text! ed disk)
+                                                           (refresh-labels! @*tab-ctx)
+                                                           (log! (str name " was reloaded from disk")))
+                                               :warn (do (editor/rebase-saved! ed disk)
+                                                         (refresh-labels! @*tab-ctx)
+                                                         (log! (str name " changed on disk, and this tab keeps your unsaved edits")))
+                                               :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
+                                               :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
+                                                            (log! (str name " was deleted or moved on disk")))
+                                               nil)))
+                                       (catch :default e
+                                         (log-entry! {:kind :file :error? true :target {:tab-id (:id t)}
+                                                      :summary (str name " changed on disk, but following it failed: "
+                                                                    (or (ex-message e) (str e)))}))))))))
+                           ;; the stat itself failed: the next tick tries again
+                           (catch :default _ nil)))))
+        _ (g/g-timeout-add DISK-POLL-MS (callable (fn [_data] (disk-tick!) 1) [:pointer] :int :on-throw 1) ffi/null)
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -5048,8 +4992,6 @@
     (g/gtk-box-append slot (:root dbgp))
     (g/gtk-widget-set-vexpand (:root tracep) 1)
     (g/gtk-box-append slot (:root tracep))
-    (g/gtk-widget-set-vexpand (:root msgp) 1)
-    (g/gtk-box-append slot (:root msgp))
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-vexpand (:root p) 1)
       (g/gtk-box-append slot (:root p)))
@@ -5063,7 +5005,6 @@
     (g/gtk-widget-set-visible (:root locp) 0)
     (g/gtk-widget-set-visible (:root dbgp) 0)
     (g/gtk-widget-set-visible (:root tracep) 0)
-    (g/gtk-widget-set-visible (:root msgp) 0)
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-visible (:root p) 0))
     (g/gtk-widget-set-visible (:root hp) 0)
@@ -5786,11 +5727,8 @@
                    ;; the Frames panel and the inspector's own Close
                    :debugger-pane dbgp
                    :trace-pane tracep
-                   :messages-pane msgp
                    :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
-                   :messages* messages*
-                   :log!* log-entry!
                    :disk-tick!* disk-tick!
                    :unread-label unread-label
                    ;; the recent panels atom, most recent first, and the

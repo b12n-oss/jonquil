@@ -420,6 +420,7 @@
    messages-rows/row-messages-disk-waits-a-tick
    messages-rows/row-messages-disk-follow-failure-said
    messages-rows/row-messages-selection-stays
+   messages-rows/row-messages-unread-click-opens
    world-rows/row-world-save-restore
    replay-rows/row-replay-records-console
    replay-rows/row-replay-records-saved-run

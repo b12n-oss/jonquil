@@ -4,7 +4,9 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.gtk.messages-pane :as messages-pane]
             [jonquil.gtk.parts.layouts :as layouts-part]
+            [jonquil.gtk.parts.messages :as messages-part]
             [jonquil.gtk.parts.processes :as processes-part]
             [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.parts.replay :as replay-part]
@@ -62,8 +64,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
-  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+  (is (= [:messages :layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
+  (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
           :panel/processes :processes/show}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
@@ -404,3 +406,37 @@
         (show)
         (is (= [:watch] @ops))
         (is (= 1 (count @statuses)))))))
+
+;; Messages: the log panel, its unread count's click and the status log.
+(deftest messages-part-owns-its-command-and-panel
+  (let [spec (some #(when (= :messages (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :messages] (get-in spec [:commands :panel/messages :call])))
+    (is (= "Focus the Messages panel, or open it." (get-in spec [:commands :panel/messages :doc])))
+    (is (= [{:id :messages :label "Messages"}] (:panels spec)))
+    (is (contains? registry/window-commands :panel/messages))
+    (is (= "Messages" (:messages palette/PANEL-LABELS)))))
+
+(deftest messages-part-registers-its-log
+  (let [registered (atom [])
+        wctx {:right {:recent-panels (atom [])} :tabs (atom []) :active-tab (fn [] nil)
+              :showing-panel (fn [_] nil) :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+              :set-status! (fn [_]) :status-label :lbl :unread-label :unread
+              :register-status-log! #(swap! registered conj %)
+              :plugin-step! (fn [& _]) :settings-path* (atom nil) :select-tab! (fn [& _])
+              :tab-ctx* (atom nil) :panel-focus-fn (fn [& _])}]
+    (with-redefs [messages-pane/make-pane (fn [] {:root :root :list :list})
+                  messages-pane/set-handlers! (fn [& _])
+                  g/gtk-gesture-click-new (fn [] :click)
+                  g/g-signal-connect-data (fn [& _])
+                  g/gtk-widget-add-controller (fn [& _])]
+      (let [c ((deref #'messages-part/install) wctx)]
+        (is (= 1 (count @registered)))
+        (is (fn? (get-in c [:exports :log-entry!])))
+        (is (identical? (first @registered) (get-in c [:exports :log-entry!])))
+        (is (identical? (first @registered) (get-in c [:ui :log!*])))
+        (is (fn? (get-in c [:ui :unread-click!*])))
+        (is (= :root (get-in c [:panels :messages :root])))))))
+
+(deftest messages-installs-first
+  (is (= :messages (:part/id (meta (first gtk-parts/installs)))))
+  (is (= :replay (:part/id (meta (last gtk-parts/installs))))))

@@ -72,7 +72,7 @@
   labels merged with the specs' :panels; a clash throws at load."
   (parts/merge-panels
    {:inspector "Inspector" :source "Source" :locations "Locations"
-    :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"}
+    :debugger "Frames" :trace "Trace" :plugins "Plugins"}
    parts/specs))
 
 (defn panel-entries
