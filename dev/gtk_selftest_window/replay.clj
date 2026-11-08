@@ -17,6 +17,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.popover :as popover]
+            [jonquil.parts :as parts]
             [jonquil.replay :as replay]
             [jonquil.settings :as settings]
             [temp-dirs]))
@@ -671,3 +672,37 @@
                                     (empty? (:previous (record ui))))
                                {:ok ok? :record (record ui) :disk (on-disk ui d)})
                 (finally (restore! ui original [d])))))))
+
+(defn row-replay-state-per-window
+  "Replay state is per window. The harness opens one window per process, so
+  this checks that the window's record is its own root's, and that installing
+  the replay part again, as a second window would (its own console slots, no
+  tabs yet), starts from an empty record and leaves this window's recorder
+  alone."
+  [ui]
+  (go-row :replay-state-per-window support/check
+    (on-gtk (let [part (some-> (resolve 'jonquil.gtk.parts.replay/part) deref)
+                  recorder* (:recorder* (:console ui))
+                  before @recorder*
+                  own ((:replay-record* ui))
+                  slots {:recorder* (atom nil) :replay-root* (atom nil) :replay-tab* (atom nil)}
+                  other (when part (:ui (part {:cv slots :tab-ctx* (atom nil)})))
+                  fresh (when other ((:replay-record* other)))]
+              (support/check :replay-state-per-window
+                             (and part (= (root ui) (:root own)) (= {} fresh)
+                                  (identical? before @recorder*) (some? @(:recorder* slots)))
+                             {:part? (some? part) :root (root ui) :own-root (:root own) :fresh fresh
+                              :recorder-kept? (identical? before @recorder*)})))))
+
+(defn row-part-commands-reachable
+  "Every :window-scope part spec command's :call key is in the palette's window context
+  (the core's keys plus the parts' :fns), so none runs as a silent no-op."
+  [ui]
+  (go-row :part-commands-reachable support/check
+    (on-gtk (let [ks (:palette-ctx-keys ui)
+                  cmds (into {} (filter (comp #{:window} :scope val))
+                             (mapcat :commands parts/specs))
+                  missing (parts/missing-calls cmds ks)]
+              (support/check :part-commands-reachable
+                             (and (set? ks) (seq cmds) (empty? missing))
+                             {:ctx-keys? (set? ks) :commands (sort (keys cmds)) :missing missing})))))
