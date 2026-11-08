@@ -7,6 +7,7 @@
     jonquil.dialect
     jonquil.parts.extra
     jonquil.parts.layouts
+    jonquil.parts.processes
     jonquil.parts.replay
     jonquil.parts.time-form
     jonquil.parts.worlds
@@ -130,6 +131,7 @@
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
     jonquil.gtk.parts.layouts
+    jonquil.gtk.parts.processes
     jonquil.gtk.parts.replay
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds

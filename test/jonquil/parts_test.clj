@@ -1,9 +1,12 @@
 (ns jonquil.parts-test
   (:require [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.parts.layouts :as layouts-part]
+            [jonquil.gtk.parts.processes :as processes-part]
+            [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.parts.replay :as replay-part]
             [jonquil.gtk.parts.time-form :as time-form-part]
             [jonquil.gtk.parts.worlds :as worlds-part]
@@ -59,8 +62,9 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:layouts :worlds :time-form :replay] (mapv :id parts/specs)))
-  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last}
+  (is (= [:layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
+  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+          :panel/processes :processes/show}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -349,3 +353,34 @@
           :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"
           :processes "Processes"}
          palette/PANEL-LABELS)))
+
+(deftest processes-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :processes (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :processes] (get-in spec [:commands :panel/processes :call])))
+    (is (= [:processes-show-fn] (get-in spec [:commands :processes/show :call])))
+    (is (= [{:id :processes :label "Processes"}] (:panels spec)))
+    (is (contains? registry/window-commands :processes/show))
+    (is (= "Processes" (:processes palette/PANEL-LABELS)))))
+
+;; Review focus 2: a dialect switch swaps the evaluator in ev*, and the
+;; next refresh must read the new one.
+(deftest processes-refresh-reads-the-evaluator-per-call
+  (let [statuses (atom [])
+        ops (atom [])
+        ev* (atom {:not :fibers})
+        right {:recent-panels (atom [])}
+        wctx {:ev* ev* :right right :showing-panel (fn [_] nil)
+              :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+              :set-status! #(swap! statuses conj %) :status-label :lbl
+              :active-tab (fn [] nil)}]
+    (with-redefs [g/g-timeout-add (fn [& _] 1)
+                  processes-pane/make-pane (fn [] {:root :root :list :list})
+                  processes-pane/set-handlers! (fn [& _])]
+      (let [show (get-in ((deref #'processes-part/install) wctx) [:fns :processes-show-fn])]
+        (show)
+        (is (= ["; Processes need Jolt."] @statuses))
+        (reset! ev* (reify ev/Fibers
+                      (fibers-op! [_ op _ _] (swap! ops conj op))))
+        (show)
+        (is (= [:watch] @ops))
+        (is (= 1 (count @statuses)))))))

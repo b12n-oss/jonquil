@@ -29,6 +29,7 @@
    "jonquil/parts.clj" (embedded-text "jonquil/parts.clj")
    "jonquil/parts/extra.clj" (embedded-text "jonquil/parts/extra.clj")
    "jonquil/parts/layouts.clj" (embedded-text "jonquil/parts/layouts.clj")
+   "jonquil/parts/processes.clj" (embedded-text "jonquil/parts/processes.clj")
    "jonquil/parts/replay.clj" (embedded-text "jonquil/parts/replay.clj")
    "jonquil/parts/time_form.clj" (embedded-text "jonquil/parts/time_form.clj")
    "jonquil/parts/worlds.clj" (embedded-text "jonquil/parts/worlds.clj")

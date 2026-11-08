@@ -5,6 +5,7 @@
   only when it comes later."
   (:require [jonquil.parts.extra :as extra]
             [jonquil.gtk.parts.layouts :as layouts]
+            [jonquil.gtk.parts.processes :as processes]
             [jonquil.gtk.parts.replay :as replay]
             [jonquil.gtk.parts.time-form :as time-form]
             [jonquil.gtk.parts.worlds :as worlds]))
@@ -12,4 +13,4 @@
 (def installs
   "Install fns, in order: the real parts, then any registered in
   jonquil.parts.extra."
-  (into [layouts/part worlds/part time-form/part replay/part] @extra/installs*))
+  (into [layouts/part worlds/part time-form/part processes/part replay/part] @extra/installs*))
