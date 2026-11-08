@@ -143,6 +143,7 @@ bb clean:tmp              # delete temp dirs earlier test runs left behind
 ```bash
 bb lint                 # clj-kondo over src, test and dev (report only)
 bb lint:strict          # the same, but exit non-zero if there are any findings
+bb metrics              # jolt-metrics: refactoring queue, hotspots, cleanup (report only)
 bb lsp:format-check     # clojure-lsp format, dry run
 bb lsp:clean-ns-check   # clojure-lsp clean-ns, dry run
 bb lsp:check            # the two dry runs together

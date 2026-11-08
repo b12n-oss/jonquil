@@ -320,6 +320,16 @@ port.
   `bb lint:strict` exits non-zero on any finding (2 for warnings, 3 for
   errors); the manual CI workflow gates on it. The git hooks block only on
   clj-kondo errors.
+- `bb metrics` runs [jolt-metrics](https://github.com/jlt-commons/jolt-metrics)
+  over the repo and prints its Markdown report: a refactoring queue worst
+  first, git hotspots, unused requires and functions nothing mentions, then
+  per-file numbers and coupling. `bb metrics:edn` gives every finding as
+  data. Extra arguments go to its CLI (an output file, `--top N`,
+  `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
+  does. `.jolt-metrics.edn` at the root counts `test` and `dev` as test code
+  (measured, never queued) and leaves out build output, clj-kondo's cache,
+  the smoke fixtures and `docs`. The `:metrics` alias pins the library's
+  version.
 - `bb lsp:format` / `bb lsp:format-check` and `bb lsp:clean-ns` /
   `bb lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with
   clojure-lsp; `bb lsp:check` runs both dry-run checks.

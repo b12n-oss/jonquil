@@ -29,6 +29,11 @@
   ;; Headless compile-check: requires every project namespace and exits.
   :check {:extra-paths ["dev"]
           :main-opts ["-m" "check"]}
+  ;; Code metrics report (bb metrics): jolt-metrics' CLI. Report only.
+  :metrics {:extra-deps {io.github.jlt-commons/jolt-metrics
+                         {:git/url "https://github.com/jlt-commons/jolt-metrics"
+                          :git/tag "v0.1.2" :git/sha "c23aec7"}}
+            :main-opts ["-m" "metrics.cli"]}
   ;; GTK self-test: opens a real window and runs the front-end rows.
   :selftest {:extra-paths ["dev"]
              :main-opts ["-m" "gtk-selftest"]}
