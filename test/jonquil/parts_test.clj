@@ -1,6 +1,7 @@
 (ns jonquil.parts-test
   (:require [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
+            [jonquil.gtk.parts :as gtk-parts]
             [jonquil.parts :as parts]))
 
 (defn- call [k & args]
@@ -118,3 +119,7 @@
               :p/c {:doc "c" :scope :window}}]
     (is (= #{:nope-fn} (parts/missing-calls cmds #{:here})))
     (is (= #{} (parts/missing-calls cmds #{:here :nope-fn})))))
+
+(deftest specs-and-installs-name-the-same-parts
+  (is (= (set (map :id parts/specs))
+         (set (map (comp :part/id meta) gtk-parts/installs)))))
