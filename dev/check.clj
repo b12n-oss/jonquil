@@ -124,6 +124,7 @@
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
+    jonquil.gtk.parts
     jonquil.gtk.window
     jonquil.mcp.window
     jonquil.mcp.listen

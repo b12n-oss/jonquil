@@ -56,3 +56,63 @@
          (+ (count registry/window-commands)
             (count registry/editor-commands)
             (count registry/console-commands)))))
+
+(defn- install-fn [id f] (with-meta f {:part/id id}))
+
+(deftest install-merges-in-order
+  (let [seen (atom nil)
+        a (install-fn :a (fn [_] {:fns {:a-fn inc} :ui {:a-ui 1} :hooks {:on-quit :a-quit}
+                                  :exports {:a-ex 10}}))
+        b (install-fn :b (fn [wctx] (reset! seen (:a-ex wctx))
+                           {:fns {:b-fn dec} :hooks {:on-quit :b-quit :on-start :b-start}}))
+        c (parts/install [a b] {:win :w} (fn [& _] (throw (ex-info "no error expected" {}))))]
+    (is (= 10 @seen))
+    (is (= #{:a-fn :b-fn} (set (keys (:fns c)))))
+    (is (= {:a-ui 1} (:ui c)))
+    (is (= {:a-ex 10} (:exports c)))
+    (is (= {:on-quit [:a-quit :b-quit] :on-start [:b-start]} (:hooks c)))))
+
+(deftest install-refuses-duplicate-keys
+  (let [a (install-fn :a (fn [_] {:ui {:shared 1}}))
+        b (install-fn :b (fn [_] {:ui {:shared 2}}))]
+    (is (= "duplicate ui key :shared: :a and :b"
+           (message #(parts/install [a b] {} (fn [& _] nil)))))))
+
+(deftest install-contains-a-throwing-part
+  (let [errors (atom [])
+        a (install-fn :a (fn [_] (throw (ex-info "boom" {}))))
+        b (install-fn :b (fn [_] {:fns {:b-fn inc}}))
+        c (parts/install [a b] {} (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+    (is (= [[:a "boom"]] @errors))
+    (is (= #{:b-fn} (set (keys (:fns c)))))))
+
+(deftest install-names-an-unlabelled-part-by-index
+  (let [errors (atom [])]
+    (parts/install [(fn [_] (throw (ex-info "boom" {})))] {} (fn [id _] (swap! errors conj id)))
+    (is (= [0] @errors))))
+
+(deftest merge-with-core-refuses-a-core-key
+  (let [c {:fns {:x 1} :owners {:fns {:x :p}}}]
+    (is (= {:y 2 :x 1} (parts/merge-with-core :fns {:y 2} c)))
+    (is (= "duplicate fns key :x: :core and :p"
+           (message #(parts/merge-with-core :fns {:x 0} c))))))
+
+(deftest run-hooks-isolates-a-throwing-hook
+  (let [ran (atom []) errors (atom 0)
+        errored (atom [])
+        contribution {:hooks {:on-quit [(fn [x] (swap! ran conj [1 x]))
+                                        (fn [_] (throw (ex-info "bad" {})))
+                                        (fn [x] (swap! ran conj [3 x]))]}
+                      :owners {:hooks {:on-quit [:a :b :c]}}}]
+    (is (nil? (parts/run-hooks! contribution :on-quit [:arg] (fn [id _] (swap! errors inc) (swap! errored conj id)))))
+    (is (= [[1 :arg] [3 :arg]] @ran))
+    (is (= 1 @errors))
+    (is (= [:b] @errored))
+    (is (nil? (parts/run-hooks! contribution :on-start [] (fn [_ _] (swap! errors inc)))))))
+
+(deftest missing-calls-names-unreachable-keys
+  (let [cmds {:p/a {:doc "a" :scope :window :call [:here 1]}
+              :p/b {:doc "b" :scope :window :call [:nope-fn]}
+              :p/c {:doc "c" :scope :window}}]
+    (is (= #{:nope-fn} (parts/missing-calls cmds #{:here})))
+    (is (= #{} (parts/missing-calls cmds #{:here :nope-fn})))))

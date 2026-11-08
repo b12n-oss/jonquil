@@ -67,6 +67,8 @@
             [jonquil.inspect :as inspect]
             [jonquil.last-session :as last-session]
             [jonquil.locations :as loc]
+            [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.parts :as parts]
             [jonquil.replay :as replay]
             [jonquil.restarts :as restarts]
             [jonquil.results :as results]
@@ -5340,7 +5342,19 @@
         ;; LM8's named layouts, installed once the editor/console split
         ;; exists (below, after paned)
         layout-fns* (atom {})
-        window-key-args {:layout-use-fn (fn [n] (some-> (:use @layout-fns*) (apply [n])))
+        ;; Window parts (jonquil.gtk.parts): each install fn reads the core
+        ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
+        ;; :exports. A part's error is said on the status line, not thrown.
+        part-error! (fn [id ex]
+                      (set-status! status-label (str "; part " id ": " (ex-message ex))))
+        part-contribution (parts/install gtk-parts/installs
+                                         {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
+                                          :tabs tabs :active-tab active-tab :settings-path* settings-path*
+                                          :tab-ctx* *tab-ctx}
+                                         part-error!)
+        window-key-args (parts/merge-with-core
+                         :fns
+                         {:layout-use-fn (fn [n] (some-> (:use @layout-fns*) (apply [n])))
                          :layout-save-fn (fn [] (some-> (:save @layout-fns*) (apply [])))
                          :layout-forget-fn (fn [] (some-> (:forget @layout-fns*) (apply [])))
                          :panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -5407,6 +5421,7 @@
                                                                              :step (fn [] []) :open-list? true}))
                                       :reload-plugins-fn (fn [] (plugin-load! {:settings-path @settings-path*
                                                                                :cv cv :plugins? @plugins-on*}))}
+                         part-contribution)
         window-key-fn (on-window-key window-key-args)
         toolbar (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
         run-btn (g/gtk-button-new-with-label "Run (F5)")
@@ -5621,6 +5636,7 @@
                                                                                       restoring? (some-> c :session-restoring? deref)]
                                                                                   ;; LM7: a pending record write is not left to the timer
                                                                                   (when c (flush-replay! c))
+                                                                                  (parts/run-hooks! part-contribution :on-quit [] part-error!)
                                                                                   (some-> c :session-live? (reset! false))
                                                                                   (some-> c :session-restoring? (reset! false))
                                                                                   (when-not restoring? (save-session! c))))})
@@ -5726,6 +5742,7 @@
                                                 (tabs/untouched-untitled? {:path @(:path t) :text (editor/editor-text (:ed t))}))
                                        (apply-selection! sel-ctx (ft/project-selection
                                                                   p (:dialect (settings/load-settings @settings-path*))))))
+                                   (parts/run-hooks! part-contribution :on-reroot [{:path p}] part-error!)
                                    ;; LM7: the new root's record, its offer and history
                                    (open-root! tab-ctx))
                              (dialog-dismissed? r) nil
@@ -5836,7 +5853,8 @@
                     (reset! (:session-last tab-ctx) (session-snapshot tab-ctx))
                     (reset! (:session-live? tab-ctx) true)
                     ;; LM7: the root's record, its offer and history
-                    (open-root! tab-ctx))]
+                    (open-root! tab-ctx)
+                    (parts/run-hooks! part-contribution :on-start [] part-error!))]
         ;; Say where the child tools' PATH came from. The wait for the
         ;; lookup is off the GTK thread; the append goes through on-gui!, and
         ;; a window closed meanwhile must not throw out of the future.
@@ -6011,7 +6029,7 @@
       ;; "the window's file" (:open-path!, :save-to!, the simulated dialog
       ;; results, :close-choice!) use the active tab.
       (let [{:keys [ed fb help-pop full-doc-pop rename-pop completion palette actions]} (first @tabs)]
-        (on-ready {:editor ed :console cv :session session :status-label status-label :window win
+        (on-ready (parts/merge-with-core :ui {:editor ed :console cv :session session :status-label status-label :window win
                  ;; The notebook, the tab list and the active tab, read live.
                    :notebook notebook
                    :tabs* (fn [] @tabs)
@@ -6391,7 +6409,8 @@
                    :pending-alerts* (fn [] (count @alert-cancellables))
                    :alert-release! alert-release!
                    :register-alert-choice-for-test! register-alert-choice!
-                   :complete-alert-for-test! complete-alert!})))))
+                   :complete-alert-for-test! complete-alert!}
+                                  part-contribution))))))
 
 (defn- run-application!
   "Runs the application's main loop. With an argv of more than the program
