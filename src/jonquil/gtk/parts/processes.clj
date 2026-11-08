@@ -10,35 +10,61 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.processes-pane :as processes-pane]))
 
+(defn- show-fibers!
+  "Fills the pane from a :list answer r. An error clears the rows."
+  [{:keys [procp]} r]
+  (if (:error r)
+    ;; no stale rows to act on while the runtime's away
+    (do (processes-pane/show! procp [])
+        (processes-pane/report! procp (str "; " (:error r))))
+    (processes-pane/show! procp (:fibers r))))
+
+(defn- apply-list!
+  "On the GUI thread: opens the panel when show?, updates it while it shows."
+  [{:keys [right showing-panel show-right-panel! procp] :as ctx} show? r]
+  (when show? (show-right-panel! right :processes))
+  (when (= :processes (showing-panel right))
+    (show-fibers! ctx r))
+  (when show? (g/gtk-widget-grab-focus (:list procp))))
+
+(defn- watch-then-list!
+  "Watches, then lists, then hops to the GUI thread with the answer."
+  [ctx e show?]
+  (ev/fibers-op!
+   e :watch {}
+   (fn [_]
+     (ev/fibers-op!
+      e :list {}
+      (fn [r]
+        (on-gui! (fn [] (apply-list! ctx show? r))))))))
+
+(defn- no-jolt!
+  "The runtime has no fibers: say so in the status bar or the panel footer."
+  [{:keys [right showing-panel set-status! procp]} show?]
+  (case (processes-pane/no-jolt-goes-to show?)
+    :status (set-status! "; Processes need Jolt.")
+    :footer (when (= :processes (showing-panel right))
+              (processes-pane/show! procp [])
+              (processes-pane/report! procp "; Processes need Jolt."))))
+
 (defn- refresh!
   "LM4: the Processes panel's list, from where the code runs. Watching
   (wrapping jolt.fibers/spawn) starts on the first refresh and is
   idempotent, so a restarted child picks it up again. show? opens
   the panel; the timer's refreshes only update it while it shows. The
   evaluator is read from ev* on every call."
-  [{:keys [ev* right showing-panel show-right-panel! set-status! procp]} show?]
+  [{:keys [ev*] :as ctx} show?]
   (let [e @ev*]
     (if (satisfies? ev/Fibers e)
-      (ev/fibers-op!
-       e :watch {}
-       (fn [_]
-         (ev/fibers-op!
-          e :list {}
-          (fn [r]
-            (on-gui! (fn []
-                       (when show? (show-right-panel! right :processes))
-                       (when (= :processes (showing-panel right))
-                         (if (:error r)
-                           ;; no stale rows to act on while the runtime's away
-                           (do (processes-pane/show! procp [])
-                               (processes-pane/report! procp (str "; " (:error r))))
-                           (processes-pane/show! procp (:fibers r))))
-                       (when show? (g/gtk-widget-grab-focus (:list procp)))))))))
-      (case (processes-pane/no-jolt-goes-to show?)
-        :status (set-status! "; Processes need Jolt.")
-        :footer (when (= :processes (showing-panel right))
-                  (processes-pane/show! procp [])
-                  (processes-pane/report! procp "; Processes need Jolt."))))))
+      (watch-then-list! ctx e show?)
+      (no-jolt! ctx show?))))
+
+(defn- signal-done!
+  "On the GUI thread: reports an error from the signal, else refreshes."
+  [{:keys [procp] :as ctx} r]
+  (if (:error r)
+    (processes-pane/report! procp (str "; " (:error r)))
+    (refresh! ctx false)))
 
 (defn- signal!
   "Interrupts, kills or forgets (k) the fiber id, then refreshes the list."
@@ -48,10 +74,7 @@
       (processes-pane/report! procp "; Processes need Jolt.")
       (ev/fibers-op! e k (if id {:id id} {})
                      (fn [r]
-                       (on-gui! (fn []
-                                  (if (:error r)
-                                    (processes-pane/report! procp (str "; " (:error r)))
-                                    (refresh! ctx false)))))))))
+                       (on-gui! (fn [] (signal-done! ctx r))))))))
 
 (defn- install
   "The Processes part for one window: builds the pane, wires its handlers

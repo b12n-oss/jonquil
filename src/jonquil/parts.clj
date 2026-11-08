@@ -129,29 +129,49 @@
 (def ^:private contribution-keys #{:fns :ui :hooks :exports :panels})
 (def ^:private hook-kinds #{:on-start :on-reroot :on-quit})
 
+(defn- check-keys
+  [id contribution]
+  (doseq [k (keys contribution)
+          :when (not (contains? contribution-keys k))]
+    (throw (ex-info (str "part " id ": unknown contribution key " k) {:part id :key k}))))
+
+(defn- check-hooks
+  [id contribution]
+  (doseq [h (keys (:hooks contribution))
+          :when (not (contains? hook-kinds h))]
+    (throw (ex-info (str "part " id ": unknown hook " h) {:part id :hook h}))))
+
+(defn- check-panel
+  [id declared [k {:keys [root focus! open!]}]]
+  (when-not (contains? declared k)
+    (throw (ex-info (str "part " id ": panel " k " is not declared in its spec")
+                    {:part id :panel k})))
+  (when-not (and (some? root) (fn? focus!) (fn? open!))
+    (throw (ex-info (str "part " id ": panel " k " needs a :root and :focus! and :open! fns")
+                    {:part id :panel k}))))
+
+(defn- check-panels
+  [id specs contribution]
+  (let [declared (into #{} (comp (filter #(= id (:id %))) (mapcat :panels) (map :id)) specs)]
+    (doseq [entry (:panels contribution)]
+      (check-panel id declared entry))))
+
+(defn- check-exports
+  [id wctx contribution]
+  (doseq [k (keys (:exports contribution))
+          :when (contains? wctx k)]
+    (throw (ex-info (str "duplicate exports key " k ": :core and " id)
+                    {:kind :exports :key k :owners [:core id]}))))
+
 (defn- check-contribution
   "Throws unless contribution (of id) uses only the known keys and hook
   kinds, exports no key wctx already holds, and answers :panels only for ids
   the part's spec (in specs) declares."
   [id wctx specs contribution]
-  (doseq [k (keys contribution)
-          :when (not (contains? contribution-keys k))]
-    (throw (ex-info (str "part " id ": unknown contribution key " k) {:part id :key k})))
-  (doseq [h (keys (:hooks contribution))
-          :when (not (contains? hook-kinds h))]
-    (throw (ex-info (str "part " id ": unknown hook " h) {:part id :hook h})))
-  (let [declared (into #{} (comp (filter #(= id (:id %))) (mapcat :panels) (map :id)) specs)]
-    (doseq [[k {:keys [root focus! open!]}] (:panels contribution)]
-      (when-not (contains? declared k)
-        (throw (ex-info (str "part " id ": panel " k " is not declared in its spec")
-                        {:part id :panel k})))
-      (when-not (and (some? root) (fn? focus!) (fn? open!))
-        (throw (ex-info (str "part " id ": panel " k " needs a :root and :focus! and :open! fns")
-                        {:part id :panel k})))))
-  (doseq [k (keys (:exports contribution))
-          :when (contains? wctx k)]
-    (throw (ex-info (str "duplicate exports key " k ": :core and " id)
-                    {:kind :exports :key k :owners [:core id]}))))
+  (check-keys id contribution)
+  (check-hooks id contribution)
+  (check-panels id specs contribution)
+  (check-exports id wctx contribution))
 
 (defn- add-contribution
   "acc with one part's contribution folded in. Strict for :fns, :ui,
