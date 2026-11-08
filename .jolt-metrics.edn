@@ -2,7 +2,9 @@
 ;; test and dev are measured but kept out of the refactoring queue.
 ;; Left out: build output (target, the app build's jonquil.build),
 ;; clj-kondo's cache, the deliberately broken smoke fixtures and the
-;; docs' demo files.
+;; docs' demo files. Upstream-lifted code (see UPSTREAM.md) is left out
+;; too: it follows DrClojure's source, so it is not ours to refactor.
 {:exclude ["target/**" "jonquil.build/**" ".clj-kondo/**" ".superpowers/**"
-           ".cpcache/**" "dev/smoke/fixtures/**" "docs/**"]
+           ".cpcache/**" "dev/smoke/fixtures/**" "docs/**"
+           "src/jonquil/syntax.clj" "test/jonquil/upstream/**"]
  :test-paths ["test" "dev"]}

@@ -328,7 +328,9 @@ port.
   `--no-git`, `--exclude GLOB`). Findings never fail it; only bad usage
   does. `.jolt-metrics.edn` at the root counts `test` and `dev` as test code
   (measured, never queued) and leaves out build output, clj-kondo's cache,
-  the smoke fixtures and `docs`. The `:metrics` alias pins the library's
+  the smoke fixtures and `docs`. Upstream-lifted code (`src/jonquil/syntax.clj`
+  and `test/jonquil/upstream/`) is left out too, since it follows DrClojure's
+  source and is tracked in `UPSTREAM.md`. The `:metrics` alias pins the library's
   version.
 - `bb lsp:format` / `bb lsp:format-check` and `bb lsp:clean-ns` /
   `bb lsp:clean-ns-check` reformat (or dry-run) code and `ns` forms with
