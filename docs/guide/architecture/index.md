@@ -128,6 +128,30 @@ Applying a theme rebuilds nothing: each component's `apply-theme!` retints its t
 - `editor/dispatch-key!` and the window key handler catch throws, report them in the status bar and still consume the key.
 - Server help (`ev/ServerHelp`: attach evaluators, out-of-process Jolt, jank) never blocks the GTK thread. `ev/ask-help!` waits `ev/help-grace-ms` (25 ms) and a late answer arrives through `on-gui!`. It applies only if it is the newest request (`:gen`), the evaluator is unchanged and the text and caret haven't moved. Jump checks the buffer first, so a local definition never waits.
 
+## Window parts
+
+A window feature that owns its own state, commands and startup work is a part, so it doesn't have to grow `jonquil.gtk.window`. A part has two namespaces:
+
+- `jonquil.parts.<name>` is GTK-free and holds `spec`: `{:id :name :commands {cmd-id {:doc "..." :scope :window :call [ctx-key & args]}}}`. A command names its context function as data (`:call`), never as a `:run` fn, so a spec needs nothing from `jonquil.command-registry`, which requires it.
+- `jonquil.gtk.parts.<name>` holds `part`, an install fn tagged `^{:part/id :name}`. `(part wctx)` returns `{:fns :ui :hooks :exports}`.
+
+`jonquil.parts/specs` and `jonquil.gtk.parts/installs` list the parts in install order, and a test checks that both name the same ones. A part may read another part's `:exports` only if that part comes earlier.
+
+`command_registry`'s public tables are the core commands plus every spec's commands. An id claimed twice, in any scope, throws when the registry loads and names the id and both owners.
+
+`wctx` gives a part the core's bindings by name: `:win :status-label :cv :ev* :sel* :tabs :active-tab :settings-path* :tab-ctx* :tab-by-id :select-tab! :new-tab!`. A part never requires the window namespace. It reads `:tab-ctx*` when it runs, not when it installs, since the tab map doesn't exist yet at install time.
+
+The contribution keys:
+
+- `:fns` are context functions the spec's `:call` entries name (`:replay-open-fn`).
+- `:ui` are the slots the window reads for its own wiring.
+- `:exports` are values for parts installed later.
+- `:hooks` maps a hook kind to a function. The kinds that exist are `:on-start` (once, when startup finishes), `:on-reroot` (Open Folder, before the new root opens, called with `{:path p}`) and `:on-quit` (a real quit only). Tab hooks, panels and part key bindings don't exist yet.
+
+`jonquil.parts/install` merges strictly. A duplicate `:fns`, `:ui` or `:exports` key throws and names both owners, and a key already in the core's tables is refused the same way. A part whose install throws contributes nothing, and the status bar says `; part <id>: <message>`. Hooks run in part order, and one that throws is reported the same way while the rest still run.
+
+Replay (the last session's record, LM7) is the example: `jonquil.parts.replay` holds the two palette commands, and `jonquil.gtk.parts.replay` holds the recorder, the record's state, the offer at open, and the three hooks that load the record at start and re-root and flush it at quit.
+
 ## The inspector: `Inspector`, `jonquil.inspect` and `jonquil.inspect.view`
 
 `jonquil.evaluator` has a second, optional protocol, `Inspector`: `inspect!` (an op, its args, and an `on-view` callback called exactly once, off the GTK thread) and `inspectable?`. The window checks `(satisfies? ev/Inspector e)` as it does `Attached`, so a ClojureDart evaluator gets the unavailable sentence.
