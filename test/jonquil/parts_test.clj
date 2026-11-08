@@ -54,8 +54,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:replay] (mapv :id parts/specs)))
-  (is (= #{:session/open-replay :session/forget-last}
+  (is (= [:layouts :replay] (mapv :id parts/specs)))
+  (is (= #{:layout/save :layout/forget :session/open-replay :session/forget-last}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -179,3 +179,12 @@
     (is (= 3 (count @seen)))
     (is (some? (first @seen)))
     (is (= 1 (count (distinct @seen))) "every scheduled save reuses one callable")))
+
+(deftest replay-is-the-last-part
+  (is (= :replay (:id (last parts/specs)))))
+
+(deftest layouts-part-owns-its-commands
+  (let [spec (some #(when (= :layouts (:id %)) %) parts/specs)]
+    (is (= [:layout-save-fn] (get-in spec [:commands :layout/save :call])))
+    (is (= [:layout-forget-fn] (get-in spec [:commands :layout/forget :call])))
+    (is (contains? registry/window-commands :layout/forget))))

@@ -70,6 +70,7 @@
     jonquil.results-rt
     jonquil.results
     jonquil.keymap
+    jonquil.parts.layouts
     jonquil.parts.replay
     jonquil.parts
     jonquil.command-registry
@@ -125,6 +126,7 @@
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
+    jonquil.gtk.parts.layouts
     jonquil.gtk.parts.replay
     jonquil.gtk.parts
     jonquil.gtk.window
