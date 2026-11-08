@@ -5,8 +5,9 @@
   only when it comes later."
   (:require [jonquil.gtk.parts.layouts :as layouts]
             [jonquil.gtk.parts.replay :as replay]
+            [jonquil.gtk.parts.time-form :as time-form]
             [jonquil.gtk.parts.worlds :as worlds]))
 
 (def installs
   "Install fns, in order."
-  [layouts/part worlds/part replay/part])
+  [layouts/part worlds/part time-form/part replay/part])

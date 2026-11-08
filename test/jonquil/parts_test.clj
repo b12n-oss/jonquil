@@ -5,6 +5,7 @@
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.replay :as replay-part]
+            [jonquil.gtk.parts.time-form :as time-form-part]
             [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
@@ -57,8 +58,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:layouts :worlds :replay] (mapv :id parts/specs)))
-  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :session/open-replay :session/forget-last}
+  (is (= [:layouts :worlds :time-form :replay] (mapv :id parts/specs)))
+  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -263,3 +264,22 @@
     (is (= 0 (@#'layouts-part/settle! deps)) "a throwing tick still answers 0, removing the source")
     (is (false? @running?) "so the next use can arm a timer")
     (is (re-find #"boom" (str @said)))))
+
+;; The time-form part: its command, and the per-window confirmation.
+(deftest time-form-part-owns-its-command
+  (let [spec (some #(when (= :time-form (:id %)) %) parts/specs)]
+    (is (= [:time-form-fn] (get-in spec [:commands :run/time-form :call])))
+    (is (contains? registry/window-commands :run/time-form))))
+
+(deftest time-form-confirmation-is-per-install
+  (let [install #(@#'time-form-part/install
+                  {:win :w :tabs (atom []) :active-tab (fn [] nil) :cv {} :ev* (atom nil)
+                   :sel* (atom nil) :status-label :lbl :set-status! (fn [_]) :alert-pending? (atom false)
+                   :show-alert! (fn [& _]) :make-eval-opts (fn [& _]) :refuse-foreign! (fn [_])})
+        c1 (install)
+        c2 (install)]
+    (is (fn? (get-in c1 [:fns :time-form-fn])))
+    (reset! (:time-confirmed? (:ui c1)) true)
+    (is (false? @(:time-confirmed? (:ui c2))))
+    (is (not (identical? (:time-confirmed? (:ui c1)) (:time-confirmed? (:ui c2)))))
+    (is (not (identical? (:time-ask* (:ui c1)) (:time-ask* (:ui c2)))))))

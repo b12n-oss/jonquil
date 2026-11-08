@@ -92,7 +92,6 @@
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
-            [jonquil.timing :as timing]
             [jonquil.theme :as theme]
             [jonquil.usages :as usages]))
 
@@ -577,7 +576,6 @@
 
 (def ^:private CLOSE-ALERT {:cancel 2 :default 0})
 (def ^:private TRASH-ALERT {:cancel 1 :default 1})
-(def ^:private TIME-ALERT {:cancel 2 :default 0})
 
 (defn- finish-close!
   "Confirms and re-triggers the window's own close-request:
@@ -1679,68 +1677,6 @@
             (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                   warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
-          (set-status! status-label "No form at the caret."))))))
-
-(defn- start-timing!
-  "Evaluates the timing harness around text (the form snap had at the
-  caret) in the window's runtime as Inspect Form evaluates, so the console
-  gets its ; Time: line and the map it answers. A tab that closed while
-  its alert was up times nothing."
-  [{:keys [tab tabs cv ev* status-label]} snap text]
-  (when (some #(= (:id tab) (:id %)) @tabs)
-    (let [{:keys [ed]} tab
-          opts (make-eval-opts ed cv ev* status-label false)]
-      (cview/append! cv :system (str "; Timing " (timing/form-label text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
-      (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-            warning (ev/eval! @ev* (timing/code text 1000)
-                              (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
-        (when warning (cview/append! cv :system warning))))))
-
-(defn- time-choice!
-  "The timing alert's decision: index 0 Time It, 1 Time It and stop asking
-  in this window (time-confirmed?), 2 Cancel; an :error means the alert
-  was dismissed. Cancel and a dismissal time nothing."
-  [{:keys [time-confirmed?] :as ctx} snap text {:keys [index error]}]
-  (cond
-    error nil
-    (= index 0) (start-timing! ctx snap text)
-    (= index 1) (do (reset! time-confirmed? true) (start-timing! ctx snap text))
-    :else nil))
-
-(defn- time-form!
-  "Time the form at the caret: Run Form's form, wrapped in
-  jonquil.timing/code. The form runs many times, side effects and all, so
-  an alert asks first (ask-time!, which rows can replace) until
-  Don't Ask Again sets time-confirmed? for this window. The alert shares
-  the other alerts' alert-pending? guard, as the tree's trash alert does,
-  so it never opens over a close alert. Dialects without the harness's
-  System/nanoTime say so and evaluate nothing."
-  [{:keys [tab cv ev* status-label sel* ask-time! time-confirmed?] :as ctx}]
-  (let [{:keys [ed]} tab]
-    (cond
-      (refuse-foreign! ctx) nil
-      (not (timing/supported? (:id (:profile @sel*))))
-      (set-status! status-label "; Timing needs Jolt or JVM Clojure.")
-      :else
-      (let [snap (editor/snapshot ed)]
-        (if-let [{:keys [text]} (commands/run-form snap)]
-          (cond
-            @time-confirmed? (start-timing! ctx snap text)
-            @alert-pending? (set-status! status-label "Another alert is open.")
-            :else
-            (do (reset! alert-pending? true)
-                ;; an older message (a No form at the caret. from a miss, say)
-                ;; shouldn't sit under the alert; a running eval keeps its own
-                (when-not (ev/evaluating? @ev*) (set-status! status-label "Ready"))
-                ;; complete-alert! releases the guard for the real alert; this
-                ;; also releases it for a stand-in, and a throw while building
-                ;; the alert releases it too
-                (try
-                  (ask-time! (timing/confirm-alert text)
-                             (fn [result] (reset! alert-pending? false) (time-choice! ctx snap text result)))
-                  (catch :default e
-                    (reset! alert-pending? false)
-                    (cview/append! cv :error (str "; time: " (ex-message e) "\n"))))))
           (set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
@@ -3654,15 +3590,6 @@
         ;; front, remove-tab! drops it): Genera's Select order
         recent-tabs (atom [])
         win (g/gtk-application-window-new app)
-        ;; Time the form's alert: once Don't Ask Again is chosen, this
-        ;; window times without asking. ask-time* shows the real alert;
-        ;; the self-test swaps it for a stand-in (nil puts the real one back).
-        time-confirmed? (atom false)
-        ask-time* (atom nil)
-        ask-time! (fn [alert on-choice]
-                    (if-let [f @ask-time*]
-                      (f alert on-choice)
-                      (show-alert! win alert TIME-ALERT on-choice)))
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
         ;; LM6: what keys do at the caret, dim, hidden while there's nothing
@@ -4033,8 +3960,6 @@
                            (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
-        time-form-fn (fn [] (time-form! {:tab (active-tab) :tabs tabs :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                          :ask-time! ask-time! :time-confirmed? time-confirmed?}))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
@@ -5044,7 +4969,9 @@
                                           :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
                                           :files-btn files-btn :panel-focus-fn panel-focus-fn
                                           :showing-panel showing-panel :show-right-panel! show-right-panel!
-                                          :hide-right-panel! hide-right-panel!}
+                                          :hide-right-panel! hide-right-panel!
+                                          :alert-pending? alert-pending? :show-alert! show-alert!
+                                          :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!}
                                          part-error!)
         window-key-args (parts/merge-with-core
                          :fns
@@ -5058,7 +4985,6 @@
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :locations-project-usages-fn locations-project-usages-fn
-                         :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :hints-toggle-fn (fn []
@@ -5674,7 +5600,6 @@
                    :tree-submit!* (fn [text] (file-tree-pane/submit-name! tree-pane text))
                    :tree-menu-state* (fn [] (file-tree-pane/menu-state tree-pane))
                    :trash-choice! (fn [path result] (trash-choice! @*tab-ctx path result))
-                   :time-ask* ask-time* :time-confirmed? time-confirmed?
                    :open-paths! (fn [paths] (@current-open-paths paths))
                    :app app
                    :active-tab* active-tab

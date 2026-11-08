@@ -6,11 +6,12 @@
   from the registry (which requires this namespace)."
   (:require [jonquil.parts.layouts :as layouts]
             [jonquil.parts.replay :as replay]
+            [jonquil.parts.time-form :as time-form]
             [jonquil.parts.worlds :as worlds]))
 
 (def specs
   "Every part's spec, {:id kw :commands {cmd-id {:doc s :scope sc :call [k & args]}}}."
-  [layouts/spec worlds/spec replay/spec])
+  [layouts/spec worlds/spec time-form/spec replay/spec])
 
 (defn- claim
   "owners with id's owner added, or throws when id is already owned."

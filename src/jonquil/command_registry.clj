@@ -75,8 +75,6 @@
    :trace/show {:doc "Show the calls of the traced functions." :scope :window :run (call :trace-show-fn)}
    :trace/clear {:doc "Clear the recorded calls." :scope :window :run (call :trace-clear-fn)}
    :trace/untrace-all {:doc "Stop tracing every function." :scope :window :run (call :trace-untrace-all-fn)}
-   :run/time-form {:doc "Time the form at the caret (about a second)." :scope :window
-                   :run (call :time-form-fn)}
    :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window
                        :run (call :show-frames-fn)}
    :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
