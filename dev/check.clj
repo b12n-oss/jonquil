@@ -6,9 +6,13 @@
   '[jonquil.core
     jonquil.dialect
     jonquil.parts.extra
+    jonquil.parts.disk-poll
+    jonquil.parts.messages
     jonquil.parts.layouts
     jonquil.parts.processes
     jonquil.parts.replay
+    jonquil.parts.trace
+    jonquil.parts.live-results
     jonquil.parts.time-form
     jonquil.parts.worlds
     jonquil.parts
@@ -130,9 +134,13 @@
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
+    jonquil.gtk.parts.disk-poll
+    jonquil.gtk.parts.messages
     jonquil.gtk.parts.layouts
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.replay
+    jonquil.gtk.parts.trace
+    jonquil.gtk.parts.live-results
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds
     jonquil.gtk.parts

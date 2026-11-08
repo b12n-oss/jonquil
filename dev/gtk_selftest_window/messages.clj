@@ -335,3 +335,21 @@
                                  (and arrived? (= 2 picked) (= picked after))
                                  {:picked picked :after after :arrived arrived?})))
         (finally (close-panel! ui))))))
+
+(defn row-messages-unread-click-opens
+  "Clicking the status bar's unread count opens Messages and marks it read."
+  [ui]
+  (go-row :messages-unread-click-opens support/check
+    (let [mp (:messages-pane ui)]
+      (on-gtk (fresh! ui))
+      (try
+        ((:log!* ui) {:kind :agent :summary "unread click"})
+        (let [counted? (await-until 3000 20 #(= "● 1 message" (unread ui)))
+              _ (on-gtk ((:unread-click!* ui)))
+              shown (await-until 3000 20 #(shown? mp))
+              panel (on-gtk (when (pos? (g/gtk-widget-get-visible (:right-slot ui))) :messages))
+              after (on-gtk (unread ui))]
+          (on-gtk (support/check :messages-unread-click-opens
+                                 (and counted? shown (= :messages panel) (nil? after))
+                                 {:counted counted? :shown shown :panel panel :after after})))
+        (finally (close-panel! ui))))))

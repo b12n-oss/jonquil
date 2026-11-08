@@ -4,11 +4,18 @@
             [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.parts.disk-poll :as disk-poll-part]
             [jonquil.gtk.parts.layouts :as layouts-part]
+            [jonquil.gtk.parts.live-results :as live-results-part]
+            [jonquil.gtk.console-view :as cview]
+            [jonquil.gtk.parts.messages :as messages-part]
             [jonquil.gtk.parts.processes :as processes-part]
             [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.parts.replay :as replay-part]
             [jonquil.gtk.parts.time-form :as time-form-part]
+            [jonquil.gtk.parts.trace :as trace-part]
+            [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.palette :as palette]
             [jonquil.settings :as settings]
@@ -62,9 +69,11 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
-  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
-          :panel/processes :processes/show}
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :live-results :replay] (mapv :id parts/specs)))
+  (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+            :panel/processes :processes/show
+          :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all
+          :result/inspect :result/copy :result/define :result/jump}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -370,8 +379,8 @@
 (deftest palette-labels-hold-the-core-panels
   (is (= "Processes" (:processes palette/PANEL-LABELS)))
   (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
-          :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"
-          :processes "Processes"}
+            :debugger "Frames" :plugins "Plugins" :messages "Messages"
+          :processes "Processes" :trace "Trace"}
          palette/PANEL-LABELS)))
 
 (deftest processes-part-owns-its-commands-and-panel
@@ -404,3 +413,135 @@
         (show)
         (is (= [:watch] @ops))
         (is (= 1 (count @statuses)))))))
+
+;; Messages: the log panel, its unread count's click and the status log.
+(deftest messages-part-owns-its-command-and-panel
+  (let [spec (some #(when (= :messages (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :messages] (get-in spec [:commands :panel/messages :call])))
+    (is (= "Focus the Messages panel, or open it." (get-in spec [:commands :panel/messages :doc])))
+    (is (= [{:id :messages :label "Messages"}] (:panels spec)))
+    (is (contains? registry/window-commands :panel/messages))
+    (is (= "Messages" (:messages palette/PANEL-LABELS)))))
+
+(deftest messages-part-registers-its-log
+  (let [registered (atom [])
+        wctx {:right {:recent-panels (atom [])} :tabs (atom []) :active-tab (fn [] nil)
+              :showing-panel (fn [_] nil) :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+              :set-status! (fn [_]) :status-label :lbl :unread-label :unread
+              :register-status-log! #(swap! registered conj %)
+              :plugin-step! (fn [& _]) :settings-path* (atom nil) :select-tab! (fn [& _])
+              :tab-ctx* (atom nil) :panel-focus-fn (fn [& _])}]
+    (with-redefs [messages-pane/make-pane (fn [] {:root :root :list :list})
+                  messages-pane/set-handlers! (fn [& _])
+                  g/gtk-gesture-click-new (fn [] :click)
+                  g/g-signal-connect-data (fn [& _])
+                  g/gtk-widget-add-controller (fn [& _])]
+      (let [c ((deref #'messages-part/install) wctx)]
+        (is (= 1 (count @registered)))
+        (is (fn? (get-in c [:exports :log-entry!])))
+        (is (identical? (first @registered) (get-in c [:exports :log-entry!])))
+        (is (identical? (first @registered) (get-in c [:ui :log!*])))
+        (is (fn? (get-in c [:ui :unread-click!*])))
+        (is (= :root (get-in c [:panels :messages :root])))))))
+
+(deftest messages-installs-first
+  (is (= :messages (:part/id (meta (first gtk-parts/installs)))))
+  (is (= :replay (:part/id (meta (last gtk-parts/installs))))))
+
+;; Disk polling: open tabs follow their files; logs through Messages' export.
+(deftest disk-poll-needs-the-messages-log
+  (let [timers (atom [])
+        errors (atom [])]
+    (with-redefs [g/g-timeout-add (fn [& args] (swap! timers conj args) 1)]
+      (let [c (parts/install [disk-poll-part/part]
+                             {:tabs (atom []) :settings-path* (atom nil) :refresh-labels! (fn [])}
+                             (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+        (is (= [[:disk-poll "disk-poll needs :log-entry! from the messages part"]] @errors))
+        (is (= {} (:ui c)))
+        (is (empty? @timers))))))
+
+(deftest disk-poll-arms-one-timer
+  (let [timers (atom [])]
+    (with-redefs [g/g-timeout-add (fn [& args] (swap! timers conj args) 1)]
+      (let [c ((deref #'disk-poll-part/install)
+               {:tabs (atom []) :settings-path* (atom nil) :refresh-labels! (fn [])
+                :log-entry! (fn [_])})]
+        (is (= 1 (count @timers)))
+        (is (= 2000 (ffirst @timers)))
+        (is (fn? (get-in c [:ui :disk-tick!*])))))))
+
+(deftest disk-poll-spec-has-no-commands
+  (is (= {:id :disk-poll :commands {}} (some #(when (= :disk-poll (:id %)) %) parts/specs))))
+
+;; Trace: the panel, its four commands and the after-eval refresh.
+(deftest trace-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :trace (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :trace] (get-in spec [:commands :panel/trace :call])))
+    (is (= [:trace-toggle-fn] (get-in spec [:commands :trace/toggle :call])))
+    (is (= [:trace-show-fn] (get-in spec [:commands :trace/show :call])))
+    (is (= [:trace-clear-fn] (get-in spec [:commands :trace/clear :call])))
+    (is (= [:trace-untrace-all-fn] (get-in spec [:commands :trace/untrace-all :call])))
+    (is (= [{:id :trace :label "Trace"}] (:panels spec)))
+    (is (= "Trace" (:trace palette/PANEL-LABELS)))))
+
+(defn- trace-wctx [ev* statuses]
+  {:ev* ev* :cv {:after-eval* (atom nil)} :right {:slot :slot :recent-panels (atom [])}
+   :set-status! #(swap! statuses conj %) :status-label :lbl
+   :active-tab (fn [] nil) :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+   :inspect! (fn [_])})
+
+;; Review focus 3: a dialect switch swaps the evaluator in ev*, and the
+;; next call must read the new one.
+(deftest trace-reads-the-evaluator-per-call
+  (let [statuses (atom [])
+        ops (atom [])
+        ev* (atom {:not :trace})
+        wctx (trace-wctx ev* statuses)]
+    (with-redefs [trace-pane/make-pane (fn [] {:root :root :list :list})
+                  trace-pane/set-handlers! (fn [& _])]
+      (let [show (get-in ((deref #'trace-part/install) wctx) [:fns :trace-show-fn])]
+        (show)
+        (is (= ["; Trace needs Jolt."] @statuses))
+        (reset! ev* (reify ev/Trace
+                      (trace-op! [_ op _ _] (swap! ops conj op))))
+        (show)
+        (is (= [:log] @ops))
+        (is (= 1 (count @statuses)))))))
+
+(deftest trace-part-sets-after-eval
+  (let [wctx (trace-wctx (atom nil) (atom []))]
+    (with-redefs [trace-pane/make-pane (fn [] {:root :root :list :list})
+                  trace-pane/set-handlers! (fn [& _])]
+      (let [c ((deref #'trace-part/install) wctx)]
+        (is (fn? @(:after-eval* (:cv wctx))))
+        (is (= :root (get-in c [:panels :trace :root])))))))
+
+(deftest live-results-part-owns-its-commands
+  (let [spec (some #(when (= :live-results (:id %)) %) parts/specs)]
+    (is (= [:result-inspect-fn] (get-in spec [:commands :result/inspect :call])))
+    (is (= [:result-copy-fn] (get-in spec [:commands :result/copy :call])))
+    (is (= [:result-define-fn] (get-in spec [:commands :result/define :call])))
+    (is (= [:result-jump-fn] (get-in spec [:commands :result/jump :call])))
+    (is (= 4 (count (:commands spec))))))
+
+(deftest live-results-say-no-result
+  (let [statuses (atom [])
+        wctx {:cv {:view :view :buf :buf :results (atom [])}
+              :set-status! #(swap! statuses conj %) :status-label :lbl
+              :ev* (atom nil) :active-tab (fn [] nil)
+              :inspect! (fn [_]) :ask-lookup! (fn [& _]) :jump-to! (fn [& _])
+              :source-ctx (fn [_] {})}]
+    (with-redefs [cview/result-at (fn [_ _] nil)
+                  cview/result-text-at (fn [_ _] nil)
+                  g/cursor-offset (fn [_] 0)
+                  g/gtk-gesture-click-new (fn [] :gesture)
+                  g/gtk-gesture-single-set-button (fn [& _])
+                  g/gtk-event-controller-set-propagation-phase (fn [& _])
+                  g/g-signal-connect-data (fn [& _] 1)
+                  g/gtk-widget-add-controller (fn [& _])]
+      (let [c ((deref #'live-results-part/install) wctx)]
+        (doseq [k [:result-inspect-fn :result-copy-fn :result-define-fn :result-jump-fn]]
+          (reset! statuses [])
+          ((get-in c [:fns k]))
+          (is (= ["; No result here."] @statuses) (str k)))
+        (is (= #{:result-click!* :result-release!* :console-right-press!*} (set (keys (:ui c)))))))))

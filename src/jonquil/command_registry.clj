@@ -48,29 +48,14 @@
                      :run (call :panel-focus-fn :locations)}
    :panel/frames {:doc "Focus the Frames panel, or open it." :scope :window
                   :run (call :panel-focus-fn :debugger)}
-   :panel/trace {:doc "Focus the Trace panel, or open it." :scope :window
-                 :run (call :panel-focus-fn :trace)}
    :panel/plugins {:doc "Focus the Plugins panel, or open it." :scope :window
                    :run (call :panel-focus-fn :plugins)}
-   :panel/messages {:doc "Focus the Messages panel, or open it." :scope :window
-                    :run (call :panel-focus-fn :messages)}
    :view/cycle-theme {:doc "Switch to the next theme." :scope :window :run (call :theme-cycle-fn)}
    :inspect/form {:doc "Inspect the value of the form at the caret." :scope :window
                   :run (call :inspect-form-fn)}
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :run/changed {:doc "Run the forms changed since they last ran." :scope :window
                  :run (call :run-changed-fn)}
-   :result/inspect {:doc "Inspect the console result at the caret." :scope :window :run (call :result-inspect-fn)}
-   :result/copy {:doc "Copy the console result at the caret." :scope :window :run (call :result-copy-fn)}
-   :result/define {:doc "Define a var holding the console result at the caret." :scope :window
-                   :run (call :result-define-fn)}
-   :result/jump {:doc "Jump to the definition of the var the console result at the caret names." :scope :window
-                 :run (call :result-jump-fn)}
-   :trace/toggle {:doc "Trace the function at the caret, or stop tracing it." :scope :window
-                  :run (call :trace-toggle-fn)}
-   :trace/show {:doc "Show the calls of the traced functions." :scope :window :run (call :trace-show-fn)}
-   :trace/clear {:doc "Clear the recorded calls." :scope :window :run (call :trace-clear-fn)}
-   :trace/untrace-all {:doc "Stop tracing every function." :scope :window :run (call :trace-untrace-all-fn)}
    :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window
                        :run (call :show-frames-fn)}
    :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
