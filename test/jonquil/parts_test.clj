@@ -5,6 +5,7 @@
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.replay :as replay-part]
+            [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
@@ -56,8 +57,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:layouts :replay] (mapv :id parts/specs)))
-  (is (= #{:layout/save :layout/forget :session/open-replay :session/forget-last}
+  (is (= [:layouts :worlds :replay] (mapv :id parts/specs)))
+  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :session/open-replay :session/forget-last}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -190,6 +191,34 @@
     (is (= [:layout-save-fn] (get-in spec [:commands :layout/save :call])))
     (is (= [:layout-forget-fn] (get-in spec [:commands :layout/forget :call])))
     (is (contains? registry/window-commands :layout/forget))))
+
+;; The worlds part: its commands, and what it does on a dialect whose
+;; evaluator has no ev/World (a plain map doesn't satisfy the protocol).
+(deftest worlds-part-owns-its-commands
+  (let [spec (some #(when (= :worlds (:id %)) %) parts/specs)]
+    (is (= [:world-save-fn] (get-in spec [:commands :world/save :call])))
+    (is (= [:world-restore-fn] (get-in spec [:commands :world/restore :call])))
+    (is (= [:world-restore-earlier-fn] (get-in spec [:commands :world/restore-earlier :call])))
+    (is (contains? registry/window-commands :world/restore-earlier))))
+
+(deftest worlds-need-jolt
+  (let [statuses (atom [])
+        effects (atom [])
+        fns (:fns ((deref #'worlds-part/install)
+                   {:ev* (atom {:not :a-world}) :settings-path* (atom "/nonexistent/settings.edn") :cv {}
+                    :tree-pane {:state (atom {:root "r"})}
+                    :active-tab (fn [] (swap! effects conj :active-tab) nil)
+                    :set-status! #(swap! statuses conj %)}))]
+    ;; the restore-earlier fn lists the (read-only) world folder before it
+    ;; checks for Jolt, as it did in window.clj; no folder exists here
+    ((:world-save-fn fns))
+    ((:world-restore-fn fns))
+    ((:world-restore-earlier-fn fns))
+    ((:world-restore-from-fn fns) "p")
+    (is (= ["; Save World needs Jolt." "; Restore World needs Jolt."
+            "; Restore World needs Jolt." "; Restore World needs Jolt."]
+           @statuses))
+    (is (= [] @effects))))
 
 ;; The layouts part's settle timer. ffi/foreign-callable is stubbed to hand
 ;; back the contained fn itself, so a test can run the tick.

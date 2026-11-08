@@ -4,8 +4,9 @@
   is its namespace plus one entry here. A part may read another's :exports
   only when it comes later."
   (:require [jonquil.gtk.parts.layouts :as layouts]
-            [jonquil.gtk.parts.replay :as replay]))
+            [jonquil.gtk.parts.replay :as replay]
+            [jonquil.gtk.parts.worlds :as worlds]))
 
 (def installs
   "Install fns, in order."
-  [layouts/part replay/part])
+  [layouts/part worlds/part replay/part])

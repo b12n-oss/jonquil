@@ -72,6 +72,7 @@
     jonquil.keymap
     jonquil.parts.layouts
     jonquil.parts.replay
+    jonquil.parts.worlds
     jonquil.parts
     jonquil.command-registry
     jonquil.palette
@@ -128,6 +129,7 @@
     jonquil.gtk.file-tree-pane
     jonquil.gtk.parts.layouts
     jonquil.gtk.parts.replay
+    jonquil.gtk.parts.worlds
     jonquil.gtk.parts
     jonquil.gtk.window
     jonquil.mcp.window
