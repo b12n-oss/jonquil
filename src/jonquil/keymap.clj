@@ -22,7 +22,8 @@
   Cmd+Option+F/L keycode fallback (jonquil.gtk.editor/physical-key), kept
   per binding so no other chord picks it up."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [jonquil.parts :as parts]))
 
 (def MODIFIER-MASKS
   "GDK modifier bits, from gdktypes.h. Copied rather than read from
@@ -169,6 +170,42 @@
   [path]
   (slurp (io/resource path)))
 
+(defn- chord-states
+  "Every concrete GDK modifier state a binding can fire in: its :exact set, else
+  its :mods with :cmd taken as Control and as Meta (matches? holds :cmd for
+  either), minus any state that holds a :not modifier. Empty when the
+  binding can fire in none."
+  [{:keys [exact mods] :as binding}]
+  (let [mask #(reduce bit-or 0 (map MODIFIER-MASKS %))
+        variants (if (contains? mods :cmd)
+                   (for [c [:ctrl :meta]] (conj (disj mods :cmd) c))
+                   [(or exact mods)])]
+    (filter #(modifiers-match? binding %) (map mask variants))))
+
+(defn unreachable-bindings
+  "The bindings that don't fire themselves: for some key name and some
+  state the binding can fire in (Control and Meta both, for :cmd), the first
+  match in scope-vector is a binding with another :command, :args or
+  :outcome (or none). So a :cmd binding shadowed on Meta only is reported.
+  Every :when condition is taken as true and every command as answering, so
+  the check can only over-report, never miss a shadow. :physical? changes
+  nothing here: it only widens a match when dispatch is given a physical key
+  name, and the states built here carry none."
+  [bindings scope-vector]
+  (let [same? (juxt :command :args :outcome)]
+    (filterv (fn [b]
+               (some (fn [[k st]]
+                       (let [hit (when-let [kv (key-value k)]
+                                   (resolve-binding scope-vector kv st (constantly true)))]
+                         (not (and hit (= (same? hit) (same? b))))))
+                     (for [k (key-names b), st (chord-states b)]
+                       [k st])))
+             bindings)))
+
 (def shipped
-  "The shipped keymap, {scope [bindings...]}, from jonquil/keymap.edn."
-  (edn/read-string (embedded-text "jonquil/keymap.edn")))
+  "The shipped keymap, {scope [bindings...]}, from jonquil/keymap.edn, with
+  every spec's bindings for the scope appended after its vector, so a spec
+  binding can never shadow a shipped key."
+  (let [base (edn/read-string (embedded-text "jonquil/keymap.edn"))]
+    (into {} (for [[scope v] base]
+               [scope (into (vec v) (parts/bindings parts/specs scope))]))))

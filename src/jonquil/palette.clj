@@ -3,7 +3,8 @@
   registered commands as entries a person can filter, each with its doc
   line, the chords that run it and its source. No GTK here;
   jonquil.gtk.palette shows the entries and runs the one picked."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [jonquil.parts :as parts]))
 
 (def ^:private key-display
   {"equal" "=" "plus" "+" "minus" "-" "slash" "/" "semicolon" ";" "bracketleft" "["
@@ -67,10 +68,12 @@
   "The right-hand panels a switch can bring back, by the window's key for
   each, with the name the palette gives it. Review and History are left
   out: each shows one proposal or one plugin's history, opened from that
-  thing, so bringing one back would show a stale view."
-  {:inspector "Inspector" :source "Source" :locations "Locations"
-   :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"
-   :processes "Processes"})
+  thing, so bringing one back would show a stale view. The core panels'
+  labels merged with the specs' :panels; a clash throws at load."
+  (parts/merge-panels
+   {:inspector "Inspector" :source "Source" :locations "Locations"
+    :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"}
+   parts/specs))
 
 (defn panel-entries
   "The palette's panel entries: every recent panel but showing, most

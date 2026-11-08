@@ -16,7 +16,8 @@
 
 (def sources
   "Classpath-relative path -> text: jonquil.plugin-protocol's requires,
-  followed through (measured 2026-10-26), keymap.edn (which keymap reads
+  followed through (measured 2026-10-26; plus jonquil.parts and its spec
+  namespaces, which keymap and palette now require), keymap.edn (which keymap reads
   when it compiles), and the checker."
   {"jonquil/commands.clj" (embedded-text "jonquil/commands.clj")
    "jonquil/console.clj" (embedded-text "jonquil/console.clj")
@@ -25,6 +26,13 @@
    "jonquil/keymap.clj" (embedded-text "jonquil/keymap.clj")
    "jonquil/keymap.edn" (embedded-text "jonquil/keymap.edn")
    "jonquil/palette.clj" (embedded-text "jonquil/palette.clj")
+   "jonquil/parts.clj" (embedded-text "jonquil/parts.clj")
+   "jonquil/parts/extra.clj" (embedded-text "jonquil/parts/extra.clj")
+   "jonquil/parts/layouts.clj" (embedded-text "jonquil/parts/layouts.clj")
+   "jonquil/parts/processes.clj" (embedded-text "jonquil/parts/processes.clj")
+   "jonquil/parts/replay.clj" (embedded-text "jonquil/parts/replay.clj")
+   "jonquil/parts/time_form.clj" (embedded-text "jonquil/parts/time_form.clj")
+   "jonquil/parts/worlds.clj" (embedded-text "jonquil/parts/worlds.clj")
    "jonquil/plugin.clj" (embedded-text "jonquil/plugin.clj")
    "jonquil/plugin_check.clj" (embedded-text "jonquil/plugin_check.clj")
    "jonquil/plugin_protocol.clj" (embedded-text "jonquil/plugin_protocol.clj")

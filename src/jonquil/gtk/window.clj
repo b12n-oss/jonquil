@@ -53,7 +53,6 @@
             [jonquil.gtk.locations-pane :as locations-pane]
             [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.gtk.messages-pane :as messages-pane]
-            [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.messages :as messages]
             [jonquil.gtk.palette :as palette]
             [jonquil.gtk.plugin-history-pane :as plugin-history-pane]
@@ -863,19 +862,21 @@
   (atom nil))
 
 (defn- right-roots
-  "{which root} for the panels right's slot holds; a right without
-  :review-root, :plugins-root or :history-root (a test's) has fewer."
+  "{which root} for the panels right's slot holds, a part's among them; a
+  right without :review-root, :plugins-root or :history-root (a test's) has
+  fewer, and one without :part-panels* has no part panels."
   [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root messages-root
-           processes-root]}]
-  (cond-> {:inspector inspector-root :source source-root}
+           part-panels*]}]
+  (cond-> (into {:inspector inspector-root :source source-root}
+                (map (fn [[id p]] [id (:root p)]))
+                (some-> part-panels* deref))
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)
     locations-root (assoc :locations locations-root)
     debugger-root (assoc :debugger debugger-root)
     trace-root (assoc :trace trace-root)
-    messages-root (assoc :messages messages-root)
-    processes-root (assoc :processes processes-root)))
+    messages-root (assoc :messages messages-root)))
 
 (defn- show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
@@ -3674,8 +3675,6 @@
         ;; events, written from any thread (messages/log!), and the status
         ;; bar's unread count, shown while it's above zero
         msgp (messages-pane/make-pane)
-        ;; LM4's Processes panel: the fibers the program spawned
-        procp (processes-pane/make-pane)
         messages* (atom (messages/empty-log))
         unread-label (g/gtk-label-new "")
         dbgp (debugger-pane/make-pane)
@@ -3807,14 +3806,18 @@
                                         :state inspector-state})
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        ;; {id {:root :focus! :open!}} of the parts' panels, reset once the
+        ;; parts install (after part-contribution): panel-focus-fn and
+        ;; right-roots are built first, like *tab-ctx.
+        part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
                :debugger-root (:root dbgp) :trace-root (:root tracep) :messages-root (:root msgp)
-               :processes-root (:root procp)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
                ;; Switch to panel entries, and the panel keys' "open it"
-               :recent-panels (atom [])}
+               :recent-panels (atom [])
+               :part-panels* part-panels*}
         _ (reset! *right right)
         ;; The plugin-step! opts for Accept or Reject of the
         ;; proposal the panel shows (nil when none is), its lines put on
@@ -4378,44 +4381,6 @@
                                                     :else (trace-said (str "; " (:error r)))))))))
                             (set-status! status-label "; Trace needs Jolt.")))
         trace-show-fn (fn [] (trace-refresh! true))
-        ;; LM4: the Processes panel's list, from where the code runs. Watching
-        ;; (wrapping jolt.fibers/spawn) starts on the first refresh and is
-        ;; idempotent, so a restarted child picks it up again. show? opens
-        ;; the panel; the timer's refreshes only update it while it shows.
-        processes-refresh! (fn [show?]
-                             (let [e @ev*]
-                               (if (satisfies? ev/Fibers e)
-                                 (ev/fibers-op!
-                                  e :watch {}
-                                  (fn [_]
-                                    (ev/fibers-op!
-                                     e :list {}
-                                     (fn [r]
-                                       (on-gui! (fn []
-                                                  (when show? (show-right-panel! right :processes))
-                                                  (when (= :processes (showing-panel right))
-                                                    (if (:error r)
-                                                      ;; no stale rows to act on while the runtime's away
-                                                      (do (processes-pane/show! procp [])
-                                                          (processes-pane/report! procp (str "; " (:error r))))
-                                                      (processes-pane/show! procp (:fibers r))))
-                                                  (when show? (g/gtk-widget-grab-focus (:list procp)))))))))
-                                 (case (processes-pane/no-jolt-goes-to show?)
-                                   :status (set-status! status-label "; Processes need Jolt.")
-                                   :footer (when (= :processes (showing-panel right))
-                                             (processes-pane/show! procp [])
-                                             (processes-pane/report! procp "; Processes need Jolt."))))))
-        processes-show-fn (fn [] (processes-refresh! true))
-        processes-signal! (fn [k id]
-                            (let [e @ev*]
-                              (if-not (satisfies? ev/Fibers e)
-                                (processes-pane/report! procp "; Processes need Jolt.")
-                                (ev/fibers-op! e k (if id {:id id} {})
-                                               (fn [r]
-                                                 (on-gui! (fn []
-                                                            (if (:error r)
-                                                              (processes-pane/report! procp (str "; " (:error r)))
-                                                              (processes-refresh! false)))))))))
         trace-clear-fn (fn []
                          (if-let [e (trace-ev)]
                            (ev/trace-op! e :clear {} (fn [_] (trace-said "; Cleared the recorded calls.")
@@ -4666,17 +4631,6 @@
                                     :else (messages-pane/show! msgp @messages* tab-label-of))))
                  :on-filter (fn [] (messages-pane/show! msgp @messages* tab-label-of))
                  :on-close (fn [] (hide-right-panel! right :messages) (editor/focus! (:ed (active-tab))))})
-        _ (processes-pane/set-handlers!
-           procp {:on-interrupt (fn [id] (processes-signal! :interrupt id))
-                  :on-kill (fn [id] (processes-signal! :kill id))
-                  :on-forget (fn [] (processes-signal! :forget nil))
-                  :on-close (fn [] (hide-right-panel! right :processes) (editor/focus! (:ed (active-tab))))})
-        ;; while the Processes panel shows, its list follows the fibers each second
-        _ (g/g-timeout-add 1000 (callable (fn [_data]
-                                            (when (= :processes (showing-panel right)) (processes-refresh! false))
-                                            1)
-                                          [:pointer] :int :on-throw 1)
-                           ffi/null)
         ;; Live console results (LM1): a click on a result line inspects
         ;; its value; the verbs act on the result at the console's caret
         ;; (a right-click moves the caret there first)
@@ -4923,12 +4877,13 @@
                                           :locations (g/gtk-widget-grab-focus (:list locp))
                                           :trace (g/gtk-widget-grab-focus (:list tracep))
                                           :messages (g/gtk-widget-grab-focus (:list msgp))
-                                          :processes (g/gtk-widget-grab-focus (:list procp))
-                                          :plugins (g/gtk-widget-grab-focus (:list lp))))]
+                                          :plugins (g/gtk-widget-grab-focus (:list lp))
+                                          (if-let [p (get @part-panels* k)]
+                                            ((:focus! p))
+                                            (throw (IllegalArgumentException. (str "No matching clause: " k))))))]
                            (cond
                              (= k (showing-panel right)) (focus!)
                              ;; never "nothing yet": an empty log says what fills it
-                             (= k :processes) (processes-show-fn)
                              (= k :messages) (do (show-right-panel! right :messages)
                                                  (refresh-messages!)
                                                  (focus!))
@@ -4936,6 +4891,7 @@
                                                            :step (fn [] []) :open-list? true})
                              (= k :trace) (trace-show-fn)
                              (= k :debugger) (show-frames-fn)
+                             (contains? @part-panels* k) ((:open! (get @part-panels* k)))
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
                              (set-status! status-label
@@ -4972,7 +4928,9 @@
                                           :hide-right-panel! hide-right-panel!
                                           :alert-pending? alert-pending? :show-alert! show-alert!
                                           :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!}
-                                         part-error!)
+                                         part-error!
+                                         {:specs parts/specs})
+        _ (reset! part-panels* (:panels part-contribution))
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -4997,7 +4955,6 @@
                          :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
                          :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
                          :trace-toggle-fn trace-toggle-fn :trace-show-fn trace-show-fn
-                         :processes-show-fn processes-show-fn
                          :trace-clear-fn trace-clear-fn :trace-untrace-all-fn trace-untrace-all-fn
                          :result-inspect-fn result-inspect-fn :result-copy-fn result-copy-fn
                          :result-define-fn result-define-fn :result-jump-fn result-jump-fn
@@ -5093,8 +5050,9 @@
     (g/gtk-box-append slot (:root tracep))
     (g/gtk-widget-set-vexpand (:root msgp) 1)
     (g/gtk-box-append slot (:root msgp))
-    (g/gtk-widget-set-vexpand (:root procp) 1)
-    (g/gtk-box-append slot (:root procp))
+    (doseq [[_ p] @part-panels*]
+      (g/gtk-widget-set-vexpand (:root p) 1)
+      (g/gtk-box-append slot (:root p)))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -5106,7 +5064,8 @@
     (g/gtk-widget-set-visible (:root dbgp) 0)
     (g/gtk-widget-set-visible (:root tracep) 0)
     (g/gtk-widget-set-visible (:root msgp) 0)
-    (g/gtk-widget-set-visible (:root procp) 0)
+    (doseq [[_ p] @part-panels*]
+      (g/gtk-widget-set-visible (:root p) 0))
     (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
@@ -5828,7 +5787,7 @@
                    :debugger-pane dbgp
                    :trace-pane tracep
                    :messages-pane msgp
-                   :processes-pane procp
+                   :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
                    :messages* messages*
                    :log!* log-entry!

@@ -20,7 +20,9 @@
   only row-fns (the ordered list every row runs in -- the last row really
   closes the window, so order matters), the driver, and -main."
   (:require [clojure.core.async :as a :refer [<! go timeout]]
+            [gtk-selftest-window.probe-part]
             [gtk-async :as ga :refer [go-row on-gtk]]
+            [gtk-selftest-window.probe :as probe-rows]
             [gtk-selftest-window.app-open :as app-open]
             [gtk-selftest-window.close-prerun :as close-prerun]
             [gtk-selftest-window.completion :as completion]
@@ -608,6 +610,7 @@
    parinfer-rows/row-parinfer-label-after-open-into-untitled
    parinfer-rows/row-format-style-project-pin
    parinfer-rows/row-parinfer-mode-change-clears-skip-note
+   probe-rows/row-probe-part
    window-keys/row-command-chord-close])
 
 ;; --- driver --------------------------------------------------------------

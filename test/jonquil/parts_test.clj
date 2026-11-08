@@ -1,12 +1,16 @@
 (ns jonquil.parts-test
   (:require [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
+            [jonquil.evaluator :as ev]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.parts.layouts :as layouts-part]
+            [jonquil.gtk.parts.processes :as processes-part]
+            [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.parts.replay :as replay-part]
             [jonquil.gtk.parts.time-form :as time-form-part]
             [jonquil.gtk.parts.worlds :as worlds-part]
+            [jonquil.palette :as palette]
             [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
@@ -58,8 +62,9 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:layouts :worlds :time-form :replay] (mapv :id parts/specs)))
-  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last}
+  (is (= [:layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
+  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
+          :panel/processes :processes/show}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -80,6 +85,39 @@
     (is (= {:a-ui 1} (:ui c)))
     (is (= {:a-ex 10} (:exports c)))
     (is (= {:on-quit [:a-quit :b-quit] :on-start [:b-start]} (:hooks c)))))
+
+(deftest install-merges-panels
+  (let [go (fn [] :go)
+        a (install-fn :p (fn [_] {:panels {:p {:root :w :focus! go :open! go}}}))
+        c (parts/install [a] {} (fn [& _] (throw (ex-info "no error expected" {})))
+                         {:specs [{:id :p :panels [{:id :p :label "P"}]}]})]
+    (is (= {:root :w :focus! go :open! go} (get-in c [:panels :p])))
+    (is (= {:p :p} (get-in c [:owners :panels])))))
+
+(deftest install-refuses-an-undeclared-panel
+  (let [errors (atom [])
+        a (install-fn :p (fn [_] {:fns {:p-fn inc} :panels {:other {:root :w}}}))
+        c (parts/install [a] {} (fn [id ex] (swap! errors conj [id (ex-message ex)]))
+                         {:specs [{:id :p :panels [{:id :p :label "P"}]}]})]
+    (is (= 1 (count @errors)))
+    (is (= :p (ffirst @errors)))
+    (is (re-find #":other" (second (first @errors))))
+    (is (empty? (:fns c)))
+    (is (empty? (:panels c)))))
+
+(deftest install-refuses-a-malformed-panel-entry
+  (let [f (fn [] :go)]
+    (doseq [entry [{:focus! f :open! f}
+                   {:root :w :focus! f :open! :not-a-fn}
+                   {:root :w :focus! :not-a-fn :open! f}]]
+      (let [errors (atom [])
+            a (install-fn :p (fn [_] {:fns {:p-fn inc} :panels {:p entry}}))
+            c (parts/install [a] {} (fn [id ex] (swap! errors conj [id (ex-message ex)]))
+                             {:specs [{:id :p :panels [{:id :p :label "P"}]}]})]
+        (is (= 1 (count @errors)) (pr-str entry))
+        (is (= :p (ffirst @errors)))
+        (is (empty? (:fns c)))
+        (is (empty? (:panels c)))))))
 
 (deftest install-refuses-duplicate-keys
   (let [a (install-fn :a (fn [_] {:ui {:shared 1}}))
@@ -291,3 +329,78 @@
     (is (false? @(:time-confirmed? (:ui c2))))
     (is (not (identical? (:time-confirmed? (:ui c1)) (:time-confirmed? (:ui c2)))))
     (is (not (identical? (:time-ask* (:ui c1)) (:time-ask* (:ui c2)))))))
+
+(deftest merge-panels-adds-and-refuses
+  (let [core {:processes "Processes"}
+        spec {:id :p :panels [{:id :p-panel :label "P"}]}]
+    (is (= {:processes "Processes" :p-panel "P"} (parts/merge-panels core [spec])))
+    (is (= "duplicate panel :processes: :core and :p"
+           (message #(parts/merge-panels core [{:id :p :panels [{:id :processes :label "X"}]}]))))
+    (is (= "duplicate panel :p-panel: :p and :q"
+           (message #(parts/merge-panels core [spec {:id :q :panels [{:id :p-panel :label "Q"}]}]))))))
+
+(deftest merge-panels-reserves-review-and-history
+  (doseq [id [:review :history]]
+    (is (= (str "duplicate panel " id ": :core and :p")
+           (message #(parts/merge-panels {:processes "Processes"}
+                                         [{:id :p :panels [{:id id :label "X"}]}]))))))
+
+(deftest bindings-concatenate-in-spec-order
+  (let [b (fn [k] {:key k :mods #{:cmd} :command :p/go})
+        specs [{:id :a :bindings {:window [(b "1")] :editor [(b "2")]}}
+               {:id :b}
+               {:id :c :bindings {:window [(b "3") (b "4")]}}]]
+    (is (= [(b "1") (b "3") (b "4")] (parts/bindings specs :window)))
+    (is (= [(b "2")] (parts/bindings specs :editor)))
+    (is (= [] (parts/bindings [{:id :b}] :window)))))
+
+(deftest check-clashes-refuses-a-bad-panel-or-binding
+  (let [bad (fn [spec] (message #(parts/check-clashes {} [(merge {:id :p} spec)])))]
+    (is (= "part :p: a panel needs a keyword :id and a string :label"
+           (bad {:panels [{:id :x}]})))
+    (is (= "part :p: a panel needs a keyword :id and a string :label"
+           (bad {:panels [{:id :x :label :y}]})))
+    (is (= "part :p: :bindings scope must be :window or :editor, got :console"
+           (bad {:bindings {:console []}})))
+    (is (= "part :p: :bindings :window must be a vector"
+           (bad {:bindings {:window '()}})))
+    (is (nil? (bad {:panels [{:id :x :label "X"}]
+                    :bindings {:window [{:key "9" :command :p/go}] :editor []}})))))
+
+(deftest palette-labels-hold-the-core-panels
+  (is (= "Processes" (:processes palette/PANEL-LABELS)))
+  (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
+          :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"
+          :processes "Processes"}
+         palette/PANEL-LABELS)))
+
+(deftest processes-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :processes (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :processes] (get-in spec [:commands :panel/processes :call])))
+    (is (= [:processes-show-fn] (get-in spec [:commands :processes/show :call])))
+    (is (= [{:id :processes :label "Processes"}] (:panels spec)))
+    (is (contains? registry/window-commands :processes/show))
+    (is (= "Processes" (:processes palette/PANEL-LABELS)))))
+
+;; Review focus 2: a dialect switch swaps the evaluator in ev*, and the
+;; next refresh must read the new one.
+(deftest processes-refresh-reads-the-evaluator-per-call
+  (let [statuses (atom [])
+        ops (atom [])
+        ev* (atom {:not :fibers})
+        right {:recent-panels (atom [])}
+        wctx {:ev* ev* :right right :showing-panel (fn [_] nil)
+              :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+              :set-status! #(swap! statuses conj %) :status-label :lbl
+              :active-tab (fn [] nil)}]
+    (with-redefs [g/g-timeout-add (fn [& _] 1)
+                  processes-pane/make-pane (fn [] {:root :root :list :list})
+                  processes-pane/set-handlers! (fn [& _])]
+      (let [show (get-in ((deref #'processes-part/install) wctx) [:fns :processes-show-fn])]
+        (show)
+        (is (= ["; Processes need Jolt."] @statuses))
+        (reset! ev* (reify ev/Fibers
+                      (fibers-op! [_ op _ _] (swap! ops conj op))))
+        (show)
+        (is (= [:watch] @ops))
+        (is (= 1 (count @statuses)))))))
