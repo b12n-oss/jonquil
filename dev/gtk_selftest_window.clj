@@ -405,6 +405,7 @@
    panel-rows/row-panel-stale-panels-leave
    processes-rows/row-processes-interrupt-and-forget
    panel-rows/row-layout-save-and-use
+   panel-rows/row-layout-use-twice
    messages-rows/row-messages-agent-replace-logged
    messages-rows/row-messages-reads-hidden
    messages-rows/row-messages-status-collapses

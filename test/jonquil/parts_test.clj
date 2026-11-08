@@ -3,7 +3,11 @@
             [jonquil.command-registry :as registry]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.replay :as replay-part]
+            [jonquil.gtk.parts.time-form :as time-form-part]
+            [jonquil.gtk.parts.worlds :as worlds-part]
+            [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
 (defn- call [k & args]
@@ -54,8 +58,8 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:replay] (mapv :id parts/specs)))
-  (is (= #{:session/open-replay :session/forget-last}
+  (is (= [:layouts :worlds :time-form :replay] (mapv :id parts/specs)))
+  (is (= #{:layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -179,3 +183,111 @@
     (is (= 3 (count @seen)))
     (is (some? (first @seen)))
     (is (= 1 (count (distinct @seen))) "every scheduled save reuses one callable")))
+
+(deftest replay-is-the-last-part
+  (is (= :replay (:id (last parts/specs)))))
+
+(deftest layouts-part-owns-its-commands
+  (let [spec (some #(when (= :layouts (:id %)) %) parts/specs)]
+    (is (= [:layout-save-fn] (get-in spec [:commands :layout/save :call])))
+    (is (= [:layout-forget-fn] (get-in spec [:commands :layout/forget :call])))
+    (is (contains? registry/window-commands :layout/forget))))
+
+;; The worlds part: its commands, and what it does on a dialect whose
+;; evaluator has no ev/World (a plain map doesn't satisfy the protocol).
+(deftest worlds-part-owns-its-commands
+  (let [spec (some #(when (= :worlds (:id %)) %) parts/specs)]
+    (is (= [:world-save-fn] (get-in spec [:commands :world/save :call])))
+    (is (= [:world-restore-fn] (get-in spec [:commands :world/restore :call])))
+    (is (= [:world-restore-earlier-fn] (get-in spec [:commands :world/restore-earlier :call])))
+    (is (contains? registry/window-commands :world/restore-earlier))))
+
+(deftest worlds-need-jolt
+  (let [statuses (atom [])
+        effects (atom [])
+        fns (:fns ((deref #'worlds-part/install)
+                   {:ev* (atom {:not :a-world}) :settings-path* (atom "/nonexistent/settings.edn") :cv {}
+                    :tree-pane {:state (atom {:root "r"})}
+                    :active-tab (fn [] (swap! effects conj :active-tab) nil)
+                    :set-status! #(swap! statuses conj %)}))]
+    ;; the restore-earlier fn lists the (read-only) world folder before it
+    ;; checks for Jolt, as it did in window.clj; no folder exists here
+    ((:world-save-fn fns))
+    ((:world-restore-fn fns))
+    ((:world-restore-earlier-fn fns))
+    ((:world-restore-from-fn fns) "p")
+    (is (= ["; Save World needs Jolt." "; Restore World needs Jolt."
+            "; Restore World needs Jolt." "; Restore World needs Jolt."]
+           @statuses))
+    (is (= [] @effects))))
+
+;; The layouts part's settle timer. The tick body is a plain fn (settle!) so a
+;; test can run it: a foreign callable can't be invoked from Clojure.
+(defn- layouts-fns
+  "The layouts part installed with stub wctx; answers its :fns. Two saved
+  layouts, \"L\" and \"M\", differ in their split."
+  []
+  (let [layouts {"L" {:tree? false :split 100} "M" {:tree? false :split 200}}]
+    (with-redefs [settings/load-settings (fn [_] {:layouts layouts})
+                  g/label-text (fn [_] "before")
+                  g/gtk-toggle-button-set-active (fn [_ _] nil)]
+      (:fns ((deref #'layouts-part/install)
+             {:settings-path* (atom "x") :status-label :lbl :cv {} :right :right
+              :tree-pane {} :tree-paned :tp :paned :p :files-btn :fb
+              :panel-focus-fn (fn [_]) :set-status! (fn [_])
+              :showing-panel (fn [_] nil)
+              :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])})))))
+
+(defn- use-layout!
+  "Runs :layout-use-fn for n with the settings and GTK stubs in place."
+  [fns n]
+  (with-redefs [settings/load-settings (fn [_] {:layouts {"L" {:tree? false :split 100}
+                                                          "M" {:tree? false :split 200}}})
+                g/label-text (fn [_] "before")
+                g/gtk-toggle-button-set-active (fn [_ _] nil)]
+    ((:layout-use-fn fns) n)))
+
+(deftest layouts-timer-can-be-armed-again-after-arm-throws
+  (let [fns (layouts-fns)
+        armed (atom 0)]
+    (with-redefs [g/g-timeout-add (fn [_ms _cb _d] (swap! armed inc) (throw (ex-info "no loop" {})))]
+      (is (thrown? Exception (use-layout! fns "L")))
+      (is (thrown? Exception (use-layout! fns "L")))
+      (is (= 2 @armed) "the second use arms again"))))
+
+(deftest layouts-two-uses-arm-one-timer
+  (let [fns (layouts-fns)
+        armed (atom 0)]
+    (with-redefs [g/g-timeout-add (fn [_ms _cb _d] (swap! armed inc) 1)]
+      (use-layout! fns "L")
+      (use-layout! fns "M")
+      (is (= 1 @armed) "the second use takes over the running timer"))))
+
+(deftest layouts-timer-can-be-armed-again-after-the-tick-throws
+  (let [pending* (atom {:panel :trace :tree? false :split 100 :tries 0})
+        running? (atom true)
+        deps {:pending* pending* :running? running? :right :r :tree-paned :tp :paned :p
+              :showing-panel (fn [_] (throw (ex-info "boom" {})))
+              :set-status! (fn [_] (throw (ex-info "the status line is not used" {})))}]
+    (is (thrown-with-msg? Exception #"boom" (@#'layouts-part/settle! deps))
+        "the throw reaches the callable's :on-throw 0 reporting")
+    (is (false? @running?) "so the next use can arm a timer")))
+
+;; The time-form part: its command, and the per-window confirmation.
+(deftest time-form-part-owns-its-command
+  (let [spec (some #(when (= :time-form (:id %)) %) parts/specs)]
+    (is (= [:time-form-fn] (get-in spec [:commands :run/time-form :call])))
+    (is (contains? registry/window-commands :run/time-form))))
+
+(deftest time-form-confirmation-is-per-install
+  (let [install #(@#'time-form-part/install
+                  {:win :w :tabs (atom []) :active-tab (fn [] nil) :cv {} :ev* (atom nil)
+                   :sel* (atom nil) :status-label :lbl :set-status! (fn [_]) :alert-pending? (atom false)
+                   :show-alert! (fn [& _]) :make-eval-opts (fn [& _]) :refuse-foreign! (fn [_])})
+        c1 (install)
+        c2 (install)]
+    (is (fn? (get-in c1 [:fns :time-form-fn])))
+    (reset! (:time-confirmed? (:ui c1)) true)
+    (is (false? @(:time-confirmed? (:ui c2))))
+    (is (not (identical? (:time-confirmed? (:ui c1)) (:time-confirmed? (:ui c2)))))
+    (is (not (identical? (:time-ask* (:ui c1)) (:time-ask* (:ui c2)))))))

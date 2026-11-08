@@ -139,7 +139,7 @@ A window feature that owns its own state, commands and startup work is a part, s
 
 `command_registry`'s public tables are the core commands plus every spec's commands. An id claimed twice, in any scope, throws when the registry loads and names the id and both owners.
 
-`wctx` gives a part the core's bindings by name: `:win :status-label :cv :ev* :sel* :tabs :active-tab :settings-path* :tab-ctx* :tab-by-id :select-tab! :new-tab!`. A part never requires the window namespace. It reads `:tab-ctx*` when it runs, not when it installs, since the tab map doesn't exist yet at install time.
+`wctx` gives a part the core's bindings by name: `:win :status-label :cv :ev* :sel* :tabs :active-tab :settings-path* :tab-ctx* :tab-by-id :select-tab! :new-tab! :set-status! :right :tree-pane :tree-paned :paned :files-btn :panel-focus-fn :showing-panel :show-right-panel! :hide-right-panel! :alert-pending? :show-alert! :make-eval-opts :refuse-foreign!`. `:set-status!` takes one argument, the text. A part never requires the window namespace. It reads `:tab-ctx*` when it runs, not when it installs, since the tab map doesn't exist yet at install time.
 
 The contribution keys:
 
@@ -150,7 +150,9 @@ The contribution keys:
 
 `jonquil.parts/install` merges strictly. A duplicate `:fns`, `:ui` or `:exports` key throws and names both owners, and a key already in the core's tables is refused the same way. A part whose install throws contributes nothing, and the status bar says `; part <id>: <message>`. Hooks run in part order, and one that throws is reported the same way while the rest still run.
 
-Replay (the last session's record, LM7) is the example: `jonquil.parts.replay` holds the two palette commands, and `jonquil.gtk.parts.replay` holds the recorder, the record's state, the offer at open, and the three hooks that load the record at start and re-root and flush it at quit.
+The parts install in this order: layouts, worlds, Time Form, replay. Layouts (LM8) holds the saved-layout commands and their timer. Worlds (LM7) holds Save World and Restore World with the helpers they share. Time Form holds the timed-form command and its confirmation, and puts `:time-ask*` and `:time-confirmed?` in `ui` for the self-test. Replay goes last because its re-root hook loads the new root's record and its quit hook flushes it, and both have to run after every other part's hooks.
+
+Replay (the last session's record, LM7) is the worked example: `jonquil.parts.replay` holds the two palette commands, and `jonquil.gtk.parts.replay` holds the recorder, the record's state, the offer at open, and the three hooks that load the record at start and re-root and flush it at quit.
 
 ## The inspector: `Inspector`, `jonquil.inspect` and `jonquil.inspect.view`
 

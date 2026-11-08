@@ -163,3 +163,35 @@
       (on-gtk (support/check :layout-save-and-use (and both? saved? hidden? back? said? forgot?)
                              {:both both? :saved saved? :hidden hidden? :back back? :said said? :forgot forgot?
                               :status (status ui)})))))
+
+(defn row-layout-use-twice
+  "Two layouts with different splits, used one right after the other: the
+  second one's split and its status line win, once the settle timer is done
+  (one timer serves both uses, so the later layout takes it over outright)."
+  [ui]
+  (go-row :layout-use-twice support/check
+    (let [paned (g/gtk-widget-get-parent (:scroll (:console ui)))
+          pos (fn [] (g/gtk-paned-get-position paned))
+          near? (fn [a b] (<= (abs (- a b)) 2))
+          _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 0)
+                    (g/gtk-paned-set-position paned 250)
+                    (run-palette! ui "save the layout"))
+          saved-a? (await-until 3000 20 #(= "; Saved the layout \"Editor only\"." (status ui)))
+          _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 1)
+                    (g/gtk-paned-set-position paned 350)
+                    (run-palette! ui "save the layout"))
+          saved-b? (await-until 3000 20 #(= "; Saved the layout \"File tree\"." (status ui)))
+          _ (on-gtk (g/gtk-paned-set-position paned 430))
+          _ (on-gtk (run-palette! ui "use layout: editor only")
+                    (run-palette! ui "use layout: file tree"))
+          settled? (await-until 2500 20 #(and (near? 350 (pos))
+                                              (= "; Layout \"File tree\"." (status ui))))
+          ;; past the settle window the first layout's split must not come back
+          _ (await-until 600 20 (fn [] false))
+          held? (on-gtk (near? 350 (pos)))
+          _ (on-gtk (run-palette! ui "forget every saved layout"))
+          forgot? (await-until 3000 20 #(= "; Forgot the saved layouts." (status ui)))
+          _ (on-gtk (g/gtk-toggle-button-set-active (:files-btn ui) 0))]
+      (on-gtk (support/check :layout-use-twice (and saved-a? saved-b? settled? held? forgot?)
+                             {:saved-a saved-a? :saved-b saved-b? :settled settled? :held held?
+                              :forgot forgot? :split (pos) :status (status ui)})))))

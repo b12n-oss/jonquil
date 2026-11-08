@@ -75,8 +75,6 @@
    :trace/show {:doc "Show the calls of the traced functions." :scope :window :run (call :trace-show-fn)}
    :trace/clear {:doc "Clear the recorded calls." :scope :window :run (call :trace-clear-fn)}
    :trace/untrace-all {:doc "Stop tracing every function." :scope :window :run (call :trace-untrace-all-fn)}
-   :run/time-form {:doc "Time the form at the caret (about a second)." :scope :window
-                   :run (call :time-form-fn)}
    :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window
                        :run (call :show-frames-fn)}
    :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
@@ -109,9 +107,6 @@
                   :run (call :compare-head-fn)}
    :compare/take {:doc "Take the other version here: the compared file's lines for the difference at the caret."
                   :scope :window :run (call :compare-take-fn)}
-   :layout/save {:doc "Save the layout: the file tree, the panel and the split, named after what shows." :scope :window
-                 :run (call :layout-save-fn)}
-   :layout/forget {:doc "Forget every saved layout." :scope :window :run (call :layout-forget-fn)}
    :help/key-bindings {:doc "List every key binding." :scope :window :run (call :key-bindings-fn)}
    :help/recent-keys {:doc "Show the keys you pressed last." :scope :window :run (call :recent-keys-fn)}
    ;; the locations list: three ways to fill it, F8 and Shift+F8 to step
@@ -123,15 +118,6 @@
                        :run (call :locations-matches-fn)}
    :locations/usages-in-project {:doc "Find Usages in Project: list every use of the symbol at the caret in the project's files."
                                  :scope :window :run (call :locations-project-usages-fn)}
-   ;; Save World and Restore World (LM7): the session's data, one world per project
-   :world/save {:doc "Save World: write the session's data to this project's world, naming first what can't be saved."
-                :scope :window :run (call :world-save-fn)}
-   ;; the doc must not hold "save": the palette sorts by doc, and "save
-   ;; world" would otherwise pick Restore World first (measured 2026-11-04)
-   :world/restore {:doc "Restore World: bring back the newest world of this project, replacing the current values."
-                   :scope :window :run (call :world-restore-fn)}
-   :world/restore-earlier {:doc "Restore an Earlier World: pick one of this project's earlier worlds to bring back."
-                           :scope :window :run (call :world-restore-earlier-fn)}
    :locations/next {:doc "Go to the next place in the list." :scope :window
                     :run (call :locations-step-fn 1)}
    :locations/previous {:doc "Go to the previous place in the list." :scope :window

@@ -92,10 +92,8 @@
             [jonquil.settings :as settings]
             [jonquil.source :as source]
             [jonquil.tabs :as tabs]
-            [jonquil.timing :as timing]
             [jonquil.theme :as theme]
-            [jonquil.usages :as usages]
-            [jonquil.world :as world]))
+            [jonquil.usages :as usages]))
 
 ;; --- title -------------------------------------------------------------
 
@@ -578,7 +576,6 @@
 
 (def ^:private CLOSE-ALERT {:cancel 2 :default 0})
 (def ^:private TRASH-ALERT {:cancel 1 :default 1})
-(def ^:private TIME-ALERT {:cancel 2 :default 0})
 
 (defn- finish-close!
   "Confirms and re-triggers the window's own close-request:
@@ -1680,68 +1677,6 @@
             (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
                   warning (ev/eval! @ev* text (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
               (when warning (cview/append! cv :system warning))))
-          (set-status! status-label "No form at the caret."))))))
-
-(defn- start-timing!
-  "Evaluates the timing harness around text (the form snap had at the
-  caret) in the window's runtime as Inspect Form evaluates, so the console
-  gets its ; Time: line and the map it answers. A tab that closed while
-  its alert was up times nothing."
-  [{:keys [tab tabs cv ev* status-label]} snap text]
-  (when (some #(= (:id tab) (:id %)) @tabs)
-    (let [{:keys [ed]} tab
-          opts (make-eval-opts ed cv ev* status-label false)]
-      (cview/append! cv :system (str "; Timing " (timing/form-label text) " for about a second. It runs over and over, so any side effect repeats too.\n"))
-      (let [_ (when-not (ev/evaluating? @ev*) (cview/note-run-start! cv))
-            warning (ev/eval! @ev* (timing/code text 1000)
-                              (assoc opts :run? false :ns-source (:text snap) :owner (:id tab)))]
-        (when warning (cview/append! cv :system warning))))))
-
-(defn- time-choice!
-  "The timing alert's decision: index 0 Time It, 1 Time It and stop asking
-  in this window (time-confirmed?), 2 Cancel; an :error means the alert
-  was dismissed. Cancel and a dismissal time nothing."
-  [{:keys [time-confirmed?] :as ctx} snap text {:keys [index error]}]
-  (cond
-    error nil
-    (= index 0) (start-timing! ctx snap text)
-    (= index 1) (do (reset! time-confirmed? true) (start-timing! ctx snap text))
-    :else nil))
-
-(defn- time-form!
-  "Time the form at the caret: Run Form's form, wrapped in
-  jonquil.timing/code. The form runs many times, side effects and all, so
-  an alert asks first (ask-time!, which rows can replace) until
-  Don't Ask Again sets time-confirmed? for this window. The alert shares
-  the other alerts' alert-pending? guard, as the tree's trash alert does,
-  so it never opens over a close alert. Dialects without the harness's
-  System/nanoTime say so and evaluate nothing."
-  [{:keys [tab cv ev* status-label sel* ask-time! time-confirmed?] :as ctx}]
-  (let [{:keys [ed]} tab]
-    (cond
-      (refuse-foreign! ctx) nil
-      (not (timing/supported? (:id (:profile @sel*))))
-      (set-status! status-label "; Timing needs Jolt or JVM Clojure.")
-      :else
-      (let [snap (editor/snapshot ed)]
-        (if-let [{:keys [text]} (commands/run-form snap)]
-          (cond
-            @time-confirmed? (start-timing! ctx snap text)
-            @alert-pending? (set-status! status-label "Another alert is open.")
-            :else
-            (do (reset! alert-pending? true)
-                ;; an older message (a No form at the caret. from a miss, say)
-                ;; shouldn't sit under the alert; a running eval keeps its own
-                (when-not (ev/evaluating? @ev*) (set-status! status-label "Ready"))
-                ;; complete-alert! releases the guard for the real alert; this
-                ;; also releases it for a stand-in, and a throw while building
-                ;; the alert releases it too
-                (try
-                  (ask-time! (timing/confirm-alert text)
-                             (fn [result] (reset! alert-pending? false) (time-choice! ctx snap text result)))
-                  (catch :default e
-                    (reset! alert-pending? false)
-                    (cview/append! cv :error (str "; time: " (ex-message e) "\n"))))))
           (set-status! status-label "No form at the caret."))))))
 
 ;; --- window commands: F6 focus toggle, clear console, zoom -----------------
@@ -3655,15 +3590,6 @@
         ;; front, remove-tab! drops it): Genera's Select order
         recent-tabs (atom [])
         win (g/gtk-application-window-new app)
-        ;; Time the form's alert: once Don't Ask Again is chosen, this
-        ;; window times without asking. ask-time* shows the real alert;
-        ;; the self-test swaps it for a stand-in (nil puts the real one back).
-        time-confirmed? (atom false)
-        ask-time* (atom nil)
-        ask-time! (fn [alert on-choice]
-                    (if-let [f @ask-time*]
-                      (f alert on-choice)
-                      (show-alert! win alert TIME-ALERT on-choice)))
         status-label (g/gtk-label-new "Ready")
         line-col-label (g/gtk-label-new "Ln 1, Col 1")
         ;; LM6: what keys do at the caret, dim, hidden while there's nothing
@@ -4034,8 +3960,6 @@
                            (plugin-list-pane/report! lp "No plugin is selected.")))
         inspect-last-fn (fn [] (inspect-last! ev* right pane inspector-state inspecting?
                                               inspector-last-args on-view status-label))
-        time-form-fn (fn [] (time-form! {:tab (active-tab) :tabs tabs :cv cv :ev* ev* :sel* sel* :status-label status-label
-                                          :ask-time! ask-time! :time-confirmed? time-confirmed?}))
         inspect-form-fn (fn [] (inspect-form! {:tab (active-tab) :cv cv :ev* ev* :sel* sel* :status-label status-label
                                                :inspecting? inspecting? :inspect-queued inspect-queued
                                                :inspect-last-fn inspect-last-fn}))
@@ -4423,88 +4347,6 @@
         ;; Tracing (LM4, jonquil.trace-rt through ev/Trace): the panel's
         ;; rows are the whole log, fetched again when shown and after every
         ;; evaluation while it's showing
-        ;; Save World and Restore World (LM7, jonquil.world-rt through
-        ;; ev/World): each project keeps its last world/KEEP saves beside
-        ;; the settings file, and every restore saves what's there first,
-        ;; so a restore you didn't mean is one more restore away
-        world-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/World e)) e)))
-        world-dir! (fn []
-                     ;; the window's folder, or one no-folder history: never
-                     ;; the active tab's own folder, which would split the
-                     ;; history by whichever tab is in front
-                     (world/world-dir @settings-path* (:root @(:state tree-pane))))
-        world-report! (fn [{:keys [status lines]}]
-                        (doseq [l lines] (cview/append! cv :system (str l "\n")))
-                        (set-status! status-label status))
-        world-save! (fn [e dir kind protect on-done]
-                      ;; one save into the history. On success it's recorded,
-                      ;; which is what lists it, then the history is pruned,
-                      ;; sparing protect (a save about to be restored). On
-                      ;; failure the file is deleted, so a half-written or
-                      ;; timed-out world is never picked. on-done always
-                      ;; runs, with the answer, on the GTK thread.
-                      (let [at (System/currentTimeMillis)
-                            path (world/free-entry-path dir at)]
-                        (ev/world-op! e :save {:path path}
-                                      (fn [r]
-                                        (on-gui! (fn []
-                                                   (let [r (if (:error r)
-                                                             (do (.delete (java.io.File. ^String path)) r)
-                                                             (try
-                                                               (world/record! path {:at at :kind kind :saved (:saved r)
-                                                                                    :placeholders (count (:placeholders r))})
-                                                               (world/prune! dir world/KEEP protect)
-                                                               r
-                                                               (catch :default ex
-                                                                 (.delete (java.io.File. ^String path))
-                                                                 (.delete (java.io.File. ^String (world/record-path path)))
-                                                                 {:error (str "the world couldn't be recorded: " (or (ex-message ex) (str ex)))})))]
-                                                     (on-done r))))))))
-        world-save-fn (fn []
-                        (if-let [e (world-ev)]
-                          (do (set-status! status-label "; Saving the world...")
-                              (world-save! e (world-dir!) :save #{} (fn [r] (world-report! (world/save-report r)))))
-                          (set-status! status-label "; Save World needs Jolt.")))
-        world-restore-from! (fn [path picked?]
-                              (if-let [e (world-ev)]
-                                (do (set-status! status-label "; Saving what you have, then restoring...")
-                                    (world-save! e (world-dir!) :before-restore #{path}
-                                                 (fn [s]
-                                                   (if (:error s)
-                                                     ;; never restore over data that couldn't be kept
-                                                     (do (world-report! (world/save-report s))
-                                                         (set-status! status-label
-                                                                      (str "; Restore World didn't run: what you have now couldn't be saved first. " (:error s))))
-                                                     (do
-                                                       ;; what went into the safety save as placeholders
-                                                       ;; can't come back from it: name it
-                                                       (doseq [l (:lines (world/save-report s))]
-                                                         (cview/append! cv :system (str l "\n")))
-                                                       (ev/world-op! e :restore {:path path}
-                                                                     (fn [r]
-                                                                       (on-gui! (fn []
-                                                                                  (world-report!
-                                                                                   (world/restore-report
-                                                                                    r {:saved-first? true :picked? picked?
-                                                                                       :first-placeholders (count (:placeholders s))})))))))))))
-                                (set-status! status-label "; Restore World needs Jolt.")))
-        world-restore-fn (fn []
-                           (cond
-                             (nil? (world-ev)) (set-status! status-label "; Restore World needs Jolt.")
-                             :else (if-let [newest (world/newest-save (world/entries (world-dir!)))]
-                                     (world-restore-from! (:path newest) false)
-                                     (world-report! (world/restore-report {:missing true})))))
-        world-restore-earlier-fn (fn []
-                                   (let [es (world/entries (world-dir!))
-                                         now (System/currentTimeMillis)]
-                                     (cond
-                                       (nil? (world-ev)) (set-status! status-label "; Restore World needs Jolt.")
-                                       (empty? es) (world-report! (world/restore-report {:missing true}))
-                                       :else (palette/open! (:palette (active-tab))
-                                                            (mapv (fn [x] {:id [:world/restore-from (:path x)]
-                                                                           :doc (world/entry-label now x)
-                                                                           :chords [] :source "world"})
-                                                                  es)))))
         trace-ev (fn [] (let [e @ev*] (when (and e (satisfies? ev/Trace e)) e)))
         trace-refresh! (fn [show?]
                          (if-let [e (trace-ev)]
@@ -5112,9 +4954,7 @@
                                                [:pointer :int :double :double :pointer] :void)
                                      ffi/null ffi/null g/CONNECT-DEFAULT)
             (g/gtk-widget-add-controller unread-label click))
-        ;; LM8's named layouts, installed once the editor/console split
-        ;; exists (below, after paned)
-        layout-fns* (atom {})
+        paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
         ;; Window parts (jonquil.gtk.parts): each install fn reads the core
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
         ;; :exports. A part's error is said on the status line, not thrown.
@@ -5124,14 +4964,18 @@
                                          {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
                                           :tabs tabs :active-tab active-tab :settings-path* settings-path*
                                           :tab-ctx* *tab-ctx
-                                          :tab-by-id tab-by-id :select-tab! select-tab! :new-tab! new-tab!}
+                                          :tab-by-id tab-by-id :select-tab! select-tab! :new-tab! new-tab!
+                                          :set-status! (fn [text] (set-status! status-label text))
+                                          :right right :tree-pane tree-pane :tree-paned tree-paned :paned paned
+                                          :files-btn files-btn :panel-focus-fn panel-focus-fn
+                                          :showing-panel showing-panel :show-right-panel! show-right-panel!
+                                          :hide-right-panel! hide-right-panel!
+                                          :alert-pending? alert-pending? :show-alert! show-alert!
+                                          :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!}
                                          part-error!)
         window-key-args (parts/merge-with-core
                          :fns
-                         {:layout-use-fn (fn [n] (some-> (:use @layout-fns*) (apply [n])))
-                         :layout-save-fn (fn [] (some-> (:save @layout-fns*) (apply [])))
-                         :layout-forget-fn (fn [] (some-> (:forget @layout-fns*) (apply [])))
-                         :panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
+                         {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
                          :live-keys live-keys :print-lines! print-lines!
                          :describe-key-fn (fn [] (reset! describe-pending true)
                                             (print-lines! ["; Press the key to describe."]))
@@ -5141,10 +4985,6 @@
                          :locations-uses-fn locations-uses-fn :locations-definitions-fn locations-definitions-fn
                          :locations-matches-fn locations-matches-fn :locations-step-fn locations-step-fn
                          :locations-project-usages-fn locations-project-usages-fn
-                         :world-save-fn world-save-fn :world-restore-fn world-restore-fn
-                         :world-restore-earlier-fn world-restore-earlier-fn
-                         :world-restore-from-fn (fn [path] (world-restore-from! path true))
-                         :time-form-fn time-form-fn
                          :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
                          :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :hints-toggle-fn (fn []
@@ -5208,62 +5048,6 @@
         ;; left (hexpand, so it claims the box's spare width) and the
         ;; Ln/Col label on the right.
         status-box (g/gtk-box-new g/ORIENTATION-HORIZONTAL 6)
-        paned (g/gtk-paned-new g/ORIENTATION-VERTICAL)
-        _ (reset! layout-fns*
-                  (let [saved (fn [] (or (:layouts (settings/load-settings @settings-path*)) {}))
-                        said (fn [s] (set-status! status-label s))
-                        save! (fn [m] (when-let [err (settings/save-settings! @settings-path* {:layouts m})]
-                                        (cview/append! cv :system (str "; settings: " err "\n"))))]
-                    {:save (fn []
-                             (let [panel (showing-panel right)
-                                   l (cond-> {:tree? (pos? (g/gtk-widget-get-visible (:root tree-pane)))
-                                              :tree-width (g/gtk-paned-get-position tree-paned)
-                                              :panel panel
-                                              :split (g/gtk-paned-get-position paned)})]
-                               (save! (layouts/save (saved) l))
-                               (said (str "; Saved the layout \"" (layouts/layout-name l) "\"."))))
-                     :use (fn [n]
-                            (let [{:keys [tree? tree-width panel split] :as l} (get (saved) n)]
-                              (cond
-                                (nil? l) (said (str "; No layout named \"" n "\"."))
-                                ;; checked before anything moves, so a bad one never half-applies
-                                (not (layouts/valid? l)) (said (str "; The layout \"" n "\" can't be used: its settings entry is malformed."))
-                                :else
-                                (let [before (g/label-text status-label)]
-                                  (g/gtk-toggle-button-set-active files-btn (if tree? 1 0))
-                                  ;; the panel showing goes unless it's the layout's own
-                                  (when-let [k (showing-panel right)]
-                                    (when (not= k panel) (hide-right-panel! right k)))
-                                  (when panel
-                                    (if (= panel (showing-panel right))
-                                      (show-right-panel! right panel)
-                                      (panel-focus-fn panel)))
-                                  ;; GTK lays the tree and a panel out over its next frames (and
-                                  ;; a panel shown from an evaluator's answer arrives later), so
-                                  ;; the tree's width and the split are set every 100 ms until
-                                  ;; they read back, for at most 2 s. The panel opens at its own
-                                  ;; width: set together with the tree's, GTK kept neither.
-                                  (let [tries (atom 0)
-                                        near? (fn [a b] (<= (abs (- a b)) 2))]
-                                    (g/g-timeout-add
-                                     100
-                                     (callable
-                                      (fn [_d]
-                                        (let [ready? (or (nil? panel) (= panel (showing-panel right)))]
-                                          (when ready?
-                                            (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
-                                            (when split (g/gtk-paned-set-position paned split)))
-                                          (if (or (>= (swap! tries inc) 20)
-                                                  (and ready?
-                                                       (or (not (and tree? tree-width)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
-                                                       (or (not split) (near? split (g/gtk-paned-get-position paned)))))
-                                            0 1)))
-                                      [:pointer] :int :on-throw 0)
-                                     ffi/null))
-                                  ;; a panel with nothing to show said so: that line stays
-                                  (when (= before (g/label-text status-label))
-                                    (said (str "; Layout \"" n "\".")))))))
-                     :forget (fn [] (save! {}) (said "; Forgot the saved layouts."))}))
         vbox (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
         keyctl (g/gtk-event-controller-key-new)]
     (g/gtk-box-append toolbar files-btn)
@@ -5816,7 +5600,6 @@
                    :tree-submit!* (fn [text] (file-tree-pane/submit-name! tree-pane text))
                    :tree-menu-state* (fn [] (file-tree-pane/menu-state tree-pane))
                    :trash-choice! (fn [path result] (trash-choice! @*tab-ctx path result))
-                   :time-ask* ask-time* :time-confirmed? time-confirmed?
                    :open-paths! (fn [paths] (@current-open-paths paths))
                    :app app
                    :active-tab* active-tab
