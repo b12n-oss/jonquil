@@ -12,6 +12,33 @@
             [jonquil.layouts :as layouts]
             [jonquil.settings :as settings]))
 
+(defn- near? [a b] (<= (abs (- a b)) 2))
+
+(defn- settle!
+  "One tick of the settle timer: sets the tree's width and the split toward
+  pending*'s target and answers 1 to run again, or 0 when they read back,
+  the tries run out, or the tick threw. Whenever it answers 0 it clears
+  running?, so the next use can arm a timer; a throw is said on the status
+  line (set-status!) and never leaves the tick."
+  [{:keys [pending* running? right tree-paned paned showing-panel set-status!]}]
+  (try
+    (let [{:keys [tree? tree-width panel split]} @pending*
+          ready? (or (nil? panel) (= panel (showing-panel right)))]
+      (when ready?
+        (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
+        (when split (g/gtk-paned-set-position paned split)))
+      (if (or (>= (:tries (swap! pending* update :tries inc)) 20)
+              (and ready?
+                   (or (not (and tree? tree-width)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
+                   (or (not split) (near? split (g/gtk-paned-get-position paned)))))
+        (do (reset! running? false) 0)
+        1))
+    (catch :default e
+      (reset! running? false)
+      (try (set-status! (str "; layout: " (or (ex-message e) (str e))))
+           (catch :default _ nil))
+      0)))
+
 (defn- install
   "The layouts part for one window, reading the editor/console split, the
   tree and the right-hand panels from wctx. The settle timer's callable is
@@ -27,20 +54,10 @@
                         (cview/append! cv :system (str "; settings: " err "\n"))))
         pending* (atom nil)
         running? (atom false)
-        near? (fn [a b] (<= (abs (- a b)) 2))
         tick (callable
-              (fn [_d]
-                (let [{:keys [tree? tree-width panel split]} @pending*
-                      ready? (or (nil? panel) (= panel (showing-panel right)))]
-                  (when ready?
-                    (when (and tree? tree-width) (g/gtk-paned-set-position tree-paned tree-width))
-                    (when split (g/gtk-paned-set-position paned split)))
-                  (if (or (>= (:tries (swap! pending* update :tries inc)) 20)
-                          (and ready?
-                               (or (not (and tree? tree-width)) (near? tree-width (g/gtk-paned-get-position tree-paned)))
-                               (or (not split) (near? split (g/gtk-paned-get-position paned)))))
-                    (do (reset! running? false) 0)
-                    1)))
+              (fn [_d] (settle! {:pending* pending* :running? running? :right right
+                                 :tree-paned tree-paned :paned paned
+                                 :showing-panel showing-panel :set-status! set-status!}))
               [:pointer] :int :on-throw 0)]
     {:fns
      {:layout-save-fn
@@ -78,7 +95,8 @@
               ;; its target and its tries.
               (reset! pending* {:panel panel :tree? tree? :tree-width tree-width :split split :tries 0})
               (when (compare-and-set! running? false true)
-                (g/g-timeout-add 100 tick ffi/null))
+                (try (g/g-timeout-add 100 tick ffi/null)
+                     (catch :default e (reset! running? false) (throw e))))
               ;; a panel with nothing to show said so: that line stays
               (when (= before (g/label-text status-label))
                 (said (str "; Layout \"" n "\".")))))))

@@ -3,7 +3,9 @@
             [jonquil.command-registry :as registry]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.replay :as replay-part]
+            [jonquil.settings :as settings]
             [jonquil.parts :as parts]))
 
 (defn- call [k & args]
@@ -188,3 +190,47 @@
     (is (= [:layout-save-fn] (get-in spec [:commands :layout/save :call])))
     (is (= [:layout-forget-fn] (get-in spec [:commands :layout/forget :call])))
     (is (contains? registry/window-commands :layout/forget))))
+
+;; The layouts part's settle timer. ffi/foreign-callable is stubbed to hand
+;; back the contained fn itself, so a test can run the tick.
+(defn- layouts-fns
+  "The layouts part installed with stub wctx; answers {:fns .. :status ..}.
+  tick-throws? makes the tick body throw (showing-panel throws once armed)."
+  [tick-throws?]
+  (let [status (atom nil)
+        layout {"L" {:tree? false :split 100}}]
+    (with-redefs [settings/load-settings (fn [_] {:layouts layout})
+                  g/label-text (fn [_] "before")
+                  g/gtk-toggle-button-set-active (fn [_ _] nil)
+                  g/gtk-paned-get-position (fn [_] 0)]
+      {:status status
+       :fns (:fns ((deref #'layouts-part/install)
+                   {:settings-path* (atom "x") :status-label :lbl :cv {} :right :right
+                    :tree-pane {} :tree-paned :tp :paned :p :files-btn :fb
+                    :panel-focus-fn (fn [_]) :set-status! #(reset! status %)
+                    :showing-panel (fn [_] (when tick-throws? (throw (ex-info "boom" {}))) nil)
+                    :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])}))})))
+
+(deftest layouts-timer-can-be-armed-again-after-arm-throws
+  (let [{:keys [fns]} (layouts-fns false)
+        armed (atom 0)]
+    (with-redefs [settings/load-settings (fn [_] {:layouts {"L" {:tree? false :split 100}}})
+                  g/label-text (fn [_] "before")
+                  g/gtk-toggle-button-set-active (fn [_ _] nil)
+                  g/g-timeout-add (fn [_ms _cb _d] (swap! armed inc) (throw (ex-info "no loop" {})))]
+      (is (thrown? Exception ((:layout-use-fn fns) "L")))
+      (is (thrown? Exception ((:layout-use-fn fns) "L")))
+      (is (= 2 @armed) "the second use arms again"))))
+
+;; The tick body is a plain fn (settle!) so a test can run it: a foreign
+;; callable can't be invoked from Clojure.
+(deftest layouts-timer-can-be-armed-again-after-the-tick-throws
+  (let [said (atom nil)
+        pending* (atom {:panel :trace :tree? false :split 100 :tries 0})
+        running? (atom true)
+        deps {:pending* pending* :running? running? :right :r :tree-paned :tp :paned :p
+              :showing-panel (fn [_] (throw (ex-info "boom" {})))
+              :set-status! #(reset! said %)}]
+    (is (= 0 (@#'layouts-part/settle! deps)) "a throwing tick still answers 0, removing the source")
+    (is (false? @running?) "so the next use can arm a timer")
+    (is (re-find #"boom" (str @said)))))
