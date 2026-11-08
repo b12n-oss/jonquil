@@ -11,7 +11,7 @@
   conditions, no window binding takes an editor chord, what each
   window chord runs (Shift forms ahead of plain ones), F5 under any
   modifier, and each context-menu item's command."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
             [jonquil.keymap :as km]
             [jonquil.parts :as parts]))
@@ -195,3 +195,22 @@
   (doseq [scope [:window :editor]]
     (is (empty? (km/unreachable-bindings (parts/bindings parts/specs scope) (get km/shipped scope)))
         (str scope))))
+
+(deftest unreachable-bindings-checks-meta-and-not-and-args
+  (let [spec-cmd {:key "q" :mods #{:cmd} :command :panel/q}]
+    (testing "a Meta-only earlier binding shadows a :cmd binding"
+      (let [meta-only {:key "q" :mods #{:meta} :command :other}]
+        (is (= [spec-cmd] (km/unreachable-bindings [spec-cmd] [meta-only spec-cmd])))))
+    (testing "a Ctrl-only earlier binding (with :not Meta) shadows it for Ctrl only: unreachable"
+      (let [ctrl-only {:key "q" :mods #{:ctrl} :not #{:meta} :command :other}]
+        (is (= [spec-cmd] (km/unreachable-bindings [spec-cmd] [ctrl-only spec-cmd])))))
+    (testing "a Ctrl-only :not Meta spec binding is not flagged by a Meta-only earlier one"
+      (let [meta-only {:key "q" :mods #{:meta} :command :other}
+            spec-ctrl {:key "q" :mods #{:ctrl} :not #{:meta} :command :panel/q}]
+        (is (= [] (km/unreachable-bindings [spec-ctrl] [meta-only spec-ctrl])))))
+    (testing "a free :cmd chord is reachable"
+      (is (= [] (km/unreachable-bindings [spec-cmd] [spec-cmd]))))
+    (testing "same command, different args"
+      (let [early {:key "8" :mods #{:cmd} :command :tab/select :args {:n 8}}
+            late {:key "8" :mods #{:cmd :alt} :command :tab/select :args {:n 9}}]
+        (is (= [late] (km/unreachable-bindings [late] [early late])))))))
