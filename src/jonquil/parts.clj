@@ -57,10 +57,12 @@
 
 (defn merge-panels
   "core-labels ({panel-id label}) with every spec's :panels added. Throws on
-  an id two owners share; an owner is :core or a spec's :id."
+  an id two owners share; an owner is :core or a spec's :id. :review and
+  :history are core right-hand panels with no label (never offered by Switch
+  to panel), so they are reserved for :core too."
   [core-labels specs]
   (loop [acc core-labels
-         owners (reduce #(assoc %1 %2 :core) {} (keys core-labels))
+         owners (reduce #(assoc %1 %2 :core) {} (concat (keys core-labels) [:review :history]))
          [[owner {:keys [id label]}] & more :as entries]
          (for [spec specs, panel (:panels spec)] [(:id spec) panel])]
     (if (empty? entries)
@@ -139,10 +141,13 @@
           :when (not (contains? hook-kinds h))]
     (throw (ex-info (str "part " id ": unknown hook " h) {:part id :hook h})))
   (let [declared (into #{} (comp (filter #(= id (:id %))) (mapcat :panels) (map :id)) specs)]
-    (doseq [k (keys (:panels contribution))
-            :when (not (contains? declared k))]
-      (throw (ex-info (str "part " id ": panel " k " is not declared in its spec")
-                      {:part id :panel k}))))
+    (doseq [[k {:keys [root focus! open!]}] (:panels contribution)]
+      (when-not (contains? declared k)
+        (throw (ex-info (str "part " id ": panel " k " is not declared in its spec")
+                        {:part id :panel k})))
+      (when-not (and (some? root) (fn? focus!) (fn? open!))
+        (throw (ex-info (str "part " id ": panel " k " needs a :root and :focus! and :open! fns")
+                        {:part id :panel k})))))
   (doseq [k (keys (:exports contribution))
           :when (contains? wctx k)]
     (throw (ex-info (str "duplicate exports key " k ": :core and " id)

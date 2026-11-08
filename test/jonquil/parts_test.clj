@@ -105,6 +105,20 @@
     (is (empty? (:fns c)))
     (is (empty? (:panels c)))))
 
+(deftest install-refuses-a-malformed-panel-entry
+  (let [f (fn [] :go)]
+    (doseq [entry [{:focus! f :open! f}
+                   {:root :w :focus! f :open! :not-a-fn}
+                   {:root :w :focus! :not-a-fn :open! f}]]
+      (let [errors (atom [])
+            a (install-fn :p (fn [_] {:fns {:p-fn inc} :panels {:p entry}}))
+            c (parts/install [a] {} (fn [id ex] (swap! errors conj [id (ex-message ex)]))
+                             {:specs [{:id :p :panels [{:id :p :label "P"}]}]})]
+        (is (= 1 (count @errors)) (pr-str entry))
+        (is (= :p (ffirst @errors)))
+        (is (empty? (:fns c)))
+        (is (empty? (:panels c)))))))
+
 (deftest install-refuses-duplicate-keys
   (let [a (install-fn :a (fn [_] {:ui {:shared 1}}))
         b (install-fn :b (fn [_] {:ui {:shared 2}}))]
@@ -324,6 +338,12 @@
            (message #(parts/merge-panels core [{:id :p :panels [{:id :processes :label "X"}]}]))))
     (is (= "duplicate panel :p-panel: :p and :q"
            (message #(parts/merge-panels core [spec {:id :q :panels [{:id :p-panel :label "Q"}]}]))))))
+
+(deftest merge-panels-reserves-review-and-history
+  (doseq [id [:review :history]]
+    (is (= (str "duplicate panel " id ": :core and :p")
+           (message #(parts/merge-panels {:processes "Processes"}
+                                         [{:id :p :panels [{:id id :label "X"}]}]))))))
 
 (deftest bindings-concatenate-in-spec-order
   (let [b (fn [k] {:key k :mods #{:cmd} :command :p/go})
