@@ -3659,9 +3659,8 @@
         ;; every plugin step, like the reviews
         lp (plugin-list-pane/make-pane)
         locp (locations-pane/make-pane)
-        ;; The Messages panel (LM8): the window's one log of background
-        ;; events, written from any thread (messages/log!), and the status
-        ;; bar's unread count, shown while it's above zero
+        ;; The Messages panel's unread count (LM8), shown in the status
+        ;; bar while it's above zero; the Messages part fills it
         unread-label (g/gtk-label-new "")
         dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
