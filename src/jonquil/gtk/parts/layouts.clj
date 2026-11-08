@@ -16,11 +16,10 @@
 
 (defn- settle!
   "One tick of the settle timer: sets the tree's width and the split toward
-  pending*'s target and answers 1 to run again, or 0 when they read back,
-  the tries run out, or the tick threw. Whenever it answers 0 it clears
-  running?, so the next use can arm a timer; a throw is said on the status
-  line (set-status!) and never leaves the tick."
-  [{:keys [pending* running? right tree-paned paned showing-panel set-status!]}]
+  pending*'s target and answers 1 to run again, or 0 when they read back
+  or the tries run out. Whenever it answers 0 it clears running?, so the next use can arm a timer. A throw clears running? and is
+  rethrown, so the callable's :on-throw 0 reports it and answers 0."
+  [{:keys [pending* running? right tree-paned paned showing-panel]}]
   (try
     (let [{:keys [tree? tree-width panel split]} @pending*
           ready? (or (nil? panel) (= panel (showing-panel right)))]
@@ -35,9 +34,7 @@
         1))
     (catch :default e
       (reset! running? false)
-      (try (set-status! (str "; layout: " (or (ex-message e) (str e))))
-           (catch :default _ nil))
-      0)))
+      (throw e))))
 
 (defn- install
   "The layouts part for one window, reading the editor/console split, the
@@ -57,7 +54,7 @@
         tick (callable
               (fn [_d] (settle! {:pending* pending* :running? running? :right right
                                  :tree-paned tree-paned :paned paned
-                                 :showing-panel showing-panel :set-status! set-status!}))
+                                 :showing-panel showing-panel}))
               [:pointer] :int :on-throw 0)]
     {:fns
      {:layout-save-fn

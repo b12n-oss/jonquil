@@ -221,49 +221,57 @@
            @statuses))
     (is (= [] @effects))))
 
-;; The layouts part's settle timer. ffi/foreign-callable is stubbed to hand
-;; back the contained fn itself, so a test can run the tick.
+;; The layouts part's settle timer. The tick body is a plain fn (settle!) so a
+;; test can run it: a foreign callable can't be invoked from Clojure.
 (defn- layouts-fns
-  "The layouts part installed with stub wctx; answers {:fns .. :status ..}.
-  tick-throws? makes the tick body throw (showing-panel throws once armed)."
-  [tick-throws?]
-  (let [status (atom nil)
-        layout {"L" {:tree? false :split 100}}]
-    (with-redefs [settings/load-settings (fn [_] {:layouts layout})
+  "The layouts part installed with stub wctx; answers its :fns. Two saved
+  layouts, \"L\" and \"M\", differ in their split."
+  []
+  (let [layouts {"L" {:tree? false :split 100} "M" {:tree? false :split 200}}]
+    (with-redefs [settings/load-settings (fn [_] {:layouts layouts})
                   g/label-text (fn [_] "before")
-                  g/gtk-toggle-button-set-active (fn [_ _] nil)
-                  g/gtk-paned-get-position (fn [_] 0)]
-      {:status status
-       :fns (:fns ((deref #'layouts-part/install)
-                   {:settings-path* (atom "x") :status-label :lbl :cv {} :right :right
-                    :tree-pane {} :tree-paned :tp :paned :p :files-btn :fb
-                    :panel-focus-fn (fn [_]) :set-status! #(reset! status %)
-                    :showing-panel (fn [_] (when tick-throws? (throw (ex-info "boom" {}))) nil)
-                    :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])}))})))
+                  g/gtk-toggle-button-set-active (fn [_ _] nil)]
+      (:fns ((deref #'layouts-part/install)
+             {:settings-path* (atom "x") :status-label :lbl :cv {} :right :right
+              :tree-pane {} :tree-paned :tp :paned :p :files-btn :fb
+              :panel-focus-fn (fn [_]) :set-status! (fn [_])
+              :showing-panel (fn [_] nil)
+              :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])})))))
+
+(defn- use-layout!
+  "Runs :layout-use-fn for n with the settings and GTK stubs in place."
+  [fns n]
+  (with-redefs [settings/load-settings (fn [_] {:layouts {"L" {:tree? false :split 100}
+                                                          "M" {:tree? false :split 200}}})
+                g/label-text (fn [_] "before")
+                g/gtk-toggle-button-set-active (fn [_ _] nil)]
+    ((:layout-use-fn fns) n)))
 
 (deftest layouts-timer-can-be-armed-again-after-arm-throws
-  (let [{:keys [fns]} (layouts-fns false)
+  (let [fns (layouts-fns)
         armed (atom 0)]
-    (with-redefs [settings/load-settings (fn [_] {:layouts {"L" {:tree? false :split 100}}})
-                  g/label-text (fn [_] "before")
-                  g/gtk-toggle-button-set-active (fn [_ _] nil)
-                  g/g-timeout-add (fn [_ms _cb _d] (swap! armed inc) (throw (ex-info "no loop" {})))]
-      (is (thrown? Exception ((:layout-use-fn fns) "L")))
-      (is (thrown? Exception ((:layout-use-fn fns) "L")))
+    (with-redefs [g/g-timeout-add (fn [_ms _cb _d] (swap! armed inc) (throw (ex-info "no loop" {})))]
+      (is (thrown? Exception (use-layout! fns "L")))
+      (is (thrown? Exception (use-layout! fns "L")))
       (is (= 2 @armed) "the second use arms again"))))
 
-;; The tick body is a plain fn (settle!) so a test can run it: a foreign
-;; callable can't be invoked from Clojure.
+(deftest layouts-two-uses-arm-one-timer
+  (let [fns (layouts-fns)
+        armed (atom 0)]
+    (with-redefs [g/g-timeout-add (fn [_ms _cb _d] (swap! armed inc) 1)]
+      (use-layout! fns "L")
+      (use-layout! fns "M")
+      (is (= 1 @armed) "the second use takes over the running timer"))))
+
 (deftest layouts-timer-can-be-armed-again-after-the-tick-throws
-  (let [said (atom nil)
-        pending* (atom {:panel :trace :tree? false :split 100 :tries 0})
+  (let [pending* (atom {:panel :trace :tree? false :split 100 :tries 0})
         running? (atom true)
         deps {:pending* pending* :running? running? :right :r :tree-paned :tp :paned :p
               :showing-panel (fn [_] (throw (ex-info "boom" {})))
-              :set-status! #(reset! said %)}]
-    (is (= 0 (@#'layouts-part/settle! deps)) "a throwing tick still answers 0, removing the source")
-    (is (false? @running?) "so the next use can arm a timer")
-    (is (re-find #"boom" (str @said)))))
+              :set-status! (fn [_] (throw (ex-info "the status line is not used" {})))}]
+    (is (thrown-with-msg? Exception #"boom" (@#'layouts-part/settle! deps))
+        "the throw reaches the callable's :on-throw 0 reporting")
+    (is (false? @running?) "so the next use can arm a timer")))
 
 ;; The time-form part: its command, and the per-window confirmation.
 (deftest time-form-part-owns-its-command
