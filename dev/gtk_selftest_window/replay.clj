@@ -695,12 +695,13 @@
                               :recorder-kept? (identical? before @recorder*)})))))
 
 (defn row-part-commands-reachable
-  "Every part spec command's :call key is in the palette's window context
+  "Every :window-scope part spec command's :call key is in the palette's window context
   (the core's keys plus the parts' :fns), so none runs as a silent no-op."
   [ui]
   (go-row :part-commands-reachable support/check
     (on-gtk (let [ks (:palette-ctx-keys ui)
-                  cmds (apply merge {} (map :commands parts/specs))
+                  cmds (into {} (filter (comp #{:window} :scope val))
+                             (mapcat :commands parts/specs))
                   missing (parts/missing-calls cmds ks)]
               (support/check :part-commands-reachable
                              (and (set? ks) (seq cmds) (empty? missing))

@@ -1,7 +1,9 @@
 (ns jonquil.parts-test
   (:require [clojure.test :refer [deftest is testing]]
             [jonquil.command-registry :as registry]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
+            [jonquil.gtk.parts.replay :as replay-part]
             [jonquil.parts :as parts]))
 
 (defn- call [k & args]
@@ -121,5 +123,59 @@
     (is (= #{} (parts/missing-calls cmds #{:here :nope-fn})))))
 
 (deftest specs-and-installs-name-the-same-parts
-  (is (= (set (map :id parts/specs))
-         (set (map (comp :part/id meta) gtk-parts/installs)))))
+  (is (= (mapv :id parts/specs)
+         (mapv (comp :part/id meta) gtk-parts/installs))))
+
+(deftest check-clashes-refuses-a-bad-scope-or-call
+  (let [spec (fn [cmd] {:id :p :commands {:p/go cmd}})]
+    (doseq [scope [nil :windw "window"]]
+      (is (= "command :p/go of :p: :scope must be :window, :editor or :console"
+             (message #(parts/check-clashes {} [(spec {:doc "x" :scope scope :call [:f]})])))))
+    (doseq [call [nil [] :f '(:f) "f"]]
+      (is (= "command :p/go of :p: :call must be a non-empty vector"
+             (message #(parts/check-clashes {} [(spec {:doc "x" :scope :window :call call})])))))
+    (is (nil? (parts/check-clashes {} [(spec {:doc "x" :scope :console :call [:f]})])))))
+
+(deftest install-refuses-an-exports-key-already-in-wctx
+  (let [a (install-fn :a (fn [_] {:exports {:win 1}}))
+        errors (atom [])
+        c (parts/install [a] {:win :w} (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+    (is (= [[:a "duplicate exports key :win: :core and :a"]] @errors))
+    (is (= {} (:exports c)))))
+
+(deftest install-refuses-unknown-contribution-keys-and-hooks
+  (let [errors (atom [])
+        a (install-fn :a (fn [_] {:fns {:a-fn inc} :uii {:x 1}}))
+        b (install-fn :b (fn [_] {:hooks {:on-quitt (fn [])}}))
+        c (install-fn :c (fn [_] {:fns {:c-fn inc}}))
+        r (parts/install [a b c] {} (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+    (is (= [[:a "part :a: unknown contribution key :uii"]
+            [:b "part :b: unknown hook :on-quitt"]]
+           @errors))
+    (is (= #{:c-fn} (set (keys (:fns r)))))))
+
+(deftest replay-part-reads-the-tab-map-late
+  (let [tab-ctx* (atom nil)
+        cv {:recorder* (atom nil) :replay-root* (atom nil) :replay-tab* (atom nil)}
+        c (replay-part/part {:cv cv :tab-ctx* tab-ctx*})
+        root-fn @(:replay-root* cv)]
+    (testing "before activate! sets the tab map"
+      (is (nil? (root-fn)))
+      (is (nil? (@(:recorder* cv) {} {}))))
+    (testing "once it is set, the same fns see it"
+      (reset! tab-ctx* {:tree-pane {:state (atom {:root "/proj"})}})
+      (is (= "/proj" (root-fn))))
+    (is (= #{:on-start :on-reroot :on-quit} (set (keys (:hooks c)))))))
+
+(deftest replay-part-schedules-with-one-callable
+  (let [wctx {:cv {} :tab-ctx* (atom {:tree-pane {:state (atom {:root "/proj"})}})}
+        state (@#'replay-part/new-state wctx)
+        ctx (@#'replay-part/part-ctx wctx state)
+        seen (atom [])]
+    (with-redefs [g/g-timeout-add (fn [_ms cb _data] (swap! seen conj cb) 1)]
+      (dotimes [_ 3]
+        (reset! (:replay-save-pending? state) false)
+        (@#'replay-part/schedule-replay-save! ctx)))
+    (is (= 3 (count @seen)))
+    (is (some? (first @seen)))
+    (is (= 1 (count (distinct @seen))) "every scheduled save reuses one callable")))

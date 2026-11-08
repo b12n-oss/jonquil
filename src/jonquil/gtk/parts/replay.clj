@@ -87,16 +87,12 @@
       (save-replay! ctx st))))
 
 (defn- schedule-replay-save!
-  "Arranges one flush-replay! in REPLAY-SAVE-MS unless one is already due."
-  [{:keys [replay-save-pending?] :as ctx}]
+  "Arranges one flush-replay! in REPLAY-SAVE-MS unless one is already due.
+  The timer's callable is the part's own :replay-save-cb, made once at
+  install, since every callable lives for the process."
+  [{:keys [replay-save-pending? replay-save-cb]}]
   (when (compare-and-set! replay-save-pending? false true)
-    (g/g-timeout-add REPLAY-SAVE-MS
-                     (callable (fn [_data]
-                                 (reset! replay-save-pending? false)
-                                 (try (flush-replay! ctx) (catch :default _ nil))
-                                 0)
-                               [:pointer] :int :on-throw 0)
-                     ffi/null)))
+    (g/g-timeout-add REPLAY-SAVE-MS replay-save-cb ffi/null)))
 
 (defn- open-root!
   "The tree's root has opened (at startup, or an Open Folder re-root):
@@ -250,13 +246,29 @@
   (when-let [tc @(:tab-ctx* wctx)]
     (merge tc state (select-keys wctx [:tab-by-id :select-tab! :new-tab!]))))
 
+(defn- new-state
+  "This window's replay state: the record, the last error, the pending-save
+  flag and the one callable that timer fires. The callable reads the tab map
+  when it runs, so it is made before the map exists."
+  [wctx]
+  (let [state* (atom nil)
+        pending? (atom false)
+        cb (callable (fn [_data]
+                       (reset! pending? false)
+                       (try (some-> (part-ctx wctx @state*) flush-replay!)
+                            (catch :default _ nil))
+                       0)
+                     [:pointer] :int :on-throw 0)]
+    (reset! state* {:replay* (atom nil) :replay-error (atom nil)
+                    :replay-save-pending? pending? :replay-save-cb cb})))
+
 (defn- install
-  "The replay part for one window. Its state (the record, the last error,
-  the pending save) is this window's own; opened-roots stays process-wide.
+  "The replay part for one window. Its state (see new-state) is this
+  window's own; opened-roots stays process-wide.
   The recorder and the root fn go into cv's hook slots now, and read the
   tab map when an evaluation calls them."
   [{:keys [cv] :as wctx}]
-  (let [state {:replay* (atom nil) :replay-error (atom nil) :replay-save-pending? (atom false)}
+  (let [state (new-state wctx)
         ctx (fn [] (part-ctx wctx state))
         open-root (fn [] (when-let [c (ctx)] (open-root! c)))
         open-fn (fn [] (replay-open! (ctx)))

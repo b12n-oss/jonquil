@@ -36,11 +36,25 @@
                (claim owners id owner)
                more)))))
 
+(defn- check-command-shape
+  "Throws unless cmd (of part-id) has a known :scope and a non-empty :call
+  vector, since merge-commands would otherwise drop it without a word."
+  [part-id id {:keys [scope call]}]
+  (when-not (contains? #{:window :editor :console} scope)
+    (throw (ex-info (str "command " id " of " part-id ": :scope must be :window, :editor or :console")
+                    {:command id :part part-id :scope scope})))
+  (when-not (and (vector? call) (seq call))
+    (throw (ex-info (str "command " id " of " part-id ": :call must be a non-empty vector")
+                    {:command id :part part-id :call call}))))
+
 (defn check-clashes
   "Throws when a command id has two owners across every scope: the core
   tables (cores, {scope table}) and every spec, whatever each command's
-  scope. Same message as merge-commands. Answers nil."
+  scope. Same message as merge-commands. Also throws when a spec command
+  has no known :scope or no :call vector. Answers nil."
   [cores specs]
+  (doseq [spec specs, [id cmd] (:commands spec)]
+    (check-command-shape (:id spec) id cmd))
   (reduce (fn [owners [owner id]] (claim owners id owner))
           (reduce #(claim %1 %2 :core) {} (mapcat keys (vals cores)))
           (for [spec specs, id (keys (:commands spec))] [(:id spec) id]))
@@ -63,6 +77,23 @@
     (assoc owners k owner)))
 
 (def ^:private merged-kinds [:fns :ui :exports])
+(def ^:private contribution-keys #{:fns :ui :hooks :exports})
+(def ^:private hook-kinds #{:on-start :on-reroot :on-quit})
+
+(defn- check-contribution
+  "Throws unless contribution (of id) uses only the known keys and hook
+  kinds, and exports no key wctx already holds."
+  [id wctx contribution]
+  (doseq [k (keys contribution)
+          :when (not (contains? contribution-keys k))]
+    (throw (ex-info (str "part " id ": unknown contribution key " k) {:part id :key k})))
+  (doseq [h (keys (:hooks contribution))
+          :when (not (contains? hook-kinds h))]
+    (throw (ex-info (str "part " id ": unknown hook " h) {:part id :hook h})))
+  (doseq [k (keys (:exports contribution))
+          :when (contains? wctx k)]
+    (throw (ex-info (str "duplicate exports key " k ": :core and " id)
+                    {:kind :exports :key k :owners [:core id]}))))
 
 (defn- add-contribution
   "acc with one part's contribution folded in. Strict for :fns, :ui and
@@ -86,13 +117,16 @@
   in order. Answers {:fns {} :ui {} :hooks {hook-kw [f ...]} :exports {}
   :owners {kind {k part-id}, :hooks {hook-kw [part-id ...]}}}, merged strictly: a duplicate :fns, :ui or
   :exports key throws naming the key and both part ids. An install fn that
-  throws is reported once, (on-error part-id ex), and contributes nothing;
-  the others still install."
+  throws, or answers a contribution with an unknown key or hook kind or an
+  :exports key wctx already holds, is reported once, (on-error part-id ex),
+  and contributes nothing; the others still install."
   [installs wctx on-error]
   (reduce (fn [acc [i install-fn]]
             (let [id (part-id install-fn i)
-                  contribution (try (install-fn (merge wctx (:exports acc)))
-                                    (catch Throwable ex (on-error id ex) nil))]
+                  contribution (try (let [c (install-fn (merge wctx (:exports acc)))]
+                                      (check-contribution id wctx c)
+                                      c)
+                                    (catch :default ex (on-error id ex) nil))]
               (add-contribution acc id contribution)))
           {:fns {} :ui {} :hooks {} :exports {} :owners {:fns {} :ui {} :exports {} :hooks {}}}
           (map-indexed vector installs)))
@@ -117,7 +151,7 @@
                       (get-in contribution [:hooks hook-kw])
                       (get-in contribution [:owners :hooks hook-kw]))]
     (try (apply f args)
-         (catch Throwable ex (on-error id ex))))
+         (catch :default ex (on-error id ex))))
   nil)
 
 (defn missing-calls

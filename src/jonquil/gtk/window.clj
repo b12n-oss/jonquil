@@ -5119,7 +5119,7 @@
         ;; bindings it needs from wctx and answers its :fns, :ui, :hooks and
         ;; :exports. A part's error is said on the status line, not thrown.
         part-error! (fn [id ex]
-                      (set-status! status-label (str "; part " id ": " (ex-message ex))))
+                      (set-status! status-label (str "; part " id ": " (or (ex-message ex) (str ex)))))
         part-contribution (parts/install gtk-parts/installs
                                          {:win win :status-label status-label :cv cv :ev* ev* :sel* sel*
                                           :tabs tabs :active-tab active-tab :settings-path* settings-path*
