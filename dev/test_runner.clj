@@ -52,6 +52,7 @@
     jonquil.results-rt-test
     jonquil.results-test
     jonquil.keymap-test
+    jonquil.parts-test
     jonquil.command-registry-test
     jonquil.keymap-shipped-test
     jonquil.palette-test

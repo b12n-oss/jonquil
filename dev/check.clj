@@ -70,6 +70,7 @@
     jonquil.results-rt
     jonquil.results
     jonquil.keymap
+    jonquil.parts
     jonquil.command-registry
     jonquil.palette
     jonquil.debugger

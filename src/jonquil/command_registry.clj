@@ -10,12 +10,15 @@
   menus read the same table (editor-menu, console-menu, menu-items), the
   command palette lists it (run-command-in), and plugins add their own."
   (:require [jonquil.keymap :as km]
+            [jonquil.parts :as parts]
             [jonquil.results :as results]))
 
-(defn- call [k & args]
+(defn call
+  "A command's :run: calls the ctx fn under k with args, answers :handled."
+  [k & args]
   (fn [ctx _args] (apply (get ctx k) args) :handled))
 
-(def window-commands
+(def ^:private core-window-commands
   {:run/run {:doc "Run the buffer." :scope :window :run (call :run-fn)}
    :file/open {:doc "Open a file." :scope :window :run (call :open-fn)}
    :file/save-as {:doc "Save the buffer under a new name." :scope :window :run (call :save-as-fn)}
@@ -215,7 +218,7 @@
 (defn- act [k]
   (fn [ctx _args] ((get ctx k)) :handled))
 
-(def editor-commands
+(def ^:private core-editor-commands
   "The editor's chords, plus the context menu's unbound
   Indent and Unindent. ctx is the per-key map
   jonquil.gtk.editor/handle-key! builds, each entry a thunk that reads the
@@ -245,13 +248,25 @@
   {:writable (fn [ctx] ((:writable? ctx)))
    :preedit-active (fn [ctx] ((:preedit-active? ctx)))})
 
-(def console-commands
+(def ^:private core-console-commands
   "The console's context-menu commands. The console's keys stay
   in jonquil.gtk.console-view, outside the window and editor key chains."
   ;; :palette? false: its popup takes keys only while the console has focus,
   ;; and a palette run hands focus back to the editor
   {:console/complete {:doc "Complete the symbol at the console's caret." :scope :console
                       :palette? false :run (act :complete!)}})
+
+(def window-commands
+  "The window's commands: the core table plus the parts' window commands."
+  (parts/merge-commands core-window-commands parts/specs :window call))
+
+(def editor-commands
+  "The editor's commands: the core table plus the parts' editor commands."
+  (parts/merge-commands core-editor-commands parts/specs :editor call))
+
+(def console-commands
+  "The console's commands: the core table plus the parts' console commands."
+  (parts/merge-commands core-console-commands parts/specs :console call))
 
 (def commands
   "Every registered command, the three scopes merged; ids never collide
