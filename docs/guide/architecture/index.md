@@ -144,7 +144,7 @@ A window feature that owns its own state, commands and startup work is a part, s
 The contribution keys:
 
 - `:fns` are context functions the spec's `:call` entries name (`:replay-open-fn`).
-- `:ui` are the slots the window reads for its own wiring.
+- `:ui` are entries in the window's `ui` map, which the self-tests and MCP read.
 - `:exports` are values for parts installed later.
 - `:hooks` maps a hook kind to a function. The kinds that exist are `:on-start` (once, when startup finishes), `:on-reroot` (Open Folder, before the new root opens, called with `{:path p}`) and `:on-quit` (a real quit only). Tab hooks, panels and part key bindings don't exist yet.
 
