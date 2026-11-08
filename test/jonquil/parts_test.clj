@@ -12,6 +12,8 @@
             [jonquil.gtk.processes-pane :as processes-pane]
             [jonquil.gtk.parts.replay :as replay-part]
             [jonquil.gtk.parts.time-form :as time-form-part]
+            [jonquil.gtk.parts.trace :as trace-part]
+            [jonquil.gtk.trace-pane :as trace-pane]
             [jonquil.gtk.parts.worlds :as worlds-part]
             [jonquil.palette :as palette]
             [jonquil.settings :as settings]
@@ -65,9 +67,10 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :trace :replay] (mapv :id parts/specs)))
   (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
-          :panel/processes :processes/show}
+            :panel/processes :processes/show
+          :panel/trace :trace/toggle :trace/show :trace/clear :trace/untrace-all}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
@@ -373,8 +376,8 @@
 (deftest palette-labels-hold-the-core-panels
   (is (= "Processes" (:processes palette/PANEL-LABELS)))
   (is (= {:inspector "Inspector" :source "Source" :locations "Locations"
-          :debugger "Frames" :trace "Trace" :plugins "Plugins" :messages "Messages"
-          :processes "Processes"}
+            :debugger "Frames" :plugins "Plugins" :messages "Messages"
+          :processes "Processes" :trace "Trace"}
          palette/PANEL-LABELS)))
 
 (deftest processes-part-owns-its-commands-and-panel
@@ -466,3 +469,46 @@
 
 (deftest disk-poll-spec-has-no-commands
   (is (= {:id :disk-poll :commands {}} (some #(when (= :disk-poll (:id %)) %) parts/specs))))
+
+;; Trace: the panel, its four commands and the after-eval refresh.
+(deftest trace-part-owns-its-commands-and-panel
+  (let [spec (some #(when (= :trace (:id %)) %) parts/specs)]
+    (is (= [:panel-focus-fn :trace] (get-in spec [:commands :panel/trace :call])))
+    (is (= [:trace-toggle-fn] (get-in spec [:commands :trace/toggle :call])))
+    (is (= [:trace-show-fn] (get-in spec [:commands :trace/show :call])))
+    (is (= [:trace-clear-fn] (get-in spec [:commands :trace/clear :call])))
+    (is (= [:trace-untrace-all-fn] (get-in spec [:commands :trace/untrace-all :call])))
+    (is (= [{:id :trace :label "Trace"}] (:panels spec)))
+    (is (= "Trace" (:trace palette/PANEL-LABELS)))))
+
+(defn- trace-wctx [ev* statuses]
+  {:ev* ev* :cv {:after-eval* (atom nil)} :right {:slot :slot :recent-panels (atom [])}
+   :set-status! #(swap! statuses conj %) :status-label :lbl
+   :active-tab (fn [] nil) :show-right-panel! (fn [& _]) :hide-right-panel! (fn [& _])
+   :inspect! (fn [_])})
+
+;; Review focus 3: a dialect switch swaps the evaluator in ev*, and the
+;; next call must read the new one.
+(deftest trace-reads-the-evaluator-per-call
+  (let [statuses (atom [])
+        ops (atom [])
+        ev* (atom {:not :trace})
+        wctx (trace-wctx ev* statuses)]
+    (with-redefs [trace-pane/make-pane (fn [] {:root :root :list :list})
+                  trace-pane/set-handlers! (fn [& _])]
+      (let [show (get-in ((deref #'trace-part/install) wctx) [:fns :trace-show-fn])]
+        (show)
+        (is (= ["; Trace needs Jolt."] @statuses))
+        (reset! ev* (reify ev/Trace
+                      (trace-op! [_ op _ _] (swap! ops conj op))))
+        (show)
+        (is (= [:log] @ops))
+        (is (= 1 (count @statuses)))))))
+
+(deftest trace-part-sets-after-eval
+  (let [wctx (trace-wctx (atom nil) (atom []))]
+    (with-redefs [trace-pane/make-pane (fn [] {:root :root :list :list})
+                  trace-pane/set-handlers! (fn [& _])]
+      (let [c ((deref #'trace-part/install) wctx)]
+        (is (fn? @(:after-eval* (:cv wctx))))
+        (is (= :root (get-in c [:panels :trace :root])))))))

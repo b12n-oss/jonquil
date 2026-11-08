@@ -33,6 +33,7 @@
    "jonquil/parts/messages.clj" (embedded-text "jonquil/parts/messages.clj")
    "jonquil/parts/processes.clj" (embedded-text "jonquil/parts/processes.clj")
    "jonquil/parts/replay.clj" (embedded-text "jonquil/parts/replay.clj")
+   "jonquil/parts/trace.clj" (embedded-text "jonquil/parts/trace.clj")
    "jonquil/parts/time_form.clj" (embedded-text "jonquil/parts/time_form.clj")
    "jonquil/parts/worlds.clj" (embedded-text "jonquil/parts/worlds.clj")
    "jonquil/plugin.clj" (embedded-text "jonquil/plugin.clj")

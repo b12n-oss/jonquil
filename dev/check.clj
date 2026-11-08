@@ -11,6 +11,7 @@
     jonquil.parts.layouts
     jonquil.parts.processes
     jonquil.parts.replay
+    jonquil.parts.trace
     jonquil.parts.time-form
     jonquil.parts.worlds
     jonquil.parts
@@ -137,6 +138,7 @@
     jonquil.gtk.parts.layouts
     jonquil.gtk.parts.processes
     jonquil.gtk.parts.replay
+    jonquil.gtk.parts.trace
     jonquil.gtk.parts.time-form
     jonquil.gtk.parts.worlds
     jonquil.gtk.parts

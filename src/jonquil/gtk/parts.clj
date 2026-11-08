@@ -9,10 +9,11 @@
             [jonquil.gtk.parts.messages :as messages]
             [jonquil.gtk.parts.processes :as processes]
             [jonquil.gtk.parts.replay :as replay]
+            [jonquil.gtk.parts.trace :as trace]
             [jonquil.gtk.parts.time-form :as time-form]
             [jonquil.gtk.parts.worlds :as worlds]))
 
 (def installs
   "Install fns, in order: the real parts, then any registered in
   jonquil.parts.extra."
-  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part replay/part] @extra/installs*))
+  (into [messages/part disk-poll/part layouts/part worlds/part time-form/part processes/part trace/part replay/part] @extra/installs*))
