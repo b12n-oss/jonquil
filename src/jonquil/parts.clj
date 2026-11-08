@@ -34,3 +34,13 @@
                                  (assoc :run (apply call-fn (:call cmd)))))
                (claim owners id owner)
                more)))))
+
+(defn check-clashes
+  "Throws when a command id has two owners across every scope: the core
+  tables (cores, {scope table}) and every spec, whatever each command's
+  scope. Same message as merge-commands. Answers nil."
+  [cores specs]
+  (reduce (fn [owners [owner id]] (claim owners id owner))
+          (reduce #(claim %1 %2 :core) {} (mapcat keys (vals cores)))
+          (for [spec specs, id (keys (:commands spec))] [(:id spec) id]))
+  nil)

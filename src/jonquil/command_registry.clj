@@ -256,6 +256,12 @@
   {:console/complete {:doc "Complete the symbol at the console's caret." :scope :console
                       :palette? false :run (act :complete!)}})
 
+;; an id may have one owner across every scope, or `commands` would lose one
+(parts/check-clashes {:window core-window-commands
+                      :editor core-editor-commands
+                      :console core-console-commands}
+                     parts/specs)
+
 (def window-commands
   "The window's commands: the core table plus the parts' window commands."
   (parts/merge-commands core-window-commands parts/specs :window call))
