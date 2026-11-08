@@ -6,6 +6,7 @@
   '[jonquil.core
     jonquil.dialect
     jonquil.parts.extra
+    jonquil.parts.debugger
     jonquil.parts.disk-poll
     jonquil.parts.messages
     jonquil.parts.layouts
@@ -135,6 +136,7 @@
     jonquil.gtk.console-view
     jonquil.gtk.tab
     jonquil.gtk.file-tree-pane
+    jonquil.gtk.parts.debugger
     jonquil.gtk.parts.disk-poll
     jonquil.gtk.parts.messages
     jonquil.gtk.parts.layouts

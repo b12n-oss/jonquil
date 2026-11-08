@@ -44,8 +44,6 @@
                      :run (call :panel-focus-fn :inspector)}
    :panel/source {:doc "Focus the Source panel, or open it." :scope :window
                   :run (call :panel-focus-fn :source)}
-   :panel/frames {:doc "Focus the Frames panel, or open it." :scope :window
-                  :run (call :panel-focus-fn :debugger)}
    :panel/plugins {:doc "Focus the Plugins panel, or open it." :scope :window
                    :run (call :panel-focus-fn :plugins)}
    :view/cycle-theme {:doc "Switch to the next theme." :scope :window :run (call :theme-cycle-fn)}
@@ -54,22 +52,6 @@
    :inspect/last {:doc "Inspect the last result." :scope :window :run (call :inspect-last-fn)}
    :run/changed {:doc "Run the forms changed since they last ran." :scope :window
                  :run (call :run-changed-fn)}
-   :debug/show-frames {:doc "Show the last error's frames and locals." :scope :window
-                       :run (call :show-frames-fn)}
-   :debug/locals-mode {:doc "Keep every local for the debugger (debug mode, then reload your code)."
-                       :scope :window :run (call :locals-mode-fn)}
-   :run/line-counts {:doc "Count how often each line runs (Jolt): turn it on, then Run your saved file."
-                     :scope :window :run (call :line-counts-fn)}
-   :run/clear-line-counts {:doc "Clear line counts: zero Jolt's counters and hide them."
-                           :scope :window :run (call :clear-line-counts-fn)}
-   :debug/break-on-error {:doc "Break on error: pause an evaluation where it throws, before anything unwinds."
-                          :scope :window :run (call :break-fn)}
-   :debug/continue {:doc "Continue from the break: let the error unwind." :scope :window
-                    :run (call :continue-fn)}
-   :restart/retry {:doc "Retry the last failed evaluation." :scope :window :run (call :retry-fn)}
-   :restart/edit {:doc "Edit the last failed evaluation at the prompt." :scope :window :run (call :edit-retry-fn)}
-   :restart/define {:doc "Define the name the last error couldn't resolve, then retry." :scope :window
-                    :run (call :define-retry-fn)}
    :tab/next {:doc "Go to the next tab." :scope :window :run (call :step-tab-fn 1)}
    :tab/previous {:doc "Go to the previous tab." :scope :window :run (call :step-tab-fn -1)}
    ;; find and focus

@@ -37,7 +37,6 @@
             [jonquil.gtk.callbacks :refer [callable on-gui!]]
             [jonquil.gtk.completion :as completion]
             [jonquil.gtk.console-view :as cview]
-            [jonquil.gtk.debugger-pane :as debugger-pane]
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.file-tree-pane :as file-tree-pane]
@@ -851,15 +850,14 @@
   "{which root} for the panels right's slot holds, a part's among them; a
   right without :review-root, :plugins-root or :history-root (a test's) has
   fewer, and one without :part-panels* has no part panels."
-  [{:keys [inspector-root source-root review-root plugins-root history-root debugger-root
+  [{:keys [inspector-root source-root review-root plugins-root history-root
            part-panels*]}]
   (cond-> (into {:inspector inspector-root :source source-root}
                 (map (fn [[id p]] [id (:root p)]))
                 (some-> part-panels* deref))
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
-    history-root (assoc :history history-root)
-    debugger-root (assoc :debugger debugger-root)))
+    history-root (assoc :history history-root)))
 
 (defn- show-right-panel!
   "Shows which (:inspector, :source, :review, :plugins, :history,
@@ -1344,6 +1342,40 @@
                       :hook-source :selection :failure-kind :example :hook-tab (:id tab)
                       :changed nil
                       :record {:source :example :code code :path nil :ns "user"}}))))
+
+(defn- re-eval-failure!
+  "Sends failure f's code through the REPL again, in tab t, as it first went."
+  [{:keys [cv ev* status-label]} f t]
+  (let [code (:code f)
+        buffer? (#{:selection :form} (:kind f))]
+    (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
+    (do-repl-eval! (:ed t) cv ev* status-label code
+                   (cond-> {:hook-source (:kind f) :hook-tab (:id t)
+                            :record (if buffer?
+                                      (tab-record t ev* (:kind f) code (editor/editor-text (:ed t)))
+                                      {:source (:kind f) :code code :path nil
+                                       :ns (str (ev/prompt-ns @ev*))})}
+                     ;; as Run Selection and Run Form send them
+                     buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t))))))
+
+(defn- rerun-failure!
+  "Runs failure f again in tab t: the retry restart's dispatch by the
+  failure's kind. m is {:failure :tab :cv :ev* :sel* :status-label}. The run
+  fns are called through their vars."
+  [{f :failure t :tab :keys [cv ev* sel* status-label]}]
+  (let [ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
+        code (:code f)
+        buffer? (#{:selection :form} (:kind f))]
+    (cond
+      (= :run (:kind f)) (do-run! ctx)
+      ;; an example goes back through its own Run, in user
+      (= :example (:kind f)) (do-run-example! ctx code)
+      ;; the checks Run Selection and Run Form make first
+      (and buffer? (or (refuse-foreign! ctx)
+                       (and (not (ev/evaluating? @ev*))
+                            (before-run-stopped ctx (:kind f) t code))))
+      nil
+      :else (re-eval-failure! ctx f t))))
 
 (defn- do-copy-example!
   "Copy to Definitions: code goes into the tab's editor after the form at
@@ -2710,58 +2742,13 @@
   ctx is the window's map; see add-tab!."
   [{:keys [win cv ev* status-label line-col-label close-popovers-fn register-popover-fn
            active? source-ctx sel-ctx sel* tabs settings-path* inspect-last-fn inspect-form-fn tree-saved!
-           open-find-fn open-replace-fn window-key-args repl-complete-fn hint-label hints-on? line-counting?] :as ctx}
+           open-find-fn open-replace-fn window-key-args repl-complete-fn hint-label hints-on?] :as ctx}
    {:keys [ed fb help-pop full-doc-pop rename-pop completion palette last-shown path discard-warned?] :as t}]
+  ;; LM4 (the debugger part's :on-tab-wired hook): the gutter's line counts,
+  ;; first, so its "changed" handler connects before LM3's
+  (parts/run-tab-hooks! ctx :on-tab-wired t)
   ;; LM3: the gutter's marks follow edits, 150 ms after the last change,
   ;; computed off the GTK thread and drawn only if the text is still the same
-  ;; LM4: after a run, the file's line counts in the gutter, while
-  ;; counting is on; drawn only for a saved, clean tab whose text is still
-  ;; what it was when the fetch started, and hidden at the first edit
-  (when-let [{:keys [counts-refresh counting? gutter]} (:changed ed)]
-    (reset! counting? (fn [] (boolean (and line-counting? @line-counting?))))
-    ;; the text the tab's last full Run ran: counts are drawn only while the
-    ;; buffer still holds it, so a Run Form or Run Selection never shows
-    ;; counts for lines that have moved since
-    (let [run-text (atom nil)]
-      (reset! counts-refresh
-              (fn [source code]
-                (on-gui! (fn []
-                           (when (= :run source) (reset! run-text code))
-                           (when (and line-counting? @line-counting? (not @(:destroyed? ed)))
-                             (let [e @ev* path @path]
-                               (cond
-                                 (not (satisfies? ev/LineCounts e)) nil
-                                 ;; on the console: the Run's own Ready lands on the
-                                 ;; status bar after this. Only for a Run: a Run Form
-                                 ;; on an edited tab is the usual case, not news
-                                 (or (nil? path) (editor/dirty? ed))
-                                 (when (= :run source)
-                                   (cview/append! cv :system "; Line counts show for a saved file.\n"))
-                                 :else
-                                 (let [text (editor/editor-text ed)]
-                                   (when (= text @run-text)
-                                     (ev/line-counts!
-                                      e path
-                                      (fn [r]
-                                        (on-gui! (fn []
-                                                   (cond
-                                                     (:error r) (cview/append! cv :system (str "; " (:error r) "\n"))
-                                                     ;; the runtime isn't counting: a restart, or a
-                                                     ;; toggle elsewhere
-                                                     (not= :counts (:mode r))
-                                                     (when @line-counting?
-                                                       (reset! line-counting? false)
-                                                       (gutter/set-counts! gutter {})
-                                                       (cview/append! cv :system "; Line counts went off (the runtime restarted).\n"))
-                                                     (and (not @(:destroyed? ed)) (= text (editor/editor-text ed)))
-                                                     (gutter/set-counts! gutter (into {} (for [[line hits] (:counts r) :when line]
-                                                                                           [(dec line) (line-counts/label hits)]))))))))))))))))))
-    (g/g-signal-connect-data (:buf ed) "changed"
-                             (callable (fn [_buf _data]
-                                         (when (seq @(:counts gutter)) (gutter/set-counts! gutter {}))
-                                         nil)
-                                       [:pointer :pointer] :void)
-                             ffi/null ffi/null g/CONNECT-DEFAULT))
   (when-let [{:keys [ran refresh gutter]} (:changed ed)]
     (let [pending (atom 0)
           ;; a closed tab's buffer and gutter are gone (:destroyed?), and a
@@ -3638,7 +3625,6 @@
         ;; The Messages panel's unread count (LM8), shown in the status
         ;; bar while it's above zero; the Messages part fills it
         unread-label (g/gtk-label-new "")
-        dbgp (debugger-pane/make-pane)
         ;; And the history of the plugin selected in it
         hp (plugin-history-pane/make-pane)
         *right (atom nil)
@@ -3773,7 +3759,6 @@
         part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp)
-               :debugger-root (:root dbgp)
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
                ;; Switch to panel entries, and the panel keys' "open it"
@@ -4079,220 +4064,6 @@
                                        (catch :default e (say (str "; ! failed: " (or (ex-message e) (str e)))))))))))
         ;; named, so each tab's palette can build the same per-key ctx
         ;; (window-key-ctx) a window chord gets
-        ;; The Frames panel's data (jonquil.debugger). GTK thread only. Debug
-        ;; mode has no flag here: the toggle reads the runtime's own mode.
-        frames-state (atom nil)
-        frames-ev (fn [] (let [e @ev*] (when (satisfies? ev/Frames e) e)))
-        ;; LM4: whether Jolt is counting lines, from each toggle's answer
-        line-counting? (atom false)
-        show-frames-fn (fn []
-                         (if-let [e (frames-ev)]
-                           (ev/error-frames! e (fn [d]
-                                                 (on-gui! (fn []
-                                                            (if-let [err (:error d)]
-                                                              (if-let [f @(:failure* cv)]
-                                                                ;; no frames, but the restarts still apply
-                                                                (let [d {:note err}]
-                                                                  (reset! frames-state d)
-                                                                  (debugger-pane/show! dbgp d)
-                                                                  (debugger-pane/show-restarts! dbgp (restarts/options f))
-                                                                  (show-right-panel! right :debugger))
-                                                                (set-status! status-label (str "; " err)))
-                                                              (do (reset! frames-state d)
-                                                                  (debugger-pane/show! dbgp d)
-                                                                  (debugger-pane/show-restarts! dbgp (restarts/options @(:failure* cv)))
-                                                                  (show-right-panel! right :debugger)
-                                                                  (debugger-pane/focus! dbgp)))))))
-                           ;; no frames here, but the restarts work in every dialect
-                           (if-let [f @(:failure* cv)]
-                             (let [d {:note "Frames need Jolt or JVM Clojure; the restarts above work here."}]
-                               (reset! frames-state d)
-                               (debugger-pane/show! dbgp d)
-                               (debugger-pane/show-restarts! dbgp (restarts/options f))
-                               (show-right-panel! right :debugger))
-                             (set-status! status-label "; The debugger needs Jolt."))))
-        hide-line-counts! (fn [] (doseq [t @tabs] (some-> t :ed :changed :gutter (gutter/set-counts! {}))))
-        line-counts-fn (fn []
-                         (let [e @ev*]
-                           (if (satisfies? ev/LineCounts e)
-                             (ev/toggle-line-counts!
-                              e (fn [r]
-                                  (on-gui! (fn []
-                                             (when-not (:error r) (reset! line-counting? (boolean (:on? r))))
-                                             (when (and (not (:error r)) (not (:on? r))) (hide-line-counts!))
-                                             (set-status! status-label
-                                                          (cond (:error r) (str "; " (:error r))
-                                                                (:was-debug? r) "; Line counts on, so debug mode is off: Run your file to count its lines."
-                                                                (:on? r) "; Line counts on: Run your file to count its lines."
-                                                                :else "; Line counts off."))))))
-                             (set-status! status-label "; Line counts need Jolt."))))
-        clear-line-counts-fn (fn []
-                               (let [e @ev*]
-                                 (if (satisfies? ev/LineCounts e)
-                                   (ev/clear-line-counts!
-                                    e (fn [r]
-                                        (on-gui! (fn []
-                                                   (hide-line-counts!)
-                                                   (set-status! status-label (if (:error r) (str "; " (:error r)) "; Line counts cleared."))))))
-                                   (set-status! status-label "; Line counts need Jolt."))))
-        locals-mode-fn (fn []
-                         (if-let [e (frames-ev)]
-                           (ev/toggle-debug-mode! e (fn [r]
-                                                      (on-gui! (fn []
-                                                                 ;; Jolt has one mode: debug on ends counting
-                                                                 (let [was-counting? @line-counting?]
-                                                                   (when (:on? r) (reset! line-counting? false) (hide-line-counts!))
-                                                                 (set-status! status-label
-                                                                              (cond (:error r) (str "; " (:error r))
-                                                                                    (and (:on? r) was-counting?) "; Debug mode on: code you load from now on keeps its locals. Line counts are off."
-                                                                                    (:on? r) "; Debug mode on: code you load from now on keeps its locals."
-                                                                                    :else "; Debug mode off.")))))))
-                           (set-status! status-label "; The debugger needs Jolt.")))
-        _ (debugger-pane/set-handlers!
-           dbgp {:on-frame (fn [i]
-                             (let [{f :fn :keys [file line]} (get (:frames @frames-state) i)
-                                   loc (when file (source/location {:file file :line line}
-                                                                   {:project-dir (:project-dir @sel*)}))]
-                               (cond
-                                 (nil? file) (set-status! status-label "; This frame has no file.")
-                                 (nil? loc) (set-status! status-label (str "; Can't open " file "."))
-                                 (:editable? loc) (open-in-tab! (source-ctx (active-tab)) f loc)
-                                 :else (show-source! (source-ctx (active-tab)) loc))))
-                 :on-local (fn [i local-name]
-                             (inspect-last! ev* right pane inspector-state inspecting? inspector-last-args
-                                            on-view status-label
-                                            [:start-local {:frame i :local local-name :label local-name
-                                                           :error-id (:error-id @frames-state)}]))
-                 :on-eval (fn [i code]
-                            (let [e (frames-ev)
-                                  label (:fn (get (:frames @frames-state) i))]
-                              (cond
-                                (or (nil? i) (nil? label)) (set-status! status-label "; Select a frame first.")
-                                (nil? e) (set-status! status-label "; The debugger needs Jolt.")
-                                :else
-                                ;; the code at once, so a slow form shows it's running
-                                ;; (Stop stops it), then what it printed and its value;
-                                ;; while paused, on the paused thread (Break on error)
-                                (do (cview/append! cv :system (str "; in " label ": " code "\n"))
-                                    ((if (and (:paused? @frames-state) (satisfies? ev/Break e))
-                                       (fn [on-result] (ev/break-eval! e i code on-result))
-                                       (fn [on-result] (ev/eval-in-frame! e i code (:error-id @frames-state) on-result)))
-                                     (fn [r]
-                                       (on-gui!
-                                        (fn []
-                                          (if-let [err (:error r)]
-                                            (cview/append! cv :error (str "; in " label ": " err "\n"))
-                                            (do (when (seq (:out r)) (cview/append! cv :out (:out r)))
-                                                (cview/append! cv :result (str "=> " (:text r) "\n"))))))))))))
-                 :on-close (fn [] (hide-right-panel! right :debugger))})
-        ;; The restarts (jonquil.restarts) for cv's last failure
-        nothing-failed "; Nothing has failed since the last success."
-        edit-the-file "; Edit the file and Run it again."
-        retry-fn (fn []
-                   (if-let [f @(:failure* cv)]
-                     ;; a REPL entry doesn't belong to its tab: any tab will do
-                     (if-let [t (or (tab-by-id tabs (:tab-id f)) (when (= :repl (:kind f)) (active-tab)))]
-                       (let [ctx {:tab t :cv cv :ev* ev* :sel* sel* :status-label status-label}
-                             code (:code f)
-                             buffer? (#{:selection :form} (:kind f))]
-                         (cond
-                           (= :run (:kind f)) (do-run! ctx)
-                           ;; an example goes back through its own Run, in user
-                           (= :example (:kind f)) (do-run-example! ctx code)
-                           ;; the checks Run Selection and Run Form make first
-                           (and buffer? (or (refuse-foreign! ctx)
-                                            (and (not (ev/evaluating? @ev*))
-                                                 (before-run-stopped ctx (:kind f) t code))))
-                           nil
-                           :else
-                           (do (cview/echo-entry! cv code (not (ev/evaluating? @ev*)))
-                               (do-repl-eval! (:ed t) cv ev* status-label code
-                                              (cond-> {:hook-source (:kind f) :hook-tab (:id t)
-                                                       :record (if buffer?
-                                                                 (tab-record t ev* (:kind f) code (editor/editor-text (:ed t)))
-                                                                 {:source (:kind f) :code code :path nil
-                                                                  :ns (str (ev/prompt-ns @ev*))})}
-                                                ;; as Run Selection and Run Form send them
-                                                buffer? (assoc :ns-source (editor/editor-text (:ed t)) :owner (:id t)))))))
-                       (set-status! status-label "; The tab that failed is closed."))
-                     (set-status! status-label nothing-failed)))
-        edit-retry-fn (fn []
-                        (let [f @(:failure* cv)]
-                          (cond (nil? f) (set-status! status-label nothing-failed)
-                                (= :run (:kind f)) (set-status! status-label edit-the-file)
-                                :else (cview/set-input! cv (:code f) (count (:code f))))))
-        define-retry-fn (fn []
-                          (let [f @(:failure* cv)
-                                n (some-> f :error-text restarts/missing-name)]
-                            (cond (nil? f) (set-status! status-label nothing-failed)
-                                  (= :run (:kind f)) (set-status! status-label edit-the-file)
-                                  (nil? n) (set-status! status-label "; The last error wasn't an unresolved name.")
-                                  :else (let [{:keys [text caret]} (restarts/define-input n (:code f))]
-                                          (cview/set-input! cv text caret)))))
-        ;; Break on error (jonquil.debugger's break). The pause comes from the
-        ;; worker; the panel shows it with Continue in the restart bar. After
-        ;; Continue the error is recorded as a failure, and that refreshes
-        ;; the panel with its frames. break-resumed holds the id of the
-        ;; evaluation that was continued, and ends with that evaluation
-        ;; (:on-eval-end): Inspect Form and Time Form record no failure, and
-        ;; a later, unrelated one mustn't open the panel. An id, not a flag,
-        ;; because the evaluators go idle before on-complete, so the next
-        ;; evaluation can start before this one's failure is recorded.
-        current-eval (atom nil)
-        break-resumed (atom nil)
-        show-paused! (fn [d]
-                       (let [shown (assoc d :title (str "Paused: " (:title d)))]
-                         (reset! frames-state (assoc shown :paused? true))
-                         (debugger-pane/show! dbgp shown)
-                         (debugger-pane/show-restarts! dbgp [{:id :continue :label "Continue"}])
-                         (show-right-panel! right :debugger)
-                         (debugger-pane/focus! dbgp)
-                         (cview/append! cv :system (str "; Paused at " (:title d) ".\n"))
-                         (set-status! status-label (str "; Paused: " (:title d) ". Continue or Stop."))))
-        end-paused! (fn [{:keys [continued?]}]
-                      (when (:paused? @frames-state)
-                        (let [d {:note (if continued? "Continued: the error unwinds." "Stopped while paused.")}]
-                          (reset! frames-state d)
-                          (debugger-pane/show! dbgp d)
-                          (debugger-pane/show-restarts! dbgp []))))
-        register-break! (fn [e]
-                          (when (and e (satisfies? ev/Break e))
-                            (ev/set-break-handlers! e {:on-pause (fn [d] (on-gui! (fn [] (show-paused! d))))
-                                                       ;; the flag on the worker, before the error
-                                                       ;; it lets through is recorded as the failure
-                                                       :on-resume (fn [how]
-                                                                    (reset! break-resumed (when (:continued? how) @current-eval))
-                                                                    (on-gui! (fn [] (end-paused! how))))
-                                                       :on-eval-start (fn [id] (reset! current-eval id))
-                                                       :on-eval-end (fn [id] (compare-and-set! break-resumed id nil))})))
-        _ (register-break! @ev*)
-        _ (add-watch ev* ::break (fn [_ _ old new] (when-not (identical? old new) (register-break! new))))
-        _ (add-watch (:failure* cv) ::break-refresh
-                     (fn [_ _ _ new]
-                       (let [r @break-resumed]
-                         (when (and r (compare-and-set! break-resumed r nil))
-                           (when new (on-gui! show-frames-fn))))))
-        break-fn (fn []
-                   (let [e @ev*]
-                     (if (and e (satisfies? ev/Break e))
-                       (ev/toggle-break! e (fn [r]
-                                             (on-gui! (fn []
-                                                        (set-status! status-label
-                                                                     (cond (:error r) (str "; " (:error r))
-                                                                           (:on? r) "; Break on error on: an error pauses where it was thrown."
-                                                                           :else "; Break on error off."))))))
-                       (set-status! status-label "; Break on error needs Jolt."))))
-        continue-fn (fn []
-                      (let [e @ev*]
-                        (when-not (and e (satisfies? ev/Break e) (ev/continue-break! e))
-                          (set-status! status-label "; Nothing is paused."))))
-        _ (debugger-pane/set-restart-handler!
-           dbgp (fn [id]
-                  (case id
-                    :retry (retry-fn)
-                    :edit (edit-retry-fn)
-                    :define (define-retry-fn)
-                    :continue (continue-fn))))
         ;; Describe Key's pending flag and the recent keys (jonquil.describe's
         ;; ring), both read and written on the GTK thread only
         describe-pending (atom false)
@@ -4315,7 +4086,6 @@
                                         (case k
                                           :inspector (inspector-pane/focus! pane)
                                           :source (source-pane/focus! sp)
-                                          :debugger (debugger-pane/focus! dbgp)
                                           :plugins (g/gtk-widget-grab-focus (:list lp))
                                           (if-let [p (get @part-panels* k)]
                                             ((:focus! p))
@@ -4324,7 +4094,6 @@
                              (= k (showing-panel right)) (focus!)
                              (= k :plugins) (plugin-step! {:settings-path @settings-path*
                                                            :step (fn [] []) :open-list? true})
-                             (= k :debugger) (show-frames-fn)
                              (contains? @part-panels* k) ((:open! (get @part-panels* k)))
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
@@ -4359,7 +4128,11 @@
                                                                      inspector-last-args on-view status-label start))
                                           :ask-lookup! ask-lookup! :jump-to! jump-to!
                                           :source-ctx source-ctx
-                                          :place-caret-and-scroll! place-caret-and-scroll! :file-name file-name}
+                                          :place-caret-and-scroll! place-caret-and-scroll! :file-name file-name
+                                          :open-in-tab! open-in-tab! :show-source! show-source!
+                                          :rerun-failure! (fn [f t]
+                                                            (rerun-failure! {:failure f :tab t :cv cv :ev* ev* :sel* sel*
+                                                                             :status-label status-label}))}
                                          part-error!
                                          {:specs parts/specs})
         _ (reset! part-panels* (:panels part-contribution))
@@ -4385,16 +4158,13 @@
                          :key-bindings-fn (fn [] (print-lines! (describe/binding-lines
                                                                 (assoc (live-keys) :os (System/getProperty "os.name")))))
                          :recent-keys-fn (fn [] (print-lines! (describe/recent-lines @recent-keys)))
-                         :show-frames-fn show-frames-fn :locals-mode-fn locals-mode-fn
-                         :line-counts-fn line-counts-fn :clear-line-counts-fn clear-line-counts-fn
                          :hints-toggle-fn (fn []
                                             (let [on? (swap! hints-on? not)]
                                               (when-not on? (g/gtk-widget-set-visible hint-label 0))
                                               (set-status! status-label (if on?
                                                                           "; Key hints on: the status bar names the keys for the symbol at the caret."
                                                                           "; Key hints off."))))
-                         :retry-fn retry-fn :edit-retry-fn edit-retry-fn :define-retry-fn define-retry-fn
-                         :break-fn break-fn :continue-fn continue-fn :run-changed-fn run-changed-fn
+                         :run-changed-fn run-changed-fn
                          ;; switching tabs: a palette tab entry, and Go back
                          :switch-tab-fn (fn [id] (when (tab-by-id tabs id) (select-tab! @*tab-ctx id)))
                          :tab-back-fn (fn [] (if-let [id (second @recent-tabs)]
@@ -4479,8 +4249,6 @@
     (g/gtk-box-append slot (:root lp))
     (g/gtk-widget-set-vexpand (:root hp) 1)
     (g/gtk-box-append slot (:root hp))
-    (g/gtk-widget-set-vexpand (:root dbgp) 1)
-    (g/gtk-box-append slot (:root dbgp))
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-vexpand (:root p) 1)
       (g/gtk-box-append slot (:root p)))
@@ -4491,7 +4259,6 @@
     (g/gtk-widget-set-visible (:root sp) 0)
     (g/gtk-widget-set-visible (:root rp) 0)
     (g/gtk-widget-set-visible (:root lp) 0)
-    (g/gtk-widget-set-visible (:root dbgp) 0)
     (doseq [[_ p] @part-panels*]
       (g/gtk-widget-set-visible (:root p) 0))
     (g/gtk-widget-set-visible (:root hp) 0)
@@ -4668,8 +4435,7 @@
                    :parinfer-label-update! update-parinfer-label!
                    :part-contribution part-contribution :part-error! part-error!
                    :recent-tabs recent-tabs
-                   :hint-label hint-label :hints-on? hints-on?
-                   :line-counting? line-counting?}
+                   :hint-label hint-label :hints-on? hints-on?}
           first-tab (add-tab! tab-ctx {:path (when-not file-nul file)
                                        :text (if file-nul "" (or text ""))})
           tree-settings (:file-tree (settings/load-settings @settings-path*))
@@ -5211,8 +4977,7 @@
                  ;; for), Enable, Disable and Open on an id's row as the
                  ;; buttons do, and what the list shows now
                    :plugin-list-pane lp
-                   ;; the Frames panel and the inspector's own Close
-                   :debugger-pane dbgp
+                   ;; the inspector's own Close
                    :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
                    :unread-label unread-label
