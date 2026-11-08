@@ -150,7 +150,7 @@ The contribution keys:
 
 `jonquil.parts/install` merges strictly. A duplicate `:fns`, `:ui` or `:exports` key throws and names both owners, and a key already in the core's tables is refused the same way. A part whose install throws contributes nothing, and the status bar says `; part <id>: <message>`. Hooks run in part order, and one that throws is reported the same way while the rest still run.
 
-The parts install in this order: layouts, worlds, Time Form, replay. Layouts (LM8) holds the saved-layout commands and their timer. Worlds (LM7) holds Save World and Restore World with the state they share. Time Form holds the timed-form command and its confirmation, and puts `:time-ask*` and `:time-confirmed?` in `ui` for the self-test. Replay goes last because its re-root hook loads the new root's record and its quit hook flushes it, and both have to run after every other part's hooks.
+The parts install in this order: layouts, worlds, Time Form, replay. Layouts (LM8) holds the saved-layout commands and their timer. Worlds (LM7) holds Save World and Restore World with the helpers they share. Time Form holds the timed-form command and its confirmation, and puts `:time-ask*` and `:time-confirmed?` in `ui` for the self-test. Replay goes last because its re-root hook loads the new root's record and its quit hook flushes it, and both have to run after every other part's hooks.
 
 Replay (the last session's record, LM7) is the worked example: `jonquil.parts.replay` holds the two palette commands, and `jonquil.gtk.parts.replay` holds the recorder, the record's state, the offer at open, and the three hooks that load the record at start and re-root and flush it at quit.
 
