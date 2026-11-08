@@ -830,11 +830,6 @@
         (doseq [l (ev/limitations e)]
           (cview/append! cv :system (str "; Limit: " l "\n"))))))
 
-(def ^:private DISK-POLL-MS
-  ;; estimate: quick enough to see an agent's edit while it works, slow
-  ;; enough that statting the open tabs costs nothing
-  2000)
-
 (def ^:private PANEL-WIDTH
   ;; estimate: matched against jonquil.gtk.inspector-pane/WIDTH-REQUEST
   ;; (360) plus room for the paned's handle.
@@ -4800,81 +4795,11 @@
                                           :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!
                                           :unread-label unread-label
                                           :register-status-log! (fn [log!] (register-status-log! status-label log!))
-                                          :plugin-step! plugin-step!}
+                                          :plugin-step! plugin-step!
+                                          :refresh-labels! (fn [] (refresh-labels! @*tab-ctx))}
                                          part-error!
                                          {:specs parts/specs})
         _ (reset! part-panels* (:panels part-contribution))
-        ;; Open files changed on disk: agents mostly edit files with their
-        ;; own tools, which no MCP call shows. Each tick stats every open
-        ;; tab's file (plugin tabs keep sync-plugin-tabs!) and reads one only
-        ;; when its time or size moved. A clean tab follows the file as one
-        ;; undo step; a dirty one keeps its edits and takes the disk text as
-        ;; its saved baseline (tabs/disk-follow), each logged to Messages.
-        ;; GTK thread, so the tab list and saved text are read safely.
-        log-entry! (:log-entry! (:exports part-contribution))
-        disk-seen (atom {})
-        disk-tick! (fn []
-                     (let [dir (plugin-loader/plugins-dir @settings-path*)
-                           ts @tabs]
-                       (swap! disk-seen select-keys (map :id ts))
-                       (doseq [t ts
-                               :let [path @(:path t)]
-                               :when (and path (not (plugin-loader/plugin-file-or-target? dir path)))]
-                         (try
-                           (let [f (java.io.File. ^String path)
-                                 stat (when (.exists f) [(.lastModified f) (.length f)])
-                                 seen (get @disk-seen (:id t))]
-                             (cond
-                               ;; first sight (or a new path): only remember it
-                               (or (nil? seen) (not= path (:path seen)))
-                               (swap! disk-seen assoc (:id t) {:path path :stat stat})
-                               :else
-                               (case (tabs/stat-step (cond-> {:stat stat :seen-stat (:stat seen)}
-                                                       (contains? seen :pending) (assoc :pending (:pending seen))))
-                                 :same (swap! disk-seen update (:id t) dissoc :pending)
-                                 ;; moved: wait a tick, so a writer that truncates and then
-                                 ;; writes is never caught halfway
-                                 :wait (swap! disk-seen assoc-in [(:id t) :pending] stat)
-                                 :act
-                                 ;; a read that fails logs nothing: the stat stays pending and
-                                 ;; the next tick tries again
-                                 (when-some [disk (try (if stat (slurp path) ::gone) (catch :default _ nil))]
-                                   (let [disk (when-not (= ::gone disk) disk)
-                                         ed (:ed t)
-                                         name (last (str/split path #"/"))
-                                         log! (fn [summary] (log-entry! {:kind :file :target {:tab-id (:id t)} :summary summary}))]
-                                     (swap! disk-seen update (:id t) #(-> % (assoc :stat stat) (dissoc :pending)))
-                                     ;; the file is there again: a later delete is said again
-                                     (when disk (swap! disk-seen update (:id t) dissoc :reported))
-                                     ;; a throw from here on is one row, not a silent retry: the
-                                     ;; tab may already have changed
-                                     (try
-                                       (if (and disk (tabs/nul-line disk))
-                                         ;; GTK would truncate it, and rebasing on it would leave the
-                                         ;; tab dirty for good; said once per text
-                                         (when (not= disk (:nul seen))
-                                           (swap! disk-seen assoc-in [(:id t) :nul] disk)
-                                           (log! (str name " changed on disk but holds a NUL byte, so this tab keeps its text")))
-                                         (do (swap! disk-seen update (:id t) dissoc :nul)
-                                             (case (tabs/disk-follow {:saved @(:saved-text ed) :disk disk :dirty? (editor/dirty? ed)
-                                                                      :buffer (when disk (editor/editor-text ed)) :reported (:reported seen)})
-                                               :reload (do (editor/reload-text! ed disk)
-                                                           (refresh-labels! @*tab-ctx)
-                                                           (log! (str name " was reloaded from disk")))
-                                               :warn (do (editor/rebase-saved! ed disk)
-                                                         (refresh-labels! @*tab-ctx)
-                                                         (log! (str name " changed on disk, and this tab keeps your unsaved edits")))
-                                               :rebase (do (editor/rebase-saved! ed disk) (refresh-labels! @*tab-ctx))
-                                               :missing (do (swap! disk-seen assoc-in [(:id t) :reported] ::tabs/missing)
-                                                            (log! (str name " was deleted or moved on disk")))
-                                               nil)))
-                                       (catch :default e
-                                         (log-entry! {:kind :file :error? true :target {:tab-id (:id t)}
-                                                      :summary (str name " changed on disk, but following it failed: "
-                                                                    (or (ex-message e) (str e)))}))))))))
-                           ;; the stat itself failed: the next tick tries again
-                           (catch :default _ nil)))))
-        _ (g/g-timeout-add DISK-POLL-MS (callable (fn [_data] (disk-tick!) 1) [:pointer] :int :on-throw 1) ffi/null)
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -5729,7 +5654,6 @@
                    :trace-pane tracep
                    :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
-                   :disk-tick!* disk-tick!
                    :unread-label unread-label
                    ;; the recent panels atom, most recent first, and the
                    ;; panel keys' and Switch to panel's fn

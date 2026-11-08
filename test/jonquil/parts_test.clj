@@ -5,6 +5,7 @@
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.parts :as gtk-parts]
             [jonquil.gtk.messages-pane :as messages-pane]
+            [jonquil.gtk.parts.disk-poll :as disk-poll-part]
             [jonquil.gtk.parts.layouts :as layouts-part]
             [jonquil.gtk.parts.messages :as messages-part]
             [jonquil.gtk.parts.processes :as processes-part]
@@ -64,7 +65,7 @@
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
 (deftest registry-tables-hold-the-specs
-  (is (= [:messages :layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
+  (is (= [:messages :disk-poll :layouts :worlds :time-form :processes :replay] (mapv :id parts/specs)))
   (is (= #{:panel/messages :layout/save :layout/forget :world/save :world/restore :world/restore-earlier :run/time-form :session/open-replay :session/forget-last
           :panel/processes :processes/show}
          (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
@@ -440,3 +441,28 @@
 (deftest messages-installs-first
   (is (= :messages (:part/id (meta (first gtk-parts/installs)))))
   (is (= :replay (:part/id (meta (last gtk-parts/installs))))))
+
+;; Disk polling: open tabs follow their files; logs through Messages' export.
+(deftest disk-poll-needs-the-messages-log
+  (let [timers (atom [])
+        errors (atom [])]
+    (with-redefs [g/g-timeout-add (fn [& args] (swap! timers conj args) 1)]
+      (let [c (parts/install [disk-poll-part/part]
+                             {:tabs (atom []) :settings-path* (atom nil) :refresh-labels! (fn [])}
+                             (fn [id ex] (swap! errors conj [id (ex-message ex)])))]
+        (is (= [[:disk-poll "disk-poll needs :log-entry! from the messages part"]] @errors))
+        (is (= {} (:ui c)))
+        (is (empty? @timers))))))
+
+(deftest disk-poll-arms-one-timer
+  (let [timers (atom [])]
+    (with-redefs [g/g-timeout-add (fn [& args] (swap! timers conj args) 1)]
+      (let [c ((deref #'disk-poll-part/install)
+               {:tabs (atom []) :settings-path* (atom nil) :refresh-labels! (fn [])
+                :log-entry! (fn [_])})]
+        (is (= 1 (count @timers)))
+        (is (= 2000 (ffirst @timers)))
+        (is (fn? (get-in c [:ui :disk-tick!*])))))))
+
+(deftest disk-poll-spec-has-no-commands
+  (is (= {:id :disk-poll :commands {}} (some #(when (= :disk-poll (:id %)) %) parts/specs))))
