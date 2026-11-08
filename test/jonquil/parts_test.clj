@@ -82,6 +82,25 @@
     (is (= {:a-ex 10} (:exports c)))
     (is (= {:on-quit [:a-quit :b-quit] :on-start [:b-start]} (:hooks c)))))
 
+(deftest install-merges-panels
+  (let [go (fn [] :go)
+        a (install-fn :p (fn [_] {:panels {:p {:root :w :focus! go :open! go}}}))
+        c (parts/install [a] {} (fn [& _] (throw (ex-info "no error expected" {})))
+                         {:specs [{:id :p :panels [{:id :p :label "P"}]}]})]
+    (is (= {:root :w :focus! go :open! go} (get-in c [:panels :p])))
+    (is (= {:p :p} (get-in c [:owners :panels])))))
+
+(deftest install-refuses-an-undeclared-panel
+  (let [errors (atom [])
+        a (install-fn :p (fn [_] {:fns {:p-fn inc} :panels {:other {:root :w}}}))
+        c (parts/install [a] {} (fn [id ex] (swap! errors conj [id (ex-message ex)]))
+                         {:specs [{:id :p :panels [{:id :p :label "P"}]}]})]
+    (is (= 1 (count @errors)))
+    (is (= :p (ffirst @errors)))
+    (is (re-find #":other" (second (first @errors))))
+    (is (empty? (:fns c)))
+    (is (empty? (:panels c)))))
+
 (deftest install-refuses-duplicate-keys
   (let [a (install-fn :a (fn [_] {:ui {:shared 1}}))
         b (install-fn :b (fn [_] {:ui {:shared 2}}))]

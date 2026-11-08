@@ -122,28 +122,34 @@
                     {:kind kind :key k :owners [prior owner]}))
     (assoc owners k owner)))
 
-(def ^:private merged-kinds [:fns :ui :exports])
-(def ^:private contribution-keys #{:fns :ui :hooks :exports})
+(def ^:private merged-kinds [:fns :ui :exports :panels])
+(def ^:private contribution-keys #{:fns :ui :hooks :exports :panels})
 (def ^:private hook-kinds #{:on-start :on-reroot :on-quit})
 
 (defn- check-contribution
   "Throws unless contribution (of id) uses only the known keys and hook
-  kinds, and exports no key wctx already holds."
-  [id wctx contribution]
+  kinds, exports no key wctx already holds, and answers :panels only for ids
+  the part's spec (in specs) declares."
+  [id wctx specs contribution]
   (doseq [k (keys contribution)
           :when (not (contains? contribution-keys k))]
     (throw (ex-info (str "part " id ": unknown contribution key " k) {:part id :key k})))
   (doseq [h (keys (:hooks contribution))
           :when (not (contains? hook-kinds h))]
     (throw (ex-info (str "part " id ": unknown hook " h) {:part id :hook h})))
+  (let [declared (into #{} (comp (filter #(= id (:id %))) (mapcat :panels) (map :id)) specs)]
+    (doseq [k (keys (:panels contribution))
+            :when (not (contains? declared k))]
+      (throw (ex-info (str "part " id ": panel " k " is not declared in its spec")
+                      {:part id :panel k}))))
   (doseq [k (keys (:exports contribution))
           :when (contains? wctx k)]
     (throw (ex-info (str "duplicate exports key " k ": :core and " id)
                     {:kind :exports :key k :owners [:core id]}))))
 
 (defn- add-contribution
-  "acc with one part's contribution folded in. Strict for :fns, :ui and
-  :exports; :hooks append in part order."
+  "acc with one part's contribution folded in. Strict for :fns, :ui,
+  :exports and :panels; :hooks append in part order."
   [acc id {:keys [hooks] :as contribution}]
   (let [acc (reduce (fn [acc kind]
                       (reduce (fn [acc [k v]]
@@ -161,21 +167,26 @@
 (defn install
   "Calls each install fn with wctx plus the :exports of the parts before it,
   in order. Answers {:fns {} :ui {} :hooks {hook-kw [f ...]} :exports {}
-  :owners {kind {k part-id}, :hooks {hook-kw [part-id ...]}}}, merged strictly: a duplicate :fns, :ui or
-  :exports key throws naming the key and both part ids. An install fn that
-  throws, or answers a contribution with an unknown key or hook kind or an
-  :exports key wctx already holds, is reported once, (on-error part-id ex),
-  and contributes nothing; the others still install."
-  [installs wctx on-error]
+  :panels {id {:root w :focus! f :open! f}}
+  :owners {kind {k part-id}, :hooks {hook-kw [part-id ...]}}}, merged strictly: a duplicate :fns, :ui,
+  :exports or :panels key throws naming the key and both part ids. An install fn that
+  throws, or answers a contribution with an unknown key or hook kind, an
+  :exports key wctx already holds or a :panels id its spec doesn't declare, is
+  reported once, (on-error part-id ex), and contributes nothing; the others
+  still install. opts' :specs (default none, so any :panels is refused) are
+  the specs a part's id is looked up in."
+  ([installs wctx on-error] (install installs wctx on-error {}))
+  ([installs wctx on-error {:keys [specs]}]
   (reduce (fn [acc [i install-fn]]
             (let [id (part-id install-fn i)
                   contribution (try (let [c (install-fn (merge wctx (:exports acc)))]
-                                      (check-contribution id wctx c)
+                                      (check-contribution id wctx specs c)
                                       c)
                                     (catch :default ex (on-error id ex) nil))]
               (add-contribution acc id contribution)))
-          {:fns {} :ui {} :hooks {} :exports {} :owners {:fns {} :ui {} :exports {} :hooks {}}}
-          (map-indexed vector installs)))
+          {:fns {} :ui {} :hooks {} :exports {} :panels {}
+           :owners {:fns {} :ui {} :exports {} :panels {} :hooks {}}}
+          (map-indexed vector installs))))
 
 (defn merge-with-core
   "core (a map of kind's keys) with the contribution's kind keys added.

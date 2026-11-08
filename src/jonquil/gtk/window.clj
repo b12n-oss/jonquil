@@ -863,11 +863,14 @@
   (atom nil))
 
 (defn- right-roots
-  "{which root} for the panels right's slot holds; a right without
-  :review-root, :plugins-root or :history-root (a test's) has fewer."
+  "{which root} for the panels right's slot holds, a part's among them; a
+  right without :review-root, :plugins-root or :history-root (a test's) has
+  fewer, and one without :part-panels* has no part panels."
   [{:keys [inspector-root source-root review-root plugins-root history-root locations-root debugger-root trace-root messages-root
-           processes-root]}]
-  (cond-> {:inspector inspector-root :source source-root}
+           processes-root part-panels*]}]
+  (cond-> (into {:inspector inspector-root :source source-root}
+                (map (fn [[id p]] [id (:root p)]))
+                (some-> part-panels* deref))
     review-root (assoc :review review-root)
     plugins-root (assoc :plugins plugins-root)
     history-root (assoc :history history-root)
@@ -3807,6 +3810,10 @@
                                         :state inspector-state})
         _ (reset! *pane pane)
         slot (g/gtk-box-new g/ORIENTATION-VERTICAL 0)
+        ;; {id {:root :focus! :open!}} of the parts' panels, reset once the
+        ;; parts install (after part-contribution): panel-focus-fn and
+        ;; right-roots are built first, like *tab-ctx.
+        part-panels* (atom {})
         right {:win win :h-paned h-paned :slot slot :inspector-root (:root pane) :source-root (:root sp)
                :review-root (:root rp) :plugins-root (:root lp) :locations-root (:root locp)
                :debugger-root (:root dbgp) :trace-root (:root tracep) :messages-root (:root msgp)
@@ -3814,7 +3821,8 @@
                :history-root (:root hp) :source-pane sp
                ;; the panels shown, most recent first: the palette's
                ;; Switch to panel entries, and the panel keys' "open it"
-               :recent-panels (atom [])}
+               :recent-panels (atom [])
+               :part-panels* part-panels*}
         _ (reset! *right right)
         ;; The plugin-step! opts for Accept or Reject of the
         ;; proposal the panel shows (nil when none is), its lines put on
@@ -4924,7 +4932,10 @@
                                           :trace (g/gtk-widget-grab-focus (:list tracep))
                                           :messages (g/gtk-widget-grab-focus (:list msgp))
                                           :processes (g/gtk-widget-grab-focus (:list procp))
-                                          :plugins (g/gtk-widget-grab-focus (:list lp))))]
+                                          :plugins (g/gtk-widget-grab-focus (:list lp))
+                                          (if-let [p (get @part-panels* k)]
+                                            ((:focus! p))
+                                            (throw (IllegalArgumentException. (str "No matching clause: " k))))))]
                            (cond
                              (= k (showing-panel right)) (focus!)
                              ;; never "nothing yet": an empty log says what fills it
@@ -4936,6 +4947,7 @@
                                                            :step (fn [] []) :open-list? true})
                              (= k :trace) (trace-show-fn)
                              (= k :debugger) (show-frames-fn)
+                             (contains? @part-panels* k) ((:open! (get @part-panels* k)))
                              (some #{k} @(:recent-panels right)) (do (show-right-panel! right k) (focus!))
                              :else
                              (set-status! status-label
@@ -4972,7 +4984,9 @@
                                           :hide-right-panel! hide-right-panel!
                                           :alert-pending? alert-pending? :show-alert! show-alert!
                                           :make-eval-opts make-eval-opts :refuse-foreign! refuse-foreign!}
-                                         part-error!)
+                                         part-error!
+                                         {:specs parts/specs})
+        _ (reset! part-panels* (:panels part-contribution))
         window-key-args (parts/merge-with-core
                          :fns
                          {:panel-focus-fn panel-focus-fn :describe-pending describe-pending :recent-keys recent-keys
@@ -5095,6 +5109,9 @@
     (g/gtk-box-append slot (:root msgp))
     (g/gtk-widget-set-vexpand (:root procp) 1)
     (g/gtk-box-append slot (:root procp))
+    (doseq [[_ p] @part-panels*]
+      (g/gtk-widget-set-vexpand (:root p) 1)
+      (g/gtk-box-append slot (:root p)))
     (g/gtk-paned-set-end-child h-paned slot)
     (g/gtk-paned-set-resize-end-child h-paned 0)
     (g/gtk-paned-set-shrink-end-child h-paned 0)
@@ -5107,6 +5124,8 @@
     (g/gtk-widget-set-visible (:root tracep) 0)
     (g/gtk-widget-set-visible (:root msgp) 0)
     (g/gtk-widget-set-visible (:root procp) 0)
+    (doseq [[_ p] @part-panels*]
+      (g/gtk-widget-set-visible (:root p) 0))
     (g/gtk-widget-set-visible (:root hp) 0)
     (g/gtk-widget-set-visible slot 0)
     (g/gtk-box-append vbox toolbar)
@@ -5829,6 +5848,7 @@
                    :trace-pane tracep
                    :messages-pane msgp
                    :processes-pane procp
+                   :part-owners* (fn [] (:owners part-contribution))
                    :hint-label hint-label
                    :messages* messages*
                    :log!* log-entry!
