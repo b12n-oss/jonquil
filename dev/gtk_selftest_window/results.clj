@@ -134,6 +134,39 @@
                                  {:ref ref :copied copied? :not-var not-var? :input input :none none? :status (status ui)})))
         (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
 
+(defn row-result-menu-verbs
+  "The console's own right-click menu items reach the result verbs: the
+  same four outcomes as row-result-verbs, fired by menu action name."
+  [ui]
+  (go-row :result-menu-verbs support/check
+    (let [cv (:console ui)
+          fire! (:repl-activate-menu-action!* ui)
+          to-prompt! (fn [] (console-caret! ui (g/gtk-text-buffer-get-char-count (:buf cv))))]
+      (try
+        (let [m (enter! ui "(+ 40 2)")
+              _ (await-until 5000 20 #(and (support/idle? ui) (str/includes? (support/since ui m) "=> 42")))
+              at (offset-in ui "=> 42")
+              ref (on-gtk (cview/result-at cv at))
+              _ (on-gtk (console-caret! ui at) (fire! "result-copy"))
+              copied? (await-until 3000 20 #(= "; Copied the result." (status ui)))
+              copied-status (on-gtk (status ui))
+              _ (on-gtk (console-caret! ui at) (fire! "result-jump"))
+              not-var? (await-until 3000 20 #(= "; That result isn't a var." (status ui)))
+              not-var-status (on-gtk (status ui))
+              _ (on-gtk (console-caret! ui at) (fire! "result-define"))
+              input (on-gtk (cview/input-text cv))
+              defined? (= (str "(def  (jonquil.results-rt/value! " (:id ref) " " (pr-str (:epoch ref)) "))") input)
+              _ (on-gtk (cview/clear-input! cv)
+                        (to-prompt!)
+                        (fire! "result-inspect"))
+              none? (await-until 3000 20 #(= "; No result here." (status ui)))
+              none-status (on-gtk (status ui))]
+          (on-gtk (support/check :result-menu-verbs (and ref copied? not-var? defined? none?)
+                                 {:ref ref :copied copied? :copied-status copied-status
+                                  :not-var not-var? :not-var-status not-var-status
+                                  :input input :none none? :none-status none-status})))
+        (finally (on-gtk (cview/clear-input! cv) (to-prompt!)))))))
+
 (defn- widget-xy
   "The console view's widget coordinates of offset's character."
   [ui offset]

@@ -4352,16 +4352,9 @@
         ;; jonquil.command-registry. install-context-menu! returns the GSimpleActionGroup, so :activate-
         ;; menu-action!*/:repl-activate-menu-action!* (below) can fire an
         ;; item directly, by name, for rows and the smoke.
-        console-menu-group
-        (install-context-menu! (:view cv)
-                               (cmd-registry/menu-items cmd-registry/console-menu
-                                                        {:complete! repl-complete-fn :clear-last-fn clear-last-fn})
-                               (fn [msg] (set-status! status-label msg)))
         ;; The ui's editor-menu hook fires the FIRST tab's menu
         ;; (tabs are built after this let), as the other per-tab ui keys do.
         activate-menu-action-fn (fn [name] (g/g-action-group-activate-action (:menu-group (first @tabs)) name ffi/null))
-        repl-activate-menu-action-fn
-        (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
         ;; The tree on the left, its toggle first in the toolbar, and the
         ;; outer paned that holds it beside h-paned.
         *open-folder (atom nil)
@@ -5103,6 +5096,17 @@
                                                      (jump-to! (source-ctx (active-tab)) sym {:kind :external :doc doc})
                                                      (set-status! status-label (str "No definition found for " sym ".")))))
                                     (set-status! status-label "; That result isn't a var.")))))
+        ;; The console's context menu is built here, after the four result
+        ;; fns its live-result items call; built earlier those keys were nil.
+        console-menu-group
+        (install-context-menu! (:view cv)
+                               (cmd-registry/menu-items cmd-registry/console-menu
+                                                        {:complete! repl-complete-fn :clear-last-fn clear-last-fn
+                                                         :result-inspect-fn result-inspect-fn :result-copy-fn result-copy-fn
+                                                         :result-define-fn result-define-fn :result-jump-fn result-jump-fn})
+                               (fn [msg] (set-status! status-label msg)))
+        repl-activate-menu-action-fn
+        (fn [name] (g/g-action-group-activate-action console-menu-group name ffi/null))
         ;; GTK's own right-click opens the menu without moving the caret
         ;; (gtk_text_view_click_gesture_pressed: a context-menu press goes
         ;; to do_popup), so this moves it to the click first, in the capture
