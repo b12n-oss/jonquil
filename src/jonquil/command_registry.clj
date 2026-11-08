@@ -132,13 +132,6 @@
                    :scope :window :run (call :world-restore-fn)}
    :world/restore-earlier {:doc "Restore an Earlier World: pick one of this project's earlier worlds to bring back."
                            :scope :window :run (call :world-restore-earlier-fn)}
-   ;; The last session's replay (LM7). "replay" and "forget last" pick their command
-   ;; first in the palette (palette_test). The Forget doc and id must not hold "replay", and
-   ;; bare "forget" lists Forget every saved layout first (sorted by doc).
-   :session/open-replay {:doc "Open last session's replay: review what this project ran last time, in a new tab."
-                         :scope :window :run (call :replay-open-fn)}
-   :session/forget-last {:doc "Forget last session: drop what was recorded of it."
-                           :scope :window :run (call :replay-forget-fn)}
    :locations/next {:doc "Go to the next place in the list." :scope :window
                     :run (call :locations-step-fn 1)}
    :locations/previous {:doc "Go to the previous place in the list." :scope :window

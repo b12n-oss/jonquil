@@ -443,6 +443,8 @@
    replay-rows/row-replay-run-ns
    replay-rows/row-replay-run-carries-skipped
    replay-rows/row-replay-run-drops-deleted-skipped
+   replay-rows/row-replay-state-per-window
+   replay-rows/row-part-commands-reachable
    gutter-rows/row-gutter-bars-follow-lines
    gutter-rows/row-gutter-counts-widen-and-draw
    gutter-rows/row-changed-not-before-first-run

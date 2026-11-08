@@ -50,8 +50,10 @@
     (testing "no clash passes"
       (is (nil? (parts/check-clashes cores [(ed-spec :p/new :p)]))))))
 
-(deftest registry-tables-unchanged-with-no-specs
-  (is (empty? parts/specs))
+(deftest registry-tables-hold-the-specs
+  (is (= [:replay] (mapv :id parts/specs)))
+  (is (= #{:session/open-replay :session/forget-last}
+         (set (filter (set (mapcat (comp keys :commands) parts/specs)) (keys registry/window-commands)))))
   (is (= (count registry/commands)
          (+ (count registry/window-commands)
             (count registry/editor-commands)

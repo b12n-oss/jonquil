@@ -3,11 +3,12 @@
   data half, a part's commands, merged into jonquil.command-registry's
   public tables. A spec command names its context fn as :call data
   ([ctx-key & args]), never a :run fn, so a spec namespace needs nothing
-  from the registry (which requires this namespace).")
+  from the registry (which requires this namespace)."
+  (:require [jonquil.parts.replay :as replay]))
 
 (def specs
   "Every part's spec, {:id kw :commands {cmd-id {:doc s :scope sc :call [k & args]}}}."
-  [])
+  [replay/spec])
 
 (defn- claim
   "owners with id's owner added, or throws when id is already owned."
