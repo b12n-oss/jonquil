@@ -143,6 +143,47 @@
                              (finally
                                (notify {:done {:result result :output (apply str @out)}}))))))
 
+(defn- note-ran!
+  "LM3 and LM4 after a Run, Run Form or Run Selection: an :ok result marks
+  code as ran (jonquil.changed) and refreshes the marks, and either way the
+  gutter's line counts refresh. Never throws."
+  [{:keys [changed hook-source hook-code]} result]
+  ;; LM3: what ran :ok is no longer changed (jonquil.changed)
+  (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
+    (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
+         ((deref (:refresh changed)))
+         (catch :default _ nil)))
+  ;; LM4: the lines that ran, whether it ended well or not
+  (when (and changed (#{:run :form :selection} hook-source))
+    (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil))))
+
+(defn- record-replay!
+  "The replay recorder (LM7) hears record and result, when both a record and
+  a recorder are set. Never throws."
+  [{:keys [recorder record]} result]
+  ;; LM7: what the user ran, for the last session's replay.
+  ;; Last, and never throwing into the evaluation: the recorder
+  ;; hands its work to the GTK thread and says its own failures
+  (when-let [f (and record (some-> recorder deref))]
+    (try (f record result)
+         (catch :default _ nil))))
+
+(defn- after-hooked-eval!
+  "hooked-opts' completion for an eval that had a :hook-source: the eval's
+  own on-complete, then the restarts' failure, the changed marks and counts,
+  the plugins' hooks and the replay recorder, in that order. hooks holds
+  hooked-opts' keys, :record as hooked-opts completed it."
+  [{:keys [on-complete failure* failure-kind hook-source hook-code hook-tab] :as hooks} result]
+  (when on-complete (on-complete result))
+  ;; after the eval's own completion, and never throwing: the
+  ;; window's last failure, for the restarts (jonquil.restarts)
+  (when failure*
+    (restarts/record-failure! failure* {:kind (or failure-kind hook-source) :code hook-code :tab-id hook-tab}
+                              result console/error-text))
+  (note-ran! hooks result)
+  (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result})
+  (record-replay! hooks result))
+
 (defn- hooked-opts
   "opts without :hook-source (:run :selection :form :repl), :failure-kind
   (the kind the restarts record when it differs from what plugins see, as an
@@ -166,29 +207,9 @@
                         :root (when-let [f (some-> replay-root deref)] (f))))]
     (if-not hook-source
       opts
-      (assoc opts :on-complete
-             (fn [result]
-               (when on-complete (on-complete result))
-               ;; after the eval's own completion, and never throwing: the
-               ;; window's last failure, for the restarts (jonquil.restarts)
-               (when failure*
-                 (restarts/record-failure! failure* {:kind (or failure-kind hook-source) :code hook-code :tab-id hook-tab}
-                                           result console/error-text))
-               ;; LM3: what ran :ok is no longer changed (jonquil.changed)
-               (when (and changed (= :ok (:status result)) (#{:run :form :selection} hook-source))
-                 (try (swap! (:ran changed) changed/record hook-code (if (= :run hook-source) :run :form))
-                      ((deref (:refresh changed)))
-                      (catch :default _ nil)))
-               ;; LM4: the lines that ran, whether it ended well or not
-               (when (and changed (#{:run :form :selection} hook-source))
-                 (try ((deref (:counts-refresh changed)) hook-source hook-code) (catch :default _ nil)))
-               (plugin-hooks/after-eval! {:source hook-source :tab hook-tab :result result})
-               ;; LM7: what the user ran, for the last session's replay.
-               ;; Last, and never throwing into the evaluation: the recorder
-               ;; hands its work to the GTK thread and says its own failures
-               (when-let [f (and record (some-> recorder deref))]
-                 (try (f record result)
-                      (catch :default _ nil))))))))
+      (let [hooks {:on-complete on-complete :failure* failure* :failure-kind failure-kind :hook-source hook-source
+                   :hook-code hook-code :hook-tab hook-tab :changed changed :recorder recorder :record record}]
+        (assoc opts :on-complete (fn [result] (after-hooked-eval! hooks result)))))))
 
 (defn- before-run-stopped
   "Asks the :before-run hooks about a Run of kind sending text

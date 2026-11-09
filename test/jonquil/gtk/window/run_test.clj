@@ -1,5 +1,6 @@
 (ns jonquil.gtk.window.run-test
   (:require [clojure.test :refer [deftest is]]
+            [jonquil.changed :as changed]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.console-view :as cview]
             [jonquil.gtk.window.run :as win-run]
@@ -143,3 +144,104 @@
         ((:run-selection-fn built))
         ((:run-changed-fn built))
         (is (= [[:run c] [:stop ::ev ::cv] [:sel c] [:changed c]] @log))))))
+
+(defn- hook-env
+  "The :changed and :recorder values hooked-opts takes, logging into log:
+  :refresh, [:counts source code] and [:recorder record result] (the
+  recorder answers ::rec-ret)."
+  [log]
+  {:changed {:ran (atom nil)
+             :refresh (atom (fn [] (swap! log conj :refresh)))
+             :counts-refresh (atom (fn [s c] (swap! log conj [:counts s c])))}
+   :recorder (atom (fn [rec res] (swap! log conj [:recorder rec res]) ::rec-ret))})
+
+(deftest hooked-opts-without-a-source-test
+  (let [log (atom [])
+        roots (atom 0)
+        oc (fn [_] nil)
+        in (merge {:x 1 :on-complete oc :hook-tab 3 :hook-code "c" :failure-kind :example
+                   :failure* (atom nil)
+                   :record {:source :run}
+                   :replay-root (atom (fn [] (swap! roots inc) "/r"))}
+                  (hook-env log))
+        out (#'win-run/hooked-opts in)]
+    (is (= {:x 1 :on-complete oc} out))
+    (is (identical? oc (:on-complete out)))
+    (is (= 1 @roots))
+    (is (= {:x 1} (#'win-run/hooked-opts {:x 1 :hook-tab 3})))))
+
+(deftest hooked-opts-completion-runs-every-step-in-order-test
+  (let [log (atom [])
+        failure* (atom ::old)
+        env (hook-env log)
+        r {:status :ok :printed "#'user/a"}
+        o (#'win-run/hooked-opts
+           (merge {:hook-source :run :hook-tab 3 :hook-code "(def a 1)" :failure* failure*
+                   :on-complete (fn [r] (swap! log conj [:on-complete r]))
+                   :record {:source :run :code "(def a 1)" :path nil :ns "user"}
+                   :replay-root (atom (fn [] "/r"))}
+                  env))]
+    (with-redefs [plugin-hooks/after-eval! (fn [m] (swap! log conj [:after-eval m]))]
+      (is (= ::rec-ret ((:on-complete o) r))))
+    (is (= [[:on-complete r]
+            :refresh
+            [:counts :run "(def a 1)"]
+            [:after-eval {:source :run :tab 3 :result r}]
+            [:recorder {:source :run :code "(def a 1)" :path nil :ns "user" :tab-id 3 :root "/r"} r]]
+           @log))
+    (is (nil? @failure*))
+    (is (= (changed/record nil "(def a 1)" :run) @(:ran (:changed env))))
+    (is (not-any? #{:hook-source :failure-kind :hook-tab :hook-code :failure* :changed :record :recorder :replay-root}
+                  (keys (dissoc o :on-complete))))))
+
+(deftest hooked-opts-error-and-kinds-test
+  (let [log (atom [])
+        failure* (atom nil)
+        env (hook-env log)
+        base {:hook-tab 3 :hook-code "c" :failure* failure*}]
+    (with-redefs [plugin-hooks/after-eval! (fn [m] (swap! log conj [:after-eval m]))]
+      (let [o (#'win-run/hooked-opts (merge base env {:hook-source :selection :failure-kind :example}))]
+        ((:on-complete o) {:status :error :error-text "boom"})
+        (is (= {:kind :example :code "c" :tab-id 3 :error-text "boom"} @failure*))
+        (is (some #{[:counts :selection "c"]} @log))
+        (is (not-any? #{:refresh} @log))
+        (is (nil? @(:ran (:changed env)))))
+      (reset! log [])
+      (let [o (#'win-run/hooked-opts (merge base env {:hook-source :repl}))]
+        ((:on-complete o) {:status :ok})
+        (is (not-any? #{:refresh} @log))
+        (is (not-any? #(and (vector? %) (= :counts (first %))) @log))
+        (is (nil? @failure*))
+        (is (= :repl (get-in (first (filter #(= :after-eval (first %)) (filter vector? @log))) [1 :source])))))))
+
+(deftest hooked-opts-hooks-never-throw-test
+  (let [log (atom [])
+        boom (fn [& _] (throw (ex-info "x" {})))
+        env {:changed {:ran (atom nil) :refresh (atom boom) :counts-refresh (atom boom)}
+             :recorder (atom boom)}
+        o (#'win-run/hooked-opts
+           (merge {:hook-source :run :hook-tab 3 :hook-code "(def a 1)"
+                   :record {:source :run :code "(def a 1)"}}
+                  env))]
+    (with-redefs [plugin-hooks/after-eval! (fn [m] (swap! log conj [:after-eval m]))]
+      (is (nil? ((:on-complete o) {:status :ok}))))
+    (is (= [[:after-eval {:source :run :tab 3 :result {:status :ok}}]] @log))
+    (is (= (changed/record nil "(def a 1)" :run) @(:ran (:changed env))))))
+
+(deftest hooked-opts-root-is-read-at-submit-test
+  (let [log (atom [])
+        root* (atom "/r")
+        mk (fn [replay-root]
+             (#'win-run/hooked-opts
+              (merge {:hook-source :repl :hook-tab 3 :record {:source :repl}
+                      :replay-root replay-root}
+                     (hook-env log))))]
+    (with-redefs [plugin-hooks/after-eval! (fn [_] nil)]
+      (let [o (mk (atom (fn [] @root*)))]
+        (reset! root* "/s")
+        ((:on-complete o) {:status :ok})
+        (is (= "/r" (:root (second (last @log))))))
+      (reset! log [])
+      ((:on-complete (mk (atom nil))) {:status :ok})
+      (is (nil? (:root (second (last @log)))))
+      (is (= :recorder (first (last @log)))))))
