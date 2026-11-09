@@ -371,3 +371,109 @@
          (str l ": argument text's :required? isn't true or false"))
     (has [(assoc tool-row :run "nope")] (str l ": :run isn't a function")))
   (is (some #{":mcp-tools isn't a vector"} (:problems (check [(with-tools {})] "mt")))))
+
+;; --- exact findings and their order (characterization) ----------------------
+
+(defn- findings [r] (select-keys r [:problems :warnings]))
+
+(def ^:private cmd-alt-j {:key "j" :mods #{:cmd :alt}})
+
+(deftest command-problems-exact-text-and-order-test
+  (let [base {:id :wrap-when :doc "d" :effects #{}}
+        r (check [(assoc base :commands
+                         [5
+                          {:id :x/y :doc "" :scope :console :edit 1 :run 2}
+                          {:id :x/y :doc "ok" :scope :window :edit (fn [s] s)}
+                          {:id :wrap-when/z :doc "ok" :scope :editor :run 3}
+                          {:id :wrap-when/q :doc "ok" :scope :window :run (fn [_ _] 1)}])])]
+    (is (= ["command 0 isn't a map"
+            "command 1 (:x/y): its id isn't :wrap-when/<name>"
+            "command 1 (:x/y): :doc isn't a sentence"
+            "command 1 (:x/y): :scope :console isn't :window or :editor"
+            "command 1 (:x/y): has both :edit and :run"
+            "command 1 (:x/y): :edit isn't a function"
+            "command 1 (:x/y): :run isn't a function"
+            "command 2 (:x/y): its id isn't :wrap-when/<name>"
+            "command 2 (:x/y): its id is used twice"
+            "command 2 (:x/y): an :edit command acts on the editor, so its :scope is :editor"
+            "command 3 (:wrap-when/z): :run isn't a function"
+            "command 3 (:wrap-when/z): a pure plugin's commands are :edit commands; declare the :effects its :run uses"
+            "command 4 (:wrap-when/q): a pure plugin's commands are :edit commands; declare the :effects its :run uses"]
+           (:problems r)))))
+
+(deftest bindings-check-exact-text-and-order-test
+  (let [r (check [(assoc good :effects #{:console}
+                         :bindings [3
+                                    {:key "j" :mods #{:cmd :alt} :outcome :handled}
+                                    {:key "j" :mods #{:cmd :alt} :command :wrap-when/wrap :scope :x}
+                                    {:key "j" :mods #{:cmd :alt} :command :console/complete}
+                                    {:key "w" :mods #{:cmd} :command :wrap-when/wrap}])])]
+    (is (= {:problems ["binding 0 isn't a map"
+                       "binding 1 has an :outcome; a plugin binding runs a command"
+                       "bindings: binding 2 has unknown keys (:scope)"
+                       "binding 3 runs :console/complete, a :console command, and the console has no keymap"
+                       "binding 4 (Ctrl+W) can never fire: the window's :tab/close takes it first; bind it in :window scope"]
+            :warnings []}
+           (findings r)))))
+
+(deftest cell-findings-exact-text-and-order-test
+  (let [say [(assoc both :bindings [(assoc cmd-alt-j :command :wrap-when/say)])]
+        gj [(assoc good :bindings [(assoc cmd-alt-j :command :wrap-when/wrap)])]
+        earlier-at (fn [bs defs] (findings (check-with (with-earlier bs) defs)))
+        never "binding 0 (Ctrl+Alt+J) never fires: plugin p-a's binding of :run/run takes that chord first, and p-a loads first"
+        only-when "binding 0 (Ctrl+Alt+J) takes that chord only when plugin p-a's binding of :run/run doesn't"]
+    (is (= {:problems [] :warnings ["binding 0 (Ctrl+Shift+P) doesn't fire on that chord: the window's :palette/open takes it first; the binding's other chords work"
+                                    "binding 0 (Ctrl+Alt+P) doesn't fire on that chord: the window's :parinfer/next-mode takes it first; the binding's other chords work"]}
+           (findings (bind {:key "p" :mods #{:cmd} :command :wrap-when/wrap}))) "partly")
+    (is (= {:problems [] :warnings ["binding 0 (Ctrl+/) takes that chord from the built-in :edit/toggle-comment"]}
+           (findings (bind {:key "slash" :mods #{:cmd} :command :wrap-when/say}))) "takes")
+    (is (= {:problems [] :warnings ["binding 0 (Meta+W) takes that chord from the built-in :tab/close"]}
+           (findings (bind {:key "w" :mods #{:meta} :command :wrap-when/say}))) "meta label")
+    (is (= {:problems ["binding 0 (Super+A) would take a key you type; hold Cmd/Ctrl"] :warnings []}
+           (findings (bind {:key "a" :mods #{:super} :command :wrap-when/say}))) "typing")
+    (is (= {:problems [] :warnings ["binding 0 (Ctrl+G) takes that chord only when the built-in :find/next doesn't"
+                                    "binding 0 (Ctrl+Shift+G) takes that chord only when the built-in :find/previous doesn't"]}
+           (findings (bind {:key "g" :mods #{:cmd} :command :wrap-when/wrap}))) "sometimes")
+    (is (= {:problems [] :warnings ["binding 0 (Esc) takes that chord only when the built-in :find/bar-key doesn't"
+                                    "binding 0 (Esc) takes that chord only when the built-in :popover/close-all doesn't"
+                                    "binding 0 (Esc) takes that chord only when the built-in :inspector/close doesn't"
+                                    "binding 0 (Esc) takes that chord only when the built-in :source/close doesn't"
+                                    "binding 0 (Esc) takes that chord only when the built-in :tree/close-menu doesn't"
+                                    "binding 0 (Esc) takes that chord only when the built-in :tree/leave doesn't"
+                                    "binding 0 (Esc) takes that chord only when the built-in :run/stop doesn't"]}
+           (findings (bind {:key "Escape" :command :wrap-when/wrap}))) "passes on")
+    (is (= {:problems ["binding 0 (Ctrl+R) can never fire: the window's :run/run takes it first; bind it in :window scope"]
+            :warnings []}
+           (findings (bind {:key "r" :mods #{:cmd} :command :wrap-when/wrap}))) "unreachable")
+    (is (= {:problems [] :warnings ["binding 0 (Ctrl+Alt+J) never fires: plugin p-a's binding of :p-a/x takes that chord first, and p-a loads first"]}
+           (earlier-at [[:editor (assoc cmd-alt-j :command :p-a/x)]] [good])) "dead, editor")
+    (is (= {:problems [] :warnings ["binding 0 (Ctrl+Alt+J) takes that chord only when plugin p-a's binding of :p-a/x doesn't"]}
+           (earlier-at [[:editor (assoc cmd-alt-j :when [:writable] :command :p-a/x)]] [good])) "guarded editor")
+    (is (= {:problems [] :warnings [never]}
+           (earlier-at [[:window (assoc cmd-alt-j :command :run/run)]] gj)) "editor vs window")
+    (is (= {:problems [] :warnings [only-when]}
+           (earlier-at [[:window (assoc cmd-alt-j :when [:tree-focused] :command :run/run)]] gj)) "editor vs guarded window")
+    (is (= {:problems [] :warnings [never]}
+           (earlier-at [[:window (assoc cmd-alt-j :command :run/run)]] say)) "window vs window")
+    (is (= {:problems [] :warnings [only-when]}
+           (earlier-at [[:window (assoc cmd-alt-j :when [:tree-focused] :command :run/run)]] say)) "window vs guarded window")
+    (is (= {:problems [] :warnings ["binding 0 (Ctrl+Alt+J) takes that chord from plugin p-a's binding of :p-a/x"]}
+           (earlier-at [[:editor (assoc cmd-alt-j :command :p-a/x)]] say)) "window takes editor")
+    (is (= {:problems ["binding 0 (Ctrl+R) can never fire: the window's :run/run takes it first; bind it in :window scope"]
+            :warnings ["binding 0 (Ctrl+R) never fires: plugin p-a's binding of :tab/new takes that chord first, and p-a loads first"]}
+           (earlier-at [[:window {:key "r" :mods #{:cmd} :command :tab/new}]]
+                       [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])) "hidden built-in")
+    (is (= {:problems ["binding 0 (Ctrl+R) can never fire: the window's :run/run takes it first; bind it in :window scope"]
+            :warnings []}
+           (earlier-at [[:window {:key "r" :mods #{:cmd} :when [:tree-focused] :command :tab/new}]]
+                       [(assoc good :bindings [{:key "r" :mods #{:cmd} :command :wrap-when/wrap}])])) "guarded over built-in")))
+
+(deftest non-map-binding-is-a-problem-not-a-throw
+  ;; the split cell-findings reports a non-map binding; main threw
+  ;; "Don't know how to create ISeq from: java.lang.Long" here
+  (let [req (pc/request-from-registry {:commands registry/commands
+                                       :conditions {:window [:evaluating] :editor 5}
+                                       :keymap km/shipped :os "Linux"})]
+    (is (= {:ok? false :problems ["binding 0 isn't a map"] :warnings []}
+           (pc/validate (assoc req :definitions [{:id :fz :doc "A." :effects #{} :bindings [5]}]
+                               :file-id "fz"))))))

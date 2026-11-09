@@ -143,3 +143,27 @@
       (is (str/includes? (:text r) (.getCanonicalPath (io/file p))))
       (is (str/includes? (:text r) "Chosen by: fallback")))
     (is (= before (count @@#'registry/live)))))
+
+(deftest unknown-tool-throws-and-nil-args-count-as-empty
+  (let [ex (try (call "jonquil_nope" {}) nil (catch Throwable e e))]
+    (is (= "Unknown tool: jonquil_nope" (ex-message ex))))
+  (is (= "Missing required argument: symbol"
+         (ex-message (try ((:call (:t @env)) "jonquil_doc" nil) nil (catch Throwable e e))))))
+
+(deftest eval-path-picks-the-project
+  (let [d (temp-dirs/temp-dir! "jonquil-mcp-test-")
+        _ (spit (io/file d ".jonquil.edn") "{:runtime :in-process}")
+        f (str (io/file d "a.clj"))
+        _ (spit f "(ns a)")
+        tt (tools/make-tools {:dir (dir) :settings-path (str (io/file d "s.edn"))})
+        asked (atom [])
+        select @#'tools/selection]
+    (with-redefs [tools/selection (fn [ctx path] (swap! asked conj path) (select ctx path))]
+      (is (= {:text "=> 3" :error? false} ((:call tt) "jonquil_eval" {"code" "(+ 1 2)" "path" f})))
+      (is (seq @asked))
+      (is (every? #(= (.getCanonicalPath (io/file f)) (.getCanonicalPath (io/file %))) @asked)
+          "every project lookup the eval makes is for the path it was given")
+      (reset! asked [])
+      (is (= {:text "=> 3" :error? false} ((:call tt) "jonquil_eval" {"code" "(+ 1 2)"})))
+      (is (seq @asked))
+      (is (every? nil? @asked) "with no path, the lookup is for no path"))))

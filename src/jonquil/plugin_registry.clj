@@ -224,6 +224,43 @@
     :else {:text (str label served " answered " (binding [*print-length* 10 *print-level* 3] (pr-str r)) ", not text")
            :error? true}))
 
+(defn- failure-result
+  "A tool result for a throwable, in the plugin's label."
+  [label e]
+  {:text (str label (or (ex-message e) (str e))) :error? true})
+
+(defn- start-tool-future
+  "The future running row's :run for one call, its answer made a result
+  there too. Frees served again if nothing started."
+  [{:keys [label served row declared args]}]
+  (try
+    (let [fx @effects
+          ;; only a :buffer tool needs the
+          ;; tab, so only it waits on the GTK thread
+          tab (when (contains? declared :buffer)
+                (when-let [t (:active-tab-turn fx)] (t)))
+          ctx (effect-ctx fx declared tab)]
+      ;; the answer is turned into a result
+      ;; here too, since realizing a lazy one runs
+      ;; plugin code, so it's under the deadline
+      (future (try (tool-answer label served ((:run row) ctx args))
+                   (catch Throwable e (failure-result label e))
+                   (finally (swap! tools-running disj served)))))
+    (catch Throwable e
+      ;; nothing started, so the tool is free again
+      (swap! tools-running disj served)
+      (throw e))))
+
+(defn- run-tool-within
+  "The result of one call of row, started on a future and awaited for
+  deadline-ms."
+  [{:keys [label served deadline-ms] :as call}]
+  (let [v (deref (start-tool-future call) deadline-ms ::timeout)]
+    (if (= ::timeout v)
+      {:text (str label served " didn't answer in " (quot deadline-ms 1000) " s; it may still be running")
+       :error? true}
+      v)))
+
 (defn- tool-call
   "The call fn of plugin-id's tool row, served as served: its args checked,
   then :run on a future with a ctx of the declared effects and, for a
@@ -240,30 +277,10 @@
           (let [[before _] (swap-vals! tools-running conj served)]
             (if (contains? before served)
               {:text (str label served " is still running") :error? true}
-              (let [f (try
-                        (let [fx @effects
-                              ;; only a :buffer tool needs the
-                              ;; tab, so only it waits on the GTK thread
-                              tab (when (contains? declared :buffer)
-                                    (when-let [t (:active-tab-turn fx)] (t)))
-                              ctx (effect-ctx fx declared tab)]
-                          ;; the answer is turned into a result
-                          ;; here too, since realizing a lazy one runs
-                          ;; plugin code, so it's under the deadline
-                          (future (try (tool-answer label served ((:run row) ctx args))
-                                       (catch Throwable e {:text (str label (or (ex-message e) (str e))) :error? true})
-                                       (finally (swap! tools-running disj served)))))
-                        (catch Throwable e
-                          ;; nothing started, so the tool is free again
-                          (swap! tools-running disj served)
-                          (throw e)))
-                    v (deref f deadline-ms ::timeout)]
-                (if (= ::timeout v)
-                  {:text (str label served " didn't answer in " (quot deadline-ms 1000) " s; it may still be running")
-                   :error? true}
-                  v)))))
+              (run-tool-within {:label label :served served :row row :declared declared
+                                :args args :deadline-ms deadline-ms}))))
         (catch Throwable e
-          {:text (str label (or (ex-message e) (str e))) :error? true})))))
+          (failure-result label e))))))
 
 (defn mcp-tools
   "Every installed plugin's MCP tools, in plugin-id then row

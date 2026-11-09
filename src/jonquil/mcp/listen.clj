@@ -248,49 +248,72 @@
   [settings-path dir]
   (pick-entry (live-entries settings-path) dir))
 
+(defn- connect-to-entry
+  "A socket to the window entry's port, or nil after saying why on *err*."
+  [entry]
+  (try (Socket. (InetAddress/getByName "127.0.0.1") (int (:port entry)))
+       (catch Exception e
+         (binding [*out* *err*]
+           (println (str "jonquil: cannot connect to the window on port " (:port entry)
+                         ": " (ex-message e))))
+         nil)))
+
+(defn- start-pump!
+  "Runs f on a daemon thread. A throw is said on err unless the bridge is
+  already closing; either way the thread's end releases done."
+  [{:keys [done closing err]} f]
+  (doto (Thread. ^Runnable (fn [] (try (f)
+                                       (catch Throwable e
+                                         (when-not @closing
+                                           (binding [*out* err]
+                                             (println "jonquil: the attach relay failed:" (or (ex-message e) (str e))))))
+                                       (finally (deliver done 0)))))
+    (.setDaemon true)
+    (.start)))
+
+(defn- relay-to-socket!
+  "Copies read-line's lines to the socket writer out until nil."
+  [read-line out]
+  (loop []
+    (when-let [l (read-line)]
+      (.write ^java.io.Writer out (str l "\n"))
+      (.flush ^java.io.Writer out)
+      (recur))))
+
+(defn- relay-from-socket!
+  "Copies the socket reader's lines to write-line until EOF."
+  [in write-line]
+  (loop []
+    (when-let [l (.readLine ^java.io.BufferedReader in)]
+      (write-line l)
+      (recur))))
+
+(defn- relay-until-eof!
+  "Pumps both directions over sock on daemon threads and waits until either
+  side ends; then marks the bridge closing and closes the socket."
+  [sock {:keys [read-line write-line]}]
+  (let [state {:done (promise) :closing (atom false) :err *err*}
+        in (io/reader (.getInputStream ^Socket sock) :encoding "UTF-8")
+        out (io/writer (.getOutputStream ^Socket sock) :encoding "UTF-8")]
+    (start-pump! state (fn [] (relay-to-socket! read-line out)))
+    (start-pump! state (fn [] (relay-from-socket! in write-line)))
+    @(:done state)
+    (reset! (:closing state) true)
+    (try (.close ^Socket sock) (catch Throwable _ nil))
+    0))
+
 (defn bridge!
   "Relays stdio lines to a listening window and back. Returns the exit code:
   1 (sentence on *err*) when no window can be found or connected, else 0 once
   either side reaches EOF. Both pumps run on daemon threads and either end
   releases the wait, so the bridge cannot hang on one dead side; the socket
   is closed on the way out."
-  [{:keys [read-line write-line settings-path dir]}]
+  {:arglists '([{:keys [read-line write-line settings-path dir]}])}
+  [{:keys [settings-path dir] :as io-fns}]
   (let [{:keys [entry error]} (try (discover settings-path dir)
                                    (catch Exception e {:error (str "cannot read the window registry: " (ex-message e))}))
-        sock (when entry
-               (try (Socket. (InetAddress/getByName "127.0.0.1") (int (:port entry)))
-                    (catch Exception e
-                      (binding [*out* *err*]
-                        (println (str "jonquil: cannot connect to the window on port " (:port entry)
-                                      ": " (ex-message e))))
-                      nil)))]
+        sock (when entry (connect-to-entry entry))]
     (cond
       error (do (binding [*out* *err*] (println (str "jonquil: " error))) 1)
       (nil? sock) 1
-      :else
-      (let [done (promise)
-            closing (atom false)
-            err *err*
-            in (io/reader (.getInputStream ^Socket sock) :encoding "UTF-8")
-            out (io/writer (.getOutputStream ^Socket sock) :encoding "UTF-8")
-            pump (fn [f] (doto (Thread. ^Runnable (fn [] (try (f)
-                                                              (catch Throwable e
-                                                                (when-not @closing
-                                                                  (binding [*out* err]
-                                                                    (println "jonquil: the attach relay failed:" (or (ex-message e) (str e))))))
-                                                              (finally (deliver done 0)))))
-                           (.setDaemon true)
-                           (.start)))]
-        (pump (fn [] (loop []
-                       (when-let [l (read-line)]
-                         (.write ^java.io.Writer out (str l "\n"))
-                         (.flush ^java.io.Writer out)
-                         (recur)))))
-        (pump (fn [] (loop []
-                       (when-let [l (.readLine ^java.io.BufferedReader in)]
-                         (write-line l)
-                         (recur)))))
-        @done
-        (reset! closing true)
-        (try (.close ^Socket sock) (catch Throwable _ nil))
-        0))))
+      :else (relay-until-eof! sock io-fns))))

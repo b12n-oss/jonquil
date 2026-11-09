@@ -3,6 +3,8 @@
             [clojure.test :refer [deftest is testing]]
             [jonquil.edit :as edit]
             [jonquil.evaluator :as ev]
+            [jonquil.gtk.editor :as editor]
+            [jonquil.gtk.ffi :as g]
             [jonquil.gtk.window :as gw]
             [jonquil.help :as help]
             [jonquil.mcp :as mcp]
@@ -377,3 +379,116 @@
     (is (= -32602 (get-in r ["error" "code"])) "the agent's reply is unchanged")
     (is (= [{:kind :plugin :error? true :summary "Claude Code called jonquil_nope, which failed: Unknown tool: jonquil_nope"}]
            (mapv #(select-keys % [:kind :error? :summary]) @entries)))))
+
+;; --- characterization: the tools that touch GTK, over fake tabs --------------
+;; The GTK-touching vars are redefined as the differential fuzz did: a tab's
+;; editor is a map of atoms, the console buffer an atom holding its text.
+
+(defn- fake-tab [id path dirty & {:keys [ro? text]}]
+  {:id id :path (atom path)
+   :ed {:text (atom (or text (str "text " id))) :dirty (atom dirty) :ro? ro?}})
+
+(defn- with-fake-gtk* [f]
+  (with-redefs [editor/editor-text (fn [ed] @(:text ed))
+                editor/dirty? (fn [ed] @(:dirty ed))
+                editor/apply-op-plain! (fn [ed op] (when-not (:ro? ed) (reset! (:text ed) (pr-str op)) true))
+                g/buffer-text (fn [buf] @buf)
+                jonquil.mcp.window/mark-offset (fn [buf _] (count @buf))]
+    (f)))
+
+(defmacro ^:private with-fake-gtk [& body] `(with-fake-gtk* (fn [] ~@body)))
+
+(defn- fake-ui
+  "A ui over tabs (a vector of fake-tab) with active tab id active. Records
+  select/open/save calls in log. :open-file! opens a path ending b.clj as an
+  error, anything else as a new active tab."
+  [tabs active log & {:as more}]
+  (let [tabs* (atom tabs) active* (atom active)]
+    (merge {:tabs* (fn [] @tabs*)
+            :active-tab* (fn [] (some #(when (= @active* (:id %)) %) @tabs*))
+            :select-tab! (fn [id] (swap! log conj [:select id]) (reset! active* id))
+            :open-file! (fn [p] (swap! log conj [:open p])
+                          (if (str/ends-with? p "b.clj")
+                            {:error "can't open"}
+                            (let [id (inc (count @tabs*))]
+                              (swap! tabs* conj (fake-tab id p false))
+                              (reset! active* id)
+                              nil)))
+            :save-to! (fn [p] (swap! log conj [:save p])
+                        (when-let [t (some #(when (= @active* (:id %)) %) @tabs*)]
+                          (when-not (str/starts-with? p "/x") (reset! (:dirty (:ed t)) false))))}
+           more)))
+
+(deftest open-success-and-error
+  (with-fake-gtk
+    (let [log (atom [])
+          t (tools-for (fake-ui [(fake-tab 1 "/p/1.clj" false)] 1 log))]
+      (is (= {:text "Opened tab 2 /d/a.clj" :error? false :tab-id 2}
+             (call t "jonquil_open" {"path" "/d/a.clj"})))
+      (is (= {:text "can't open" :error? true} (call t "jonquil_open" {"path" "/d/b.clj"})))
+      (is (= [[:open "/d/a.clj"] [:open "/d/b.clj"]] @log)))))
+
+(deftest tabs-rows-flag-active-and-dirty
+  (with-fake-gtk
+    (let [t (tools-for (fake-ui [(fake-tab 1 "/p/1.clj" true) (fake-tab 2 nil false) (fake-tab 3 "/p/3.clj" false)]
+                                2 (atom [])))]
+      (is (= {:text "1 - dirty /p/1.clj\n2 * saved Untitled\n3 - saved /p/3.clj" :error? false}
+             (call t "jonquil_tabs" {}))))))
+
+(deftest read-tab-active-by-id-and-unknown
+  (with-fake-gtk
+    (let [t (tools-for (fake-ui [(fake-tab 1 "/p/1.clj" false) (fake-tab 2 nil false)] 2 (atom [])))]
+      (is (= {:text "text 2" :error? false} (call t "jonquil_read_tab" {})))
+      (is (= {:text "text 1" :error? false} (call t "jonquil_read_tab" {"id" 1})))
+      (is (= {:text "No tab with id 9." :error? true} (call t "jonquil_read_tab" {"id" 9}))))))
+
+(deftest replace-text-outcomes
+  (with-fake-gtk
+    (let [tab1 (fake-tab 1 "/p/1.clj" false)
+          tab2 (fake-tab 2 "/p/2.clj" false)
+          ro (fake-tab 3 "/p/3.clj" false :ro? true)
+          t (tools-for (fake-ui [tab1 tab2 ro] 1 (atom [])))]
+      (is (= {:text "Replaced the text of tab 1." :error? false :tab-id 1}
+             (call t "jonquil_replace_text" {"text" "new"})))
+      (is (= (pr-str {:edits [[0 6 "new"]] :caret 3}) @(:text (:ed tab1))))
+      (is (= {:text "Replaced the text of tab 2." :error? false :tab-id 2}
+             (call t "jonquil_replace_text" {"text" "x" "id" 2})))
+      (is (= {:text "Tab 3 is read-only." :error? true :tab-id 3}
+             (call t "jonquil_replace_text" {"text" "x" "id" 3})))
+      (is (= {:text "No tab with id 9." :error? true}
+             (call t "jonquil_replace_text" {"text" "x" "id" 9})))
+      (is (= {:text "The new text holds a NUL byte on line 2, which Jonquil's editor can't keep, so nothing was changed."
+              :error? true}
+             (call t "jonquil_replace_text" {"text" "a\nb\u0000"}))))))
+
+(deftest save-outcomes
+  (with-fake-gtk
+    (let [log (atom [])
+          t (tools-for (fake-ui [(fake-tab 1 "/p/1.clj" true) (fake-tab 2 nil true)] 1 log))]
+      (is (= {:text "Saved /p/1.clj" :error? false :tab-id 1} (call t "jonquil_save" {})))
+      (is (= [[:save "/p/1.clj"]] @log))
+      (let [t2 (tools-for (fake-ui [(fake-tab 1 "/p/1.clj" true)] 1 (atom [])))]
+        (is (= {:text "The save failed; the console names the reason." :error? true :tab-id 1}
+               (call t2 "jonquil_save" {"path" "/x/out.clj"}))))
+      (let [t3 (tools-for (fake-ui [(fake-tab 2 nil true)] 2 (atom [])))]
+        (is (= {:text "The active tab is Untitled; give a path." :error? true} (call t3 "jonquil_save" {})))
+        (is (= {:text "Saved /tmp/new.clj" :error? false :tab-id 2} (call t3 "jonquil_save" {"path" "new.clj"}))))
+      (let [t4 (tools-for (fake-ui [] nil (atom [])))]
+        (is (= {:text "No active tab." :error? true} (call t4 "jonquil_save" {})))))))
+
+(deftest console-since-clamps
+  (with-fake-gtk
+    (let [t (tools-for (assoc (fake-ui [] nil (atom [])) :console {:buf (atom "0123456789") :out-end :m}))]
+      (is (= {:text "mark 10\n0123456789" :error? false} (call t "jonquil_console" {})))
+      (is (= {:text "mark 10\n3456789" :error? false} (call t "jonquil_console" {"since" 3})))
+      (is (= {:text "mark 10\n0123456789" :error? false} (call t "jonquil_console" {"since" -4})))
+      (is (= {:text "mark 10\n" :error? false} (call t "jonquil_console" {"since" 99}))))))
+
+(deftest run-reports-the-active-tab-id
+  (with-fake-gtk
+    (let [run (fn [notify] (notify {:done {:result {:status :ok :printed "e"} :output ""}}) (fn [] ""))
+          text (:text (call (tools-for {:mcp-run!* run :evaluator* (fn [] (evaluator {}))}) "jonquil_run" {}))
+          with-tab (tools-for (assoc (fake-ui [(fake-tab 4 "/p/4.clj" false)] 4 (atom []))
+                                     :mcp-run!* run :evaluator* (fn [] (evaluator {}))))]
+      (is (= {:text text :error? false :tab-id 4} (call with-tab "jonquil_run" {})))
+      (is (not (contains? (call (tools-for {:mcp-run!* run :evaluator* (fn [] (evaluator {}))}) "jonquil_run" {}) :tab-id))))))

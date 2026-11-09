@@ -262,6 +262,208 @@
       (g/gtk-text-iter-get-offset it)
       (finally (ffi/free it)))))
 
+;; make-window-tools' tools, one named fn each. ctx is {:ui :dir :grace-ms
+;; :turn :await!}: turn runs a thunk on the GUI thread, await! runs an eval.
+
+(defn- tool-eval [{:keys [ui await!]} args]
+  (let [code (tools/required-string args "code")]
+    (await! args (fn [notify] ((:mcp-eval!* ui) code notify)))))
+
+;; the tab a run runs, for the Messages entry's jump (a :tab-id
+;; side field the agent never sees); a ui without tabs has none
+(defn- active-id [{:keys [ui turn]}]
+  (when-let [f (:active-tab* ui)] (turn (fn [] (:id (f))))))
+
+(defn- with-tab [r id] (cond-> r id (assoc :tab-id id)))
+
+(defn- tool-run [{:keys [ui await!] :as ctx} args]
+  (let [id (active-id ctx)]
+    (with-tab (await! args (fn [notify] ((:mcp-run!* ui) notify))) id)))
+
+(defn- tool-run-selection [{:keys [ui await!] :as ctx} args]
+  (let [start (required-number args "start")
+        end (required-number args "end")
+        id (active-id ctx)]
+    (with-tab (await! args (fn [notify] ((:mcp-run-selection!* ui) start end notify))) id)))
+
+(defn- wait-stopped
+  "Polls until the evaluator stops or grace-ms passes; true when it stopped."
+  [ui grace-ms]
+  (let [deadline (+ (now-ms) grace-ms)]
+    (loop []
+      (cond
+        (not (ev/evaluating? ((:evaluator* ui)))) true
+        (>= (now-ms) deadline) false
+        :else (do (Thread/sleep 50) (recur))))))
+
+(defn- tool-stop [{:keys [ui turn grace-ms]} _]
+  (let [running? (turn (fn []
+                         (when (ev/evaluating? ((:evaluator* ui)))
+                           ((:stop!* ui))
+                           true)))]
+    (if-not running?
+      {:text "Nothing is running." :error? false}
+      (let [stopped? (wait-stopped ui grace-ms)]
+        {:text (if stopped?
+                 "Stopped."
+                 "Interrupt requested; the evaluation has not stopped yet.")
+         :error? false}))))
+
+(defn- tool-open [{:keys [ui dir turn]} args]
+  (let [p (tools/absolute dir (tools/required-string args "path"))]
+    (turn (fn []
+            (let [r ((:open-file! ui) p)]
+              (if (and (map? r) (:error r))
+                {:text (str (:error r)) :error? true}
+                (let [t ((:active-tab* ui))]
+                  {:text (str "Opened tab " (:id t) " " (or @(:path t) "Untitled"))
+                   :error? false :tab-id (:id t)})))))))
+
+(defn- tool-tabs [{:keys [ui turn]} _]
+  (turn (fn []
+          (let [active (:id ((:active-tab* ui)))]
+            {:text (str/join "\n"
+                             (map (fn [t]
+                                    (tab-line {:id (:id t)
+                                               :active? (= active (:id t))
+                                               :dirty? (editor/dirty? (:ed t))
+                                               :path @(:path t)}))
+                                  ((:tabs* ui))))
+             :error? false}))))
+
+(defn- tool-select [{:keys [ui turn]} args]
+  (let [id (required-number args "id")]
+    (turn (fn []
+            (if (find-tab ui id)
+              (do ((:select-tab! ui) id)
+                  {:text (str "Selected tab " id ".") :error? false :tab-id id})
+              (no-tab id))))))
+
+(defn- tool-read [{:keys [ui turn]} args]
+  (let [id (number-arg args "id")]
+    (turn (fn []
+            (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
+              (cond
+                t {:text (editor/editor-text (:ed t)) :error? false}
+                id (no-tab id)
+                :else {:text "No active tab." :error? true}))))))
+
+(defn- replace-in-tab
+  "The replace_text result for tab t (nil when there is none) on the GUI thread."
+  [t id text]
+  (if-not t
+    (if id (no-tab id) {:text "No active tab." :error? true})
+    (let [ed (:ed t)]
+      (if (editor/apply-op-plain! ed (replace-op (editor/editor-text ed) text))
+        {:text (str "Replaced the text of tab " (:id t) ".") :error? false :tab-id (:id t)}
+        {:text (str "Tab " (:id t) " is read-only.") :error? true :tab-id (:id t)}))))
+
+(defn- tool-replace [{:keys [ui turn]} args]
+  (let [text (required-text args "text")
+        id (number-arg args "id")]
+    ;; GTK text is C strings, so a NUL
+    ;; would truncate the insert; apply-op! refuses such
+    ;; an op, and this pre-check names the reason instead
+    ;; of mislabelling the refusal as read-only.
+    (if-let [n (when (string? text) (tabs/nul-line text))]
+      {:text (str "The new text holds a NUL byte on line " n
+                  ", which Jonquil's editor can't keep, so nothing was changed.")
+       :error? true}
+      (turn (fn []
+              (replace-in-tab (if id (find-tab ui id) ((:active-tab* ui))) id text))))))
+
+(defn- tool-save [{:keys [ui dir turn]} args]
+  (let [arg-path (when (get args "path")
+                   (tools/absolute dir (tools/required-string args "path")))]
+    (turn (fn []
+            (let [t ((:active-tab* ui))
+                  p (or arg-path (some-> t :path deref))]
+              (cond
+                (not t) {:text "No active tab." :error? true}
+                (not p) {:text "The active tab is Untitled; give a path." :error? true}
+                :else
+                (do ((:save-to! ui) p)
+                    (if (editor/dirty? (:ed t))
+                      {:text "The save failed; the console names the reason." :error? true :tab-id (:id t)}
+                      {:text (str "Saved " p) :error? false :tab-id (:id t)}))))))))
+
+(defn- tool-console [{:keys [ui turn]} args]
+  (let [since (number-arg args "since")]
+    (turn (fn []
+            (let [cv (:console ui)
+                  end (mark-offset (:buf cv) (:out-end cv))
+                  text (g/buffer-text (:buf cv))]
+              {:text (str "mark " end "\n" (subs text (clamp-since since end) end))
+               :error? false})))))
+
+(defn- tool-doc [{:keys [ui]} args]
+  (let [sym (tools/required-string args "symbol")
+        e ((:evaluator* ui))]
+    {:text (help/doc-text sym (ev/lookup e sym sym (count sym))) :error? false}))
+
+(defn- tool-complete [{:keys [ui]} args]
+  (let [prefix (tools/required-string args "prefix")
+        names (->> (ev/complete ((:evaluator* ui)) prefix prefix (count prefix) nil)
+                   (map #(if (map? %) (or (:name %) (:text %) (:symbol %)) %))
+                   (remove nil?)
+                   (map str)
+                   (take max-completions))]
+    {:text (if (seq names)
+             (str/join "\n" names)
+             (str "No completions for " prefix "."))
+     :error? false}))
+
+(defn- tool-brackets [{:keys [dir]} args] (tools/brackets-result dir args))
+
+(defn- tool-project [{:keys [ui]} _] {:text (tools/selection-text ((:selection* ui))) :error? false})
+
+;; reads go straight to the plugins folder; a propose
+;; is refused here before the window's hook runs any check
+(defn- tool-plugins-list [{:keys [ui]} _] (plugin-mcp/list-text ((:plugin-state* ui))))
+
+(defn- tool-plugin-read [{:keys [ui]} args]
+  (let [id (tools/required-string args "id")
+        version (number-arg args "version")]
+    (plugin-mcp/read-text (assoc ((:plugin-state* ui)) :id id :version version))))
+
+(defn- tool-plugin-status [{:keys [ui]} args]
+  (let [id (tools/required-string args "id")
+        n (number-arg args "n")]
+    (plugin-mcp/status-text (assoc ((:plugin-state* ui)) :id id :n n))))
+
+(defn- tool-plugin-propose [{:keys [ui]} args]
+  (let [p {:id (get args "id") :source (get args "source") :reason (get args "reason")}
+        why (plugin-mcp/propose-refusal (assoc p :plugins? (:plugins? ((:plugin-state* ui)))))]
+    (cond-> (plugin-mcp/propose-text (:id p)
+                                     (if why
+                                       {:status :refused :n nil :problems [why]}
+                                       ((:plugin-propose!* ui) p)))
+      (string? (:id p)) (assoc :plugin-id (:id p)))))
+
+(defn- window-handlers
+  "Tool name -> (fn [args]) over ctx."
+  [ctx]
+  (let [h (fn [f] (fn [args] (f ctx args)))]
+    {"jonquil_eval" (h tool-eval)
+     "jonquil_run" (h tool-run)
+     "jonquil_run_selection" (h tool-run-selection)
+     "jonquil_stop" (h tool-stop)
+     "jonquil_open" (h tool-open)
+     "jonquil_tabs" (h tool-tabs)
+     "jonquil_select_tab" (h tool-select)
+     "jonquil_read_tab" (h tool-read)
+     "jonquil_replace_text" (h tool-replace)
+     "jonquil_save" (h tool-save)
+     "jonquil_console" (h tool-console)
+     "jonquil_doc" (h tool-doc)
+     "jonquil_complete" (h tool-complete)
+     "jonquil_check_brackets" (h tool-brackets)
+     "jonquil_project" (h tool-project)
+     "jonquil_plugins_list" (h tool-plugins-list)
+     "jonquil_plugin_read" (h tool-plugin-read)
+     "jonquil_plugin_propose" (h tool-plugin-propose)
+     "jonquil_plugin_status" (h tool-plugin-status)}))
+
 (defn make-window-tools
   "The tool table over a live window. :ui is the :on-ready ui map, :dir the
   server's default directory (absolute), :gui the enqueue fn (default
@@ -270,173 +472,11 @@
   [{:keys [ui dir gui grace-ms]}]
   (let [gui (or gui cb/on-gui!)
         grace-ms (or grace-ms default-grace-ms)
-        turn (fn [f] (gui-call gui f gui-deadline-ms))
         await! (fn [args fire]
                  (await-eval {:ui ui :gui gui :fire fire :grace-ms grace-ms
                               :timeout-ms (tools/timeout-of args)}))
-        tool-eval (fn [args]
-                    (let [code (tools/required-string args "code")]
-                      (await! args (fn [notify] ((:mcp-eval!* ui) code notify)))))
-        ;; the tab a run runs, for the Messages entry's jump (a :tab-id
-        ;; side field the agent never sees); a ui without tabs has none
-        active-id (fn [] (when-let [f (:active-tab* ui)] (turn (fn [] (:id (f))))))
-        with-tab (fn [r id] (cond-> r id (assoc :tab-id id)))
-        tool-run (fn [args]
-                   (let [id (active-id)]
-                     (with-tab (await! args (fn [notify] ((:mcp-run!* ui) notify))) id)))
-        tool-run-selection (fn [args]
-                             (let [start (required-number args "start")
-                                   end (required-number args "end")
-                                   id (active-id)]
-                               (with-tab (await! args (fn [notify] ((:mcp-run-selection!* ui) start end notify))) id)))
-        tool-stop (fn [_]
-                    (let [running? (turn (fn []
-                                           (when (ev/evaluating? ((:evaluator* ui)))
-                                             ((:stop!* ui))
-                                             true)))]
-                      (if-not running?
-                        {:text "Nothing is running." :error? false}
-                        (let [deadline (+ (now-ms) grace-ms)
-                              stopped? (loop []
-                                         (cond
-                                           (not (ev/evaluating? ((:evaluator* ui)))) true
-                                           (>= (now-ms) deadline) false
-                                           :else (do (Thread/sleep 50) (recur))))]
-                          {:text (if stopped?
-                                   "Stopped."
-                                   "Interrupt requested; the evaluation has not stopped yet.")
-                           :error? false}))))
-        tool-open (fn [args]
-                    (let [p (tools/absolute dir (tools/required-string args "path"))]
-                      (turn (fn []
-                              (let [r ((:open-file! ui) p)]
-                                (if (and (map? r) (:error r))
-                                  {:text (str (:error r)) :error? true}
-                                  (let [t ((:active-tab* ui))]
-                                    {:text (str "Opened tab " (:id t) " " (or @(:path t) "Untitled"))
-                                     :error? false :tab-id (:id t)})))))))
-        tool-tabs (fn [_]
-                    (turn (fn []
-                            (let [active-id (:id ((:active-tab* ui)))]
-                              {:text (str/join "\n"
-                                               (map (fn [t]
-                                                      (tab-line {:id (:id t)
-                                                                 :active? (= active-id (:id t))
-                                                                 :dirty? (editor/dirty? (:ed t))
-                                                                 :path @(:path t)}))
-                                                    ((:tabs* ui))))
-                               :error? false}))))
-        tool-select (fn [args]
-                      (let [id (required-number args "id")]
-                        (turn (fn []
-                                (if (find-tab ui id)
-                                  (do ((:select-tab! ui) id)
-                                      {:text (str "Selected tab " id ".") :error? false :tab-id id})
-                                  (no-tab id))))))
-        tool-read (fn [args]
-                    (let [id (number-arg args "id")]
-                      (turn (fn []
-                              (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
-                                (cond
-                                  t {:text (editor/editor-text (:ed t)) :error? false}
-                                  id (no-tab id)
-                                  :else {:text "No active tab." :error? true}))))))
-        tool-replace (fn [args]
-                       (let [text (required-text args "text")
-                             id (number-arg args "id")]
-                         ;; GTK text is C strings, so a NUL
-                         ;; would truncate the insert; apply-op! refuses such
-                         ;; an op, and this pre-check names the reason instead
-                         ;; of mislabelling the refusal as read-only.
-                         (if-let [n (when (string? text) (tabs/nul-line text))]
-                           {:text (str "The new text holds a NUL byte on line " n
-                                       ", which Jonquil's editor can't keep, so nothing was changed.")
-                            :error? true}
-                           (turn (fn []
-                                   (let [t (if id (find-tab ui id) ((:active-tab* ui)))]
-                                     (if-not t
-                                       (if id (no-tab id) {:text "No active tab." :error? true})
-                                       (let [ed (:ed t)]
-                                         (if (editor/apply-op-plain! ed (replace-op (editor/editor-text ed) text))
-                                           {:text (str "Replaced the text of tab " (:id t) ".") :error? false :tab-id (:id t)}
-                                           {:text (str "Tab " (:id t) " is read-only.") :error? true :tab-id (:id t)})))))))))
-        tool-save (fn [args]
-                    (let [arg-path (when (get args "path")
-                                     (tools/absolute dir (tools/required-string args "path")))]
-                      (turn (fn []
-                              (let [t ((:active-tab* ui))
-                                    p (or arg-path (some-> t :path deref))]
-                                (cond
-                                  (not t) {:text "No active tab." :error? true}
-                                  (not p) {:text "The active tab is Untitled; give a path." :error? true}
-                                  :else
-                                  (do ((:save-to! ui) p)
-                                      (if (editor/dirty? (:ed t))
-                                        {:text "The save failed; the console names the reason." :error? true :tab-id (:id t)}
-                                        {:text (str "Saved " p) :error? false :tab-id (:id t)}))))))))
-        tool-console (fn [args]
-                       (let [since (number-arg args "since")]
-                         (turn (fn []
-                                 (let [cv (:console ui)
-                                       end (mark-offset (:buf cv) (:out-end cv))
-                                       text (g/buffer-text (:buf cv))]
-                                   {:text (str "mark " end "\n" (subs text (clamp-since since end) end))
-                                    :error? false})))))
-        tool-doc (fn [args]
-                   (let [sym (tools/required-string args "symbol")
-                         e ((:evaluator* ui))]
-                     {:text (help/doc-text sym (ev/lookup e sym sym (count sym))) :error? false}))
-        tool-complete (fn [args]
-                        (let [prefix (tools/required-string args "prefix")
-                              names (->> (ev/complete ((:evaluator* ui)) prefix prefix (count prefix) nil)
-                                         (map #(if (map? %) (or (:name %) (:text %) (:symbol %)) %))
-                                         (remove nil?)
-                                         (map str)
-                                         (take max-completions))]
-                          {:text (if (seq names)
-                                   (str/join "\n" names)
-                                   (str "No completions for " prefix "."))
-                           :error? false}))
-        tool-brackets (fn [args] (tools/brackets-result dir args))
-        tool-project (fn [_] {:text (tools/selection-text ((:selection* ui))) :error? false})
-        ;; reads go straight to the plugins folder; a propose
-        ;; is refused here before the window's hook runs any check
-        tool-plugins-list (fn [_] (plugin-mcp/list-text ((:plugin-state* ui))))
-        tool-plugin-read (fn [args]
-                           (let [id (tools/required-string args "id")
-                                 version (number-arg args "version")]
-                             (plugin-mcp/read-text (assoc ((:plugin-state* ui)) :id id :version version))))
-        tool-plugin-status (fn [args]
-                             (let [id (tools/required-string args "id")
-                                   n (number-arg args "n")]
-                               (plugin-mcp/status-text (assoc ((:plugin-state* ui)) :id id :n n))))
-        tool-plugin-propose (fn [args]
-                              (let [p {:id (get args "id") :source (get args "source") :reason (get args "reason")}
-                                    why (plugin-mcp/propose-refusal (assoc p :plugins? (:plugins? ((:plugin-state* ui)))))]
-                                (cond-> (plugin-mcp/propose-text (:id p)
-                                                                 (if why
-                                                                   {:status :refused :n nil :problems [why]}
-                                                                   ((:plugin-propose!* ui) p)))
-                                  (string? (:id p)) (assoc :plugin-id (:id p)))))
-        handlers {"jonquil_eval" tool-eval
-                  "jonquil_run" tool-run
-                  "jonquil_run_selection" tool-run-selection
-                  "jonquil_stop" tool-stop
-                  "jonquil_open" tool-open
-                  "jonquil_tabs" tool-tabs
-                  "jonquil_select_tab" tool-select
-                  "jonquil_read_tab" tool-read
-                  "jonquil_replace_text" tool-replace
-                  "jonquil_save" tool-save
-                  "jonquil_console" tool-console
-                  "jonquil_doc" tool-doc
-                  "jonquil_complete" tool-complete
-                  "jonquil_check_brackets" tool-brackets
-                  "jonquil_project" tool-project
-                  "jonquil_plugins_list" tool-plugins-list
-                  "jonquil_plugin_read" tool-plugin-read
-                  "jonquil_plugin_propose" tool-plugin-propose
-                  "jonquil_plugin_status" tool-plugin-status}]
+        handlers (window-handlers {:ui ui :dir dir :grace-ms grace-ms :await! await!
+                                   :turn (fn [f] (gui-call gui f gui-deadline-ms))})]
     {:defs window-tool-defs
      :call (fn [tname args]
              (if-let [h (get handlers tname)]

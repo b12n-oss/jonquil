@@ -196,6 +196,79 @@
 
 ;; --- the tools ---------------------------------------------------------------
 
+(defn- with-ev
+  "Calls (f selection evaluator) for the project selected by path."
+  [{:keys [ctx cache]} path f]
+  (let [sel (selection ctx path)]
+    (f sel (evaluator-for! cache sel))))
+
+(defn- run-in!
+  "run-eval! on evaluator e for the selection at path, evicting e from the
+  cache when it is stuck. step holds :path :e :code :opts :timeout-ms."
+  [{:keys [ctx cache grace-ms]} {:keys [path e code opts timeout-ms]}]
+  (let [k (dialect/selection-key (selection ctx path))]
+    (run-eval! e code opts timeout-ms grace-ms
+               (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m)))))))
+
+(defn- tool-eval [env args]
+  (let [code (required-string args "code")
+        path (get args "path")]
+    (with-ev env path
+      (fn [_ e] (run-in! env {:path path :e e :code code :opts {:run? false :owner :repl}
+                              :timeout-ms (timeout-of args)})))))
+
+(defn- tool-run [env args]
+  (let [p (absolute (:dir env) (required-string args "path"))
+        f (io/file p)]
+    (cond
+      (not (.exists f)) (throw (ex-info (str "No such file: " p) {}))
+      (.isDirectory f) (throw (ex-info (str "Not a file, a directory: " p) {}))
+      :else
+      (let [text (slurp f)]
+        (with-ev env p
+          (fn [_ e] (run-in! env {:path p :e e :code text :opts {:run? true :path p :owner :run}
+                                  :timeout-ms (timeout-of args)})))))))
+
+(defn- tool-brackets [env args] (brackets-result (:dir env) args))
+
+(defn- tool-doc [env args]
+  (let [sym (required-string args "symbol")]
+    (with-ev env (get args "path")
+      (fn [_ e]
+        {:text (help/doc-text sym (ev/lookup e sym sym (count sym)))
+         :error? false}))))
+
+(defn- completion-names
+  "The first max-completions completion names for prefix on evaluator e."
+  [e prefix]
+  (->> (ev/complete e prefix prefix (count prefix) nil)
+       (map #(if (map? %) (or (:name %) (:text %) (:symbol %)) %))
+       (remove nil?)
+       (map str)
+       (take max-completions)))
+
+(defn- tool-complete [env args]
+  (let [prefix (required-string args "prefix")]
+    (with-ev env (get args "path")
+      (fn [_ e]
+        (let [names (completion-names e prefix)]
+          {:text (if (seq names)
+                   (str/join "\n" names)
+                   (str "No completions for " prefix "."))
+           :error? false})))))
+
+(defn- tool-project [env args]
+  {:text (selection-text (selection (:ctx env) (get args "path")))
+   :error? false})
+
+(def ^:private tool-fns
+  {"jonquil_eval" tool-eval
+   "jonquil_run_file" tool-run
+   "jonquil_check_brackets" tool-brackets
+   "jonquil_doc" tool-doc
+   "jonquil_complete" tool-complete
+   "jonquil_project" tool-project})
+
 (defn make-tools
   "The tool table for default directory :dir (absolute) and settings file
   :settings-path. Evaluators are cached per project selection in the
@@ -203,58 +276,10 @@
   overrides the 5000 ms wait after an interrupt) and registered with jonquil.runtime-registry, so
   registry/stop-all! stops them."
   [{:keys [dir cache grace-ms] :as ctx}]
-  (let [cache (or cache (atom {}))
-        grace-ms (or grace-ms interrupt-grace-ms)
-        with-ev (fn [path f]
-                  (let [sel (selection ctx path)]
-                    (f sel (evaluator-for! cache sel))))
-        run! (fn [path e code opts timeout-ms]
-               (let [k (dialect/selection-key (selection ctx path))]
-                 (run-eval! e code opts timeout-ms grace-ms
-                            (fn [] (swap! cache (fn [m] (if (identical? e (get m k)) (dissoc m k) m)))))))
-        tool-eval (fn [args]
-                    (let [code (required-string args "code")]
-                      (with-ev (get args "path")
-                        (fn [_ e] (run! (get args "path") e code {:run? false :owner :repl} (timeout-of args))))))
-        tool-run (fn [args]
-                   (let [p (absolute dir (required-string args "path"))
-                         f (io/file p)]
-                     (cond
-                       (not (.exists f)) (throw (ex-info (str "No such file: " p) {}))
-                       (.isDirectory f) (throw (ex-info (str "Not a file, a directory: " p) {}))
-                       :else
-                       (let [text (slurp f)]
-                         (with-ev p
-                           (fn [_ e] (run! p e text {:run? true :path p :owner :run} (timeout-of args))))))))
-        tool-brackets (fn [args] (brackets-result dir args))
-        tool-doc (fn [args]
-                   (let [sym (required-string args "symbol")]
-                     (with-ev (get args "path")
-                       (fn [_ e]
-                         {:text (help/doc-text sym (ev/lookup e sym sym (count sym)))
-                          :error? false}))))
-        tool-complete (fn [args]
-                        (let [prefix (required-string args "prefix")]
-                          (with-ev (get args "path")
-                            (fn [_ e]
-                              (let [names (->> (ev/complete e prefix prefix (count prefix) nil)
-                                               (map #(if (map? %) (or (:name %) (:text %) (:symbol %)) %))
-                                               (remove nil?)
-                                               (map str)
-                                               (take max-completions))]
-                                {:text (if (seq names)
-                                         (str/join "\n" names)
-                                         (str "No completions for " prefix "."))
-                                 :error? false})))))
-        tool-project (fn [args]
-                       {:text (selection-text (selection ctx (get args "path")))
-                        :error? false})
-        handlers {"jonquil_eval" tool-eval
-                  "jonquil_run_file" tool-run
-                  "jonquil_check_brackets" tool-brackets
-                  "jonquil_doc" tool-doc
-                  "jonquil_complete" tool-complete
-                  "jonquil_project" tool-project}]
+  (let [env {:ctx ctx :dir dir
+             :cache (or cache (atom {}))
+             :grace-ms (or grace-ms interrupt-grace-ms)}
+        handlers (into {} (map (fn [[tname f]] [tname (fn [args] (f env args))])) tool-fns)]
     {:defs tool-defs
      :call (fn [tname args]
              (if-let [h (get handlers tname)]

@@ -128,6 +128,19 @@
                    (println (str "jonquil: couldn't send tools/list_changed: " (or (ex-message e) (str e))))))))
         nil))))
 
+(defn- handle-line!
+  "One non-blank input line of the serve loop: decode, dispatch, run the
+  :on-initialize hook, write the reply, and mark ready? on
+  notifications/initialized."
+  [{:keys [tools on-initialize write! ready?]} line]
+  (let [{:keys [msg resp]} (respond tools line)]
+    (when (and on-initialize (map? msg) (= "initialize" (get msg "method")))
+      (try (on-initialize (get-in msg ["params" "clientInfo"]))
+           (catch Throwable _ nil)))
+    (when resp (write! (encode-response resp)))
+    (when (and (map? msg) (= "notifications/initialized" (get msg "method")))
+      (reset! ready? true))))
+
 (defn serve!
   "Reads one JSON-RPC message per line via :read-line until it returns nil,
   writing each response with :write-line. Blank lines are skipped. A bad
@@ -153,13 +166,7 @@
       (loop []
         (when-let [line (read-line)]
           (when-not (str/blank? line)
-            (let [{:keys [msg resp]} (respond tools line)]
-              (when (and on-initialize (map? msg) (= "initialize" (get msg "method")))
-                (try (on-initialize (get-in msg ["params" "clientInfo"]))
-                     (catch Throwable _ nil)))
-              (when resp (write! (encode-response resp)))
-              (when (and (map? msg) (= "notifications/initialized" (get msg "method")))
-                (reset! ready? true))))
+            (handle-line! {:tools tools :on-initialize on-initialize :write! write! :ready? ready?} line))
           (recur)))
       (finally
         (when (fn? unsubscribe) (unsubscribe))))))

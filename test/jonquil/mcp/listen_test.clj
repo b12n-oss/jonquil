@@ -316,6 +316,20 @@
         (is (= ["a" "b"] (deref got 5000 :timeout))))
       (finally (.close ss) (future-cancel srv)))))
 
+(deftest bridge-connect-failure-says-so-and-returns-1
+  (let [sp (settings-path)
+        ss (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
+        port (.getLocalPort ss)
+        _ (.close ss)
+        err (java.io.StringWriter.)]
+    (listen/write-entry! sp {:dir (canon "/tmp") :port port :pid (own-pid)})
+    (let [code (binding [*err* err]
+                 (listen/bridge! {:read-line (lines-fn []) :write-line (fn [_] nil)
+                                  :settings-path sp :dir "/tmp"}))]
+      (is (= 1 code))
+      (is (str/includes? (str err) (str "jonquil: cannot connect to the window on port " port ": "))
+          (str err)))))
+
 (deftest bridge-socket-eof-returns-0
   (let [sp (settings-path)
         ss (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))
