@@ -35,7 +35,15 @@
     (is (= [:ns :call] (mapv :how (usages/hits "(comment (ns scratch))\n(ns a (:require [x :refer [join]]))\n(join)" "join"))))
     (is (= [:ns] (mapv :how (usages/hits "#_(ns old)\n(ns a (:require [x :refer [join]]))" "join")))))
   (testing "a reader conditional's ns form counts, as every one in the file does"
-    (is (= [:ns] (mapv :how (usages/hits "(ns a)\n#?(:clj (ns b (:require [x :refer [join]])))" "join"))))))
+    (is (= [:ns] (mapv :how (usages/hits "(ns a)\n#?(:clj (ns b (:require [x :refer [join]])))" "join"))))
+    (is (= [:ns] (mapv :how (usages/hits "(ns a)\n#?@(:clj (ns b (:require [x :refer [join]])))" "join")))
+        "a splicing reader conditional too"))
+  (testing "an ns form nested in an ordinary list, or two deep, isn't an ns form"
+    (is (= [:value] (mapv :how (usages/hits "(foo (ns b (:require [x :refer [join]])))" "join"))))
+    (is (= [:value] (mapv :how (usages/hits "#?(:clj [(ns b (:require [x :refer [join]]))])" "join")))))
+  (testing "a stray closer, and a list or vector whose head is not ns, change nothing"
+    (is (= [:ns :call] (mapv :how (usages/hits ") (ns a (:require [x :refer [join]])) (join)" "join"))))
+    (is (= [:value] (mapv :how (usages/hits "[ns a [x join]]" "join"))))))
 
 (defn- temp-project
   "A temp dir holding files, a map of relative path -> text."

@@ -30,6 +30,23 @@
   (swap! doc-cache (fn [{:keys [gen]}] {:gen (inc gen) :m {}}))
   nil)
 
+(defn- lookup-doc
+  "[ok? doc] for sym-name looked up with ns-sym's namespace as *ns*; [false
+  nil] when the lookup throws."
+  [ns-sym sym-name text pos]
+  (try [true (binding [*ns* (resolve-ns ns-sym)]
+               (syntax/get-symbol-doc sym-name text pos))]
+       (catch Exception _ [false nil])))
+
+(defn- store-doc!
+  "Memoises doc under k, unless a clear bumped the generation since gen. A
+  full memo restarts with just this entry."
+  [gen k doc]
+  (swap! doc-cache (fn [c]
+                     (if (= gen (:gen c))
+                       (update c :m (fn [m] (assoc (if (>= (count m) doc-cache-limit) {} m) k doc)))
+                       c))))
+
 (defn symbol-doc
   "syntax/get-symbol-doc with ns-sym's namespace as *ns* (or `user` when it
   is gone). Memoised on [ns-sym sym-name text]; nil when the lookup throws,
@@ -39,14 +56,8 @@
         {:keys [gen m]} @doc-cache]
     (if-let [hit (find m k)]
       (val hit)
-      (let [[ok? v] (try [true (binding [*ns* (resolve-ns ns-sym)]
-                                 (syntax/get-symbol-doc sym-name text pos))]
-                         (catch Exception _ [false nil]))]
-        (when ok?
-          (swap! doc-cache (fn [c]
-                             (if (= gen (:gen c))
-                               (update c :m (fn [m] (assoc (if (>= (count m) doc-cache-limit) {} m) k v)))
-                               c))))
+      (let [[ok? v] (lookup-doc ns-sym sym-name text pos)]
+        (when ok? (store-doc! gen k v))
         v))))
 
 (defn candidates

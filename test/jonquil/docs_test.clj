@@ -91,3 +91,19 @@
                                             {:status :found :doc a}))]
       (is (= "old" (:doc (docs/symbol-doc 'user "zork" "y" 0))) "the caller still gets its answer")
       (is (= "new" (:doc (docs/symbol-doc 'user "zork" "y" 0))) "the next lookup isn't served it"))))
+
+(deftest a-full-memo-restarts-with-the-new-entry-test
+  ;; At 256 entries the next store drops them all and keeps only itself.
+  (docs/clear-doc-cache!)
+  (let [calls (atom 0)]
+    (with-redefs [syntax/get-symbol-doc (fn [n & _] (swap! calls inc) {:status :found :doc n})]
+      (dotimes [i 256] (docs/symbol-doc 'user (str "n" i) "" 0))
+      (is (= 256 @calls))
+      (docs/symbol-doc 'user "n255" "" 0)
+      (is (= 256 @calls) "a full memo still serves its entries")
+      (docs/symbol-doc 'user "extra" "" 0)
+      (is (= 257 @calls))
+      (docs/symbol-doc 'user "extra" "" 0)
+      (is (= 257 @calls) "the new entry is kept")
+      (docs/symbol-doc 'user "n0" "" 0)
+      (is (= 258 @calls) "the older entries are gone"))))
