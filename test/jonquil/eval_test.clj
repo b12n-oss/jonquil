@@ -496,7 +496,7 @@
 (deftest read-line-callback-sequence-test
   (let [ctx (sut/make-eval-context) done (promise) statuses (atom [])]
     (sut/eval-async ctx "(read-line)" {:on-status-change (fn [st] (swap! statuses conj st))
-                                        :on-complete (fn [r] (deliver done r))})
+                                       :on-complete (fn [r] (deliver done r))})
     (loop [i 0] (when (and (< i 300) (not (sut/waiting-for-input? ctx))) (Thread/sleep 10) (recur (inc i))))
     (sut/push-stdin! ctx "hello")
     (let [r (deref done 3000 :timeout)]
