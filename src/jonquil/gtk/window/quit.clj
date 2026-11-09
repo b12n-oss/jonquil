@@ -4,8 +4,8 @@
   alert's choice and Save All; unparenting the popovers before the real quit;
   and connect!, which makes activate!'s close-request connect and its quit
   action. Internal to the window, as jonquil.gtk.window.status is. Moved out of
-  jonquil.gtk.window unchanged; connect! holds activate!'s own statements in
-  their order."
+  jonquil.gtk.window unchanged, then close-request-fn's branches split into
+  named steps; connect! holds activate!'s own statements in their order."
   (:require [jolt.ffi :as ffi]
             [jonquil.evaluator :as ev]
             [jonquil.gtk.callbacks :refer [callable]]
@@ -107,6 +107,81 @@
       (when-not (ffi/null? (g/gtk-widget-get-parent pop))
         (g/gtk-widget-unparent pop)))))
 
+(defn- ask-before-close!
+  "close-request-fn's dirty, unconfirmed branch: shows the close alert
+  naming dirty-names, whose choice goes to close-choice! with the dirty
+  tabs, unless an alert is already pending (alert-pending?). ctx is
+  close-request-fn's."
+  [{:keys [cv win confirmed-close? select!]} dirty dirty-names]
+  (when-not @win-alerts/alert-pending?
+    (reset! win-alerts/alert-pending? true)
+    ;; A throw while building the alert would leave alert-pending?
+    ;; true for the rest of the session (every later close silently
+    ;; doing nothing) and escape into GTK's signal emission. Reset
+    ;; the flag and report it instead; the window stays open, since
+    ;; the text is still unsaved.
+    (try
+      (win-alerts/show-alert!
+       win (tabs/close-alert dirty-names) win-alerts/CLOSE-ALERT
+       (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
+                                    :select! select!}
+                                   result)))
+      (catch :default e
+        (reset! win-alerts/alert-pending? false)
+        (cview/append! cv :error (str "; close: " (ex-message e) "\n"))))))
+
+(defn- save-session-at-quit!
+  "The real quit's session save: calls save-session! (nil, or a fn that
+  answers nil or an error string) and says a failure or a throw on stderr."
+  [save-session!]
+  (when save-session!
+    (try (when-let [err (save-session!)]
+           (binding [*out* *err*]
+             (println "jonquil: saving the session failed:" err)))
+         (catch :default e
+           (binding [*out* *err*]
+             (println "jonquil: saving the session failed:" (ex-message e)))))))
+
+(defn- stop-runtime-at-quit!
+  "The real quit's runtime stop: ev/stop! on the window's evaluator, a
+  throw said on stderr, and the evaluator leaves the registry either way."
+  [ev*]
+  (try (ev/stop! @ev*)
+       (catch :default e
+         ;; The window is going away, so the console can't show
+         ;; it; the process's real stderr can.
+         (binding [*out* *err*]
+           (println "jonquil: stopping the runtime failed:" (ex-message e))))
+       ;; Leaves jonquil.runtime-registry: this evaluator is
+       ;; stopped (or its stop! at least ran), so
+       ;; jonquil.main's stop-all! has nothing left for it.
+       (finally (registry/unregister! @ev*))))
+
+(defn- real-quit!
+  "close-request-fn's real-quit branch: unparents the popovers, saves the
+  session, stops the runtime, quits the application and answers 0, so GTK
+  proceeds. ctx is close-request-fn's."
+  [{:keys [app popovers ev* save-session!]}]
+  ;; Unparents every registered popover BEFORE the real quit
+  ;; (see unparent-registered-popovers!), never in the
+  ;; suppress-close? branch (proceed-close!, below).
+  (unparent-registered-popovers! popovers)
+  (save-session-at-quit! save-session!)
+  (stop-runtime-at-quit! ev*)
+  (g/g-application-quit app)
+  0)
+
+(defn- proceed-close!
+  "close-request-fn's branch for a clean or confirmed close: sets closing?,
+  then either stops there for the self-test (suppress-close?: confirmed-close?
+  back to false, answers 1) or quits for real (real-quit!, 0). ctx is
+  close-request-fn's."
+  [{:keys [confirmed-close? suppress-close? closing?] :as ctx}]
+  (reset! closing? true)
+  (if @suppress-close?
+    (do (reset! confirmed-close? false) 1)
+    (real-quit! ctx)))
+
 (defn close-request-fn
   "The window's close-request handler. Dirty and unconfirmed shows
   the alert and suppresses the close (returns 1, GTK does not proceed);
@@ -139,8 +214,9 @@
 
   save-session! (the open tabs, for the next launch) runs in the
   real-quit branch only."
-  [{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!
-           save-session!]}]
+  {:arglists '([{:keys [tabs cv win app confirmed-close? suppress-close? closing? popovers ev* select!
+                        save-session!]}])}
+  [{:keys [tabs confirmed-close?] :as ctx}]
   (fn [_win _data]
     ;; One alert naming every dirty tab, in tab order.
     (let [ts @tabs
@@ -148,49 +224,8 @@
           dirty (filterv (fn [t] (editor/dirty? (:ed t))) ts)
           dirty-names (keep-indexed (fn [i t] (when (editor/dirty? (:ed t)) (nth names i))) ts)]
       (if (and (seq dirty) (not @confirmed-close?))
-        (do (when-not @win-alerts/alert-pending?
-              (reset! win-alerts/alert-pending? true)
-            ;; A throw while building the alert would leave alert-pending?
-            ;; true for the rest of the session (every later close silently
-            ;; doing nothing) and escape into GTK's signal emission. Reset
-            ;; the flag and report it instead; the window stays open, since
-            ;; the text is still unsaved.
-              (try
-                (win-alerts/show-alert!
-                 win (tabs/close-alert dirty-names) win-alerts/CLOSE-ALERT
-                 (fn [result] (close-choice! {:dirty-tabs dirty :cv cv :win win :confirmed-close? confirmed-close?
-                                              :select! select!}
-                                             result)))
-                (catch :default e
-                  (reset! win-alerts/alert-pending? false)
-                  (cview/append! cv :error (str "; close: " (ex-message e) "\n")))))
-            1)
-        (do (reset! closing? true)
-            (if @suppress-close?
-              (do (reset! confirmed-close? false) 1)
-            ;; Unparents every registered popover BEFORE the real quit
-            ;; (see unparent-registered-popovers!), never in the
-            ;; suppress-close? branch above.
-              (do (unparent-registered-popovers! popovers)
-                  (when save-session!
-                    (try (when-let [err (save-session!)]
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the session failed:" err)))
-                         (catch :default e
-                           (binding [*out* *err*]
-                             (println "jonquil: saving the session failed:" (ex-message e))))))
-                  (try (ev/stop! @ev*)
-                       (catch :default e
-                       ;; The window is going away, so the console can't show
-                       ;; it; the process's real stderr can.
-                         (binding [*out* *err*]
-                           (println "jonquil: stopping the runtime failed:" (ex-message e))))
-                     ;; Leaves jonquil.runtime-registry: this evaluator is
-                     ;; stopped (or its stop! at least ran), so
-                     ;; jonquil.main's stop-all! has nothing left for it.
-                       (finally (registry/unregister! @ev*)))
-                  (g/g-application-quit app)
-                  0)))))))
+        (do (ask-before-close! ctx dirty dirty-names) 1)
+        (proceed-close! ctx)))))
 
 (defn connect!
   "activate!'s close-request connect and its application \"quit\" action, in
