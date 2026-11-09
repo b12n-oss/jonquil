@@ -10,7 +10,7 @@
             [jonquil.gtk.editor :as editor]
             [jonquil.gtk.ffi :as g]
             [jonquil.gtk.popover :as popover]
-            [jonquil.gtk.window :as window]
+            [jonquil.gtk.window.theme :as win-theme]
             [jonquil.keymap :as km]))
 
 (defn row-escape-yields-when-idle
@@ -160,7 +160,7 @@
   consumed (1), and the status bar shows the error."
   [ui]
   (go-row :window-key-throw-contained support/check
-    (let [handled (on-gtk (with-redefs [window/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
+    (let [handled (on-gtk (with-redefs [win-theme/do-cycle-theme! (fn [& _] (throw (ex-info "forced window-key failure" {})))]
                             ((:handle-window-key! ui) nil 0x06d 0 (bit-or g/CONTROL-MASK g/SHIFT-MASK) nil)))
           status-ok? (await-until 1000 20 #(str/includes? (g/label-text (:status-label ui)) "forced window-key failure"))]
       (on-gtk (support/check :window-key-throw-contained
